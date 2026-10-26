@@ -3,6 +3,22 @@ module Prelude where
 data Eq (A : Type) : A -> A -> Type where
   refl : forall (a : A) -> Eq A a a
 
+-- A dependent pair whose two levels are its own, `Sigma` with every `Type₀`
+-- written `Type` — so inference generalises it the way it generalises `And`
+-- (MS3 phase 33c), one level per component and the result at their join.
+--
+-- **It is what the generated no-confusion family conjoins with where a
+-- constructor's argument type mentions an earlier argument.** The paper's
+-- telescopic equality states the later equation after transporting along the
+-- earlier one (Cockx, Devriese and Piessens, §3.3), so the second component's
+-- type mentions the first component's proof and `And` cannot hold it.
+--
+-- **No projections, deliberately.** The prelude's namespace is every modelled
+-- language's, and nothing needs them: the elimination tactic builds the two
+-- projections inline from the constructor, as it does for `And`.
+data DPair (A : Type) (B : A -> Type) : Type where
+  dpair : forall (a : A) (b : B a) -> DPair A B
+
 data Unit : Type where
   unit : Unit
 
@@ -204,22 +220,6 @@ fst = \ A B s -> elim Sigma (A B) (\ z -> A) ((\ a b -> a)) () s
 
 snd : forall (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> B (fst A B s)
 snd = \ A B s -> elim Sigma (A B) (\ z -> B (fst A B z)) ((\ a b -> b)) () s
-
--- A dependent pair whose two levels are its own, `Sigma` with every `Type₀`
--- written `Type` — so inference generalises it the way it generalises `And`
--- (MS3 phase 33c), one level per component and the result at their join.
---
--- **It is what the generated no-confusion family conjoins with where a
--- constructor's argument type mentions an earlier argument.** The paper's
--- telescopic equality states the later equation after transporting along the
--- earlier one (Cockx, Devriese and Piessens, §3.3), so the second component's
--- type mentions the first component's proof and `And` cannot hold it.
---
--- **No projections, deliberately.** The prelude's namespace is every modelled
--- language's, and nothing needs them: the elimination tactic builds the two
--- projections inline from the constructor, as it does for `And`.
-data DPair (A : Type) (B : A -> Type) : Type where
-  dpair : forall (a : A) (b : B a) -> DPair A B
 
 andLeft : forall (A : Type) (B : Type) (c : And A B) -> A
 andLeft = \ A B c -> elim And (A B) (\ z -> A) ((\ a b -> a)) () c

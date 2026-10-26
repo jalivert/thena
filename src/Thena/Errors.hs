@@ -85,12 +85,12 @@ import Thena.Syntax.Parser (ParseError)
 -- had a @NoEquality@, and a grammar warning should not import a declaration
 -- module to raise one.
 data Warning
-  = NoConfusionSkipped GlobalName Skipped
-    -- ^ the datatype went in, and its no-confusion equipment did not. **The
-    -- one diagnostic the system already had and could not report during a
-    -- module load**, because a load discards the op-level messages a prompt
-    -- shows — which is what phase 98 was written to fix.
-  | VacuousBinder BlockKind String String String
+  -- **@NoConfusionSkipped@ was removed at MS9 phase 212**, with the only
+  -- 'Skipped' that was ever about the declaration the user wrote. A datatype no
+  -- longer goes in without its no-confusion equipment on account of its own
+  -- shape, and the two environment cases left were silent already, so nothing
+  -- could produce this.
+  = VacuousBinder BlockKind String String String
     -- ^ the block, the production, and a binder declared @as binders@ that no
     -- @[…]@ mentions (@ms6\/SPEC.md@ §4.5, MS6 phase 101). A vacuous binder is
     -- allowed — that is why it can be declared — and worth saying.
@@ -142,29 +142,20 @@ data Skipped
     -- why it is silent.
   | NoProducts
     -- ^ a prelude type this datatype's own table would be written out of —
-    -- @And@, @Unit@ or @Empty@ — is missing or misshapen. Silent for
+    -- @DPair@, @Unit@ or @Empty@ — is missing or misshapen. Silent for
     -- 'NoEqInScope'\'s reason and arising in the same situation, a prelude-free
     -- script, which is why the two are tested together.
     --
     -- **Asked per datatype, not once**, and that is load-bearing rather than
-    -- fastidious: the prelude declares @Eq@ before @And@, so a blanket
+    -- fastidious: the prelude declares @Eq@ before @DPair@, so a blanket
     -- precondition would refuse @NoConfusionEq@ — which phase 14 generated —
     -- for a name it was never going to write. See 'productsInScope'.
-  | DependentArguments GlobalName Int Ident
-    -- ^ this constructor's argument telescope is dependent, so the equation for
-    -- the named argument is ill-typed. @cons : (n : Nat) (a : A) (as : Vec A n)
-    -- -> Vec A (succ n)@ wants @Eq (Vec A n) as as'@ while @as' : Vec A n'@.
-    -- An MS1 limit and not unsoundness — the way out is a transported chain of
-    -- equations, which nothing in MS1 wants (@AGENDA.md@).
-    --
-    -- **The position is carried as well as the name** (2026-09-13), because the
-    -- name alone does not identify the argument: an anonymous arrow argument is
-    -- stored as @Ident \"x\"@ deliberately (@Syntax.Resolve@\'s @RawArrow@ case
-    -- says why, and the printer freshens a repeat), so a constructor written
-    -- @hop : ∀ (x y z : A) -> Chain A x y -> Chain A y z -> Chain A x z@ has
-    -- /three/ arguments called @x@ and this said only *argument x*.
-    -- 'Thena.Errors.IndexTypeDepends' — the same condition one telescope over —
-    -- has carried its position since it was written.
+  -- **A third case, @DependentArguments@, was removed at MS9 phase 212.** A
+  -- constructor whose argument telescope is dependent used to be declined — it
+  -- wanted @Eq (Vec A n) as as'@ where @as' : Vec A n'@ — and that is now the
+  -- transported chain of equations @Thena.Global.NoConfusion.telescopic@
+  -- states, so nothing is declined for it and no datatype is without a
+  -- no-confusion lemma on account of its telescope.
   deriving (Eq, Show)
 
 -- | Why an operation failed. Structured, never a string (§12 invariant 2).

@@ -19,6 +19,7 @@ module Thena.Declared
   , eqDecl
   , unitDecl
   , andDecl
+  , dpairDecl
   , preludeDecls
   , taplDecl
   , stepDecl
@@ -30,6 +31,8 @@ module Thena.Declared
   , eqNat
   , eqNatVec
   , eqNatVecCounter
+  , eqNatFin
+  , eqNatFinCounter
   , eqNatCounter
   , eqTapl
   , eqTaplCounter
@@ -73,7 +76,7 @@ emptyDecl = "Empty : Type where { }"
 -- stated, and these fixtures are prelude-free on purpose (phase 11). Declaring
 -- it in a fixture is what lets a suite have both worlds — the environments
 -- above have no @Eq@ and therefore no no-confusion, the ones below do.
-eqDecl, unitDecl, andDecl, taplDecl :: String
+eqDecl, unitDecl, andDecl, dpairDecl, taplDecl :: String
 eqDecl =
   "Eq (A : Type) : A -> A -> Type \
   \where { refl : \8704 (a : A) -> Eq A a a }"
@@ -86,13 +89,21 @@ andDecl =
   "And (A : Type) (B : Type) : Type \
   \where { both : \8704 (a : A) (b : B) -> And A B }"
 
+-- | The dependent pair the generated family pairs its equations in (MS9 phase
+-- 212). Level-polymorphic in both components, which is what writing @Type@
+-- twice gets.
+dpairDecl =
+  "DPair (A : Type) (B : A -> Type) : Type \
+  \where { dpair : \8704 (a : A) (b : B a) -> DPair A B }"
+
 -- | Everything 'Thena.Global.NoConfusion' can need, in the prelude's own order.
 --
--- **@Eq@ first, and @And@ after it**, because @And@\'s own no-confusion states
--- equations and so needs the equality already declared. The reverse order costs
--- @NoConfusionAnd@ silently.
+-- **@Eq@ first, then @DPair@, and @And@ after both**, because each one's own
+-- no-confusion needs what precedes it: @And@ states equations, so it needs the
+-- equality, and @both@ takes two arguments, so it needs the pair. The reverse
+-- order costs @NoConfusionAnd@ silently.
 preludeDecls :: [String]
-preludeDecls = [eqDecl, unitDecl, emptyDecl, andDecl]
+preludeDecls = [eqDecl, dpairDecl, unitDecl, emptyDecl, andDecl]
 
 -- | MS1's target language: TAPL chapter 3, the seven constructors determinacy
 -- of evaluation is proved about (§9). @ifthen@ is the one with three arguments,
@@ -134,7 +145,7 @@ declared = foldl one (emptyGlobals, 0)
       Left e -> error ("fixture does not parse: " ++ show e)
       Right (d, n1) -> case declare env n1 d of
         Left e              -> error ("fixture refused: " ++ show e)
-        Right (env', n2, _) -> (env', n2)
+        Right (env', n2)    -> (env', n2)
 
 nat, natVec, natFin :: GlobalEnv
 nat    = fst (declared [natDecl])
@@ -174,6 +185,14 @@ eqNatVec = fst (declared (preludeDecls ++ [natDecl, vecDecl]))
 
 eqNatVecCounter :: Int
 eqNatVecCounter = snd (declared (preludeDecls ++ [natDecl, vecDecl]))
+
+-- | The prelude, @Nat@ and @Fin@ — a dependent argument telescope, which got no
+-- no-confusion equipment at all before MS9 phase 212.
+eqNatFin :: GlobalEnv
+eqNatFin = fst (declared (preludeDecls ++ [natDecl, finDecl]))
+
+eqNatFinCounter :: Int
+eqNatFinCounter = snd (declared (preludeDecls ++ [natDecl, finDecl]))
 
 -- | The prelude and then MS1's target language.
 eqTapl :: GlobalEnv

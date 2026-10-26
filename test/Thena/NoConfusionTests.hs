@@ -34,6 +34,8 @@ import Thena.Declared
   , eqDecl
   , eqNat
   , eqNatCounter
+  , eqNatFin
+  , eqNatVec
   , eqTapl
   , eqTaplCounter
   , finDecl
@@ -46,8 +48,15 @@ import Thena.Driver
   , parseDeclaration
   )
 import Thena.Global.Declare (DeclareError (..), declare)
-import Thena.Global.Env (GlobalEnv, definitionBody, definitionType, lookupDefinition)
-import Thena.Errors (Skipped (..))
+import Thena.Global.Env
+  ( GlobalEnv
+  , definitionBody
+  , definitionType
+  , inductiveName
+  , isDeclared
+  , lookupDefinition
+  )
+import Thena.Global.NoConfusion (noConfusionNames)
 import Thena.Kernel (certify)
 import Thena.Render ( Rendering (..)
   ,renderCore)
@@ -215,6 +224,16 @@ kernelTests =
     -- 31g generalises the generator to the datatype's own level, and @Eq@'s
     -- own table is the case that proves it — a polymorphic, indexed family.
   , testCase "Eq's own, which is an indexed family" (certified eqNat "noConfusionEq")
+    -- **A dependent argument telescope, which got no equipment at all before
+    -- MS9 phase 212** — @fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n)@, whose
+    -- second equation is stated at @Fin n'@ with @i@ transported along the
+    -- first. The kernel accepting the lemma is the whole claim of that phase:
+    -- the family is checked at declaration, and this says the trusted core
+    -- agrees.
+  , testCase "Fin's family, whose telescope is dependent" (certified eqNatFin "NoConfusionFin")
+  , testCase "Fin's lemma, which is the transported chain" (certified eqNatFin "noConfusionFin")
+  , testCase "Vec's family, with a parameter as well" (certified eqNatVec "NoConfusionVec")
+  , testCase "Vec's lemma" (certified eqNatVec "noConfusionVec")
 
     -- **Found by phase 17, and it was a real bug.** The generator freshens a
     -- telescope in two places, and 'freshen' gave each entry a new variable
@@ -254,41 +273,46 @@ certified env g = case lookupDefinition (GlobalName g) env of
 -- What gets none
 -- --------------------------------------------------------------------------
 
--- | Declare one datatype into an environment and keep what no-confusion did.
-skipped :: [String] -> String -> Either DeclareError (Maybe Skipped)
-skipped before src = case parseDeclaration [] env n src of
-  Left e       -> error ("fixture does not parse: " ++ show e)
-  Right (d, n1) -> (\(_, _, s) -> s) <$> declare env n1 d
+-- | Declare one datatype into an environment and say whether its no-confusion
+-- lemma came with it.
+--
+-- **It used to report the 'Thena.Errors.Skipped' the declaration handed back**,
+-- which MS9 phase 212 removed along with the one case that was ever about the
+-- declaration itself. Asking the environment is the stronger question anyway:
+-- what a caller can observe is whether the lemma is there.
+generated :: [String] -> String -> Either DeclareError Bool
+generated before src = case parseDeclaration [] env n src of
+  Left e        -> error ("fixture does not parse: " ++ show e)
+  Right (d, n1) ->
+    (\(env', _) -> isDeclared (snd (noConfusionNames (inductiveName d))) env')
+      <$> declare env n1 d
   where (env, n) = declared before
 
 skipTests :: [TestTree]
 skipTests =
-  [ -- The MS1 limit. @cons@ wants @Eq {0} (Vec A n) as as'@ while @as' : Vec A n'@,
-    -- and a transported chain of equations is the way out — not MS1's.
-    --
-    -- **The position is asserted with the name** (2026-09-13): an anonymous
-    -- arrow argument is stored as @Ident "x"@ on purpose, so one constructor may
-    -- have several arguments of that name and the name alone does not say which
-    -- one stopped the table being written.
-    testCase "Vec: cons's telescope is dependent" $
-      skipped (preludeDecls ++ [natDecl]) vecDecl
-        @?= Right (Just (DependentArguments (GlobalName "cons") 3 (Ident "as")))
-  , testCase "Fin: so is fs's" $
-      skipped (preludeDecls ++ [natDecl]) finDecl
-        @?= Right (Just (DependentArguments (GlobalName "fs") 2 (Ident "i")))
+  [ -- **These two were the MS1 limit and are not a limit any more** (MS9 phase
+    -- 212). @cons@ wants @Eq (Vec A n) as as'@ where @as' : Vec A n'@, and
+    -- 'Thena.Global.NoConfusion.telescopic' now states that equation after
+    -- transporting @as@ along the equation between @n@ and @n'@. Nothing is
+    -- skipped for a dependent telescope, which is what these assert — the
+    -- equipment itself is in 'kernelTests'.
+    testCase "Vec: cons's dependent telescope gets its lemma now" $
+      generated (preludeDecls ++ [natDecl]) vecDecl @?= Right True
+  , testCase "Fin: so does fs's" $
+      generated (preludeDecls ++ [natDecl]) finDecl @?= Right True
   , -- **This asserted the opposite until MS3 phase 31g**, and the change is
     -- §2 item 2: the generator states its equations at the *datatype's own*
     -- level rather than at @Type₀@, so a family above @Type₀@ gets its table
     -- like any other. Cumulativity is what makes the equations conjoinable —
     -- @wrap@'s argument type is @Type₀@, which lifts into @Type₁@.
     testCase "a datatype above Type₀ gets one now" $
-      skipped preludeDecls "Big : Type\8321 where { wrap : Type\8320 -> Big }"
-        @?= Right Nothing
+      generated preludeDecls "Big : Type\8321 where { wrap : Type\8320 -> Big }"
+        @?= Right True
   , -- Silent, and it has to be: this is the state every prelude-free golden
     -- transcript declares its datatypes in, and a note on every @data@ line
     -- would be noise about the environment rather than about the declaration.
     testCase "no Eq in scope at all — skipped, and quietly" $
-      skipped [] natDecl @?= Right Nothing
+      generated [] natDecl @?= Right False
   , testCase "and then nothing was generated" $
       lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [natDecl]))
         `seq` (lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [natDecl])) == Nothing)
@@ -307,7 +331,7 @@ skipTests =
         @?= False
   , -- Two constructors want an off-diagonal @Empty {0}@, and there is none.
     testCase "Nat with Eq but no Empty — skipped, and quietly" $
-      skipped [eqDecl] natDecl @?= Right Nothing
+      generated [eqDecl] natDecl @?= Right False
   , testCase "and then nothing was generated" $
       (lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [eqDecl, natDecl]))
         == Nothing) @?= True
@@ -323,9 +347,9 @@ skipTests =
 clashTests :: [TestTree]
 clashTests =
   [ testCase "the family's name taken" $
-      skipped (preludeDecls ++ ["NoConfusionNat : Type\8320 where { }"]) natDecl
+      generated (preludeDecls ++ ["NoConfusionNat : Type\8320 where { }"]) natDecl
         @?= Left (AlreadyDeclared (GlobalName "NoConfusionNat"))
   , testCase "the lemma's name taken" $
-      skipped (preludeDecls ++ ["noConfusionNat : Type\8320 where { }"]) natDecl
+      generated (preludeDecls ++ ["noConfusionNat : Type\8320 where { }"]) natDecl
         @?= Left (AlreadyDeclared (GlobalName "noConfusionNat"))
   ]

@@ -121,7 +121,6 @@ import Thena.Errors
   ( BuildError (..)
   , ObjectError (..)
   , DataBuildError (..)
-  , Skipped (..)
   , Warning (..)
   , Clash (..)
   , ConversionFailure (..)
@@ -145,7 +144,6 @@ import Thena.Language.Grammar (grammarName, typeFormerProductions, Grammar, Gram
 import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
-import Thena.Global.NoConfusion (noConfusionNames)
 import Thena.Syntax.Print
   ( Env
   , escapeChar
@@ -1645,19 +1643,6 @@ renderWarning w = "warning: " ++ case w of
     blockAt k g ++ ": no character may be appended to every name " ++ cls
       ++ " accepts, so a binder renamed to avoid capture will not print in this"
       ++ " notation. Substitution is unaffected"
-  NoConfusionSkipped d why ->
-    "no " ++ nameString (snd (noConfusionNames d)) ++ ": " ++ because
-    where
-      because = case why of
-        NoEqInScope -> "there is no Eq in scope"
-        NoProducts -> "there is no And, Unit and Empty in scope"
-        -- Position and name both, as 'Thena.Errors.IndexTypeDepends' says it
-        -- one telescope over: several arguments of one constructor may carry
-        -- the same 'Ident', so the name alone does not say which.
-        DependentArguments c k (Ident i) ->
-          nameString c ++ "'s argument " ++ show k ++ " (" ++ i ++ ") has a type"
-            ++ " that depends on an earlier argument, so its equation cannot be"
-            ++ " stated"
 
 renderDeclareError :: Rendering -> DeclareError -> String
 renderDeclareError ren e = case e of

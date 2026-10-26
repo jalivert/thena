@@ -153,7 +153,7 @@ the level left to be worked out:
 thena spine> :infer Type₀
 Type₀ : Type₁
 thena spine> :infer Type
-Type : Type (suc ?ℓ3710)
+Type : Type (suc ?ℓ3778)
 ```
 
 `?ℓ229` is an unknown level. It is not a default and it is not zero — it is
@@ -195,7 +195,7 @@ one unknown per parameter, and unification settles them.
 
 ```
 thena spine> :infer refl
-refl : ∀ (A : Type (?ℓ3717)) (a : A) -> Eq {?ℓ3717} A a a
+refl : ∀ (A : Type (?ℓ3785)) (a : A) -> Eq {?ℓ3785} A a a
 ```
 
 Written in the development calculus they are explicit, and **prenex** — a use
@@ -214,8 +214,8 @@ join:
 
 ```
 thena spine> :show And
-data And {ℓ₂₅₂ ℓ₂₅₃} (A : Type (ℓ₂₅₂)) (B : Type (ℓ₂₅₃)) : Type (ℓ₂₅₂ ⊔ ℓ₂₅₃) where
-  { both : A -> B -> And {ℓ₂₅₂ ℓ₂₅₃} A B }
+data And {ℓ₃₈₉ ℓ₃₉₀} (A : Type (ℓ₃₈₉)) (B : Type (ℓ₃₉₀)) : Type (ℓ₃₈₉ ⊔ ℓ₃₉₀) where
+  { both : A -> B -> And {ℓ₃₈₉ ℓ₃₉₀} A B }
 ```
 
 `⊔` is the one symbol that is printed and never written: the join is computed
@@ -310,8 +310,8 @@ constructors' own levels, and becomes a level parameter if nothing pins it:
 thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
-data Box {ℓ₃₇₇₁} (A : Type (ℓ₃₇₇₁)) : Type (ℓ₃₇₇₁) where
-  { box : A -> Box {ℓ₃₇₇₁} A }
+data Box {ℓ₃₈₃₉} (A : Type (ℓ₃₈₃₉)) : Type (ℓ₃₈₃₉) where
+  { box : A -> Box {ℓ₃₈₃₉} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
@@ -353,13 +353,20 @@ noConfusionNat = λ (x : Nat) (y : Nat) (e : Eq {0} Nat x y) -> elim Eq {0} …
 
 (`:show` prints the body too; it is one long line and is elided here.)
 
-Indexed families work too. Where a constructor's argument types depend on
-earlier arguments, the no-confusion lemma cannot be stated, and the system says
-so plainly rather than failing:
+Indexed families get one too, including the ones whose constructors take an
+argument whose *type* mentions an earlier argument. There the equation about the
+later argument is stated after transporting it along the equation about the
+earlier one, so every equation is still between two terms of one type:
 
 ```
-no noConfusionNV: nvSucc's argument p has a type that depends on an earlier argument, so its equation cannot be stated
+thena spine> data Ladder : Nat -> Type₀ where { base : Ladder zero ; step : ∀ (n : Nat) (r : Ladder n) -> Ladder (succ n) }
+declared Ladder
+thena spine> :infer noConfusionLadder
+noConfusionLadder : ∀ (x : Nat) (x1 : Ladder x) (y : Ladder x) -> Eq {0} (Ladder x) x1 y -> NoConfusionLadder x x1 y
 ```
+
+`DECISIONS.md`, *Thena does not assume K*, says what that buys and what it does
+not.
 
 ---
 
@@ -452,11 +459,11 @@ unknown becomes a parameter:
 
 ```
 thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
-proving idPoly : ∀ (A : Type (?ℓ3811)) -> A -> A
+proving idPoly : ∀ (A : Type (?ℓ3945)) -> A -> A
 thena spine> try-core ⌜ \ (A : Type) (a : A) -> a ⌝
 thena spine> solve
 thena spine> qed
-idPoly {ℓ₃₈₂₃} : ∀ (A : Type (ℓ₃₈₂₃)) -> A -> A   ∎
+idPoly {ℓ₃₉₅₇} : ∀ (A : Type (ℓ₃₉₅₇)) -> A -> A   ∎
 ```
 
 Sometimes one level is not enough, and the proof leaves a *relation* between two
@@ -465,11 +472,11 @@ before a `⊢`:
 
 ```
 thena spine> :theorem lift : Type -> Type
-proving lift : Type (?ℓ3825) -> Type (?ℓ3826)
+proving lift : Type (?ℓ3959) -> Type (?ℓ3960)
 thena spine> try-core ⌜ \ (x : Type) -> x ⌝
 thena spine> solve
 thena spine> qed
-lift {ℓ₃₈₃₄ ℓ₃₈₃₅} : (ℓ₃₈₃₄ ≤ ℓ₃₈₃₅) ⊢ Type (ℓ₃₈₃₄) -> Type (ℓ₃₈₃₅)   ∎
+lift {ℓ₃₉₆₈ ℓ₃₉₆₉} : (ℓ₃₉₆₈ ≤ ℓ₃₉₆₉) ⊢ Type (ℓ₃₉₆₈) -> Type (ℓ₃₉₆₉)   ∎
 ```
 
 Read it as *given `ℓ₂₃₈ ≤ ℓ₂₃₉`, this type*. A constraint that held at every
@@ -798,7 +805,7 @@ intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
-chose 4158: intro
+chose 4226: intro
 ```
 
 Three rules matched, so the engine reports which one it took and leaves a
@@ -806,7 +813,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-4158  intro   untried: solve, regret, prove
+4226  intro   untried: solve, regret, prove
 ```
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
@@ -815,13 +822,13 @@ undoes the whole thing:
 
 ```
 thena spine> retry
-retrying 4158: solve
-backtracking to 4158: regret
+retrying 4226: solve
+backtracking to 4226: regret
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-4158  regret   untried: prove
+4226  regret   untried: prove
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -842,11 +849,11 @@ line left is yours to reach with `retry`, and nothing reaches it for you:
 thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
 proving t : ∀ (A : Type₀) -> A -> A
 thena spine> prove
-chose 3705: attack
+chose 3773: attack
 thena spine> regret
 thena spine> back
 stuck: already at the root
-  undoing that would backtrack to 3705, which was chosen before this line — retry 3705 to take it
+  undoing that would backtrack to 3773, which was chosen before this line — retry 3773 to take it
 ```
 
 `regret` took the guess back off and `back` had nothing left to pop. Without the
@@ -931,26 +938,26 @@ pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ3739)
+  l = Type (?ℓ3807)
 stack
   call, 14 instruction(s) to resume
   call, 8 instruction(s) to resume
-  call, 189 instruction(s) to resume (returned)
+  call, 178 instruction(s) to resume (returned)
 thena spine> :run 6
 pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ3741)
+  l = Type (?ℓ3809)
 stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
   call, 8 instruction(s) to resume
-  call, 189 instruction(s) to resume (returned)
+  call, 178 instruction(s) to resume (returned)
 thena spine> :run
-solved: ?ℓ3737
-solved: ?ℓ3739
-solved: ?ℓ3741
+solved: ?ℓ3805
+solved: ?ℓ3807
+solved: ?ℓ3809
 already equal
 thena spine> :step off
 ```

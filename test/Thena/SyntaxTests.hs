@@ -42,7 +42,7 @@ natEnv = case parseDeclaration [] emptyGlobals 0 decl of
   Left e -> error ("generator fixture does not parse: " ++ show e)
   Right (d, n) -> case declare emptyGlobals n d of
     Left e            -> error ("generator fixture refused: " ++ show e)
-    Right (env, _, _) -> env
+    Right (env, _)    -> env
   where
     decl = "Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 

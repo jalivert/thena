@@ -314,7 +314,7 @@ declareAll = foldl one (Right (emptyGlobals, 0))
     one acc src = do
       (env, n)  <- acc
       (d, n1)      <- shown (parseDeclaration [] env n src)
-      (env', n2, _) <- shown (declare env n1 d)
+      (env', n2)   <- shown (declare env n1 d)
       Right (env', n2)
 
     shown :: Show e => Either e a -> Either String a

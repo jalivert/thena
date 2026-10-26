@@ -2020,6 +2020,24 @@ transporting along the earlier one.** `Eq (Vec A n) as as'` is ill-typed when
 and it is what Thena uses in place of a heterogeneous ("John Major") equality, whose
 elimination rule is equivalent to K.
 
+**That is built for a constructor's arguments, which is where the no-confusion equipment
+needs it.** Every `data` gets its `NoConfusion` family and `noConfusion` lemma now,
+including `Vec`, `Fin` and any judgment whose rule takes an argument typed by an earlier
+one; before, such a datatype was declared without equipment and the load said so. For a
+two-argument constructor the lemma's diagonal case reads
+
+```
+NoConfusionFin (fs n i) (fs n' i')
+  = DPair (Eq N n n') (λ q. Eq (Fin n') (transport q i) i')
+```
+
+— a *dependent* pair, because the second equation's type mentions the first equation's
+proof. Where no argument's type mentions an earlier one the pair is the ordinary `And` it
+always was, so nothing written against the old shape changed. **Splitting on such a family
+is a separate matter and is not built**: the elimination tactic still refuses a tied index
+whose type depends on an earlier index, which is the index-telescope half of the same
+construction.
+
 **What this costs: nothing you can currently name in language metatheory.** The proofs K
 buys are proofs *about* equality proofs rather than proofs that use them. If one is ever
 needed, K is provable rather than assumed for any type with decidable equality (Hedberg),
@@ -3604,12 +3622,11 @@ the loader.
 **succeed and say something**:
 
 ```
-thena spine> :load proof examples/canonical.thena
-module Canonical
-  declared Term
+thena spine> :load proof examples/stlc.thena
+module STLC
+  declared Ty
   ...
-warning: no noConfusionNV: nvSucc's argument 2 (n) has a type that depends on an
-  earlier argument, so its equation cannot be stated
+warning: in the grammar of LC, production vacuous: x binds in nothing
 ```
 
 Everything named as declared **is** declared — a warning is a remark about a

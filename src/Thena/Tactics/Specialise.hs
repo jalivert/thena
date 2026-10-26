@@ -95,7 +95,7 @@ import Thena.Global.Env
   , lookupConstructor
   , lookupInductive
   )
-import Thena.Global.NoConfusion (noConfusionNames)
+import Thena.Global.NoConfusion (dependentTelescope, noConfusionNames)
 import Thena.Tactics.Eliminate (MethodShape (..), spineOf)
 
 -- | What specialisation worked out: the subgoal, and __one ordered report of
@@ -643,7 +643,8 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- convertible and 'verify' is what holds this honest.
     conjuncts dn c e n = case (confusion dn e, lookupConstructor c env) of
       (Just (lv, p), Just (d, kc))
-        | Just (_, _, us) <- former (eqnLeft e)
+        | not (dependentTelescope kc)
+        , Just (_, _, us) <- former (eqnLeft e)
         , Just (_, _, vs) <- former (eqnRight e)
         , length us == length (constructorArguments kc)
         , length vs == length (constructorArguments kc) ->
@@ -651,9 +652,15 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
       _ -> (Nothing, n)
       where
         -- A constructor argument's type with the __actual__ parameters and level
-        -- arguments in it. It mentions no earlier argument:
-        -- 'Thena.Global.NoConfusion' declines a telescope where one does, which
-        -- is why this substitution is the whole of it.
+        -- arguments in it. It mentions no earlier argument, which is why this
+        -- substitution is the whole of it — 'dependentTelescope' above is what
+        -- holds that true.
+        --
+        -- __The chain is what is not built yet, not the lemma__ (MS9 phase
+        -- 212). @noConfusion‹D›@ is generated for a dependent telescope now,
+        -- and what it answers with is a chain of equations each transported
+        -- along the ones before it; rebuilding that here is its own phase, so
+        -- the equation is kept exactly as it was while the lemma did not exist.
         argType d kc j =
           substituteAll (zip (map entryVar (inductiveParameters d)) (actuals d))
             (substLevelsIn (levelSub d) (entryType (constructorArguments kc !! j)))
@@ -762,6 +769,11 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
 
     -- @And@ right-nested, which is the shape "Thena.Global.NoConfusion"
     -- conjoins its equations in.
+    --
+    -- __It is @And@ and not the dependent pair__ because 'conjuncts' declines a
+    -- dependent argument telescope, and that is the only shape whose chain the
+    -- generator states with @DPair@: an equation mentions the previous
+    -- equation's proof only where its own side was transported.
     conjoin lv ts = case ts of
       []       -> Global (GlobalName "Unit") [lv]
       [t]      -> t

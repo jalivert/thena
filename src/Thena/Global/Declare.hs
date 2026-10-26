@@ -40,7 +40,7 @@ import Thena.Core.Level
   , solveLevels
   )
 import Thena.Core.Typing (infer)
-import Thena.Errors (DataBuildError (..), ResolveError (..), Skipped (..), TypeError (..))
+import Thena.Errors (DataBuildError (..), ResolveError (..), TypeError (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
@@ -163,13 +163,15 @@ data DeclareError
 -- phase 6). @define-data@ yields the resolved declaration through the single
 -- channel and the driver runs this, exactly as §7.5 has the driver run kernel
 -- policy for @Certify@ at phase 12. No instruction writes globals.
--- **Also reports what no-confusion did not do.** The 'Skipped' is a fact about
--- the declaration the user just wrote — @Vec@ gets no @noConfusionVec@ — and
--- the driver says it. 'Thena.Global.NoConfusion.NoEqInScope' is the one case
--- that is about the environment instead, and it is silent.
+-- **It no longer reports what no-confusion did not do** (MS9 phase 212). It
+-- used to hand back a 'Skipped' for the driver to warn about, and the only case
+-- that was ever about the declaration the user wrote — a dependent argument
+-- telescope — is now generated rather than declined. What is left of 'Skipped'
+-- is two facts about the /environment/, both of which a prelude-free script is
+-- entitled to and both of which were already silent.
 declare
   :: GlobalEnv -> Int -> InductiveDefinition
-  -> Either DeclareError (GlobalEnv, Int, Maybe Skipped)
+  -> Either DeclareError (GlobalEnv, Int)
 declare env n d0 = do
   checkNames env d0
   n1 <- foldM
@@ -206,12 +208,10 @@ declare env n d0 = do
   -- renaming the post-'universes' counter and leaving these three branches
   -- naming the old one.
   case generateNoConfusion env1 n5 d of
-    Generated env2 n6   -> Right (env2, n6, Nothing)
-    Declined NoEqInScope -> Right (env1, n5, Nothing)
-    Declined NoProducts -> Right (env1, n5, Nothing)
-    Declined why        -> Right (env1, n5, Just why)
-    Clash g             -> Left (AlreadyDeclared g)
-    Rejected g e        -> Left (NoConfusionRejected g e)
+    Generated env2 n6 -> Right (env2, n6)
+    Declined _        -> Right (env1, n5)
+    Clash g           -> Left (AlreadyDeclared g)
+    Rejected g e      -> Left (NoConfusionRejected g e)
 
 -- --------------------------------------------------------------------------
 -- Checking

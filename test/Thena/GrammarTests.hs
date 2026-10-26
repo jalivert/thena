@@ -22,7 +22,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
+import Thena.Core.Term (Core (..), GlobalName (..))
 import Thena.Driver
   ( Response (..)
   , RuleFileError (..)
@@ -35,7 +35,7 @@ import Thena.Driver
   , newSession
   )
 import Thena.Engine (Machine (..))
-import Thena.Errors (Skipped (..), SyntaxError (..), Warning (..))
+import Thena.Errors (SyntaxError (..), Warning (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Language.Grammar
 import Thena.Language.Reader
@@ -341,12 +341,13 @@ meaning =
       case loadProofSource s0 stlc of
         (_, ProofLoaded _ names _ ws) -> do
           names @?= ["x", "Ty", "LC", "Ctx"]
-          -- The second is the context's generated lookup (phase 107): its
-          -- @ne@ premise depends on earlier arguments, which the no-confusion
-          -- generator states no equation for (@ms6\/CLOSEOUT.md@ 25).
-          ws @?= [ VacuousBinder LanguageBlock "LC" "vacuous" "x"
-                 , NoConfusionSkipped (GlobalName "extend-in")
-                     (DependentArguments (GlobalName "extend-there-extend") 6 (Ident "ne")) ]
+          -- **One warning, and it used to be two** (MS9 phase 212). The second
+          -- was the context's generated lookup (phase 107): its @ne@ premise
+          -- depends on earlier arguments, and the no-confusion generator
+          -- declined the whole datatype for it. It now states a transported
+          -- chain of equations instead, so there is nothing to warn about —
+          -- asserted below rather than left to the absence of a line.
+          ws @?= [ VacuousBinder LanguageBlock "LC" "vacuous" "x" ]
         (_, other) -> assertFailure (show other)
   , testCase "the arguments and roles of LC, production by production" $ do
       gs <- installed stlc

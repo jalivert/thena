@@ -8,7 +8,6 @@ thena spine> data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b
 declared And
 thena spine> data Box1 : Type₀ -> Type₁ where { box1 : ∀ (A : Type₀) -> A -> Box1 A }
 declared Box1
-warning: no noConfusionBox1: box1's argument 2 (x) has a type that depends on an earlier argument, so its equation cannot be stated
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
 thena spine> :theorem probe : ∀ (b : Box1 Nat) -> Nat
@@ -24,9 +23,9 @@ abandoned probe
 thena spine> data N : Type where { z : N ; s : N -> N }
 declared N
 thena spine> :show N
-data N {ℓ₂₁₇} : Type (ℓ₂₁₇) where
-  { z : N {ℓ₂₁₇}
-  ; s : N {ℓ₂₁₇} -> N {ℓ₂₁₇} }
+data N {ℓ₂₁₉} : Type (ℓ₂₁₉) where
+  { z : N {ℓ₂₁₉}
+  ; s : N {ℓ₂₁₉} -> N {ℓ₂₁₉} }
 thena spine> :infer ⌜ s {0} ⌝
 s {0} : N {0} -> N {0}
 thena spine> :infer ⌜ s {1} (z {1}) ⌝

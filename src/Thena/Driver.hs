@@ -3094,17 +3094,11 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- is abandoned, and there is nothing to retry the way there is at 'Halted'.
   Engine.Declaring d m -> case declare (globals m) (names m) d of
     Left e -> stop (load [] m) msgs warns (Refused e)
-    Right (g, n1, skip)
-      | exhausted -> stop installed msgs warns' (Paused spent)
-      | otherwise -> spending fuel spent s { sessionMachine = installed } msgs warns'
+    Right (g, n1)
+      | exhausted -> stop installed msgs warns (Paused spent)
+      | otherwise -> spending fuel spent s { sessionMachine = installed } msgs warns
       where
         installed = m { globals = g, names = n1 }
-        -- **A warning and no longer a message** (MS6 phase 98). Raised here
-        -- rather than by a 'Say' in the program, because the program is built
-        -- before 'declare' runs and cannot know (§7.5: the driver owns what the
-        -- driver decides) — and carried in the warning list so that a module
-        -- load, which throws the messages away, still reports it.
-        warns' = maybe warns (\why -> NoConfusionSkipped (inductiveName d) why : warns) skip
   -- The kernel runs here, outside the machine, for 'Declaring'\'s reason: it is
   -- policy, and §7.5 has the driver own policy. On refusal the rest of the
   -- program is dropped.
