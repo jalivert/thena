@@ -1,5 +1,7 @@
 -- | A family with a dependent index telescope — proved and admitted at a
--- /friendly/ index (phase 19), and split at a /tied/ one (MS9 phase 214).
+-- /friendly/ index (phase 19), and split at a /tied/ one (MS9 phase 214) —
+-- and a constructor with a dependent /argument/ telescope, split through (MS9
+-- phase 215).
 --
 -- @examples\/dependent-index.thena.script@ declares
 -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ — two indices, the second typed by
@@ -22,6 +24,14 @@
 -- second equation is stated about the first one's __proof__. Solving the first
 -- removes the binder that proof is, so the solution transition supplies @refl@
 -- for it and the transports ι-contract.
+--
+-- __AND THE OTHER TELESCOPE, WHICH IS A DIFFERENT CHAIN IN A DIFFERENT PLACE —
+-- MS9 phase 215.__ @examples\/dependent-argument-chain.thena@ declares
+-- @Pack@, whose one constructor's /own/ arguments are dependent — @i : Fin n@
+-- after @n : N@ — over a datatype with no indices at all. So the chain is in
+-- @noConfusionPack@ rather than in the motive, and the transition that meets it
+-- is injectivity rather than solution. Neither telescope is downstream of the
+-- other.
 --
 -- __It is a module and not a tactic script__, because the thing being exercised
 -- is the surface split: @case … of@ is what reaches
@@ -51,6 +61,9 @@ target = "examples/dependent-index.thena.script"
 tiedTarget :: FilePath
 tiedTarget = "examples/tied-index-chain.thena"
 
+argumentTarget :: FilePath
+argumentTarget = "examples/dependent-argument-chain.thena"
+
 tests :: TestTree
 tests =
   testGroup
@@ -72,6 +85,30 @@ tests =
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "\8704 (m : N) -> Q (s m) (fz m) -> N"
+
+      -- The split's one equation is between two @pack@ applications, so
+      -- injectivity fires and has to read the lemma's chain apart. Both of the
+      -- equations it yields are then discharged, so the arm binds the
+      -- constructor's arguments alone.
+    , testCase "the dependent-argument file runs to the end" $ do
+        (s, _) <- startingSession
+        (_, _, stopped) <- loadProofFile s argumentTarget
+        assertBool (unlines (map show stopped)) (null stopped)
+
+      -- __And the arm really binds them__: @depth@ answers with the
+      -- constructor's own @n@, so it computes to @s (s z)@ where the ambient
+      -- @m@ would have given the same number by a different route. Reducing is
+      -- what tells the two apart — an arm that had been handed the ambient copy
+      -- would still have this type.
+    , testCase "and the split's arm computes from the arguments it bound" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s argumentTarget
+        let m = machineOf s'
+        case lookupDefinition (GlobalName "depth") (globals m) of
+          Nothing -> assertFailure "depth was not admitted"
+          Just d  ->
+            renderCore (Rendering [] (names m)) [] (definitionType d)
+              @?= "\8704 (m : N) (j : Fin m) -> Holds (pack m j) -> N"
 
     , testCase "the file runs to the end" $ do
         (s, _) <- startingSession

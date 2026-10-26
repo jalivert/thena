@@ -33,7 +33,14 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar)
 import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh, freeVars)
-import Thena.Declared (eqNat, eqNatCounter, eqNatVec, eqNatVecCounter)
+import Thena.Declared
+  ( eqNat
+  , eqNatCounter
+  , eqNatFinPack
+  , eqNatFinPackCounter
+  , eqNatVec
+  , eqNatVecCounter
+  )
 import Thena.Driver
   ( Loaded (..)
   , Response (..)
@@ -374,7 +381,31 @@ chainTests =
       "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat m k) \
       \-> Eq {0} (Eq {0} Nat m k) q q -> Nat"
       (Just "Nat -> Nat")
+
+    -- __AND THE CHAIN A CONSTRUCTOR'S OWN TELESCOPE MAKES — MS9 phase 215.__
+    -- @pack@'s second argument is typed by its first, so @noConfusionPack@
+    -- answers with a @DPair@ whose second equation is stated about the first
+    -- one's /proof/: it is @i@ transported along it, not @i@. Injectivity used
+    -- to decline such a constructor outright and the equation was kept; it now
+    -- reads the chain apart.
+    --
+    -- __Both of the chain's equations are then discharged__, which is the
+    -- assertion: the first solves @n1@ and supplies @refl@ for its own proof,
+    -- the second's transport ι-contracts to @Eq (Fin j) i1 jj@ and solves @i1@,
+    -- so the method keeps neither binder and the subgoal is @Nat@.
+  , specialisesIn eqNatFinPack packContext packCounter
+      "injectivity over a dependent argument telescope reads the chain apart"
+      "pack" 1
+      "\8704 (n1 : Nat) (i1 : Fin n1) -> Eq {0} Pack (pack n1 i1) (pack j jj) -> Nat"
+      (Just "Nat")
   ]
+
+-- | @j : Nat@, @jj : Fin j@ — the ambient, rigid pair the equation above is
+-- stated against. They are what the chain's two equations solve towards.
+packContext :: Context
+packCounter :: Int
+(packContext, packCounter) =
+  contextOf eqNatFinPack eqNatFinPackCounter [("j", "Nat"), ("jj", "Fin j")]
 
 -- --------------------------------------------------------------------------
 -- Through the engine
@@ -519,6 +550,14 @@ specialises :: String -> String -> Int -> String -> Maybe String -> TestTree
 specialises what c k src want = testCase what $
   fmap snd (goalIn natContext (run' eqNat natContext natCounter c (plainShape k) mty)) @?= want
   where mty = term eqNat natContext natCounter src
+
+-- | 'specialises' somewhere other than @Nat@ and the two rigid naturals.
+specialisesIn
+  :: GlobalEnv -> Context -> Int
+  -> String -> String -> Int -> String -> Maybe String -> TestTree
+specialisesIn env ctx n what c k src want = testCase what $
+  fmap snd (goalIn ctx (run' env ctx n c (plainShape k) mty)) @?= want
+  where mty = term env ctx n src
 
 -- | The refusal, for a fixture that is meant to be refused.
 refused :: String -> Int -> String -> Maybe SpecialiseError

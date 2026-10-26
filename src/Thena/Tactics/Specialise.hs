@@ -83,7 +83,6 @@ import Thena.Core.Term
   , fresh
   , instantiate
   , open
-  , substLevelsIn
   )
 import Thena.Core.Typing (check, sortOf)
 import Thena.Errors (ChainBlocker (..), SpecialiseError (..))
@@ -97,7 +96,6 @@ import Thena.Global.Env
   )
 import Thena.Global.NoConfusion
   ( dependentPairInScope
-  , dependentTelescope
   , noConfusionNames
   )
 import Thena.Tactics.Eliminate (MethodShape (..), spineOf)
@@ -729,10 +727,10 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         Nothing -> Nothing
       Nothing -> Nothing
 
-    -- @noConfusion‹D›@, if it was generated at all. It is declined for a
-    -- datatype with a dependent argument telescope
-    -- ("Thena.Global.NoConfusion"), and without it neither discrimination
-    -- transition can fire — so the equation is kept.
+    -- @noConfusion‹D›@, if it was generated at all — it is declined for a
+    -- datatype whose prelude is missing a piece ("Thena.Global.NoConfusion"),
+    -- and without it neither discrimination transition can fire, so the
+    -- equation is kept.
     confusionOf dn
       | isDeclared lem env = Just lem
       | otherwise          = Nothing
@@ -753,64 +751,96 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                    (as ++ [eqnLeft e, eqnRight e, Free (eqnVar e)])
            )
 
+    -- @NoConfusion‹D› p⃗ i⃗ u v@ — the family at the same arguments, which /is/
+    -- the chain: the lemma's result type, before anything is projected out of
+    -- it. 'conjuncts' reduces this rather than restating what the generator
+    -- wrote.
+    confusionFamily dn e = do
+      fam         <- family
+      (_, ls, as) <- spineOf (whnf env ctx (eqnCarrier e))
+      pure (foldl App (Global fam ls) (as ++ [eqnLeft e, eqnRight e]))
+      where
+        nm = fst (noConfusionNames dn)
+        family | isDeclared nm env = Just nm
+               | otherwise         = Nothing
+
     -- One equation per argument, with its proof.
     --
-    -- __The chain's own types are rebuilt here rather than read back__, because
-    -- what the lemma answers with is @NoConfusion‹D› …@ and seeing the
-    -- conjunction in it means reducing two eliminations. The two spellings are
-    -- convertible and 'verify' is what holds this honest.
-    conjuncts dn c e n = case (confusion dn e, lookupConstructor c env) of
-      (Just (lv, p), Just (d, kc))
-        | not (dependentTelescope kc)
-        , Just (_, _, us) <- former (eqnLeft e)
-        , Just (_, _, vs) <- former (eqnRight e)
-        , length us == length (constructorArguments kc)
-        , length vs == length (constructorArguments kc) ->
-            chain lv [ (argType d kc j, s, u) | (j, s, u) <- zip3 [0 ..] us vs ] p n
+    -- __The chain is read apart rather than restated.__ Its shape is equation 18
+    -- of §3.2 of /Pattern Matching Without K/, and
+    -- "Thena.Global.NoConfusion" is where that equation is written: for a
+    -- dependent argument telescope a later equation is stated about an earlier
+    -- argument /transported along the earlier equation/, which only the
+    -- generator knows how to build. So this reduces the family to the chain and
+    -- walks down it, and the two cannot drift apart because there is one
+    -- statement of the nesting. Until MS9 phase 215 the types were rebuilt here
+    -- and a dependent telescope was declined for want of the transports.
+    --
+    -- __Two tracks of the same shape, and that is the whole of the
+    -- bookkeeping.__ @tyH@ carries, for each earlier equation, the /binder/ this
+    -- method will bind for its proof, which is what the sub-problem's
+    -- hypotheses have to say; @tyP@ carries the /projection/, which is what the
+    -- proof terms are actually typed at. They are destructured together, so a
+    -- shape they disagree on is a decline rather than an ill-typed method.
+    conjuncts dn c e n = case (confusion dn e, confusionFamily dn e) of
+      (Just (_, p), Just ty)
+        | Just _ <- lookupConstructor c env -> chain ty ty p n
       _ -> (Nothing, n)
       where
-        -- A constructor argument's type with the __actual__ parameters and level
-        -- arguments in it. It mentions no earlier argument, which is why this
-        -- substitution is the whole of it — 'dependentTelescope' above is what
-        -- holds that true.
+        -- The chain, walked: one equation per constructor argument in argument
+        -- order, each with a projection out of @p@ that proves it.
         --
-        -- __The chain is what is not built yet, not the lemma__ (MS9 phase
-        -- 212). @noConfusion‹D›@ is generated for a dependent telescope now,
-        -- and what it answers with is a chain of equations each transported
-        -- along the ones before it; rebuilding that here is its own phase, so
-        -- the equation is kept exactly as it was while the lemma did not exist.
-        argType d kc j =
-          substituteAll (zip (map entryVar (inductiveParameters d)) (actuals d))
-            (substLevelsIn (levelSub d) (entryType (constructorArguments kc !! j)))
+        -- The proofs are applied to the sub-problem in this order, so the type
+        -- of the @j@th is the @j@th equation with the earlier /projections/ in
+        -- it — which is exactly what applying the earlier proofs to the
+        -- sub-problem's Π type instantiates it to.
+        chain tyH tyP p n0' = case (linkOf env ctx tyH, linkOf env ctx tyP) of
+          -- A nullary constructor, so @Unit@ — and the two sides were α-equal,
+          -- so deletion fired rather than injectivity.
+          (LinkUnit, LinkUnit) -> (Just ([], []), n0')
+          (LinkLast, LinkLast) ->
+            let (v, n1) = fresh n0'
+             in case eqnAt v tyH of
+                  Nothing -> (Nothing, n1)
+                  Just q  -> (Just ([q], [p]), n1)
+          -- No later equation names this one's proof, so the generator held the
+          -- pair in @And@ and the rest of the chain is independent of it.
+          (LinkAnd _ aH bH, LinkAnd ls aP bP) ->
+            let (v, n1) = fresh n0'
+                (l, n2) = andProject ls aP bP p True n1
+                (r, n3) = andProject ls aP bP p False n2
+             in step v aH bH bP l r n3
+          -- One does, so the pair is @DPair@ and the rest of the chain is a
+          -- function of this equation's proof.
+          (LinkPair _ aH bH, LinkPair ls aP bP) ->
+            let (v,  n1) = fresh n0'
+                (hd, n2) = firstOf ls aP bP p n1
+                (tl, n3) = secondOf ls aP bP p n2
+             in step v aH (App bH (Free v)) (App bP hd) hd tl n3
+          _ -> (Nothing, n0')
+          where
+            -- This equation, bound at @v@, and then the rest of the chain.
+            step v aH restH restP prf rest n1 = case eqnAt v aH of
+              Nothing -> (Nothing, n1)
+              Just q  -> case chain restH restP rest n1 of
+                (Nothing, n2)       -> (Nothing, n2)
+                (Just (es, ps), n2) -> (Just (q : es, prf : ps), n2)
 
-        spine = spineOf (whnf env ctx (eqnCarrier e))
-        actuals d = case spine of
-          Just (_, _, as) -> take (length (inductiveParameters d)) as
-          Nothing         -> []
-        levelSub d = case spine of
-          Just (_, ls, _) -> maybe [] id (instantiateLevels (inductiveLevels d) ls)
-          Nothing         -> []
-
-    -- The right-nested @And@ chain, projected: the equations in argument order
-    -- and a proof of each.
-    chain lv pieces p n = case pieces of
-      [] -> (Just ([], []), n)   -- a nullary constructor, so @Unit@ — and the
-                                 -- two sides were α-equal, so deletion fired
-      [(i, a, b)] ->
-        let (v, n1) = fresh n
-         in (Just ([equationEqn v lv i a b], [p]), n1)
-      (i, a, b) : rest ->
-        let (v,  n1) = fresh n
-            this     = equation lv i a b
-            tail'    = conjoin lv [ equation lv i' a' b' | (i', a', b') <- rest ]
-            (l, n2)  = andProject lv this tail' p True n1
-            (r, n3)  = andProject lv this tail' p False n2
-         in case chain lv rest r n3 of
-              (Nothing, n4)       -> (Nothing, n4)
-              (Just (es, ps), n4) ->
-                (Just (equationEqn v lv i a b : es, l : ps), n4)
-
-    equationEqn v lv i a b = Eqn v (Ident "q") (equation lv i a b) lv i a b
+    -- One equation of the chain, as the hypothesis the method will bind for it.
+    -- 'equationOf' is the same reading one level out, over a binder the method
+    -- already has.
+    --
+    -- __Only the @Eq@ application is restated; its three arguments are kept as
+    -- the chain states them__, transports and all. The head has to be restated
+    -- because the chain's last link may still be the family application itself
+    -- — a one-argument constructor's chain /is/ its only equation, so nothing
+    -- was projected and nothing reduced on the way. 'reduceEqn' is what
+    -- contracts the transports in the arguments, once a solution has supplied
+    -- @refl@ for the proof they are along.
+    eqnAt v ty = case spineOf (whnf env ctx ty) of
+      Just (GlobalName "Eq", [l], [i, a, b]) ->
+        Just (Eqn v (Ident "q") (equation l i a b) l i a b)
+      _ -> Nothing
 
     -- ------------------------------------------------------------------
     -- Terms
@@ -863,10 +893,14 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- Built rather than named, because @andLeft@ and @andRight@ are prelude
     -- /definitions/ and this module already depends on the prelude's
     -- constructors alone — the same line "Thena.Global.NoConfusion" draws.
-    andProject lv a b q wantLeft n0' =
+    --
+    -- __The levels are the pair's own, read off the chain__ rather than assumed
+    -- to be the datatype's: the generator states every equation at one level
+    -- today, and nothing here has to know that.
+    andProject ls a b q wantLeft n0' =
       ( Eliminate
           { eliminated = conjunction
-          , levels     = [lv, lv]
+          , levels     = ls
           , parameters = [a, b]
           , motive     = Lam (Ident "p") pair (close pv (if wantLeft then a else b))
           , methods    = [ Lam (Ident "l") a (close av
@@ -877,10 +911,53 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           }
       , n3 )
       where
-        pair     = foldl App (Global conjunction [lv, lv]) [a, b]
+        pair     = foldl App (Global conjunction ls) [a, b]
         (pv, n1) = fresh n0'
         (av, n2) = fresh n1
         (bv, n3) = fresh n2
+
+    -- @elim DPair (A B) (λ p -> A) ((λ x y -> x)) () p@ — the first projection,
+    -- which is the equation a @DPair@ link of the chain heads, and
+    -- @λ p -> B (fst p)@ for the second, which is the rest of the chain at that
+    -- proof. 'andProject'\'s reason for building rather than naming them: @fst@
+    -- and @snd@ are prelude /definitions/.
+    firstOf ls a b p n0' =
+      ( Eliminate
+          { eliminated = dependentPair
+          , levels     = ls
+          , parameters = [a, b]
+          , motive     = Lam (Ident "p") (pairOf ls a b) (close zv a)
+          , methods    = [ Lam (Ident "x") a (close xv
+                             (Lam (Ident "y") (App b (Free xv))
+                                (close yv (Free xv)))) ]
+          , indices    = []
+          , target     = p
+          }
+      , n3 )
+      where
+        (zv, n1) = fresh n0'
+        (xv, n2) = fresh n1
+        (yv, n3) = fresh n2
+
+    secondOf ls a b p n0' =
+      let (zv, n1)  = fresh n0'
+          (fp, n2)  = firstOf ls a b (Free zv) n1
+          (xv, n3)  = fresh n2
+          (yv, n4)  = fresh n3
+       in ( Eliminate
+              { eliminated = dependentPair
+              , levels     = ls
+              , parameters = [a, b]
+              , motive     = Lam (Ident "p") (pairOf ls a b) (close zv (App b fp))
+              , methods    = [ Lam (Ident "x") a (close xv
+                                 (Lam (Ident "y") (App b (Free xv))
+                                    (close yv (Free yv)))) ]
+              , indices    = []
+              , target     = p
+              }
+          , n4 )
+
+    pairOf ls a b = foldl App (Global dependentPair ls) [a, b]
 
     -- @Φ (fixed, refl) -> Φ (‹the binder›, its own proof)@, where @Φ z q@ is
     -- the residue at @z@ for the binder being removed and @q@ for this
@@ -1016,18 +1093,6 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- of these ι-contracts the moment 'solution' supplies it.
     reflAt l i a = Canonical reflexivity [l] [i, a]
 
-    -- @And@ right-nested, which is the shape "Thena.Global.NoConfusion"
-    -- conjoins its equations in.
-    --
-    -- __It is @And@ and not the dependent pair__ because 'conjuncts' declines a
-    -- dependent argument telescope, and that is the only shape whose chain the
-    -- generator states with @DPair@: an equation mentions the previous
-    -- equation's proof only where its own side was transported.
-    conjoin lv ts = case ts of
-      []       -> Global (GlobalName "Unit") [lv]
-      [t]      -> t
-      t : rest -> foldl App (Global conjunction [lv, lv]) [t, conjoin lv rest]
-
     emptiness        = GlobalName "Empty"
     equality         = GlobalName "Eq"
     reflexivity      = GlobalName "refl"
@@ -1053,6 +1118,32 @@ data Eqn = Eqn
 -- 'Context' and 'piOver' and 'lamOver' work over both halves of a problem.
 entry :: Eqn -> Entry
 entry e = Hypothesis (eqnVar e) (eqnIdent e) (eqnType e)
+
+-- | One link of the chain @noConfusion‹D›@ answers with, as
+-- "Thena.Global.NoConfusion" nests it.
+--
+-- __@DPair@ against @And@ is the one distinction that matters__, and it is not a
+-- choice this module makes: the generator holds an equation in a dependent pair
+-- exactly where a later equation is stated about its proof, and in @And@ where
+-- one is not. Reading the nesting back is how the two stay in step.
+data Link
+  = LinkUnit                    -- ^ @Unit@, so the constructor takes no arguments
+  | LinkAnd [Level] Core Core   -- ^ @And A B@ — the rest of the chain is independent
+  | LinkPair [Level] Core Core  -- ^ @DPair A B@ — it is a function of this proof
+  | LinkLast                    -- ^ anything else, which must be the final equation
+
+-- | The chain's head, reduced far enough to see which link it is.
+--
+-- Reducing is unfolding the family and taking two ι-steps, one per side; both
+-- sides of an injectivity are saturated applications of the same constructor, so
+-- what comes out is the diagonal case. __Only the head reduces__, so the
+-- equations inside are left spelled as the generator wrote them.
+linkOf :: GlobalEnv -> Context -> Core -> Link
+linkOf env ctx t = case spineOf (whnf env ctx t) of
+  Just (GlobalName "Unit",  _,  [])     -> LinkUnit
+  Just (GlobalName "And",   ls, [a, b]) -> LinkAnd ls a b
+  Just (GlobalName "DPair", ls, [a, b]) -> LinkPair ls a b
+  _                                     -> LinkLast
 
 -- | Which transition applies to an equation.
 data Transition

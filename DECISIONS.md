@@ -2089,6 +2089,32 @@ backwards, with its round-trip law, and neither is generated — so
 refused, the first equation there being between two applications of `s`. The message says
 which step and what is missing.
 
+**A split also takes a constructor equation apart when the constructor's own arguments are
+dependent.** That is the no-confusion chain rather than the motive's one, and the two are
+independent: a datatype with no indices at all can have it. For
+
+```
+data Pack : Type₀ where
+  pack : ∀ (n : N) (i : Fin n) -> Pack
+
+data Holds : Pack -> Type₀ where
+  holds : ∀ (n : N) (i : Fin n) -> Holds (pack n i)
+
+depth : ∀ (m : N) (j : Fin m) (x : Holds (pack m j)) -> N
+depth = \ m j x -> case x of { holds n i -> s n }
+```
+
+the split's one equation is `Eq Pack (pack n i) (pack m j)`; taking it apart gives the two
+equations the lemma's dependent pair holds, the first solves `n` and supplies `refl` for its
+own proof, the transport in the second computes away and it solves `i`. Before, the
+equation was handed back undischarged and the arm did not typecheck.
+
+**Where it still does not go through is where the constructor's result type pins the
+argument.** `fs n i` and `fs m j` inhabit one `Fin` only when `n` and `m` are the same term,
+so the chain's first equation is a *deletion* over a transport — K again, and said by name.
+What that case wants is deletion at a type known to be a set, which is the Hedberg route
+below rather than a missing construction.
+
 **What this costs: nothing you can currently name in language metatheory.** The proofs K
 buys are proofs *about* equality proofs rather than proofs that use them. If one is ever
 needed, K is provable rather than assumed for any type with decidable equality (Hedberg),

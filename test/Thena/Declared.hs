@@ -15,6 +15,7 @@ module Thena.Declared
   ( natDecl
   , vecDecl
   , finDecl
+  , packDecl
   , emptyDecl
   , eqDecl
   , unitDecl
@@ -33,6 +34,8 @@ module Thena.Declared
   , eqNatVecCounter
   , eqNatFin
   , eqNatFinCounter
+  , eqNatFinPack
+  , eqNatFinPackCounter
   , eqNatCounter
   , eqTapl
   , eqTaplCounter
@@ -45,7 +48,7 @@ import Thena.Driver (parseDeclaration)
 import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
 
-natDecl, vecDecl, finDecl, emptyDecl :: String
+natDecl, vecDecl, finDecl, packDecl, emptyDecl :: String
 natDecl = "Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 vecDecl =
   "Vec (A : Type\8320) : Nat -> Type\8320 \
@@ -65,6 +68,20 @@ finDecl =
   "Fin : Nat -> Type\8320 \
   \where { fz : forall (n : Nat) -> Fin (succ n) \
   \; fs : forall (n : Nat) (i : Fin n) -> Fin (succ n) }"
+
+-- | A constructor whose argument telescope is DEPENDENT — @i@'s type mentions
+-- @n@ — over a datatype with __no indices__ (MS9 phase 215).
+--
+-- **The missing index is the whole point.** @fs@'s telescope is dependent too,
+-- but its result type @Fin (succ n)@ pins its first argument, so an equation
+-- between two @fs@ applications is well typed only when both name the same @n@
+-- and injectivity's first equation is then a /deletion/ over a transported
+-- chain, which is UIP. @Pack@ pins nothing, so the two sides may differ in the
+-- first argument and the first equation is a solution — which is the case
+-- "Thena.Tactics.Specialise" can discharge.
+packDecl =
+  "Pack : Type\8320 \
+  \where { pack : forall (n : Nat) (i : Fin n) -> Pack }"
 
 -- | No constructors at all — the eliminator with no methods, which every other
 -- fixture has at least one of.
@@ -193,6 +210,15 @@ eqNatFin = fst (declared (preludeDecls ++ [natDecl, finDecl]))
 
 eqNatFinCounter :: Int
 eqNatFinCounter = snd (declared (preludeDecls ++ [natDecl, finDecl]))
+
+-- | The prelude, @Nat@, @Fin@ and 'packDecl' — the environment injectivity over
+-- a dependent argument telescope is worked on (MS9 phase 215). @Pack@ needs
+-- @Fin@ to be a dependent telescope at all.
+eqNatFinPack :: GlobalEnv
+eqNatFinPack = fst (declared (preludeDecls ++ [natDecl, finDecl, packDecl]))
+
+eqNatFinPackCounter :: Int
+eqNatFinPackCounter = snd (declared (preludeDecls ++ [natDecl, finDecl, packDecl]))
 
 -- | The prelude and then MS1's target language.
 eqTapl :: GlobalEnv

@@ -67,7 +67,6 @@ module Thena.Global.NoConfusion
   , noConfusionNames
   , generateNoConfusion
   , dependentPairInScope
-  , dependentTelescope
   ) where
 
 import Thena.Core.Level (Level (..))
@@ -839,15 +838,6 @@ falsityInScope env = case lookupInductive (GlobalName "Empty") env of
               && inductiveLevel e == LVar lv
     _ -> False
 
--- | Does some argument of this constructor have a type that mentions an
--- argument before it?
---
--- **This no longer decides whether no-confusion is generated** — 'telescopic'
--- states a transported chain of equations for exactly this case, and before
--- MS9 phase 212 the whole datatype was declined when the answer was yes.
--- What is left of it is a question the transitions ask: a dependent telescope's
--- equations carry transports, and "Thena.Tactics.Specialise" rebuilds the chain
--- rather than reading it back, so it declines a chain it cannot yet rebuild.
 -- | Is this argument mentioned by the type of any argument after it?
 --
 -- **This one question decides which pair each equation is held in**, and it is
@@ -872,14 +862,6 @@ pairKinds c = case constructorArguments c of
     suffixes xs = case xs of
       []      -> [[]]
       _ : rest -> xs : suffixes rest
-
-dependentTelescope :: ConstructorDefinition -> Bool
-dependentTelescope c = go [] (constructorArguments c)
-  where
-    go _    []       = False
-    go seen (e : es) =
-         any (`elem` seen) (freeVars (entryType e))
-      || go (entryVar e : seen) es
 
 -- --------------------------------------------------------------------------
 -- Small helpers
