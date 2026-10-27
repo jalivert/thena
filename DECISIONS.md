@@ -2080,11 +2080,38 @@ examples needed no change. The two shapes lived side by side under separate name
 day — the telescopic one was generated first and replaced the other once it was known to
 sit snugly, so that no corpus measurement had to separate two changes at once.
 
-**It costs one thing, and it is a statement about the prelude's own ordering.** The chain
-is over `(indices; element)`, so a family whose index's type mentions an earlier index
-travels packaged, and a package of two entries or more is a dependent pair — so such a
-family declared *before* `DPair` gets no no-confusion, where before it got the homogeneous
-one. No prelude Thena ships is in that position.
+**It costs one thing: a family whose index telescope is dependent now needs `DPair` to get
+a no-confusion lemma at all.** The reason is worth following, because it is a constraint on
+anyone writing a prelude rather than a detail of the generator.
+
+The chain is stated over the telescope `(indices; element)`, and each equation of a chain
+is stated after *transporting* the earlier side along the earlier equation. A transport
+needs a motive — `λ z . A[x := z]` — and where a *later* entry's type also mentions `x`
+that motive cannot be written: it would have to mention the later entry at a type it no
+longer has. The entries that must move together are therefore packaged, moved once, and
+walked down one component at a time; and a package of two entries or more is a dependent
+pair. For
+
+```
+Below : ∀ (n : Nat) (i : Fin n) -> Type₀
+```
+
+`i`'s type mentions `n` and the element's type mentions both, so comparing a `Below n i`
+with a `Below n' i'` packages `i` with the element and the chain wants `DPair`.
+
+**The homogeneous lemma never wanted it**, because both elements sat at one index group and
+there was nothing to transport — so this is a need the replacement introduced, and it joins
+the per-datatype questions the generator already asks (`Empty` only with two or more
+constructors, `Unit` only for a nullary diagonal, and so on). **Asking once, for every
+datatype, would be wrong**: the prelude must declare `Eq` before `DPair`, since `DPair`'s
+own no-confusion states equations — so a blanket demand would silently lose `NoConfusionEq`
+at the very line the rest is built on. `Eq`'s two indices mention neither each other nor
+anything else, so `Eq` is not in this position and neither is anything else Thena ships.
+
+**What a prelude that gets it wrong loses is the whole lemma for that one datatype**, not a
+weaker version of it: declaring a dependently indexed family before `DPair` now yields no
+no-confusion for it, where before the replacement it yielded the homogeneous one. That is
+the price of having one shape instead of two, and it is paid in a corner nothing reaches.
 
 **And every `data` gets the acyclicity equipment: `BelowD`, `NotEqD`, `NotBelowD` and
 `NotBelowEqD`.** These are what a *cycle* is discharged with — an equation between a
