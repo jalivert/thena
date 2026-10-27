@@ -29,6 +29,9 @@ import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
 import Thena.Core.Typing (check)
+import Thena.Driver (Response (..), loadProofSource)
+import Thena.Files (startingSession)
+import Thena.Render (renderResponse)
 import Thena.Declared
   ( declared
   , eqDecl
@@ -69,6 +72,7 @@ tests =
     [ testGroup "the family computes the right case" caseTests
     , testGroup "the lemma is usable, which is the point of it" useTests
     , testGroup "the kernel accepts what was generated" kernelTests
+    , testGroup "the telescopic lemma, applied across two indices" acrossTests
     , testGroup "what gets none, and why" skipTests
     , testGroup "one namespace, shared with generated names" clashTests
     ]
@@ -214,6 +218,70 @@ useTests =
 -- Both definitions are closed, which is what lets the kernel take them at all
 -- (§5.3) — and it is a fact about the generator, since a stray 'Free' left
 -- unabstracted would be the natural mistake to make in a term this size.
+-- | What the homogeneous lemma cannot do at all, done from the surface.
+--
+-- **The point is the APPLICATION and not the type.** @noConfusionEv@ asks for
+-- one index group and both elements in it, so the appendix\'s last step — which
+-- assumes an equation between two constructor applications that sit at two
+-- different indices — cannot even pass it its arguments. These two load the
+-- generated telescopic lemma through the whole pipeline instead: the index
+-- equation, the element equation transported along it, and the family reducing
+-- off the diagonal to @Empty@ and on it to the arguments\' own chain.
+acrossTests :: [TestTree]
+acrossTests =
+  [ testCase "two constructors at two different indices are confused by nothing" $
+      loads
+        [ "module Across where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "data Ev : N -> Type\8320 where"
+        , "  evz : Ev z"
+        , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+        , ""
+        , "evzNotEvs : \8704 (k : N) (ek : Ev k)"
+        , "              (q1 : (Eq N z (s (s k)) : Type\8320))"
+        , "              (q2 : (Eq (Ev (s (s k)))"
+        , "                        (transport N (\\ w -> Ev w) z (s (s k)) q1 evz)"
+        , "                        (evs k ek) : Type\8320))"
+        , "           -> Empty"
+        , "evzNotEvs = \\ k ek q1 q2 ->"
+        , "  noConfusionTelEv z evz (s (s k)) (evs k ek) q1 q2"
+        ]
+  , testCase "and the same constructor at two indices gives its own chain" $
+      loads
+        [ "module AcrossDiag where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "data Ev : N -> Type\8320 where"
+        , "  evz : Ev z"
+        , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+        , ""
+        , "evsInj : \8704 (m : N) (em : Ev m) (k : N) (ek : Ev k)"
+        , "           (q1 : (Eq N (s (s m)) (s (s k)) : Type\8320))"
+        , "           (q2 : (Eq (Ev (s (s k)))"
+        , "                     (transport N (\\ w -> Ev w) (s (s m)) (s (s k)) q1"
+        , "                        (evs m em))"
+        , "                     (evs k ek) : Type\8320))"
+        , "        -> NoConfusionTelEv (s (s m)) (evs m em) (s (s k)) (evs k ek)"
+        , "evsInj = \\ m em k ek q1 q2 ->"
+        , "  noConfusionTelEv (s (s m)) (evs m em) (s (s k)) (evs k ek) q1 q2"
+        ]
+  ]
+
+-- | Load a surface module and insist it went in.
+loads :: [String] -> Assertion
+loads ls = do
+  (s0, _) <- startingSession
+  case loadProofSource s0 (unlines ls) of
+    (_,  ProofLoaded {}) -> pure ()
+    (s1, other)          -> assertFailure (unwords (renderResponse s1 other))
+
 kernelTests :: [TestTree]
 kernelTests =
   [ testCase "Nat's family" (certified eqNat "NoConfusionNat")
@@ -263,6 +331,49 @@ kernelTests =
       certified eqNatVecSpan "NoConfusionSpan"
   , testCase "and its lemma" $
       certified eqNatVecSpan "noConfusionSpan"
+
+    -- ------------------------------------------------------------------
+    -- THE TELESCOPIC PAIR (MS9 phase 218)
+    -- ------------------------------------------------------------------
+    --
+    -- **The homogeneous lemma puts both elements at ONE index group**, which is
+    -- what the appendix's @noCycleD@ cannot use: its last step applies
+    -- no-confusion to an equation whose two sides are at two /different/
+    -- indices, and @noConfusionFin@ cannot even be applied there. The
+    -- telescopic pair quantifies an index group per element and takes the chain
+    -- between them — the index equations, then the element equation transported
+    -- along them — curried rather than packaged, because a specialiser holds
+    -- its equations as separate binders.
+    --
+    -- Each case below is a shape the walk has to get right, and the kernel is
+    -- what says it did.
+  , testCase "Nat's telescopic family, with no indices at all" $
+      certified eqNat "NoConfusionTelNat"
+  , testCase "and its lemma, where the chain is the one element equation" $
+      certified eqNat "noConfusionTelNat"
+  , testCase "Eq's own telescopic lemma, two indices and polymorphic" $
+      certified eqNat "noConfusionTelEq"
+  , testCase "Fin's telescopic family" (certified eqNatFin "NoConfusionTelFin")
+  , testCase "and its lemma, one index and a dependent argument telescope" $
+      certified eqNatFin "noConfusionTelFin"
+  , testCase "Vec's telescopic lemma, with a parameter as well" $
+      certified eqNatVec "noConfusionTelVec"
+  , testCase "Term's telescopic lemma, four constructors and no indices" $
+      certified eqTapl "noConfusionTelTerm"
+  , testCase "a chain with an argument interior to it, telescopically" $
+      certified eqNatVecSpan "noConfusionTelSpan"
+
+    -- **A dependent INDEX telescope is the shape that asks for a pair the
+    -- homogeneous lemma never did**, and it is the one the old @Below@ fixture
+    -- could not show: @Below@'s own environment has no @DPair@, so the
+    -- telescopic pair is skipped there rather than generated. With the prelude
+    -- behind it the walk packages @i@ together with the element and transports
+    -- the package, which is @telescopicInScope@'s
+    -- whole reason to exist.
+  , testCase "a dependent index telescope, telescopically (phase 218)" $
+      certified preludeBelowEnv "NoConfusionTelBelow"
+  , testCase "and its lemma, where the index travels with the element" $
+      certified preludeBelowEnv "noConfusionTelBelow"
   ]
 
 -- | @Below@\'s second index has the first in its type — a dependent /index/
@@ -270,6 +381,12 @@ kernelTests =
 -- telescope 'skipTests' pins, and which nothing else in the suite has.
 belowEnv :: GlobalEnv
 belowEnv = fst (declared [eqDecl, natDecl, finDecl, belowDecl])
+
+-- | The same datatype with the whole prelude behind it, which is what the
+-- telescopic pair needs: a dependent index telescope packages the index with
+-- the element and @DPair@ is what holds the package.
+preludeBelowEnv :: GlobalEnv
+preludeBelowEnv = fst (declared (preludeDecls ++ [natDecl, finDecl, belowDecl]))
 
 belowDecl :: String
 belowDecl =

@@ -65,6 +65,7 @@
 module Thena.Global.NoConfusion
   ( Generated (..)
   , noConfusionNames
+  , telescopicNoConfusionNames
   , generateNoConfusion
   , dependentPairInScope
   ) where
@@ -140,6 +141,18 @@ noConfusionNames :: GlobalName -> (GlobalName, GlobalName)
 noConfusionNames (GlobalName d) =
   (GlobalName ("NoConfusion" ++ d), GlobalName ("noConfusion" ++ d))
 
+-- | The two the __telescopic__ lemma generates: @NoConfusionTelNat@ and
+-- @noConfusionTelNat@ (MS9 phase 218).
+--
+-- **The name is temporary and says so.** The telescopic family subsumes the
+-- homogeneous one — it degenerates to it where the two index groups coincide —
+-- and phase 222 drops the homogeneous pair and gives these its names. Until
+-- then the two live side by side, and nothing generated after this phase may
+-- name the homogeneous pair, so that 222 is a rename and not a redesign.
+telescopicNoConfusionNames :: GlobalName -> (GlobalName, GlobalName)
+telescopicNoConfusionNames (GlobalName d) =
+  (GlobalName ("NoConfusionTel" ++ d), GlobalName ("noConfusionTel" ++ d))
+
 -- | Generate, check and admit both definitions — or say why not.
 --
 -- Called from "Thena.Global.Declare" /after/ the wrappers are installed, so the
@@ -156,6 +169,8 @@ generateNoConfusion env n0 d
   | not (productsInScope env d)        = Declined NoProducts
   | isDeclared famName env             = Clash famName
   | isDeclared lemName env             = Clash lemName
+  | isDeclared telFamName env          = Clash telFamName
+  | isDeclared telLemName env          = Clash telLemName
   | otherwise =
       let (famTy,   n1) = familyType n0
           (famBody, n2) = family n1
@@ -168,7 +183,21 @@ generateNoConfusion env n0 d
                in case verdict (check env1 [] n4 lemBody lemTy) of
                     Left e   -> Rejected lemName e
                     Right () ->
-                      Generated (addDefinition lemName (MkDefinition (inductiveLevels d) [] lemTy lemBody) env1) n4
+                      let env2          = addDefinition lemName (MkDefinition (inductiveLevels d) [] lemTy lemBody) env1
+                          (tfTy,   n5)  = telFamilyType n4
+                          (tfBody, n6)  = telFamily n5
+                       in if not (telescopicInScope env2 d)
+                            then Generated env2 n4
+                            else case verdict (check env2 [] n6 tfBody tfTy) of
+                            Left e   -> Rejected telFamName e
+                            Right () ->
+                              let env3         = addDefinition telFamName (MkDefinition (inductiveLevels d) [] tfTy tfBody) env2
+                                  (tlTy,   n7) = telLemmaType n6
+                                  (tlBody, n8) = telLemma n7
+                               in case verdict (check env3 [] n8 tlBody tlTy) of
+                                    Left e   -> Rejected telLemName e
+                                    Right () ->
+                                      Generated (addDefinition telLemName (MkDefinition (inductiveLevels d) [] tlTy tlBody) env3) n8
   where
     -- Everything checked here is /generated/, so it holds no level meta and
     -- can owe no obligation. The counter is not wanted either — these checks
@@ -176,6 +205,7 @@ generateNoConfusion env n0 d
     verdict (r, _, _) = r
 
     (famName, lemName) = noConfusionNames (inductiveName d)
+    (telFamName, telLemName) = telescopicNoConfusionNames (inductiveName d)
 
     dn        = inductiveName d
     ps        = inductiveParameters d
@@ -226,6 +256,8 @@ generateNoConfusion env n0 d
     bothAt p q x y   = foldl App (Global (GlobalName "both") [dl, dl]) [p, q, x, y]
     dpairAt a b      = foldl App (Global (GlobalName "DPair") [dl, dl]) [a, b]
     dpairMk a b x y  = foldl App (Global (GlobalName "dpair") [dl, dl]) [a, b, x, y]
+    unitType         = Global (GlobalName "Unit") [dl]
+    unitProof        = Global (GlobalName "unit") [dl]
 
     -- ----------------------------------------------------------------------
     -- The family
@@ -314,6 +346,59 @@ generateNoConfusion env n0 d
     diagonal args args' n =
       let (ty, _, n1) = telescopic args (map (Free . entryVar) args') n
        in (ty, n1)
+
+    -- ----------------------------------------------------------------------
+    -- The telescopic family (MS9 phase 218)
+    -- ----------------------------------------------------------------------
+
+    -- @∀ params is1 (x : D params is1) is2 (y : D params is2) -> Type dl@
+    --
+    -- **The one difference from 'familyType' is that @y@ has its OWN index
+    -- group**, which is the whole point: the appendix\'s @noConfD@ is stated over
+    -- the telescope @D̄ = (indices; element)@, and its @β@ step applies it to an
+    -- equation whose two sides are at two different indices. The homogeneous
+    -- family cannot be /applied/ there, whatever it says.
+    --
+    -- The payload is unchanged, and that is not an accident: on the diagonal
+    -- both sides are the same constructor, whose own arguments determine both
+    -- index groups, so the indices need no equations of their own and what is
+    -- left to say is still the telescopic equality of the arguments.
+    telFamilyType n =
+      let (vx,  n1) = fresh n
+          (is2, n2) = freshen n1 idx
+          (vy,  n3) = fresh n2
+       in ( piOver ps (piOver idx
+              (Pi (Ident "x") (familyAt (varsOf idx)) (close vx
+                (piOver is2
+                  (Pi (Ident "y") (familyAt (varsOf is2)) (close vy (Universe dl)))))))
+          , n3
+          )
+
+    -- @λ params is1 x is2 y . elim D params ‹motive› (‹methods›) is1 x@, with the
+    -- inner elimination at @is2@ rather than at the one group there used to be.
+    telFamily n =
+      let (vx,  n1) = fresh n
+          (is2, n2) = freshen n1 idx
+          (vy,  n3) = fresh n2
+          (mt,  n4) = typeMotive n3
+          (ms,  n5) = each (telOuterMethod mt (varsOf is2) (Free vy)) n4 cs
+          body      = Eliminate dn (map LVar (inductiveLevels d)) paramVars mt ms (varsOf idx) (Free vx)
+       in ( lamOver ps (lamOver idx
+              (Lam (Ident "x") (familyAt (varsOf idx)) (close vx
+                (lamOver is2
+                  (Lam (Ident "y") (familyAt (varsOf is2)) (close vy body))))))
+          , n5
+          )
+
+    -- As 'outerMethod', but the second elimination is at @y@\'s own indices.
+    -- 'innerMethod' is shared with the homogeneous family unchanged: it is
+    -- about the two constructors and knows nothing about indices.
+    telOuterMethod mt is2 y c n =
+      let args         = constructorArguments c
+          (ms, n1)     = each (innerMethod mt args c) n cs
+          inner        = Eliminate dn (map LVar (inductiveLevels d)) paramVars mt ms is2 y
+          (body, n2)   = withHypotheses mt args inner n1
+       in (lamOver args body, n2)
 
     -- ----------------------------------------------------------------------
     -- The lemma
@@ -405,6 +490,215 @@ generateNoConfusion env n0 d
        in (lamOver args body, n2)
 
     -- ----------------------------------------------------------------------
+    -- The telescopic lemma (MS9 phase 218)
+    -- ----------------------------------------------------------------------
+
+    -- @∀ params is1 (x : D params is1) is2 (y : D params is2) -> ‹chain› ->
+    --   NoConfusionTelD params is1 x is2 y@
+    --
+    -- **The chain is curried and not packaged**, which is the one place this
+    -- departs from the homogeneous lemma's single @Eq@ argument. A specialiser
+    -- holds its equations as separate Π binders, one per tied index, so a lemma
+    -- it is going to call must take them that way; packaging them here would
+    -- only be unpacked at every use site. 'stations' and 'package' are the same
+    -- walk in the two shapes.
+    telLemmaType n =
+      let (t, n1) = telGoalType [] [] idx n
+       in (piOver ps t, n1)
+
+    -- @λ params . ‹the nested J›@ — and the body /is/ 'telProof', because
+    -- 'telProof' already abstracts @is1@, @x@, @is2@, @y@ and the chain in
+    -- exactly the order the type quantifies them.
+    telLemma n =
+      let (body, n1) = telProof [] idx n
+       in (lamOver ps body, n1)
+
+    -- | The type 'telProof' inhabits, and the motive of each step of the J.
+    --
+    -- @shared@ are index positions J has already unified, so both sides carry
+    -- the same term and neither needs an equation. @supplied@ are positions
+    -- whose two sides and whose equation are given rather than bound — that is
+    -- what the step's motive does with @u@, @v@ and @w@, and it is why the
+    -- transports in the equations after it come out along @w@ rather than along
+    -- a binder of this type. @remaining@ is quantified fresh on both sides.
+    --
+    -- **The chain must be generated over the whole telescope and then have the
+    -- supplied positions substituted out**, not generated over the tail: a
+    -- later equation is stated after transporting along the earlier ones, and
+    -- an earlier position left out of the walk is an earlier transport left out
+    -- of the type.
+    telGoalType shared supplied remaining n =
+      let givenEntries   = [ Hypothesis v i t | (v, i, t) <- suppliedEntries ]
+          (lsCtx, n1)    = freshen n remaining
+          (rsCtx, n2)    = freshen n1 remaining
+          lsCtx'         = retype (shared ++ suppliedLefts)  lsCtx
+          rsCtx'         = retype (shared ++ suppliedRights) rsCtx
+          lefts          = shared ++ suppliedLefts  ++ varsOf lsCtx'
+          rights         = shared ++ suppliedRights ++ varsOf rsCtx'
+          (va, n3)       = fresh n2
+          (vb, n4)       = fresh n3
+          aTy            = familyAt lefts
+          bTy            = familyAt rights
+          tel            = givenEntries ++ lsCtx' ++ [Hypothesis va (Ident "a") aTy]
+          rhs            = suppliedRights ++ varsOf rsCtx' ++ [Free vb]
+          (hs, n5)       = stations tel rhs n4
+          given          = [ (statedProof h, pr)
+                           | (h, (_, _, pr)) <- zip hs supplied ]
+          bound          = drop (length supplied) hs
+          result         = foldl App (Global telFamName (map LVar (inductiveLevels d)))
+                             (paramVars ++ lefts ++ [Free va] ++ rights ++ [Free vb])
+       in ( piOver lsCtx' (Pi (Ident "a") aTy (close va
+              (piOver rsCtx' (Pi (Ident "b") bTy (close vb
+                (rewriting given (chained bound result)))))))
+          , n5
+          )
+      where
+        suppliedLefts  = [ l | (l, _, _) <- supplied ]
+        suppliedRights = [ r | (_, r, _) <- supplied ]
+        -- A supplied position's left side is a variable the caller bound, so it
+        -- can stand as the telescope entry 'stations' states its equation from.
+        suppliedEntries =
+          [ (v, i, t)
+          | ((Free v, _, _), Hypothesis _ i t) <- zip supplied entries ]
+        entries = retype shared (take (length supplied) remainingAll)
+        remainingAll = drop (length shared) idx
+
+    -- | The curried chain: one Π per equation, in order, each closing over the
+    -- binder that stands for its proof so the next equation's transports can
+    -- name it.
+    chained hs result =
+      foldr
+        (\h acc ->
+           Pi (Ident "q")
+              (eqAt (statedType h) (statedLeft h) (statedRight h))
+              (close (statedProof h) acc))
+        result hs
+
+    -- | The index entries' types, with the positions already decided replaced
+    -- by the terms that decided them.
+    -- **The positions are counted from the front of @idx@ and nowhere else.**
+    -- An index entry's type can only mention indices before it, so the terms
+    -- that have decided the first @length ts@ positions are the whole of what
+    -- any later entry needs substituting — and every caller here holds exactly
+    -- that prefix.
+    retype ts ctx = map rewriteEntry ctx
+      where
+        ss = zip (map entryVar (take (length ts) idx)) ts
+        rewriteEntry e = case e of
+          Hypothesis v i t   -> Hypothesis v i (rewriting ss t)
+          Definition v i s t -> Definition v i (rewriting ss s) (rewriting ss t)
+
+    -- | The nested J, one step per index position, ending in the diagonal.
+    --
+    -- **Both sides have to be generalised at every step, not just the one being
+    -- eliminated.** @x@'s type mentions the index the step is about, so it
+    -- cannot stay in scope across the elimination; the motive re-quantifies the
+    -- remaining telescope on both sides, the two elements and the equations
+    -- after this one, and the J is then applied to exactly those.
+    telProof shared remaining n = case remaining of
+      [] ->
+        let fam      = familyAt shared
+            (va, n1) = fresh n
+            (vb, n2) = fresh n1
+            (ve, n3) = fresh n2
+            (dg, n4) = telDiagonal shared (Free va) n3
+            mot w    = foldl App (Global telFamName (map LVar (inductiveLevels d)))
+                         (paramVars ++ shared ++ [Free va] ++ shared ++ [w])
+            (tr, n5) = transportAt fam mot (Free va) (Free vb) (Free ve) dg n4
+         in ( Lam (Ident "a") fam (close va
+                (Lam (Ident "b") fam (close vb
+                  (Lam (Ident "e") (eqAt fam (Free va) (Free vb)) (close ve tr)))))
+            , n5
+            )
+      e : es ->
+        let a0            = case retype shared [e] of
+                              (e' : _) -> entryType e'
+                              []       -> entryType e
+            (lsCtx, n1)   = freshen n es
+            (rsCtx, n2)   = freshen n1 es
+            (vl, n3)      = fresh n2
+            (vr, n4)      = fresh n3
+            lsCtx'        = retype (shared ++ [Free vl]) lsCtx
+            rsCtx'        = retype (shared ++ [Free vr]) rsCtx
+            lefts         = shared ++ [Free vl] ++ varsOf lsCtx'
+            rights        = shared ++ [Free vr] ++ varsOf rsCtx'
+            (va, n5)      = fresh n4
+            (vb, n6)      = fresh n5
+            aTy           = familyAt lefts
+            bTy           = familyAt rights
+            tel           = Hypothesis vl (Ident "u") a0
+                              : lsCtx' ++ [Hypothesis va (Ident "a") aTy]
+            rhs           = Free vr : varsOf rsCtx' ++ [Free vb]
+            (hs, n7)      = stations tel rhs n6
+            (q0, rest)    = case hs of
+                              (h : more) -> (statedProof h, more)
+                              []         -> (vl, [])
+            (mt, n8)      = telStepMotive shared es a0 n7
+            (mh, n9)      = telStepMethod shared es a0 n8
+            applied       = foldl App
+                              (Eliminate (GlobalName "Eq") [dl] [a0] mt [mh]
+                                 [Free vl, Free vr] (Free q0))
+                              (varsOf lsCtx' ++ [Free va]
+                                 ++ varsOf rsCtx' ++ [Free vb]
+                                 ++ map (Free . statedProof) rest)
+         in ( Lam (Ident "u") a0 (close vl
+                (lamOver lsCtx' (Lam (Ident "a") aTy (close va
+                  (Lam (Ident "v") a0 (close vr
+                    (lamOver rsCtx' (Lam (Ident "b") bTy (close vb
+                      (lamsOver hs applied))))))))))
+            , n9
+            )
+
+    -- | One λ per equation of a chain, matching 'chained' binder for binder.
+    lamsOver hs body =
+      foldr
+        (\h acc ->
+           Lam (Ident "q")
+               (eqAt (statedType h) (statedLeft h) (statedRight h))
+               (close (statedProof h) acc))
+        body hs
+
+    -- @λ u v w . ‹the rest, with this position's equation supplied as w›@.
+    telStepMotive shared es a0 n =
+      let (uv, n1) = fresh n
+          (vv, n2) = fresh n1
+          (wv, n3) = fresh n2
+          (t,  n4) = telGoalType shared [(Free uv, Free vv, Free wv)] (es' uv) n3
+       in ( Lam (Ident "u") a0 (close uv
+              (Lam (Ident "v") a0 (close vv
+                (Lam (Ident "w") (eqAt a0 (Free uv) (Free vv)) (close wv t)))))
+          , n4
+          )
+      where
+        es' _ = es
+
+    -- @λ c . ‹the rest at one shared position more›@ — the only method J leaves,
+    -- and the step that makes the recursion finite.
+    telStepMethod shared es a0 n =
+      let (cv, n1) = fresh n
+          (t,  n2) = telProof (shared ++ [Free cv]) es n1
+       in (Lam (Ident "c") a0 (close cv t), n2)
+
+    -- @NoConfusionTelD params shared a shared a@, by one elimination of @a@:
+    -- the family's inner elimination lands on the same constructor, so the
+    -- payload reduces to the telescopic equality of its arguments with
+    -- themselves, which 'diagonalMethod' proves by @refl@.
+    telDiagonal shared a n =
+      let (mdg, n1) = telDiagonalMotive n
+          (ms,  n2) = each (diagonalMethod mdg) n1 cs
+       in (Eliminate dn (map LVar (inductiveLevels d)) paramVars mdg ms shared a, n2)
+
+    -- @λ indices (z : D params indices) . NoConfusionTelD params indices z indices z@
+    telDiagonalMotive n =
+      let (is, n1) = freshen n idx
+          (vz, n2) = fresh n1
+          result   = foldl App (Global telFamName (map LVar (inductiveLevels d)))
+                       (paramVars ++ varsOf is ++ [Free vz] ++ varsOf is ++ [Free vz])
+       in ( lamOver is (Lam (Ident "z") (familyAt (varsOf is)) (close vz result))
+          , n2
+          )
+
+    -- ----------------------------------------------------------------------
     -- Shared shapes
     -- ----------------------------------------------------------------------
 
@@ -476,41 +770,61 @@ generateNoConfusion env n0 d
     -- package is @as; pa; h@ and @pa@ is interior to it. 'mentionedLater' still
     -- says which prelude types the constructor needs — see 'pairKinds' — and
     -- that is all it says now.
-    telescopic args rs n0' = go [] Nothing args rs n0'
+    telescopic args rs n0' =
+      let (hs, n1)  = stations args rs n0'
+          (ty, prf) = package hs
+       in (ty, prf, n1)
+
+    -- | The package, folded from the stations right to left.
+    --
+    -- **The dependent pair is used exactly where the dependency is**, and the
+    -- question is asked of the type that was built rather than predicted from
+    -- the telescope — see 'stations' for the shape phase 216 found that wrong
+    -- on. Where a later equation does not mention this one's proof, @And@ says
+    -- the same thing with one binder fewer.
+    package []  = (unitType, unitProof)
+    package [h] = ( eqAt (statedType h) (statedLeft h) (statedRight h)
+                  , reflAt (statedType h) (statedLeft h)
+                  )
+    package (h : hs) =
+      let eq                = eqAt (statedType h) (statedLeft h) (statedRight h)
+          prf               = reflAt (statedType h) (statedLeft h)
+          (restTy, restPrf) = package hs
+          qv                = statedProof h
+          binder            = Lam (Ident "q") eq (close qv restTy)
+          prf'              = rewriting [(qv, prf)] restPrf
+       in if qv `elem` freeVars restTy
+            then (dpairAt eq binder, dpairMk eq binder prf prf')
+            else (andAt eq restTy,   bothAt eq restTy prf prf')
+
+    -- | One 'Stated' per argument: the equation it contributes, the type that
+    -- equation is stated at, and the binder standing for its proof.
+    --
+    -- **Separated from the packaging at MS9 phase 218**, which wants the same
+    -- walk curried into a Π-telescope rather than nested into pairs — a
+    -- specialiser holds its equations as separate binders, so a lemma it calls
+    -- must take them that way. One walk, two shapes, and they cannot drift.
+    stations args rs n0' = go [] Nothing args rs n0'
       where
-        go _ _ []       _         n = (unitType, unitProof, n)
-        go _ _ (_ : _)  []        n = (unitType, unitProof, n)
+        go _ _ []       _         n = ([], n)
+        go _ _ (_ : _)  []        n = ([], n)
         go hist carry (e : es) (r : rs') n =
           let (ty, lhs, nextCarry, n1) = headOf hist carry e es r n
-              eq  = eqAt ty lhs r
-              prf = reflAt ty lhs
+              (qv, n2) = fresh n1
+              h = Stated
+                    { statedEntry = e
+                    , statedMoved = lhs /= Free (entryVar e)
+                    , statedType  = ty
+                    , statedLeft  = lhs
+                    , statedRight = r
+                    , statedProof = qv
+                    }
            in case es of
-                [] -> (eq, prf, n1)
+                [] -> ([h], n2)
                 _  ->
-                  let (qv, n2)      = fresh n1
-                      (carry', n3)  = nextCarry qv n2
-                      h = Stated
-                            { statedEntry = e
-                            , statedMoved = lhs /= Free (entryVar e)
-                            , statedType  = ty
-                            , statedLeft  = lhs
-                            , statedRight = r
-                            , statedProof = qv
-                            }
-                      (restTy, restPrf, n4) = go (hist ++ [h]) carry' es rs' n3
-                      binder = Lam (Ident "q") eq (close qv restTy)
-                      prf'   = rewriting [(qv, prf)] restPrf
-                   in ( if qv `elem` freeVars restTy
-                          then ( dpairAt eq binder
-                               , dpairMk eq binder prf prf'
-                               , n4 )
-                          else ( andAt eq restTy
-                               , bothAt eq restTy prf prf'
-                               , n4 )
-                      )
-
-        unitType  = Global (GlobalName "Unit") [dl]
-        unitProof = Global (GlobalName "unit") [dl]
+                  let (carry', n3) = nextCarry qv n2
+                      (rest,   n4) = go (hist ++ [h]) carry' es rs' n3
+                   in (h : rest, n4)
 
         -- The type this argument's equation is stated at, its left side, and
         -- what the next argument inherits — @e*@ of equation 18, for one term.
@@ -773,6 +1087,31 @@ productsInScope env d =
     -- and absent is a generated term that does not typecheck.
     needsAnd   = any (elem False . pairKinds) cs
     needsPair  = any (elem True  . pairKinds) cs
+
+-- | Can the __telescopic__ pair be generated for this datatype (MS9 phase 218)?
+--
+-- **It asks for one pair the homogeneous one never did.** The telescopic chain
+-- is over the telescope @(indices; element)@, so where an index's type mentions
+-- an earlier index that index travels packaged with everything after it — the
+-- element included — and 'packType' of two entries or more is a dependent pair.
+--
+-- **A non-dependent index telescope asks for nothing new**, because the element
+-- is then packaged alone and 'packType' of one entry is the bare type. That is
+-- not a detail: @Eq@'s own two indices mention neither each other nor anything
+-- else, and @Eq@ is declared before @DPair@ is.
+--
+-- **Failing it skips the telescopic pair and keeps the homogeneous one**, rather
+-- than declining the declaration's equipment altogether: the telescopic lemma
+-- is additive until phase 222 replaces the homogeneous one with it.
+telescopicInScope :: GlobalEnv -> InductiveDefinition -> Bool
+telescopicInScope env d =
+  not (dependentIndices (inductiveIndices d)) || dependentPairInScope env
+  where
+    dependentIndices es' = case es' of
+      []       -> False
+      (e : es) ->
+        entryVar e `elem` concatMap (freeVars . entryType) es
+          || dependentIndices es
 
 -- | @And {ℓ₀ ℓ₁} (A : Type ℓ₀) (B : Type ℓ₁) : Type (ℓ₀ ⊔ ℓ₁)
 --   { both : ∀ (a : A) (b : B) -> And A B }@
