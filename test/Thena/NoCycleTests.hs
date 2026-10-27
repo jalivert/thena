@@ -38,6 +38,7 @@ import Thena.Declared
   , eqNatVecSpan
   , eqNatVecAll
   , eqNatVecAfter
+  , eqNatVecBefore
   , eqStep
   , eqTapl
   , finDecl
@@ -442,6 +443,16 @@ guardTests =
     -- equipment coming after it.
     testCase "an index after a dependent one: the no-confusion lemma is there" $
       has eqNatVecAfter "noConfusionAfter" @?= True
+  , -- **An index BEFORE the dependent one refused the declaration** until MS9
+    -- phase 225. @as@ reaches back to @n@ with @m@ between them, so the chain's
+    -- package has @as@ read out of it and is then transported again for the
+    -- element; the motive of that transport carried the equations but not the
+    -- component already projected, leaving @as@ bare at its old index. This is
+    -- the smallest telescope that shows it.
+    testCase "an index before a dependent one: the no-confusion lemma is there" $
+      has eqNatVecBefore "noConfusionBefore" @?= True
+  , testCase "and so is the nested J over it" $
+      has eqNatVecBefore "noCycleBefore" @?= True
   , testCase "and so is the nested J over it" $
       has eqNatVecAfter "noCycleAfter" @?= True
   , -- One namespace, shared with generated names (§3.6).

@@ -19,6 +19,7 @@ module Thena.Declared
   , spanDecl
   , allDecl
   , afterDecl
+  , beforeDecl
   , emptyDecl
   , eqDecl
   , unitDecl
@@ -43,6 +44,7 @@ module Thena.Declared
   , eqNatVecSpanCounter
   , eqNatVecAll
   , eqNatVecAfter
+  , eqNatVecBefore
   , eqNatCounter
   , eqTapl
   , eqTaplCounter
@@ -56,7 +58,7 @@ import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
 
 natDecl, vecDecl, finDecl, packDecl, spanDecl, emptyDecl :: String
-allDecl, afterDecl :: String
+allDecl, afterDecl, beforeDecl :: String
 natDecl = "Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 vecDecl =
   "Vec (A : Type\8320) : Nat -> Type\8320 \
@@ -134,6 +136,18 @@ allDecl =
 afterDecl =
   "After (A : Type\8320) : forall (n : Nat) -> Vec A n -> Nat -> Type\8320 \
   \where { amk : forall (n : Nat) (as : Vec A n) (m : Nat) -> After A n as m }"
+
+-- | An index BEFORE the dependent one (MS9 phase 225).
+--
+-- **The smallest telescope the projections defect showed on**, and smaller than
+-- the two-vector shape it was found next to: @as@ reaches back to @n@ with the
+-- independent @m@ sitting between them, so the chain's package has a component
+-- read out of it and is then transported again. The motive of that second
+-- transport substituted the equations but not the component already projected,
+-- which left @as@ bare at its old index.
+beforeDecl =
+  "Before (A : Type\8320) : forall (n : Nat) -> Nat -> Vec A n -> Type\8320 \
+  \where { bmk : forall (n : Nat) (m : Nat) (as : Vec A n) -> Before A n m as }"
 
 -- | No constructors at all — the eliminator with no methods, which every other
 -- fixture has at least one of.
@@ -290,6 +304,10 @@ eqNatVecAll = fst (declared (preludeDecls ++ [natDecl, vecDecl, allDecl]))
 -- | The prelude, @Nat@, @Vec@ and 'afterDecl' — an index after a dependent one.
 eqNatVecAfter :: GlobalEnv
 eqNatVecAfter = fst (declared (preludeDecls ++ [natDecl, vecDecl, afterDecl]))
+
+-- | The prelude, @Nat@, @Vec@ and 'beforeDecl' — an index before a dependent one.
+eqNatVecBefore :: GlobalEnv
+eqNatVecBefore = fst (declared (preludeDecls ++ [natDecl, vecDecl, beforeDecl]))
 
 -- | The prelude and then MS1's target language.
 eqTapl :: GlobalEnv

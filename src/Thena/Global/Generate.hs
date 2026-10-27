@@ -412,11 +412,24 @@ stations dl args rs n0' = go [] [] args rs n0'
         -- step says both. 'owed' is what decides which steps are taken, and
         -- 'chain' is what guarantees an argument outside the package is in
         -- place: one that moved would be in it.
-        outward inside (t, applied, nn) h =
+        -- **The motive has to carry the components already read out of the
+        -- package as well as the equations** (MS9 phase 225, @~rjq7b@). A
+        -- component that has been projected is no longer the argument its
+        -- binder names: the entries still inside the package are typed
+        -- against the projection. Substituting the equations alone left that
+        -- binder bare in the motive, so the package's type there stood at the
+        -- component's /old/ index while the equation stated it at the new
+        -- one. It is reachable only once a package has had one component read
+        -- out and is then transported again, which is why an index telescope
+        -- needs three entries before it shows.
+        outward inside projected0 (t, applied, nn) h =
           let v         = entryVar (statedEntry h)
               held      = [ sub | sub <- applied, fst sub /= v ]
+              carried   = [ sub | sub <- projected0
+                                , fst sub /= v
+                                , fst sub `notElem` map fst held ]
               (t', nn') = transportAt dl (statedType h)
-                            (\z -> packType dl (held ++ [(v, z)]) inside)
+                            (\z -> packType dl (held ++ [(v, z)] ++ carried) inside)
                             (statedLeft h) (statedRight h)
                             (Free (statedProof h)) t nn
            in (t', held ++ [(v, statedRight h)], nn')
@@ -446,7 +459,7 @@ stations dl args rs n0' = go [] [] args rs n0'
         -- any other now, and its equation is owed to whatever still mentions
         -- it.
         walking (p0, inside, applied0, projected0) nn =
-          let (p, applied, n1) = foldl (outward inside) (p0, applied0, nn) owed
+          let (p, applied, n1) = foldl (outward inside projected0) (p0, applied0, nn) owed
               -- **The projections stay last and the equations stay before
               -- them.** 'rewriting' is a fold, so a substitution applied after
               -- one whose term mentions its own variable would descend into
