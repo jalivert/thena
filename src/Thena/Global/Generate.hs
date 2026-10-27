@@ -669,82 +669,89 @@ data Chain = Chain
 
 -- | @∀ ⟨Θ⟩ ⟨Θ\'⟩ ⟨the chain between them⟩ -> goal@, which 'chainProof' inhabits.
 chainGoalType :: Chain -> Int -> (Core, Int)
-chainGoalType ch = goalFrom ch [] [] (chainTelescope ch)
+chainGoalType ch = goalFrom ch [] (chainTelescope ch)
 
 -- | The nested J, one step per entry of the telescope, ending in the diagonal.
 chainProof :: Chain -> Int -> (Core, Int)
 chainProof ch = proofFrom ch [] (chainTelescope ch)
 
--- | The goal, with some positions already unified and one supplied.
+-- | The goal, with the positions already decided supplied rather than bound.
 --
--- @shared@ are positions J has already unified, so both sides carry the same
--- term and neither needs an equation. @supplied@ are positions whose two sides
--- /and whose equation/ are given rather than bound — that is what a step\'s
--- motive does with @u@, @v@ and @w@, and it is why the transports in the
--- equations after it come out along @w@ rather than along a binder of this type.
--- @remaining@ is quantified fresh on both sides.
+-- @decided@ are the positions a step of the J has already passed: each carries
+-- its two sides /and the proof of its equation/, so the transports in the
+-- equations after it come out along that proof rather than along a binder of
+-- this type. @remaining@ is quantified fresh on both sides.
 --
--- **The chain is generated over the whole telescope and the supplied positions
+-- **THERE IS ONE WALK AND A DECIDED POSITION IS NEVER ANYTHING BUT SUPPLIED —
+-- MS9 phase 224, @~gcs43@.** The eliminated position used to be @shared@ in the
+-- method and @supplied@ in the motive — two code paths for the same position,
+-- so the method packaged nothing where the motive packaged, and whether the
+-- kernel accepted the step depended on the two happening to agree. A method's
+-- goal is now literally its motive at @(c, c, refl c)@: the same call to this
+-- function, with the same triple in @decided@. @.claude\/HAZARDS.md@ carries
+-- what the old shape cost.
+--
+-- **The chain is generated over the whole telescope and the decided positions
 -- are then substituted out**, not generated over the tail: a later equation is
 -- stated after transporting along the earlier ones, and an earlier position left
 -- out of the walk is an earlier transport left out of the type.
-goalFrom :: Chain -> [Core] -> [(Core, Core, Core)] -> Context -> Int -> (Core, Int)
-goalFrom ch shared supplied remaining n =
+goalFrom :: Chain -> [(Core, Core, Core)] -> Context -> Int -> (Core, Int)
+goalFrom ch decided remaining n =
   let dl           = chainLevel ch
-      givenEntries = [ Hypothesis v i t | (v, i, t) <- suppliedEntries ]
+      givenEntries = [ Hypothesis v i t | (v, i, t) <- decidedEntries ]
       -- **The left side keeps the telescope's own names and the right side is
       -- primed**, so a generated lemma reads @∀ (n : N) (x : Ev n) (n' : N)
       -- (x' : Ev n') -> …@. Freshening both would name them @n'@ and @n'1@.
       (lsCtx, n1)  = freshenAs id n remaining
       (rsCtx, n2)  = freshen n1 remaining
-      lsCtx'       = retypeIn theta (shared ++ suppliedLefts)  lsCtx
-      rsCtx'       = retypeIn theta (shared ++ suppliedRights) rsCtx
-      lefts        = shared ++ suppliedLefts  ++ varsOf lsCtx'
-      rights       = shared ++ suppliedRights ++ varsOf rsCtx'
+      lsCtx'       = retypeIn theta decidedLefts  lsCtx
+      rsCtx'       = retypeIn theta decidedRights rsCtx
+      lefts        = decidedLefts  ++ varsOf lsCtx'
+      rights       = decidedRights ++ varsOf rsCtx'
       (hs, n3)     = stations dl (givenEntries ++ lsCtx')
-                       (suppliedRights ++ varsOf rsCtx') n2
-      given        = [ (statedProof h, pr) | (h, (_, _, pr)) <- zip hs supplied ]
-      bound        = drop (length supplied) hs
+                       (decidedRights ++ varsOf rsCtx') n2
+      given        = [ (statedProof h, pr) | (h, (_, _, pr)) <- zip hs decided ]
+      bound        = drop (length decided) hs
    in ( piOver lsCtx' (piOver rsCtx'
           (rewriting given (chained dl bound (chainGoal ch lefts rights))))
       , n3
       )
   where
-    theta          = chainTelescope ch
-    suppliedLefts  = [ l | (l, _, _) <- supplied ]
-    suppliedRights = [ r | (_, r, _) <- supplied ]
-    -- A supplied position's left side is a variable the caller bound, so it can
+    theta         = chainTelescope ch
+    decidedLefts  = [ l | (l, _, _) <- decided ]
+    decidedRights = [ r | (_, r, _) <- decided ]
+    -- A decided position's left side is a variable the caller bound, so it can
     -- stand as the telescope entry 'stations' states its equation from.
-    suppliedEntries =
+    decidedEntries =
       [ (v, i, t)
-      | ((Free v, _, _), Hypothesis _ i t) <- zip supplied entries ]
-    entries = retypeIn theta shared (take (length supplied) (drop (length shared) theta))
+      | ((Free v, _, _), Hypothesis _ i t) <- zip decided entries ]
+    entries = retypeIn theta decidedLefts (take (length decided) theta)
 
 -- | The nested J itself. Each step binds the two sides of one position, the
 -- rest of the telescope on both sides, and every equation of the chain; it
 -- eliminates this position's equation and applies what comes back to the rest.
-proofFrom :: Chain -> [Core] -> Context -> Int -> (Core, Int)
-proofFrom ch shared remaining n = case remaining of
-  []     -> chainDiagonal ch shared n
+proofFrom :: Chain -> [(Core, Core, Core)] -> Context -> Int -> (Core, Int)
+proofFrom ch decided remaining n = case remaining of
+  []     -> chainDiagonal ch lefts n
   e : es ->
     let dl          = chainLevel ch
         theta       = chainTelescope ch
-        a0          = case retypeIn theta shared [e] of
+        a0          = case retypeIn theta lefts [e] of
                         (e' : _) -> entryType e'
                         []       -> entryType e
         (lsCtx, n1) = freshen n es
         (rsCtx, n2) = freshen n1 es
         (vl, n3)    = fresh n2
         (vr, n4)    = fresh n3
-        lsCtx'      = retypeIn theta (shared ++ [Free vl]) lsCtx
-        rsCtx'      = retypeIn theta (shared ++ [Free vr]) rsCtx
+        lsCtx'      = retypeIn theta (lefts ++ [Free vl]) lsCtx
+        rsCtx'      = retypeIn theta (rights ++ [Free vr]) rsCtx
         (hs, n5)    = stations dl (Hypothesis vl (Ident "u") a0 : lsCtx')
                         (Free vr : varsOf rsCtx') n4
         (q0, rest)  = case hs of
                         (h : more) -> (statedProof h, more)
                         []         -> (vl, [])
-        (mt, n6)    = stepMotive ch shared es a0 n5
-        (mh, n7)    = stepMethod ch shared es a0 n6
+        (mt, n6)    = stepMotive ch decided es a0 n5
+        (mh, n7)    = stepMethod ch decided es a0 n6
         applied     = foldl App
                         (Eliminate (GlobalName "Eq") [dl] [a0] mt [mh]
                            [Free vl, Free vr] (Free q0))
@@ -756,27 +763,39 @@ proofFrom ch shared remaining n = case remaining of
                 (lamOver rsCtx' (lamsOver dl hs applied))))))
         , n7
         )
+  where
+    lefts  = [ l | (l, _, _) <- decided ]
+    rights = [ r | (_, r, _) <- decided ]
 
 -- | @λ u v w . ‹the rest, with this position's equation supplied as w›@.
-stepMotive :: Chain -> [Core] -> Context -> Core -> Int -> (Core, Int)
-stepMotive ch shared es a0 n =
+stepMotive :: Chain -> [(Core, Core, Core)] -> Context -> Core -> Int -> (Core, Int)
+stepMotive ch decided es a0 n =
   let dl       = chainLevel ch
       (uv, n1) = fresh n
       (vv, n2) = fresh n1
       (wv, n3) = fresh n2
-      (t,  n4) = goalFrom ch shared [(Free uv, Free vv, Free wv)] es n3
+      (t,  n4) = goalFrom ch (decided ++ [(Free uv, Free vv, Free wv)]) es n3
    in ( Lam (Ident "u") a0 (close uv
           (Lam (Ident "v") a0 (close vv
             (Lam (Ident "w") (eqAt dl a0 (Free uv) (Free vv)) (close wv t)))))
       , n4
       )
 
--- | @λ c . ‹the rest at one shared position more›@ — the only method J leaves,
--- and the step that makes the recursion finite.
-stepMethod :: Chain -> [Core] -> Context -> Core -> Int -> (Core, Int)
-stepMethod ch shared es a0 n =
-  let (cv, n1) = fresh n
-      (t,  n2) = proofFrom ch (shared ++ [Free cv]) es n1
+-- | @λ c . ‹the rest with this position decided at @(c, c, refl c)@›@ — the only
+-- method J leaves, and the step that makes the recursion finite.
+--
+-- **This is 'stepMotive' at @(c, c, refl c)@ and it is built as that** (MS9
+-- phase 224, @~gcs43@). The method used to pass the position on as /shared/,
+-- which is a second walk of the same telescope and packaged differently; the
+-- kernel was the only thing that checked the two agreed, and for an index
+-- telescope with two positions reaching back to the same earlier one it refused
+-- the generated lemma.
+stepMethod :: Chain -> [(Core, Core, Core)] -> Context -> Core -> Int -> (Core, Int)
+stepMethod ch decided es a0 n =
+  let dl       = chainLevel ch
+      (cv, n1) = fresh n
+      c        = Free cv
+      (t,  n2) = proofFrom ch (decided ++ [(c, c, reflAt dl a0 c)]) es n1
    in (Lam (Ident "c") a0 (close cv t), n2)
 
 -- | The entries' types, with the positions already decided replaced by the
