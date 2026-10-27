@@ -126,7 +126,7 @@ import Thena.Global.Generate
   , unpackChain
   , varsOf
   )
-import Thena.Global.NoConfusion (telescopicNoConfusionNames)
+import Thena.Global.NoConfusion (noConfusionNames)
 
 -- | The names the acyclicity equipment reserves for one datatype, in the order
 -- it is generated.
@@ -221,7 +221,7 @@ generateNoCycle env n0 d
     -- owe no obligation; the checks run in an empty context on closed terms.
     verdict (r, _, _) = r
 
-    (_, telLemName) = telescopicNoConfusionNames dn
+    (_, telLemName) = noConfusionNames dn
 
     dn        = inductiveName d
     ps        = inductiveParameters d

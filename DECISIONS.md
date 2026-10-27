@@ -2053,18 +2053,19 @@ is left bare, which is what keeps it in reach of the unifier; and the generalise
 carried there along the earlier equation. Where no index's type mentions an earlier one the
 chain is empty and the equation is the one it always was.
 
-**And every `data` now also gets a *telescopic* no-confusion pair, `NoConfusionTelD` and
-`noConfusionTelD`.** The pair above puts both elements at one index group, so it says
-nothing about two elements at two *different* indices — and that is what acyclicity needs,
-its last step being an assumed equation between two constructor applications whose indices
-are not visibly the same. The telescopic family quantifies an index group per element:
+**And for an indexed family the no-confusion pair gives each element its own indices.** A
+pair that puts both elements at one index group says nothing about two elements at two
+*different* indices — and that is what acyclicity needs, its last step being an assumed
+equation between two constructor applications whose indices are not visibly the same. So
+the family takes an index group per element, and the lemma takes a *chain* where it took a
+single `Eq`:
 
 ```
-NoConfusionTelEv : ∀ (n : N) -> Ev n -> ∀ (n' : N) -> Ev n' -> Type₀
-noConfusionTelEv : ∀ (n : N) (a : Ev n) (n' : N) (b : Ev n')
-                     (q : Eq N n n')
-                  -> Eq (Ev n') (transport q a) b
-                  -> NoConfusionTelEv n a n' b
+NoConfusionEv : ∀ (n : N) -> Ev n -> ∀ (n' : N) -> Ev n' -> Type₀
+noConfusionEv : ∀ (n : N) (a : Ev n) (n' : N) (b : Ev n')
+                  (q : Eq N n n')
+               -> Eq (Ev n') (transport q a) b
+               -> NoConfusionEv n a n' b
 ```
 
 The chain is **curried**, one argument per equation, rather than packaged into a pair: a
@@ -2073,12 +2074,17 @@ takes them that way. The payload is unchanged — on the diagonal both sides are
 constructor, whose own arguments determine both index groups, so the indices need no
 equations of their own.
 
-**Two names are therefore reserved per datatype that were not before**, and the namespace
-is the one shared one: a definition already called `noConfusionTelFoo` makes `data Foo`
-refuse. **Both names are temporary.** The telescopic pair subsumes the homogeneous one —
-they coincide where the two index groups do — and the homogeneous pair is to be dropped,
-the telescopic one taking its names. Until then nothing new is written against the
-homogeneous pair.
+**Where a family has no indices this is the shape it always had**, the chain being its one
+equation, so a proof written against the old lemma is untouched: all 318 uses across the
+examples needed no change. The two shapes lived side by side under separate names for a
+day — the telescopic one was generated first and replaced the other once it was known to
+sit snugly, so that no corpus measurement had to separate two changes at once.
+
+**It costs one thing, and it is a statement about the prelude's own ordering.** The chain
+is over `(indices; element)`, so a family whose index's type mentions an earlier index
+travels packaged, and a package of two entries or more is a dependent pair — so such a
+family declared *before* `DPair` gets no no-confusion, where before it got the homogeneous
+one. No prelude Thena ships is in that position.
 
 **And every `data` gets the acyclicity equipment: `BelowD`, `NotEqD`, `NotBelowD` and
 `NotBelowEqD`.** These are what a *cycle* is discharged with — an equation between a

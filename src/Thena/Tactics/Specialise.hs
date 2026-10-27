@@ -776,29 +776,46 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
       | otherwise          = Nothing
       where lem = snd (noConfusionNames dn)
 
-    -- @noConfusion‹D› p⃗ i⃗ u v q@ — the lemma applied, and the level its @Empty@
-    -- and its equations are stated at, which is the datatype's own (phase 31g)
-    -- __instantiated at the carrier's level arguments__. Left rigid it would be
-    -- a level parameter of the declaration appearing in a term, which is the
-    -- bug phase 31c fixed one level up.
+    -- @noConfusion‹D› p⃗ i⃗ u i⃗ v ⟨the chain⟩@ — the lemma applied, and the level
+    -- its @Empty@ and its equations are stated at, which is the datatype's own
+    -- (phase 31g) __instantiated at the carrier's level arguments__. Left rigid
+    -- it would be a level parameter of the declaration appearing in a term,
+    -- which is the bug phase 31c fixed one level up.
+    --
+    -- __BOTH ELEMENTS GET THEIR OWN INDEX GROUP, AND THE SAME ONE — MS9 phase
+    -- 222.__ The lemma is stated over the telescope @(indices; element)@ now,
+    -- so what it takes is the chain between @(i⃗; u)@ and @(i⃗; v)@; an equation
+    -- this module holds is homogeneous, so the index half of that chain is
+    -- reflexivity throughout and only the last link is this equation's own
+    -- proof. 'overChain' reads each link off its own Π domain rather than
+    -- restating it, which is the bargain 'conjuncts' makes one step further in.
     confusion dn e = do
-      lem        <- confusionOf dn
-      d          <- lookupInductive dn env
+      lem         <- confusionOf dn
+      d           <- lookupInductive dn env
+      def         <- lookupDefinition lem env
       (_, ls, as) <- spineOf (whnf env ctx (eqnCarrier e))
-      let sub = maybe [] id (instantiateLevels (inductiveLevels d) ls)
-      pure ( substLevel sub (inductiveLevel d)
-           , foldl App (Global lem ls)
-                   (as ++ [eqnLeft e, eqnRight e, Free (eqnVar e)])
-           )
+      let (prm, is) = splitAt (length (inductiveParameters d)) as
+          sub       = maybe [] id (instantiateLevels (inductiveLevels d) ls)
+          lemTy     = atLevels (definitionLevels def) ls (definitionType def)
+      (chainTy, chainTm) <-
+        applied lemTy (Global lem ls)
+                (prm ++ is ++ [eqnLeft e] ++ is ++ [eqnRight e])
+      (_, prf) <- overChain (eqnLeft e) (eqnRight e) (Free (eqnVar e))
+                            chainTy chainTm
+      pure (substLevel sub (inductiveLevel d), prf)
 
-    -- @NoConfusion‹D› p⃗ i⃗ u v@ — the family at the same arguments, which /is/
+    -- @NoConfusion‹D› p⃗ i⃗ u i⃗ v@ — the family at the same arguments, which /is/
     -- the chain: the lemma's result type, before anything is projected out of
     -- it. 'conjuncts' reduces this rather than restating what the generator
-    -- wrote.
+    -- wrote. __One index group per element since MS9 phase 222__, and the same
+    -- group twice here for 'confusion'\'s reason.
     confusionFamily dn e = do
       fam         <- family
+      d           <- lookupInductive dn env
       (_, ls, as) <- spineOf (whnf env ctx (eqnCarrier e))
-      pure (foldl App (Global fam ls) (as ++ [eqnLeft e, eqnRight e]))
+      let (prm, is) = splitAt (length (inductiveParameters d)) as
+      pure (foldl App (Global fam ls)
+              (prm ++ is ++ [eqnLeft e] ++ is ++ [eqnRight e]))
       where
         nm = fst (noConfusionNames dn)
         family | isDeclared nm env = Just nm

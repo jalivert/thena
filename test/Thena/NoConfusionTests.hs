@@ -136,7 +136,7 @@ caseTests =
         @?= Just "Term -> Term -> Type₀"
   , testCase "the lemma's own type" $
       typeOfGlobal eqTapl eqTaplCounter "noConfusionTerm"
-        @?= Just "∀ (x : Term) (y : Term) -> Eq {0} Term x y -> NoConfusionTerm x y"
+        @?= Just "∀ (x : Term) (x' : Term) -> Eq {0} Term x x' -> NoConfusionTerm x x'"
   ]
 
 typeOfGlobal :: GlobalEnv -> Int -> String -> Maybe String
@@ -248,7 +248,7 @@ acrossTests =
         , "                        (evs k ek) : Type\8320))"
         , "           -> Empty"
         , "evzNotEvs = \\ k ek q1 q2 ->"
-        , "  noConfusionTelEv z evz (s (s k)) (evs k ek) q1 q2"
+        , "  noConfusionEv z evz (s (s k)) (evs k ek) q1 q2"
         ]
   , testCase "and the same constructor at two indices gives its own chain" $
       loads
@@ -268,9 +268,9 @@ acrossTests =
         , "                     (transport N (\\ w -> Ev w) (s (s m)) (s (s k)) q1"
         , "                        (evs m em))"
         , "                     (evs k ek) : Type\8320))"
-        , "        -> NoConfusionTelEv (s (s m)) (evs m em) (s (s k)) (evs k ek)"
+        , "        -> NoConfusionEv (s (s m)) (evs m em) (s (s k)) (evs k ek)"
         , "evsInj = \\ m em k ek q1 q2 ->"
-        , "  noConfusionTelEv (s (s m)) (evs m em) (s (s k)) (evs k ek) q1 q2"
+        , "  noConfusionEv (s (s m)) (evs m em) (s (s k)) (evs k ek) q1 q2"
         ]
   ]
 
@@ -314,10 +314,16 @@ kernelTests =
     -- telescope named the first copy's variable, and @NoConfusionBelow@ came
     -- out ill-typed — reported as @DeclareError@'s @NoConfusionRejected@,
     -- which is precisely the "unreachable if the generator is right" case.
+    -- **The fixture gained the whole prelude at MS9 phase 222.** @Below@'s
+    -- second index is a @Fin@ of its first, so the chain packages the index with
+    -- the element and @DPair@ is what holds the package — and since the chain
+    -- is the only shape generated now, a prelude without @DPair@ gets no pair
+    -- for this datatype at all. 'skipTests' pins that, and the phase-17 bug is
+    -- still what these two catch.
   , testCase "an index telescope that is dependent (phase 17)" $
-      certified belowEnv "NoConfusionBelow"
+      certified preludeBelowEnv "NoConfusionBelow"
   , testCase "and its lemma" $
-      certified belowEnv "noConfusionBelow"
+      certified preludeBelowEnv "noConfusionBelow"
 
     -- **Found by MS9 phase 216, and it was a real bug.** @span@'s last argument
     -- reaches back past the one before it, so the chain's package holds an
@@ -348,20 +354,20 @@ kernelTests =
     -- Each case below is a shape the walk has to get right, and the kernel is
     -- what says it did.
   , testCase "Nat's telescopic family, with no indices at all" $
-      certified eqNat "NoConfusionTelNat"
+      certified eqNat "NoConfusionNat"
   , testCase "and its lemma, where the chain is the one element equation" $
-      certified eqNat "noConfusionTelNat"
+      certified eqNat "noConfusionNat"
   , testCase "Eq's own telescopic lemma, two indices and polymorphic" $
-      certified eqNat "noConfusionTelEq"
-  , testCase "Fin's telescopic family" (certified eqNatFin "NoConfusionTelFin")
+      certified eqNat "noConfusionEq"
+  , testCase "Fin's telescopic family" (certified eqNatFin "NoConfusionFin")
   , testCase "and its lemma, one index and a dependent argument telescope" $
-      certified eqNatFin "noConfusionTelFin"
+      certified eqNatFin "noConfusionFin"
   , testCase "Vec's telescopic lemma, with a parameter as well" $
-      certified eqNatVec "noConfusionTelVec"
+      certified eqNatVec "noConfusionVec"
   , testCase "Term's telescopic lemma, four constructors and no indices" $
-      certified eqTapl "noConfusionTelTerm"
+      certified eqTapl "noConfusionTerm"
   , testCase "a chain with an argument interior to it, telescopically" $
-      certified eqNatVecSpan "noConfusionTelSpan"
+      certified eqNatVecSpan "noConfusionSpan"
 
     -- **A dependent INDEX telescope is the shape that asks for a pair the
     -- homogeneous lemma never did**, and it is the one the old @Below@ fixture
@@ -371,9 +377,9 @@ kernelTests =
     -- the package, which is @telescopicInScope@'s
     -- whole reason to exist.
   , testCase "a dependent index telescope, telescopically (phase 218)" $
-      certified preludeBelowEnv "NoConfusionTelBelow"
+      certified preludeBelowEnv "NoConfusionBelow"
   , testCase "and its lemma, where the index travels with the element" $
-      certified preludeBelowEnv "noConfusionTelBelow"
+      certified preludeBelowEnv "noConfusionBelow"
   ]
 
 -- | @Below@\'s second index has the first in its type — a dependent /index/
@@ -460,6 +466,16 @@ skipTests =
     testCase "Eq alone: its own table needs no product, so it is generated" $
       (lookupDefinition (GlobalName "NoConfusionEq") (fst (declared [eqDecl])) == Nothing)
         @?= False
+  , -- **A dependent index telescope wants @DPair@ — MS9 phase 222.** The chain
+    -- is stated over @(indices; element)@, so where an index's type mentions an
+    -- earlier index the two travel packaged together, and @packType@ of two
+    -- entries is a dependent pair. Until phase 222 the homogeneous pair had no
+    -- such need and was generated here; now there is one shape and it needs the
+    -- product, so the datatype gets no pair in this prelude.
+    testCase "a dependent index telescope with no DPair — skipped" $
+      generated [eqDecl, natDecl, finDecl] belowDecl @?= Right False
+  , testCase "and then nothing was generated" $
+      (lookupDefinition (GlobalName "NoConfusionBelow") belowEnv == Nothing) @?= True
   , -- Two constructors want an off-diagonal @Empty {0}@, and there is none.
     testCase "Nat with Eq but no Empty — skipped, and quietly" $
       generated [eqDecl] natDecl @?= Right False

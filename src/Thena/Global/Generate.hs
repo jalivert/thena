@@ -76,6 +76,7 @@ module Thena.Global.Generate
   , mentionsAnEarlierEntry
   , varsOf
   , freshen
+  , freshenAs
   , each
   ) where
 
@@ -611,7 +612,10 @@ goalFrom :: Chain -> [Core] -> [(Core, Core, Core)] -> Context -> Int -> (Core, 
 goalFrom ch shared supplied remaining n =
   let dl           = chainLevel ch
       givenEntries = [ Hypothesis v i t | (v, i, t) <- suppliedEntries ]
-      (lsCtx, n1)  = freshen n remaining
+      -- **The left side keeps the telescope's own names and the right side is
+      -- primed**, so a generated lemma reads @∀ (n : N) (x : Ev n) (n' : N)
+      -- (x' : Ev n') -> …@. Freshening both would name them @n'@ and @n'1@.
+      (lsCtx, n1)  = freshenAs id n remaining
       (rsCtx, n2)  = freshen n1 remaining
       lsCtx'       = retypeIn theta (shared ++ suppliedLefts)  lsCtx
       rsCtx'       = retypeIn theta (shared ++ suppliedRights) rsCtx
@@ -953,7 +957,17 @@ mentionsAnEarlierEntry es' = case es' of
 -- 'close' then 'instantiate' is the only way to rewrite a variable (§3.4), and
 -- it is safe here because both are free variables of the ambient context.
 freshen :: Int -> Context -> (Context, Int)
-freshen n0 = go n0
+freshen = freshenAs (++ "'")
+
+-- | 'freshen', with a say in what the copy's binders are called.
+--
+-- **The names are what a user reads off a generated lemma**, so the two
+-- instantiations a chain quantifies want @x@ and @x'@ and not @x'@ and @x'1@ —
+-- the second being what two 'freshen's of one telescope print as, the printer
+-- disambiguating a repeated name by number. 'goalFrom' keeps the telescope's own
+-- names on the left and primes the right.
+freshenAs :: (String -> String) -> Int -> Context -> (Context, Int)
+freshenAs rename n0 = go n0
   where
     go n []       = ([], n)
     go n (e : es) =
@@ -962,8 +976,8 @@ freshen n0 = go n0
        in (copy v e : rest, n2)
 
     copy v e = case e of
-      Hypothesis _ (Ident i) t   -> Hypothesis v (Ident (i ++ "'")) t
-      Definition _ (Ident i) s t -> Definition v (Ident (i ++ "'")) s t
+      Hypothesis _ (Ident i) t   -> Hypothesis v (Ident (rename i)) t
+      Definition _ (Ident i) s t -> Definition v (Ident (rename i)) s t
 
     repoint old new e = case e of
       Hypothesis w i t   -> Hypothesis w i (swap t)

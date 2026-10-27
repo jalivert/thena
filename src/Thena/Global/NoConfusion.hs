@@ -1,5 +1,5 @@
 -- | Generating the @NoConfusion@ family and the @noConfusion@ lemma (§3.7
--- items 3 and 4).
+-- items 3, 4 and 6).
 --
 -- These are what an elimination at specific indices uses to discharge the
 -- equational hypotheses its motive carries: /injectivity/ of a former in each
@@ -46,6 +46,40 @@
 -- noConfusionNat : ∀ (x y : Nat) -> Eq Nat x y -> NoConfusionNat x y
 -- @
 --
+-- == Each element has its own indices, and what relates them is a chain
+--
+-- **MS9 phases 218 and 222.** @Nat@ above is the whole story for a family with
+-- no indices, and that is most of them. For an indexed family the pair is stated
+-- over the telescope @(indices; element)@: the family takes an index group per
+-- element, and the lemma takes the telescopic equality between the two
+-- instantiations — §3.3 of /Pattern Matching Without K/, 'confusionChain' —
+-- __curried__, one argument per equation.
+--
+-- @
+-- NoConfusionEv : ∀ (n : N) -> Ev n -> ∀ (n' : N) -> Ev n' -> Type₀
+-- noConfusionEv : ∀ (n : N) (a : Ev n) (n' : N) (b : Ev n') (q : Eq N n n')
+--              -> Eq (Ev n') (transport q a) b -> NoConfusionEv n a n' b
+-- @
+--
+-- **Why both sides need their own indices**: @noCycleD@'s last step assumes an
+-- equation between two constructor applications whose indices are not visibly
+-- the same, so a lemma stated at one index group cannot be /applied/ there,
+-- whatever it says. "Thena.Global.NoCycle" is that caller.
+--
+-- **Curried and not packaged** because a split holds its equations as separate Π
+-- binders, one per tied index, so a lemma it calls must take them that way;
+-- packaging here would only be unpacked at every use site.
+--
+-- **The payload is unchanged, and that is why the replacement cost nothing at a
+-- use site.** On the diagonal both sides are the same constructor, whose own
+-- arguments determine both index groups, so the indices need no equations of
+-- their own and what is left to say is still the telescopic equality of the
+-- arguments. Where the family has no indices the chain /is/ the single @Eq@ the
+-- homogeneous lemma took, argument for argument.
+--
+-- **It costs one precondition**: a dependent index telescope packages the index
+-- with the element, so it wants @DPair@. See 'productsInScope'.
+--
 -- A constructor with several arguments pairs one equation per argument,
 -- right-nested: @dpair@'s @DPair (Eq A a a') (λ _ . Eq B b b')@, and where an
 -- argument's type mentions an earlier argument the later equation is stated
@@ -64,7 +98,6 @@
 -- is why only the diagonal cases are ever proved: @λ C k . k refl … refl@.
 module Thena.Global.NoConfusion
   ( noConfusionNames
-  , telescopicNoConfusionNames
   , generateNoConfusion
   ) where
 
@@ -99,7 +132,6 @@ import Thena.Global.Generate
   , mentionsAnEarlierEntry
   , each
   , emptyType
-  , eqAt
   , equalityInScope
   , falsityInScope
   , freshen
@@ -119,18 +151,6 @@ noConfusionNames :: GlobalName -> (GlobalName, GlobalName)
 noConfusionNames (GlobalName d) =
   (GlobalName ("NoConfusion" ++ d), GlobalName ("noConfusion" ++ d))
 
--- | The two the __telescopic__ lemma generates: @NoConfusionTelNat@ and
--- @noConfusionTelNat@ (MS9 phase 218).
---
--- **The name is temporary and says so.** The telescopic family subsumes the
--- homogeneous one — it degenerates to it where the two index groups coincide —
--- and phase 222 drops the homogeneous pair and gives these its names. Until
--- then the two live side by side, and nothing generated after this phase may
--- name the homogeneous pair, so that 222 is a rename and not a redesign.
-telescopicNoConfusionNames :: GlobalName -> (GlobalName, GlobalName)
-telescopicNoConfusionNames (GlobalName d) =
-  (GlobalName ("NoConfusionTel" ++ d), GlobalName ("noConfusionTel" ++ d))
-
 -- | Generate, check and admit both definitions — or say why not.
 --
 -- Called from "Thena.Global.Declare" /after/ the wrappers are installed, so the
@@ -147,8 +167,6 @@ generateNoConfusion env n0 d
   | not (productsInScope env d)        = Declined NoProducts
   | isDeclared famName env             = Clash famName
   | isDeclared lemName env             = Clash lemName
-  | isDeclared telFamName env          = Clash telFamName
-  | isDeclared telLemName env          = Clash telLemName
   | otherwise =
       let (famTy,   n1) = familyType n0
           (famBody, n2) = family n1
@@ -161,21 +179,7 @@ generateNoConfusion env n0 d
                in case verdict (check env1 [] n4 lemBody lemTy) of
                     Left e   -> Rejected lemName e
                     Right () ->
-                      let env2          = addDefinition lemName (MkDefinition (inductiveLevels d) [] lemTy lemBody) env1
-                          (tfTy,   n5)  = telFamilyType n4
-                          (tfBody, n6)  = telFamily n5
-                       in if not (telescopicInScope env2 d)
-                            then Generated env2 n4
-                            else case verdict (check env2 [] n6 tfBody tfTy) of
-                            Left e   -> Rejected telFamName e
-                            Right () ->
-                              let env3         = addDefinition telFamName (MkDefinition (inductiveLevels d) [] tfTy tfBody) env2
-                                  (tlTy,   n7) = telLemmaType n6
-                                  (tlBody, n8) = telLemma n7
-                               in case verdict (check env3 [] n8 tlBody tlTy) of
-                                    Left e   -> Rejected telLemName e
-                                    Right () ->
-                                      Generated (addDefinition telLemName (MkDefinition (inductiveLevels d) [] tlTy tlBody) env3) n8
+                      Generated (addDefinition lemName (MkDefinition (inductiveLevels d) [] lemTy lemBody) env1) n4
   where
     -- Everything checked here is /generated/, so it holds no level meta and
     -- can owe no obligation. The counter is not wanted either — these checks
@@ -183,7 +187,6 @@ generateNoConfusion env n0 d
     verdict (r, _, _) = r
 
     (famName, lemName) = noConfusionNames (inductiveName d)
-    (telFamName, telLemName) = telescopicNoConfusionNames (inductiveName d)
 
     dn        = inductiveName d
     ps        = inductiveParameters d
@@ -215,44 +218,6 @@ generateNoConfusion env n0 d
 
     -- @∀ params indices (x y : D params indices) -> Type dl@
     --
-    -- **At the datatype's own level, not one above it.** Phase 14 had every
-    -- case CPS-encoded, and @(C : Type l) -> C@ is itself at @Type (suc l)@;
-    -- with @Empty@, @Unit@ and @And@ in the prelude every case is an ordinary
-    -- proposition at @dl@ and the family follows it down. Phase 31g is what
-    -- made @dl@ the datatype's own rather than @Type₀@; nothing else about the
-    -- shape changed.
-    familyType n =
-      let (vx, n1) = fresh n
-          (vy, n2) = fresh n1
-          fam      = familyAt (varsOf idx)
-       in ( piOver ps (piOver idx
-              (Pi (Ident "x") fam (close vx
-                (Pi (Ident "y") fam (close vy (Universe dl))))))
-          , n2
-          )
-
-    -- @λ params indices x y . elim D params ‹motive› (‹methods›) indices x@
-    --
-    -- **@y@ is bound outside both eliminations, not consumed by the first.**
-    -- The obvious reading of "eliminate @x@, then eliminate @y@" makes the
-    -- first elimination compute a /function/ of @y@, and then its motive is
-    -- Π-valued. That is well typed, but each method's body is a λ and the whole
-    -- term is harder to read for no gain: with @y@ already in scope, the second
-    -- elimination is simply what each method of the first returns, and both
-    -- motives are the same constant.
-    family n =
-      let (vx, n1) = fresh n
-          (vy, n2) = fresh n1
-          (mt, n3) = typeMotive n2
-          (ms, n4) = each (outerMethod mt (Free vy)) n3 cs
-          fam      = familyAt (varsOf idx)
-          body     = Eliminate dn (map LVar (inductiveLevels d)) paramVars mt ms (varsOf idx) (Free vx)
-       in ( lamOver ps (lamOver idx
-              (Lam (Ident "x") fam (close vx
-                (Lam (Ident "y") fam (close vy body)))))
-          , n4
-          )
-
     -- @λ indices (t : D params indices) . Type dl@ — the motive of both
     -- eliminations, since both compute a type and neither result depends on
     -- what was eliminated. Valued in @Type (suc dl)@, which is the level
@@ -263,15 +228,6 @@ generateNoConfusion env n0 d
        in ( lamOver is (Lam (Ident "t") (familyAt (varsOf is)) (close vt (Universe dl)))
           , n2
           )
-
-    -- One per constructor of @x@: @λ Δ . λ IHs . elim D … y@, the second
-    -- elimination, at the indices @y@ was given.
-    outerMethod mt y c n =
-      let args       = constructorArguments c
-          (ms, n1)   = each (innerMethod mt args c) n cs
-          inner      = Eliminate dn (map LVar (inductiveLevels d)) paramVars mt ms (varsOf idx) y
-          (body, n2) = withHypotheses mt args inner n1
-       in (lamOver args body, n2)
 
     -- One per constructor of @y@, given the constructor @x@ turned out to be.
     -- The arguments are **freshened**: on the diagonal the two telescopes are
@@ -298,7 +254,7 @@ generateNoConfusion env n0 d
        in (ty, n1)
 
     -- ----------------------------------------------------------------------
-    -- The telescopic family (MS9 phase 218)
+    -- The family — over the telescope (indices; element), MS9 phase 218
     -- ----------------------------------------------------------------------
 
     -- @∀ params is1 (x : D params is1) is2 (y : D params is2) -> Type dl@
@@ -313,7 +269,7 @@ generateNoConfusion env n0 d
     -- both sides are the same constructor, whose own arguments determine both
     -- index groups, so the indices need no equations of their own and what is
     -- left to say is still the telescopic equality of the arguments.
-    telFamilyType n =
+    familyType n =
       let (vx,  n1) = fresh n
           (is2, n2) = freshen n1 idx
           (vy,  n3) = fresh n2
@@ -326,12 +282,12 @@ generateNoConfusion env n0 d
 
     -- @λ params is1 x is2 y . elim D params ‹motive› (‹methods›) is1 x@, with the
     -- inner elimination at @is2@ rather than at the one group there used to be.
-    telFamily n =
+    family n =
       let (vx,  n1) = fresh n
           (is2, n2) = freshen n1 idx
           (vy,  n3) = fresh n2
           (mt,  n4) = typeMotive n3
-          (ms,  n5) = each (telOuterMethod mt (varsOf is2) (Free vy)) n4 cs
+          (ms,  n5) = each (outerMethod mt (varsOf is2) (Free vy)) n4 cs
           body      = Eliminate dn (map LVar (inductiveLevels d)) paramVars mt ms (varsOf idx) (Free vx)
        in ( lamOver ps (lamOver idx
               (Lam (Ident "x") (familyAt (varsOf idx)) (close vx
@@ -343,85 +299,12 @@ generateNoConfusion env n0 d
     -- As 'outerMethod', but the second elimination is at @y@\'s own indices.
     -- 'innerMethod' is shared with the homogeneous family unchanged: it is
     -- about the two constructors and knows nothing about indices.
-    telOuterMethod mt is2 y c n =
+    outerMethod mt is2 y c n =
       let args         = constructorArguments c
           (ms, n1)     = each (innerMethod mt args c) n cs
           inner        = Eliminate dn (map LVar (inductiveLevels d)) paramVars mt ms is2 y
           (body, n2)   = withHypotheses mt args inner n1
        in (lamOver args body, n2)
-
-    -- ----------------------------------------------------------------------
-    -- The lemma
-    -- ----------------------------------------------------------------------
-
-    -- @∀ params indices (x y : D params indices) -> Eq (D params indices) x y
-    --   -> NoConfusionD params indices x y@
-    lemmaType n =
-      let (vx, n1) = fresh n
-          (vy, n2) = fresh n1
-          (ve, n3) = fresh n2
-          fam      = familyAt (varsOf idx)
-          result   = foldl App (Global famName (map LVar (inductiveLevels d)))
-                       (paramVars ++ varsOf idx ++ [Free vx, Free vy])
-       in ( piOver ps (piOver idx
-              (Pi (Ident "x") fam (close vx
-                (Pi (Ident "y") fam (close vy
-                  (Pi (Ident "e") (eqAt dl fam (Free vx) (Free vy)) (close ve result)))))))
-          , n3
-          )
-
-    -- @λ params indices x y e . elim Eq (D params indices) ‹motive› (‹refl›)
-    --   (x, y) e@ — J, and the whole reason only diagonal cases are proved.
-    lemma n =
-      let (vx, n1) = fresh n
-          (vy, n2) = fresh n1
-          (ve, n3) = fresh n2
-          fam      = familyAt (varsOf idx)
-          (meq, n4)  = equalityMotive n3
-          (mrfl, n5) = reflMethod n4
-          body = Eliminate (GlobalName "Eq") [dl] [fam] meq [mrfl]
-                   [Free vx, Free vy] (Free ve)
-       in ( lamOver ps (lamOver idx
-              (Lam (Ident "x") fam (close vx
-                (Lam (Ident "y") fam (close vy
-                  (Lam (Ident "e") (eqAt dl fam (Free vx) (Free vy)) (close ve body)))))))
-          , n5
-          )
-
-    -- @λ u v (w : Eq (D …) u v) . NoConfusionD params indices u v@ — valued in
-    -- @Type₀@, so J is used at level 0 here and the family's own eliminations
-    -- at level 1.
-    equalityMotive n =
-      let (vu, n1) = fresh n
-          (vv, n2) = fresh n1
-          (vw, n3) = fresh n2
-          fam      = familyAt (varsOf idx)
-          result   = foldl App (Global famName (map LVar (inductiveLevels d)))
-                       (paramVars ++ varsOf idx ++ [Free vu, Free vv])
-       in ( Lam (Ident "u") fam (close vu
-              (Lam (Ident "v") fam (close vv
-                (Lam (Ident "w") (eqAt dl fam (Free vu) (Free vv)) (close vw result)))))
-          , n3
-          )
-
-    -- @λ a . elim D params ‹motive› (‹methods›) indices a@ — the one method J
-    -- leaves, which is @NoConfusionD … a a@ for an arbitrary @a@.
-    reflMethod n =
-      let (va, n1)   = fresh n
-          (mdg, n2)  = diagonalMotive n1
-          (ms,  n3)  = each (diagonalMethod mdg) n2 cs
-          body       = Eliminate dn (map LVar (inductiveLevels d)) paramVars mdg ms (varsOf idx) (Free va)
-       in (Lam (Ident "a") (familyAt (varsOf idx)) (close va body), n3)
-
-    -- @λ indices (z : D params indices) . NoConfusionD params indices z z@.
-    diagonalMotive n =
-      let (is, n1) = freshen n idx
-          (vz, n2) = fresh n1
-          result   = foldl App (Global famName (map LVar (inductiveLevels d)))
-                       (paramVars ++ varsOf is ++ [Free vz, Free vz])
-       in ( lamOver is (Lam (Ident "z") (familyAt (varsOf is)) (close vz result))
-          , n2
-          )
 
     -- @λ Δ . λ IHs . dpair … (refl A₁ a₁) (dpair … (refl A₂ a₂) …)@ — the only
     -- proof this generator ever writes, built by the same function that builds
@@ -440,11 +323,11 @@ generateNoConfusion env n0 d
        in (lamOver args body, n2)
 
     -- ----------------------------------------------------------------------
-    -- The telescopic lemma (MS9 phase 218)
+    -- The lemma — over the same telescope, MS9 phase 218
     -- ----------------------------------------------------------------------
 
     -- @∀ params is1 (x : D params is1) is2 (y : D params is2) -> ‹chain› ->
-    --   NoConfusionTelD params is1 x is2 y@
+    --   NoConfusionD params is1 x is2 y@
     --
     -- **The chain is curried and not packaged**, which is the one place this
     -- departs from the homogeneous lemma's single @Eq@ argument. A specialiser
@@ -460,51 +343,51 @@ generateNoConfusion env n0 d
     -- @transport@ in the base case rather than by the same J as every other
     -- position; it is one more entry of one telescope now, and the base case is
     -- the diagonal and nothing else.
-    telChain n =
+    confusionChain n =
       let (vx, n1) = fresh n
           theta    = idx ++ [Hypothesis vx (Ident "x") (familyAt (varsOf idx))]
        in ( Chain
               { chainLevel     = dl
               , chainTelescope = theta
               , chainGoal      = \ls rs ->
-                  foldl App (Global telFamName (map LVar (inductiveLevels d)))
+                  foldl App (Global famName (map LVar (inductiveLevels d)))
                     (paramVars ++ ls ++ rs)
               , chainDiagonal  = \shared m ->
                   case splitAt (length idx) shared of
-                    (is, [a]) -> telDiagonal is a m
+                    (is, [a]) -> diagonalProof is a m
                     _         -> (unitProof dl, m)
               }
           , n1
           )
 
-    telLemmaType n =
-      let (ch, n1) = telChain n
+    lemmaType n =
+      let (ch, n1) = confusionChain n
           (t,  n2) = chainGoalType ch n1
        in (piOver ps t, n2)
 
     -- @λ params . ‹the nested J›@ — and the body /is/ the chain's proof, because
     -- that already abstracts @is1@, @x@, @is2@, @y@ and the chain in exactly the
     -- order the type quantifies them.
-    telLemma n =
-      let (ch, n1)   = telChain n
+    lemma n =
+      let (ch, n1)   = confusionChain n
           (body, n2) = chainProof ch n1
        in (lamOver ps body, n2)
 
 
-    -- @NoConfusionTelD params shared a shared a@, by one elimination of @a@:
+    -- @NoConfusionD params shared a shared a@, by one elimination of @a@:
     -- the family's inner elimination lands on the same constructor, so the
     -- payload reduces to the telescopic equality of its arguments with
     -- themselves, which 'diagonalMethod' proves by @refl@.
-    telDiagonal shared a n =
-      let (mdg, n1) = telDiagonalMotive n
+    diagonalProof shared a n =
+      let (mdg, n1) = diagonalProofMotive n
           (ms,  n2) = each (diagonalMethod mdg) n1 cs
        in (Eliminate dn (map LVar (inductiveLevels d)) paramVars mdg ms shared a, n2)
 
-    -- @λ indices (z : D params indices) . NoConfusionTelD params indices z indices z@
-    telDiagonalMotive n =
+    -- @λ indices (z : D params indices) . NoConfusionD params indices z indices z@
+    diagonalProofMotive n =
       let (is, n1) = freshen n idx
           (vz, n2) = fresh n1
-          result   = foldl App (Global telFamName (map LVar (inductiveLevels d)))
+          result   = foldl App (Global famName (map LVar (inductiveLevels d)))
                        (paramVars ++ varsOf is ++ [Free vz] ++ varsOf is ++ [Free vz])
        in ( lamOver is (Lam (Ident "z") (familyAt (varsOf is)) (close vz result))
           , n2
@@ -579,27 +462,16 @@ productsInScope env d =
     -- declared after it. The converse approximation is worse: a pair demanded
     -- and absent is a generated term that does not typecheck.
     needsAnd   = any (elem False . pairKinds) cs
+    -- **And one pair the argument telescopes may not ask for.** The chain is
+    -- over the telescope @(indices; element)@, so where an index's type
+    -- mentions an earlier index that index travels packaged with everything
+    -- after it — the element included — and 'Thena.Global.Generate.packType' of
+    -- two entries or more is a dependent pair. A non-dependent index telescope
+    -- asks for nothing new, the element then being packaged alone: that is why
+    -- @NoConfusionEq@ is still generated, @Eq@'s two indices mentioning neither
+    -- each other nor anything else and @Eq@ being declared before @DPair@.
     needsPair  = any (elem True  . pairKinds) cs
-
--- | Can the __telescopic__ pair be generated for this datatype (MS9 phase 218)?
---
--- **It asks for one pair the homogeneous one never did.** The telescopic chain
--- is over the telescope @(indices; element)@, so where an index's type mentions
--- an earlier index that index travels packaged with everything after it — the
--- element included — and 'packType' of two entries or more is a dependent pair.
---
--- **A non-dependent index telescope asks for nothing new**, because the element
--- is then packaged alone and 'packType' of one entry is the bare type. That is
--- not a detail: @Eq@'s own two indices mention neither each other nor anything
--- else, and @Eq@ is declared before @DPair@ is.
---
--- **Failing it skips the telescopic pair and keeps the homogeneous one**, rather
--- than declining the declaration's equipment altogether: the telescopic lemma
--- is additive until phase 222 replaces the homogeneous one with it.
-telescopicInScope :: GlobalEnv -> InductiveDefinition -> Bool
-telescopicInScope env d =
-  not (mentionsAnEarlierEntry (inductiveIndices d)) || dependentPairInScope env
-
+              || mentionsAnEarlierEntry (inductiveIndices d)
 
 -- | Is this argument mentioned by the type of any argument after it?
 --
