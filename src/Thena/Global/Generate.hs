@@ -359,11 +359,12 @@ stations dl args rs n0' = go [] [] args rs n0'
         -- later argument whose type mentions a member cannot be moved on its
         -- own, so it joins; and an argument that a member's type mentions and
         -- that /itself/ moves joins too, because the member cannot be moved
-        -- while that one is still out of place. @Div@ in
-        -- @test\/Thena\/Declared.hs@ is the second direction: @as@ and @bs@
-        -- both reach back to @n@ and the element mentions both, so one package
+        -- while that one is still out of place. A family
+        -- indexed by two vectors is the second direction: @as@ and @bs@ both
+        -- reach back to @n@ and the element mentions both, so one package
         -- holds all three. Closing downwards alone built two packages that
-        -- each claimed the element (MS9 phase 223).
+        -- each claimed the element (MS9 phase 223). **Such a family still
+        -- cannot be declared**, for a reason this closure is not.
         --
         -- **The package is the chain and not the telescope**, which is the
         -- whole of why this is affordable. @extend-there-extend@ has seven
