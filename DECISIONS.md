@@ -3712,13 +3712,36 @@ would be a lie, and the second is the one the kernel has to be the judge of. So
 everything `specialise` builds is checked against the method it claims to prove
 before you are given it.
 
-**An equation it cannot simplify is kept, not refused.** There are four
-transitions — an equation of a term with itself goes, two different constructors
-close the method, the same constructor splits into its arguments, and a binder
-the equation determines is substituted away — and no fifth one for a *cyclic*
-equation like `Eq Nat m (succ m)`, which is refutable and is not refuted. When
-none applies, the equation stays a hypothesis of the simplified method. That is
-what you were handed before, so the worst case is the behaviour this replaces.
+**There are five transitions, and the fifth is what recognises a case you were
+right to leave out.** An equation of a term with itself goes; two different
+constructors close the method; the same constructor splits into its arguments; a
+binder the equation determines is substituted away; and — since 2026-10-27 — an
+equation between a term and something that *contains it structurally*, `Eq Nat m
+(succ m)`, closes the method too. Nothing inhabits such an equation, so the case
+it belongs to cannot arise.
+
+**So a correctly omitted case is accepted, and nothing is said about it.** `case`
+with empty braces, or an arm with no body, is how you write that the case cannot
+happen; before this, the equation survived, the method stayed open and the
+omission was refused. The proof is the generated acyclicity equipment above:
+`noCycleD` says the equation puts one side structurally below the other, the
+tuple it answers with holds `x ≢ x`, and reflexivity makes that an `Empty`. For
+
+```
+data Step : N -> N -> Type₀ where
+  down : ∀ (n : N) -> Step (s n) n
+
+noSelf : ∀ (n : N) (st : Step n n) -> Empty
+noSelf = \ n st -> case st of { }
+```
+
+the tied target asks for a number that is its own successor, and the braces are
+empty. `examples/omitted-cases.thena` is the same thing at four shapes. **A case
+that does arise is still refused**, by name, as it always was.
+
+**An equation it cannot simplify is kept, not refused.** When none of the five
+applies, the equation stays a hypothesis of the simplified method — that is what
+you were handed before, so the worst case is the behaviour this replaces.
 
 **`prim-eliminate` now answers with a number**: how many equations each of its
 methods carries. A method type is Π binders all the way down and does not say

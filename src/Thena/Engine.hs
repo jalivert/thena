@@ -1264,7 +1264,7 @@ perform instr rest m = case operation instr of
       (Left e,   n1) -> failure (CannotTieRecursion e) m { names = n1 }
       (Right t'', n1) -> produce (VTerm t'') m { names = n1 }
 
-  -- **Specialisation by unification** (MS9 phase 177) — the four transitions
+  -- **Specialisation by unification** (MS9 phase 177) — the five transitions
   -- over the equations the elimination above stated, in one coarse op by his
   -- ruling of 2026-10-18. "Thena.Tactics.Specialise" has the argument that
   -- decided it.

@@ -29,7 +29,7 @@ module Thena.SpecialiseTests (tests) where
 import Data.List (isInfixOf)
 
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar)
 import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh, freeVars)
@@ -45,6 +45,7 @@ import Thena.Driver
   ( Loaded (..)
   , Response (..)
   , Session
+  , loadProofSource
   , loadRuleBases
   , loadSource
   , newSession
@@ -60,7 +61,8 @@ import Thena.Global.Env
   , lookupConstructor
   , recursiveArgument
   )
-import Thena.Render (Rendering (..), renderCore)
+import Thena.Files (loadProofFile, startingSession)
+import Thena.Render (Rendering (..), renderCore, renderResponse)
 import Thena.Tactics.Eliminate
   ( Elimination (..)
   , MethodShape (..)
@@ -77,6 +79,7 @@ tests =
     "specialisation by unification (MS9 phase 177)"
     [ testGroup "vtail — the milestone's own case" vtailTests
     , testGroup "one transition at a time" transitionTests
+    , testGroup "a correctly omitted case, through the surface" omittedTests
     , testGroup "what it leaves alone" residualTests
     , testGroup "a transported chain" chainTests
     , testGroup "what it refuses" refusalTests
@@ -268,32 +271,182 @@ transitionTests =
   , specialises "injectivity then solution" "succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat (succ m) (succ k) -> Eq {0} Nat m k"
       (Just "Nat -> Eq {0} Nat k k")
+
+    -- __cycle.__ @m@ is inside @succ m@, so nothing inhabits the equation and
+    -- the method is closed outright, exactly as a conflict closes one. __This
+    -- is the case the user correctly omitted__, and it is the last of
+    -- @eliminating.pdf@'s five (MS9 phase 221).
+  , specialises "cycle: a term against its own successor" "succ" 1
+      "\8704 (m : Nat) -> Nat -> Eq {0} Nat m (succ m) -> Eq {0} Nat m k"
+      Nothing
+
+    -- __and the other way round__, which the chain states through the
+    -- symmetric equation rather than through a second construction.
+  , specialises "cycle: and with the successor on the left" "succ" 1
+      "\8704 (m : Nat) -> Nat -> Eq {0} Nat (succ m) m -> Eq {0} Nat m k"
+      Nothing
+
+    -- __Two constructors down.__ The tuple nests, so the search goes into a
+    -- sub-tuple before it crosses to the @≢@ half.
+  , specialises "cycle: two constructors deep" "succ" 1
+      "\8704 (m : Nat) -> Nat -> Eq {0} Nat m (succ (succ m)) -> Eq {0} Nat m k"
+      Nothing
+
+    -- __An ambient variable, which no other transition may touch.__ Solution
+    -- may not move a rigid binding (§6.2), but @j ≃ succ j@ is unsatisfiable
+    -- whoever bound @j@ — @noCycle‹D›@ quantifies the side that occurs, so
+    -- nothing in the construction asks whether it is a pattern variable.
+  , specialises "cycle: on a rigid variable" "succ" 1
+      "\8704 (m : Nat) -> Nat -> Eq {0} Nat j (succ j) -> Eq {0} Nat m k"
+      Nothing
   ]
+
+-- --------------------------------------------------------------------------
+-- The case the user omitted
+-- --------------------------------------------------------------------------
+
+-- | __What the cycle transition is for, said in the surface language__ (MS9
+-- phase 221). Each of these is a split whose only case cannot arise, written
+-- with no arm at all; until this transition existed the equation survived, the
+-- method stayed open and the omission was refused with
+-- @no clause of case-must-vanish applies here@.
+--
+-- __Nothing is said when one of these loads__, which is the behaviour: no
+-- error, and no warning either. A correctly omitted case is correct.
+omittedTests :: [TestTree]
+omittedTests =
+  [ -- @down@ makes the two indices @s n@ and @n@; the target ties them, so
+    -- solution answers the first and leaves @s m ≃ m@ for this one.
+    testCase "an index that would have to be its own successor" $
+      accepts
+        [ "module OmitStep where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "data Step : N -> N -> Type\8320 where"
+        , "  down : \8704 (n : N) -> Step (s n) n"
+        , ""
+        , "noSelf : \8704 (n : N) (st : Step n n) -> Empty"
+        , "noSelf = \\ n st -> case st of { }"
+        ]
+
+    -- __Two constructors down__, so the search goes into a sub-tuple before it
+    -- crosses to the @≢@ half.
+  , testCase "nor its own successor twice over" $
+      accepts
+        [ "module OmitSkip where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "data Skip : N -> N -> Type\8320 where"
+        , "  over : \8704 (n : N) -> Skip (s (s n)) n"
+        , ""
+        , "noSkip : \8704 (n : N) (sk : Skip n n) -> Empty"
+        , "noSkip = \\ n sk -> case sk of { }"
+        ]
+
+    -- __The second of two recursive arguments__, which the tuple reaches by a
+    -- projection past the first.
+  , testCase "nor the right subtree of a node it is in" $
+      accepts
+        [ "module OmitTree where"
+        , ""
+        , "data Tree : Type\8320 where"
+        , "  leaf : Tree"
+        , "  node : Tree -> Tree -> Tree"
+        , ""
+        , "data Sub : Tree -> Tree -> Type\8320 where"
+        , "  onRight : \8704 (l : Tree) (r : Tree) -> Sub r (node l r)"
+        , ""
+        , "noSub : \8704 (t : Tree) (sb : Sub t t) -> Empty"
+        , "noSub = \\ t sb -> case sb of { }"
+        ]
+
+    -- __A parameterised carrier__: the lemma takes the parameters before the
+    -- indices, and the equation's own carrier is where they are read from.
+  , testCase "nor its own tail" $
+      accepts
+        [ "module OmitList where"
+        , ""
+        , "data Lst (A : Type\8320) : Type\8320 where"
+        , "  lnil : Lst A"
+        , "  lcons : \8704 (a : A) (as : Lst A) -> Lst A"
+        , ""
+        , "data Tail (A : Type\8320) : Lst A -> Lst A -> Type\8320 where"
+        , "  tl : \8704 (a : A) (as : Lst A) -> Tail A as (lcons A a as)"
+        , ""
+        , "noTail : \8704 (A : Type\8320) (xs : Lst A) (t : Tail A xs xs) -> Empty"
+        , "noTail = \\ A xs t -> case t of { }"
+        ]
+
+    -- __The negative control, and it is what keeps the rest honest.__ Here the
+    -- case does arise, so the method stays open and the missing arm is refused
+    -- exactly as it always was.
+    -- __And all of it as the user meets it__, in a file he can read:
+    -- @examples\/omitted-cases.thena@ is the same four shapes with the prose
+    -- that says what each one is, and the illegal arm commented out beside
+    -- them.
+  , testCase "the example file runs to the end" $ do
+      (s, _) <- startingSession
+      (_, _, stopped) <- loadProofFile s "examples/omitted-cases.thena"
+      assertBool (unlines (map show stopped)) (null stopped)
+
+  , testCase "a case that does arise is still refused" $
+      refusedWith "case-must-vanish"
+        [ "module KeepStep where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "data Step : N -> N -> Type\8320 where"
+        , "  down : \8704 (n : N) -> Step (s n) n"
+        , ""
+        , "bogus : \8704 (n : N) (st : Step (s n) n) -> Empty"
+        , "bogus = \\ n st -> case st of { }"
+        ]
+  ]
+
+-- | Load a surface module and insist it went in with nothing said.
+accepts :: [String] -> Assertion
+accepts ls = do
+  (s0, _) <- startingSession
+  case loadProofSource s0 (unlines ls) of
+    (_,  ProofLoaded {}) -> pure ()
+    (s1, other)          -> assertFailure (unwords (renderResponse s1 other))
+
+-- | Load one and insist it was refused, in words that name the law.
+refusedWith :: String -> [String] -> Assertion
+refusedWith what ls = do
+  (s0, _) <- startingSession
+  case loadProofSource s0 (unlines ls) of
+    (_,  ProofLoaded {}) -> assertFailure ("loaded, and it should not have")
+    (s1, other)
+      | what `isInfixOf` unwords (renderResponse s1 other) -> pure ()
+      | otherwise -> assertFailure (unwords (renderResponse s1 other))
 
 -- --------------------------------------------------------------------------
 -- What it leaves alone
 -- --------------------------------------------------------------------------
 
--- | __An equation no transition applies to is kept__, which is the whole of how
--- the missing cycle transition is survived.
+-- | __An equation no transition applies to is kept__, which is this module's
+-- own law rather than a step it is missing.
 --
 -- @eliminating.pdf@ Definition 19 makes "no transition applies" a /failure/.
 -- Keeping the equation is weaker and strictly more useful: it is the hypothesis
 -- the user is handed today, so the specialiser's worst case is the behaviour
--- that preceded it.
+-- that preceded it. __All five transitions are tried since MS9 phase 221__, so
+-- what reaches here is residue.
 residualTests :: [TestTree]
 residualTests =
-  [ -- A cycle. @noCycle@ does not exist, so this equation is refutable and not
-    -- refuted — and what happens is that it survives, not that the split is
-    -- withdrawn.
-    specialises "a cyclic equation is kept, not refuted" "succ" 1
-      "\8704 (m : Nat) -> Nat -> Eq {0} Nat m (succ m) -> Eq {0} Nat m k"
-      (Just "\8704 (m : Nat) -> Nat -> Eq {0} Nat m (succ m) -> Eq {0} Nat m k")
-
-    -- Two ambient variables: neither is a binder of this method, so neither may
+  [ -- Two ambient variables: neither is a binder of this method, so neither may
     -- be solved. §6.2's note is the reason — moving a declaration leftwards is
     -- @raise@, and @raise@ is deliberately not in the op vocabulary at all.
-  , specialises "two ambient variables are both rigid" "succ" 1
+    specialises "two ambient variables are both rigid" "succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat j k -> Eq {0} Nat m k"
       (Just "\8704 (m : Nat) -> Nat -> Eq {0} Nat j k -> Eq {0} Nat m k")
 

@@ -171,7 +171,7 @@ data Value
     --
     -- 'Thena.Instral.Type.TBinder' carries why it is a type of its own, and
     -- "Thena.Tactics.Specialise" is the only thing that makes one: a method's
-    -- binders are what the four transitions rewrote, and nothing else can say
+    -- binders are what the five transitions rewrote, and nothing else can say
     -- which of them survived.
   | VList    [Value]
     -- ^ @[a, b, c]@ (MS5 phase 65) — **homogeneous by intention and not by
@@ -1250,7 +1250,7 @@ data Op
     -- /number/ is this list's length, which is a constructor pattern's arity,
     -- so no separate arity op: one question, one answer.
 
-    -- **Specialisation by unification** (MS9 phase 177): the four transitions
+    -- **Specialisation by unification** (MS9 phase 177): the five transitions
     -- over the equations an elimination's method carries, in one coarse op —
     -- __his ruling, 2026-10-18__, with the argument that decided it: the
     -- splitting tree is rules, because a wrong tree is a failed elaboration

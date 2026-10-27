@@ -1,5 +1,5 @@
--- | Specialisation by unification — the four transitions, in one coarse
--- operation (MS9 phase 177).
+-- | Specialisation by unification — the five transitions, in one coarse
+-- operation (MS9 phases 177 and 221).
 --
 -- "Thena.Tactics.Eliminate" stops where the equations are produced. A method of
 -- an elimination at specific indices reads
@@ -20,7 +20,7 @@
 -- that work instead__: it rewrites such a method type to the one its equations
 -- imply, and emits the term that recovers the original from the rewritten one.
 --
--- == The four transitions
+-- == The five transitions
 --
 -- Each applies to one equation, and applying one leaves a smaller problem.
 --
@@ -35,16 +35,18 @@
 -- * __solution__ — @Eq I t x@ (or @Eq I x t@) where @x@ is one of the method's
 --   own binders substitutes @x := t@ and __drops the binder__. This is the one
 --   that removes a coercion from what the user writes rather than a line.
---
--- __There is no cycle transition__, because @noCycle@ exists nowhere in Thena.
--- Its absence is sound and it is not silent: an equation no transition applies
--- to is __kept__, exactly as it is handed over today, so the worst case here is
--- the behaviour that preceded it.
+-- * __cycle__ — @Eq I x t@ where @x@ occurs in @t@ as a structural sub-term,
+--   @k ≃ s k@, cannot be inhabited either, so like conflict there is __no
+--   subgoal at all__: the generated @noCycle‹D›@ turns the equation into the
+--   tuple of everything @t@ is not equal to, and the paper's search finds
+--   @x ≢ x@ in it. __This is the case the user correctly omitted__, and
+--   nothing is said about it (MS9 phase 221).
 --
 -- __So this never fails for want of a transition.__ @eliminating.pdf@
 -- Definition 19 makes "no transition applies" a /failure/; here it is a
 -- residual hypothesis, because refusing would withdraw a split the user can
--- still do by hand.
+-- still do by hand. That is what an equation still standing with all five
+-- tried now means.
 --
 -- == Where the risk sits
 --
@@ -56,9 +58,9 @@
 -- "Thena.Global.NoConfusion" already struck.
 --
 -- __Termination__ is the lexicographic measure (binders in @Δ@, then the size
--- of the equations): solution drops a binder, and deletion, conflict and
--- injectivity keep @Δ@ and shrink the equations. Nothing here is bounded by a
--- fuel count because nothing here needs to be.
+-- of the equations): solution drops a binder, and deletion and injectivity keep
+-- @Δ@ and shrink the equations. Conflict and cycle recurse on nothing at all.
+-- Nothing here is bounded by a fuel count because nothing here needs to be.
 --
 -- Where it sits in §2.5: beside "Thena.Tactics.Eliminate" — above
 -- "Thena.Core.Typing" and "Thena.Global.Env", below "Thena.Engine".
@@ -72,7 +74,7 @@ module Thena.Tactics.Specialise
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver, piOver)
 import Thena.Core.Level (Level, instantiateLevels, substLevel)
-import Thena.Core.Reduce (whnf)
+import Thena.Core.Reduce (atLevels, whnf)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -88,14 +90,18 @@ import Thena.Core.Typing (check, sortOf)
 import Thena.Errors (ChainBlocker (..), SpecialiseError (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
+  , Definition (..)
   , GlobalEnv
   , InductiveDefinition (..)
   , isDeclared
   , lookupConstructor
+  , lookupDefinition
   , lookupInductive
+  , recursiveArgument
   )
 import Thena.Global.Generate (dependentPairInScope)
 import Thena.Global.NoConfusion (noConfusionNames)
+import Thena.Global.NoCycle (noCycleName)
 import Thena.Tactics.Eliminate (MethodShape (..), spineOf)
 
 -- | What specialisation worked out: the subgoal, and __one ordered report of
@@ -267,7 +273,7 @@ binderWord (Binder r (Ident w)) = word r ++ " " ++ w
 -- assumption made @case … of@ refuse its own methods as misshapen. The caller
 -- knows which scheme it asked for; this does not, and no longer guesses. The
 -- copies join @Δc@ and the hypotheses as __pattern variables__, which is the
--- only change the four transitions need.
+-- only change the transitions need.
 specialise
   :: GlobalEnv -> Context -> Int -> GlobalName -> [Ident] -> MethodShape -> Core
   -> (Either SpecialiseError Specialisation, Int)
@@ -540,6 +546,11 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
            in case transition delta e of
                 NoTransition -> keep
                 Conflict dn  -> conflict bfr e after n dn
+                -- __cycle carries a chain for the same reason conflict does__:
+                -- it claims nothing and binds the equation it fired on, so a
+                -- later equation transported along this one stays in scope
+                -- under the @Empty@ elimination. No 'namedLater' guard.
+                Cycle dn path onLeft -> refute bfr e after n dn path onLeft
                 Delete
                   | namedLater e after -> blocked ByDeletion
                   | otherwise          -> deletion bfr e after n
@@ -586,6 +597,30 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                   , target     = absurd
                   }
              in (Right (Nothing, lamOver (prefix before e) node, []), n1)
+
+        -- __cycle.__ @noCycle‹D›@ turns the equation into the tuple of
+        -- everything the bigger side is not equal to, the paper's search finds
+        -- @x ≢ x@ in it, and reflexivity makes that an @Empty@. __Nothing is
+        -- claimed__, exactly as in @conflict@: this is the case the user
+        -- correctly omitted, and what the user sees is that omitting it is
+        -- accepted with nothing said.
+        refute bfr e after n dn path onLeft = case cycleProof dn path onLeft e n of
+          Nothing -> go (e : bfr) after n
+          Just (lv, absurd, n1) ->
+            let before   = reverse bfr
+                rest     = piOver (map entry after) t
+                (v, n2)  = fresh n1
+                node = Eliminate
+                  { eliminated = emptiness
+                  , levels     = [lv]
+                  , parameters = []
+                  , motive     = Lam (Ident "impossible") (Global emptiness [lv])
+                                     (close v rest)
+                  , methods    = []
+                  , indices    = []
+                  , target     = absurd
+                  }
+             in (Right (Nothing, lamOver (prefix before e) node, []), n2)
 
         -- __injectivity.__ One equation per constructor argument, each proved by
         -- a projection out of the @And@ chain the lemma answers with, and the
@@ -692,6 +727,13 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           if cu == cv then Inject dn cu else Conflict dn
       | Just x <- solvable (eqnRight e) (eqnLeft e)  = Solve x False
       | Just x <- solvable (eqnLeft e)  (eqnRight e) = Solve x True
+      -- __cycle, and it is disjoint from solution by construction__: solution
+      -- declines exactly where the side it would substitute occurs in the term
+      -- that solves it, which is the shape this one is about. So the order
+      -- between the two decides nothing, and it is written after the
+      -- transition whose refusal it picks up.
+      | Just (dn, path) <- cyclic (eqnLeft e)  (eqnRight e) = Cycle dn path True
+      | Just (dn, path) <- cyclic (eqnRight e) (eqnLeft e)  = Cycle dn path False
       | otherwise = NoTransition
       where
         -- A pattern variable is one of __this method's own binders__ — @delta@,
@@ -701,10 +743,10 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- transition that may move a binding at all.
         --
         -- Two conditions beyond that, each a case that breaks without it. @x@
-        -- may not occur in the term that solves it — that is the cycle
-        -- transition, and @noCycle@ does not exist — and the term may mention
-        -- __no binder at or after @x@__, or substituting it leftwards would be
-        -- ill-scoped.
+        -- may not occur in the term that solves it — __that is the cycle
+        -- transition, and declining here is how it is reached__ — and the term
+        -- may mention __no binder at or after @x@__, or substituting it
+        -- leftwards would be ill-scoped.
         solvable candidate by = case whnf env ctx candidate of
           Free x
             | any ((== x) . entryVar) delta
@@ -839,6 +881,176 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
       Just (GlobalName "Eq", [l], [i, a, b]) ->
         Just (Eqn v (Ident "q") (equation l i a b) l i a b)
       _ -> Nothing
+
+    -- ------------------------------------------------------------------
+    -- Which cycle, and the Empty it gives
+    -- ------------------------------------------------------------------
+
+    -- Where @small@ sits inside @big@ as a structural sub-term: @big@ is a
+    -- constructor application whose @k@th recursive argument is @small@, or
+    -- contains it one further step down. An equation between the two cannot be
+    -- satisfied, and that is @eliminating.pdf@'s fifth transition.
+    --
+    -- __The side that occurs is any term, not just a pattern variable.__
+    -- @noCycle‹D›@ quantifies it, so nothing in the construction asks; and
+    -- @n ≃ s n@ for an ambient @n@ is as unsatisfiable as the same equation on
+    -- a binder of this method. Asking would be a special case whose only effect
+    -- is to keep an equation that is refutable.
+    cyclic small big = case former big of
+      Just (dn, _, _) -> (,) dn <$> descend dn small big
+      Nothing         -> Nothing
+
+    descend dn small big = case former big of
+      Just (dn', c, args) | dn' == dn ->
+        let recs = recursivesOf dn c args
+            m    = length recs
+         in firstJust [ stepTo pos m a | (pos, a) <- zip [0 ..] recs ]
+      _ -> Nothing
+      where
+        stepTo pos m a
+          | alike a small = Just [(pos, m)]
+          | otherwise     = ((pos, m) :) <$> descend dn small a
+
+    -- The arguments of @c@ whose type is the family itself. __The same reading
+    -- "Thena.Global.NoCycle" makes__ when it decides what the tuple conjoins,
+    -- so a path cannot name a conjunct that is not there.
+    recursivesOf dn c args = case lookupConstructor c env of
+      Just (d, cd) ->
+        [ a
+        | (a, en) <- zip args (constructorArguments cd)
+        , Just _  <- [recursiveArgument dn (length (inductiveParameters d))
+                                           (entryType en)]
+        ]
+      Nothing -> []
+
+    alike a b = whnf env ctx a == whnf env ctx b
+
+    firstJust xs = case [ x | Just x <- xs ] of
+      (x : _) -> Just x
+      []      -> Nothing
+
+    -- @noCycle‹D›@, if it was generated at all — it is declined for a datatype
+    -- whose prelude is missing a piece and for one whose constructor chains
+    -- package two arguments or more ("Thena.Global.NoCycle"), and without it
+    -- the equation is kept, exactly as it was before this transition existed.
+    cycleOf dn
+      | isDeclared lem env = Just lem
+      | otherwise          = Nothing
+      where lem = noCycleName dn
+
+    -- The @Empty@ this equation gives, and the level it is at: the lemma
+    -- applied to the chain, the tuple it answers with searched down @path@ for
+    -- the @x ≢ x@ the paper says is in there, and that applied to reflexivity.
+    --
+    -- __Every type on the way is read off what the generator wrote.__ The
+    -- lemma's own type is carried along the application, so the chain is
+    -- whatever "Thena.Global.Generate"\'s walk stated; the tuple's conjuncts
+    -- come out of 'linkOf'; and the @Empty@ at the end is read rather than
+    -- assumed, which is what makes a surprise a decline instead of an ill-typed
+    -- method. 'conjuncts' strikes the same bargain one transition over.
+    cycleProof dn path onLeft e n0' = do
+      lem          <- cycleOf dn
+      d            <- lookupInductive dn env
+      def          <- lookupDefinition lem env
+      (hd, ls, as) <- spineOf (whnf env ctx (eqnCarrier e))
+      _            <- if hd == dn then Just () else Nothing
+      let (prm, is) = splitAt (length (inductiveParameters d)) as
+          small | onLeft    = eqnLeft e
+                | otherwise = eqnRight e
+          big   | onLeft    = eqnRight e
+                | otherwise = eqnLeft e
+          lemTy   = atLevels (definitionLevels def) ls (definitionType def)
+          (q, n1) = oriented e onLeft n0'
+      (chainTy, chainTm) <-
+        applied lemTy (Global lem ls) (prm ++ is ++ [small] ++ is ++ [big])
+      (tupleTy, tuple)  <- overChain small big q chainTy chainTm
+      (neTy, ne, n2)    <- search path tupleTy tuple n1
+      (emptyTy, absurd) <- overChain small big q neTy ne
+      case spineOf (whnf env ctx emptyTy) of
+        Just (GlobalName "Empty", [lv], []) -> Just (lv, absurd, n2)
+        _                                   -> Nothing
+
+    -- The paper's search. @NotBelow‹D› x y@ is the tuple; each step takes its
+    -- own conjunct, which is @NotBelowEq‹D› x aₖ@, and then __its sub-tuple
+    -- half where the path goes on and its @≢@ half where it stops__.
+    search path ty p n = case path of
+      []              -> Nothing
+      ((pos, m) : ks) -> do
+        (ty1, p1, n1) <- componentOf pos m ty p n
+        (ty2, p2, n2) <- half (not (null ks)) ty1 p1 n1
+        if null ks then Just (ty2, p2, n2) else search ks ty2 p2 n2
+
+    -- The @pos@th of @m@ conjuncts of a right-nested @And@. __@m@ is told rather
+    -- than read__, for the reason 'Path' carries it.
+    componentOf pos m ty p n
+      | m <= 1    = Just (ty, p, n)
+      | pos <= 0  = half True ty p n
+      | otherwise = do
+          (ty', p', n1) <- half False ty p n
+          componentOf (pos - 1) (m - 1) ty' p' n1
+
+    -- One half of an @And@, with the type it leaves.
+    half wantLeft ty p n = case linkOf env ctx ty of
+      LinkAnd ls a b ->
+        let (t, n1) = andProject ls a b p wantLeft n
+         in Just (if wantLeft then a else b, t, n1)
+      _ -> Nothing
+
+    -- A term applied to arguments with its type carried along, which is the
+    -- only way to arrive at the chain the generator actually stated.
+    applied ty tm []         = Just (ty, tm)
+    applied ty tm (a : rest) = case whnf env ctx ty of
+      Pi _ _ sc -> applied (instantiate a sc) (App tm a) rest
+      _         -> Nothing
+
+    -- A term applied to a whole chain of equations, each read from its own Π
+    -- domain: __reflexivity where the two sides are already the same term, and
+    -- this equation's own proof where they are @small@ and @big@__. Anything
+    -- else is a chain this module did not expect, and it declines.
+    --
+    -- A supplied @refl@ makes the transport a dependent index telescope states
+    -- the next equation through ι-contract, which is why reading each domain
+    -- after the step before it is enough. @≢@'s own chain compares @small@ with
+    -- itself throughout, so the proof is never reached there.
+    overChain small big q = go
+      where
+        go ty tm = case whnf env ctx ty of
+          Pi _ dom sc -> case spineOf (whnf env ctx dom) of
+            Just (GlobalName "Eq", [l], [i, a, b])
+              | alike a b                 -> step (reflAt l i a) sc tm
+              | alike a small, alike b big -> step q sc tm
+            _ -> Nothing
+          _ -> Just (ty, tm)
+        step arg sc tm = go (instantiate arg sc) (App tm arg)
+
+    -- A proof of @small ≡ big@, which is this equation read in the direction
+    -- the chain states it — itself, or the symmetric one.
+    --
+    -- @elim Eq (I) (λ l r q -> Eq I r l) ((λ a -> refl I a)) (u, v) q@, built
+    -- rather than named for 'andProject'\'s reason: @sym@ is a prelude
+    -- /definition/ and this module depends on the prelude's constructors alone.
+    oriented e onLeft n
+      | onLeft    = (Free (eqnVar e), n)
+      | otherwise =
+          let ((zl, zr, zq), n1) = freshThree n
+              (za, n2)           = fresh n1
+              i  = eqnCarrier e
+              lv = eqnLevel e
+           in ( Eliminate
+                  { eliminated = equality
+                  , levels     = [lv]
+                  , parameters = [i]
+                  , motive =
+                      Lam (Ident "left") i (close zl
+                        (Lam (Ident "right") i (close zr
+                          (Lam (Ident "q") (equation lv i (Free zl) (Free zr))
+                             (close zq (equation lv i (Free zr) (Free zl)))))))
+                  , methods = [ Lam (Ident "same") i
+                                  (close za (reflAt lv i (Free za))) ]
+                  , indices = [eqnLeft e, eqnRight e]
+                  , target  = Free (eqnVar e)
+                  }
+              , n2 )
 
     -- ------------------------------------------------------------------
     -- Terms
@@ -1149,7 +1361,21 @@ data Transition
   | Conflict GlobalName
   | Inject GlobalName GlobalName   -- ^ the datatype, and the shared constructor
   | Solve Var Bool                 -- ^ the binder, and whether it is on the left
+  | Cycle GlobalName Path Bool
+    -- ^ the datatype, the path down to the occurrence, and whether the side
+    -- that occurs is on the left
   | NoTransition
+
+-- | Where one side of an equation sits inside the other: one step per
+-- constructor, each saying which of that constructor's recursive arguments to
+-- go into and how many it has.
+--
+-- __The count travels with the position because the tuple's shape needs both.__
+-- @Below‹D› P (c ā)@ is a right-nested @And@ with one conjunct per recursive
+-- argument, and a conjunct list of length one is no @And@ at all — so which
+-- projections reach the @k@th conjunct cannot be read off the type, which is
+-- an @And@ either way.
+type Path = [(Int, Int)]
 
 varsOf :: Context -> [Core]
 varsOf = map (Free . entryVar)
