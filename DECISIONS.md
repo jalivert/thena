@@ -2180,47 +2180,61 @@ would reserve one per recursive argument of every constructor and buy nothing.
 
 ### When `noCycle` is not generated, and what you see if it is not
 
-*Decided 2026-10-27.*
+*Decided 2026-10-27, and the condition changed the same week.*
 
-**One shape of constructor telescope does not get these two definitions: a constructor with
-a *middle* argument — one that both depends on an earlier argument and is depended on by a
-later one.** One such constructor withholds `noCycleDiagD` and `noCycleD` for the whole
-datatype. The four relations above, and the no-confusion pair, are generated regardless.
+**Whether a datatype gets `noCycleDiagD` and `noCycleD` is decided by the checker and not
+by a question about the telescope.** The two are generated, checked, and kept if they
+check; if the checker refuses one, both are withheld and the declaration goes through
+without them. The four relations above, and the no-confusion pair, are generated
+regardless.
 
-Depending on an earlier argument is not by itself enough, and the difference is the whole
-condition:
+**No shape of constructor telescope is known to be withheld today.** It used to be one — a
+constructor with a *middle* argument, one that both depends on an earlier argument and is
+depended on by a later one:
 
 ```
 enode : ∀ (x : A) (y : B x) (r : E) -> E              -- y depends on x; nothing depends on y
 fnode : ∀ (x : A) (y : B x) (z : C x y) (r : F) -> F  -- y is in the middle
 ```
 
-`E` gets `noCycleE`; `F` does not.
+Both get their acyclicity equipment now. An argument that a later argument depends on
+cannot be transported on its own — the motive would have to mention the later argument at a
+type it no longer has — so it travels packaged with the arguments that depend on it, and
+the chain reads each component back out by *projection*. **The package holds exactly the
+arguments that have to travel, and is moved one component at a time**, along the equations
+that component's own type mentions and in the order those equations were stated. Taking the
+contiguous span over them instead dragged in an argument that nothing in the package
+mentions, and that argument's own equation then came out as a projection out of a pair
+transported along its neighbour's proof — a transport no step of the nested `J` eliminates.
 
-**Why that shape.** An argument that a later argument depends on cannot be transported on
-its own — the motive would have to mention the later argument at a type it no longer has —
-so it travels packaged with everything after it, and the chain reads each component back
-out by *projection*. A projection mentions the bound proof of the equation that package was
-transported along, and a step of the nested `J` has eliminated that proof while its own
-motive still quantifies it, so the term the step is handed and the one its motive asks for
-differ by a redex that cannot fire. `y` in `enode` is never packaged, because nothing after
-it mentions it.
-
-**What you see.** Exactly one thing: a split over such a family keeps a cyclic equation
-instead of refuting it, so a case you were right to omit is refused with
-`no clause of case-must-vanish applies here` rather than accepted. Nothing is accepted that
-should not be — the loss is capability — and nothing else about the declaration changes.
-
-**It is caught at declaration and it is not silent in the other direction either**: if the
-generator ever emits one of these and the checker refuses it, the declaration says so by
-name. That is what makes withholding a decision rather than a risk.
-
-In the TAPL and POPLMark corpus and the whole test suite this catches two datatypes.
-`Nat`, `Vec`, `Fin`, a `Step` relation and every syntax type are unaffected.
+**What you lose where they are withheld.** Exactly one thing: a split over such a family
+keeps a cyclic equation instead of refuting it, so a case you were right to omit is refused
+with `no clause of case-must-vanish applies here` rather than accepted. Nothing is accepted
+that should not be — the loss is capability — and nothing else about the declaration
+changes.
 
 **The whole acyclicity bundle — six definitions per `data` — costs about 8% of the time it
 takes to load the example corpus**, and about 30% on the largest single development in it.
 Measured by generating and not generating, two runs each.
+
+### One shape of index telescope is refused outright
+
+*Measured 2026-10-27.*
+
+**A family whose index telescope has two indices that each depend on an earlier index, with
+the family's own element depending on both, is refused when you declare it**, with
+`the generated noConfusionD does not typecheck, which is a bug in Thena`. It is a defect
+and not a limit of the theory, and it is being worked on.
+
+```
+data Pair2 : ∀ (n : Nat) (as : Vec A n) (bs : Vec A n) -> Type₀   -- refused
+data Both2 : ∀ (n : Nat) (as : Vec A n) (m : Nat) (bs : Vec A m) -> Type₀  -- refused
+data After : ∀ (n : Nat) (as : Vec A n) (m : Nat) -> Type₀        -- fine
+data One   : ∀ (n : Nat) (as : Vec A n) -> Type₀                  -- fine
+```
+
+A relation between two vectors — `Append`, `Permutation` — has the refused shape. One
+dependent index with anything after it does not, and that distinction is the whole of it.
 
 **Two shapes are still refused, and both are a missing step of that chain rather than a
 missing equality.** An index whose type mentions an earlier index that was *abstracted
