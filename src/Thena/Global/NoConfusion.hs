@@ -90,9 +90,10 @@ import Thena.Global.Env
   , recursiveArgument
   )
 import Thena.Global.Generate
-  ( Generated (..)
-  , Stated (..)
-  , chained
+  ( Chain (..)
+  , Generated (..)
+  , chainGoalType
+  , chainProof
   , conjunctionInScope
   , dependentPairInScope
   , mentionsAnEarlierEntry
@@ -102,12 +103,9 @@ import Thena.Global.Generate
   , equalityInScope
   , falsityInScope
   , freshen
-  , lamsOver
-  , rewriting
-  , stations
   , telescopic
-  , transportAt
   , truthInScope
+  , unitProof
   , varsOf
   )
 
@@ -452,165 +450,46 @@ generateNoConfusion env n0 d
     -- departs from the homogeneous lemma's single @Eq@ argument. A specialiser
     -- holds its equations as separate Π binders, one per tied index, so a lemma
     -- it is going to call must take them that way; packaging them here would
-    -- only be unpacked at every use site. 'stations' and 'package' are the same
-    -- walk in the two shapes.
+    -- only be unpacked at every use site. 'Thena.Global.Generate.stations' and
+    -- 'Thena.Global.Generate.package' are the same walk in the two shapes.
+    --
+    -- **The telescope is the indices /and/ the element, with nothing special
+    -- about the element** (MS9 phase 220, where the walk became
+    -- 'Thena.Global.Generate.Chain' and grew two more callers). The element
+    -- used to be handled apart from the indices, its equation eliminated by a
+    -- @transport@ in the base case rather than by the same J as every other
+    -- position; it is one more entry of one telescope now, and the base case is
+    -- the diagonal and nothing else.
+    telChain n =
+      let (vx, n1) = fresh n
+          theta    = idx ++ [Hypothesis vx (Ident "x") (familyAt (varsOf idx))]
+       in ( Chain
+              { chainLevel     = dl
+              , chainTelescope = theta
+              , chainGoal      = \ls rs ->
+                  foldl App (Global telFamName (map LVar (inductiveLevels d)))
+                    (paramVars ++ ls ++ rs)
+              , chainDiagonal  = \shared m ->
+                  case splitAt (length idx) shared of
+                    (is, [a]) -> telDiagonal is a m
+                    _         -> (unitProof dl, m)
+              }
+          , n1
+          )
+
     telLemmaType n =
-      let (t, n1) = telGoalType [] [] idx n
-       in (piOver ps t, n1)
+      let (ch, n1) = telChain n
+          (t,  n2) = chainGoalType ch n1
+       in (piOver ps t, n2)
 
-    -- @λ params . ‹the nested J›@ — and the body /is/ 'telProof', because
-    -- 'telProof' already abstracts @is1@, @x@, @is2@, @y@ and the chain in
-    -- exactly the order the type quantifies them.
+    -- @λ params . ‹the nested J›@ — and the body /is/ the chain's proof, because
+    -- that already abstracts @is1@, @x@, @is2@, @y@ and the chain in exactly the
+    -- order the type quantifies them.
     telLemma n =
-      let (body, n1) = telProof [] idx n
-       in (lamOver ps body, n1)
+      let (ch, n1)   = telChain n
+          (body, n2) = chainProof ch n1
+       in (lamOver ps body, n2)
 
-    -- | The type 'telProof' inhabits, and the motive of each step of the J.
-    --
-    -- @shared@ are index positions J has already unified, so both sides carry
-    -- the same term and neither needs an equation. @supplied@ are positions
-    -- whose two sides and whose equation are given rather than bound — that is
-    -- what the step's motive does with @u@, @v@ and @w@, and it is why the
-    -- transports in the equations after it come out along @w@ rather than along
-    -- a binder of this type. @remaining@ is quantified fresh on both sides.
-    --
-    -- **The chain must be generated over the whole telescope and then have the
-    -- supplied positions substituted out**, not generated over the tail: a
-    -- later equation is stated after transporting along the earlier ones, and
-    -- an earlier position left out of the walk is an earlier transport left out
-    -- of the type.
-    telGoalType shared supplied remaining n =
-      let givenEntries   = [ Hypothesis v i t | (v, i, t) <- suppliedEntries ]
-          (lsCtx, n1)    = freshen n remaining
-          (rsCtx, n2)    = freshen n1 remaining
-          lsCtx'         = retype (shared ++ suppliedLefts)  lsCtx
-          rsCtx'         = retype (shared ++ suppliedRights) rsCtx
-          lefts          = shared ++ suppliedLefts  ++ varsOf lsCtx'
-          rights         = shared ++ suppliedRights ++ varsOf rsCtx'
-          (va, n3)       = fresh n2
-          (vb, n4)       = fresh n3
-          aTy            = familyAt lefts
-          bTy            = familyAt rights
-          tel            = givenEntries ++ lsCtx' ++ [Hypothesis va (Ident "a") aTy]
-          rhs            = suppliedRights ++ varsOf rsCtx' ++ [Free vb]
-          (hs, n5)       = stations dl tel rhs n4
-          given          = [ (statedProof h, pr)
-                           | (h, (_, _, pr)) <- zip hs supplied ]
-          bound          = drop (length supplied) hs
-          result         = foldl App (Global telFamName (map LVar (inductiveLevels d)))
-                             (paramVars ++ lefts ++ [Free va] ++ rights ++ [Free vb])
-       in ( piOver lsCtx' (Pi (Ident "a") aTy (close va
-              (piOver rsCtx' (Pi (Ident "b") bTy (close vb
-                (rewriting given (chained dl bound result)))))))
-          , n5
-          )
-      where
-        suppliedLefts  = [ l | (l, _, _) <- supplied ]
-        suppliedRights = [ r | (_, r, _) <- supplied ]
-        -- A supplied position's left side is a variable the caller bound, so it
-        -- can stand as the telescope entry 'stations' states its equation from.
-        suppliedEntries =
-          [ (v, i, t)
-          | ((Free v, _, _), Hypothesis _ i t) <- zip supplied entries ]
-        entries = retype shared (take (length supplied) remainingAll)
-        remainingAll = drop (length shared) idx
-
-
-    -- | The index entries' types, with the positions already decided replaced
-    -- by the terms that decided them.
-    -- **The positions are counted from the front of @idx@ and nowhere else.**
-    -- An index entry's type can only mention indices before it, so the terms
-    -- that have decided the first @length ts@ positions are the whole of what
-    -- any later entry needs substituting — and every caller here holds exactly
-    -- that prefix.
-    retype ts ctx = map rewriteEntry ctx
-      where
-        ss = zip (map entryVar (take (length ts) idx)) ts
-        rewriteEntry e = case e of
-          Hypothesis v i t   -> Hypothesis v i (rewriting ss t)
-          Definition v i s t -> Definition v i (rewriting ss s) (rewriting ss t)
-
-    -- | The nested J, one step per index position, ending in the diagonal.
-    --
-    -- **Both sides have to be generalised at every step, not just the one being
-    -- eliminated.** @x@'s type mentions the index the step is about, so it
-    -- cannot stay in scope across the elimination; the motive re-quantifies the
-    -- remaining telescope on both sides, the two elements and the equations
-    -- after this one, and the J is then applied to exactly those.
-    telProof shared remaining n = case remaining of
-      [] ->
-        let fam      = familyAt shared
-            (va, n1) = fresh n
-            (vb, n2) = fresh n1
-            (ve, n3) = fresh n2
-            (dg, n4) = telDiagonal shared (Free va) n3
-            mot w    = foldl App (Global telFamName (map LVar (inductiveLevels d)))
-                         (paramVars ++ shared ++ [Free va] ++ shared ++ [w])
-            (tr, n5) = transportAt dl fam mot (Free va) (Free vb) (Free ve) dg n4
-         in ( Lam (Ident "a") fam (close va
-                (Lam (Ident "b") fam (close vb
-                  (Lam (Ident "e") (eqAt dl fam (Free va) (Free vb)) (close ve tr)))))
-            , n5
-            )
-      e : es ->
-        let a0            = case retype shared [e] of
-                              (e' : _) -> entryType e'
-                              []       -> entryType e
-            (lsCtx, n1)   = freshen n es
-            (rsCtx, n2)   = freshen n1 es
-            (vl, n3)      = fresh n2
-            (vr, n4)      = fresh n3
-            lsCtx'        = retype (shared ++ [Free vl]) lsCtx
-            rsCtx'        = retype (shared ++ [Free vr]) rsCtx
-            lefts         = shared ++ [Free vl] ++ varsOf lsCtx'
-            rights        = shared ++ [Free vr] ++ varsOf rsCtx'
-            (va, n5)      = fresh n4
-            (vb, n6)      = fresh n5
-            aTy           = familyAt lefts
-            bTy           = familyAt rights
-            tel           = Hypothesis vl (Ident "u") a0
-                              : lsCtx' ++ [Hypothesis va (Ident "a") aTy]
-            rhs           = Free vr : varsOf rsCtx' ++ [Free vb]
-            (hs, n7)      = stations dl tel rhs n6
-            (q0, rest)    = case hs of
-                              (h : more) -> (statedProof h, more)
-                              []         -> (vl, [])
-            (mt, n8)      = telStepMotive shared es a0 n7
-            (mh, n9)      = telStepMethod shared es a0 n8
-            applied       = foldl App
-                              (Eliminate (GlobalName "Eq") [dl] [a0] mt [mh]
-                                 [Free vl, Free vr] (Free q0))
-                              (varsOf lsCtx' ++ [Free va]
-                                 ++ varsOf rsCtx' ++ [Free vb]
-                                 ++ map (Free . statedProof) rest)
-         in ( Lam (Ident "u") a0 (close vl
-                (lamOver lsCtx' (Lam (Ident "a") aTy (close va
-                  (Lam (Ident "v") a0 (close vr
-                    (lamOver rsCtx' (Lam (Ident "b") bTy (close vb
-                      (lamsOver dl hs applied))))))))))
-            , n9
-            )
-
-    -- @λ u v w . ‹the rest, with this position's equation supplied as w›@.
-    telStepMotive shared es a0 n =
-      let (uv, n1) = fresh n
-          (vv, n2) = fresh n1
-          (wv, n3) = fresh n2
-          (t,  n4) = telGoalType shared [(Free uv, Free vv, Free wv)] (es' uv) n3
-       in ( Lam (Ident "u") a0 (close uv
-              (Lam (Ident "v") a0 (close vv
-                (Lam (Ident "w") (eqAt dl a0 (Free uv) (Free vv)) (close wv t)))))
-          , n4
-          )
-      where
-        es' _ = es
-
-    -- @λ c . ‹the rest at one shared position more›@ — the only method J leaves,
-    -- and the step that makes the recursion finite.
-    telStepMethod shared es a0 n =
-      let (cv, n1) = fresh n
-          (t,  n2) = telProof (shared ++ [Free cv]) es n1
-       in (Lam (Ident "c") a0 (close cv t), n2)
 
     -- @NoConfusionTelD params shared a shared a@, by one elimination of @a@:
     -- the family's inner elimination lands on the same constructor, so the

@@ -70,6 +70,8 @@ module Thena.Global.NoCycle
   , notEqName
   , notBelowName
   , notBelowEqName
+  , noCycleDiagName
+  , noCycleName
   , generateNoCycle
   ) where
 
@@ -94,8 +96,16 @@ import Thena.Global.Env
   , recursiveArgument
   )
 import Thena.Global.Generate
-  ( Generated (..)
+  ( Chain (..)
+  , Generated (..)
   , andAt
+  , andFirst
+  , andSecond
+  , bothAt
+  , chainIsFlat
+  , chainProof
+  , chainGoalType
+  , curriedRefls
   , conjunctionInScope
   , dependentPairInScope
   , mentionsAnEarlierEntry
@@ -104,9 +114,16 @@ import Thena.Global.Generate
   , equalityInScope
   , falsityInScope
   , freshen
+  , lamsOver
+  , rewriteStated
+  , rewriting
+  , stations
+  , statedProof
   , telescopicChain
   , truthInScope
+  , unitProof
   , unitType
+  , unpackChain
   , varsOf
   )
 import Thena.Global.NoConfusion (telescopicNoConfusionNames)
@@ -119,7 +136,12 @@ import Thena.Global.NoConfusion (telescopicNoConfusionNames)
 -- the user could have written and the declaration that would generate it is
 -- refused if they did.
 noCycleNames :: GlobalName -> [GlobalName]
-noCycleNames d = [belowName d, notEqName d, notBelowName d, notBelowEqName d]
+noCycleNames d =
+  [ belowName d, notEqName d, notBelowName d, notBelowEqName d
+  , noCycleDiagName d, noCycleName d
+  ]
+
+
 
 -- | @BelowNat@ — the tuple of a motive at everything structurally smaller.
 belowName :: GlobalName -> GlobalName
@@ -137,6 +159,15 @@ notBelowName (GlobalName d) = GlobalName ("NotBelow" ++ d)
 notBelowEqName :: GlobalName -> GlobalName
 notBelowEqName (GlobalName d) = GlobalName ("NotBelowEq" ++ d)
 
+-- | @noCycleDiagNat@ — no term is structurally below itself.
+noCycleDiagName :: GlobalName -> GlobalName
+noCycleDiagName (GlobalName d) = GlobalName ("noCycleDiag" ++ d)
+
+-- | @noCycleNat@ — and so nothing equal to a term is below it either, which is
+-- what the cycle transition applies.
+noCycleName :: GlobalName -> GlobalName
+noCycleName (GlobalName d) = GlobalName ("noCycle" ++ d)
+
 -- | Generate, check and admit the four definitions — or say why not.
 --
 -- Called from "Thena.Global.Declare" after 'Thena.Global.NoConfusion' has run,
@@ -152,16 +183,28 @@ generateNoCycle env n0 d
   | needsUnit && not (truthInScope env)      = Declined NoProducts
   | needsPair && not (dependentPairInScope env) = Declined NoProducts
   | not (isDeclared telLemName env)          = Declined NoProducts
-  | otherwise = case filter (`isDeclared` env) (noCycleNames dn) of
-      (g : _) -> Clash g
-      []      ->
-        admit env n0
-          [ (belowName      dn, belowType,      belowBody)
-          , (notEqName      dn, relationType,   notEqBody)
-          , (notBelowName   dn, relationType,   notBelowBody)
-          , (notBelowEqName dn, relationType,   notBelowEqBody)
-          ]
+  | otherwise = case filter ((`isDeclared` env) . fst3) planned of
+      ((g, _, _) : _) -> Clash g
+      []              -> admit env n0 planned
   where
+    fst3 (g, _, _) = g
+
+    -- **The nested J is withheld where a constructor's chain is not flat**, and
+    -- only the last two members of the bundle rest on it — see
+    -- 'Thena.Global.Generate.chainIsFlat'. The four relations are generated
+    -- whatever the telescopes look like.
+    planned =
+      [ (belowName      dn, belowType,    belowBody)
+      , (notEqName      dn, relationType, notEqBody)
+      , (notBelowName   dn, relationType, notBelowBody)
+      , (notBelowEqName dn, relationType, notBelowEqBody)
+      ]
+        ++ [ (noCycleDiagName dn, diagType,  diagBody)  | flatChains ]
+        ++ [ (noCycleName     dn, cycleType, cycleBody) | flatChains ]
+
+    flatChains =
+      all (\c -> chainIsFlat dl (constructorArguments c) n0) cs
+
     -- | Each definition in turn, in the environment the ones before it left.
     -- **A 'Rejected' here is a generator bug**, like 'Thena.Global.NoConfusion'\'s,
     -- and carries the 'Thena.Errors.TypeError' out to where it can be printed.
@@ -208,11 +251,26 @@ generateNoCycle env n0 d
     -- **Read through 'Thena.Global.Env.recursiveArgument'**, which is the same
     -- reading 'Thena.Global.Env.eliminatorType' makes of the record — so a
     -- method cannot bind a telescope its own type does not have.
-    recursivesOf c =
+    recursivesOf c = recursivesAmong (constructorArguments c)
+
+    -- The same reading of an arbitrary telescope, for a /freshened/ copy of a
+    -- constructor's arguments.
+    recursivesAmong tel =
       [ (e, is)
-      | e <- constructorArguments c
+      | e <- tel
       , Just is <- [recursiveArgument dn np (entryType e)]
       ]
+
+    -- The constructor applied to the parameters and to the variables of @tel@ —
+    -- the generated wrapper's own spelling, parameters first.
+    appliedAt c tel =
+      foldl App (Global (constructorName c) levels) (paramVars ++ varsOf tel)
+
+    -- A constructor's target indices, read at a freshened copy of its
+    -- arguments.
+    indicesAt c tel =
+      map (rewriting (zip (map entryVar (constructorArguments c)) (varsOf tel)))
+          (constructorIndices c)
 
     -- ----------------------------------------------------------------------
     -- Below
@@ -357,3 +415,273 @@ generateNoCycle env n0 d
         (Lam (Ident "x") (familyAt (varsOf idx)) (close vx
           (lamOver is2
             (Lam (Ident "y") (familyAt (varsOf is2)) (close vy body))))))
+
+    -- ----------------------------------------------------------------------
+    -- noCycleDiag — no term is structurally below itself
+    -- ----------------------------------------------------------------------
+
+    -- @∀ params indices (x : D params indices) -> NotBelowD params ī x ī x@
+    diagType n =
+      let (vx, n1) = fresh n
+       in ( piOver ps (piOver idx (Pi (Ident "x") (familyAt (varsOf idx)) (close vx
+              (at (notBelowName dn)
+                 (varsOf idx ++ [Free vx] ++ varsOf idx ++ [Free vx])))))
+          , n1
+          )
+
+    -- @λ params indices x . elim D params (λ ī y . NotBelowD ī y ī y) (‹methods›)
+    --   indices x@
+    diagBody n =
+      let (vx, n1) = fresh n
+          (mt, n2) = diagMotive n1
+          (ms, n3) = each (diagMethod mt) n2 cs
+          body     = Eliminate dn levels paramVars mt ms (varsOf idx) (Free vx)
+       in ( lamOver ps (lamOver idx
+              (Lam (Ident "x") (familyAt (varsOf idx)) (close vx body)))
+          , n3
+          )
+
+    diagMotive n =
+      let (is, n1) = freshen n idx
+          (vy, n2) = fresh n1
+          result   = at (notBelowName dn)
+                       (varsOf is ++ [Free vy] ++ varsOf is ++ [Free vy])
+       in (lamOver is (Lam (Ident "y") (familyAt (varsOf is)) (close vy result)), n2)
+
+    -- | One per constructor: @λ Δ . λ IHs . ‹the tuple›@, with the component for
+    -- each recursive argument given by that argument's __Step__ lemma applied to
+    -- its own inductive hypothesis — (64), with every @Φ@ empty.
+    --
+    -- **The Step lemma is written inline and not generated under a name.** It is
+    -- used exactly once, here, so a global would reserve a name per recursive
+    -- argument of every constructor and buy nothing.
+    diagMethod mt c n =
+      let args        = constructorArguments c
+          recs        = recursivesOf c
+          (ihs, n1)   = each (\_ m -> fresh m) n recs
+          target      = appliedAt c args
+          tis         = constructorIndices c
+          (comps, n2) = each (stepAt c args target tis) n1
+                          (zip [0 ..] (zip ihs recs))
+          compTys     = [ at (notBelowEqName dn)
+                            (tis ++ [target] ++ is ++ [Free (entryVar e)])
+                        | (e, is) <- recs
+                        ]
+          body        = tupleOf compTys comps
+          wrapped     = foldr bindIH body (zip ihs recs)
+          bindIH (h, (e, is)) acc =
+            Lam (Ident "ih") (foldl App mt (is ++ [Free (entryVar e)])) (close h acc)
+       in (lamOver args wrapped, n2)
+
+    -- | The proof of a right-nested @And@, matching 'conjoin' level for level.
+    tupleOf tys prfs = case (tys, prfs) of
+      ([],     _)      -> unitProof dl
+      ([_],    [p])    -> p
+      (t : ts, p : qs) -> bothAt dl t (conjoin ts) p (tupleOf ts qs)
+      _                -> unitProof dl
+
+    -- ----------------------------------------------------------------------
+    -- The Step lemma, (63)–(68)
+    -- ----------------------------------------------------------------------
+
+    -- | @stepij@ applied at @b := xⱼ@ and then to its inductive hypothesis,
+    -- which is the only place it is ever used.
+    --
+    -- Its statement is (63): if the constructor's @j@-th recursive argument is
+    -- not a proper subterm of @b@, the whole application is neither a proper
+    -- subterm of @b@ nor equal to it. It is proved by eliminating @b@.
+    stepAt c args target tis (q, (ihv, (e, is))) n =
+      let (mt, n1) = stepMotive c args target tis e is n
+          (ms, n2) = each (stepFor q c args target tis e is mt) n1 cs
+       in ( App (Eliminate dn levels paramVars mt ms is (Free (entryVar e))) (Free ihv)
+          , n2
+          )
+
+    -- @λ j̄ b . NotBelowD ī_a a j̄ b -> NotBelowEqD ū_c (c Δ) j̄ b@
+    stepMotive _ _ target tis e is n =
+      let (js, n1) = freshen n idx
+          (vb, n2) = fresh n1
+          (vh, n3) = fresh n2
+          prem     = at (notBelowName dn)
+                       (is ++ [Free (entryVar e)] ++ varsOf js ++ [Free vb])
+          concl    = at (notBelowEqName dn) (tis ++ [target] ++ varsOf js ++ [Free vb])
+       in ( lamOver js (Lam (Ident "b") (familyAt (varsOf js)) (close vb
+              (Pi (Ident "H") prem (close vh concl))))
+          , n3
+          )
+
+    -- | One method of that elimination, per constructor @c'@ of @b@ — (65), and
+    -- its two halves are the paper's @α@ of (67) and @β@ of (68).
+    --
+    -- @H@ says @xⱼ@ is not a proper subterm of @c' Δ'@, which /reduces/ to one
+    -- @xⱼ ≰ x'_q@ per recursive argument of @c'@; the goal reduces the same way
+    -- with @c Δ@ in place of @xⱼ@. So @α@ is that tuple again, each component
+    -- being the inner inductive hypothesis fed the matching half of @H@.
+    stepFor q c args target tis e is mt c' n =
+      let (args', n1) = freshen n (constructorArguments c')
+          recs'       = recursivesAmong args'
+          (ihs', n2)  = each (\_ m -> fresh m) n1 recs'
+          target'     = appliedAt c' args'
+          tis'        = indicesAt c' args'
+          (vH, n3)    = fresh n2
+          aTy         = at (notBelowName dn) (tis ++ [target] ++ tis' ++ [target'])
+          bTy         = at (notEqName dn)    (tis ++ [target] ++ tis' ++ [target'])
+          hTy         = at (notBelowName dn)
+                          (is ++ [Free (entryVar e)] ++ tis' ++ [target'])
+          belowSides  = [ (at (notBelowName dn) (lhs ++ rhs e' is')
+                          , at (notEqName dn)   (lhs ++ rhs e' is'))
+                        | (e', is') <- recs'
+                        ]
+          lhs         = is ++ [Free (entryVar e)]
+          rhs e' is'  = is' ++ [Free (entryVar e')]
+          hParts      = [ at (notBelowEqName dn) (lhs ++ rhs e' is') | (e', is') <- recs' ]
+          aParts      = [ at (notBelowEqName dn) (tis ++ [target] ++ rhs e' is')
+                        | (e', is') <- recs'
+                        ]
+          (alpha, n4) = each (stepBelow (Free vH) hParts belowSides) n3
+                          (zip [0 ..] ihs')
+          (beta,  n5) = stepApart q c args target tis e is c' args' recs'
+                          (Free vH) hParts n4
+       in ( lamOver args' (foldr bindIH
+              (Lam (Ident "H") hTy (close vH
+                 (bothAt dl aTy bTy (tupleOf aParts alpha) beta)))
+              (zip ihs' recs'))
+          , n5
+          )
+      where
+        bindIH (h, (e', is')) acc =
+          Lam (Ident "ih") (foldl App mt (is' ++ [Free (entryVar e')])) (close h acc)
+
+    -- @αq = ihq (π₁ (Hq))@.
+    stepBelow h hParts belowSides (q, ihv) n =
+      let (part, n1) = componentOf hParts q h n
+          (bl, bq)   = belowSides !! q
+          (left, n2) = andFirst dl bl bq part n1
+       in (App (Free ihv) left, n2)
+
+    -- | The @q@-th component of a right-nested @And@ whose conjuncts are @tys@.
+    componentOf tys q t n = go tys q t n
+      where
+        go [_]        _ term m = (term, m)
+        go (a : rest) 0 term m = andFirst dl a (conjoin rest) term m
+        go (a : rest) k term m =
+          let (t', m1) = andSecond dl a (conjoin rest) term m
+           in go rest (k - 1) t' m1
+        go []         _ term m = (term, m)
+
+    -- | @β@ of (68): the two applications cannot be equal.
+    --
+    -- Off the diagonal the telescopic no-confusion lemma /is/ the proof — its
+    -- family reduces to @Empty@ for two different constructors, so the lemma
+    -- applied to the chain already has the type wanted.
+    --
+    -- **On the diagonal it is the paper's \"it suffices to consider the case
+    -- where @x̄ = x̄'@\", and that is a second chain.** No-confusion turns the
+    -- chain between the two applications into the chain between their
+    -- /arguments/; eliminating that one down to its diagonal makes @Δ'@ into
+    -- @Δ@, and then @H@'s own @j@-th half says @xⱼ@ is not equal to itself,
+    -- which reflexivity contradicts.
+    --
+    -- **The argument chain's equation for @xⱼ@ cannot simply be handed over.**
+    -- It transports along an /argument/\'s equation — motive @λ z . D p̄ v̄ⱼ[z]@ —
+    -- where @≢@\'s own chain transports along an /index/\'s, and the two are the
+    -- same term only when @v̄ⱼ@ is a variable. Eliminating is what makes them
+    -- agree, by making both sides one.
+    stepApart q c args target tis e is c' args' recs' h hParts n
+      | constructorName c' /= constructorName c =
+          let (vz, n1)  = fresh n
+              theta     = idx ++ [Hypothesis vz (Ident "x") (familyAt (varsOf idx))]
+              (hs0, n2) = stations dl theta (indicesAt c' args' ++ [appliedAt c' args']) n1
+              hs        = map (rewriteStated (zip (map entryVar theta) (tis ++ [target]))) hs0
+              pay       = foldl App (Global telLemName levels)
+                            (paramVars ++ tis ++ [target]
+                               ++ indicesAt c' args' ++ [appliedAt c' args']
+                               ++ map (Free . statedProof) hs)
+           in (lamsOver dl hs pay, n2)
+      | otherwise =
+          let (vz, n1)   = fresh n
+              theta      = idx ++ [Hypothesis vz (Ident "x") (familyAt (varsOf idx))]
+              rightSide  = indicesAt c' args' ++ [appliedAt c' args']
+              (hs0, n2)  = stations dl theta rightSide n1
+              hs         = map (rewriteStated (zip (map entryVar theta) (tis ++ [target]))) hs0
+              pay        = foldl App (Global telLemName levels)
+                             (paramVars ++ tis ++ [target] ++ rightSide
+                                ++ map (Free . statedProof) hs)
+              (argHs, n3) = stations dl args (varsOf args') n2
+              (part, n4)  = componentOf hParts q h n3
+              (ne,   n5)  = andSecond dl
+                              (at (notBelowName dn) (lhs ++ rhsAt q))
+                              (at (notEqName dn)    (lhs ++ rhsAt q))
+                              part n4
+              (apart, n6) = chainProof (apartChain args e is) n5
+              applied     = foldl App apart
+                              (varsOf args ++ varsOf args'
+                                 ++ map (Free . statedProof) argHs ++ [ne])
+              (body, n7)  = unpackChain dl argHs (emptyType dl) pay applied n6
+           in (lamsOver dl hs body, n7)
+      where
+        lhs      = is ++ [Free (entryVar e)]
+        rhsAt k  = case drop k recs' of
+                     ((e', is') : _) -> is' ++ [Free (entryVar e')]
+                     []              -> []
+        -- **On the diagonal the two argument telescopes are the same**, so the
+        -- Step lemma's own position @q@ is also the position of @H@'s half about
+        -- it. Off the diagonal this function is not reached.
+
+    -- | @∀ Δ Δ' ⟨the argument chain⟩ -> xⱼ ≢ x'ⱼ -> Empty@ — the chain that
+    -- makes @β@'s diagonal go through, eliminated by
+    -- 'Thena.Global.Generate.chainProof'.
+    apartChain args e is =
+      Chain
+        { chainLevel     = dl
+        , chainTelescope = args
+        , chainGoal      = \ls rs ->
+            Pi (Ident "ne") (at (notEqName dn) (sidesAt ls ++ sidesAt rs))
+               -- Nothing of @Empty@ mentions the binder, so any variable
+               -- closes it; @e@'s is one that certainly exists.
+               (close (entryVar e) (emptyType dl))
+        , chainDiagonal  = \shared m ->
+            let (vz, m1)  = fresh m
+                theta     = idx ++ [Hypothesis vz (Ident "x") (familyAt (varsOf idx))]
+                diag      = sidesAt shared
+                (hs0, m2) = stations dl theta diag m1
+                hs        = map (rewriteStated (zip (map entryVar theta) diag)) hs0
+                (nev, m3) = fresh m2
+             in ( Lam (Ident "ne") (at (notEqName dn) (diag ++ diag)) (close nev
+                    (foldl App (Free nev) (curriedRefls dl hs)))
+                , m3
+                )
+        }
+      where
+        sidesAt ts =
+          let ss = zip (map entryVar args) ts
+           in map (rewriting ss) is ++ [rewriting ss (Free (entryVar e))]
+
+    -- ----------------------------------------------------------------------
+    -- noCycleD
+    -- ----------------------------------------------------------------------
+
+    -- | @∀ p̄ ī x j̄ y -> ⟨chain⟩ -> NotBelowD p̄ ī x j̄ y@ — the same chain the
+    -- telescopic no-confusion lemma takes, eliminated down to
+    -- @noCycleDiagD@.
+    cycleChain n =
+      let (vx, n1) = fresh n
+          theta    = idx ++ [Hypothesis vx (Ident "x") (familyAt (varsOf idx))]
+       in ( Chain
+              { chainLevel     = dl
+              , chainTelescope = theta
+              , chainGoal      = \ls rs -> at (notBelowName dn) (ls ++ rs)
+              , chainDiagonal  = \shared m -> (at (noCycleDiagName dn) shared, m)
+              }
+          , n1
+          )
+
+    cycleType n =
+      let (ch, n1) = cycleChain n
+          (t,  n2) = chainGoalType ch n1
+       in (piOver ps t, n2)
+
+    cycleBody n =
+      let (ch, n1) = cycleChain n
+          (b,  n2) = chainProof ch n1
+       in (lamOver ps b, n2)

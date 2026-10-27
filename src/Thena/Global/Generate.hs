@@ -46,6 +46,8 @@ module Thena.Global.Generate
   , unitType
   , unitProof
   , emptyType
+  , andFirst
+  , andSecond
   , transportAt
   , packType
   , packValue
@@ -60,6 +62,16 @@ module Thena.Global.Generate
   , truthInScope
   , falsityInScope
 
+    -- * Eliminating a chain down to its diagonal
+  , Chain (..)
+  , chainGoalType
+  , chainProof
+  , retypeIn
+  , rewriteStated
+  , curriedRefls
+  , unpackChain
+  , chainIsFlat
+
     -- * Small helpers
   , mentionsAnEarlierEntry
   , varsOf
@@ -68,7 +80,7 @@ module Thena.Global.Generate
   ) where
 
 import Thena.Core.Level (Level (..))
-import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
+import Thena.Core.Context (Context, Entry (..), entryType, entryVar, lamOver, piOver)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -449,6 +461,35 @@ secondOf dl a b p n =
           [] p
       , n4 )
 
+-- | @elim And (A B) (λ _ . A) ((λ a b . a)) () c@ — the first projection, built
+-- rather than named for 'firstOf'\'s reason: the prelude\'s projections are
+-- /definitions/ and what is generated here depends on its constructors alone.
+andFirst :: Level -> Core -> Core -> Core -> Int -> (Core, Int)
+andFirst dl a b p n =
+  let (zv, n1) = fresh n
+      (xv, n2) = fresh n1
+      (yv, n3) = fresh n2
+   in ( Eliminate (GlobalName "And") [dl, dl] [a, b]
+          (Lam (Ident "c") (andAt dl a b) (close zv a))
+          [ Lam (Ident "x") a (close xv
+              (Lam (Ident "y") b (close yv (Free xv)))) ]
+          [] p
+      , n3 )
+
+-- | @elim And (A B) (λ _ . B) ((λ a b . b)) () c@ — the second.
+andSecond :: Level -> Core -> Core -> Core -> Int -> (Core, Int)
+andSecond dl a b p n =
+  let (zv, n1) = fresh n
+      (xv, n2) = fresh n1
+      (yv, n3) = fresh n2
+   in ( Eliminate (GlobalName "And") [dl, dl] [a, b]
+          (Lam (Ident "c") (andAt dl a b) (close zv b))
+          [ Lam (Ident "x") a (close xv
+              (Lam (Ident "y") b (close yv (Free yv)))) ]
+          [] p
+      , n3 )
+
+
 -- @elim Eq (A) (λ u v w . M u -> M v) ((λ a z . z)) (x, y) e@ applied to
 -- @p@ — the prelude's @transport@, built inline for 'firstOf'\'s reason.
 --
@@ -512,6 +553,249 @@ telescopicChain :: Level -> Context -> [Core] -> Core -> Int -> (Core, Int)
 telescopicChain dl tel rs result n =
   let (hs, n1) = stations dl tel rs n
    in (chained dl hs result, n1)
+
+-- --------------------------------------------------------------------------
+-- Eliminating a chain down to its diagonal (MS9 phase 220)
+-- --------------------------------------------------------------------------
+
+-- | A chain to be eliminated: one telescope, two instantiations of it, and what
+-- is to be proved about the two.
+--
+-- **Three generated lemmas state a chain and then eliminate it, and this is the
+-- one walk all three go through.** The telescopic no-confusion lemma eliminates
+-- the chain between @(ī; x)@ and @(j̄; y)@; @noCycleD@ eliminates the same chain
+-- down to \"nothing is below itself\"; and the @Step@ lemma\'s diagonal case
+-- eliminates the chain between a constructor\'s argument telescope and a second
+-- copy of it. A second copy of the walk would be a second thing to keep in step,
+-- and the failure mode is silent — a transport left out of one copy still
+-- typechecks.
+--
+-- **Both sides are generalised at every step, not just the one being
+-- eliminated**: a later entry\'s type mentions the entry the step is about, so it
+-- cannot stay in scope across the elimination. The motive re-quantifies the rest
+-- of the telescope on both sides, along with the equations after this one, and
+-- the J is then applied to exactly those.
+data Chain = Chain
+  { chainLevel     :: Level
+    -- ^ the level every equation is stated at
+  , chainTelescope :: Context
+    -- ^ the telescope both sides instantiate
+  , chainGoal      :: [Core] -> [Core] -> Core
+    -- ^ what is to be proved, at the left and right instantiations
+  , chainDiagonal  :: [Core] -> Int -> (Core, Int)
+    -- ^ its inhabitant where the two sides have become one
+  }
+
+-- | @∀ ⟨Θ⟩ ⟨Θ\'⟩ ⟨the chain between them⟩ -> goal@, which 'chainProof' inhabits.
+chainGoalType :: Chain -> Int -> (Core, Int)
+chainGoalType ch = goalFrom ch [] [] (chainTelescope ch)
+
+-- | The nested J, one step per entry of the telescope, ending in the diagonal.
+chainProof :: Chain -> Int -> (Core, Int)
+chainProof ch = proofFrom ch [] (chainTelescope ch)
+
+-- | The goal, with some positions already unified and one supplied.
+--
+-- @shared@ are positions J has already unified, so both sides carry the same
+-- term and neither needs an equation. @supplied@ are positions whose two sides
+-- /and whose equation/ are given rather than bound — that is what a step\'s
+-- motive does with @u@, @v@ and @w@, and it is why the transports in the
+-- equations after it come out along @w@ rather than along a binder of this type.
+-- @remaining@ is quantified fresh on both sides.
+--
+-- **The chain is generated over the whole telescope and the supplied positions
+-- are then substituted out**, not generated over the tail: a later equation is
+-- stated after transporting along the earlier ones, and an earlier position left
+-- out of the walk is an earlier transport left out of the type.
+goalFrom :: Chain -> [Core] -> [(Core, Core, Core)] -> Context -> Int -> (Core, Int)
+goalFrom ch shared supplied remaining n =
+  let dl           = chainLevel ch
+      givenEntries = [ Hypothesis v i t | (v, i, t) <- suppliedEntries ]
+      (lsCtx, n1)  = freshen n remaining
+      (rsCtx, n2)  = freshen n1 remaining
+      lsCtx'       = retypeIn theta (shared ++ suppliedLefts)  lsCtx
+      rsCtx'       = retypeIn theta (shared ++ suppliedRights) rsCtx
+      lefts        = shared ++ suppliedLefts  ++ varsOf lsCtx'
+      rights       = shared ++ suppliedRights ++ varsOf rsCtx'
+      (hs, n3)     = stations dl (givenEntries ++ lsCtx')
+                       (suppliedRights ++ varsOf rsCtx') n2
+      given        = [ (statedProof h, pr) | (h, (_, _, pr)) <- zip hs supplied ]
+      bound        = drop (length supplied) hs
+   in ( piOver lsCtx' (piOver rsCtx'
+          (rewriting given (chained dl bound (chainGoal ch lefts rights))))
+      , n3
+      )
+  where
+    theta          = chainTelescope ch
+    suppliedLefts  = [ l | (l, _, _) <- supplied ]
+    suppliedRights = [ r | (_, r, _) <- supplied ]
+    -- A supplied position's left side is a variable the caller bound, so it can
+    -- stand as the telescope entry 'stations' states its equation from.
+    suppliedEntries =
+      [ (v, i, t)
+      | ((Free v, _, _), Hypothesis _ i t) <- zip supplied entries ]
+    entries = retypeIn theta shared (take (length supplied) (drop (length shared) theta))
+
+-- | The nested J itself. Each step binds the two sides of one position, the
+-- rest of the telescope on both sides, and every equation of the chain; it
+-- eliminates this position's equation and applies what comes back to the rest.
+proofFrom :: Chain -> [Core] -> Context -> Int -> (Core, Int)
+proofFrom ch shared remaining n = case remaining of
+  []     -> chainDiagonal ch shared n
+  e : es ->
+    let dl          = chainLevel ch
+        theta       = chainTelescope ch
+        a0          = case retypeIn theta shared [e] of
+                        (e' : _) -> entryType e'
+                        []       -> entryType e
+        (lsCtx, n1) = freshen n es
+        (rsCtx, n2) = freshen n1 es
+        (vl, n3)    = fresh n2
+        (vr, n4)    = fresh n3
+        lsCtx'      = retypeIn theta (shared ++ [Free vl]) lsCtx
+        rsCtx'      = retypeIn theta (shared ++ [Free vr]) rsCtx
+        (hs, n5)    = stations dl (Hypothesis vl (Ident "u") a0 : lsCtx')
+                        (Free vr : varsOf rsCtx') n4
+        (q0, rest)  = case hs of
+                        (h : more) -> (statedProof h, more)
+                        []         -> (vl, [])
+        (mt, n6)    = stepMotive ch shared es a0 n5
+        (mh, n7)    = stepMethod ch shared es a0 n6
+        applied     = foldl App
+                        (Eliminate (GlobalName "Eq") [dl] [a0] mt [mh]
+                           [Free vl, Free vr] (Free q0))
+                        (varsOf lsCtx' ++ varsOf rsCtx'
+                           ++ map (Free . statedProof) rest)
+     in ( Lam (Ident "u") a0 (close vl
+            (lamOver lsCtx'
+              (Lam (Ident "v") a0 (close vr
+                (lamOver rsCtx' (lamsOver dl hs applied))))))
+        , n7
+        )
+
+-- | @λ u v w . ‹the rest, with this position's equation supplied as w›@.
+stepMotive :: Chain -> [Core] -> Context -> Core -> Int -> (Core, Int)
+stepMotive ch shared es a0 n =
+  let dl       = chainLevel ch
+      (uv, n1) = fresh n
+      (vv, n2) = fresh n1
+      (wv, n3) = fresh n2
+      (t,  n4) = goalFrom ch shared [(Free uv, Free vv, Free wv)] es n3
+   in ( Lam (Ident "u") a0 (close uv
+          (Lam (Ident "v") a0 (close vv
+            (Lam (Ident "w") (eqAt dl a0 (Free uv) (Free vv)) (close wv t)))))
+      , n4
+      )
+
+-- | @λ c . ‹the rest at one shared position more›@ — the only method J leaves,
+-- and the step that makes the recursion finite.
+stepMethod :: Chain -> [Core] -> Context -> Core -> Int -> (Core, Int)
+stepMethod ch shared es a0 n =
+  let (cv, n1) = fresh n
+      (t,  n2) = proofFrom ch (shared ++ [Free cv]) es n1
+   in (Lam (Ident "c") a0 (close cv t), n2)
+
+-- | The entries' types, with the positions already decided replaced by the
+-- terms that decided them.
+--
+-- **The positions are counted from the front of the telescope and nowhere
+-- else.** An entry's type can only mention entries before it, so the terms that
+-- have decided the first @length ts@ positions are the whole of what any later
+-- entry needs substituting — and every caller here holds exactly that prefix.
+retypeIn :: Context -> [Core] -> Context -> Context
+retypeIn theta ts ctx = map rewriteEntry ctx
+  where
+    ss = zip (map entryVar (take (length ts) theta)) ts
+    rewriteEntry e = case e of
+      Hypothesis v i t   -> Hypothesis v i (rewriting ss t)
+      Definition v i s t -> Definition v i (rewriting ss s) (rewriting ss t)
+
+-- | One station with its three terms rewritten.
+--
+-- **This is how a chain stated over a telescope is read at terms that are not
+-- its variables.** 'stations' takes its left sides from the telescope's own
+-- binders, so a caller that needs the chain between two /applications/ builds it
+-- generically and substitutes afterwards. The result is what the generated
+-- relation reduces to when applied to those terms, because the relation's own
+-- body is the generic chain under the same binders.
+rewriteStated :: [(Var, Core)] -> Stated -> Stated
+rewriteStated ss h = h
+  { statedType  = rewriting ss (statedType h)
+  , statedLeft  = rewriting ss (statedLeft h)
+  , statedRight = rewriting ss (statedRight h)
+  }
+
+-- | The chain's own proof where the two sides coincide, one @refl@ per station,
+-- curried.
+--
+-- **Each @refl@ is substituted into the stations after it as it is produced**,
+-- which is what makes the later ones typecheck: the transport an equation was
+-- stated after contracts once the proof it travels along is reflexivity. It is
+-- the same move 'package' makes, in the curried shape.
+curriedRefls :: Level -> [Stated] -> [Core]
+curriedRefls dl = go []
+  where
+    go _  []       = []
+    go ss (h : hs) =
+      let p = rewriting ss (reflAt dl (statedType h) (statedLeft h))
+       in p : go (ss ++ [(statedProof h, p)]) hs
+
+-- | Bind each station's proof out of a package of them, with one constant-motive
+-- elimination per station, and run @body@ underneath.
+--
+-- **The pair each station is held in is decided the way 'package' decides it**,
+-- by asking whether the rest of the package mentions this station's proof, and
+-- from the same @package@ call — so an unpacking cannot disagree with the
+-- packing it is reading.
+unpackChain :: Level -> [Stated] -> Core -> Core -> Core -> Int -> (Core, Int)
+unpackChain dl hs goal pkg body n = case hs of
+  []      -> (body, n)
+  [h]     -> (rewriting [(statedProof h, pkg)] body, n)
+  h : rest ->
+    let eq          = eqAt dl (statedType h) (statedLeft h) (statedRight h)
+        qv          = statedProof h
+        restTy      = fst (package dl rest)
+        dependent   = qv `elem` freeVars restTy
+        binder      = Lam (Ident "q") eq (close qv restTy)
+        pairTy      = if dependent then dpairAt dl eq binder else andAt dl eq restTy
+        sndTy       = if dependent then App binder (Free qv) else restTy
+        (rv, n1)    = fresh n
+        (pv, n2)    = fresh n1
+        (inner, n3) = unpackChain dl rest goal (Free rv) body n2
+        mot         = Lam (Ident "p") pairTy (close pv goal)
+        meth        = Lam (Ident "q") eq (close qv
+                        (Lam (Ident "r") sndTy (close rv inner)))
+        former      = if dependent then "DPair" else "And"
+        args        = if dependent then [eq, binder] else [eq, restTy]
+     in (Eliminate (GlobalName former) [dl, dl] args mot [meth] [] pkg, n3)
+
+-- | Is the chain over this telescope flat — no station's left side mentioning
+-- an entry that comes after its own?
+--
+-- **That is what a package of two entries or more looks like from outside.**
+-- Where an entry reaches back into the chain /and/ a later entry reaches back to
+-- it, 'stations' packages the two together, transports the package, and reads
+-- each component back out by projection — so the earlier station's left side is
+-- a projection out of a pair that holds the later entries.
+--
+-- **It is read off the real walk and not predicted from the telescope**, which
+-- is the lesson of @.claude\/HAZARDS.md@, /a predicate over the input stands in
+-- for a fact about the output/: @vcons@'s @as@ reaches back to @n@ and nothing
+-- reaches back to @as@, so its package holds one entry and the chain is flat,
+-- which no question about the telescope alone answers.
+--
+-- **What it gates is the nested J and nothing else** — see 'Chain'. A
+-- projection's own type mentions the /bound/ proof variable of the equation the
+-- package was transported along, so a step's motive and the type the step's
+-- method actually has are not convertible: the motive carries that variable and
+-- the method has eliminated it.
+chainIsFlat :: Level -> Context -> Int -> Bool
+chainIsFlat dl tel n0 =
+  let (hs, _) = stations dl tel (varsOf tel) n0
+   in all ok (zip [0 ..] hs)
+  where
+    ok (k, h) =
+      not (any (`elem` freeVars (statedLeft h)) (map entryVar (drop (k + 1) tel)))
 
 -- --------------------------------------------------------------------------
 -- Preconditions

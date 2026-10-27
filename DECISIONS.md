@@ -2120,6 +2120,41 @@ precondition and is skipped on its own**: it needs `Unit` where a constructor ha
 recursive argument, and a datatype that cannot have it keeps its no-confusion lemma
 regardless. It costs about 4% of the time it takes to load the example corpus, measured.
 
+**And the acyclicity theorem itself: `noCycleDiagD` and `noCycleD`.** The first says no term
+is structurally below itself; the second says nothing equal to a term is below it either,
+and it is what a *cycle* is discharged with. For `N`:
+
+```
+noCycleDiagN : ∀ (n : N) -> NotBelowN n n
+noCycleN     : ∀ (x : N) (y : N) -> Eq N x y -> NotBelowN x y
+```
+
+So the user's correctly omitted case — the one where a split leaves `n ≃ s n` behind
+because the case cannot arise — is discharged by
+
+```
+noSelfN : ∀ (n : N) -> Eq N n (s n) -> Empty
+noSelfN = \ n e -> andRight (NotBelowN n n) (NotEqN n n) (noCycleN n (s n) e) (refl N n)
+```
+
+**For an indexed family the equation is the chain**, so `noCycleD` takes it curried and the
+contradiction is reached by supplying reflexivity, which makes every transport contract. No
+appeal to UIP anywhere, and no heterogeneous equality.
+
+`noCycleDiagD` carries the appendix's `Step` lemma **inline** at each recursive argument of
+each constructor, rather than under a name of its own: each is used exactly once, so a name
+would reserve one per recursive argument of every constructor and buy nothing.
+
+**One shape of constructor telescope does not get these two**, and it is narrow: an
+argument that both reaches back to an earlier argument *and* is reached back to by a later
+one, so that the chain packages three or more arguments together and reads each back out by
+projection. The four relations above are generated regardless. `Nat`, `Vec`, `Fin`, a
+`Step` relation and every syntax type are unaffected.
+
+**The whole acyclicity bundle — six definitions per `data` — costs about 8% of the time it
+takes to load the example corpus**, and about 30% on the largest single development in it.
+Measured by generating and not generating, two runs each.
+
 **Two shapes are still refused, and both are a missing step of that chain rather than a
 missing equality.** An index whose type mentions an earlier index that was *abstracted
 outright* has no equation to transport along; and two mentioned indices that are themselves

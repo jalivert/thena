@@ -35,6 +35,7 @@ import Thena.Declared
   , eqNat
   , eqNatFin
   , eqNatVec
+  , eqNatVecSpan
   , eqStep
   , eqTapl
   , finDecl
@@ -53,6 +54,7 @@ tests =
     "Thena.Global.NoCycle"
     [ testGroup "the tuple computes the right case" reduceTests
     , testGroup "the appendix's construction, over what was generated" constructionTests
+    , testGroup "the cycle is discharged, from what was generated" cycleTests
     , testGroup "the kernel accepts what was generated" kernelTests
     , testGroup "its own precondition, and what each piece is for" guardTests
     ]
@@ -193,6 +195,106 @@ constructionTests =
         ]
   ]
 
+-- | @noCycleD@ itself, at four shapes: one recursive argument, the /second/ of
+-- two, an indexed family where the equation is a chain, and a family whose
+-- recursive argument sits at an index that is a term of an earlier argument.
+--
+-- **Each of these is the user's correctly omitted case.** @n ≃ s n@ is what a
+-- split leaves behind when a case cannot arise, and every line below turns one
+-- into @Empty@ using nothing but what the declaration generated.
+cycleTests :: [TestTree]
+cycleTests =
+  [ testCase "a term is not equal to its own successor" $
+      loads
+        [ "module CycleN where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "noSelfN : \8704 (n : N) (e : (Eq N n (s n) : Type\8320)) -> Empty"
+        , "noSelfN = \\ n e ->"
+        , "  andRight (NotBelowN n n) (NotEqN n n) (noCycleN n (s n) e) (refl N n)"
+        ]
+  , -- The tuple has one component per recursive argument, so reaching the
+    -- second is a projection past the first.
+    testCase "nor to a node that has it on the right" $
+      loads
+        [ "module CycleTree where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "data Tree : Type\8320 where"
+        , "  leaf : N -> Tree"
+        , "  node : Tree -> Tree -> Tree"
+        , ""
+        , "noSelfTree : \8704 (l : Tree) (r : Tree)"
+        , "               (e : (Eq Tree r (node l r) : Type\8320))"
+        , "          -> Empty"
+        , "noSelfTree = \\ l r e ->"
+        , "  andRight (NotBelowTree r r) (NotEqTree r r)"
+        , "    (andRight (NotBelowEqTree r l) (NotBelowEqTree r r)"
+        , "       (noCycleTree r (node l r) e))"
+        , "    (refl Tree r)"
+        ]
+  , -- **The equation is a chain here**, the index equation and then the element
+    -- equation transported along it, and the contradiction is reached by
+    -- supplying reflexivity for both.
+    testCase "an indexed family, where the equation is a chain" $
+      loads
+        [ "module CycleEv where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "data Ev : N -> Type\8320 where"
+        , "  evz : Ev z"
+        , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+        , ""
+        , "noSelfEv : \8704 (n : N) (x : Ev n)"
+        , "             (q : (Eq N n (s (s n)) : Type\8320))"
+        , "             (r : (Eq (Ev (s (s n)))"
+        , "                     (transport N (\\ w -> Ev w) n (s (s n)) q x)"
+        , "                     (evs n x) : Type\8320))"
+        , "        -> Empty"
+        , "noSelfEv = \\ n x q r ->"
+        , "  andRight (NotBelowEv n x n x) (NotEqEv n x n x)"
+        , "    (noCycleEv n x (s (s n)) (evs n x) q r)"
+        , "    (refl N n) (refl (Ev n) x)"
+        ]
+  , -- **The shape the easy route cannot do.** @tw@'s recursive argument sits at
+    -- @s n@, a /term/ in an earlier argument, so no-confusion's equation for it
+    -- transports along an argument where @≢@'s own chain transports along an
+    -- index; the two are the same term only when the index is a variable, and
+    -- the Step lemma's diagonal has to eliminate the argument chain to make
+    -- them agree.
+    testCase "and one whose recursive argument sits at a term of an earlier" $
+      loads
+        [ "module CycleT where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "data T : N -> Type\8320 where"
+        , "  tz : T z"
+        , "  tw : \8704 (n : N) (t : T (s n)) -> T n"
+        , ""
+        , "noSelfT : \8704 (n : N) (t : T (s n))"
+        , "            (q : (Eq N (s n) n : Type\8320))"
+        , "            (r : (Eq (T n) (transport N (\\ w -> T w) (s n) n q t)"
+        , "                    (tw n t) : Type\8320))"
+        , "       -> Empty"
+        , "noSelfT = \\ n t q r ->"
+        , "  andRight (NotBelowT (s n) t (s n) t) (NotEqT (s n) t (s n) t)"
+        , "    (noCycleT (s n) t n (tw n t) q r)"
+        , "    (refl N (s n)) (refl (T (s n)) t)"
+        ]
+  ]
+
 -- | Load a surface module and insist it went in.
 loads :: [String] -> Assertion
 loads ls = do
@@ -237,6 +339,27 @@ kernelTests =
   , testCase "a dependent index telescope" (certified preludeBelowEnv "BelowBelow")
   , testCase "and its relations, where the index travels with the element" $
       certified preludeBelowEnv "NotBelowEqBelow"
+
+    -- ------------------------------------------------------------------
+    -- THE NESTED J (MS9 phase 220)
+    -- ------------------------------------------------------------------
+    --
+    -- @noCycleDiagD@ is the induction that says no term is below itself, with
+    -- the @Step@ lemma of (63)–(68) written inline at each recursive argument;
+    -- @noCycleD@ eliminates the chain between two elements down to it.
+  , testCase "Nat's diagonal, and the cycle lemma over it" $ do
+      certified eqNat "noCycleDiagNat"
+      certified eqNat "noCycleNat"
+  , testCase "Term's, where one constructor has three recursive arguments" $ do
+      certified eqTapl "noCycleDiagTerm"
+      certified eqTapl "noCycleTerm"
+  , testCase "Fin's, one index and a dependent argument telescope" $
+      certified eqNatFin "noCycleFin"
+  , testCase "Vec's, with a parameter" (certified eqNatVec "noCycleVec")
+  , testCase "Step's, two indices and a recursive premise at its own" $
+      certified eqStep "noCycleStep"
+  , testCase "and a dependent index telescope" $
+      certified preludeBelowEnv "noCycleBelow"
   ]
 
 certified :: GlobalEnv -> String -> Assertion
@@ -293,6 +416,18 @@ guardTests =
       has eqNat "BelowEq" @?= False
   , testCase "but its no-confusion lemma is generated" $
       has eqNat "noConfusionEq" @?= True
+  , -- **The one shape the nested J is withheld for, and it is narrow.**
+    -- @span@'s @as@ reaches back to @n@ and @e@ reaches back to @as@, so the
+    -- chain packages three arguments together and reads each back out by
+    -- projection — and a projection's type mentions the /bound/ proof of the
+    -- equation the package was transported along. A step of the J has
+    -- eliminated that proof and its motive still carries it, so the two are not
+    -- convertible. 'Thena.Global.Generate.chainIsFlat' asks the question of the
+    -- walk's own output.
+    testCase "a chain that packages three arguments: no nested J" $
+      has eqNatVecSpan "noCycleSpan" @?= False
+  , testCase "but the four relations are there regardless" $
+      has eqNatVecSpan "NotBelowEqSpan" @?= True
   , -- One namespace, shared with generated names (§3.6).
     testCase "a user definition of the tuple's name refuses the declaration" $
       refuses "BelowN"
