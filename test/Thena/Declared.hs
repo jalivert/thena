@@ -17,6 +17,8 @@ module Thena.Declared
   , finDecl
   , packDecl
   , spanDecl
+  , allDecl
+  , afterDecl
   , emptyDecl
   , eqDecl
   , unitDecl
@@ -39,6 +41,8 @@ module Thena.Declared
   , eqNatFinPackCounter
   , eqNatVecSpan
   , eqNatVecSpanCounter
+  , eqNatVecAll
+  , eqNatVecAfter
   , eqNatCounter
   , eqTapl
   , eqTaplCounter
@@ -52,6 +56,7 @@ import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
 
 natDecl, vecDecl, finDecl, packDecl, spanDecl, emptyDecl :: String
+allDecl, afterDecl :: String
 natDecl = "Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 vecDecl =
   "Vec (A : Type\8320) : Nat -> Type\8320 \
@@ -101,6 +106,34 @@ spanDecl =
   "Span (A : Type\8320) : Type\8320 \
   \where { span : forall (n : Nat) (as : Vec A n) (a : A) \
   \(e : Eq {0} (Vec A n) as as) -> Span A }"
+
+-- | 'spanDecl'\'s gap, over a family with an INDEX TELESCOPE and a RECURSIVE
+-- argument (MS9 phase 223) — @examples\/vector-families.thena@\'s @All@, which
+-- is where the gap was found.
+--
+-- **@Span@ does not cover it.** @Span@ has no recursive argument, so acyclicity
+-- for it is trivial and the nested J has nothing to cross; @acons@ has one, and
+-- its own argument @ps@ is what the acyclicity equipment is about. The package
+-- is @as; ps@ with @a@ interior to it, and before phase 223 that withheld
+-- @noCycleAll@ and with it the cycle transition for every family of the shape.
+allDecl =
+  "All (A : Type\8320) : forall (n : Nat) -> Vec A n -> Type\8320 \
+  \where { anil : All A zero (nil A) \
+  \; acons : forall (n : Nat) (as : Vec A n) (a : A) (ps : All A n as) \
+  \-> All A (succ n) (cons A n a as) }"
+
+-- | An index AFTER a dependent one (MS9 phase 223).
+--
+-- **The chain's package has to be moved by an equation stated after it was
+-- built.** @as@ reaches back to @n@ and the family\'s own element reaches back
+-- to @as@, so the two travel packaged; @m@ is quantified after them and the
+-- element mentions it, so the package must be transported along @m@\'s equation
+-- when the element is read out of it and not before. Every family of this shape
+-- had its declaration refused — @noConfusionAfter does not typecheck@ — until
+-- the package was moved lazily, one component at a time.
+afterDecl =
+  "After (A : Type\8320) : forall (n : Nat) -> Vec A n -> Nat -> Type\8320 \
+  \where { amk : forall (n : Nat) (as : Vec A n) (m : Nat) -> After A n as m }"
 
 -- | No constructors at all — the eliminator with no methods, which every other
 -- fixture has at least one of.
@@ -248,6 +281,15 @@ eqNatVecSpan = fst (declared (preludeDecls ++ [natDecl, vecDecl, spanDecl]))
 
 eqNatVecSpanCounter :: Int
 eqNatVecSpanCounter = snd (declared (preludeDecls ++ [natDecl, vecDecl, spanDecl]))
+
+-- | The prelude, @Nat@, @Vec@ and 'allDecl' — 'spanDecl'\'s interior argument
+-- over an indexed family with a recursive argument.
+eqNatVecAll :: GlobalEnv
+eqNatVecAll = fst (declared (preludeDecls ++ [natDecl, vecDecl, allDecl]))
+
+-- | The prelude, @Nat@, @Vec@ and 'afterDecl' — an index after a dependent one.
+eqNatVecAfter :: GlobalEnv
+eqNatVecAfter = fst (declared (preludeDecls ++ [natDecl, vecDecl, afterDecl]))
 
 -- | The prelude and then MS1's target language.
 eqTapl :: GlobalEnv

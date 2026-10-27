@@ -36,6 +36,8 @@ import Thena.Declared
   , eqNatFin
   , eqNatVec
   , eqNatVecSpan
+  , eqNatVecAll
+  , eqNatVecAfter
   , eqStep
   , eqTapl
   , finDecl
@@ -416,18 +418,32 @@ guardTests =
       has eqNat "BelowEq" @?= False
   , testCase "but its no-confusion lemma is generated" $
       has eqNat "noConfusionEq" @?= True
-  , -- **The one shape the nested J is withheld for, and it is narrow.**
-    -- @span@'s @as@ reaches back to @n@ and @e@ reaches back to @as@, so the
-    -- chain packages three arguments together and reads each back out by
-    -- projection — and a projection's type mentions the /bound/ proof of the
-    -- equation the package was transported along. A step of the J has
-    -- eliminated that proof and its motive still carries it, so the two are not
-    -- convertible. 'Thena.Global.Generate.chainIsFlat' asks the question of the
-    -- walk's own output.
-    testCase "a chain that packages three arguments: no nested J" $
-      has eqNatVecSpan "noCycleSpan" @?= False
-  , testCase "but the four relations are there regardless" $
+  , -- **The shape the nested J used to be withheld for, and it is not any
+    -- more** (MS9 phase 223). @span@'s @as@ reaches back to @n@ and @e@ reaches
+    -- back to @as@, so the two travel packaged and each component is read back
+    -- out by projection — and @a@ sits between them, interior to the package
+    -- and mentioned by nothing in it. The package holds the closure now and not
+    -- the span over it, so @a@'s own equation is stated where it belongs
+    -- instead of as a projection out of a pair transported along its
+    -- neighbour's proof.
+    testCase "a chain that packages a dependent argument: the nested J is there" $
+      has eqNatVecSpan "noCycleSpan" @?= True
+  , testCase "and the four relations are there as they always were" $
       has eqNatVecSpan "NotBelowEqSpan" @?= True
+  , -- **The same gap over an indexed family with a recursive argument**, which
+    -- @Span@ cannot show because acyclicity for a family with no recursive
+    -- argument is trivial. This is @examples\/vector-families.thena@'s @All@,
+    -- where the gap was found.
+    testCase "and over an indexed family whose recursive argument is in the package" $
+      has eqNatVecAll "noCycleAll" @?= True
+  , -- **An index after a dependent one refused the declaration itself** until
+    -- phase 223 — the package has to be moved along an equation stated after it
+    -- was built — so the no-confusion lemma is what this pins, the acyclicity
+    -- equipment coming after it.
+    testCase "an index after a dependent one: the no-confusion lemma is there" $
+      has eqNatVecAfter "noConfusionAfter" @?= True
+  , testCase "and so is the nested J over it" $
+      has eqNatVecAfter "noCycleAfter" @?= True
   , -- One namespace, shared with generated names (§3.6).
     testCase "a user definition of the tuple's name refuses the declaration" $
       refuses "BelowN"

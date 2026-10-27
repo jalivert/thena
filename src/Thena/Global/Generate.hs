@@ -70,7 +70,6 @@ module Thena.Global.Generate
   , rewriteStated
   , curriedRefls
   , unpackChain
-  , chainIsFlat
 
     -- * Small helpers
   , mentionsAnEarlierEntry
@@ -273,12 +272,12 @@ package dl (h : hs) =
 -- specialiser holds its equations as separate binders, so a lemma it calls
 -- must take them that way. One walk, two shapes, and they cannot drift.
 stations :: Level -> Context -> [Core] -> Int -> ([Stated], Int)
-stations dl args rs n0' = go [] Nothing args rs n0'
+stations dl args rs n0' = go [] [] args rs n0'
   where
     go _ _ []       _         n = ([], n)
     go _ _ (_ : _)  []        n = ([], n)
-    go hist carry (e : es) (r : rs') n =
-      let (ty, lhs, nextCarry, n1) = headOf hist carry e es r n
+    go hist flights (e : es) (r : rs') n =
+      let (ty, lhs, advance, n1) = headOf hist flights e es n
           (qv, n2) = fresh n1
           h = Stated
                 { statedEntry = e
@@ -291,8 +290,8 @@ stations dl args rs n0' = go [] Nothing args rs n0'
        in case es of
             [] -> ([h], n2)
             _  ->
-              let (carry', n3) = nextCarry qv n2
-                  (rest,   n4) = go (hist ++ [h]) carry' es rs' n3
+              let (flights', n3) = advance h n2
+                  (rest,     n4) = go (hist ++ [h]) flights' es rs' n3
                in (h : rest, n4)
 
     -- The type this argument's equation is stated at, its left side, and
@@ -320,16 +319,29 @@ stations dl args rs n0' = go [] Nothing args rs n0'
     -- construction is three transports. Packaging the suffix instead cost
     -- 6.3 MB of term for that one constructor and ten times the suite's
     -- running time, measured 2026-10-26.
-    headOf hist carry e es r n = case carry of
-      Just (p, inside@(e0 : _), done)
-        | entryVar e0 == entryVar e -> walking p inside done n
-      _ | null ownDeps              -> (entryType e, Free (entryVar e), keep, n)
-        | otherwise                 ->
-            let (p, done, n1) = foldl outward (packValue dl [] packed, [], n) mentioned
-             in walking p packed done n1
+    headOf hist flights e es n = case break heads flights of
+      (before, f : after) ->
+        let (ty, lhs, onward, n1) = walking f n
+         in (ty, lhs, continuing before after onward, n1)
+      _ | null ownDeps -> (entryType e, Free (entryVar e), keep, n)
+        | otherwise    ->
+            let (ty, lhs, onward, n1) =
+                  walking (packValue dl [] packed, packed, [], []) n
+             in (ty, lhs, continuing flights [] onward, n1)
       where
-        -- Nothing was built, so a package already in flight keeps flying.
-        keep _ nn = (carry, nn)
+        -- Which package in flight, if any, is waiting for this argument.
+        heads (_, e0 : _, _, _) = entryVar e0 == entryVar e
+        heads (_, [],     _, _) = False
+
+        -- What the next argument inherits: this argument's package keeps its
+        -- place in the queue, and is dropped once it has been walked out.
+        continuing before after onward h m =
+          let (mf, m1) = onward (statedProof h) m
+           in (before ++ maybe [] (: []) mf ++ after, m1)
+
+        -- Nothing was built for this argument, so the packages in flight keep
+        -- flying.
+        keep _ m = (flights, m)
 
         -- **Whether this argument moves at all is decided by its own type
         -- and nothing else.** Deciding it from the package instead was a
@@ -339,60 +351,128 @@ stations dl args rs n0' = go [] Nothing args rs n0'
         -- 6.3 MB this construction exists to avoid.
         ownDeps = [ h | h <- hist, mentions h (entryType e) ]
 
-        -- Every equation already stated about an argument that any member
-        -- of the package mentions. Reaching here with a package in flight
-        -- but not at its head means this argument is not in it, so none of
-        -- these was moved.
-        mentioned =
-          [ h | h <- hist, any (mentions h) (map entryType packed) ]
-
         mentions h t = entryVar (statedEntry h) `elem` freeVars t
 
-        -- This argument, and the arguments after it that have to travel
-        -- with it: the ones whose types reach back into the chain, taken as
-        -- a contiguous span so that one package is enough.
-        packed = e : take carried es
-        carried = case chain of
-          [] -> 0
-          _  -> maximum [ k | (k, x) <- zip [1 ..] es
-                            , entryVar x `elem` map entryVar chain ]
+        -- This argument, and the arguments that have to travel with it.
+        --
+        -- **Closed in both directions, and both directions are needed.** A
+        -- later argument whose type mentions a member cannot be moved on its
+        -- own, so it joins; and an argument that a member's type mentions and
+        -- that /itself/ moves joins too, because the member cannot be moved
+        -- while that one is still out of place. @Div@ in
+        -- @test\/Thena\/Declared.hs@ is the second direction: @as@ and @bs@
+        -- both reach back to @n@ and the element mentions both, so one package
+        -- holds all three. Closing downwards alone built two packages that
+        -- each claimed the element (MS9 phase 223).
+        --
+        -- **The package is the chain and not the telescope**, which is the
+        -- whole of why this is affordable. @extend-there-extend@ has seven
+        -- arguments and @i : extend-in(x : T ∈ Γ)@ mentions three of them,
+        -- none of which any later argument mentions, so its package holds one
+        -- thing and the construction is three transports. Packaging the suffix
+        -- instead cost 6.3 MB of term for that one constructor and ten times
+        -- the suite's running time, measured 2026-10-26.
+        --
+        -- **Taking the contiguous span over the closure was the defect of MS9
+        -- phase 220**, found 2026-10-27: an argument that sits between two
+        -- members but that no member mentions was dragged in, so its own
+        -- equation came out as a projection out of a pair transported along
+        -- its /neighbour's/ proof — a transport no step of the nested J
+        -- eliminates. A package with a hole in it costs nothing here, because
+        -- 'heads' walks it by recognising the argument that comes next.
+        packed = e : [ x | x <- es, entryVar x `elem` map entryVar chain ]
         chain = settle []
         settle acc =
           let known = entryVar e : map entryVar acc
-              acc'  = [ x | x <- es
-                          , any (`elem` freeVars (entryType x)) known ]
+              downward = [ x | x <- es
+                             , any (`elem` freeVars (entryType x)) known ]
+              upward = [ x | x <- es
+                           , moves x
+                           , any (\m -> entryVar x `elem` freeVars (entryType m))
+                                 (e : downward) ]
+              acc' = [ x | x <- es
+                         , entryVar x `elem` map entryVar (downward ++ upward) ]
            in if length acc' == length acc then acc else settle acc'
 
-        -- The package, moved along one equation about an argument outside
-        -- it. Those arguments were in place where they were stated, so the
-        -- equation's left side is the binder and the motive is a plain
-        -- substitution.
-        outward (t, done, nn) h =
+        -- Does this argument's own left side come out as something other than
+        -- its binder? 'ownDeps' asks it of an argument already stated; this
+        -- asks it of one still ahead, and every entry it could mention is
+        -- either stated or ahead of it in this same telescope.
+        moves x = any (`elem` freeVars (entryType x))
+                      (map (entryVar . statedEntry) hist
+                         ++ map entryVar (takeWhile ((/= entryVar x) . entryVar) (e : es)))
+
+        -- The package, moved along one equation about an argument its own
+        -- remaining components still mention.
+        --
+        -- **The equation's left side is where the package's type already
+        -- stands**, which is the binder for an argument outside the package
+        -- and the projection for the component just read out of it, so one
+        -- step says both. 'owed' is what decides which steps are taken, and
+        -- 'chain' is what guarantees an argument outside the package is in
+        -- place: one that moved would be in it.
+        outward inside (t, applied, nn) h =
           let v         = entryVar (statedEntry h)
+              held      = [ sub | sub <- applied, fst sub /= v ]
               (t', nn') = transportAt dl (statedType h)
-                            (\z -> packType dl (done ++ [(v, z)]) packed)
+                            (\z -> packType dl (held ++ [(v, z)]) inside)
                             (statedLeft h) (statedRight h)
                             (Free (statedProof h)) t nn
-           in (t', done ++ [(v, statedRight h)], nn')
+           in (t', held ++ [(v, statedRight h)], nn')
 
         -- At the head of a package: the component is its first projection,
         -- and what the next argument inherits is the tail transported along
         -- this argument's own equation.
-        walking p inside done nn = case inside of
-          [_] -> (rewriting done (entryType e), p, \_ m -> (Nothing, m), nn)
-          _ : rest ->
-            let a        = rewriting done (entryType e)
-                b        = Lam (Ident "z") a
-                             (close (entryVar e) (packType dl done rest))
-                (hd, n1) = firstOf dl a b p nn
-                onward q m =
-                  let (tl, m1) = secondOf dl a b p m
-                      (mv, m2) = transportAt dl a
-                                   (\z -> packType dl (done ++ [(entryVar e, z)]) rest)
-                                   hd r (Free q) tl m1
-                   in (Just (mv, rest, done ++ [(entryVar e, r)]), m2)
-             in (a, hd, onward, n1)
-          [] -> (rewriting done (entryType e), p, \_ m -> (Nothing, m), nn)
+        --
+        -- **A package is moved lazily, one component at a time, and the
+        -- equations move it in the order they were stated.** Before a
+        -- component is read out, the package is transported along the
+        -- equations that component's own type mentions and that have not
+        -- moved it already — and along no others, in 'hist' order. Two
+        -- transports along independent equations commute propositionally and
+        -- not definitionally, so an order is a thing to get right and not a
+        -- free choice: the step a package takes is the step the same argument
+        -- takes with no package at all, where @ownDeps@ is walked in exactly
+        -- that order.
+        --
+        -- **This is what phase 223 had to change twice.** Moving the package
+        -- along every equation any member mentions, once at its creation,
+        -- left the earlier components' left sides stuck under a transport
+        -- that no step of the nested J eliminates; moving the tail along the
+        -- head's own equation at the projection, which is where that step
+        -- used to be taken, put that equation out of order against the
+        -- unpackaged walk. The component just read out is an argument like
+        -- any other now, and its equation is owed to whatever still mentions
+        -- it.
+        walking (p0, inside, applied0, projected0) nn =
+          let (p, applied, n1) = foldl (outward inside) (p0, applied0, nn) owed
+              -- **The projections stay last and the equations stay before
+              -- them.** 'rewriting' is a fold, so a substitution applied after
+              -- one whose term mentions its own variable would descend into
+              -- that term — and a projection's term mentions the package's own
+              -- binders, which every equation after it is about. Keeping the
+              -- two apart is what makes the list behave as the simultaneous
+              -- substitution it is meant to be (MS9 phase 223).
+              projected = [ sub | sub <- projected0
+                                , fst sub `notElem` map fst applied ]
+              done = applied ++ projected
+              owed = [ h | h <- hist
+                         , mentions h (entryType e)
+                         , lookup (entryVar (statedEntry h)) (applied0 ++ projected0)
+                             /= Just (statedRight h) ]
+           in case inside of
+                _ : rest@(_ : _) ->
+                  let a        = rewriting done (entryType e)
+                      b        = Lam (Ident "z") a
+                                   (close (entryVar e) (packType dl done rest))
+                      (hd, n2) = firstOf dl a b p n1
+                      onward _ m =
+                        let (tl, m1) = secondOf dl a b p m
+                         in ( Just (tl, rest, applied
+                                   , projected ++ [(entryVar e, hd)])
+                            , m1 )
+                   in (a, hd, onward, n2)
+                _ -> (rewriting done (entryType e), p, \_ m -> (Nothing, m), n1)
 
 -- @t@ with each listed variable rewritten to its term, left to right.
 -- 'close' then 'instantiate' is the only way to rewrite a variable (§3.4).
@@ -772,34 +852,6 @@ unpackChain dl hs goal pkg body n = case hs of
         former      = if dependent then "DPair" else "And"
         args        = if dependent then [eq, binder] else [eq, restTy]
      in (Eliminate (GlobalName former) [dl, dl] args mot [meth] [] pkg, n3)
-
--- | Is the chain over this telescope flat — no station's left side mentioning
--- an entry that comes after its own?
---
--- **That is what a package of two entries or more looks like from outside.**
--- Where an entry reaches back into the chain /and/ a later entry reaches back to
--- it, 'stations' packages the two together, transports the package, and reads
--- each component back out by projection — so the earlier station's left side is
--- a projection out of a pair that holds the later entries.
---
--- **It is read off the real walk and not predicted from the telescope**, which
--- is the lesson of @.claude\/HAZARDS.md@, /a predicate over the input stands in
--- for a fact about the output/: @vcons@'s @as@ reaches back to @n@ and nothing
--- reaches back to @as@, so its package holds one entry and the chain is flat,
--- which no question about the telescope alone answers.
---
--- **What it gates is the nested J and nothing else** — see 'Chain'. A
--- projection's own type mentions the /bound/ proof variable of the equation the
--- package was transported along, so a step's motive and the type the step's
--- method actually has are not convertible: the motive carries that variable and
--- the method has eliminated it.
-chainIsFlat :: Level -> Context -> Int -> Bool
-chainIsFlat dl tel n0 =
-  let (hs, _) = stations dl tel (varsOf tel) n0
-   in all ok (zip [0 ..] hs)
-  where
-    ok (k, h) =
-      not (any (`elem` freeVars (statedLeft h)) (map entryVar (drop (k + 1) tel)))
 
 -- --------------------------------------------------------------------------
 -- Preconditions

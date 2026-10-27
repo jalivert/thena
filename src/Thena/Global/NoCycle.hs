@@ -102,7 +102,6 @@ import Thena.Global.Generate
   , andFirst
   , andSecond
   , bothAt
-  , chainIsFlat
   , chainProof
   , chainGoalType
   , curriedRefls
@@ -183,31 +182,49 @@ generateNoCycle env n0 d
   | needsUnit && not (truthInScope env)      = Declined NoProducts
   | needsPair && not (dependentPairInScope env) = Declined NoProducts
   | not (isDeclared telLemName env)          = Declined NoProducts
-  | otherwise = case filter ((`isDeclared` env) . fst3) planned of
+  | otherwise = case filter ((`isDeclared` env) . fst3) (relations ++ nested) of
       ((g, _, _) : _) -> Clash g
-      []              -> admit env n0 planned
+      []              -> case admit env n0 relations of
+        Generated e1 n1 -> case admit e1 n1 nested of
+          Generated e2 n2 -> Generated e2 n2
+          _               -> Generated e1 n1
+        other           -> other
   where
     fst3 (g, _, _) = g
 
-    -- **The nested J is withheld where a constructor's chain is not flat**, and
-    -- only the last two members of the bundle rest on it — see
-    -- 'Thena.Global.Generate.chainIsFlat'. The four relations are generated
-    -- whatever the telescopes look like.
-    planned =
+    -- The four relations, which are generated whatever the telescopes look
+    -- like, and hold nothing that can be refused.
+    relations =
       [ (belowName      dn, belowType,    belowBody)
       , (notEqName      dn, relationType, notEqBody)
       , (notBelowName   dn, relationType, notBelowBody)
       , (notBelowEqName dn, relationType, notBelowEqBody)
       ]
-        ++ [ (noCycleDiagName dn, diagType,  diagBody)  | flatChains ]
-        ++ [ (noCycleName     dn, cycleType, cycleBody) | flatChains ]
 
-    flatChains =
-      all (\c -> chainIsFlat dl (constructorArguments c) n0) cs
+    -- **The two that go through the nested J, and whether they are generated
+    -- is read off the kernel rather than predicted from the telescope** (MS9
+    -- phase 223). Both are withheld together where the checker refuses
+    -- either, which is a loss of the cycle transition for that family and
+    -- never a wrong acceptance: @DECISIONS.md@, /When @noCycle@ is not
+    -- generated/, is what a user reads.
+    --
+    -- **It used to be a predicate over the constructors' telescopes**, and
+    -- phase 223 measured that predicate withholding the lemma from families
+    -- whose generated term the kernel accepts. A question asked of the input
+    -- stands no chance of staying exactly right as the walk improves, and
+    -- the walk is the thing that decides: @.claude\/HAZARDS.md@, /a predicate
+    -- over the input stands in for a fact about the output/.
+    nested =
+      [ (noCycleDiagName dn, diagType,  diagBody)
+      , (noCycleName     dn, cycleType, cycleBody)
+      ]
 
     -- | Each definition in turn, in the environment the ones before it left.
-    -- **A 'Rejected' here is a generator bug**, like 'Thena.Global.NoConfusion'\'s,
-    -- and carries the 'Thena.Errors.TypeError' out to where it can be printed.
+    -- **A 'Rejected' from 'relations' is a generator bug**, like
+    -- 'Thena.Global.NoConfusion'\'s, and carries the 'Thena.Errors.TypeError'
+    -- out to where it can be printed. **From 'nested' it is the family\'s
+    -- answer**: the caller above withholds both and the datatype is declared
+    -- without them.
     admit e n []                      = Generated e n
     admit e n ((g, ty, body) : rest) =
       let (t, n1) = ty n
