@@ -2080,6 +2080,46 @@ they coincide where the two index groups do — and the homogeneous pair is to b
 the telescopic one taking its names. Until then nothing new is written against the
 homogeneous pair.
 
+**And every `data` gets the acyclicity equipment: `BelowD`, `NotEqD`, `NotBelowD` and
+`NotBelowEqD`.** These are what a *cycle* is discharged with — an equation between a
+variable and a term that contains it structurally, `k ≃ s k`, which is how a case the user
+correctly omitted is recognised as impossible rather than merely undischarged. For `N`:
+
+```
+BelowN      : ∀ (P : N -> Type₀) (n : N) -> Type₀
+NotEqN      : ∀ (x : N) (y : N) -> Type₀
+NotBelowN   : ∀ (x : N) (y : N) -> Type₀
+NotBelowEqN : ∀ (x : N) (y : N) -> Type₀
+```
+
+`BelowN P n` is the tuple asserting `P` of everything structurally smaller than `n` —
+`Unit` at a constructor with no recursive argument, and `And ‹the sub-tuple› (P a)` per
+recursive argument otherwise. It is **one elimination at a type-valued motive**, and the
+inductive hypothesis the eliminator hands each method *is* the sub-tuple, because the
+elimination computes a type rather than a proof. `NotEqN` is `≢`, `NotBelowN` is
+`≮ := Below (λ w . x ≢ w)`, and `NotBelowEqN` is `≰ := ≮ × ≢`.
+
+**`belowD` and `recD` — the tuple's inhabitant and the structural recursor built from it —
+are not generated, and that was measured rather than assumed.** Every elimination the
+acyclicity construction needs is an ordinary `elim D` at a motive the generator writes, so
+nothing ever mentions them.
+
+**For an indexed family the two sides sit at two different index groups**, related by the
+same curried chain the telescopic lemma takes: a cycle compares a variable with a
+constructor application, and for an indexed family those are at different indices. So
+
+```
+NotEqEv : ∀ (n : N) -> Ev n -> ∀ (n' : N) -> Ev n' -> Type₀
+```
+
+reduces to `(q : Eq N n n') (r : Eq (Ev n') (transport q x) y) -> Empty`.
+
+**Four more names are reserved per datatype, in the same shared namespace**, so a
+definition already called `BelowFoo` makes `data Foo` refuse. **The equipment has its own
+precondition and is skipped on its own**: it needs `Unit` where a constructor has no
+recursive argument, and a datatype that cannot have it keeps its no-confusion lemma
+regardless. It costs about 4% of the time it takes to load the example corpus, measured.
+
 **Two shapes are still refused, and both are a missing step of that chain rather than a
 missing equality.** An index whose type mentions an earlier index that was *abstracted
 outright* has no equation to transport along; and two mentioned indices that are themselves

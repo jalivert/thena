@@ -60,6 +60,7 @@ import qualified Thena.TokenTests
 import qualified Thena.LoadTests
 import qualified Thena.ManualTests
 import qualified Thena.NoConfusionTests
+import qualified Thena.NoCycleTests
 import qualified Thena.InstralInferTests
 import qualified Thena.InstralTypeTests
 import qualified Thena.RulesTests
@@ -135,6 +136,7 @@ main =
       , Thena.LoadTests.tests
   , Thena.ManualTests.tests
       , Thena.NoConfusionTests.tests
+      , Thena.NoCycleTests.tests
       , Thena.InstralInferTests.tests
       , Thena.InstralTypeTests.tests
       , Thena.RulesTests.tests

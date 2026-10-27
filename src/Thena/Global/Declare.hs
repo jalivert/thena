@@ -55,9 +55,10 @@ import Thena.Core.Term
   )
 import Thena.Language.Regex (RegexError)
 import Thena.Language.Grammar (GrammarError)
+import Thena.Global.Generate (Generated (..))
+import Thena.Global.NoCycle (generateNoCycle)
 import Thena.Global.NoConfusion
-  ( Generated (..)
-  , generateNoConfusion
+  ( generateNoConfusion
   )
 import Thena.Global.Env
   ( ArgRole (..)
@@ -208,10 +209,22 @@ declare env n d0 = do
   -- renaming the post-'universes' counter and leaving these three branches
   -- naming the old one.
   case generateNoConfusion env1 n5 d of
-    Generated env2 n6 -> Right (env2, n6)
+    Generated env2 n6 -> admitted d env2 n6
     Declined _        -> Right (env1, n5)
     Clash g           -> Left (AlreadyDeclared g)
     Rejected g e      -> Left (NoConfusionRejected g e)
+  where
+    -- **The acyclicity equipment is its own bundle with its own precondition**
+    -- (MS9 phase 219), which is why it is a second call and not more of the
+    -- first: a datatype whose no-confusion is generated may still be missing a
+    -- prelude type @Below@ needs, and sharing one guard is what
+    -- @.claude\/HAZARDS.md@ records as /an additive artifact is not additive if
+    -- it shares the bundle's up-front guard/.
+    admitted d' env2 n6 = case generateNoCycle env2 n6 d' of
+      Generated env3 n7 -> Right (env3, n7)
+      Declined _        -> Right (env2, n6)
+      Clash g           -> Left (AlreadyDeclared g)
+      Rejected g e      -> Left (NoConfusionRejected g e)
 
 -- --------------------------------------------------------------------------
 -- Checking

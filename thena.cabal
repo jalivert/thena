@@ -58,7 +58,9 @@ library
         Thena.Errors
         Thena.Global.Declare
         Thena.Global.Env
+        Thena.Global.Generate
         Thena.Global.NoConfusion
+        Thena.Global.NoCycle
         Thena.Kernel
         Thena.Language.Regex
         Thena.Language.Lexemes
@@ -302,6 +304,7 @@ test-suite thena-test
         Thena.SurfaceZipperTests
         Thena.KernelTests
         Thena.NoConfusionTests
+        Thena.NoCycleTests
         Thena.DispatchTests
         Thena.ElaborateTests
         Thena.InstralInferTests

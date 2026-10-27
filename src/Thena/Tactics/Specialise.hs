@@ -94,10 +94,8 @@ import Thena.Global.Env
   , lookupConstructor
   , lookupInductive
   )
-import Thena.Global.NoConfusion
-  ( dependentPairInScope
-  , noConfusionNames
-  )
+import Thena.Global.Generate (dependentPairInScope)
+import Thena.Global.NoConfusion (noConfusionNames)
 import Thena.Tactics.Eliminate (MethodShape (..), spineOf)
 
 -- | What specialisation worked out: the subgoal, and __one ordered report of
