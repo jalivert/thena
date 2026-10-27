@@ -2178,11 +2178,45 @@ appeal to UIP anywhere, and no heterogeneous equality.
 each constructor, rather than under a name of its own: each is used exactly once, so a name
 would reserve one per recursive argument of every constructor and buy nothing.
 
-**One shape of constructor telescope does not get these two**, and it is narrow: an
-argument that both reaches back to an earlier argument *and* is reached back to by a later
-one, so that the chain packages three or more arguments together and reads each back out by
-projection. The four relations above are generated regardless. `Nat`, `Vec`, `Fin`, a
-`Step` relation and every syntax type are unaffected.
+### When `noCycle` is not generated, and what you see if it is not
+
+*Decided 2026-10-27.*
+
+**One shape of constructor telescope does not get these two definitions: a constructor with
+a *middle* argument — one that both depends on an earlier argument and is depended on by a
+later one.** One such constructor withholds `noCycleDiagD` and `noCycleD` for the whole
+datatype. The four relations above, and the no-confusion pair, are generated regardless.
+
+Depending on an earlier argument is not by itself enough, and the difference is the whole
+condition:
+
+```
+enode : ∀ (x : A) (y : B x) (r : E) -> E              -- y depends on x; nothing depends on y
+fnode : ∀ (x : A) (y : B x) (z : C x y) (r : F) -> F  -- y is in the middle
+```
+
+`E` gets `noCycleE`; `F` does not.
+
+**Why that shape.** An argument that a later argument depends on cannot be transported on
+its own — the motive would have to mention the later argument at a type it no longer has —
+so it travels packaged with everything after it, and the chain reads each component back
+out by *projection*. A projection mentions the bound proof of the equation that package was
+transported along, and a step of the nested `J` has eliminated that proof while its own
+motive still quantifies it, so the term the step is handed and the one its motive asks for
+differ by a redex that cannot fire. `y` in `enode` is never packaged, because nothing after
+it mentions it.
+
+**What you see.** Exactly one thing: a split over such a family keeps a cyclic equation
+instead of refuting it, so a case you were right to omit is refused with
+`no clause of case-must-vanish applies here` rather than accepted. Nothing is accepted that
+should not be — the loss is capability — and nothing else about the declaration changes.
+
+**It is caught at declaration and it is not silent in the other direction either**: if the
+generator ever emits one of these and the checker refuses it, the declaration says so by
+name. That is what makes withholding a decision rather than a risk.
+
+In the TAPL and POPLMark corpus and the whole test suite this catches two datatypes.
+`Nat`, `Vec`, `Fin`, a `Step` relation and every syntax type are unaffected.
 
 **The whole acyclicity bundle — six definitions per `data` — costs about 8% of the time it
 takes to load the example corpus**, and about 30% on the largest single development in it.
