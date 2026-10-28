@@ -613,8 +613,14 @@ rule pick w c p b r :- when (different-name w c) do a = arm-for r c ; return a
 -- SO A MISSING BODY IS REFUSED WHERE A BAD BODY IS, after the arm's binders are
 -- introduced and at the point the body was wanted, which the engine unwinds the
 -- same way.
-arm-needs-body : Option Surface -> ()
-rule arm-needs-body (some b) :- do call elaborate b
+-- AND A MISSING BODY NAMES THE EQUATION THAT KEPT THE CASE ALIVE -- his
+-- instruction of 2026-10-28. The second clause takes the hole the binders were
+-- introduced above, whose type still carries whatever the specialiser could not
+-- discharge, and `case-survived` refuses with it. A rule's own refusal carries a
+-- rule's name and nothing else, which is why this one is an op.
+arm-needs-body : Core -> Option Surface -> ()
+rule arm-needs-body k (some b) :- do call elaborate b
+rule arm-needs-body k none :- do case-survived k
 
 -- The arm, under every binder the split reported. ONE WALK AND ONE REPORT: the
 -- order the three groups are introduced in is the order the report is in, which
@@ -631,7 +637,7 @@ rule elaborate-arm t c sub bs fs (p, ob) :-
      ; back
      ; k1 = intro-arm-binders as bs [] [] fs k0
      ; goto k1
-     ; arm-needs-body ob
+     ; arm-needs-body sub ob
      ; goto sub
      ; solve
 
@@ -641,6 +647,7 @@ rule elaborate-arm t c sub bs fs (p, ob) :-
 case-needs-an-arm : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
 rule case-needs-an-arm t c sub bs fs (some a) :-
   do elaborate-arm t c sub bs fs a
+rule case-needs-an-arm t c sub bs fs none :- do case-survived sub
 
 -- AND A CASE THAT VANISHED TAKES NO BODY — the other half of his ruling of
 -- 2026-10-20. Two clauses, and between them they are every legal shape: no arm
@@ -660,8 +667,9 @@ rule vanished-case-takes-no-body (some (p, none)) :- do
 -- none for `some`, which is the `no-nesting` idiom: the refusal names itself,
 -- and it names the user's complaint rather than the three rules further down
 -- that would have gone looking for an arm there is no syntax for.
-case-must-vanish : Option a -> ()
+case-must-vanish : Option Core -> ()
 rule case-must-vanish none :- do
+rule case-must-vanish (some h) :- do case-survived h
 
 -- A method with no subgoal is the impossible case vanishing: the specialiser
 -- filled it from a conflicting equation and claimed nothing, so there is

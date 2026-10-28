@@ -401,6 +401,16 @@ data FailReason
     -- @constructor-datatype@ failing /is/ the answer "that name is not a
     -- constructor", so a splitting rule asks and lets the clause fail rather
     -- than needing a separate test.
+  | CaseSurvived Context [Core]
+    -- ^ **a case the specialiser could not close, and the equations that keep it
+    -- alive** (MS9 phase 230). Raised by @case-survived@ where the coverage
+    -- rules used to refuse by having no clause — @no clause of
+    -- case-must-vanish applies here@ named a rule of the implementation where
+    -- what the author needs is which equation survived.
+    --
+    -- **The list is empty when nothing about the method is an equation**, which
+    -- is a case that survived for some other reason; the renderer says so
+    -- rather than printing an empty list.
   | NoClauseMatched String Int [Int]
     -- ^ @call ‹name› ‹args›@ found nothing to run: the name, the number of
     -- arguments it was given, and the arities of the rules that do bear that

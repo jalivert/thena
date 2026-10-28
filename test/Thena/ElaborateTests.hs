@@ -778,9 +778,11 @@ baseTests =
               ++ [ "bind-friendlies", "bind-friendlies", "bind-solved", "bind-solved"
                  , "same-length", "same-length"
                  , "arm-for", "arm-for", "pick", "pick", "arm-needs-body"
-                 , "elaborate-arm", "case-needs-an-arm"
+                 , "arm-needs-body"
+                 , "elaborate-arm", "case-needs-an-arm", "case-needs-an-arm"
                  , "vanished-case-takes-no-body", "vanished-case-takes-no-body"
-                 , "case-must-vanish", "one-case", "one-case", "one-case"
+                 , "case-must-vanish", "case-must-vanish"
+                 , "one-case", "one-case", "one-case"
                  , "arm-must-be-for-this-datatype"
                  , "arms-are-for-this-datatype", "arms-are-for-this-datatype"
                  , "one-arm-per-constructor"
@@ -1104,7 +1106,7 @@ splittingTree =
       [ "partial : Nat -> Nat"
       , "partial = \\ n -> induction n of { zero -> zero }"
       ]
-      "stuck: no clause of case-needs-an-arm applies here"
+      "stuck: this case did not vanish, so there is something to prove here"
 
     -- __AN EQUATION WITH NO SOLUTION AT ALL, AND IT IS NOT A GAP IN THE
     -- UNIFIER__ (MS9 phase 229). A family whose index is built by a function
@@ -1134,6 +1136,29 @@ splittingTree =
     -- hypothesis the author is handed, not a mistake they made. Refusing the
     -- split instead, which is @eliminating.pdf@ Definition 19's third outcome,
     -- would withdraw this.
+    -- __AND THE COVERAGE FAMILY NAMES IT TOO__ — his instruction of 2026-10-28,
+    -- built in MS9 phase 230. @case p of { }@ claims every case vanishes and
+    -- this one did not; until phase 230 the refusal said @no clause of
+    -- case-must-vanish applies here@, which named a rule of the implementation.
+    -- The same reason is raised where an arm has no body, and it says the same
+    -- thing, because what the system knows is the same in both.
+  , refusesIn catModule
+      "writing no arms at all names the equation that kept the case alive"
+      [ "pick : \8704 (x : String) (y : String) -> Cat (appendString x y) -> String"
+      , "pick = \\ x y p -> case p of { }"
+      ]
+      "stuck: this case did not vanish: it keeps Eq {0} String \
+      \(appendString a b) (appendString x y), which no transition can \
+      \discharge, so there is something to prove here"
+  , refusesIn catModule
+      "and an arm with no body names it the same way"
+      [ "pick : \8704 (x : String) (y : String) -> Cat (appendString x y) -> String"
+      , "pick = \\ x y p -> case p of { mk a b -> }"
+      ]
+      "stuck: this case did not vanish: it keeps Eq {0} String \
+      \(appendString a b) (appendString x y), which no transition can \
+      \discharge, so there is something to prove here"
+
   , testCase "and the same split declares when the arm takes the equation" $ do
       (s0, _) <- startingSession
       let (s1, r) = loadProofSource s0 (unlines (catModule ++
@@ -1757,7 +1782,7 @@ splittingTree =
       [ "pred : Nat -> Nat"
       , "pred = \\ n -> induction n of { zero -> ; succ m -> m }"
       ]
-      "stuck: no clause of arm-needs-body applies here"
+      "stuck: this case did not vanish, so there is something to prove here"
 
     -- __The forced position is a definition, and @refl@ proves it.__ The goal
     -- is @Eq Nat n n@ and the arm answers with @refl Nat k@, whose type is
@@ -2089,7 +2114,7 @@ splittingTree =
       [ "partialC : Nat -> Nat"
       , "partialC = \\ n -> case n of { zero -> zero }"
       ]
-      "stuck: no clause of case-needs-an-arm applies here"
+      "stuck: this case did not vanish, so there is something to prove here"
   ]
   where
     natModule =

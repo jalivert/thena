@@ -70,6 +70,7 @@ module Thena.Tactics.Specialise
   , Role (..)
   , binderWord
   , specialise
+  , survivingEquations
   ) where
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver, piOver)
@@ -1345,6 +1346,43 @@ data Eqn = Eqn
 -- 'Context' and 'piOver' and 'lamOver' work over both halves of a problem.
 entry :: Eqn -> Entry
 entry e = Hypothesis (eqnVar e) (eqnIdent e) (eqnType e)
+
+-- | __The equations a method still takes, with the context they are stated
+-- in__ (MS9 phase 230).
+--
+-- A method's type is @∀ Δ -> equations -> goal@, and the equations left in it
+-- are the ones no transition applied to — 'solve' moves such an equation into
+-- its accumulator and it stays a binder. So they are read back off the type
+-- rather than carried out of 'solve': the type is what the caller has in hand
+-- when it has to refuse, and there is nothing else for the two readings to
+-- disagree about.
+--
+-- __Every binder is opened, which is why the context comes back too.__ An
+-- equation mentions @Δ@'s own binders — @appendString a b@ names the
+-- constructor's arguments — so a renderer handed the equation alone would
+-- print @Bound@ indices. The context returned holds every binder peeled on the
+-- way, in order.
+--
+-- __What counts as an equation is this module's own test__, the one
+-- 'equationOf' uses: a spine headed by @Eq@ at one level with three arguments.
+-- Asking it in a second place is what would let the two drift.
+survivingEquations
+  :: GlobalEnv -> Context -> Int -> Core -> ([Core], Context, Int)
+survivingEquations env ctx = go []
+  where
+    go seen n ty = case whnf env (ctx ++ seen) ty of
+      Pi i dom sc ->
+        let (v, n1) = fresh n
+            here    = ctx ++ seen
+         in case isEquation here dom of
+              Just eq -> let (es, c, n2) = go (seen ++ [Hypothesis v i dom]) n1 (open v sc)
+                          in (eq : es, c, n2)
+              Nothing -> go (seen ++ [Hypothesis v i dom]) n1 (open v sc)
+      _ -> ([], ctx ++ seen, n)
+
+    isEquation here t = case spineOf (whnf env here t) of
+      Just (GlobalName "Eq", [_], [_, _, _]) -> Just t
+      _                                      -> Nothing
 
 -- | One link of the chain @noConfusion‹D›@ answers with, as
 -- "Thena.Global.NoConfusion" nests it.

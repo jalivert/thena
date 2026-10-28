@@ -546,6 +546,20 @@ data Op
     -- ^ @some x@ — an 'VOption' that is there (MS5 phase 65).
   | None
     -- ^ @none@ — one that is not.
+  | CaseSurvivedOp Operand
+    -- ^ **refuse, naming the equations that keep this case alive** (MS9 phase
+    -- 230). It takes the subgoal handle the specialiser answered with, reads
+    -- its type where it stands and refuses with 'Thena.Errors.CaseSurvived'.
+    --
+    -- __It is the only op that cannot succeed, and that is what it is for.__ A
+    -- rule refuses by having no clause, and that refusal carries a rule's name
+    -- and nothing else — so a refusal that has to name a /term/ cannot be a
+    -- rule's. The coverage rules call this where they used to simply have no
+    -- clause.
+    --
+    -- __Its head says only what it is about__: here is a case that survived,
+    -- say so. Whether there was an arm to take the equation is the caller's
+    -- question and is not asked here.
   | Prepend Operand Operand
     -- ^ @prepend x xs@ — a list with one more element at the front (MS9 phase
     -- 195).
@@ -1565,6 +1579,7 @@ resultOf o = case o of
   Return _     -> Nothing   -- it ends a body; there is nothing after it to bind
   Some _       -> Just (TOption (TVar 0))
   None         -> Just (TOption (TVar 0))
+  CaseSurvivedOp _ -> Nothing
   Prepend _ _  -> Just (TList (TVar 0))
   -- **An 'Option', not the element** — an empty list has no head, and phase 65
   -- chose to answer with 'None' rather than to fail. The table said @a@ until
@@ -1778,6 +1793,7 @@ operandTypes o = case o of
   Return a     -> [(a, TVar 0)]
   Some a       -> [(a, TVar 0)]
   None         -> []
+  CaseSurvivedOp a -> [(a, TCore)]
   Prepend a b  -> [(a, TVar 0), (b, TList (TVar 0))]
   Prove        -> []
   DefineData _ -> []
@@ -2226,6 +2242,7 @@ opKeyword o = case o of
   Call _ _     -> "call"
   Return _     -> "return"
   Some _       -> "some"
+  CaseSurvivedOp _ -> "case-survived"
   Prepend _ _  -> "prepend"
   None         -> "none"
   FreshName _  -> "fresh-name"

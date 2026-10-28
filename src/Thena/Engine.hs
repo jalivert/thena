@@ -150,7 +150,8 @@ import Thena.Tactics.Eliminate
   , spineOf
   )
 import Thena.Tactics.Recurse (resolveRecursion)
-import Thena.Tactics.Specialise (Binder (..), Specialisation (..), specialise)
+import Thena.Tactics.Specialise
+  (Binder (..), Specialisation (..), specialise, survivingEquations)
 import Thena.Rules
   (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
 import Thena.Syntax.Lexer (isIdentifier)
@@ -848,6 +849,40 @@ perform instr rest m = case operation instr of
   -- one together, so a rule that accumulates had to be given its list whole by
   -- an op; the walk over a split's binder report is the one that needed it
   -- (MS9 phase 195).
+  -- **A case the specialiser could not close, refused by name** (MS9 phase
+  -- 230). It takes the handle the specialiser answered with, reads that hole's
+  -- type where it stands and refuses with the equations still in it.
+  --
+  -- **The only op that cannot succeed.** A rule refuses by having no clause and
+  -- that refusal carries a rule's name and nothing else, so the coverage family
+  -- could not name the equation keeping a case alive — his instruction of
+  -- 2026-10-28 is that it should.
+  Op.CaseSurvivedOp h -> case term h of
+    Left r -> failure r m
+    -- **The hole's CLAIM, not an inferred type.** A hole is not in scope at
+    -- itself, and the coverage rules refuse from inside the arm — so inferring
+    -- the handle fails exactly where this op is wanted. Going to the hole and
+    -- reading what it claims is the same move @goto@ makes, and it works from
+    -- wherever the refusal happens to be.
+    Right (Free x) -> case Cursor.goto x (cursor (development m)) of
+      Left e -> failure (CannotMove e) m
+      Right cur -> case focus cur of
+        -- **A claim or a guess, because which one it is depends on where the
+        -- refusal came from**: a missing arm is refused before the method's
+        -- hole is attacked and an empty arm after, and @prim-attack@ turns the
+        -- one into the other. Both carry the type, which is all this needs.
+        OnComponent c | Just s <- claimed c ->
+          let (eqs, with, n1) =
+                survivingEquations (globals m) (focusContext (Development cur))
+                                   (names m) s
+           in failure (CaseSurvived with eqs) m { names = n1 }
+        _ -> failure NotAHole m
+      where
+        claimed (Component.Claim _ _ s)   = Just s
+        claimed (Component.Guess _ _ _ s) = Just s
+        claimed _                         = Nothing
+    Right _ -> failure (CannotMove NoSuchHole) m
+
   Op.Prepend a b -> case (,) <$> operandValue (env (exec m)) a
                              <*> operandValue (env (exec m)) b of
     Left e -> failure e m

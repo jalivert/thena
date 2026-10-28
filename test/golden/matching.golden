@@ -54,12 +54,15 @@ standard
   arm-for ‹t› ‹c›
   pick ‹w› ‹c› ‹p› ‹b› ‹r›
   pick ‹w› ‹c› ‹p› ‹b› ‹r›
-  arm-needs-body (some b)
+  arm-needs-body ‹k› (some b)
+  arm-needs-body ‹k› none
   elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
   case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+  case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
   vanished-case-takes-no-body none
   vanished-case-takes-no-body (some (p, none))
   case-must-vanish none
+  case-must-vanish (some h)
   one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
   one-case ‹t› ‹c› none ‹bs› ‹fs›
   one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
@@ -149,12 +152,15 @@ arm-for ‹t› ‹c›
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body (some b)
+arm-needs-body ‹k› (some b)
+arm-needs-body ‹k› none
 elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
 case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
 vanished-case-takes-no-body none
 vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
+case-must-vanish (some h)
 one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
 one-case ‹t› ‹c› none ‹bs› ‹fs›
 one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
@@ -226,12 +232,15 @@ arm-for ‹t› ‹c›
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body (some b)
+arm-needs-body ‹k› (some b)
+arm-needs-body ‹k› none
 elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
 case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
 vanished-case-takes-no-body none
 vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
+case-must-vanish (some h)
 one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
 one-case ‹t› ‹c› none ‹bs› ‹fs›
 one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
@@ -289,12 +298,15 @@ arm-for ‹t› ‹c›
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body (some b)
+arm-needs-body ‹k› (some b)
+arm-needs-body ‹k› none
 elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
 case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
 vanished-case-takes-no-body none
 vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
+case-must-vanish (some h)
 one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
 one-case ‹t› ‹c› none ‹bs› ‹fs›
 one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
@@ -366,12 +378,15 @@ arm-for ‹t› ‹c›
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body (some b)
+arm-needs-body ‹k› (some b)
+arm-needs-body ‹k› none
 elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
 case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
 vanished-case-takes-no-body none
 vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
+case-must-vanish (some h)
 one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
 one-case ‹t› ‹c› none ‹bs› ‹fs›
 one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
@@ -444,12 +459,15 @@ arm-for ‹t› ‹c›
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body (some b)
+arm-needs-body ‹k› (some b)
+arm-needs-body ‹k› none
 elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
 case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
 vanished-case-takes-no-body none
 vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
+case-must-vanish (some h)
 one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
 one-case ‹t› ‹c› none ‹bs› ‹fs›
 one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
@@ -536,12 +554,15 @@ arm-for ‹t› ‹c›
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body (some b)
+arm-needs-body ‹k› (some b)
+arm-needs-body ‹k› none
 elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
 case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
 vanished-case-takes-no-body none
 vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
+case-must-vanish (some h)
 one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
 one-case ‹t› ‹c› none ‹bs› ‹fs›
 one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
@@ -619,12 +640,15 @@ arm-for ‹t› ‹c›
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body (some b)
+arm-needs-body ‹k› (some b)
+arm-needs-body ‹k› none
 elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
 case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
 vanished-case-takes-no-body none
 vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
+case-must-vanish (some h)
 one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
 one-case ‹t› ‹c› none ‹bs› ‹fs›
 one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
@@ -692,12 +716,15 @@ arm-for ‹t› ‹c›
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-arm-needs-body (some b)
+arm-needs-body ‹k› (some b)
+arm-needs-body ‹k› none
 elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
 case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
 vanished-case-takes-no-body none
 vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
+case-must-vanish (some h)
 one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
 one-case ‹t› ‹c› none ‹bs› ‹fs›
 one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›

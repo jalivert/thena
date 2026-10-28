@@ -281,6 +281,9 @@ everyOp =
   , ("ascription-term t", Op.AscriptionTerm (Ref "t"))
   , ("trusted-claim t", Op.TrustedClaim (Ref "t"))
   , ("trusted-body t", Op.TrustedBody (Ref "t"))
+    -- **The only op that cannot succeed** (MS9 phase 230): it refuses, naming
+    -- the equations that keep a case alive. It reads back like any other.
+  , ("case-survived h", Op.CaseSurvivedOp (Ref "h"))
     -- The three moves into a split (MS9 phase 181).
   , ("split-target t", Op.SplitTarget (Ref "t"))
   , ("split-arm-body t", Op.SplitArmBody (Ref "t"))

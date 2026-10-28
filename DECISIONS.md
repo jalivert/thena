@@ -2665,6 +2665,22 @@ stuck: String and Eq {0} String (appendString a b) (appendString x y) -> String
 The second line is said of any two types that differ by one argument, so an
 under-applied term says it too.
 
+**And writing no arm, or an arm with no body, says the same thing from the other
+side.** Leaving a case out is the claim that it cannot arise; this one can, and
+the refusal says what keeps it alive:
+
+```
+pick = \ x y p -> case p of { }
+  stuck: this case did not vanish: it keeps
+         Eq {0} String (appendString a b) (appendString x y),
+         which no transition can discharge, so there is something to prove here
+```
+
+**It does not say which repair**, because the same fact is reported where no arm
+was written, where an arm has no body, and where no arms were written at all —
+what to change differs in each and you know which you wrote, while what the
+system knows is only that the case is live.
+
 ### Dot patterns are optional here, because we run the eliminator and not the clause
 
 When a split determines one of a constructor's arguments, that argument has no

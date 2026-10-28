@@ -986,8 +986,14 @@ splitClauses =
     -- clause for @some@ and none for @none@, which is @case-must-vanish@'s
     -- idiom mirrored, because an empty arm is how a user says the case cannot
     -- arise and this one did not.
-  , Rule (GlobalName "arm-needs-body") [PSome (PVar "b")] []
+  , Rule (GlobalName "arm-needs-body") [PVar "k", PSome (PVar "b")] []
       [call "elaborate" [Ref "b"]]
+    -- **And the missing body names the equation that kept the case alive**
+    -- (MS9 phase 230, his instruction of 2026-10-28). @case-survived@ is the
+    -- only op that cannot succeed: a rule's own refusal carries a rule's name
+    -- and nothing else, so a refusal that has to name a term cannot be one.
+  , Rule (GlobalName "arm-needs-body") [PVar "k", PNone] []
+      [Do (Op.CaseSurvivedOp (Ref "k"))]
   , Rule (GlobalName "elaborate-arm")
       [ PVar "t", PVar "c", PVar "sub", PVar "bs", PVar "fs"
       , PPair (PVar "p") (PVar "ob")
@@ -1008,7 +1014,7 @@ splitClauses =
                    , Ref "k0"
                    ])
       , Do (Goto (Ref "k1"))
-      , call "arm-needs-body" [Ref "ob"]
+      , call "arm-needs-body" [Ref "sub", Ref "ob"]
       , Do (Goto (Ref "sub"))
       , call "solve" []
       ]
@@ -1021,6 +1027,10 @@ splitClauses =
       [ call "elaborate-arm"
           [Ref "t", Ref "c", Ref "sub", Ref "bs", Ref "fs", Ref "a"]
       ]
+  , Rule (GlobalName "case-needs-an-arm")
+      [ PVar "t", PVar "c", PVar "sub", PVar "bs", PVar "fs", PNone
+      ] []
+      [Do (Op.CaseSurvivedOp (Ref "sub"))]
     -- **And a case that vanished takes no body** — between them the two clauses
     -- are every legal shape: no arm at all, or an arm that stops at the arrow.
   , Rule (GlobalName "vanished-case-takes-no-body") [PNone] [] []
@@ -1031,6 +1041,8 @@ splitClauses =
     -- and none for @some@ — @no-nesting@'s idiom, naming the user's complaint
     -- instead of the search for an arm there is no syntax for.
   , Rule (GlobalName "case-must-vanish") [PNone] [] []
+  , Rule (GlobalName "case-must-vanish") [PSome (PVar "h")] []
+      [Do (Op.CaseSurvivedOp (Ref "h"))]
     -- **Two questions, asked separately**: did the method vanish, and did the
     -- user write arms. The arm-less clause's test is complementary to the other
     -- two, so this search records no choice point — @pick@'s shape.

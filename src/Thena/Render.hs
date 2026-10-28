@@ -1358,6 +1358,26 @@ renderFailReason ren r = case r of
   -- One reason, three messages (§8, phase 23): the name is unknown, the name
   -- is known at other arities, or clauses of the right arity all failed their
   -- heads. Which one it is falls out of the arities the reason carries.
+  -- **The coverage family names the equation that keeps the case alive** — his
+  -- instruction of 2026-10-28. Until MS9 phase 230 every one of these said
+  -- @no clause of case-must-vanish applies here@, naming a rule of the
+  -- implementation where the author needs to know which equation survived and
+  -- that nothing can discharge it.
+  --
+  -- **It does not say which repair, and that is deliberate.** The same reason is
+  -- raised from three positions — no arm, an arm with no body, and no arms at
+  -- all — and what the author has to change differs in each, while what the
+  -- system knows is the same: the case is live. Naming the repair would mean the
+  -- op being told which caller it was reached from, which is a caller's concern
+  -- in an op's head.
+  CaseSurvived ctx eqs
+    | null eqs  -> "this case did not vanish, so there is something to prove here"
+    | otherwise ->
+        "this case did not vanish: it keeps "
+          ++ orList [ renderCore ren ctx e | e <- eqs ]
+          ++ ", which no transition can discharge, so there is something to \
+             \prove here"
+
   NoClauseMatched g got want
     | null want        -> "no rule is called " ++ g
     | got `notElem` want ->

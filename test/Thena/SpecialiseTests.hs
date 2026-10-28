@@ -395,8 +395,11 @@ omittedTests =
       (_, _, stopped) <- loadProofFile s "examples/omitted-cases.thena"
       assertBool (unlines (map show stopped)) (null stopped)
 
+    -- __The refusal names the case and not the rule since MS9 phase 230__, his
+    -- instruction of 2026-10-28: every equation here is discharged, so there is
+    -- nothing to name beyond the case being live.
   , testCase "a case that does arise is still refused" $
-      refusedWith "case-must-vanish"
+      refusedWith "this case did not vanish"
         [ "module KeepStep where"
         , ""
         , "data N : Type\8320 where"
