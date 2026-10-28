@@ -2728,8 +2728,10 @@ proves `m1 = m` with no transport.
 **What is given up is a check, not an ability.** With dots required, the mark is an
 assertion the system verifies. Without them, the same text means a binder or a
 definition depending on an inference you cannot see, and changing a lemma's statement
-can silently change which. The answer to that is the system showing you which positions
-it determined, rather than making you write them out.
+can silently change which. The answer to that is the dot, written where you want the
+check — and, later, an editor that can say it about the arm your cursor is in. **Loading a
+file says nothing about it**, deliberately: a line per determined position, over a file of
+fifty theorems, is noise rather than information.
 
 **So the dot is the check, written where you want it.** Four things are legal in a
 determined position and all four mean something different:
