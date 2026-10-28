@@ -75,6 +75,17 @@ data Pairwise (A : Type₀) : forall (n : N) -> Vec A n -> Vec A n -> Type₀ wh
 pcount : forall (A : Type₀) (n : N) (as : Vec A n) (bs : Vec A n) (ps : Pairwise A n as bs) -> N
 pcount = \ A n as bs ps -> induction ps of { pwNil -> z ; pwCons k a b xs ys qs -> s (pcount A k xs ys qs) }
 
+-- `Only`'s index type `Vec A n` lives at `A`'s level, and **nothing in its
+-- constructors mentions `A`**, so nothing forces `Only`'s own level to reach
+-- that far. An index is not a constructor argument: the size restriction bounds
+-- an argument and nothing bounds an index, so the two levels are unrelated
+-- parameters. The equipment generated over the index telescope is stated at the
+-- two joined (MS9 phase 227); at the datatype's own level it asked `Eq` to take
+-- a `Vec A n` it could not, and the declaration was refused with two level
+-- parameters that "are different".
+data Only (A : Type) : forall (n : N) -> Vec A n -> Type where
+  only : Only A z (vnil A)
+
 -- And it reduces: one pair of elements, so `s z`.
 two : N
 two = pcount N (s z) (vcons N z z (vnil N)) (vcons N z (s z) (vnil N)) (pwCons N z z (s z) (vnil N) (vnil N) (pwNil N))

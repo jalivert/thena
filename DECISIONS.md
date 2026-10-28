@@ -2217,31 +2217,44 @@ changes.
 takes to load the example corpus**, and about 30% on the largest single development in it.
 Measured by generating and not generating, two runs each.
 
-### Every shape of index telescope declares, and the third one does not finish
+### Every shape of index telescope declares, and the fourth dependent index does not finish
 
 *Measured 2026-10-28.*
 
-**A family whose index telescope has two indices that each depend on an earlier index, with
-the family's own element depending on both, declares and splits.** A relation between two
-vectors — `Append`, `Permutation` — has that shape, and until 2026-10-28 it was refused
-outright with `the generated noConfusionD does not typecheck, which is a bug in Thena`.
+**A family whose index telescope has several indices each depending on an earlier one, with
+the family's own element depending on all of them, declares and splits.** A relation between
+two vectors — `Append`, `Permutation` — has that shape, and it was refused outright until
+2026-10-28 with `the generated noConfusionD does not typecheck, which is a bug in Thena`.
 
 ```
 data One   : ∀ (n : Nat) (as : Vec A n) -> Type₀                           -- fine
 data After : ∀ (n : Nat) (as : Vec A n) (m : Nat) -> Type₀                 -- fine
 data Pair2 : ∀ (n : Nat) (as : Vec A n) (bs : Vec A n) -> Type₀            -- fine
 data Both2 : ∀ (n : Nat) (as : Vec A n) (m : Nat) (bs : Vec A m) -> Type₀  -- fine
-data Three : ∀ (n : Nat) (as : Vec A n) (bs : Vec A n) (cs : Vec A n)
-             -> Type₀                                                     -- does not finish
+data Three : ∀ (n : Nat) (as bs cs : Vec A n) -> Type₀                     -- fine, ~9 s
+data Four  : ∀ (n : Nat) (as bs cs ds : Vec A n) -> Type₀      -- does not finish
 ```
 
 **What that last line is, and it is a cost rather than a rule.** The telescopic equality
-such a family generates grows by about 25× with each dependent index: the chain and the
-proof of it come to 57 KB together for one, 2.7 MB for two and 77 MB for three. Two cost
-about two seconds to declare. **Three do not finish**: the proof is too large for the
-checker to get through, so a family relating three vectors of one length is not usable
-today. The construction copies a projection out of the equality package everywhere it is
-mentioned rather than naming it once, and that is the whole of where the growth is.
+such a family generates grows by about eight times with each dependent index: the chain and
+the proof of it come to 47 KB together for one dependent index, 520 KB for two and 5 MB for
+three. Checking them costs 0.05 s, 0.7 s and 9 s. **A fourth does not finish**, so a
+relation over four vectors of one length is not usable today, and it stops rather than
+telling you so.
+
+**It was 25× before, and three did not finish.** What came down is duplication, not work:
+the pair a package travels in writes its second parameter six times and `J` writes its
+motive three, and both of those hold every projection read out of the package so far.
+Naming them with a `let` — which changes nothing a term *means* — took the three-index chain
+from 77 MB to 5 MB.
+
+**A level-polymorphic index type.** The equipment generated over an index telescope is
+stated at the datatype's own level joined with every index type's, and not at the
+datatype's alone. An index is not a constructor argument: the size restriction bounds an
+argument's type below the datatype's level, and nothing bounds an index's, so
+`data Only (A : Type) : ∀ (n : Nat) -> Vec A n -> Type` relates the two not at all. Stating
+the chain at the datatype's level refused that declaration outright unless some constructor
+argument happened to force the two levels together.
 
 **Two shapes are still refused, and both are a missing step of that chain rather than a
 missing equality.** An index whose type mentions an earlier index that was *abstracted

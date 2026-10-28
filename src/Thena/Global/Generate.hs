@@ -49,6 +49,7 @@ module Thena.Global.Generate
   , andFirst
   , andSecond
   , transportAt
+  , transportNaming
   , packType
   , packParts
   , packValue
@@ -73,6 +74,7 @@ module Thena.Global.Generate
   , unpackChain
 
     -- * Small helpers
+  , equipmentLevel
   , mentionsAnEarlierEntry
   , varsOf
   , freshen
@@ -80,7 +82,7 @@ module Thena.Global.Generate
   , each
   ) where
 
-import Thena.Core.Level (Level (..))
+import Thena.Core.Level (Level (..), levelMax)
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar, lamOver, piOver)
 import Thena.Core.Term
   ( Core (..)
@@ -92,6 +94,7 @@ import Thena.Core.Term
   , freeVars
   , instantiate
   )
+import Thena.Core.Typing (sortOf)
 import Thena.Errors (Skipped (..), TypeError)
 import Thena.Global.Env
   ( ConstructorDefinition (..)
@@ -429,7 +432,15 @@ stations dl args rs n0' = go [] [] args rs n0'
               carried   = [ sub | sub <- projected0
                                 , fst sub /= v
                                 , fst sub `notElem` map fst held ]
-              (t', nn') = transportAt dl (statedType h)
+              -- **A motive that carries a projection is named**, which is
+              -- 'transportNaming', and one that carries none is written out:
+              -- a projection is the big thing, and J writes its motive three
+              -- times (MS9 phase 227, @~6j3xq@). Nothing is projected until a
+              -- package has been walked into, so a family with a single
+              -- dependent index generates exactly what it did before.
+              moving | null carried = transportAt
+                     | otherwise    = transportNaming
+              (t', nn') = moving dl (statedType h)
                             (\z -> packType dl (held ++ [(v, z)] ++ carried) inside)
                             (statedLeft h) (statedRight h)
                             (Free (statedProof h)) t nn
@@ -566,7 +577,12 @@ packValue dl ss es n = case es of
 -- **'moveIn' never projects a head**: the equation it is about already names
 -- the component, which is what 'statedLeft' is.
 firstOf :: Level -> Core -> Core -> Core -> Int -> (Core, Int)
-firstOf dl a b p n =
+firstOf dl a b p = sharing dl a b (\a' b' -> firstBody dl a' b' p)
+
+-- | The first projection itself, over a pair whose two parameters are already
+-- named. 'sharing' is what names them.
+firstBody :: Level -> Core -> Core -> Core -> Int -> (Core, Int)
+firstBody dl a b p n =
   let (zv, n1) = fresh n
       (xv, n2) = fresh n1
       (yv, n3) = fresh n2
@@ -577,6 +593,30 @@ firstOf dl a b p n =
           [] p
       , n3 )
 
+-- | Bind a pair\'s two parameters to names and build the projection under them.
+--
+-- **A PROJECTION WRITES ITS PAIR\'S SECOND PARAMETER SIX TIMES, AND THAT
+-- PARAMETER HOLDS THE PROJECTIONS BEFORE IT** — MS9 phase 227, @~6j3xq@. A
+-- pair\'s @B@ is a λ over the rest of the package, and the rest of the package is
+-- typed against the components already read out of it, so each projection
+-- written out in full contains six copies of the one before: the chain over
+-- three dependent indices came to 77 MB and the kernel could not get through it.
+-- Naming the two parameters with a @Let@ puts one copy where there were six, and
+-- the checker walks a @Let@\'s body once with the name in its context. It changes
+-- nothing about what the term /means/ — @whnf@ substitutes a @Let@ away — so it
+-- is the same projection, written down once.
+sharing :: Level -> Core -> Core -> (Core -> Core -> Int -> (Core, Int)) -> Int -> (Core, Int)
+sharing dl a b body n =
+  let (av, n1)   = fresh n
+      (bv, n2)   = fresh n1
+      (wv, n3)   = fresh n2
+      (t,  n4)   = body (Free av) (Free bv) n3
+   in ( Let (Ident "A") a (Universe dl) (close av
+          (Let (Ident "B") b
+             (Pi (Ident "z") (Free av) (close wv (Universe dl)))
+             (close bv t)))
+      , n4 )
+
 -- @elim DPair (A B) (λ p . B (fst p)) ((λ x y . y)) () p@ — the second
 -- projection, and the only one 'moveIn' needs.
 --
@@ -584,9 +624,13 @@ firstOf dl a b p n =
 -- where it builds the same thing: the prelude's projections are
 -- /definitions/ and this module depends on the prelude's constructors alone.
 secondOf :: Level -> Core -> Core -> Core -> Int -> (Core, Int)
-secondOf dl a b p n =
+secondOf dl a b p = sharing dl a b (\a' b' -> secondBody dl a' b' p)
+
+-- | The second projection itself, over named parameters — 'firstBody'\'s reason.
+secondBody :: Level -> Core -> Core -> Core -> Int -> (Core, Int)
+secondBody dl a b p n =
   let (zv, n1)  = fresh n
-      (fp, n2)  = firstOf dl a b (Free zv) n1
+      (fp, n2)  = firstBody dl a b (Free zv) n1
       (xv, n3)  = fresh n2
       (yv, n4)  = fresh n3
    in ( Eliminate (GlobalName "DPair") [dl, dl] [a, b]
@@ -649,6 +693,62 @@ transportAt dl a m x y e p n =
       meth = Lam (Ident "a") a (close av
                (Lam (Ident "z") ma (close zv (Free zv))))
    in (App (Eliminate (GlobalName "Eq") [dl] [a] mot [meth] [x, y] e) p, n9)
+
+-- | 'transportAt' with the motive written **once** and named.
+--
+-- **J wants its motive at three terms** — @u@, @v@, and the method\'s own @c@ —
+-- so a motive written out in full is written three times. For a package that
+-- motive is the whole pack\'s type, which holds every projection read out of the
+-- pack so far, so three copies of it is three copies of everything before it.
+-- Over three dependent indices that alone was most of the 77 MB the chain came
+-- to (MS9 phase 227, @~6j3xq@).
+--
+-- **A package of one component is moved by 'transportAt' and not by this**, and
+-- the difference is the whole of when naming pays: that motive is one entry\'s
+-- type, so naming it would buy two copies of something small and put a @let@ in
+-- the printed type of every family with a single dependent index. The two build
+-- the same transport — @whnf@ substitutes a @Let@ away — so nothing downstream
+-- can tell which was used.
+transportNaming :: Level -> Core -> (Core -> Int -> (Core, Int))
+                -> Core -> Core -> Core -> Core -> Int -> (Core, Int)
+transportNaming dl a m x y e p n =
+  let (mv, n1)   = fresh n
+      (zz, n2)   = fresh n1
+      (ww, n3)   = fresh n2
+      (body, n4) = m (Free zz) n3
+      (t,  n5)   = transportAt dl a (\z k -> (App (Free mv) z, k)) x y e p n4
+   in ( Let (Ident "M") (Lam (Ident "z") a (close zz body))
+          (Pi (Ident "z") a (close ww (Universe dl)))
+          (close mv t)
+      , n5 )
+
+-- | The level a datatype\'s generated equipment is stated at: its own level,
+-- joined with the level of every one of its INDEX types.
+--
+-- **A constructor argument\'s type lives at or below the datatype\'s level and an
+-- index\'s type need not** — MS9 phase 227, @~3fj3k@. The size restriction bounds
+-- an argument, which is what makes the declaration predicative; nothing bounds an
+-- index, and @data Q (A : Type ℓ) : ∀ (n : N) -> Vec A n -> Type ℓ\'@ relates the
+-- two levels not at all. So a chain stated over the index telescope at the
+-- datatype\'s level asks @Eq {ℓ\'}@ to take a @Vec A n@, which lives at @ℓ@, and
+-- the kernel refuses the declaration with two rigid level parameters that
+-- "are different". Joining them is what cumulativity then has something to do:
+-- every index type subsumes into the join, and so does the datatype\'s own level.
+--
+-- **It is the datatype\'s own level for everything in the suite and the corpus**,
+-- where an index\'s type is @Nat@ or a @Vec@ at a parameter the datatype already
+-- quantifies — so this changes what is generated only for the families that were
+-- refused outright.
+--
+-- The counter is used and thrown away: 'sortOf' mints variables to walk a type
+-- and the answer is a 'Level', which cannot hold one.
+equipmentLevel :: GlobalEnv -> Context -> Level -> Context -> Int -> Level
+equipmentLevel env outer dl idx n = go dl outer idx
+  where
+    go acc _   []       = acc
+    go acc ctx (e : es) = case sortOf env ctx n (entryType e) of
+      (Right l, _, _) -> go (levelMax acc l) (ctx ++ [e]) es
+      (Left _,  _, _) -> go acc (ctx ++ [e]) es
 
 -- | The curried chain: one Π per equation, in order, each closing over the
 -- binder that stands for its proof so the next equation's transports can

@@ -23,7 +23,7 @@ module Thena.NoCycleTests (tests) where
 import Data.List (isInfixOf)
 
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
 import Thena.Declared
@@ -474,6 +474,26 @@ guardTests =
       has eqNatVecApart "noConfusionApart" @?= True
   , testCase "and so is the nested J over it" $
       has eqNatVecApart "noCycleApart" @?= True
+  , -- **THE SIZE IS THE PROPERTY, AND IT IS WHY THIS SHAPE IS USABLE AT ALL** —
+    -- MS9 phase 227. The chain over a package writes its projections out, each
+    -- one holding the projections before it, so the lemma's type multiplied by
+    -- about 25 with every dependent index: 556 KB over two vectors, 12.9 MB over
+    -- three, and the kernel could not get through the third in 3 GB. Naming a
+    -- pair's parameters and a transport's motive, each of which J or the
+    -- projection writes three to six times, brought the two-vector type to about
+    -- 105 KB and made three vectors declare in about nine seconds. **The bound is
+    -- generous on purpose**: it is here to catch the growth coming back, not to
+    -- pin a number, and the whole of what it measures is in
+    -- @Thena.Global.Generate.sharing@ and @transportNaming@.
+    testCase "and the lemma's type did not grow back" $
+      case lookupDefinition (GlobalName "noConfusionBoth") eqNatVecBoth of
+        Nothing -> assertFailure "noConfusionBoth was not generated"
+        Just d  ->
+          assertBool
+            ("the two-vector lemma's type is "
+               ++ show (length (show (definitionType d)))
+               ++ " characters, which is the duplication back")
+            (length (show (definitionType d)) < 250000)
   , -- One namespace, shared with generated names (§3.6).
     testCase "a user definition of the tuple's name refuses the declaration" $
       refuses "BelowN"

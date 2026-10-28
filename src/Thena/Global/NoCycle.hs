@@ -110,6 +110,7 @@ import Thena.Global.Generate
   , mentionsAnEarlierEntry
   , each
   , emptyType
+  , equipmentLevel
   , equalityInScope
   , falsityInScope
   , freshen
@@ -246,7 +247,11 @@ generateNoCycle env n0 d
     np        = length ps
     cs        = inductiveConstructors d
     paramVars = varsOf ps
-    dl        = inductiveLevel d
+    -- **The datatype's own level, joined with every index type's** (MS9 phase
+    -- 227, @~3fj3k@): an index's type is not bounded by the datatype's level the
+    -- way a constructor argument's is, and everything here states a chain over
+    -- the index telescope. 'Thena.Global.Generate.equipmentLevel' has why.
+    dl        = equipmentLevel env ps (inductiveLevel d) idx n0
     levels    = map LVar (inductiveLevels d)
 
     -- @Unit@ is written by a method for a constructor with no recursive

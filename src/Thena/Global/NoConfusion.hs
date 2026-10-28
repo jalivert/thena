@@ -133,6 +133,7 @@ import Thena.Global.Generate
   , each
   , emptyType
   , equalityInScope
+  , equipmentLevel
   , falsityInScope
   , freshen
   , telescopic
@@ -210,7 +211,12 @@ generateNoConfusion env n0 d
     -- lifts a @Type ℓ_arg@ into @Type dl@. Before phase 32 the equations would
     -- have had to be stated each at its own argument's level, and then could
     -- not have been conjoined — @And@ takes two types at **one** level.
-    dl = inductiveLevel d
+    --
+    -- **AN INDEX IS NOT AN ARGUMENT AND NOTHING BOUNDS IT** (MS9 phase 227,
+    -- @~3fj3k@), so the level is the datatype's own joined with every index
+    -- type's — 'equipmentLevel' has why. For every family in the suite and the
+    -- corpus that join /is/ the datatype's own level.
+    dl = equipmentLevel env ps (inductiveLevel d) idx n0
 
     -- ----------------------------------------------------------------------
     -- The family
