@@ -2217,24 +2217,31 @@ changes.
 takes to load the example corpus**, and about 30% on the largest single development in it.
 Measured by generating and not generating, two runs each.
 
-### One shape of index telescope is refused outright
+### Every shape of index telescope declares, and the third one does not finish
 
-*Measured 2026-10-27.*
+*Measured 2026-10-28.*
 
 **A family whose index telescope has two indices that each depend on an earlier index, with
-the family's own element depending on both, is refused when you declare it**, with
-`the generated noConfusionD does not typecheck, which is a bug in Thena`. It is a defect
-and not a limit of the theory, and it is being worked on.
+the family's own element depending on both, declares and splits.** A relation between two
+vectors — `Append`, `Permutation` — has that shape, and until 2026-10-28 it was refused
+outright with `the generated noConfusionD does not typecheck, which is a bug in Thena`.
 
 ```
-data Pair2 : ∀ (n : Nat) (as : Vec A n) (bs : Vec A n) -> Type₀   -- refused
-data Both2 : ∀ (n : Nat) (as : Vec A n) (m : Nat) (bs : Vec A m) -> Type₀  -- refused
-data After : ∀ (n : Nat) (as : Vec A n) (m : Nat) -> Type₀        -- fine
-data One   : ∀ (n : Nat) (as : Vec A n) -> Type₀                  -- fine
+data One   : ∀ (n : Nat) (as : Vec A n) -> Type₀                           -- fine
+data After : ∀ (n : Nat) (as : Vec A n) (m : Nat) -> Type₀                 -- fine
+data Pair2 : ∀ (n : Nat) (as : Vec A n) (bs : Vec A n) -> Type₀            -- fine
+data Both2 : ∀ (n : Nat) (as : Vec A n) (m : Nat) (bs : Vec A m) -> Type₀  -- fine
+data Three : ∀ (n : Nat) (as : Vec A n) (bs : Vec A n) (cs : Vec A n)
+             -> Type₀                                                     -- does not finish
 ```
 
-A relation between two vectors — `Append`, `Permutation` — has the refused shape. One
-dependent index with anything after it does not, and that distinction is the whole of it.
+**What that last line is, and it is a cost rather than a rule.** The telescopic equality
+such a family generates grows by about 25× with each dependent index: the chain and the
+proof of it come to 57 KB together for one, 2.7 MB for two and 77 MB for three. Two cost
+about two seconds to declare. **Three do not finish**: the proof is too large for the
+checker to get through, so a family relating three vectors of one length is not usable
+today. The construction copies a projection out of the equality package everywhere it is
+mentioned rather than naming it once, and that is the whole of where the growth is.
 
 **Two shapes are still refused, and both are a missing step of that chain rather than a
 missing equality.** An index whose type mentions an earlier index that was *abstracted

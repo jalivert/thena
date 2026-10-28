@@ -145,6 +145,26 @@ tests =
                 other -> assertFailure ("s applied to " ++ show other)
             other -> assertFailure ("not a successor: " ++ show other)
 
+      -- __Two indices reaching back to the same earlier one__ — both of
+      -- @Pairwise@\'s vectors are @Vec A n@, which is the shape MS9 phase 226
+      -- made declarable: two components come out of one package and each one\'s
+      -- projection mentions the other\'s argument, so the chain\'s substitution
+      -- is simultaneous and not a fold. @two@ counts a one-element pair, so
+      -- reducing says the split discharged all three equations and the arm
+      -- reached its own induction hypothesis.
+    , testCase "and so does the recursion over two vectors of one length" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s vectorTarget
+        let m = machineOf s'
+        case lookupDefinition (GlobalName "two") (globals m) of
+          Nothing -> assertFailure "two was not admitted"
+          Just d  -> case whnf (globals m) [] (definitionBody d) of
+            Canonical (GlobalName "s") _ [inner] ->
+              case whnf (globals m) [] inner of
+                Canonical (GlobalName "z") _ [] -> pure ()
+                other -> assertFailure ("s applied to " ++ show other)
+            other -> assertFailure ("not a successor: " ++ show other)
+
     , testCase "the file runs to the end" $ do
         (s, _) <- startingSession
         (_, _, stopped) <- loadFile s target

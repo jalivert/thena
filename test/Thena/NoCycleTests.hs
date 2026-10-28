@@ -39,6 +39,8 @@ import Thena.Declared
   , eqNatVecAll
   , eqNatVecAfter
   , eqNatVecBefore
+  , eqNatVecBoth
+  , eqNatVecApart
   , eqStep
   , eqTapl
   , finDecl
@@ -455,6 +457,23 @@ guardTests =
       has eqNatVecBefore "noCycleBefore" @?= True
   , testCase "and so is the nested J over it" $
       has eqNatVecAfter "noCycleAfter" @?= True
+  , -- **Two indices reaching back to the SAME earlier one refused the
+    -- declaration** until MS9 phase 226, and it is the shape a family indexed by
+    -- two vectors of one length has. Two components come out of one package and
+    -- each one's projection mentions the other's argument, so no order of a fold
+    -- substitutes them: the second rewrites inside the first's term. The chain's
+    -- substitution is simultaneous now.
+    testCase "two indices over one length: the no-confusion lemma is there" $
+      has eqNatVecBoth "noConfusionBoth" @?= True
+  , testCase "and so is the nested J over it" $
+      has eqNatVecBoth "noCycleBoth" @?= True
+  , -- The same defect's other half: here the package is transported along the
+    -- second length's equation while a projection that mentions the component
+    -- still inside it is already in flight.
+    testCase "two indices over one length each: the no-confusion lemma is there" $
+      has eqNatVecApart "noConfusionApart" @?= True
+  , testCase "and so is the nested J over it" $
+      has eqNatVecApart "noCycleApart" @?= True
   , -- One namespace, shared with generated names (§3.6).
     testCase "a user definition of the tuple's name refuses the declaration" $
       refuses "BelowN"

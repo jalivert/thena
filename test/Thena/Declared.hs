@@ -20,6 +20,8 @@ module Thena.Declared
   , allDecl
   , afterDecl
   , beforeDecl
+  , bothDecl
+  , apartDecl
   , emptyDecl
   , eqDecl
   , unitDecl
@@ -45,6 +47,8 @@ module Thena.Declared
   , eqNatVecAll
   , eqNatVecAfter
   , eqNatVecBefore
+  , eqNatVecBoth
+  , eqNatVecApart
   , eqNatCounter
   , eqTapl
   , eqTaplCounter
@@ -58,7 +62,7 @@ import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
 
 natDecl, vecDecl, finDecl, packDecl, spanDecl, emptyDecl :: String
-allDecl, afterDecl, beforeDecl :: String
+allDecl, afterDecl, beforeDecl, bothDecl, apartDecl :: String
 natDecl = "Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 vecDecl =
   "Vec (A : Type\8320) : Nat -> Type\8320 \
@@ -148,6 +152,30 @@ afterDecl =
 beforeDecl =
   "Before (A : Type\8320) : forall (n : Nat) -> Nat -> Vec A n -> Type\8320 \
   \where { bmk : forall (n : Nat) (m : Nat) (as : Vec A n) -> Before A n m as }"
+
+-- | TWO indices reaching back to the SAME earlier one (MS9 phase 226) — the
+-- shape a family indexed by two vectors of one length has, and
+-- @examples\/vector-families.thena@\'s @Pairwise@ is the same shape split on.
+--
+-- **Two components are read out of one package, and each one\'s projection
+-- mentions the other\'s argument**: a projection names the package and the
+-- package names every argument in it. So the chain\'s substitution is not a
+-- fold in any order — abstracting @bs@ captured the @bs@ inside @as@\'s
+-- projection, and the pack\'s type stood at the wrong index. Every family of
+-- this shape was refused with @noConfusionDiv does not typecheck@.
+bothDecl =
+  "Both (A : Type\8320) : forall (n : Nat) -> Vec A n -> Vec A n -> Type\8320 \
+  \where { tmk : forall (n : Nat) (as : Vec A n) (bs : Vec A n) \
+  \-> Both A n as bs }"
+
+-- | Two indices reaching back to one EACH (MS9 phase 226), which the same defect
+-- refused for its second reason: the package is transported along @m@\'s
+-- equation while @as@\'s projection, which mentions @bs@, is already in flight.
+apartDecl =
+  "Apart (A : Type\8320) : forall (n : Nat) (m : Nat) -> Vec A n -> Vec A m \
+  \-> Type\8320 \
+  \where { pmk : forall (n : Nat) (m : Nat) (as : Vec A n) (bs : Vec A m) \
+  \-> Apart A n m as bs }"
 
 -- | No constructors at all — the eliminator with no methods, which every other
 -- fixture has at least one of.
@@ -308,6 +336,14 @@ eqNatVecAfter = fst (declared (preludeDecls ++ [natDecl, vecDecl, afterDecl]))
 -- | The prelude, @Nat@, @Vec@ and 'beforeDecl' — an index before a dependent one.
 eqNatVecBefore :: GlobalEnv
 eqNatVecBefore = fst (declared (preludeDecls ++ [natDecl, vecDecl, beforeDecl]))
+
+-- | The prelude, @Nat@, @Vec@ and 'bothDecl' — two indices over one length.
+eqNatVecBoth :: GlobalEnv
+eqNatVecBoth = fst (declared (preludeDecls ++ [natDecl, vecDecl, bothDecl]))
+
+-- | The prelude, @Nat@, @Vec@ and 'apartDecl' — two indices over one length each.
+eqNatVecApart :: GlobalEnv
+eqNatVecApart = fst (declared (preludeDecls ++ [natDecl, vecDecl, apartDecl]))
 
 -- | The prelude and then MS1's target language.
 eqTapl :: GlobalEnv

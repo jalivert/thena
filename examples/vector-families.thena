@@ -58,3 +58,23 @@ count = \ A P m xs ps -> induction ps of { allNil -> z ; allCons n a as pa qs ->
 -- A closed value, so the recursion really reduces: one element, so `s z`.
 one : N
 one = count N (\ k -> N) (s z) (vcons N z z (vnil N)) (allCons N (\ k -> N) z z (vnil N) z (allNil N (\ k -> N)))
+
+-- `Pairwise` is the shape where TWO indices reach back to the SAME earlier one:
+-- both vectors are `Vec A n`. Two components then come out of one package, and
+-- each one's projection mentions the other's argument — a projection names the
+-- package and the package names every argument in it — so the chain's
+-- substitution cannot be a fold in either order. Every family of this shape had
+-- its declaration refused until MS9 phase 226.
+data Pairwise (A : Type₀) : forall (n : N) -> Vec A n -> Vec A n -> Type₀ where
+  pwNil : Pairwise A z (vnil A) (vnil A)
+  pwCons : forall (n : N) (a : A) (b : A) (as : Vec A n) (bs : Vec A n) (ps : Pairwise A n as bs) -> Pairwise A (s n) (vcons A n a as) (vcons A n b bs)
+
+-- A recursion over it: the split generalises the length and both vectors, all
+-- three equations are discharged, and each arm binds the constructor's own
+-- arguments and nothing else.
+pcount : forall (A : Type₀) (n : N) (as : Vec A n) (bs : Vec A n) (ps : Pairwise A n as bs) -> N
+pcount = \ A n as bs ps -> induction ps of { pwNil -> z ; pwCons k a b xs ys qs -> s (pcount A k xs ys qs) }
+
+-- And it reduces: one pair of elements, so `s z`.
+two : N
+two = pcount N (s z) (vcons N z z (vnil N)) (vcons N z (s z) (vnil N)) (pwCons N z z (s z) (vnil N) (vnil N) (pwNil N))

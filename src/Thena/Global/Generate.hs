@@ -50,6 +50,7 @@ module Thena.Global.Generate
   , andSecond
   , transportAt
   , packType
+  , packParts
   , packValue
   , firstOf
   , secondOf
@@ -325,8 +326,8 @@ stations dl args rs n0' = go [] [] args rs n0'
          in (ty, lhs, continuing before after onward, n1)
       _ | null ownDeps -> (entryType e, Free (entryVar e), keep, n)
         | otherwise    ->
-            let (ty, lhs, onward, n1) =
-                  walking (packValue dl [] packed, packed, [], []) n
+            let (pv, n0)              = packValue dl [] packed n
+                (ty, lhs, onward, n1) = walking (pv, packed, [], []) n0
              in (ty, lhs, continuing flights [] onward, n1)
       where
         -- Which package in flight, if any, is waiting for this argument.
@@ -460,13 +461,14 @@ stations dl args rs n0' = go [] [] args rs n0'
         -- it.
         walking (p0, inside, applied0, projected0) nn =
           let (p, applied, n1) = foldl (outward inside projected0) (p0, applied0, nn) owed
-              -- **The projections stay last and the equations stay before
-              -- them.** 'rewriting' is a fold, so a substitution applied after
-              -- one whose term mentions its own variable would descend into
-              -- that term — and a projection's term mentions the package's own
-              -- binders, which every equation after it is about. Keeping the
-              -- two apart is what makes the list behave as the simultaneous
-              -- substitution it is meant to be (MS9 phase 223).
+              -- **A component already moved along its own equation stands at
+              -- that equation's right side and no longer at its projection**, so
+              -- the equations win where both lists have a word about the same
+              -- argument. What the two make together is ONE simultaneous
+              -- substitution and not a fold ('simultaneously'): each projection
+              -- mentions the other components' arguments, so no order of a fold
+              -- is right (MS9 phase 226). Phase 223 kept the projections last
+              -- for the half of that reason it could see.
               projected = [ sub | sub <- projected0
                                 , fst sub `notElem` map fst applied ]
               done = applied ++ projected
@@ -476,22 +478,42 @@ stations dl args rs n0' = go [] [] args rs n0'
                              /= Just (statedRight h) ]
            in case inside of
                 _ : rest@(_ : _) ->
-                  let a        = rewriting done (entryType e)
-                      b        = Lam (Ident "z") a
-                                   (close (entryVar e) (packType dl done rest))
-                      (hd, n2) = firstOf dl a b p n1
+                  let ((a, b), n2) = packParts dl done e rest n1
+                      (hd, n3) = firstOf dl a b p n2
                       onward _ m =
                         let (tl, m1) = secondOf dl a b p m
                          in ( Just (tl, rest, applied
                                    , projected ++ [(entryVar e, hd)])
                             , m1 )
-                   in (a, hd, onward, n2)
-                _ -> (rewriting done (entryType e), p, \_ m -> (Nothing, m), n1)
+                   in (a, hd, onward, n3)
+                _ ->
+                  let (a, n2) = simultaneously done (entryType e) n1
+                   in (a, p, \_ m -> (Nothing, m), n2)
 
 -- @t@ with each listed variable rewritten to its term, left to right.
 -- 'close' then 'instantiate' is the only way to rewrite a variable (§3.4).
 rewriting :: [(Var, Core)] -> Core -> Core
 rewriting ss t = foldl (\t' (v, r) -> instantiate r (close v t')) t ss
+
+-- | @t@ with every listed variable rewritten to its term **at once**.
+--
+-- **'rewriting' is a fold and this is not, and no order of that fold is right —
+-- MS9 phase 226, @~rjq7b@.** Two components read out of the same package each
+-- mention the /other/'s argument, because a projection names the package and the
+-- package names every argument in it: substituting the first component's
+-- projection and then the second's rewrites inside the first's term, and the
+-- other order rewrites inside the second's. A family indexed by three vectors
+-- over one length is where that becomes unavoidable.
+--
+-- Renaming every variable to a fresh one first makes the two passes independent:
+-- a fresh name occurs in none of the terms, so neither pass can descend into
+-- what the other substituted. It is still 'close' then 'instantiate' and nothing
+-- else (§3.4).
+simultaneously :: [(Var, Core)] -> Core -> Int -> (Core, Int)
+simultaneously ss t n =
+  let (ws, n1) = each (\_ m -> fresh m) n ss
+      staged   = rewriting (zip (map fst ss) (map Free ws)) t
+   in (rewriting (zip ws (map snd ss)) staged, n1)
 
 -- A telescope as nested pairs: @DPair A₁ (λ a₁ . DPair A₂ (λ a₂ . A₃))@ for
 -- three entries, and the bare type for one.
@@ -500,26 +522,44 @@ rewriting ss t = foldl (\t' (v, r) -> instantiate r (close v t')) t ss
 -- second component is a λ, so each later type is written under a binder for
 -- the argument before it rather than against a free variable — and the
 -- whole thing is then one type, with one motive, that a single J can move.
-packType :: Level -> [(Var, Core)] -> Context -> Core
-packType dl ss es = case es of
-  []       -> Global (GlobalName "Unit") [dl]
-  [e]      -> rewriting ss (entryType e)
-  e : rest -> dpairAt dl (rewriting ss (entryType e))
-                (Lam (Ident "z") (rewriting ss (entryType e))
-                   (close (entryVar e) (packType dl ss rest)))
+packType :: Level -> [(Var, Core)] -> Context -> Int -> (Core, Int)
+packType dl ss es n = case es of
+  []       -> (Global (GlobalName "Unit") [dl], n)
+  [e]      -> simultaneously ss (entryType e) n
+  e : rest -> let ((a, b), n1) = packParts dl ss e rest n
+               in (dpairAt dl a b, n1)
+
+-- | A pair's two parameters: the head's type, and the λ the rest of the pack is
+-- written under. @DPair@ of the two is 'packType' of the same entries, and
+-- 'firstOf' and 'secondOf' want them apart — one function so that a projection
+-- cannot disagree with the type it reads.
+--
+-- **THE BINDER IS A FRESH VARIABLE AND NOT THE ARGUMENT'S OWN, AND THE RENAMING
+-- TO IT IS THE FIRST SUBSTITUTION OF THE SIMULTANEOUS ONE** (MS9 phase 226,
+-- @~rjq7b@). A projection already substituted for an earlier component /mentions
+-- this component's argument/ — a projection names the package and the package
+-- names every argument in it — so abstracting the argument itself captured that
+-- occurrence: the term under the binder stood at the component's new index where
+-- the projection meant the old one, and the pack's type was refused. Renaming
+-- first is what keeps the list the simultaneous substitution it is meant to be,
+-- which is 'simultaneously' and the same defect one step further out.
+packParts :: Level -> [(Var, Core)] -> Entry -> Context -> Int -> ((Core, Core), Int)
+packParts dl ss e rest n =
+  let (a,  n1) = simultaneously ss (entryType e) n
+      (zv, n2) = fresh n1
+      (t,  n3) = packType dl ((entryVar e, Free zv) : ss) rest n2
+   in ((a, Lam (Ident "z") a (close zv t)), n3)
 
 -- The arguments themselves, packaged to inhabit 'packType' of the same
 -- entries. Only ever called where @ss@ changes none of their types, which
 -- is why the components are the binders and not something carried.
-packValue :: Level -> [(Var, Core)] -> Context -> Core
-packValue dl ss es = case es of
-  []       -> Global (GlobalName "unit") [dl]
-  [e]      -> Free (entryVar e)
-  e : rest -> dpairMk dl (rewriting ss (entryType e))
-                (Lam (Ident "z") (rewriting ss (entryType e))
-                   (close (entryVar e) (packType dl ss rest)))
-                (Free (entryVar e))
-                (packValue dl ss rest)
+packValue :: Level -> [(Var, Core)] -> Context -> Int -> (Core, Int)
+packValue dl ss es n = case es of
+  []       -> (Global (GlobalName "unit") [dl], n)
+  [e]      -> (Free (entryVar e), n)
+  e : rest -> let ((a, b), n1) = packParts dl ss e rest n
+                  (v,      n2) = packValue dl ss rest n1
+               in (dpairMk dl a b (Free (entryVar e)) v, n2)
 
 -- @elim DPair (A B) (λ p . A) ((λ x y . x)) () p@ — written only inside
 -- 'secondOf'\'s motive, which is where the prelude's @snd@ writes it too.
@@ -591,7 +631,7 @@ andSecond dl a b p n =
 -- **J's motive here is a function type and not @M v@**, because the method
 -- has to be proved at @refl@ for an arbitrary @a@, where @M a -> M a@ is
 -- the identity and @M a@ is nothing in particular.
-transportAt :: Level -> Core -> (Core -> Core) -> Core -> Core -> Core -> Core -> Int -> (Core, Int)
+transportAt :: Level -> Core -> (Core -> Int -> (Core, Int)) -> Core -> Core -> Core -> Core -> Int -> (Core, Int)
 transportAt dl a m x y e p n =
   let (uv, n1) = fresh n
       (vv, n2) = fresh n1
@@ -599,13 +639,16 @@ transportAt dl a m x y e p n =
       (dv, n4) = fresh n3
       (av, n5) = fresh n4
       (zv, n6) = fresh n5
+      (mu, n7) = m (Free uv) n6
+      (mv, n8) = m (Free vv) n7
+      (ma, n9) = m (Free av) n8
       mot = Lam (Ident "u") a (close uv
               (Lam (Ident "v") a (close vv
                 (Lam (Ident "w") (eqAt dl a (Free uv) (Free vv)) (close wv
-                  (Pi (Ident "p") (m (Free uv)) (close dv (m (Free vv)))))))))
+                  (Pi (Ident "p") mu (close dv mv)))))))
       meth = Lam (Ident "a") a (close av
-               (Lam (Ident "z") (m (Free av)) (close zv (Free zv))))
-   in (App (Eliminate (GlobalName "Eq") [dl] [a] mot [meth] [x, y] e) p, n6)
+               (Lam (Ident "z") ma (close zv (Free zv))))
+   in (App (Eliminate (GlobalName "Eq") [dl] [a] mot [meth] [x, y] e) p, n9)
 
 -- | The curried chain: one Π per equation, in order, each closing over the
 -- binder that stands for its proof so the next equation's transports can
