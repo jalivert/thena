@@ -563,10 +563,15 @@ formerArity g e = case lookup g (inductives e) of
 -- | Is this constructor argument recursive, and if so at which indices?
 --
 -- @Just is@ when the argument\'s type is an application of the datatype itself,
--- with @is@ the indices it is at; 'Nothing' otherwise. The type must already
--- have the enclosing telescope\'s actual values substituted in where that
--- matters — 'Thena.Core.Reduce' does that before asking, 'eliminatorType' does
--- not need to because it works with the declaration\'s own formal variables.
+-- with @is@ the indices it is at; 'Nothing' otherwise.
+--
+-- **ASK IT THE DECLARATION\'S OWN TYPE, NEVER ONE WITH THE ACTUAL PARAMETERS
+-- SUBSTITUTED IN** (MS9). An argument declared at a parameter — @both@\'s
+-- @b : B@ — becomes an application of the datatype as soon as that parameter is
+-- instantiated with one, so substituting first changes /whether/ an argument is
+-- recursive and not just the indices it sits at. Both callers read the declared
+-- type; 'Thena.Core.Reduce.recursiveCalls' actualises the indices this returns,
+-- which is the only part of the answer that depends on the elimination.
 --
 -- **Here rather than in either caller, because there are two.** ι builds one
 -- recursive /call/ per recursive argument and the eliminator\'s type builds one

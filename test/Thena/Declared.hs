@@ -35,6 +35,8 @@ module Thena.Declared
   , natVecCounter
   , natFin
   , natFinCounter
+  , natAnd
+  , natAndCounter
   , eqNat
   , eqNatVec
   , eqNatVecCounter
@@ -279,6 +281,18 @@ natVecCounter = snd (declared [natDecl, vecDecl])
 -- | The same for 'natFin'.
 natFinCounter :: Int
 natFinCounter = snd (declared [natDecl, finDecl, emptyDecl])
+
+-- | @Nat@ beside 'andDecl' — a datatype with two parameters and no index, which
+-- is what it takes to instantiate a parameter with the datatype itself (MS9).
+--
+-- Prelude-free like the three above, so it carries no no-confusion: this one is
+-- about ι and nothing else.
+natAnd :: GlobalEnv
+natAnd = fst (declared [natDecl, andDecl])
+
+-- | Its counter, for the reason 'natVecCounter' gives.
+natAndCounter :: Int
+natAndCounter = snd (declared [natDecl, andDecl])
 
 -- | The prelude and then @Nat@ — so @Nat@ arrives with @NoConfusionNat@ and
 -- @noConfusionNat@ beside it (phase 14).

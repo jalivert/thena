@@ -98,6 +98,7 @@
 -- is why only the diagonal cases are ever proved: @λ C k . k refl … refl@.
 module Thena.Global.NoConfusion
   ( noConfusionNames
+  , noConfusionInverseNames
   , generateNoConfusion
   ) where
 
@@ -132,6 +133,16 @@ import Thena.Global.Generate
   , mentionsAnEarlierEntry
   , each
   , emptyType
+  , eqAt
+  , reflAt
+  , curriedRefls
+  , packageType
+  , packageWith
+  , rewriteStated
+  , rewriting
+  , stations
+  , unpackChain
+  , Stated (..)
   , equalityInScope
   , equipmentLevel
   , falsityInScope
@@ -152,7 +163,17 @@ noConfusionNames :: GlobalName -> (GlobalName, GlobalName)
 noConfusionNames (GlobalName d) =
   (GlobalName ("NoConfusion" ++ d), GlobalName ("noConfusion" ++ d))
 
--- | Generate, check and admit both definitions — or say why not.
+-- | The two names the backwards half generates: @noConfusionNatInv@ and
+-- @isLeftInvNat@ — §3.5's @noConfD⁻¹@ and @isLeftInvD@.
+--
+-- **Named apart from 'noConfusionNames' because they are generated apart.** A
+-- datatype whose forward pair is declined has no inverse either, and a caller
+-- that only wants the forward lemma should not have to know these exist.
+noConfusionInverseNames :: GlobalName -> (GlobalName, GlobalName)
+noConfusionInverseNames (GlobalName d) =
+  (GlobalName ("noConfusion" ++ d ++ "Inv"), GlobalName ("isLeftInv" ++ d))
+
+-- | Generate, check and admit all four definitions — or say why not.
 --
 -- Called from "Thena.Global.Declare" /after/ the wrappers are installed, so the
 -- datatype's own former and constructors are already resolvable: @Eq Term a b@
@@ -180,14 +201,48 @@ generateNoConfusion env n0 d
                in case verdict (check env1 [] n4 lemBody lemTy) of
                     Left e   -> Rejected lemName e
                     Right () ->
-                      Generated (addDefinition lemName (MkDefinition (inductiveLevels d) [] lemTy lemBody) env1) n4
+                      backwards
+                        (addDefinition lemName (MkDefinition (inductiveLevels d) [] lemTy lemBody) env1)
+                        n4
   where
+    -- __The backwards half__ — @noConfusionDInv@ and @isLeftInvD@, which is
+    -- what injectivity over a transported chain needs: the forward lemma drops
+    -- the binder it fired on, and only the round-trip law lets a later equation
+    -- be restated along the proof rebuilt in its place.
+    backwards env2 n
+      -- __Its own precondition, and it is stricter than the forward pair's.__
+      -- The forward lemma /takes/ the chain, one Π binder per equation, and so
+      -- needs no product at all; the inverse /produces/ it, and a term cannot
+      -- be a run of binders. So a datatype declared before the products exist —
+      -- the prelude's own first few — keeps its forward pair and gets no
+      -- inverse, which is exactly what a prelude-free script already gets.
+      | not (backwardsInScope env2) = Generated env2 n
+      | isDeclared invName env2 = Clash invName
+      | isDeclared lawName env2 = Clash lawName
+      | otherwise =
+          let (invTy, n1) = inverseType n
+              (invTm, n2) = inverseBody n1
+           in case verdict (check env2 [] n2 invTm invTy) of
+                Left e   -> Rejected invName e
+                Right () ->
+                  let env3        = addDefinition invName (MkDefinition (inductiveLevels d) [] invTy invTm) env2
+                      (lawTy, n3) = lawType n2
+                      (lawTm, n4) = lawBody n3
+                   in case verdict (check env3 [] n4 lawTm lawTy) of
+                        Left e   -> Rejected lawName e
+                        Right () ->
+                          Generated
+                            (addDefinition lawName (MkDefinition (inductiveLevels d) [] lawTy lawTm) env3)
+                            n4
+
     -- Everything checked here is /generated/, so it holds no level meta and
     -- can owe no obligation. The counter is not wanted either — these checks
     -- run in an empty context on closed terms.
     verdict (r, _, _) = r
 
     (famName, lemName) = noConfusionNames (inductiveName d)
+    (invName, lawName) = noConfusionInverseNames (inductiveName d)
+    lvls               = map LVar (inductiveLevels d)
 
     dn        = inductiveName d
     ps        = inductiveParameters d
@@ -355,9 +410,11 @@ generateNoConfusion env n0 d
        in ( Chain
               { chainLevel     = dl
               , chainTelescope = theta
-              , chainGoal      = \ls rs ->
-                  foldl App (Global famName (map LVar (inductiveLevels d)))
-                    (paramVars ++ ls ++ rs)
+              , chainGoal      = \ls rs m ->
+                  ( foldl App (Global famName (map LVar (inductiveLevels d)))
+                      (paramVars ++ ls ++ rs)
+                  , m
+                  )
               , chainDiagonal  = \shared m ->
                   case splitAt (length idx) shared of
                     (is, [a]) -> diagonalProof is a m
@@ -398,6 +455,280 @@ generateNoConfusion env n0 d
        in ( lamOver is (Lam (Ident "z") (familyAt (varsOf is)) (close vz result))
           , n2
           )
+
+    -- ----------------------------------------------------------------------
+    -- The inverse, and its round-trip law — MS9, @~rqs39@
+    -- ----------------------------------------------------------------------
+
+    -- Everything the backwards half writes, whatever the datatype: the chain is
+    -- packaged, so @DPair@, @And@ and @Unit@ are all reachable, and an
+    -- off-diagonal method is @elim Empty@.
+    backwardsInScope e =
+      dependentPairInScope e && conjunctionInScope e
+        && truthInScope e && falsityInScope e
+
+    -- @(indices; element)@ — the telescope the lemma and its inverse are both
+    -- stated over, with the datatype's own index variables.
+    thetaOf n =
+      let (vx, n1) = fresh n
+       in (idx ++ [Hypothesis vx (Ident "x") (familyAt (varsOf idx))], n1)
+
+    -- A fresh copy of it, for the right-hand side of a statement whose left
+    -- already holds those variables.
+    thetaFresh n = let (tel, n1) = thetaOf n in freshen n1 tel
+
+    -- @NoConfusionD p̄ ⟨ls⟩ ⟨rs⟩@, both sides given as terms.
+    noConfAt ls rs = foldl App (Global famName lvls) (paramVars ++ ls ++ rs)
+
+    -- The chain between two instantiations of @(indices; element)@, both given
+    -- as terms, as its stations — the type and any proof follow from those, and
+    -- there is one walk so a type and a proof of it cannot drift.
+    chainStations ls rs n =
+      let (tel, n1) = thetaOf n
+          (hs,  n2) = stations dl tel rs n1
+       in (map (rewriteStated (zip (map entryVar tel) ls)) hs, n2)
+
+    -- A constructor's target indices and the constructor applied, at @ts@ —
+    -- the instantiation of @(indices; element)@ one of its methods sits at.
+    sidesOf c ts =
+      let ss = zip (map entryVar (constructorArguments c)) ts
+       in map (rewriting ss) (constructorIndices c)
+            ++ [foldl App (Global (constructorName c) lvls) (paramVars ++ ts)]
+
+    -- @∀ p̄ ⟨ī; x⟩ ⟨j̄; y⟩ -> NoConfusionD p̄ ī x j̄ y -> ⟨the chain, packaged⟩@
+    --
+    -- **It is packaged where the forward lemma's is curried**, and it has to be:
+    -- the inverse /produces/ the chain, and a term cannot be a run of Π binders.
+    -- The law below is what reconciles the two shapes at a use site.
+    inverseType m0 =
+      let (tel,  n1) = thetaOf m0
+          (tel2, n2) = freshen n1 tel
+          (hs,   n3) = chainStations (varsOf tel) (varsOf tel2) n2
+          (hv,   n4) = fresh n3
+       in ( piOver ps (piOver tel (piOver tel2
+              (Pi (Ident "h") (noConfAt (varsOf tel) (varsOf tel2))
+                  (close hv (packageType dl hs)))))
+          , n4
+          )
+
+    -- @λ p̄ ⟨ī; x⟩ ⟨j̄; y⟩ h . elim D p̄ ⟨motive⟩ ⟨methods⟩ ī x j̄ y h@ — the same
+    -- two eliminations the family is, with the second under the first.
+    inverseBody m0 =
+      let (tel,  n1) = thetaOf m0
+          (tel2, n2) = freshen n1 tel
+          (mot,  n3) = inverseMotive n2
+          (ms,   n4) = each (inverseOuter mot) n3 cs
+          (hv,   n5) = fresh n4
+          vx         = entryVar (last tel)
+          body       = foldl App
+                         (Eliminate dn lvls paramVars mot ms (varsOf idx) (Free vx))
+                         (varsOf tel2 ++ [Free hv])
+       in ( lamOver ps (lamOver tel (lamOver tel2
+              (Lam (Ident "h") (noConfAt (varsOf tel) (varsOf tel2))
+                   (close hv body))))
+          , n5
+          )
+
+    -- @λ ī x . ∀ ⟨j̄; y⟩ -> NoConfusionD p̄ ī x j̄ y -> ⟨the chain⟩@
+    inverseMotive m0 =
+      let (is,   n1) = freshen m0 idx
+          (vt,   n2) = fresh n1
+          (tel2, n3) = thetaFresh n2
+          ls         = varsOf is ++ [Free vt]
+          (hs,   n4) = chainStations ls (varsOf tel2) n3
+          (hv,   n5) = fresh n4
+       in ( lamOver is (Lam (Ident "x") (familyAt (varsOf is)) (close vt
+              (piOver tel2 (Pi (Ident "h") (noConfAt ls (varsOf tel2))
+                               (close hv (packageType dl hs))))))
+          , n5
+          )
+
+    -- @λ ā ⟨ihs⟩ ⟨j̄; y⟩ . elim D p̄ ⟨motive⟩ ⟨methods⟩ j̄ y@
+    inverseOuter mot c m0 =
+      let args       = constructorArguments c
+          (tel2, n1) = thetaFresh m0
+          (imot, n2) = inverseInner c args n1
+          (ms,   n3) = each (inverseInnerMethod imot c args) n2 cs
+          vy         = entryVar (last tel2)
+          inner      = Eliminate dn lvls paramVars imot ms
+                         (varsOf (init tel2)) (Free vy)
+          (body, n4) = withHypotheses mot args (lamOver tel2 inner) n3
+       in (lamOver args body, n4)
+
+    -- @λ j̄ y . NoConfusionD p̄ ⟨c ā⟩ j̄ y -> ⟨the chain⟩@
+    inverseInner c args m0 =
+      let (is,  n1) = freshen m0 idx
+          (vy,  n2) = fresh n1
+          ls        = sidesOf c (varsOf args)
+          rs        = varsOf is ++ [Free vy]
+          (hs,  n3) = chainStations ls rs n2
+          (hv,  n4) = fresh n3
+       in ( lamOver is (Lam (Ident "y") (familyAt (varsOf is)) (close vy
+              (Pi (Ident "h") (noConfAt ls rs) (close hv (packageType dl hs)))))
+          , n4
+          )
+
+    -- One per constructor of @y@, given the constructor @x@ turned out to be:
+    -- off the diagonal the hypothesis is @Empty@, and on it the argument chain
+    -- has to become the chain between the two constructor applications.
+    inverseInnerMethod imot c args c' m0 =
+      let (args', n1) = freshen m0 (constructorArguments c')
+          ls          = sidesOf c  (varsOf args)
+          rs          = sidesOf c' (varsOf args')
+          (hs,    n2) = chainStations ls rs n1
+          goal        = packageType dl hs
+          (hv,    n3) = fresh n2
+          (payload, n4)
+            | constructorName c' == constructorName c =
+                inverseDiagonal c args args' goal (Free hv) n3
+            | otherwise = absurdAt goal (Free hv) n3
+          (body,  n5) = withHypotheses imot args'
+                          (Lam (Ident "h") (noConfAt ls rs) (close hv payload)) n4
+       in (lamOver args' body, n5)
+
+    -- @elim Empty ⟨λ _ . goal⟩ h@ — an impossible branch, discharged by name.
+    absurdAt goal h n =
+      let (tv, n1) = fresh n
+       in ( Eliminate (GlobalName "Empty") [dl] []
+              (Lam (Ident "impossible") (emptyType dl) (close tv goal)) [] [] h
+          , n1
+          )
+
+    -- __The diagonal, and the whole of what the inverse has to prove.__ The
+    -- hypothesis is the telescopic equality of the constructor's own arguments,
+    -- packaged; what is wanted is the chain between the two applications of it.
+    -- Unpack the one, walk the other down to where the two sides coincide, and
+    -- there the answer is reflexivity at every station — the same bargain the
+    -- forward lemma's diagonal makes, read the other way round.
+    --
+    -- **THE PACKAGE IS BOUND, NOT PROJECTED, AND THE DIFFERENCE IS EXPONENTIAL.**
+    -- A projection names the package it reads and the package names every
+    -- station in it, so writing one projection per station puts two copies of
+    -- the package's tail at every level: a constructor with eleven arguments —
+    -- @judgment alike@'s @Tr@, five premises over six metavariables — took the
+    -- suite past six gigabytes. 'unpackChain' is one constant-motive elimination
+    -- per station with the walk underneath, which is linear, and it is also the
+    -- walk 'package' is paired with, so an unpacking cannot disagree with the
+    -- packing it reads.
+    inverseDiagonal c args args' goal pkg m0 =
+      let (hs, m1) = stations dl args (varsOf args') m0
+          ch = Chain
+                 { chainLevel     = dl
+                 , chainTelescope = args
+                 , chainGoal      = \l r m ->
+                     let (hs', m') = chainStations (sidesOf c l) (sidesOf c r) m
+                      in (packageType dl hs', m')
+                 , chainDiagonal  = \shared m ->
+                     let sides     = sidesOf c shared
+                         (hs', m') = chainStations sides sides m
+                      in (packageWith dl hs' (curriedRefls dl hs'), m')
+                 }
+          (walk, m2) = chainProof ch m1
+          applied    = foldl App walk
+                         (varsOf args ++ varsOf args'
+                            ++ map (Free . statedProof) hs)
+       in unpackChain dl hs goal pkg applied m2
+
+    -- The statement of the law at one instantiation: the chain's index half is
+    -- reflexivity and its element half is the equation itself.
+    --
+    -- **That is the whole reason the law is stated homogeneously.** The caller
+    -- holds an equation whose two sides are at one index group and supplies
+    -- @refl@ for every index position, so this is the instance it needs; the
+    -- fully telescopic law would want an equation between two chains neither of
+    -- whose index halves is known.
+    lawStatement ls rs hs q =
+      let qs  = take (length hs - 1) (curriedRefls dl hs) ++ [q]
+          lhs = App (foldl App (Global invName lvls) (paramVars ++ ls ++ rs))
+                    (foldl App (Global lemName lvls) (paramVars ++ ls ++ rs ++ qs))
+       in eqAt dl (packageType dl hs) lhs (packageWith dl hs qs)
+
+    -- @∀ p̄ ī (x y : D p̄ ī) (q : Eq (D p̄ ī) x y) -> ⟨the statement⟩@
+    lawType m0 =
+      let (is, n1) = freshen m0 idx
+          (vx, n2) = fresh n1
+          (vy, n3) = fresh n2
+          (vq, n4) = fresh n3
+          dty      = familyAt (varsOf is)
+          ls       = varsOf is ++ [Free vx]
+          rs       = varsOf is ++ [Free vy]
+          (hs, n5) = chainStations ls rs n4
+       in ( piOver ps (piOver is
+              (Pi (Ident "x") dty (close vx
+                (Pi (Ident "y") dty (close vy
+                  (Pi (Ident "q") (eqAt dl dty (Free vx) (Free vy))
+                      (close vq (lawStatement ls rs hs (Free vq)))))))))
+          , n5
+          )
+
+    -- __J, and then one elimination of the datatype.__ J brings the two sides
+    -- together; after it both sides of the statement are closed terms that
+    -- reduce as soon as the former is known, and every method is @refl@.
+    lawBody m0 =
+      let (is,  n1) = freshen m0 idx
+          (vx,  n2) = fresh n1
+          (vy,  n3) = fresh n2
+          (vq,  n4) = fresh n3
+          dty       = familyAt (varsOf is)
+          (mot, n5) = lawMotive is dty n4
+          (mh,  n6) = lawMethod is dty n5
+          body      = Eliminate (GlobalName "Eq") [dl] [dty] mot [mh]
+                        [Free vx, Free vy] (Free vq)
+       in ( lamOver ps (lamOver is
+              (Lam (Ident "x") dty (close vx
+                (Lam (Ident "y") dty (close vy
+                  (Lam (Ident "q") (eqAt dl dty (Free vx) (Free vy))
+                       (close vq body)))))))
+          , n6
+          )
+
+    -- @λ u v w . ⟨the statement at u, v and w⟩@
+    lawMotive is dty m0 =
+      let (uv, n2) = fresh m0
+          (vv, n3) = fresh n2
+          (wv, n4) = fresh n3
+          ls       = varsOf is ++ [Free uv]
+          rs       = varsOf is ++ [Free vv]
+          (hs, n5) = chainStations ls rs n4
+       in ( Lam (Ident "u") dty (close uv
+              (Lam (Ident "v") dty (close vv
+                (Lam (Ident "w") (eqAt dl dty (Free uv) (Free vv))
+                     (close wv (lawStatement ls rs hs (Free wv)))))))
+          , n5
+          )
+
+    -- @λ c . elim D p̄ ⟨λ j̄ z . the statement at (j̄; z) and refl⟩ ⟨refls⟩ ī c@
+    lawMethod is dty m0 =
+      let (vc,  n1) = fresh m0
+          (mot, n2) = lawDiagMotive n1
+          (ms,  n3) = each (lawDiagMethod mot) n2 cs
+       in ( Lam (Ident "c") dty (close vc
+              (Eliminate dn lvls paramVars mot ms (varsOf is) (Free vc)))
+          , n3
+          )
+
+    -- @λ j̄ z . ⟨the statement at (j̄; z), (j̄; z) and refl⟩@
+    lawDiagMotive m0 =
+      let (js, n1) = freshen m0 idx
+          (vz, n2) = fresh n1
+          zt       = familyAt (varsOf js)
+          sides    = varsOf js ++ [Free vz]
+          (hs, n3) = chainStations sides sides n2
+       in ( lamOver js (Lam (Ident "z") zt (close vz
+              (lawStatement sides sides hs (reflAt dl zt (Free vz)))))
+          , n3
+          )
+
+    -- Both sides have reduced to the same packaged chain of reflexivities, so
+    -- the method is @refl@ of it.
+    lawDiagMethod mot c m0 =
+      let args     = constructorArguments c
+          sides    = sidesOf c (varsOf args)
+          (hs, n1) = chainStations sides sides m0
+          prf      = packageWith dl hs (curriedRefls dl hs)
+          (body, n2) = withHypotheses mot args
+                         (reflAt dl (packageType dl hs) prf) n1
+       in (lamOver args body, n2)
 
     -- ----------------------------------------------------------------------
     -- Shared shapes

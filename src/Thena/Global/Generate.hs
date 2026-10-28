@@ -32,6 +32,8 @@ module Thena.Global.Generate
   , stations
   , telescopic
   , package
+  , packageType
+  , packageWith
   , chained
   , lamsOver
   , telescopicChain
@@ -253,20 +255,46 @@ telescopic dl args rs n0' =
 -- on. Where a later equation does not mention this one's proof, @And@ says
 -- the same thing with one binder fewer.
 package :: Level -> [Stated] -> (Core, Core)
-package dl []  = (unitType dl, unitProof dl)
-package dl [h] = ( eqAt dl (statedType h) (statedLeft h) (statedRight h)
-              , reflAt dl (statedType h) (statedLeft h)
-              )
-package dl (h : hs) =
-  let eq                = eqAt dl (statedType h) (statedLeft h) (statedRight h)
-      prf               = reflAt dl (statedType h) (statedLeft h)
-      (restTy, restPrf) = package dl hs
-      qv                = statedProof h
-      binder            = Lam (Ident "q") eq (close qv restTy)
-      prf'              = rewriting [(qv, prf)] restPrf
+package dl hs = (packageType dl hs, packageWith dl hs (curriedRefls dl hs))
+
+-- | The package as a /type/, which is 'package' without its proof.
+packageType :: Level -> [Stated] -> Core
+packageType dl []  = unitType dl
+packageType dl [h] = eqAt dl (statedType h) (statedLeft h) (statedRight h)
+packageType dl (h : hs) =
+  let eq     = eqAt dl (statedType h) (statedLeft h) (statedRight h)
+      restTy = packageType dl hs
+      qv     = statedProof h
+      binder = Lam (Ident "q") eq (close qv restTy)
    in if qv `elem` freeVars restTy
-        then (dpairAt dl eq binder, dpairMk dl eq binder prf prf')
-        else (andAt dl eq restTy,   bothAt dl eq restTy prf prf')
+        then dpairAt dl eq binder
+        else andAt dl eq restTy
+
+-- | The package with a /given/ proof for each station, rather than @refl@.
+--
+-- **'package' is this at 'curriedRefls' and that is the whole relation between
+-- them** — one decision about which pair each station is held in, made in
+-- 'packageType' and read here, so a package and its unpacking (see
+-- 'unpackChain') cannot disagree. @isLeftInvD@ is the caller that wants proofs
+-- other than reflexivity: its right-hand side is the chain packaged from the
+-- very binders the lemma took.
+--
+-- Each proof is substituted into the stations after it as it is supplied,
+-- which is what makes the later ones typecheck — the transport an equation was
+-- stated after is now along a term and not along a binder.
+packageWith :: Level -> [Stated] -> [Core] -> Core
+packageWith dl []        _        = unitProof dl
+packageWith dl _         []       = unitProof dl
+packageWith _  [_]       (p : _)  = p
+packageWith dl (h : hs)  (p : ps) =
+  let eq     = eqAt dl (statedType h) (statedLeft h) (statedRight h)
+      restTy = packageType dl hs
+      qv     = statedProof h
+      binder = Lam (Ident "q") eq (close qv restTy)
+      rest   = rewriting [(qv, p)] (packageWith dl hs ps)
+   in if qv `elem` freeVars restTy
+        then dpairMk dl eq binder p rest
+        else bothAt dl eq restTy p rest
 
 -- | One 'Stated' per argument: the equation it contributes, the type that
 -- equation is stated at, and the binder standing for its proof.
@@ -818,8 +846,10 @@ data Chain = Chain
     -- ^ the level every equation is stated at
   , chainTelescope :: Context
     -- ^ the telescope both sides instantiate
-  , chainGoal      :: [Core] -> [Core] -> Core
-    -- ^ what is to be proved, at the left and right instantiations
+  , chainGoal      :: [Core] -> [Core] -> Int -> (Core, Int)
+    -- ^ what is to be proved, at the left and right instantiations. **It takes
+    -- the counter** because a goal may itself be a chain, whose stations each
+    -- want a binder — @noConfusionDInv@'s is.
   , chainDiagonal  :: [Core] -> Int -> (Core, Int)
     -- ^ its inhabitant where the two sides have become one
   }
@@ -869,9 +899,10 @@ goalFrom ch decided remaining n =
                        (decidedRights ++ varsOf rsCtx') n2
       given        = [ (statedProof h, pr) | (h, (_, _, pr)) <- zip hs decided ]
       bound        = drop (length decided) hs
+      (goal, n4)   = chainGoal ch lefts rights n3
    in ( piOver lsCtx' (piOver rsCtx'
-          (rewriting given (chained dl bound (chainGoal ch lefts rights))))
-      , n3
+          (rewriting given (chained dl bound goal)))
+      , n4
       )
   where
     theta         = chainTelescope ch

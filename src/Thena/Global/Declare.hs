@@ -39,7 +39,7 @@ import Thena.Core.Level
   , metasIn
   , solveLevels
   )
-import Thena.Core.Typing (infer)
+import Thena.Core.Typing (check, infer)
 import Thena.Errors (DataBuildError (..), ResolveError (..), TypeError (..))
 import Thena.Core.Term
   ( Core (..)
@@ -55,7 +55,7 @@ import Thena.Core.Term
   )
 import Thena.Language.Regex (RegexError)
 import Thena.Language.Grammar (GrammarError)
-import Thena.Global.Generate (Generated (..))
+import Thena.Global.Generate (Generated (..), rewriting)
 import Thena.Global.NoCycle (generateNoCycle)
 import Thena.Global.NoConfusion
   ( generateNoConfusion
@@ -311,8 +311,9 @@ universes
   -> Either DeclareError ([(LevelVar, Level)], [Obligation], Int)
 universes env n0 d = do
   (ls, obs, n1) <- argumentLevels env n0 d
-  let sized = [ AtMost l (inductiveLevel d) | (_, _, l) <- ls ]
-      owed  = obs ++ sized
+  let (ixs, n2) = indexLevels env n1 d
+      sized = [ AtMost l (inductiveLevel d) | (_, _, l) <- ls ]
+      owed  = obs ++ ixs ++ sized
   case solveLevels owed of
     -- **The substitution is kept** (phase 50). It used to be discarded, so
     -- even a bound this function itself formed pinned nothing: the comment on
@@ -324,7 +325,7 @@ universes env n0 d = do
     -- settles the metas the bounds only /constrain/, so the question this
     -- function can answer is the one it asks — whether the constraints are
     -- outright impossible.
-    Right (sub, residue) -> Right (sub, residue, n1)
+    Right (sub, residue) -> Right (sub, residue, n2)
     -- Which argument to name: the first whose own relation does not hold on
     -- its own. There is always one when the size restriction is what failed —
     -- and when it is not, the failure came from typing an argument rather than
@@ -333,6 +334,52 @@ universes env n0 d = do
               , solveLevels [AtMost l (inductiveLevel d)] /= Right ([], []) ] of
            (g, i, l) : _ -> Left (ArgumentTooLarge g i l (inductiveLevel d))
            []            -> Left (ArgumentLevelsUnmet (inductiveName d))
+
+-- | The obligations typing a constructor's TARGET INDICES owes (MS9).
+--
+-- **Nothing typed them at all, and the gap is about levels rather than types.**
+-- @onlyB : OnlyB A (vnil A)@ stores @vnil@ at a level meta of its own, and with
+-- nothing relating that meta to the one in the index telescope's @Vec A z@,
+-- 'minimised' read it as a meta that says nothing and pinned it at zero. The
+-- stored index is then @vnil {0} A@ under @A : Type ℓ@, so the family's own
+-- eliminator is ill-typed — @elim OnlyB@'s method wants
+-- @P (vnil {0} A) …@ — and the kernel refuses it as soon as anyone
+-- eliminates above @Type₀@. A family whose index telescope is
+-- level-polymorphic was unusable, in silence, and
+-- @examples\/vector-families.thena@ has carried one since MS9 phase 216.
+--
+-- Checking each index at the type the telescope declares for it is what relates
+-- the two metas, and what it owes goes where 'argumentLevels'' does —
+-- 'solveLevels' then pins the constructor's meta to the telescope's instead of
+-- leaving it for 'minimised'.
+--
+-- **A target that cannot be typed owes nothing rather than being refused.** The
+-- question here is what the indices owe; /whether/ an untypeable target should
+-- refuse the declaration is a check nothing performs today and a separate
+-- question, so a failure leaves the declaration exactly as it was before this
+-- walk existed.
+--
+-- The context is the parameters and then this constructor's own arguments, which
+-- is what the stored index terms are written against. An index entry's type may
+-- name the entries before it, and those are supplied by the terms this
+-- constructor targets them at — the same move 'Thena.Core.Reduce' makes for a
+-- recursive argument's indices.
+indexLevels :: GlobalEnv -> Int -> InductiveDefinition -> ([Obligation], Int)
+indexLevels env n0 d = foldl eachConstructor ([], n0) (inductiveConstructors d)
+  where
+    provisional = addConstant (inductiveName d) (inductiveLevels d) (formerType d) env
+
+    eachConstructor acc c =
+      go acc (inductiveParameters d ++ constructorArguments c) []
+         (zip (inductiveIndices d) (constructorIndices c))
+      where
+        go res _   _  []                 = res
+        go (owed, n) ctx ss ((e, i) : rest) =
+          let (verdict, obs, n1) = check provisional ctx n i (rewriting ss (entryType e))
+              gained             = case verdict of
+                                     Left _   -> []
+                                     Right () -> obs
+           in go (owed ++ gained, n1) ctx (ss ++ [(entryVar e, i)]) rest
 
 -- | The universe a bare @Type@ in the declared position stands for: the least
 -- one that contains every constructor argument (MS3 phase 33c).

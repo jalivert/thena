@@ -657,11 +657,13 @@ generateNoCycle env n0 d
       Chain
         { chainLevel     = dl
         , chainTelescope = args
-        , chainGoal      = \ls rs ->
-            Pi (Ident "ne") (at (notEqName dn) (sidesAt ls ++ sidesAt rs))
-               -- Nothing of @Empty@ mentions the binder, so any variable
-               -- closes it; @e@'s is one that certainly exists.
-               (close (entryVar e) (emptyType dl))
+        , chainGoal      = \ls rs m ->
+            ( Pi (Ident "ne") (at (notEqName dn) (sidesAt ls ++ sidesAt rs))
+                 -- Nothing of @Empty@ mentions the binder, so any variable
+                 -- closes it; @e@'s is one that certainly exists.
+                 (close (entryVar e) (emptyType dl))
+            , m
+            )
         , chainDiagonal  = \shared m ->
             let (vz, m1)  = fresh m
                 theta     = idx ++ [Hypothesis vz (Ident "x") (familyAt (varsOf idx))]
@@ -692,7 +694,7 @@ generateNoCycle env n0 d
        in ( Chain
               { chainLevel     = dl
               , chainTelescope = theta
-              , chainGoal      = \ls rs -> at (notBelowName dn) (ls ++ rs)
+              , chainGoal      = \ls rs m -> (at (notBelowName dn) (ls ++ rs), m)
               , chainDiagonal  = \shared m -> (at (noCycleDiagName dn) shared, m)
               }
           , n1
