@@ -43,6 +43,7 @@ import qualified Thena.SurfaceZipperTests
 import qualified Thena.DeclarationReadersTests
 import qualified Thena.SpecialiseTests
 import qualified Thena.DotPatternTests
+import qualified Thena.InteractiveSplitTests
 import qualified Thena.EliminateTests
 import qualified Thena.EliminatorTests
 import qualified Thena.EngineTests
@@ -120,6 +121,7 @@ main =
       , Thena.DeclarationReadersTests.tests
       , Thena.SpecialiseTests.tests
       , Thena.DotPatternTests.tests
+      , Thena.InteractiveSplitTests.tests
       , Thena.EliminateTests.tests
       , Thena.EliminatorTests.tests
       , Thena.EngineTests.tests

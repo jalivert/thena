@@ -1535,6 +1535,8 @@ unaryOps =
   , ("pattern-arguments", Op.PatternArguments)
     -- The inaccessible pattern's own reader (MS9 phase 228).
   , ("pattern-dot-term", Op.PatternDotTerm)
+    -- The one pattern op that builds (MS9 phase 231), for the interactive split.
+  , ("pattern-for-name", Op.PatternForName)
     -- The binder report's accessor (MS9 phase 192).
   , ("binder-name", Op.BinderName)
   , ("ascription-type", Op.AscriptionType)

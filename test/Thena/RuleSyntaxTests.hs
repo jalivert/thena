@@ -293,6 +293,8 @@ everyOp =
   , ("pattern-head t", Op.PatternHead (Ref "t"))
   , ("pattern-arguments t", Op.PatternArguments (Ref "t"))
   , ("pattern-dot-term t", Op.PatternDotTerm (Ref "t"))
+    -- The one pattern op that builds (MS9 phase 231).
+  , ("pattern-for-name n", Op.PatternForName (Ref "n"))
   , ("make-trusted c a b", Op.MakeTrusted (Ref "c") (Ref "a") (Ref "b"))
   , ("define-global x t v", Op.DefineGlobal [] (Ref "x") (Ref "t") (Ref "v"))
   , ("app-function t", Op.AppFunction (Ref "t"))

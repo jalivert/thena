@@ -3070,6 +3070,56 @@ unless it asks for the generalising tactic. That is the behaviour the tactic pat
 before the generalising motive existed, and it is the right default — the surface language
 is where refinement is meant to come from for free.
 
+### The split has a spelling you type, and it hands you one goal per case
+
+*Decided and built 2026-10-28.*
+
+`eliminate-core` gives you the eliminator's methods, equations and all. **The split is a
+different thing and now has its own words**:
+
+```
+induction-core core`t`    -- one hole per case, inside that case's own binders
+case-core core`t`         -- the same, without the induction hypotheses
+```
+
+They run what the surface language runs — the generalising motive, then `specialise` over
+every method — and then, instead of elaborating an arm, they leave the method open. So
+each case's hole is already under that case's binders, the equations the split stated are
+already discharged, and what you write is the body of the arm:
+
+```
+thena spine> induction-core core`n`
+subgoals: zeroMethod, succMethod
+subgoals: zeroCase
+subgoals: succCase
+thena spine> goto-named "succCase1"
+thena spine> :where
+…
+context
+  n : Nat
+  u : Nat
+  ih : Eq {0} Nat (plus u zero) u
+  n1 = succ u : Nat
+type
+  Eq {0} Nat (plus (succ u) zero) (succ u)
+```
+
+Three things follow from it being the same mechanism. **A name bound outside the split
+means what the split refined it to**, so `n` is a definition — `succ u` — inside the step
+case. **A forced constructor argument is a definition too** rather than a binder, which is
+the same rule an arm gets. And **a case the split proves impossible is never posted**: its
+method is closed on the way past, so you are shown what is left to do and nothing else.
+
+**Where a constructor names its arguments, those are the names you get.** Where it does
+not — `succ : Nat -> Nat` writes a bare arrow — a name is minted, `u` for an argument and
+`ih` for the hypothesis about it, because a goal binding `_` is not usable. The written
+path never needed this: an arm names the arguments itself, and a recursive call finds its
+hypothesis without naming it.
+
+**What is still hand work** is navigation: each case is reached with `goto-named`, and the
+plumbing between a filled case and the finished proof is solved by hand. Focusing the next
+goal by itself is a separate thing and is not built.
+
 ### `case` says the arm does not recurse, and the type is what says it
 
 ```

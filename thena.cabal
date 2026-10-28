@@ -296,6 +296,7 @@ test-suite thena-test
         Thena.DeclarationReadersTests
         Thena.SpecialiseTests
         Thena.DotPatternTests
+        Thena.InteractiveSplitTests
         Thena.EliminateTests
         Thena.EliminatorTests
         Thena.EngineTests

@@ -819,6 +819,9 @@ everyHoleRule =
     -- arm-less one included: it stopped being a clause of its own when the
     -- specialiser arrived, and now calls @split-elaborate@ like the other.
     ++ splitHelpers
+    -- **The two interactive tactics** (MS9 phase 231), which ask only
+    -- @focus-is-hole@ and so are offered at every one.
+    ++ ["induction-core", "case-core"]
     ++ replicate 15 "elaborate"
     ++ ["run-block"]
     ++ replicate 2 "spine-arguments"
@@ -853,6 +856,7 @@ splitHelpers =
   , "ihs-for", "ihs-for"
   , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
   , "instantiate-with"
+  , "name-or-stem", "name-or-stem"
   ]
   ++ replicate 6 "intro-arm-binders"
   ++ ["dotted-position-is-forced"]
@@ -874,6 +878,15 @@ splitHelpers =
   , "split-cases", "split-cases", "split-over"
   , "split-claim", "split-claim", "split-elaborate"
   ]
+  -- **The interactive spelling's own helpers** (MS9 phase 231), after
+  -- @split-elaborate@ because that is where the base declares them. The two
+  -- tactics themselves ask @focus-is-hole@, so they are in 'everyHoleRule' and
+  -- not here.
+  ++ replicate 4 "argument-patterns"
+  ++ ["argument-pattern", "open-case", "open-case"]
+  ++ ["split-holes", "split-holes", "split-holes-over"]
+  ++ ["with-hypotheses", "with-hypotheses"]
+  ++ ["without-hypotheses", "without-hypotheses"]
 
 -- | @Nat@, as a core term, for the row above.
 natType :: Core

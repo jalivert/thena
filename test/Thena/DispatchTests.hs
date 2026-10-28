@@ -311,7 +311,8 @@ dispatchableTests =
                ++ replicate 7 "elaborate"
                ++ [ "no-nesting", "ihs-for", "ihs-for"
                   , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
-                  , "instantiate-with" ]
+                  , "instantiate-with"
+                  , "name-or-stem", "name-or-stem" ]
                ++ replicate 6 "intro-arm-binders"
                ++ ["dotted-position-is-forced"]
                ++ replicate 3 "intro-arm-binders"
@@ -330,6 +331,17 @@ dispatchableTests =
                   , "arms-are-distinct", "arms-are-distinct"
                   , "split-cases", "split-cases", "split-over"
                   , "split-claim", "split-claim", "split-elaborate"
+                  ]
+               -- **The interactive spelling** (MS9 phase 231). @induction-core@
+               -- and @case-core@ take a parameter, so dispatch runs neither —
+               -- which is this test's own subject, one tactic on.
+               ++ replicate 4 "argument-patterns"
+               ++ [ "argument-pattern"
+                  , "open-case", "open-case"
+                  , "split-holes", "split-holes", "split-holes-over"
+                  , "with-hypotheses", "with-hypotheses"
+                  , "without-hypotheses", "without-hypotheses"
+                  , "induction-core", "case-core"
                   ]
                ++ replicate 15 "elaborate"
                ++ ["run-block"]

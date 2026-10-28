@@ -749,6 +749,22 @@ data Op
     -- arm was written with is a constructor of the family being split. A bare
     -- pattern variable is a head with no arguments, so this is also how an arm
     -- names the variables it binds.
+  | PatternForName Operand
+    -- ^ the pattern that names a variable — @pattern-for-name n@ (MS9 phase
+    -- 231).
+    --
+    -- **'PatternHead'\'s inverse, and the one pattern op that builds rather than
+    -- reads.** It exists because the interactive spelling of a split
+    -- (@induction-core@) walks the same @intro-arm-binders@ the written arms
+    -- walk, and that walk takes its name for each position from the pattern the
+    -- user wrote. An interactive split has no written patterns: the name it
+    -- introduces each position under is the method's own binder, so it supplies
+    -- that name /as/ a pattern and the walk is reached unchanged.
+    --
+    -- **Only a bare name is buildable here**, which is the whole of what the
+    -- caller needs: a wildcard would say the user did not care to name a
+    -- position nobody asked about, and a dot asserts something no tactic is in a
+    -- position to assert on the author's behalf.
   | BinderName Operand
     -- ^ the name a binder of a specialised method is bound under —
     -- @binder-name b@ (MS9 phase 192).
@@ -1529,6 +1545,7 @@ resultOf o = case o of
   SplitTail _ -> Just TSurface
   SplitArmPattern _ -> Just TPattern
   PatternHead _ -> Just TName
+  PatternForName _ -> Just TPattern
   PatternArguments _ -> Just (TList TPattern)
   PatternDotTerm _ -> Just TSurface
   BinderName _ -> Just TName
@@ -1757,6 +1774,7 @@ operandTypes o = case o of
   SplitTail x -> [(x, TSurface)]
   SplitArmPattern x -> [(x, TSurface)]
   PatternHead x -> [(x, TPattern)]
+  PatternForName x -> [(x, TName)]
   PatternArguments x -> [(x, TPattern)]
   PatternDotTerm x -> [(x, TPattern)]
   BinderName x -> [(x, TBinder)]
@@ -2281,6 +2299,7 @@ opKeyword o = case o of
   SplitTail _ -> "split-tail"
   SplitArmPattern _ -> "split-arm-pattern"
   PatternHead _ -> "pattern-head"
+  PatternForName _ -> "pattern-for-name"
   PatternArguments _ -> "pattern-arguments"
   PatternDotTerm _ -> "pattern-dot-term"
   BinderName _ -> "binder-name"

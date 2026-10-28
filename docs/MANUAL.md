@@ -732,8 +732,91 @@ premise the target's indices mention, and applies it to the premises you have.
 That is what the surface language's `induction … of` and `case … of` are built
 on, and there the extra copies are solved away case by case so you never see
 them. Driving it by hand you do see them, as a further argument to every method
-you write — which is why the plain word is the one that leaves your premises
-alone.
+you write — unless you ask for the split rather than for the eliminator, which
+is the next section.
+
+### One goal per case, with its binders already in scope
+
+`induction-core core`target`` is the same split the surface language writes,
+driven by hand. It posts one hole per case, and each hole is *inside* that
+case's own binders, with the equations the split stated already discharged. So
+you write the body of the arm and nothing else.
+
+(`core`…`` and `⌜ … ⌝` are the same fence, spelled two ways; the corners are on
+their way out.)
+
+```
+thena spine> :theorem plusZeroAgain : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
+proving plusZeroAgain : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
+thena spine> attack
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> induction-core core`n`
+subgoals: zeroMethod, succMethod
+subgoals: zeroCase
+subgoals: succCase
+```
+
+`zeroCase` and `succCase` are the two to prove. Walk into the step case and
+look at it:
+
+```
+thena spine> goto-named "succCase1"
+thena spine> :where
+focus
+  let ? succCase1 : Eq {0} Nat (plus (succ u) zero) (succ u) in
+path
+  root ▸ ≐ plusZeroAgain ▸ n ▸ zeroCase ▸ zeroMethod ▸ ≐ succCase ▸ u ▸ ih ▸ n1
+context
+  n : Nat
+  zeroCase : Eq {0} Nat (plus zero zero) zero
+  zeroMethod : Eq {0} Nat (plus zero zero) zero
+  u : Nat
+  ih : Eq {0} Nat (plus u zero) u
+  n1 = succ u : Nat
+type
+  Eq {0} Nat (plus (succ u) zero) (succ u)
+```
+
+Three things to notice. The constructor's argument is `u` and the induction
+hypothesis is `ih`, both in scope as ordinary assumptions — `succ`'s argument
+has no name in the declaration, so one was minted; where a constructor does name
+its arguments, those are the names you get. `n`, the variable the proof was
+about, is a *definition* inside this case: `succ u`, which is what the split
+refined it to. And the goal is the one you would expect, with no equation left
+to discharge, where `eliminate-core` would have handed you the method type and
+left the lambda to you.
+
+Fill both cases and finish:
+
+```
+thena spine> try-core core`congSucc {0 0} (plus u zero) u ih`
+thena spine> solve
+thena spine> goto-named "succCase"
+thena spine> solve
+thena spine> goto-named "zeroCase1"
+thena spine> try-core core`refl {0} Nat zero`
+thena spine> solve
+thena spine> goto-named "zeroCase"
+thena spine> solve
+thena spine> goto-named "zeroMethod"
+thena spine> solve
+thena spine> goto-named "succMethod"
+thena spine> solve
+thena spine> goto-named "plusZeroAgain1"
+thena spine> solve
+thena spine> goto-root
+thena spine> solve
+thena spine> qed
+plusZeroAgain : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n   ∎
+```
+
+Each case can be proved in any order, and `goto-named` is how you get to one:
+the holes keep their names for as long as they are open. `case-core` is the
+other word — the same thing without the induction hypotheses, for a proof that
+takes a value apart rather than recursing on it. A case the split proves
+impossible is not posted at all; you are shown only what is left to do.
 
 ---
 
@@ -763,6 +846,8 @@ reverse-onto [x, ...xs] ‹acc›
 apply-all ‹f› []
 apply-all ‹f› [x, ...xs]
 instantiate-with ‹f› ‹vs›
+name-or-stem ‹n› ‹stem›
+name-or-stem ‹n› ‹stem›
 intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
 intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
 intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
@@ -809,6 +894,20 @@ split-over ‹t› ‹cs› (hs, m)
 split-claim ‹t› ‹x›
 split-claim ‹t› ‹x›
 split-elaborate ‹t›
+argument-patterns [] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-pattern ‹b›
+open-case ‹mh› none ‹bs› ‹fs›
+open-case ‹mh› (some sub) ‹bs› ‹fs›
+split-holes [] [] ‹m›
+split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
+split-holes-over ‹cs› (hs, m)
+with-hypotheses []
+with-hypotheses [c, ...cs]
+without-hypotheses []
+without-hypotheses [c, ...cs]
 run-block ‹t›
 intro-binders ‹t› ‹k›
 intro-binders ‹t› ‹k›
@@ -817,7 +916,7 @@ intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
-chose 4761: intro
+chose 4804: intro
 ```
 
 Three rules matched, so the engine reports which one it took and leaves a
@@ -825,7 +924,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-4761  intro   untried: solve, regret, prove
+4804  intro   untried: solve, regret, prove
 ```
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
@@ -834,13 +933,13 @@ undoes the whole thing:
 
 ```
 thena spine> retry
-retrying 4761: solve
-backtracking to 4761: regret
+retrying 4804: solve
+backtracking to 4804: regret
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-4761  regret   untried: prove
+4804  regret   untried: prove
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -1403,6 +1502,8 @@ language and elaborated on load.
 | `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve by unification |
 | `eliminate-core ⌜ target ⌝` | induction |
 | `eliminate-generalising-core ⌜ target ⌝` | the same, and it generalises the premises the target's indices mention |
+| `induction-core core`target`` | the split: one hole per case, inside that case's own binders |
+| `case-core core`target`` | the same without the induction hypotheses |
 | `reduce` | reduce the focused term in place |
 | `along` `into` `back` | move on the chain |
 | `cross type` / `cross val` | move into a term |

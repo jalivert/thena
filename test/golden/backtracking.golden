@@ -17,6 +17,8 @@ reverse-onto [x, ...xs] ‹acc›
 apply-all ‹f› []
 apply-all ‹f› [x, ...xs]
 instantiate-with ‹f› ‹vs›
+name-or-stem ‹n› ‹stem›
+name-or-stem ‹n› ‹stem›
 intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
 intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
 intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
@@ -63,6 +65,20 @@ split-over ‹t› ‹cs› (hs, m)
 split-claim ‹t› ‹x›
 split-claim ‹t› ‹x›
 split-elaborate ‹t›
+argument-patterns [] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-pattern ‹b›
+open-case ‹mh› none ‹bs› ‹fs›
+open-case ‹mh› (some sub) ‹bs› ‹fs›
+split-holes [] [] ‹m›
+split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
+split-holes-over ‹cs› (hs, m)
+with-hypotheses []
+with-hypotheses [c, ...cs]
+without-hypotheses []
+without-hypotheses [c, ...cs]
 run-block ‹t›
 intro-binders ‹t› ‹k›
 intro-binders ‹t› ‹k›

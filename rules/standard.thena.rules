@@ -396,6 +396,21 @@ rule instantiate-with f vs :-
 --
 -- `fs` is carried untouched and spent in the base case: the names a FRIENDLY
 -- index abstracted, which `bind-friendlies` below explains.
+-- THE NAME A BINDER IS INTRODUCED UNDER, WHERE THE DECLARATION GAVE IT NONE.
+-- A constructor argument written as a bare arrow — `succ : Nat -> Nat` — has `_`
+-- for a name, and so does the hypothesis about it, a hypothesis being named
+-- after the recursive argument it is about. The written path never noticed: an
+-- arm names the arguments itself, and a recursion reaches its hypothesis through
+-- `tie-recursion` rather than by name. The interactive one hands both to an
+-- author, who has to be able to write them. A name the declaration did give is
+-- used exactly as written, which is the arm's own behaviour.
+name-or-stem : Name -> Name -> Name
+rule name-or-stem n stem :- when (different-name n "_")
+  do return n
+rule name-or-stem n stem :- when (same-name n "_")
+  do w = fresh-name stem
+     ; return w
+
 intro-arm-binders : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
 rule intro-arm-binders [] [] vs ds fs k :-
   do ds2 = bind-friendlies fs vs ds
@@ -480,7 +495,8 @@ rule dotted-position-is-forced e (some f) vs k :-
      ; goto g
 
 rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-hypothesis b)
-  do n = binder-name b
+  do n0 = binder-name b
+     ; n = name-or-stem n0 "ih"
      ; h = fresh-name n
      ; g = here
      ; k2 = prim-lambda h
@@ -831,6 +847,161 @@ rule split-elaborate t :-
      ; split-over t cs r
      ; goto h
      ; solve
+
+-- THE INTERACTIVE SPELLING OF A SPLIT (MS9 phase 231). `induction-core` and
+-- `case-core` are what a person types at a hole, and they are the written form
+-- with the arm taken out: the same claim, the same specialiser, the same walk
+-- over the report, and then the method is LEFT as a hole instead of being
+-- elaborated into and solved.
+--
+-- WHAT THEY BUY OVER `eliminate-core`, which has been here since phase 211: the
+-- author gets the method the specialiser left, not the one the eliminator did.
+-- The equations are discharged, every solved copy and every forced argument is a
+-- definition rather than a binder, and the names are the declaration's own. The
+-- hand-written path paid for all of that by writing each method's whole lambda
+-- out, equation arguments included — `examples/dependent-index.thena.script` is
+-- what that looks like.
+--
+-- THE WORD IS READ IN THE RULE'S NAME, because that is where it was written.
+-- Everything after a method is in hand is shared, which is the same division
+-- `split-claim` and `ihs-for` make on the written path: the two words are two
+-- motives and neither is a flag on one rule.
+
+-- ONE NAME PER POSITION THE AUTHOR WOULD HAVE WRITTEN, TAKEN FROM THE METHOD.
+-- `intro-arm-binders` reads the name for each of the constructor's arguments off
+-- the pattern the arm was written with, and an interactive split has no arm. The
+-- method's own binder carries the name the declaration gave that argument, so
+-- those names are handed over AS patterns and the walk is reached unchanged —
+-- `pattern-for-name` is the one pattern op that builds, and it exists for this.
+--
+-- ONLY AN ARGUMENT TAKES A PATTERN. A hypothesis and a copy are named by the
+-- walk itself, from the binder, so three clauses — one per role — walk past them
+-- and the lists still correspond position for position where it matters.
+argument-patterns : List (Binder, a) -> List Pattern -> List Pattern
+rule argument-patterns [] acc :-
+  do r = reverse-onto acc []
+     ; return r
+rule argument-patterns [(b, oc), ...bs] acc :- when (binder-is-argument b)
+  do p = argument-pattern b
+     ; acc2 = prepend p acc
+     ; r = argument-patterns bs acc2
+     ; return r
+rule argument-patterns [(b, oc), ...bs] acc :- when (binder-is-hypothesis b)
+  do r = argument-patterns bs acc
+     ; return r
+rule argument-patterns [(b, oc), ...bs] acc :- when (binder-is-copy b)
+  do r = argument-patterns bs acc
+     ; return r
+
+-- ONE CASE, LEFT FOR THE AUTHOR. A surviving method becomes a hole with the
+-- arm's binders introduced above it; a vanished one is nothing to prove and
+-- takes nothing, which is `case-must-vanish` with no complaint to make — nothing
+-- was written here, so there is no arm to be unreachable and no coverage to
+-- check. Coverage is the written form's business and is not reproduced.
+--
+-- AND AN ANONYMOUS ARGUMENT IS GIVEN A NAME. `succ : Nat -> Nat` writes its
+-- argument as a bare arrow, so the method's binder is `_`. A term may say `_` —
+-- a name is a string and that one lexes — but a goal binding `_` and `_1` is not
+-- something to hand an author, and splitting a `Nat` is the first thing anyone
+-- does. `u` is the stem, which is `intro-arm-binders`' own answer where an arm
+-- writes a wildcard.
+argument-pattern : Binder -> Pattern
+rule argument-pattern b :-
+  do n = binder-name b
+     ; n2 = name-or-stem n "u"
+     ; p = pattern-for-name n2
+     ; return p
+
+-- IT DOES NOT SOLVE A SURVIVING CASE, and that is the whole difference from
+-- `elaborate-arm`: the method is left a guess with an open hole inside it, which
+-- is what every other tactic at a hole leaves and what the author then attacks.
+--
+-- A VANISHED CASE IS CLOSED HERE AND THE AUTHOR NEVER SEES IT. The specialiser
+-- filled the method from a conflicting equation and claimed nothing, so there is
+-- nothing open inside it and the method solves at once. Leaving it would show the
+-- author a goal that is already proved and make them discharge the tactic's own
+-- plumbing — and `induction d of { }` is the written form of the same thing,
+-- where a vanished case is accepted in silence.
+-- IT DOES NOT TAKE THE CONSTRUCTOR'S NAME, and that is inference's doing rather
+-- than a choice: nothing in either clause reads it, and a written signature must
+-- be exactly what the rules justify.
+open-case : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+rule open-case mh none bs fs :-
+  do goto mh
+     ; solve
+rule open-case mh (some sub) bs fs :-
+  do ps = argument-patterns bs []
+     ; goto sub
+     ; prim-attack
+     ; into
+     ; k0 = here
+     ; back
+     ; k1 = intro-arm-binders ps bs [] [] fs k0
+     ; goto k1
+
+-- The constructors and their method holes, walked in step — `split-cases`
+-- without `one-case`. Each constructor comes paired with the hypotheses its
+-- method carries, because that pairing is where the word means something and
+-- this walk is past it.
+split-holes : List (Name, List Name) -> List Core -> MethodShape -> ()
+rule split-holes [] [] m :- do
+rule split-holes [(c, ihs), ...cs] [mh, ...ms] m :-
+  do goto mh
+     ; (sub, (bs, fs)) = specialise c ihs m
+     ; open-case mh sub bs fs
+     ; split-holes cs ms m
+
+split-holes-over : List (Name, List Name) -> (List Core, MethodShape) -> ()
+rule split-holes-over cs (hs, m) :- do split-holes cs hs m
+
+-- WHICH HYPOTHESES EACH METHOD CARRIES, paired with its constructor — `ihs-for`
+-- for a path with no surface node to read the word off. Two rules rather than
+-- two clauses of one, for the reason `eliminate-core` and
+-- `eliminate-generalising-core` are two rules: each is about one word.
+with-hypotheses : List Name -> List (Name, List Name)
+rule with-hypotheses [] :- do return []
+rule with-hypotheses [c, ...cs] :-
+  do ihs = constructor-recursive-arguments c
+     ; r = with-hypotheses cs
+     ; p = prepend (c, ihs) r
+     ; return p
+
+without-hypotheses : List a -> List (a, List b)
+rule without-hypotheses [] :- do return []
+rule without-hypotheses [c, ...cs] :-
+  do r = without-hypotheses cs
+     ; p = prepend (c, []) r
+     ; return p
+
+-- The two tactics. `prim-eliminate` is the generalising construction and
+-- `prim-case` applies the generated caseD — the same two `split-claim` reaches,
+-- and reached here directly because the word is the rule's name.
+--
+-- EACH ENDS WHERE IT WAS INVOKED, and that is deliberate: the author asked for a
+-- split here, and the walk's last step is wherever the last case happened to
+-- leave it. Which goal to show next is `~g3qnw`'s question — focusing the next
+-- goal by itself — and is not answered by a tactic guessing.
+induction-core : Core -> ()
+rule induction-core t :- when focus-is-hole
+  do h = here
+     ; r = prim-eliminate t
+     ; tt = typeof t
+     ; d = datatype-of tt
+     ; cs = constructors-of d
+     ; cs2 = with-hypotheses cs
+     ; split-holes-over cs2 r
+     ; goto h
+
+case-core : Core -> ()
+rule case-core t :- when focus-is-hole
+  do h = here
+     ; r = prim-case t
+     ; tt = typeof t
+     ; d = datatype-of tt
+     ; cs = constructors-of d
+     ; cs2 = without-hypotheses cs
+     ; split-holes-over cs2 r
+     ; goto h
 
 -- E⟦induction t of { p -> e ; … }⟧ and E⟦case t of { p -> e ; … }⟧ — the two
 -- clauses, and they are two only because the head language has no disjunction.

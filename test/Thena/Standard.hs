@@ -364,6 +364,133 @@ elaborateClauses =
            , Do (Op.Goto (Ref "h"))
            , call "solve" []
            ]
+         -- **THE INTERACTIVE SPELLING** (MS9 phase 231) — the written walk with
+         -- the arm taken out. @argument-patterns@ hands the method's own binder
+         -- names over as patterns, so @intro-arm-binders@ is reached unchanged;
+         -- @open-case@ leaves a surviving method open and solves a vanished one.
+       , Rule (GlobalName "argument-patterns")
+           [PList [] Nothing, PVar "acc"] []
+           [ Bind (Op.PVar "r") Nothing
+               (Op.Call "reverse-onto" [Ref "acc", Op.ListOf []])
+           , Do (Op.Return (Ref "r"))
+           ]
+       , Rule (GlobalName "argument-patterns")
+           [ PList [PPair (PVar "b") (PVar "oc")] (Just (PVar "bs"))
+           , PVar "acc"
+           ]
+           [BinderIsArgument (Ref "b")]
+           [ Bind (Op.PVar "p") Nothing (Op.Call "argument-pattern" [Ref "b"])
+           , Bind (Op.PVar "acc2") Nothing (Op.Prepend (Ref "p") (Ref "acc"))
+           , Bind (Op.PVar "r") Nothing
+               (Op.Call "argument-patterns" [Ref "bs", Ref "acc2"])
+           , Do (Op.Return (Ref "r"))
+           ]
+       , Rule (GlobalName "argument-patterns")
+           [ PList [PPair (PVar "b") (PVar "oc")] (Just (PVar "bs"))
+           , PVar "acc"
+           ]
+           [BinderIsHypothesis (Ref "b")]
+           [ Bind (Op.PVar "r") Nothing
+               (Op.Call "argument-patterns" [Ref "bs", Ref "acc"])
+           , Do (Op.Return (Ref "r"))
+           ]
+       , Rule (GlobalName "argument-patterns")
+           [ PList [PPair (PVar "b") (PVar "oc")] (Just (PVar "bs"))
+           , PVar "acc"
+           ]
+           [BinderIsCopy (Ref "b")]
+           [ Bind (Op.PVar "r") Nothing
+               (Op.Call "argument-patterns" [Ref "bs", Ref "acc"])
+           , Do (Op.Return (Ref "r"))
+           ]
+       , Rule (GlobalName "argument-pattern") [PVar "b"] []
+           [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
+           , Bind (Op.PVar "n2") Nothing
+               (Op.Call "name-or-stem" [Ref "n", Lit (VText "u")])
+           , Bind (Op.PVar "p") Nothing (Op.PatternForName (Ref "n2"))
+           , Do (Op.Return (Ref "p"))
+           ]
+       , Rule (GlobalName "open-case")
+           [PVar "mh", PNone, PVar "bs", PVar "fs"] []
+           [Do (Goto (Ref "mh")), call "solve" []]
+       , Rule (GlobalName "open-case")
+           [PVar "mh", PSome (PVar "sub"), PVar "bs", PVar "fs"] []
+           [ Bind (Op.PVar "ps") Nothing
+               (Op.Call "argument-patterns" [Ref "bs", Op.ListOf []])
+           , Do (Goto (Ref "sub"))
+           , Do Attack
+           , Do Into
+           , Bind (Op.PVar "k0") Nothing Here
+           , Do Back
+           , Bind (Op.PVar "k1") Nothing
+               (Op.Call "intro-arm-binders"
+                        [ Ref "ps", Ref "bs", Op.ListOf [], Op.ListOf []
+                        , Ref "fs", Ref "k0"
+                        ])
+           , Do (Goto (Ref "k1"))
+           ]
+       , Rule (GlobalName "split-holes")
+           [PList [] Nothing, PList [] Nothing, PVar "m"] [] []
+       , Rule (GlobalName "split-holes")
+           [ PList [PPair (PVar "c") (PVar "ihs")] (Just (PVar "cs"))
+           , PList [PVar "mh"] (Just (PVar "ms")), PVar "m"
+           ] []
+           [ Do (Goto (Ref "mh"))
+           , Bind (PPair (Op.PVar "sub") (PPair (Op.PVar "bs") (Op.PVar "fs")))
+               Nothing (Op.Specialise (Ref "c") (Ref "ihs") (Ref "m"))
+           , call "open-case" [Ref "mh", Ref "sub", Ref "bs", Ref "fs"]
+           , call "split-holes" [Ref "cs", Ref "ms", Ref "m"]
+           ]
+       , Rule (GlobalName "split-holes-over")
+           [PVar "cs", PPair (PVar "hs") (PVar "m")] []
+           [call "split-holes" [Ref "cs", Ref "hs", Ref "m"]]
+         -- **Which hypotheses each method carries, paired with its
+         -- constructor** — @ihs-for@ for a path with no surface node to read
+         -- the word off. Two rules, each about one word.
+       , Rule (GlobalName "with-hypotheses") [PList [] Nothing] []
+           [Do (Op.Return (Op.ListOf []))]
+       , Rule (GlobalName "with-hypotheses")
+           [PList [PVar "c"] (Just (PVar "cs"))] []
+           [ Bind (Op.PVar "ihs") Nothing
+               (Op.ConstructorRecursiveArguments (Ref "c"))
+           , Bind (Op.PVar "r") Nothing (Op.Call "with-hypotheses" [Ref "cs"])
+           , Bind (Op.PVar "p") Nothing
+               (Op.Prepend (Op.PairOf (Ref "c") (Ref "ihs")) (Ref "r"))
+           , Do (Op.Return (Ref "p"))
+           ]
+       , Rule (GlobalName "without-hypotheses") [PList [] Nothing] []
+           [Do (Op.Return (Op.ListOf []))]
+       , Rule (GlobalName "without-hypotheses")
+           [PList [PVar "c"] (Just (PVar "cs"))] []
+           [ Bind (Op.PVar "r") Nothing
+               (Op.Call "without-hypotheses" [Ref "cs"])
+           , Bind (Op.PVar "p") Nothing
+               (Op.Prepend (Op.PairOf (Ref "c") (Op.ListOf [])) (Ref "r"))
+           , Do (Op.Return (Ref "p"))
+           ]
+         -- **The two tactics, and each ends where it was invoked.** The word is
+         -- the rule's name, which is why there are two and no flag.
+       , Rule (GlobalName "induction-core") [PVar "t"] [FocusIsHole]
+           [ Bind (Op.PVar "h") Nothing Here
+           , Bind (Op.PVar "r") Nothing (Op.Eliminate (Ref "t"))
+           , Bind (Op.PVar "tt") Nothing (Op.Typing (Ref "t"))
+           , Bind (Op.PVar "d") Nothing (Op.DatatypeOf (Ref "tt"))
+           , Bind (Op.PVar "cs") Nothing (Op.ConstructorsOf (Ref "d"))
+           , Bind (Op.PVar "cs2") Nothing (Op.Call "with-hypotheses" [Ref "cs"])
+           , call "split-holes-over" [Ref "cs2", Ref "r"]
+           , Do (Goto (Ref "h"))
+           ]
+       , Rule (GlobalName "case-core") [PVar "t"] [FocusIsHole]
+           [ Bind (Op.PVar "h") Nothing Here
+           , Bind (Op.PVar "r") Nothing (Op.CaseAnalyse (Ref "t"))
+           , Bind (Op.PVar "tt") Nothing (Op.Typing (Ref "t"))
+           , Bind (Op.PVar "d") Nothing (Op.DatatypeOf (Ref "tt"))
+           , Bind (Op.PVar "cs") Nothing (Op.ConstructorsOf (Ref "d"))
+           , Bind (Op.PVar "cs2") Nothing
+               (Op.Call "without-hypotheses" [Ref "cs"])
+           , call "split-holes-over" [Ref "cs2", Ref "r"]
+           , Do (Goto (Ref "h"))
+           ]
        , Rule (GlobalName "elaborate") [PVar "t"]
            [ FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
            , SplitIsInduction (Ref "t")
@@ -724,6 +851,17 @@ splitClauses =
       , Bind (Op.PVar "r") Nothing (Op.Expose (Ref "g"))
       , Do (Op.Return (Ref "r"))
       ]
+    -- **A binder the declaration gave no name** (MS9 phase 231): a bare-arrow
+    -- argument is `_`, and so is the hypothesis about it. The written path never
+    -- noticed; the interactive one hands both to an author.
+  , Rule (GlobalName "name-or-stem") [PVar "n", PVar "stem"]
+      [DifferentName (Ref "n") (Lit (VText "_"))]
+      [Do (Op.Return (Ref "n"))]
+  , Rule (GlobalName "name-or-stem") [PVar "n", PVar "stem"]
+      [SameName (Ref "n") (Lit (VText "_"))]
+      [ Bind (Op.PVar "w") Nothing (Op.FreshName (Ref "stem"))
+      , Do (Op.Return (Ref "w"))
+      ]
   , Rule (GlobalName "intro-arm-binders")
       [ PList [] Nothing, PList [] Nothing, PVar "vs", PVar "ds", PVar "fs"
       , PVar "k"
@@ -869,7 +1007,9 @@ splitClauses =
       , PVar "vs", PVar "ds", PVar "fs", PVar "k"
       ]
       [BinderIsHypothesis (Ref "b")]
-      [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
+      [ Bind (Op.PVar "n0") Nothing (Op.BinderName (Ref "b"))
+      , Bind (Op.PVar "n") Nothing
+          (Op.Call "name-or-stem" [Ref "n0", Lit (VText "ih")])
       , Bind (Op.PVar "h") Nothing (Op.FreshName (Ref "n"))
       , Bind (Op.PVar "g") Nothing Here
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "h")))

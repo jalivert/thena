@@ -1776,6 +1776,15 @@ perform instr rest m = case operation instr of
     Left r -> failure r m
     Right (Concrete.PatternName w _) -> produce (VText w) m
     Right _ -> failure (ExpectedSurfaceShape "a pattern written as a word") m
+  -- **The one pattern op that builds** (MS9 phase 231). @pattern-for-name@ is
+  -- 'Op.PatternHead'\'s inverse: the interactive spelling of a split has no
+  -- written patterns, so it names each position after the method's own binder
+  -- and hands that name over as a pattern, which is what lets it walk the same
+  -- @intro-arm-binders@ the written arms walk.
+  Op.PatternForName x -> case operandValue (env (exec m)) x of
+    Left e -> failure e m
+    Right (VText w) -> produce (VPattern (Concrete.PatternName w [])) m
+    Right _ -> failure ExpectedText m
   Op.PatternArguments x -> case patternAt x of
     Left r -> failure r m
     Right (Concrete.PatternName _ ps) -> produce (VList (map VPattern ps)) m
