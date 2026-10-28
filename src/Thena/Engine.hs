@@ -1746,8 +1746,18 @@ perform instr rest m = case operation instr of
     Right (Concrete.PatternName _ ps) -> produce (VList (map VPattern ps)) m
     -- **A wildcard takes no arguments and is not an error**: it is a pattern
     -- with none, exactly as a bare name is, so a walk over the arguments of
-    -- either stops immediately.
+    -- either stops immediately. **A dot is the same** (MS9 phase 228) — an
+    -- inaccessible position binds nothing, so there is nothing in it to nest.
     Right Concrete.PatternWildcard -> produce (VList []) m
+    Right (Concrete.PatternDot _)  -> produce (VList []) m
+
+  -- **The inaccessible pattern's reader** (MS9 phase 228). It answers with the
+  -- term rooted at itself: a pattern carries no path — see @split-arm-pattern@
+  -- above — and a dot is not made the one exception to that.
+  Op.PatternDotTerm x -> case patternAt x of
+    Left r -> failure r m
+    Right (Concrete.PatternDot e) -> produce (VSurface (Zipper.rootedAt e)) m
+    Right _ -> failure (ExpectedSurfaceShape "an inaccessible pattern") m
 
   -- **The binder report's accessor** (MS9 phase 192). A role is read by a head
   -- test, so the only thing a body asks of a binder is the name to bind it

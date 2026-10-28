@@ -772,7 +772,9 @@ baseTests =
               ++ [ "no-nesting", "ihs-for", "ihs-for"
                  , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
                  , "instantiate-with" ]
-              ++ replicate 8 "intro-arm-binders"
+              ++ replicate 6 "intro-arm-binders"
+              ++ ["dotted-position-is-forced"]
+              ++ replicate 3 "intro-arm-binders"
               ++ [ "bind-friendlies", "bind-friendlies", "bind-solved", "bind-solved"
                  , "same-length", "same-length"
                  , "arm-for", "arm-for", "pick", "pick", "arm-needs-body"

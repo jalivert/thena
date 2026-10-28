@@ -41,6 +41,7 @@ module Thena.View.Surface
   , SurfaceBinding (..)
   , SurfaceArgView (..)
   , SurfaceArmView (..)
+  , SurfacePatternView (..)
   , SurfacePieceView (..)
   , displaySurface
   ) where
@@ -98,8 +99,10 @@ data SurfaceShape
     -- 'Plicity''s arrangement in 'SurfaceBinding' and for the same reason: it
     -- holds no term, so there is nothing for a view to translate and a mirror
     -- could only drift from it. The same is true of a
-    -- 'Thena.Surface.Concrete.SurfacePattern' — **until an inaccessible pattern
-    -- arrives**, which carries a term and will want translating here.
+    -- 'Thena.Surface.Concrete.SurfacePattern' until MS9 phase 228. **The
+    -- inaccessible pattern arrived**, it carries a term, and a view may not
+    -- carry a concrete one — so a pattern is translated here now, into
+    -- 'SurfacePatternView'.
   | ASurfaceDo String
     -- ^ the block's own written text — see the module header.
   deriving (Eq, Show)
@@ -111,7 +114,29 @@ data SurfaceShape
 -- his ruling of 2026-10-20), so the body is optional here exactly as a binder's
 -- type is optional in 'SurfaceBinding'. A frontend drawing one has an arrow with
 -- nothing to its right, and that is the whole of it.
-data SurfaceArmView = SurfaceArmView SurfacePattern (Maybe SurfaceShape)
+data SurfaceArmView = SurfaceArmView SurfacePatternView (Maybe SurfaceShape)
+  deriving (Eq, Show)
+
+-- | A written pattern, as a view (MS9 phase 228).
+--
+-- **It exists because a dot carries a term.** Every other pattern is names and
+-- shape, which is why 'Thena.Surface.Concrete.SurfacePattern' was handed across
+-- unchanged until an inaccessible one arrived: a view never carries a concrete
+-- node, and @.(succ n)@ holds a whole surface term.
+--
+-- **A bare name still does not say whether it binds or matches** — that is the
+-- concrete type's own line and it survives translation: @nil@ and @n@ are the
+-- same shape written down, and which is which is a question about the globals
+-- that elaboration answers, not a frontend.
+data SurfacePatternView
+  = APatternName String [SurfacePatternView]
+    -- ^ @c p₁ … pₙ@, and with no arguments a bare name
+  | APatternWildcard
+    -- ^ @_@
+  | APatternDot SurfaceShape
+    -- ^ @.e@ — an inaccessible pattern, and the term it asserts the position
+    -- is determined to. **Drawing it is a dot and then the term**, with
+    -- brackets around anything that is not a bare name.
   deriving (Eq, Show)
 
 -- | One bound name: its plicity, its name, and its type if it was written.
@@ -149,12 +174,18 @@ displaySurface s = case s of
       (map displaySurface ms) (map displaySurface is) (displaySurface tgt)
   SurfaceSplit a tgt as ->
     ASurfaceSplit a (displaySurface tgt)
-      [ SurfaceArmView pat (fmap displaySurface b) | SurfaceArm pat b <- as ]
+      [ SurfaceArmView (pattern_ pat) (fmap displaySurface b)
+      | SurfaceArm pat b <- as
+      ]
   SurfaceDo is -> ASurfaceDo (intercalate " ; " (map rawInstruction is))
   where
     piece p = case p of
       ObjectText t -> ASurfacePieceText t
       ObjectSplice e -> ASurfacePieceSplice (displaySurface e)
+    pattern_ pt = case pt of
+      PatternWildcard  -> APatternWildcard
+      PatternName x ps -> APatternName x (map pattern_ ps)
+      PatternDot e     -> APatternDot (displaySurface e)
     arg (SurfaceArg pl t) = SurfaceArgView pl (displaySurface t)
     binding (SurfaceBinder pl x ty) = SurfaceBinding pl x (fmap displaySurface ty)
 

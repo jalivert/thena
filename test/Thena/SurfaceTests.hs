@@ -313,7 +313,15 @@ genPattern = sized go
             [ (2, leaf)
             , (1, PatternName <$> patName <*> listOf1 (resize (n `div` 2) genPattern))
             ]
-    leaf = oneof [pure PatternWildcard, flip PatternName [] <$> patName]
+    -- **A dot is a leaf and its term is generated** (MS9 phase 228): an
+    -- inaccessible position binds nothing, so it has no sub-pattern, and what
+    -- has to round-trip is the two written forms — @.n@ and @.(e)@.
+    leaf =
+      oneof
+        [ pure PatternWildcard
+        , flip PatternName [] <$> patName
+        , PatternDot <$> oneof [SurfaceName <$> patName, resize 3 genSurface]
+        ]
     patName = elements ["n", "zero", "succ", "cons"]
 
 -- | A tagged term literal, with pieces that could have been written.

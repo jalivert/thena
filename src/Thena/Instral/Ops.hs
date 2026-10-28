@@ -745,6 +745,22 @@ data Op
     -- from a different place: an argument's is the method type's own binder, a
     -- hypothesis's is the recursive argument it is about, a copy's is the
     -- ambient entry it copies.
+  | PatternDotTerm Operand
+    -- ^ **the term inside an inaccessible pattern** (MS9 phase 228) — the @e@
+    -- of @.e@, as a surface term ready to elaborate.
+    --
+    -- **It is the one pattern reader that answers with a term**, and it is why
+    -- 'Thena.Surface.Concrete.SurfacePattern' is otherwise read into a
+    -- 'Thena.Instral.Ops.VPattern' with no path to carry: nothing elaborates a
+    -- pattern, and a dot is not a pattern being elaborated — it is a term that
+    -- happens to be written in a pattern's place.
+    --
+    -- **The term is rooted at itself**, with no frame back into the arm. A
+    -- pattern has no path — that is the rule @split-arm-pattern@ already
+    -- states — and a dot does not become the one exception to it: nothing
+    -- navigates into a pattern, so a frame would buy a move no caller performs
+    -- and would be the only reachable position inside one. It is additive if an
+    -- editor ever wants it.
   | PatternArguments Operand
     -- ^ a pattern's arguments, in order — @pattern-arguments p@.
     --
@@ -1500,6 +1516,7 @@ resultOf o = case o of
   SplitArmPattern _ -> Just TPattern
   PatternHead _ -> Just TName
   PatternArguments _ -> Just (TList TPattern)
+  PatternDotTerm _ -> Just TSurface
   BinderName _ -> Just TName
   MakeTrusted {} -> Just TCore
   Goal         -> Just TCore
@@ -1726,6 +1743,7 @@ operandTypes o = case o of
   SplitArmPattern x -> [(x, TSurface)]
   PatternHead x -> [(x, TPattern)]
   PatternArguments x -> [(x, TPattern)]
+  PatternDotTerm x -> [(x, TPattern)]
   BinderName x -> [(x, TBinder)]
   MakeTrusted a b c -> [(a, TCore), (b, TCore), (c, TCore)]
   Goal         -> []
@@ -2018,12 +2036,16 @@ data Test
     -- ^ a pattern written as a word, with or without arguments (MS9 phase 183)
   | PatternIsWildcard Operand
     -- ^ … or written @_@.
+  | PatternIsDot Operand
+    -- ^ … or written @.e@, an __inaccessible pattern__ (MS9 phase 228).
     --
-    -- **Two tests over a two-case type**, which is @let-is-annotated@ /
-    -- @let-is-bare@'s arrangement, and the category is documented to grow — an
-    -- inaccessible pattern and a literal pattern are each a further case — so a
-    -- clause that matches on @pattern-is-name@ keeps declining what it was never
-    -- written for.
+    -- **Three tests over a three-case type**, which is @let-is-annotated@ /
+    -- @let-is-bare@'s arrangement, and the category is still documented to grow
+    -- — a literal pattern is a further case — so a clause that matches on
+    -- @pattern-is-name@ keeps declining what it was never written for. That is
+    -- what let this one be added without touching a clause: before it, a dot
+    -- reached @intro-arm-binders@ and matched nothing, which is a refusal and
+    -- not a wrong answer.
   | BinderIsArgument Operand
     -- ^ a binder of a specialised method that is an argument of the constructor
     -- (MS9 phase 192), so the arm's __pattern__ names it
@@ -2243,6 +2265,7 @@ opKeyword o = case o of
   SplitArmPattern _ -> "split-arm-pattern"
   PatternHead _ -> "pattern-head"
   PatternArguments _ -> "pattern-arguments"
+  PatternDotTerm _ -> "pattern-dot-term"
   BinderName _ -> "binder-name"
   MakeTrusted {} -> "make-trusted"
   AscriptionTerm _ -> "ascription-term"

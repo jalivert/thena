@@ -504,6 +504,7 @@ describe t = case t of
   -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
   TChar c     -> show c
   TSpread     -> "..."
+  TDot        -> "."
   TLBracket   -> "["
   TRBracket   -> "]"
   TComma      -> ","

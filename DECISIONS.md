@@ -2637,7 +2637,7 @@ yields a case binding two arguments, not three. A reader who knows Agda will exp
 to have to write `.n` there, and to be *required* to.
 
 **Thena lets you write a name instead, and binds it as a definition.** Both spellings
-will exist; the dot will be a way to say more, never an obligation.
+exist; the dot is a way to say more, never an obligation.
 
 **The reason is that the requirement protects something Thena does not have.**
 Inaccessible terms — Agda's dot patterns — were introduced to keep a *left-hand side*
@@ -2672,6 +2672,34 @@ assertion the system verifies. Without them, the same text means a binder or a
 definition depending on an inference you cannot see, and changing a lemma's statement
 can silently change which. The answer to that is the system showing you which positions
 it determined, rather than making you write them out.
+
+**So the dot is the check, written where you want it.** Four things are legal in a
+determined position and all four mean something different:
+
+```
+case xs of { vcons n  a as -> … }   -- n is a DEFINITION equal to the forced term
+case xs of { vcons _  a as -> … }   -- ask for nothing
+case xs of { vcons .n a as -> … }   -- ASSERT it is determined, and to n
+case xs of { vcons ._ a as -> … }   -- assert it is determined, decline to say to what
+```
+
+A dot binds nothing. The term after it is an ordinary term — `.n` for a name,
+`.(succ n)` for anything larger — elaborated at the type the position has and then
+unified with the term the equation forced it to. So the type is checked as well as the
+value: `.true` where a `Nat` was determined is refused before the comparison is
+reached. And because a placeholder elaborates to a hole that unification solves, `._`
+costs nothing beyond the assertion it makes.
+
+**A dot on a position nothing determined is refused.** That is the assertion failing,
+and it is the whole of what the notation buys: splitting a `Vec A n` with `n` a plain
+variable generalises it and leaves `vcons`'s own length a genuine binder, so there is
+nothing there to assert. `examples/dot-patterns.thena` has all of it, the refusals
+included.
+
+**What a dot cannot do is destructure.** A position can be determined to a compound
+term — splitting `Vec A (succ (succ n))` determines `vcons`'s length to `succ n` — and
+either spelling can name it or ignore it; an inaccessible position binds nothing, so
+there is no sub-pattern inside one. That is a refusal under both spellings alike.
 
 ### A case that cannot happen is an arm with no body, and there is no `impossible`
 

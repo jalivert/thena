@@ -80,6 +80,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   regex   { Located _ (TRegex $$) }
   block   { Located _ (TBlock _ _) }
   '...'   { Located _ TSpread }
+  '.'     { Located _ TDot }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
   ','     { Located _ TComma }
@@ -421,9 +422,22 @@ PatternAtoms :: { [SurfacePattern] }
   : PatternAtom                            { [$1] }
   | PatternAtoms PatternAtom               { $2 : $1 }
 
+-- | One argument of a pattern.
+--
+-- **A dot is a prefix on an atom and nothing else** (MS9 phase 228): @.n@ for a
+-- name and @.(succ n)@ for anything larger, which is Agda's spelling and the one
+-- a reader arrives with. The parenthesised form holds a 'Term' and not a
+-- 'Pattern' — an inaccessible position binds nothing, so there is no
+-- sub-pattern in there to bind and what is written is an ordinary term.
+--
+-- **A dot may head a whole pattern as far as the grammar is concerned**, and
+-- @arm-for@ then refuses it for wanting a constructor's name: an arm is for a
+-- case, and @.e ->@ names none.
 PatternAtom :: { SurfacePattern }
   : ident                                  { patternName $1 [] }
   | '(' Pattern ')'                        { $2 }
+  | '.' ident                              { PatternDot (name $2) }
+  | '.' '(' Term ')'                       { PatternDot $3 }
 
 -- | The pieces of a tagged term literal, reversed.
 --

@@ -261,10 +261,10 @@ data SurfaceArm = SurfaceArm SurfacePattern (Maybe Surface)
 -- __Nested patterns are parenthesised__, so an argument of a pattern is itself
 -- one and @cons n a (cons m b nil)@ is three of these deep.
 --
--- __What is deliberately not here yet__: an inaccessible pattern, which is a
--- notation and a check over positions the specialiser already knows are forced,
--- and a literal pattern. Both are additive — a case of this type — and neither
--- is foreclosed.
+-- __An inaccessible pattern carries a term__ (MS9 phase 228), which is what
+-- makes it the one pattern with something to elaborate. __What is deliberately
+-- not here yet__ is a literal pattern; it is additive, a case of this type, and
+-- not foreclosed.
 data SurfacePattern
   = PatternName String [SurfacePattern]
     -- ^ @c p₁ … pₙ@, and with no arguments a bare name
@@ -272,6 +272,21 @@ data SurfacePattern
     -- ^ @_@ — a variable the user did not care to name. **Not
     -- 'SurfacePlaceholder'**, which is a term that elaborates by not
     -- elaborating; a pattern binds, and there is nothing here to solve.
+  | PatternDot Surface
+    -- ^ @.e@ — an __inaccessible pattern__ (MS9 phase 228, on his ruling of
+    -- 2026-10-19). It binds nothing and __asserts__: this position is
+    -- determined, and by this term.
+    --
+    -- **It is optional and may never be made mandatory**, which is the whole of
+    -- the ruling — naming a forced position binds the name as a definition and
+    -- goes on working. Thena has no left-hand side to keep linear, so the
+    -- constraint that makes Agda demand the dot does not reach here; the dot is
+    -- kept because it __says more than a name can__.
+    --
+    -- **The term is a 'Surface' and not a 'SurfacePattern'**: @.(succ n)@ is an
+    -- ordinary term that elaborates in the arm's own context, and an
+    -- inaccessible position binds nothing, so there is nothing in it to
+    -- destructure and no sub-pattern to carry.
   deriving (Eq, Show)
 
 -- | One bound name, its plicity, and its type if it was written.

@@ -382,6 +382,7 @@ holds env cur args t = case t of
   SplitHasNoArms o        -> surfaceIs o hasNoArms
   PatternIsName o         -> patternIs o isPatName
   PatternIsWildcard o     -> patternIs o isPatWild
+  PatternIsDot o          -> patternIs o isPatDot
   -- **The binder report's three** (MS9 phase 192), the same shape one category
   -- over: which group of a specialised method's telescope a binder is in.
   BinderIsArgument o      -> binderIs o isArgument
@@ -451,6 +452,7 @@ holds env cur args t = case t of
 
     isPatName     pt = case pt of PatternName _ _ -> True; _ -> False
     isPatWild     pt = case pt of PatternWildcard -> True; _ -> False
+    isPatDot      pt = case pt of PatternDot _ -> True; _ -> False
 
     isArgument   (Spec.Binder r _) = r == Spec.AnArgument
     isHypothesis (Spec.Binder r _) = r == Spec.AnHypothesis
@@ -1530,6 +1532,8 @@ unaryOps =
   , ("split-arm-pattern", Op.SplitArmPattern)
   , ("pattern-head", Op.PatternHead)
   , ("pattern-arguments", Op.PatternArguments)
+    -- The inaccessible pattern's own reader (MS9 phase 228).
+  , ("pattern-dot-term", Op.PatternDotTerm)
     -- The binder report's accessor (MS9 phase 192).
   , ("binder-name", Op.BinderName)
   , ("ascription-type", Op.AscriptionType)
@@ -1788,6 +1792,7 @@ withOperands t os = case (t, os) of
   (SplitHasNoArms _, [o])        -> Just (SplitHasNoArms o)
   (PatternIsName _, [o])         -> Just (PatternIsName o)
   (PatternIsWildcard _, [o])     -> Just (PatternIsWildcard o)
+  (PatternIsDot _, [o])          -> Just (PatternIsDot o)
   (BinderIsArgument _, [o])      -> Just (BinderIsArgument o)
   (BinderIsHypothesis _, [o])    -> Just (BinderIsHypothesis o)
   (BinderIsCopy _, [o])          -> Just (BinderIsCopy o)
@@ -1834,6 +1839,7 @@ testTypes t = case t of
   SplitHasNoArms o        -> [(o, Ty.TSurface)]
   PatternIsName o         -> [(o, Ty.TPattern)]
   PatternIsWildcard o     -> [(o, Ty.TPattern)]
+  PatternIsDot o          -> [(o, Ty.TPattern)]
   BinderIsArgument o      -> [(o, Ty.TBinder)]
   BinderIsHypothesis o    -> [(o, Ty.TBinder)]
   BinderIsCopy o          -> [(o, Ty.TBinder)]
@@ -1892,6 +1898,7 @@ testWord t = case t of
   SplitHasNoArms _        -> "split-has-no-arms"
   PatternIsName _         -> "pattern-is-name"
   PatternIsWildcard _     -> "pattern-is-wildcard"
+  PatternIsDot _          -> "pattern-is-dot"
   BinderIsArgument _      -> "binder-is-argument"
   BinderIsHypothesis _    -> "binder-is-hypothesis"
   BinderIsCopy _          -> "binder-is-copy"
@@ -1956,6 +1963,7 @@ everyTest =
   , SplitHasNoArms (Lit (VText ""))
   , PatternIsName (Lit (VText ""))
   , PatternIsWildcard (Lit (VText ""))
+  , PatternIsDot (Lit (VText ""))
   , BinderIsArgument (Lit (VText ""))
   , BinderIsHypothesis (Lit (VText ""))
   , BinderIsCopy (Lit (VText ""))

@@ -260,6 +260,11 @@ surfacePattern = go False
     go nested (PatternName x ps) =
       (if nested then \t -> "(" ++ t ++ ")" else id)
         (unwords (x : map (go True) ps))
+    -- **A dot keeps its parentheses unless the term is a bare name**, which is
+    -- the grammar's own two forms: @.n@ round-trips as @.n@ and anything else
+    -- needs the brackets back, @.(succ n)@ included.
+    go _ (PatternDot (SurfaceName x)) = "." ++ x
+    go _ (PatternDot e)               = ".(" ++ surf Loose e ++ ")"
 
 objectPiece :: ObjectPiece -> String
 objectPiece pc = case pc of

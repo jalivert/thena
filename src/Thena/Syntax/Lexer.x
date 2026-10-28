@@ -120,6 +120,11 @@ tokens :-
   -- /contains/ dots — @a...b@ — is untouched, because this rule can only win at
   -- the start of a token.
   "..."         { keyword TSpread }
+  -- **@.@ is a token too, and @...@ still wins** (MS9 phase 228): Alex takes the
+  -- longest match, so @...@ is one 'TSpread' and never three of these. It
+  -- reserves nothing either, for the reason above — no identifier has ever begun
+  -- with a dot — and a lone @.@ was a lexical error before this line.
+  "."           { keyword TDot }
   "["           { keyword TLBracket }
   "]"           { keyword TRBracket }
   ","           { keyword TComma }
@@ -302,6 +307,7 @@ data Token
   | TRBracket
   | TComma
   | TSpread      -- ^ @...@, the list-pattern tail marker (MS5 phase 82)
+  | TDot         -- ^ @.@, the inaccessible-pattern marker (MS9 phase 228)
   | TUniverse Int
   | TUniverseOpen
   | TIdent String

@@ -221,4 +221,5 @@ kindOf t = case t of
   TCloseQuote   -> APunctuation
   TNeck         -> APunctuation
   TSpread       -> APunctuation
+  TDot          -> APunctuation
   TDashes       -> APunctuation

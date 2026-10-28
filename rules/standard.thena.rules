@@ -438,6 +438,47 @@ rule intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] vs ds fs k :-
      ; ds2 = prepend (w, v) ds
      ; r = intro-arm-binders ps bs vs ds2 fs k
      ; return r
+-- AN INACCESSIBLE POSITION (MS9 phase 228, on his ruling of 2026-10-19). A dot
+-- binds nothing and asserts: this position is determined, and by this term. One
+-- clause for both options, because the complaint when it is not forced is the
+-- user's and belongs to a rule that says so by its name. It consumes its
+-- pattern either way, which is what keeps `same-length` honest: a dot is
+-- written in a position, so it counts as one.
+rule intro-arm-binders [p, ...ps] [(b, oc), ...bs] vs ds fs k :-
+     when (binder-is-argument b) (pattern-is-dot p)
+  do e = pattern-dot-term p
+     ; dotted-position-is-forced e oc vs k
+     ; r = intro-arm-binders ps bs vs ds fs k
+     ; return r
+
+-- THE DOT'S OWN CHECK, AND THE RULE'S NAME IS THE REFUSAL -- `case-must-vanish`'s
+-- idiom: one clause, for a position that really is forced, and none for `none`,
+-- so dotting a position the split left free fails saying that and not that a
+-- search ran out.
+--
+-- The term is elaborated AT THE TYPE THE POSITION HAS and then unified with the
+-- term the equation forced it to. Both halves matter: the type catches `.true`
+-- where a `Nat` was determined, and the unification is the assertion itself.
+-- `._` is not a hole in that check but the whole of it -- a placeholder
+-- elaborates to a hole, which unification solves, so `._` says "determined, and
+-- I am not writing by what" and costs nothing extra to allow.
+--
+-- It runs at `k` and not where the walk stands, which is `bind-solved`'s
+-- sandwich: the forced term is a function of the binders introduced before this
+-- position, and those are in scope at `k`.
+dotted-position-is-forced : Surface -> Option Core -> List Core -> Core -> ()
+rule dotted-position-is-forced e (some f) vs k :-
+  do g = here
+     ; goto k
+     ; v = instantiate-with f vs
+     ; ty = typeof v
+     ; x = claim "dotted" ty
+     ; goto x
+     ; elaborate e
+     ; goto k
+     ; unify x v
+     ; goto g
+
 rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-hypothesis b)
   do n = binder-name b
      ; h = fresh-name n

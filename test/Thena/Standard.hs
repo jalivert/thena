@@ -806,6 +806,59 @@ splitClauses =
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds2", Ref "fs", Ref "k"])
       , Do (Op.Return (Ref "r"))
       ]
+    -- **An INACCESSIBLE position** (MS9 phase 228, on his ruling of
+    -- 2026-10-19). A dot binds nothing and asserts: this position is
+    -- determined, and by this term. One clause for both options, because the
+    -- complaint when it is not forced is the user's and belongs to a rule that
+    -- says so by its name.
+    --
+    -- **It consumes its pattern either way**, which is what keeps
+    -- @same-length@ honest: a dot is written in a position, so it counts as
+    -- one.
+  , Rule (GlobalName "intro-arm-binders")
+      [ PList [PVar "p"] (Just (PVar "ps"))
+      , PList [PPair (PVar "b") (PVar "oc")] (Just (PVar "bs"))
+      , PVar "vs", PVar "ds", PVar "fs", PVar "k"
+      ]
+      [BinderIsArgument (Ref "b"), PatternIsDot (Ref "p")]
+      [ Bind (Op.PVar "e") Nothing (Op.PatternDotTerm (Ref "p"))
+      , call "dotted-position-is-forced"
+             [Ref "e", Ref "oc", Ref "vs", Ref "k"]
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds", Ref "fs", Ref "k"])
+      , Do (Op.Return (Ref "r"))
+      ]
+    -- **The dot's own check, and the rule's NAME is the refusal** —
+    -- @case-must-vanish@'s idiom: one clause, for a position that really is
+    -- forced, and none for @none@, so dotting a position the split left free
+    -- fails saying that and not that a search ran out.
+    --
+    -- **The term is elaborated at the type the position has** and then unified
+    -- with the term the equation forced it to. Both halves matter: the type
+    -- catches @.true@ where a @Nat@ was determined, and the unification is the
+    -- assertion itself. **@._@ is not a hole in that check but the whole of
+    -- it** — a placeholder elaborates to a hole, which unification solves, so
+    -- @._@ says \"determined, and I am not writing by what\" and costs nothing
+    -- extra to allow.
+    --
+    -- **It runs at @k@ and not where the walk stands**, which is
+    -- @bind-solved@'s sandwich: the forced term is a function of the binders
+    -- introduced before this position, and those are in scope at @k@.
+  , Rule (GlobalName "dotted-position-is-forced")
+      [PVar "e", PSome (PVar "f"), PVar "vs", PVar "k"] []
+      [ Bind (Op.PVar "g") Nothing Here
+      , Do (Goto (Ref "k"))
+      , Bind (Op.PVar "v") Nothing
+          (Op.Call "instantiate-with" [Ref "f", Ref "vs"])
+      , Bind (Op.PVar "ty") Nothing (Op.Typing (Ref "v"))
+      , Bind (Op.PVar "x") Nothing
+          (Op.Claim (Lit (VText "dotted")) (Ref "ty"))
+      , Do (Goto (Ref "x"))
+      , call "elaborate" [Ref "e"]
+      , Do (Goto (Ref "k"))
+      , Do (Op.Unify (Ref "x") (Ref "v"))
+      , Do (Goto (Ref "g"))
+      ]
     -- **An induction hypothesis, under a FRESHENED name**: the argument it is
     -- about is already in the development, and shadowing it would resolve the
     -- arm's body to the hypothesis with nothing failing. It consumes no

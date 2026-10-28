@@ -21,6 +21,7 @@ thena spine> :produces Core
 thena spine> :accepts Surface
   elaborate/1 : Surface -> ()   (rule)
   ihs-for/2 : Surface -> Name -> List Name   (rule)
+  dotted-position-is-forced/4 : Surface -> Option Core -> List Core -> Core -> ()   (rule)
   arm-for/2 : Surface -> Name -> Option (Pattern, Option Surface)   (rule)
   pick/5 : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)   (rule)
   elaborate-arm/6 : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()   (rule)
