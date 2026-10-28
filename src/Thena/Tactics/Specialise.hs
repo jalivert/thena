@@ -101,7 +101,7 @@ import Thena.Global.Env
   , recursiveArgument
   )
 import Thena.Global.Generate (dependentPairInScope)
-import Thena.Global.NoConfusion (noConfusionNames)
+import Thena.Global.NoConfusion (noConfusionInverseNames, noConfusionNames)
 import Thena.Global.NoCycle (noCycleName)
 import Thena.Tactics.Eliminate (MethodShape (..), spineOf)
 
@@ -517,10 +517,12 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         --   * __deletion__ would need @q ≃ refl@ for an arbitrary proof of
         --     @Eq I t t@, which is UIP, and that is the one place the paper
         --     says the K axiom actually enters. It is not coming.
-        --   * __injectivity__ would need @noConfusion@ /backwards/ and its
-        --     round-trip law — the paper's @noConfD⁻¹@ and @isLeftInvD@, §3.5 —
-        --     to restate the later transport along the new proof. Neither is
-        --     generated.
+        --   * __injectivity__ needs @noConfusion@ /backwards/ and its round-trip
+        --     law — the paper's @noConfD⁻¹@ and @isLeftInvD@, §3.5 — to restate
+        --     the later transport along the new proof. **Both are generated now
+        --     and 'crossing' is the transition that uses them**, for a
+        --     constructor of one argument over a datatype with no indices; the
+        --     shapes it does not cover still keep the equation.
         --   * __solution__ would need the paper's own @solution@, which is
         --     @J A x₀ Φ m x e@ with @Φ@ abstracting the /varying/ end and the
         --     proof while the fixed end stays fixed — __based path induction__.
@@ -556,7 +558,9 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                   | namedLater e after -> blocked ByDeletion
                   | otherwise          -> deletion bfr e after n
                 Inject dn c
-                  | namedLater e after -> blocked ByInjectivity
+                  | namedLater e after -> case crossing bfr e after n dn c of
+                      Just r  -> r
+                      Nothing -> blocked ByInjectivity
                   | otherwise          -> injection bfr e after n dn c
                 Solve x left
                   | not (namedLater e after) -> solution bfr e after n x left
@@ -633,6 +637,47 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
              in continue (before ++ news ++ after) t n1 $ \g ->
                   lamOver (prefix before e)
                           (applyTo g (varsOf delta ++ eqnVars before ++ ps))
+
+        -- __injectivity ACROSS a chain — MS9, `~rqs39`.__ Where a later equation
+        -- is stated about this one's proof, removing this one's binder leaves
+        -- that equation about a variable that is gone, which is why the other
+        -- three transitions keep the equation instead. Injectivity does not have
+        -- to: @q@ is recoverable from the argument equations it is replaced by.
+        --
+        -- __The sub-problem is stated at @q@ rebuilt, and the method transports
+        -- back along the law.__ Let @Φ qq@ be @∀ after -> t@ with this
+        -- equation's proof read as @qq@. The sub-problem binds the argument
+        -- equation at @v@ and proves @Φ (noConfusion‹D›Inv … v)@; applying it to
+        -- the projection out of @noConfusion‹D› … q@ gives
+        -- @Φ (noConfusion‹D›Inv … (noConfusion‹D› … q))@, and @isLeftInv‹D›@
+        -- says that argument is @q@ — so one J carries @Φ@ from the one to the
+        -- other. **The law's own left side is literally the term being
+        -- transported from**, which is what makes the motive read off its type
+        -- rather than being reconstructed here.
+        --
+        -- __Two shapes, and outside them it declines and the equation is
+        -- kept.__ The constructor must have exactly one argument, so that the
+        -- chain is a single link and @v@ alone rebuilds @q@; and the datatype
+        -- must have no indices, so that the law is an equation between proofs
+        -- and not between packaged chains whose index halves have to be
+        -- projected apart. `~rqs39` on the agenda says what the general shape
+        -- costs beyond this.
+        crossing bfr e after n dn c = case backwards dn e of
+          Nothing -> Nothing
+          Just (inv, (lv, i, lhs, rhs, law)) -> case conjuncts dn c e n of
+            (Just ([one], [prf]), n1) ->
+              let before     = reverse bfr
+                  qback      = inv (Free (eqnVar one))
+                  after'     = map (substEqn (eqnVar e) qback) after
+                  t'         = substituting (eqnVar e) qback t
+                  residueAt qq =
+                    substituting (eqnVar e) qq (piOver (map entry after) t)
+                  (carry, n2) = transporting lv i lhs rhs law residueAt n1
+               in Just $ continue (before ++ [one] ++ after') t' n2 $ \g ->
+                    lamOver (prefix before e)
+                      (App carry
+                         (applyTo g (varsOf delta ++ eqnVars before ++ [prf])))
+            (_, _) -> Nothing
 
         -- __solution.__ The binder goes and everything to its right is
         -- substituted. What the sub-problem then proves is this method at the
@@ -804,6 +849,55 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
       (_, prf) <- overChain (eqnLeft e) (eqnRight e) (Free (eqnVar e))
                             chainTy chainTm
       pure (substLevel sub (inductiveLevel d), prf)
+
+    -- @noConfusion‹D›Inv@ and @isLeftInv‹D›@, if they were generated at all.
+    -- Declined for a datatype whose prelude is missing a product
+    -- ("Thena.Global.NoConfusion"): the inverse /produces/ the chain, so it
+    -- needs the pair where the forward lemma, which takes it curried, does not.
+    inverseOf dn
+      | isDeclared g env = Just g
+      | otherwise        = Nothing
+      where g = fst (noConfusionInverseNames dn)
+
+    lawFor dn
+      | isDeclared g env = Just g
+      | otherwise        = Nothing
+      where g = snd (noConfusionInverseNames dn)
+
+    -- __The backwards half, applied: how to rebuild this equation's proof, and
+    -- the law that says the rebuilding is faithful.__ 'crossing' is the one
+    -- caller and its header has what the two are for.
+    --
+    -- @inv@ is @noConfusion‹D›Inv p⃗ u v@ waiting for the chain. @isLeftInv‹D›@
+    -- is applied to this equation's own proof and its /type/ read back, which is
+    -- how the transport's motive gets the two terms it is between without
+    -- reconstructing either.
+    --
+    -- __Declined where the datatype has indices.__ The lemma is stated over
+    -- @(indices; element)@, so the inverse answers with the chain /packaged/ and
+    -- the law is an equation between two packages. This equation's proof is the
+    -- element half of one, and taking it out needs a transport whose motive
+    -- mentions the index half — a construction nothing here has. A datatype with
+    -- no indices has a one-station chain, where the package /is/ the proof.
+    backwards dn e = do
+      invN <- inverseOf dn
+      lawN <- lawFor dn
+      d    <- lookupInductive dn env
+      lawD <- lookupDefinition lawN env
+      (_, ls, as) <- spineOf (whnf env ctx (eqnCarrier e))
+      let (prm, is) = splitAt (length (inductiveParameters d)) as
+          lawTy     = atLevels (definitionLevels lawD) ls (definitionType lawD)
+          sides     = [eqnLeft e, eqnRight e]
+      case is of
+        _ : _ -> Nothing
+        []    -> do
+          (lTy, lTm) <- applied lawTy (Global lawN ls)
+                          (prm ++ sides ++ [Free (eqnVar e)])
+          case spineOf (whnf env ctx lTy) of
+            Just (GlobalName "Eq", [lv], [i, a, b]) ->
+              Just ( \chain -> foldl App (Global invN ls) (prm ++ sides ++ [chain])
+                   , (lv, i, a, b, lTm) )
+            _ -> Nothing
 
     -- @NoConfusion‹D› p⃗ i⃗ u i⃗ v@ — the family at the same arguments, which /is/
     -- the chain: the lemma's result type, before anything is projected out of
@@ -1116,6 +1210,40 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         methodTerm =
           Lam (Ident "same") i (close za
             (Lam (Ident "at") (residueAt (Free za)) (close zb (Free zb))))
+
+    -- @elim Eq (I) (λ x y w -> Φ x -> Φ y) ((λ z at -> at)) (a, b) prf@ — J over an
+    -- equation this module holds as a /term/ rather than as a binder, which is
+    -- the whole difference from 'coerce': that one is always at an 'Eqn' whose
+    -- proof is one of the method's own binders, and 'crossing' transports along
+    -- a lemma it has just applied.
+    --
+    -- Non-dependent in the proof, as 'coerce' is: nothing either caller carries
+    -- mentions it.
+    transporting lv i a b prf residueAt n0' =
+      ( Eliminate
+          { eliminated = equality
+          , levels     = [lv]
+          , parameters = [i]
+          , motive =
+              Lam (Ident "left") i (close zl
+                (Lam (Ident "right") i (close zr
+                  (Lam (Ident "q") (equation lv i (Free zl) (Free zr)) (close zq
+                    (Pi (Ident "at") (residueAt (Free zl))
+                        (close zf (residueAt (Free zr)))))))))
+          , methods = [ Lam (Ident "same") i (close za
+                          (Lam (Ident "at") (residueAt (Free za))
+                               (close zb (Free zb)))) ]
+          , indices = [a, b]
+          , target  = prf
+          }
+      , n6 )
+      where
+        (zl, n1) = fresh n0'
+        (zr, n2) = fresh n1
+        (zq, n3) = fresh n2
+        (zf, n4) = fresh n3
+        (za, n5) = fresh n4
+        (zb, n6) = fresh n5
 
     -- @elim And (A B) (λ p -> A) ((λ l r -> l)) () q@, and the mirror image.
     -- Built rather than named, because @andLeft@ and @andRight@ are prelude

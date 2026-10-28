@@ -2286,14 +2286,35 @@ one inhabitant up to `Eq`: the ordinary rule proves that, and carrying the goal 
 an ordinary transport. **No universe is spent**, which the obvious alternative — quantifying
 over the goal family — would have cost.
 
-**Two of the four unification steps still cannot cross a chain, and a split that needs one
-of them is refused by name.** Deleting an equation whose proof a later one mentions would
-need K, which is the line this whole design is drawn around. Taking a constructor equation
-*apart* when a later equation mentions its proof would need the no-confusion lemma
-backwards, with its round-trip law, and neither is generated — so
-`Small : ∀ (n : N) -> Fin n -> Type₀` with `isFz : ∀ (n : N) -> Small (s n) (fz n)` is
-refused, the first equation there being between two applications of `s`. The message says
-which step and what is missing.
+**Taking a constructor equation *apart* crosses a chain too, and that is what makes a
+pinned index splittable.** For
+
+```
+data Small : ∀ (n : N) -> Fin n -> Type₀ where
+  isFz : ∀ (n : N) -> Small (s n) (fz n)
+
+tiedTwo : ∀ (m : N) (x : Small (s m) (fz m)) -> N
+tiedTwo = \ m x -> case x of { isFz n -> n }
+```
+
+the first equation is between two applications of `s`, so injectivity fires where
+`tied`'s solution did. It replaces that equation with one about `s`'s argument and drops
+its binder — and the second equation was stated about that binder. **The no-confusion
+lemma run backwards turns the new equation back into a proof of the old one, and its
+round-trip law says the proof it rebuilds is the one that was given**, so the second
+equation is restated along the rebuilt proof and the law carries the method back. Both
+definitions are generated per datatype beside `noConfusion` itself. Before, this was
+refused.
+
+**It crosses a chain for a constructor of one argument over a datatype with no indices,
+and keeps the equation otherwise.** More arguments put the new equations in a pair, and
+there is then no single proof to rebuild from; indices make the law an equation between
+packaged chains rather than between proofs.
+
+**One of the four steps still cannot cross a chain, and a split that needs it is refused
+by name.** Deleting an equation whose proof a later one mentions would need K, which is
+the line this whole design is drawn around. The message says which step and what is
+missing.
 
 **A split also takes a constructor equation apart when the constructor's own arguments are
 dependent.** That is the no-confusion chain rather than the motive's one, and the two are

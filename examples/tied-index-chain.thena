@@ -13,9 +13,12 @@
 -- plain variables there, so the dependent one is FRIENDLY and states no
 -- equation at all. The difference is the whole of what this file is for.
 --
--- What is still refused is the shape where the first equation is between two
--- CONSTRUCTOR applications, so injectivity rather than solution fires on it —
--- that needs no-confusion backwards, which nothing generates.
+-- And the shape below `tied`, where the first equation is between two
+-- CONSTRUCTOR applications so that INJECTIVITY rather than solution fires on
+-- it. That one needs no-confusion backwards and its round-trip law, which are
+-- generated per datatype since MS9: injectivity replaces the equation's proof
+-- with one about the constructor's arguments, the later equation is restated
+-- along the proof rebuilt from it, and the law carries the method back.
 
 module TiedIndexChain where
 
@@ -35,3 +38,24 @@ data Q : forall (n : N) -> Fin n -> Type₀ where
 -- (fz m)` with no transport left and solves `i`.
 tied : forall (m : N) (x : Q (s m) (fz m)) -> N
 tied = \ m x -> case x of { mk n i -> m }
+
+-- INJECTIVITY over the same kind of chain. `isFz`'s target pins the first index
+-- to `s n`, so the first equation is `Eq N (s n) (s m)` — two applications of
+-- `s`, where `mk`'s above was a variable against a term. Injectivity replaces it
+-- with `Eq N n m` and drops its binder, so the second equation, which was stated
+-- about that binder, is restated along `noConfusionNInv` of the new proof;
+-- `isLeftInvN` is what makes the method's own type and the sub-problem's agree.
+-- Both equations are then discharged and the arm binds `n` alone.
+data Small : forall (n : N) -> Fin n -> Type₀ where
+  isFz : forall (n : N) -> Small (s n) (fz n)
+
+-- The arm answers with the constructor's own `n`, not with the ambient `m`, so
+-- reducing it at a known index is what tells the two apart.
+tiedTwo : forall (m : N) (x : Small (s m) (fz m)) -> N
+tiedTwo = \ m x -> case x of { isFz n -> n }
+
+-- And it reduces through the arm, which is what says the arm was handed the
+-- constructor's own `n` rather than the ambient `m`: both are `s (s z)` here,
+-- and only reducing tells them apart.
+twoFromArm : N
+twoFromArm = tiedTwo (s (s z)) (isFz (s (s z)))

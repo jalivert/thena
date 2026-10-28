@@ -90,6 +90,41 @@ tests =
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "\8704 (m : N) -> Q (s m) (fz m) -> N"
 
+      -- __AND THE SAME CHAIN CROSSED BY INJECTIVITY RATHER THAN BY SOLUTION —
+      -- MS9, @~rqs39@.__ @isFz@'s target pins the first index to @s n@, so the
+      -- first equation is between two applications of @s@ where @mk@'s was a
+      -- variable against a term. Injectivity drops that equation's binder, and
+      -- the second equation — stated about it — is restated along the proof
+      -- rebuilt by @noConfusionNInv@, with @isLeftInvN@ carrying the method
+      -- back. Refused by name until the backwards half was generated.
+    , testCase "and the split injectivity crosses is admitted at its written type" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s tiedTarget
+        case lookupDefinition (GlobalName "tiedTwo") (globals (machineOf s')) of
+          Nothing -> assertFailure "tiedTwo was not admitted"
+          Just d  ->
+            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "\8704 (m : N) -> Small (s m) (fz m) -> N"
+
+      -- __And the arm answers with its own binder.__ The ambient @m@ and the
+      -- constructor's @n@ are the same number here, so the type says nothing
+      -- about which one was bound and only reducing does.
+    , testCase "and the arm injectivity crossed computes from its own binder" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s tiedTarget
+        let m = machineOf s'
+        case lookupDefinition (GlobalName "twoFromArm") (globals m) of
+          Nothing -> assertFailure "twoFromArm was not admitted"
+          Just d  -> case whnf (globals m) [] (definitionBody d) of
+            Canonical (GlobalName "s") _ [inner] ->
+              case whnf (globals m) [] inner of
+                Canonical (GlobalName "s") _ [innermost] ->
+                  case whnf (globals m) [] innermost of
+                    Canonical (GlobalName "z") _ [] -> pure ()
+                    other -> assertFailure ("s (s " ++ show other ++ ")")
+                other -> assertFailure ("s applied to " ++ show other)
+            other -> assertFailure ("not a successor: " ++ show other)
+
       -- The split's one equation is between two @pack@ applications, so
       -- injectivity fires and has to read the lemma's chain apart. Both of the
       -- equations it yields are then discharged, so the arm binds the

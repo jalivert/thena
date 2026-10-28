@@ -502,10 +502,18 @@ refusalTests =
         Just (TransportedEquation ByDeletion 1 _) -> pure ()
         other -> assertFailure ("expected a blocked deletion, got " ++ show other)
 
-  , testCase "an injectivity whose proof a later equation names" $
+    -- __AND THE ONE THAT DECLINES FOR A SHAPE RATHER THAN FOR WANT OF A
+    -- CONSTRUCTION — MS9, `~rqs39`.__ 'crossing' rebuilds this equation's proof
+    -- from the argument equation that replaces it, which takes exactly one
+    -- argument: @both@ has two, so the chain is a pair and there is no single
+    -- variable to rebuild from. The equation is kept, which is the same answer
+    -- as before the transition existed.
+  , testCase "an injectivity over a constructor of two arguments" $
       case refused "succ" 2
-             "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat (succ m) (succ k)) \
-             \-> Eq {0} (Eq {0} Nat (succ m) (succ k)) q q -> Nat" of
+             "\8704 (m : Nat) (ih : Nat) \
+             \(q : Eq {0} (And {0 0} Nat Nat) (both {0 0} Nat Nat m k) (both {0 0} Nat Nat k m)) \
+             \-> Eq {0} (Eq {0} (And {0 0} Nat Nat) (both {0 0} Nat Nat m k) (both {0 0} Nat Nat k m)) q q \
+             \-> Nat" of
         Just (TransportedEquation ByInjectivity 1 _) -> pure ()
         other -> assertFailure ("expected a blocked injectivity, got " ++ show other)
   ]
@@ -536,6 +544,21 @@ chainTests =
       "succ" 2
       "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat m k) \
       \-> Eq {0} (Eq {0} Nat m k) q q -> Nat"
+      (Just "Nat -> Nat")
+
+    -- __AND INJECTIVITY CARRIES ONE TOO — MS9, `~rqs39`.__ The same fixture with
+    -- the equation's two sides made applications of @succ@, so injectivity fires
+    -- where solution did above. It replaces the proof with one about @succ@'s
+    -- argument and drops its binder, the later equation is restated along
+    -- @noConfusionNatInv@ of the new proof, and @isLeftInvNat@ carries the method
+    -- back from the rebuilt proof to the one it was given. Both binders go, so
+    -- the method is left with the induction hypothesis alone — the same answer
+    -- solution reaches, by the other transition. This was refused by name until
+    -- the backwards half was generated.
+  , specialises "injectivity over an equation a later one names carries it too"
+      "succ" 2
+      "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat (succ m) (succ k)) \
+      \-> Eq {0} (Eq {0} Nat (succ m) (succ k)) q q -> Nat"
       (Just "Nat -> Nat")
 
     -- __AND THE CHAIN A CONSTRUCTOR'S OWN TELESCOPE MAKES — MS9 phase 215.__
