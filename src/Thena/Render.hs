@@ -610,6 +610,38 @@ data Prec
 renderCore :: Rendering -> Context -> Core -> String
 renderCore ren ctx = go ren (envOf ctx) AtTop
 
+-- | __The one thing a mismatch can say beyond the two types it names__ (MS9
+-- phase 229).
+--
+-- A method the specialiser could not simplify keeps the equation no transition
+-- applied to, so an arm's body is checked against @Eq … -> X@ where the author
+-- wrote an @X@ — and @X and Eq … -> X cannot be made equal@ names neither the
+-- argument that is missing nor its type. On
+-- @mk : ∀ (a b : String) -> P (appendString a b)@ split at
+-- @P (appendString x y)@ that is the whole of what the reader is told, and the
+-- repair — one @\\ q ->@ in the arm — is invisible. @~2d9xj@ is the item.
+--
+-- __Read off the two types and nothing else, and said in neither direction.__
+-- It reports what the two differ BY, never where the Π came from: a renderer
+-- that guessed at the cause would say the same sentence for every
+-- under-applied term.
+--
+-- __Symmetric because a 'Mismatch' is__: every one in the system comes from
+-- "Thena.Core.Unify", where the two sides are the halves of a unification
+-- problem and @related@ may hand them over either way round. So the sentence
+-- names the shorter side rather than /the term/ or /the expected type/, neither
+-- of which this constructor distinguishes.
+owedArgument :: Rendering -> Context -> Core -> Core -> [String]
+owedArgument ren ctx a b = case (a, b) of
+  (Pi{}, Pi{})    -> []
+  (_, Pi _ dom _) -> [differ dom]
+  (Pi _ dom _, _) -> [differ dom]
+  _               -> []
+  where
+    differ dom =
+      "they differ by one argument, which the shorter side has to take first: "
+        ++ renderCore ren ctx dom
+
 -- | Display names for a context's variables, freshened as the chain printer
 -- freshens a component's.
 envOf :: Context -> Env
@@ -1250,6 +1282,7 @@ renderFailReason ren r = case r of
     "there is no call to return from here"
   Mismatch ctx a b ->
     renderCore ren ctx a ++ " and " ++ renderCore ren ctx b ++ " cannot be made equal"
+      ++ concatMap ("\n  " ++) (owedArgument ren ctx a b)
   OccursCheck ctx x t ->
     "solving " ++ nameIn ctx x ++ " with " ++ renderCore ren ctx t
       ++ " would define it in terms of itself"

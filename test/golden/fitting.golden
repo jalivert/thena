@@ -18,6 +18,7 @@ thena spine> :undo
   t0
 thena spine> apply-core ⌜ succ ⌝
 stuck: Nat and Nat -> Nat cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Nat
 thena spine> :abandon
 abandoned t0
 thena spine> :theorem t1 : Nat

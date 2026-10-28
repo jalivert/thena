@@ -2623,6 +2623,48 @@ Three consequences a user meets:
   own hypothesis — `chain n c`'s distinctness, where the recursion is at `c` with
   one more prime — writes that premise to the right of the split.
 
+### A split whose equation has no solution hands you the equation, and says which one
+
+Splitting a value asks whether the constructor's indices can be made equal to the
+ones the thing you are splitting has. Thena discharges such a question by
+substituting one side for the other, by discriminating two different
+constructors, or by reading a constructor apart — and where the index is built by
+a function that is not injective, none of those applies and none ever could:
+
+```
+data Cat : String -> Type₀ where
+  mk : forall (a : String) (b : String) -> Cat (appendString a b)
+
+pick : forall (x : String) (y : String) (p : Cat (appendString x y)) -> String
+pick = \ x y p -> case p of { mk a b -> a }
+```
+
+`appendString a b` and `appendString x y` can be the same string without `a` and
+`x` being the same — `"ab"` then `"c"` is `"a"` then `"bc"` — so nothing can
+conclude `a = x`.
+
+**The split is still offered, and the equation becomes a hypothesis of the arm.**
+It is true where you stand, so taking it costs one binder and the proof goes
+through:
+
+```
+pick = \ x y p -> case p of { mk a b -> \ q -> a }
+```
+
+**Refusing the split instead would withdraw that proof**, which is why Thena
+keeps the equation where the standard presentation reports a failure. An arm that
+does not take it is refused, and the refusal names the equation it owes:
+
+```
+stuck: String and Eq {0} String (appendString a b) (appendString x y) -> String
+       cannot be made equal
+  they differ by one argument, which the shorter side has to take first:
+  Eq {0} String (appendString a b) (appendString x y)
+```
+
+The second line is said of any two types that differ by one argument, so an
+under-applied term says it too.
+
 ### Dot patterns are optional here, because we run the eliminator and not the clause
 
 When a split determines one of a constructor's arguments, that argument has no

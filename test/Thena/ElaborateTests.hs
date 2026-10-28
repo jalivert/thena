@@ -1106,6 +1106,45 @@ splittingTree =
       ]
       "stuck: no clause of case-needs-an-arm applies here"
 
+    -- __AN EQUATION WITH NO SOLUTION AT ALL, AND IT IS NOT A GAP IN THE
+    -- UNIFIER__ (MS9 phase 229). A family whose index is built by a function
+    -- that is not injective states an equation no transition can discharge and
+    -- none ever will: @appendString a b@ and @appendString x y@ agree without
+    -- @a@ and @x@ agreeing, @"ab"@ then @"c"@ being @"a"@ then @"bc"@. So
+    -- the method keeps it, which is "Thena.Tactics.Specialise"\'s own law, and
+    -- the arm either takes it or does not typecheck.
+    --
+    -- __The refusal has to name the equation.__ Until phase 229 it said only
+    -- @String and Eq … -> String cannot be made equal@, which names neither the
+    -- argument that is missing nor what to do about it (@~2d9xj@). Nothing in
+    -- @examples\/@ has an index of this shape, so these two are the whole test
+    -- corpus of it.
+  , refusesIn catModule
+      "a family indexed by a function that is not injective keeps its equation, and the refusal names it"
+      [ "pick : \8704 (x : String) (y : String) -> Cat (appendString x y) -> String"
+      , "pick = \\ x y p -> case p of { mk a b -> a }"
+      ]
+      "stuck: String and Eq {0} String (appendString a b) (appendString x y) \
+      \-> String cannot be made equal they differ by one argument, which the \
+      \shorter side has to take first: Eq {0} String (appendString a b) \
+      \(appendString x y)"
+
+    -- __AND THE SPLIT IS NOT WRONG, WHICH IS WHY IT IS NOT REFUSED OUTRIGHT.__
+    -- One @\\ q ->@ in the arm and the proof goes through — the equation is a
+    -- hypothesis the author is handed, not a mistake they made. Refusing the
+    -- split instead, which is @eliminating.pdf@ Definition 19's third outcome,
+    -- would withdraw this.
+  , testCase "and the same split declares when the arm takes the equation" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (catModule ++
+            [ "pick : \8704 (x : String) (y : String) -> Cat (appendString x y) -> String"
+            , "pick = \\ x y p -> case p of { mk a b -> \\ q -> a }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure
+                   ("it did not load: " ++ unwords (renderResponse s1 other))
+
     -- __EVERY ARM THE USER WROTE WAS ASKED FOR__ — his ruling of 2026-10-20,
     -- built in MS9 phase 190. The three below are the three ways an arm went
     -- unlooked-at before it, each of which loaded and declared in silence, and
@@ -2218,6 +2257,15 @@ splittingTree =
       , ""
       , "data P : L -> Type\8320 where"
       , "  mkP : \8704 (l : L) -> P l"
+      , ""
+      ]
+    -- A family whose index is a PRIMITIVE application, stuck on its arguments:
+    -- @appendString@ is not a constructor and is not injective, so an equation
+    -- between two of its results has no transition and no solution.
+    catModule =
+      [ "module Cat where", ""
+      , "data Cat : String -> Type\8320 where"
+      , "  mk : \8704 (a : String) (b : String) -> Cat (appendString a b)"
       , ""
       ]
     vecModule =

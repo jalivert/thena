@@ -202,6 +202,7 @@ thena spine> :goal ∀ (b : Bool) -> Maybe Bool
   goal
 thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Bool
 thena spine> :show
 ▶ let ? goal : Bool -> Maybe Bool in
   goal
@@ -209,9 +210,11 @@ thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
 proving h : Bool -> Maybe Bool
 thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Bool
 thena spine> assume "q" ⌜ Bool ⌝
 thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Bool
 thena spine> :abandon
 abandoned h
 thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool

@@ -28,6 +28,7 @@ solved: ?ℓ68
 solved: ?ℓ70
 solved: ?ℓ72
 stuck: Nat and Nat -> Nat cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Nat
 thena spine> declare data Bool : Type₀ where { true : Bool ; false : Bool }
 solved: ?ℓ85
 solved: ?ℓ85
