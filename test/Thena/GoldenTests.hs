@@ -766,11 +766,18 @@ tests =
         , "eliminate-core ⌜ b ⌝"
         , ":where"
         , ":abandon"
-        -- And the refusal that remains, which is the message a user meets now:
-        -- @Chain@'s third index is tied and its type mentions BOTH earlier
-        -- ones, while the second's type mentions the first. Transporting past
-        -- the first leaves the second's binder typed at the old one, and the
-        -- chain has no step for that.
+        -- __AND THE CHAINED TELESCOPE, WHICH WAS THE REFUSAL THAT REMAINED
+        -- UNTIL MS9 phase 237.__ @Chain@'s third index is tied and its type
+        -- mentions BOTH earlier ones, while the second's type mentions the
+        -- first. Transporting past the first used to leave the second's binder
+        -- typed at the old one; the motive now binds the second and states the
+        -- right-hand residue at it carried along the same proof.
+        --
+        -- __The subgoal line is the whole of what this pins here__ — the motive
+        -- is three nested transports and @:where@ would print several thousand
+        -- characters of them, which is churn and not evidence.
+        -- @examples/chained-index-telescope.thena@ is where the term is judged,
+        -- by the kernel, with the arm's own payload reduced out of it.
         , "data Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀ where { c0 : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Chain n i b }"
         , ":theorem chained : ∀ (m : Nat) (c : Chain (succ m) (fz m) (bz m)) -> Nat"
         , "attack"

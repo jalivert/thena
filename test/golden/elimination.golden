@@ -208,7 +208,5 @@ thena spine> into
 thena spine> along
 thena spine> along
 thena spine> eliminate-core ⌜ c ⌝
-stuck: index 3 (b) has a type depending on an earlier index
-  that its equation cannot be transported past — that index is either
-  abstracted outright, or itself typed by one this one also mentions
+subgoals: c0Method
 thena spine> :quit

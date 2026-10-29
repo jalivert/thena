@@ -558,19 +558,25 @@ refusalTests =
         Left (TargetNotInductive {}) -> pure ()
         other                        -> assertFailure (show (fmap (const ()) other))
 
-    -- §3.7's limit as MS9 phase 213 leaves it: __two mentioned indices that are
-    -- CHAINED__. @Chain@'s index 3 is @bz m@, a constructor application, so it
-    -- is tied and its type @Below i1 i2@ mentions both earlier indices — while
-    -- @i2@'s own type @Fin i1@ mentions @i1@. Transporting past @i1@ would
-    -- leave @i2@'s binder typed at the old one, and the paper's answer is a
-    -- motive abstracting the /proof/ as well as the endpoint, which is the
-    -- packaged telescopic equality these phases do without.
-  , testCase "two chained dependent indices are refused, by position and name" $
+    -- __TWO MENTIONED INDICES THAT ARE CHAINED ARE NO LONGER REFUSED — MS9
+    -- phase 237, @~fq5gp@.__ @Chain@'s index 3 is @bz m@, a constructor
+    -- application, so it is tied and its type @Below i1 i2@ mentions both
+    -- earlier indices — while @i2@'s own type @Fin i1@ mentions @i1@.
+    -- Transporting past @i1@ used to leave @i2@'s binder typed at the old one;
+    -- the motive now binds @i2@ and states the right-hand residue at it carried
+    -- along the same proof, so the elimination is built.
+    --
+    -- __It is asserted here as a build and nowhere else as a string__: the
+    -- motive is three nested transports and pinning its text would say nothing
+    -- a reader could check. @Thena.DependentIndexTests@ runs
+    -- @examples/chained-index-telescope.thena@ through the kernel instead,
+    -- which is the judge that matters, and asserts the arm computes.
+  , testCase "two chained dependent indices are eliminated, not refused" $
       let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl, chainDecl]
           (ctx, n1) = contextOf env n0 [("m", "Nat")]
        in case fst (attempt env ctx n1 "Nat" "c0 (succ m) (fz m) (bz m)") of
-            Left e  -> e @?= IndexTypeDepends 3 (Ident "b")
-            Right _ -> assertFailure "expected a refusal"
+            Right _ -> pure ()
+            Left e  -> assertFailure ("refused: " ++ show e)
 
     -- §3.7, decided 2026-08-11: @Eq@ and @refl@ are named, not designated. A
     -- family with no indices states no equations and so needs neither, which

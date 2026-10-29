@@ -2053,6 +2053,45 @@ is left bare, which is what keeps it in reach of the unifier; and the generalise
 carried there along the earlier equation. Where no index's type mentions an earlier one the
 chain is empty and the equation is the one it always was.
 
+**And a transport carries whatever moves with it, so an index telescope may be chained to
+any depth.** The hard shape is `Chain : ∀ (n : N) (i : Fin n) (b : Below n i) -> Type₀` —
+the third index's type mentions both earlier ones, and the second's type mentions the
+first. A transport whose motive reads `λ l r q. residue l -> residue r` cannot state that:
+moving `n`, the right-hand side `Below r i` leaves `i` typed `Fin l`. So the motive binds
+the positions that move with the one being transported and states the right-hand side at
+those positions carried along the **same** proof:
+
+```
+λ l r q. ∀ (y : Fin l) -> Below l y -> Below r (coe q y)
+```
+
+`coe q y` is that same transport one level down, on `Fin` rather than on the residue, so
+this is one construction used recursively and not a second mechanism — which is what lets a
+moving position have a moving position of its own. The method is `λ s y at. at`, and it
+typechecks because `coe refl y` reduces to `y`. **Nothing here is K and no equality is
+packaged**: every equation is still an `Eq` between two terms of a single type.
+
+**It is not cheap, and the cost is per chained position.** Measured on the printed term of
+the admitted split: 3,835 characters for one transport, 13,269 with one chained position,
+49,840 with two — about fourfold each time, with load time following it. Nothing in the
+languages Thena models has an index typed by two mutually dependent indices, so this is a
+gap closed rather than a cost anybody pays: where no index's type mentions an earlier one
+not a byte of it is generated. `examples/chained-index-telescope.thena` and
+`examples/chained-index-telescope-deep.thena` are the two worked shapes.
+
+**One shape of index telescope is still refused**, and it may not be reachable: a *tied*
+index — one whose position the target pins to a constructor application, so that it states
+an equation — whose type mentions a *friendly* one, which is abstracted outright and has no
+equation to carry anything along. A friendly index is a variable no other index mentions,
+while a tied index's own term pins every index its type mentions, so the two conditions look
+incompatible; no written family reaches it. The refusal is kept because that is an argument
+rather than a proof, and it names the position and the identifier:
+
+```
+index 3 (b) has a type depending on an earlier index
+  that is abstracted outright, so there is no equation to carry it along
+```
+
 **And for an indexed family the no-confusion pair gives each element its own indices.** A
 pair that puts both elements at one index group says nothing about two elements at two
 *different* indices — and that is what acyclicity needs, its last step being an assumed

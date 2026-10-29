@@ -671,17 +671,20 @@ data ElimError
     -- Neither @Vec@ nor @Below@ any more: a one-element index telescope has no
     -- earlier index to depend on, and
     -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ eliminates at a tied @fz m@
-    -- since phase 213. __Two shapes remain, and both are a missing step of the
-    -- transport chain rather than a missing equality:__
+    -- since phase 213. __And not @Chain@ either, since MS9 phase 237__: two
+    -- mentioned indices that are /chained/ — @Iₙ@ mentioning both @j@ and @m@
+    -- while @Iₘ@ mentions @j@, as in
+    -- @Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀@ — are carried
+    -- by a motive that binds the position moving with the one being
+    -- transported, which needs no packaged equality (@~fq5gp@).
     --
-    --   * the mentioned index is friendly — abstracted outright, so there is no
-    --     equation to transport along;
-    --   * two mentioned indices are chained — @Iₙ@ mentions both @j@ and @m@
-    --     while @Iₘ@ mentions @j@, as in
-    --     @Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀@. Carrying
-    --     past @j@ then leaves @m@'s binder typed at the old @j@, and the
-    --     paper's answer is a motive abstracting the equality /proof/ as well as
-    --     its endpoint
+    -- __ONE SHAPE REMAINS AND IT MAY BE UNREACHABLE.__ A tied index whose type
+    -- mentions a /friendly/ one: there is no equation about a friendly index to
+    -- carry anything along. A friendly index is a variable no other index
+    -- mentions, while a tied index's term pins every index its type mentions —
+    -- which makes the two look incompatible, and no shape anybody has written
+    -- reaches it. That is an argument and not a proof, so this constructor
+    -- stays rather than being deleted.
   | IndexTypeIllTyped TypeError
     -- ^ a tied index's type has no universe (MS3 phase 31d). Needed because
     -- the equation @Eq Iₖ iₖ aₖ@ is stated at @Iₖ@'s **level** now, which has

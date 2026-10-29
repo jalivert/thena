@@ -1932,9 +1932,18 @@ renderDeclareError ren e = case e of
 --
 -- And since MS9 phase 213 a tied index's equation is stated at the /actual/
 -- earlier indices, its generalised side carried there along the earlier
--- equations, so this is raised only where that chain has a missing step — see
--- 'Thena.Errors.IndexTypeDepends' for the two shapes. The message names the
--- chain rather than \"John Major\" equality, which Thena does not declare.
+-- equations, so this is raised only where that chain has a missing step. The
+-- message names the chain rather than \"John Major\" equality, which Thena does
+-- not declare.
+--
+-- __MS9 phase 237 left it ONE shape, and that shape may be unreachable from the
+-- surface.__ Chained mentions are carried now (@~fq5gp@), so what is left is a
+-- tied index whose type mentions a /friendly/ one — and a friendly index is a
+-- variable mentioned by no other index, while a tied index's own term pins
+-- every index its type mentions, which makes the two conditions look
+-- incompatible. That is an argument and not a proof, so the guard stays: it
+-- costs one list comprehension, and the alternative to refusing here is
+-- 'SchemeIllTyped' from a motive nobody can read.
 renderElimError :: Rendering -> ElimError -> String
 renderElimError ren e = case e of
   TargetNotTypeable te ->
@@ -1946,8 +1955,7 @@ renderElimError ren e = case e of
     "eliminating at indices needs " ++ nameString g ++ ", which is not declared"
   IndexTypeDepends k (Ident i) ->
     "index " ++ show k ++ " (" ++ i ++ ") has a type depending on an earlier index"
-      ++ "\n  that its equation cannot be transported past — that index is either"
-      ++ "\n  abstracted outright, or itself typed by one this one also mentions"
+      ++ "\n  that is abstracted outright, so there is no equation to carry it along"
   IndexTypeIllTyped te ->
     "the type of a tied index has no universe, so its equation cannot be stated"
       ++ concatMap ("\n  " ++) (renderTypeError ren te)

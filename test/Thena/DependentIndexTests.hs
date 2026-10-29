@@ -42,7 +42,7 @@
 module Thena.DependentIndexTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=), assertBool)
+import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=), assertBool)
 
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (Canonical), GlobalName (..))
@@ -67,6 +67,15 @@ argumentTarget = "examples/dependent-argument-chain.thena"
 
 vectorTarget :: FilePath
 vectorTarget = "examples/vector-families.thena"
+
+chainedTarget :: FilePath
+chainedTarget = "examples/chained-index-telescope.thena"
+
+-- | One rung deeper, and __its own file because it is expensive__: the
+-- generated term grows about fourfold per chained index, so this split alone is
+-- most of a load. One test case reads it, where the shallow file has three.
+deepTarget :: FilePath
+deepTarget = "examples/chained-index-telescope-deep.thena"
 
 tests :: TestTree
 tests =
@@ -270,6 +279,51 @@ tests =
                 other -> assertFailure ("s applied to " ++ show other)
             other -> assertFailure ("not a successor: " ++ show other)
 
+      -- __AND THE CHAINED TELESCOPE — MS9 phase 237, @~fq5gp@.__ @Chain@'s
+      -- third index is tied and its type mentions BOTH earlier ones, while the
+      -- second's type mentions the first, so transporting the first has to
+      -- carry the second with it. The motive binds the position that moves and
+      -- states the right-hand residue at it carried along the same proof; this
+      -- was refused by position and name until the phase.
+    , testCase "the chained file runs to the end" $ do
+        (s, _) <- startingSession
+        (_, _, stopped) <- loadProofFile s chainedTarget
+        assertBool (unlines (map show stopped)) (null stopped)
+
+    , testCase "and the chained split is admitted at its written type" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s chainedTarget
+        case lookupDefinition (GlobalName "chained") (globals (machineOf s')) of
+          Nothing -> assertFailure "chained was not admitted"
+          Just d  ->
+            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "\8704 (m : N) -> Chain (s m) (fz m) (bz m) -> N"
+
+      -- __And the arm answers with the constructor's own payload__, which the
+      -- type cannot say. A split that typechecked and refined nothing would
+      -- still admit @chained@ at the type above; only reducing says the @w@ the
+      -- arm bound is the @w@ @c0@ was applied to.
+    , testCase "and the chained arm computes from the payload it bound" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s chainedTarget
+        numeral (machineOf s') "chainedPayload" 3
+
+      -- __One rung deeper, which is what says the construction recurses.__
+      -- @Deep@'s fourth index is typed by @Over n i b@, whose own telescope is
+      -- chained, so carrying the first position has to carry @b@, and carrying
+      -- @b@ has to carry @i@ first. Two levels of the recursion in one split.
+      --
+      -- __One case for the three assertions the shallow file gets separately__,
+      -- because this load is about six seconds on its own and the three would
+      -- be three of them. Running to the end, being admitted and computing are
+      -- all said by the payload reducing: it cannot reduce if the file stopped
+      -- or the definition was never admitted.
+    , testCase "and a telescope one rung deeper again computes too" $ do
+        (s, _) <- startingSession
+        (s', _, stopped) <- loadProofFile s deepTarget
+        assertBool (unlines (map show stopped)) (null stopped)
+        numeral (machineOf s') "deepPayload" 2
+
     , testCase "the file runs to the end" $ do
         (s, _) <- startingSession
         (_, _, stopped) <- loadFile s target
@@ -284,3 +338,23 @@ tests =
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "∀ (n : Nat) (i : Fin n) -> Below n i -> Eq {0} (Fin n) i i"
     ]
+
+-- | A global that must reduce to a specific @N@ numeral.
+--
+-- The payload assertions want /the arm bound this argument and not another/,
+-- and a numeral is how a term says so: @z@ and @s@ are the only two things it
+-- can be built from, so reducing to the right depth cannot happen by accident.
+numeral :: Machine -> String -> Int -> Assertion
+numeral m name expected =
+  case lookupDefinition (GlobalName name) (globals m) of
+    Nothing -> assertFailure (name ++ " was not admitted")
+    Just d  -> go expected (whnf (globals m) [] (definitionBody d))
+  where
+    go 0 t = case t of
+      Canonical (GlobalName "z") _ [] -> pure ()
+      other -> assertFailure (name ++ ": expected z, got " ++ show other)
+    go k t = case t of
+      Canonical (GlobalName "s") _ [inner] ->
+        go (k - 1) (whnf (globals m) [] inner)
+      other ->
+        assertFailure (name ++ ": expected a successor, got " ++ show other)

@@ -91,6 +91,7 @@ module Thena.Tactics.Eliminate
   ) where
 
 import Data.List (nub)
+import Data.Maybe (fromMaybe)
 
 import Thena.Core.Level (Level, instantiateLevels)
 import Thena.Core.Context
@@ -854,9 +855,15 @@ eliminate env ctx sch prem n0 goal tgt =
           | otherwise = Just (IndexTypeDepends (k + 1) (entryIdent (inductiveIndices d !! k)))
           where
             ms = mentionedBy k
+            -- __Only the FRIENDLY mention is left — MS9 phase 237.__ A
+            -- mentioned index that is abstracted outright has no equation to
+            -- transport along, and @Eq (Fin i₁) i₂ (fz m)@ would ask @fz m@ to
+            -- inhabit @Fin i₁@ for an @i₁@ nothing constrains. __Two mentioned
+            -- indices that are CHAINED are no longer refused__: 'transport'
+            -- binds the position that moves with the one being transported and
+            -- carries it along the same proof.
             untransportable =
               [ j | j <- ms, j `notElem` tiedIx ]
-                ++ [ j | j <- ms, i <- ms, i < j, (ixVars !! i) `elem` freeVars (ixType j) ]
         firstJust xs = case [ x | Just x <- xs ] of
           x : _ -> Just x
           []    -> Nothing
@@ -1015,43 +1022,170 @@ eliminate env ctx sch prem n0 goal tgt =
           (lefts, n5'') = foldl carried ([], n5') tiedIx
           carried (acc, m) k = (acc ++ [(k, t)], m')
             where
-              (t, m') = walk (mentionedBy k) (Free (ivs !! k)) (indexTys !! k) m
-              walk []       u _  p = (u, p)
-              walk (j : js) u ty p
-                | [(lv, qv, lj)] <- [ (lv, qv, lj)
-                                    | ((i, lv), qv) <- zip (zip tiedIx tiedLvs) qvs
-                                    , i == j
-                                    , (i', lj) <- acc
-                                    , i' == j
-                                    ] =
-                let cj      = carrierTys !! j
-                    resid z = substVars [(ivs !! j, z)] ty
-                    (zl, p1) = fresh p
-                    (zr, p2) = fresh p1
-                    (zq, p3) = fresh p2
-                    (zf, p4) = fresh p3
-                    (za, p5) = fresh p4
-                    (zb, p6) = fresh p5
-                    motiveT =
-                      Lam (Ident "left") cj (close zl
-                        (Lam (Ident "right") cj (close zr
-                          (Lam (Ident "q") (equationOf lv cj (Free zl) (Free zr)) (close zq
-                            (Pi (Ident "at") (resid (Free zl))
-                                (close zf (resid (Free zr)))))))))
-                    methodT =
-                      Lam (Ident "same") cj (close za
-                        (Lam (Ident "at") (resid (Free za)) (close zb (Free zb))))
-                    carry = Eliminate
-                      { eliminated = equality
-                      , levels     = [lv]
-                      , parameters = [cj]
-                      , motive     = motiveT
-                      , methods    = [methodT]
-                      , indices    = [lj, asG !! j]
-                      , target     = Free qv
-                      }
-                 in walk js (App carry u) (resid (asG !! j)) p6
+              -- __What term stands for each index position in the residue being
+              -- carried, and at what type__ (MS9 phase 237). Before any step it
+              -- is the motive's own binder at its own type; a step replaces the
+              -- position it moves, and every position that moved with it.
+              stands0 =
+                [ (p, (ivs !! p, Free (ivs !! p), indexTys !! p)) | p <- [0 .. ni - 1] ]
+              (t, m') = walk (mentionedBy k) (Free (ivs !! k)) (indexTys !! k) stands0 m
+              walk []       u _  _      p = (u, p)
+              walk (j : js) u ty stands p
+                | Just (lv, qv)     <- equationAt j
+                , Just (_, left, _) <- lookup j stands =
+                    let (u', ty', stands', p') =
+                          transport j lv left (asG !! j) (Free qv) u ty stands p
+                     in walk js u' ty' stands' p'
                 | otherwise = (u, p)
+
+              equationAt j =
+                case [ (lv, qv)
+                     | ((i, lv), qv) <- zip (zip tiedIx tiedLvs) qvs
+                     , i == j
+                     ] of
+                  r : _ -> Just r
+                  []    -> Nothing
+
+              -- __One position's transport, with every later position whose own
+              -- type moves with it abstracted in the motive — MS9 phase 237,
+              -- and this is what makes a CHAINED index statable.__
+              --
+              -- Phase 213's motive was @λ l r q -> resid l -> resid r@, which is
+              -- well typed only when nothing in @resid@ is /typed by/ the
+              -- position being moved. Where something is — @b : Below n i@ with
+              -- @i : Fin n@, moving @n@ — the right-hand residue reads
+              -- @Below r i@ with @i : Fin l@ and does not typecheck. So the
+              -- motive binds those positions and carries them along the __same__
+              -- proof:
+              --
+              -- > λ l r q -> ∀ (y : Iₚ[l]) -> resid[l, y] -> resid[r, coe q y]
+              --
+              -- @coe q y@ is this same function one level down, on @Iₚ@ instead
+              -- of on the residue, so the construction is one recursion and not
+              -- a second mechanism. The method is @λ s y at -> at@ and
+              -- typechecks because @coe refl y@ ι-reduces to @y@ — that
+              -- reduction is the whole reason no packaged telescopic equality is
+              -- needed, and @~fq5gp@ records it being checked by hand first.
+              --
+              -- __A moving position's own type moves too__, which is what makes
+              -- this hold past depth two: @Over n i b@'s @b@ is typed @Below n i@
+              -- and names @i@, which is itself a moving position, so the
+              -- abstraction is over the hole AND every moving position — and
+              -- @stands@ is threaded into the recursion so the inner transport
+              -- finds them under the motive's own binders rather than the
+              -- motive's index binders.
+              --
+              -- __With no dependent position this is phase 213's term exactly__:
+              -- @deps@ is empty, both Π chains are empty, and every family that
+              -- generated a transport before this phase generates the same one.
+              transport j lv left right q u ty stands p0 =
+                (uOut, tyOut, standsOut, p13)
+                where
+                  cj = carrierTys !! j
+
+                  -- In increasing order, which is the order the motive binds
+                  -- them in, so a moving position's type only ever names an
+                  -- outer binder.
+                  deps =
+                    [ (dp, iv, dt, dty)
+                    | dp <- [j + 1 .. ni - 1]
+                    , (ivs !! j) `elem` freeVars (indexTys !! dp)
+                    , (iv, dt, dty) <- maybe [] (: []) (lookup dp stands)
+                    , iv `elem` freeVars ty
+                    ]
+                  depTerms = [ dt | (_, _, dt, _) <- deps ]
+
+                  -- The residue and each moving position's type as a skeleton
+                  -- over the hole and over the moving positions, so the motive's
+                  -- two endpoints and the method's one are a substitution apart.
+                  (hv,  p1) = fresh p0
+                  (dvs, p2) = freshen (length deps) p1
+                  abstractAll t0 n =
+                    foldl one (t0, n) ((hv, left) : zip dvs depTerms)
+                    where one (acc1, m1) (v, needle) = replaceTerm needle v m1 acc1
+                  (skel, p3) = abstractAll ty p2
+                  (depSkels, p4) = foldl absDep ([], p3) deps
+                  absDep (acc1, n) (_, _, _, dty) =
+                    let (sk, nAfter) = abstractAll dty n in (acc1 ++ [sk], nAfter)
+
+                  shaped hole args sk = substVars ((hv, hole) : zip dvs args) sk
+
+                  (zl, p5) = fresh p4
+                  (zr, p6) = fresh p5
+                  (zq, p7) = fresh p6
+                  (ys, p8) = freshen (length deps) p7
+                  yArgs = map Free ys
+
+                  -- What stands for each moving position under the motive's own
+                  -- binders, which is what the inner transport reads.
+                  standsIn =
+                    [ (dp, (yv, Free yv, shaped (Free zl) yArgs sk))
+                    | ((dp, _, _, _), yv, sk) <- zip3 deps ys depSkels
+                    ]
+                      ++ stands
+
+                  (depCarried, p9) = foldl carryDep ([], p8) (zip ys depSkels)
+                  carryDep (acc1, n) (yv, sk) =
+                    let (c, _, _, nAfter) =
+                          transport j lv (Free zl) (Free zr) (Free zq)
+                                    (Free yv) (shaped (Free zl) yArgs sk) standsIn n
+                     in (acc1 ++ [c], nAfter)
+
+                  (zf, p10) = fresh p9
+                  motiveT =
+                    Lam (Ident "left") cj (close zl
+                      (Lam (Ident "right") cj (close zr
+                        (Lam (Ident "q") (equationOf lv cj (Free zl) (Free zr)) (close zq
+                          (piOver [ Hypothesis yv (Ident "y") (shaped (Free zl) yArgs sk)
+                                  | (yv, sk) <- zip ys depSkels
+                                  ]
+                            (Pi (Ident "at")
+                                (shaped (Free zl) yArgs skel)
+                                (close zf
+                                  (shaped (Free zr) depCarried skel)))))))))
+
+                  (za,  p11) = fresh p10
+                  (zas, p12) = freshen (length deps) p11
+                  (zb,  p13) = fresh p12
+                  zArgs = map Free zas
+                  methodT =
+                    Lam (Ident "same") cj (close za
+                      (lamOver [ Hypothesis yv (Ident "y") (shaped (Free za) zArgs sk)
+                               | (yv, sk) <- zip zas depSkels
+                               ]
+                        (Lam (Ident "at")
+                             (shaped (Free za) zArgs skel)
+                             (close zb (Free zb)))))
+
+                  carry = Eliminate
+                    { eliminated = equality
+                    , levels     = [lv]
+                    , parameters = [cj]
+                    , motive     = motiveT
+                    , methods    = [methodT]
+                    , indices    = [left, right]
+                    , target     = q
+                    }
+
+                  -- The transport applied: the moving positions as they stand
+                  -- now, then the value itself.
+                  uOut = App (foldl App carry depTerms) u
+
+                  -- The motive's own binders instantiated at this step's
+                  -- endpoints, which is what each moving position now stands at.
+                  here = substVars
+                    ([(zl, left), (zr, right), (zq, q)] ++ zip ys depTerms)
+                  carriedHere = map here depCarried
+                  tyOut = shaped right carriedHere skel
+                  moved =
+                    [ (dp, (iv, c, shaped right carriedHere sk))
+                    | ((dp, iv, _, _), sk, c) <- zip3 deps depSkels carriedHere
+                    ]
+                  standsOut =
+                    [ (pp, fromMaybe e
+                             (lookup pp ((j, (ivs !! j, right, cj)) : moved)))
+                    | (pp, e) <- stands
+                    ]
 
           -- Each tied index with **the level its type lives at**, the equation
           -- the motive states about it, and the @refl@ the use site discharges
