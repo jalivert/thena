@@ -640,8 +640,18 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- __injectivity.__ One equation per constructor argument, each proved by
         -- a projection out of the @And@ chain the lemma answers with, and the
         -- whole lot handed to the sub-problem in this equation's place.
+        -- __AND WHERE THE CHAIN IT WOULD HAND ON CANNOT BE DISCHARGED, THE
+        -- EQUATION IS TAKEN APART BY PROJECTION INSTEAD — MS9 phase 235.__ The
+        -- chain blocks on exactly one shape: a link whose two sides are the
+        -- same term, which only deletion matches, and which a later link is
+        -- transported along. 'pinnedApart' is the same transition reaching the
+        -- same equations by another construction, and it declines outside the
+        -- shapes it covers, where this is unchanged.
         injection bfr e after n dn c = case conjuncts dn c e n of
           (Nothing, n1) -> go (e : bfr) after n1
+          (Just (news, _), _)
+            | chainStops news
+            , Just r <- pinnedApart bfr e after n dn c -> r
           (Just (news, ps), n1) ->
             let before = reverse bfr
              in continue (before ++ news ++ after) t n1 $ \g ->
@@ -736,6 +746,78 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
             unitAt = case linkOf env ctx <$> confusionFamily dn e of
               Just (LinkUnit [ul]) -> Just ul
               _                    -> Nothing
+
+        -- Does the chain hold a link no transition can discharge? One whose
+        -- two sides are the same term — so deletion is what matches it — and
+        -- which a later link names. That is the only shape 'go' refuses rather
+        -- than keeps, and it is what 'pinnedApart' is offered for.
+        chainStops news =
+          or [ whnf env ctx (eqnLeft lnk) == whnf env ctx (eqnRight lnk)
+                 && namedLater lnk rest
+             | (lnk, rest) <- zip news (drop 1 (iterate (drop 1) news)) ]
+
+        -- __INJECTIVITY AT A PINNED INDEX — MS9 phase 235, @~5hshj@.__
+        --
+        -- Where the carrier's index determines a constructor argument, the
+        -- chain states an equation about that argument all the same — between
+        -- two terms that are the same by typing — and transports every later
+        -- link along its proof. Discharging it is deletion over a chain, which
+        -- is UIP; so the split stopped there, although the equation it stops on
+        -- says nothing.
+        --
+        -- __So the equation is taken apart by projection rather than by the
+        -- chain.__ For each argument, a function out of the family /at that
+        -- index/ is built here — by elimination, with the constructors the
+        -- index rules out discharged through the index's own no-confusion — and
+        -- @cong@ of it states that argument's own equation. **Each is stated at
+        -- the pinned type and transported along nothing**, so no link names
+        -- another and the sub-problem sees ordinary homogeneous equations. An
+        -- argument the index determines is **not stated at all**: its two sides
+        -- are convertible, so there is nothing to say.
+        --
+        -- __Nothing here claims that a proof is @refl@__; it never binds one.
+        --
+        -- __The shapes it covers__, and it declines outside them, leaving the
+        -- chain to answer: the datatype has exactly one index, whose type
+        -- mentions no other; the argument's type mentions at most one argument
+        -- the target index pins, and pins it as the single argument of a
+        -- constructor of an index type with no parameters, indices or levels of
+        -- its own; and every other constructor's target index clashes with this
+        -- one at its head.
+        pinnedApart bfr e after n dn c = do
+          d              <- lookupInductive dn env
+          (_, ls, as)    <- spineOf (whnf env ctx (eqnCarrier e))
+          (_, _, lefts)  <- former (eqnLeft e)
+          (_, _, rights) <- former (eqnRight e)
+          (_, cd)        <- lookupConstructor c env
+          let (prm, is) = splitAt (length (inductiveParameters d)) as
+              args      = constructorArguments cd
+          case is of
+            [i0] | length lefts == length args
+                 , length rights == length args -> do
+              (news, ps, n1) <- components e d ls prm i0 cd
+                                  (zip3 args lefts rights) 0 n
+              let before = reverse bfr
+              pure $ continue (before ++ news ++ after) t n1 $ \g ->
+                       lamOver (prefix before e)
+                               (applyTo g (varsOf delta ++ eqnVars before ++ ps))
+            _ -> Nothing
+
+        -- One equation per argument, in argument order, each with the @cong@
+        -- that proves it — and nothing at all for an argument whose two sides
+        -- are already the same term.
+        components _ _ _ _ _ _ [] _ n = Just ([], [], n)
+        components e d ls prm i0 cd ((_, lft, rgt) : rest) pos n
+          | whnf env ctx lft == whnf env ctx rgt =
+              components e d ls prm i0 cd rest (pos + 1) n
+          | otherwise = do
+              (f, tk, lvk, n1) <- accessorAt (ctx ++ delta) d ls prm i0 cd pos n
+              let (v,  n2) = fresh n1
+                  (cg, n3) = congAt (eqnLevel e) (eqnCarrier e) (eqnLeft e)
+                               (eqnRight e) f tk lvk (Free (eqnVar e)) n2
+                  hyp = Eqn v (Ident "q") (equation lvk tk lft rgt) lvk tk lft rgt
+              (hs, cgs, n4) <- components e d ls prm i0 cd rest (pos + 1) n3
+              pure (hyp : hs, cg : cgs, n4)
 
         -- __solution.__ The binder goes and everything to its right is
         -- substituted. What the sub-problem then proves is this method at the
@@ -882,6 +964,238 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           Just (inductiveName d, g, drop (length (inductiveParameters d)) as)
         Nothing -> Nothing
       Nothing -> Nothing
+
+    -- ------------------------------------------------------------------
+    -- Injectivity at a pinned index — MS9 phase 235
+    -- ------------------------------------------------------------------
+
+    -- | What the carrier's index pins each constructor argument to.
+    --
+    -- First-order matching of the constructor's target indices against the
+    -- ones the equation's carrier actually has. An argument that the match
+    -- never reaches is simply not in the answer; one it reaches twice has to
+    -- agree with itself.
+    pinning vs = walk []
+      where
+        walk acc [] = Just acc
+        walk acc ((pat, tm) : rest) = case step acc pat tm of
+          Nothing   -> Nothing
+          Just acc' -> walk acc' rest
+        step acc pat tm = case pat of
+          Free v
+            | v `elem` vs -> case lookup v acc of
+                Nothing -> Just ((v, tm) : acc)
+                Just u
+                  | whnf env ctx u == whnf env ctx tm -> Just acc
+                  | otherwise                         -> Nothing
+          _ -> case (spineOf (whnf env ctx pat), spineOf (whnf env ctx tm)) of
+            (Just (g, _, xs), Just (g', _, ys))
+              | g == g', length xs == length ys -> walk acc (zip xs ys)
+            _ | whnf env ctx pat == whnf env ctx tm -> Just acc
+              | otherwise                           -> Nothing
+
+    -- | The @k@th argument of @c@, read out of the family __at the index the
+    -- carrier has__ — a function @D p⃗ ī -> Tₖ@, where @Tₖ@ is the argument's
+    -- own type with every argument the index pins replaced by what it is
+    -- pinned to.
+    --
+    -- The elimination's motive carries the index equation, which is what
+    -- discharges the constructors this index rules out and what moves the
+    -- wanted argument into @Tₖ@; the whole thing is applied to @refl@, so at a
+    -- constructor application it ι-reduces to that argument and nothing else.
+    accessorAt lvlCtx d ls prm i0 cd pos m0 = do
+      let args     = constructorArguments cd
+          dn       = inductiveName d
+          paramSub = zip (map entryVar (inductiveParameters d)) prm
+          -- The declaration's spellings at this carrier's levels and
+          -- parameters. Everything read off the record goes through it.
+          inst     = substituteAll paramSub . atLevels (inductiveLevels d) ls
+          targets  = map inst (constructorIndices cd)
+      ek  <- nth pos args
+      pin <- pinning (map entryVar args) (zip targets [i0])
+      ixE <- nth 0 (inductiveIndices d)
+      let ixTy = inst (entryType ixE)
+          tk   = substituteAll pin (inst (entryType ek))
+      if any (`elem` map entryVar args) (freeVars tk) then Nothing else do
+        (lvIx, n1) <- levelOf lvlCtx ixTy m0
+        (lvK,  n2) <- levelOf lvlCtx tk n1
+        let (vi, n3) = fresh n2
+            (vx, n4) = fresh n3
+            (vq, n5) = fresh n4
+            famAt js = applyTo (Global dn ls) (prm ++ js)
+            motive   = Lam (Ident "i") ixTy (close vi
+                         (Lam (Ident "x") (famAt [Free vi]) (close vx
+                           (Pi (Ident "ie") (equation lvIx ixTy (Free vi) i0)
+                               (close vq tk)))))
+        (ms, n6) <- accessorMethods lvlCtx d ls prm i0 cd pos ek pin ixTy lvIx tk motive n5
+        let (vz, n7) = fresh n6
+            node = Eliminate
+                     { eliminated = dn
+                     , levels     = ls
+                     , parameters = prm
+                     , motive     = motive
+                     , methods    = ms
+                     , indices    = [i0]
+                     , target     = Free vz
+                     }
+        pure ( Lam (Ident "x") (famAt [i0])
+                 (close vz (App node (reflAt lvIx ixTy i0)))
+             , tk, lvK, n7 )
+
+    -- | One method per constructor: the wanted argument for the one being
+    -- taken apart, and an @Empty@ elimination for every other, whose target
+    -- index cannot be this one.
+    accessorMethods lvlCtx d ls prm i0 cd pos ek pin ixTy lvIx tk motive = walk cs
+      where
+        cs       = inductiveConstructors d
+        dn       = inductiveName d
+        np       = length (inductiveParameters d)
+        paramSub = zip (map entryVar (inductiveParameters d)) prm
+        inst     = substituteAll paramSub . atLevels (inductiveLevels d) ls
+
+        -- The declaration's telescope at the parameters the carrier has: a
+        -- method binds its arguments at those, not at the parameter variables
+        -- the declaration was written with.
+        instantiated = map (\x -> Hypothesis (entryVar x) (entryIdent x)
+                                    (inst (entryType x)))
+
+        walk []        n = Just ([], n)
+        walk (c' : cs') n = do
+          (m,  n1) <- methodFor c' n
+          (ms, n2) <- walk cs' n1
+          pure (m : ms, n2)
+
+        methodFor c' n = do
+          tgt0 <- nth 0 (constructorIndices c')
+          let args'    = instantiated (constructorArguments c')
+              tgt'     = inst tgt0
+              (vq, n1) = fresh n
+              ieTy     = equation lvIx ixTy tgt' i0
+          (inner, n2) <-
+            if constructorName c' == constructorName cd
+              then wanted args' (Free vq) n1
+              else unreachable tgt' (Free vq) n1
+          let (body, n3) = hypotheses args'
+                             (Lam (Ident "ie") ieTy (close vq inner)) n2
+          pure (lamOver args' body, n3)
+
+        -- One binder per recursive argument, in argument order and at this
+        -- motive — the same reading "Thena.Global.Generate" makes, and nothing
+        -- built here ever uses one.
+        hypotheses tel body = goH tel
+          where
+            goH []       m = (body, m)
+            goH (x : xs) m = case recursiveArgument dn np (entryType x) of
+              Nothing -> goH xs m
+              Just is ->
+                let (hv, m1)    = fresh m
+                    (below, m2) = goH xs m1
+                 in ( Lam (Ident "ih")
+                        (applyTo motive (is ++ [Free (entryVar x)]))
+                        (close hv below)
+                    , m2 )
+
+        -- The argument itself, moved into @Tₖ@ where its own type mentions an
+        -- argument the index pins. The proof it moves along is read out of the
+        -- index equation by the index type's own no-confusion, so it is
+        -- @refl@ wherever the two indices are the same term — which is what
+        -- makes the whole accessor compute.
+        wanted args' ie n = do
+          ekArg <- nth pos args'
+          let ekTy = inst (entryType ek)
+          case [ x | x <- args', entryVar x `elem` freeVars ekTy ] of
+            []  -> Just (Free (entryVar ekArg), n)
+            [x] -> do
+              pinned      <- lookup (entryVar x) pin
+              tgt0        <- nth 0 (constructorIndices cd)
+              drv         <- byIndex (entryVar x) tgt0 ie
+              (lvX, n1)   <- levelOf (lvlCtx ++ args') (entryType x) n
+              let residueAt z = substituting (entryVar x) z ekTy
+                  (carry, n2) = transporting lvX (entryType x)
+                                  (Free (entryVar x)) pinned drv residueAt n1
+              pure (App carry (Free (entryVar ekArg)), n2)
+            _   -> Nothing
+
+        -- @noConfusion‹I›@ of the index equation, where the target index is
+        -- this argument under a constructor of the index type. That is the one
+        -- shape covered: the index type has nothing of its own to instantiate.
+        byIndex v tgt0 ie = do
+          (g, _, xs) <- spineOf (whnf env ctx tgt0)
+          case xs of
+            [Free w] | w == v -> do
+              (dI, _) <- lookupConstructor g env
+              bare dI
+              let lem = snd (noConfusionNames (inductiveName dI))
+              if isDeclared lem env
+                then Just (applyTo (Global lem []) [inst tgt0, i0, ie])
+                else Nothing
+            _ -> Nothing
+
+        -- This constructor's target index clashes with the carrier's at its
+        -- head, so the index equation the method takes is absurd.
+        unreachable tgt' ie n = do
+          (g1, _, _) <- spineOf (whnf env ctx tgt')
+          (g2, _, _) <- spineOf (whnf env ctx i0)
+          if g1 == g2 then Nothing else do
+            (dI, _) <- lookupConstructor g1 env
+            bare dI
+            let lem = snd (noConfusionNames (inductiveName dI))
+            if not (isDeclared lem env) then Nothing else do
+              let lv       = inductiveLevel dI
+                  (vz, n1) = fresh n
+              pure ( Eliminate
+                       { eliminated = emptiness
+                       , levels     = [lv]
+                       , parameters = []
+                       , motive     = Lam (Ident "impossible")
+                                        (Global emptiness [lv]) (close vz tk)
+                       , methods    = []
+                       , indices    = []
+                       , target     = applyTo (Global lem []) [tgt', i0, ie]
+                       }
+                   , n1 )
+
+        -- An index type with nothing of its own: no parameters, no indices and
+        -- no level arguments, so its no-confusion is named and not instantiated.
+        bare dI
+          | null (inductiveParameters dI)
+          , null (inductiveIndices dI)
+          , null (inductiveLevels dI) = Just ()
+          | otherwise                 = Nothing
+
+    -- | @cong f q@ — the equation this one becomes under a function, built
+    -- rather than named for 'andProject'\'s reason.
+    congAt lvE ity u v f tyR lvR prf n0' =
+      ( Eliminate
+          { eliminated = equality
+          , levels     = [lvE]
+          , parameters = [ity]
+          , motive =
+              Lam (Ident "left") ity (close zl
+                (Lam (Ident "right") ity (close zr
+                  (Lam (Ident "q") (equation lvE ity (Free zl) (Free zr)) (close zq
+                    (equation lvR tyR (App f (Free zl)) (App f (Free zr))))))))
+          , methods = [ Lam (Ident "same") ity (close za
+                          (reflAt lvR tyR (App f (Free za)))) ]
+          , indices = [u, v]
+          , target  = prf
+          }
+      , n4 )
+      where
+        (zl, n1) = fresh n0'
+        (zr, n2) = fresh n1
+        (zq, n3) = fresh n2
+        (za, n4) = fresh n3
+
+    -- The universe a type lives in, where the caller can do nothing with a
+    -- type error but decline.
+    levelOf lvlCtx ty n = case sortOf env lvlCtx n ty of
+      (Right l, _, n1) -> Just (l, n1)
+      (Left _,  _, _)  -> Nothing
+
+    nth i xs
+      | i >= 0, i < length xs = Just (xs !! i)
+      | otherwise             = Nothing
 
     -- @noConfusion‹D›@, if it was generated at all — it is declined for a
     -- datatype whose prelude is missing a piece ("Thena.Global.NoConfusion"),

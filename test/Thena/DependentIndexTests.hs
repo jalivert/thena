@@ -233,6 +233,43 @@ tests =
                 other -> assertFailure ("s applied to " ++ show other)
             other -> assertFailure ("not a successor: " ++ show other)
 
+      -- __A PROJECTION AT A PINNED INDEX — MS9 phase 235, @~5hshj@.__ Not a
+      -- recursion and not a variable index: @vcons A m a as@ pins @vcons@'s
+      -- own arguments, so the chain states an equation about its length —
+      -- @m@ against @m@, because @Vec A (s n)@ says the length is the index —
+      -- which says nothing and which deletion over a chain cannot remove
+      -- without UIP. Injectivity reads a pinned index apart by projection
+      -- instead, so no such equation is stated at all. Refused by name until
+      -- then.
+    , testCase "and a projection at a pinned index is admitted" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s vectorTarget
+        case lookupDefinition (GlobalName "headAll") (globals (machineOf s')) of
+          Nothing -> assertFailure "headAll was not admitted"
+          Just d  ->
+            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "\8704 (A : Type\8320) (P : A -> Type\8320) (m : N) (a : A) (as : Vec {0} A m) -> All A P (s m) (vcons {0} A m a as) -> P a"
+
+      -- __And the arm answers with the argument it bound__, which the type
+      -- cannot say: @headTwo@ is the projection at a one-element @All@, and
+      -- only reducing says the proof came out of the constructor rather than
+      -- from anywhere else.
+    , testCase "and the arm of that projection computes" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s vectorTarget
+        let m = machineOf s'
+        case lookupDefinition (GlobalName "headTwo") (globals m) of
+          Nothing -> assertFailure "headTwo was not admitted"
+          Just d  -> case whnf (globals m) [] (definitionBody d) of
+            Canonical (GlobalName "s") _ [inner] ->
+              case whnf (globals m) [] inner of
+                Canonical (GlobalName "s") _ [innermost] ->
+                  case whnf (globals m) [] innermost of
+                    Canonical (GlobalName "z") _ [] -> pure ()
+                    other -> assertFailure ("s (s " ++ show other ++ ")")
+                other -> assertFailure ("s applied to " ++ show other)
+            other -> assertFailure ("not a successor: " ++ show other)
+
     , testCase "the file runs to the end" $ do
         (s, _) <- startingSession
         (_, _, stopped) <- loadFile s target

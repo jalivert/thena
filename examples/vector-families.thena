@@ -89,3 +89,19 @@ data Only (A : Type) : forall (n : N) -> Vec A n -> Type where
 -- And it reduces: one pair of elements, so `s z`.
 two : N
 two = pcount N (s z) (vcons N z z (vnil N)) (vcons N z (s z) (vnil N)) (pwCons N z z (s z) (vnil N) (vnil N) (pwNil N))
+
+-- A PROJECTION OUT OF `All` AT A PINNED INDEX — MS9 phase 235. The split is
+-- not a recursion and the index is not a variable: `vcons A m a as` pins
+-- `vcons`'s own arguments, so taking the index equation apart states one
+-- equation per argument of `vcons` — including its LENGTH, which is `m` on
+-- both sides because `vcons`'s result type `Vec A (s n)` says so. That
+-- equation says nothing and cannot be deleted either, deletion over a chain
+-- being the K axiom, and the split stopped there until injectivity learned to
+-- read a pinned index apart by projection instead.
+headAll : forall (A : Type₀) (P : A -> Type₀) (m : N) (a : A) (as : Vec A m)
+            (ps : All A P (s m) (vcons A m a as)) -> P a
+headAll = \ A P m a as ps -> case ps of { allNil -> ; allCons n b bs pb qs -> pb }
+
+-- And the arm answers with the proof it bound, which only reducing says.
+headTwo : N
+headTwo = headAll N (\ k -> N) z z (vnil N) (allCons N (\ k -> N) z z (vnil N) (s (s z)) (allNil N (\ k -> N)))

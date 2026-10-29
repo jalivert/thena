@@ -2331,12 +2331,30 @@ pinned = \ x -> case x of { mkT i -> i }
 equation is `Eq N (s z) (s z)`. The split goes through and the arm computes with the
 argument it bound. Before, it was refused with UIP given as the reason.
 
+**And where the index *pins* a constructor argument, the equation is taken apart by
+projection, which states no equation about the pinned one at all.** Splitting
+
+```
+headAll : ∀ (A : Type₀) (P : A -> Type₀) (m : N) (a : A) (as : Vec A m)
+            (ps : All A P (s m) (vcons A m a as)) -> P a
+headAll = \ A P m a as ps -> case ps of { allNil -> ; allCons n b bs pb qs -> pb }
+```
+
+asks what `vcons A m b bs = vcons A m a as` tells you, and taking a constructor equation
+apart states one equation per argument — including the **length**, which is `m` on both
+sides because `vcons`'s own result type says the length is the index. That equation says
+nothing, and deleting it is K, so the split used to stop there. Now each argument's
+equation comes instead from a function out of the family *at that index*, so every
+equation is stated at the pinned type and none mentions another's proof — and the pinned
+argument, whose two sides are the same by typing, gets no equation at all. **Agda accepts
+this definition without K for the same reason**: its unifier never states an equation for
+a position the index determines.
+
 **One shape still cannot cross a chain, and that one is the K line itself.** An equation
-between a *variable* and itself, with a later equation stated about its proof, has no
-constructor head for injectivity to take apart whatever order the steps are tried in, and
-deleting it is UIP. A split that meets it is refused by name, with the position and what is
-missing. **Agda accepts some of these without K**, by never stating such an equation where
-the position is determined by the index; Thena states it and stops.
+between a *variable* and itself that nothing pins, with a later equation stated about its
+proof, has no constructor head for injectivity to take apart whatever order the steps are
+tried in, and deleting it is UIP. A split that meets it is refused by name, with the
+position and what is missing.
 
 **A split also takes a constructor equation apart when the constructor's own arguments are
 dependent.** That is the no-confusion chain rather than the motive's one, and the two are
