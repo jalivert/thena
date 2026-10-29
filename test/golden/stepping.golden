@@ -75,7 +75,7 @@ pc
   2  unify-into s g
   3  prim-try x
 env
-  x = ⌜refined⌝
+  x = ⌜A⌝
   n = "refined"
   t = ⌜A⌝
 stack
@@ -88,7 +88,7 @@ pc
   2  prim-try x
 env
   s = ⌜Type₀⌝
-  x = ⌜refined⌝
+  x = ⌜A⌝
   n = "refined"
   t = ⌜A⌝
 stack

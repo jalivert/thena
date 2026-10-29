@@ -644,6 +644,31 @@ owedArgument ren ctx a b = case (a, b) of
 
 -- | Display names for a context's variables, freshened as the chain printer
 -- freshens a component's.
+--
+-- __A variable that is definitionally another variable prints as that one__
+-- (MS9 phase 236, his direction of 2026-10-29). @fill@ parks every elaborated
+-- argument in a @=@-binding, so a term the user wrote arrives here with a name
+-- the elaborator minted standing where the user's variable stood: @.(s q)@
+-- against a forced @p@ refused with @s a and p cannot be made equal@, naming an
+-- @a@ that is in no source file. The entry is always @a = refined1@ and
+-- @refined1 = q@ — every link one variable equal to another and nothing else —
+-- so the chain is collapsed by giving the alias the name its endpoint already
+-- has, and the message says @s q and p@. Nothing about the term changes; this
+-- is a display name and the development still holds every binding.
+--
+-- __It is one rule for every definition, not a rule about generated names.__
+-- Whether a @=@-binding was minted by @fill@ or written by the user naming a
+-- forced position is not a distinction this module can draw — the name is a
+-- string a rule asked @fresh-name@ for either way — and inventing the
+-- distinction is the special case the first design principle forbids. So a
+-- forced position the user named @k@ where the split determined @n@ prints as
+-- @n@ too. That is the same term under the name the reader can also see, which
+-- is the trade this takes: the alias loses a name that was equal to another,
+-- where before every refusal lost the name the user actually typed.
+--
+-- __The chain costs nothing to follow__ because the fold already runs
+-- outermost-first and a definiens may only mention variables bound before it,
+-- so an alias's endpoint is in @e@ by the time the alias is reached.
 envOf :: Context -> Env
 envOf = foldl add []
   where
@@ -651,7 +676,12 @@ envOf = foldl add []
       let (v, hint) = case entry of
             Hypothesis x (Ident h) _   -> (x, h)
             Definition x (Ident h) _ _ -> (x, h)
-       in (v, freshen hint e) : e
+       in (v, nameFor e entry hint) : e
+
+    nameFor e entry hint = case entry of
+      Definition _ _ (Free w) _
+        | Just name <- lookup w e -> name
+      _                         -> freshen hint e
 
 go :: Rendering -> Env -> Prec -> Core -> String
 

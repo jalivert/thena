@@ -15,6 +15,11 @@
 --   * 'refusedTests' — the whole of what the notation buys. A dot on a position
 --     the split left free, a dot on the wrong term, and a dot at the wrong
 --     type, each refused and each by a different mechanism.
+--   * 'namingTests' — __and these are not about dots at all__ (@~v9fbj@, MS9
+--     phase 236). A refusal that compares two terms has to name the one the
+--     user wrote; a dot on a compound term is only the first feature that makes
+--     two written terms meet, which is why the defect surfaced here. The second
+--     case in that group has no dot in it.
 module Thena.DotPatternTests (tests) where
 
 import Data.List (isInfixOf)
@@ -43,6 +48,7 @@ tests =
     [ testGroup "the notation" notationTests
     , testGroup "a position the split forced" acceptedTests
     , testGroup "and what the dot refuses" refusedTests
+    , testGroup "a refusal names the term the user wrote" namingTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -166,6 +172,39 @@ refusedTests =
     testCase "a dot where an arm's head should be" $
       refusedWith "a pattern written as a word"
         (vecPreamble ++ vtail ".m")
+  ]
+
+-- --------------------------------------------------------------------------
+-- The name in the message
+-- --------------------------------------------------------------------------
+
+-- | __The message may not name a variable that is in no source file__
+-- (@~v9fbj@, MS9 phase 236).
+--
+-- @fill@ parks every elaborated argument in a @=@-binding, so a written @s q@
+-- is carried as @s a@ with @a = q@ beside it, and the one message whose job is
+-- to say which term the user got wrong used to name the @a@. These pin the
+-- names rather than a substring, because the defect was a /name/ and a
+-- substring check is exactly what did not catch it: @"cannot be made equal"@
+-- passed throughout.
+--
+-- __The second case has no dot in it__, which is the point. Nothing about the
+-- notation caused this; a dot on a compound term is just the first feature that
+-- makes two terms the user wrote meet each other.
+namingTests :: [TestTree]
+namingTests =
+  [ testCase "a dot on a compound term that is not the one" $
+      refusedWith "s q and p cannot be made equal"
+        (vecPreamble
+           ++ [ "vq : forall (A : Type\8320) (p : N) (q : N) (xs : Vec A (s p)) -> Vec A p"
+              , "vq = \\ A p q xs -> case xs of { vnil -> ; vcons .(s q) hd tl -> tl }"
+              ])
+  , testCase "an ordinary application, with no dot anywhere" $
+      refusedWith "kk and s kk cannot be made equal"
+        (vecPreamble
+           ++ [ "vp : forall (A : Type\8320) (kk : N) (a : A) (xs : Vec A kk) -> Vec A kk"
+              , "vp = \\ A kk a xs -> vcons A (s kk) a xs"
+              ])
   ]
 
 -- --------------------------------------------------------------------------

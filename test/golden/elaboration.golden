@@ -250,7 +250,7 @@ pc
   2  unify-into s g
   3  prim-try x
 env
-  x = ⌜refined⌝
+  x = ⌜a⌝
   n = "refined"
   t = ⌜a⌝
 stack

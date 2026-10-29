@@ -5022,6 +5022,39 @@ Every name position takes one: a λ or ∀ binder, a `let`, a claim, a guess, an
 **A level position needs no splice**: build the universe with `universe-at` and
 splice the term.
 
+### A variable that is definitionally another variable prints as that one
+
+*Decided 2026-10-29.*
+
+Elaboration parks every argument it has elaborated in a `=`-binding of the
+development, so a term you wrote arrives at a message with a name the elaborator
+minted standing where your variable stood. Writing `.(s q)` on a position the
+split determined to `p` used to be refused with
+
+```
+s a and p cannot be made equal
+```
+
+naming an `a` that is in no source file. **A context entry whose definiens is a
+bare variable now prints under the name that variable already has**, so the same
+refusal reads
+
+```
+s q and p cannot be made equal
+```
+
+This is a display name. Nothing about the term changes, every binding is still in
+the development, and `:where` still shows them.
+
+**It is one rule for every definition, not a rule about generated names.** A
+forced position you name yourself is a `=`-binding too — `vcons k hd tl` where the
+split determined `n` puts `k = n` in scope — and it prints as `n` for the same
+reason. The system cannot tell a binding it minted from one you asked for, and the
+alternative is a message that names neither.
+
+**It never prints a definition's body.** The collapse fires only where the
+definiens is a bare variable, so it replaces one name with another name.
+
 ## Building a frontend
 
 *Added 2026-09-24, MS7; rewritten 2026-09-27, when the decision below replaced a
