@@ -55,11 +55,12 @@ import Brick.Widgets.Edit
   , renderEditor
   )
 import qualified Brick.Widgets.Edit as E
-import Brick.BChan (newBChan, writeBChan)
+import Brick.BChan (BChan, newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
 import Data.List (intercalate, isPrefixOf, isSuffixOf, sort, sortOn)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -71,6 +72,8 @@ import System.CPUTime (getCPUTime)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStr, stdout)
+
+import Tui.Jev (JevConfig, loadJevConfig, rankCandidates)
 
 import Thena.Driver (Response (..), Session, oneLine)
 import Thena.Files (following, startingSession)
@@ -189,6 +192,11 @@ data OfferDropdown = OfferDropdown
     -- ^ how many characters after 'odWordStart' an accept removes — the
     -- recovered text's own length when recovered; one placeholder character
     -- when the cursor sits on a box ('offeredReplaces'); zero otherwise.
+  , odSplit :: Int
+    -- ^ how many leading 'odRows' are token rows — the rest are
+    -- productions. Exists only so a Jev ranking ('applyJevRanking') can
+    -- reorder within each group without disturbing his "tokens before
+    -- productions" ruling; nothing else reads it.
   }
 
 data St = St
@@ -295,6 +303,20 @@ data St = St
     -- 'historyForward' on the way back past the newest entry — the same
     -- "what you were typing before you went looking" a shell keeps.
     -- Meaningless while 'stHistoryPos' is 'Nothing'.
+  , stJevConfig :: Maybe JevConfig
+    -- ^ loaded once at startup from @TYPESAFE_API_KEY@ — 'Nothing' turns
+    -- the whole feature off, see 'Tui.Jev.loadJevConfig'. Never reloaded
+    -- mid-session; there is no command that would need it to be.
+  , stJevChan :: BChan AppEvent
+    -- ^ so 'refreshOfferDropdown' can hand a background request somewhere
+    -- to report back to — 'EventM' itself has no access to the channel
+    -- 'runTui' gave 'customMain'.
+  , stJevGen :: Int
+    -- ^ bumped every time a ranking request is sent. 'applyJevRanking'
+    -- drops an answer whose generation doesn't match — the candidate set
+    -- it scored is not the one on screen any more, so it isn't a stale
+    -- reordering of the same list, it's an answer to a question nobody is
+    -- asking.
   }
 
 stInputL :: Lens' St (Editor Text Name)
@@ -307,6 +329,8 @@ runTui :: IO ()
 runTui = do
   (s0, trouble) <- startingSession
   cfg <- loadConfig
+  jevCfg <- loadJevConfig
+  chan <- newBChan 16
   let theme0 = maybe neonPinkDark id (themeByName (cfgTheme cfg))
       autoSelect0 = cfgAutoSelect cfg
   let st0 = St
@@ -340,6 +364,9 @@ runTui = do
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
         , stArrowsReleased = False
+        , stJevConfig   = jevCfg
+        , stJevChan     = chan
+        , stJevGen      = 0
         }
   -- One synthetic event after startup: extents only exist once something
   -- has rendered, so the launch dropdown cannot position on the very first
@@ -348,17 +375,18 @@ runTui = do
   -- measurements. A single delayed write, then the thread is done; if the
   -- first draw somehow hasn't happened yet, the tick is a harmless no-op
   -- and the dropdown arrives on the first keystroke as before.
-  chan <- newBChan 1
   _ <- forkIO (threadDelay 200000 >> writeBChan chan Tick)
   vty <- mkVty V.defaultConfig
   _ <- customMain vty (mkVty V.defaultConfig) (Just chan) app st0
   resetCursorStyle
 
--- | The synthetic post-startup tick above — handled by doing nothing: the
--- outer wrapper around every event still records the fresh extents.
-data Tick = Tick
+-- | The custom event channel carries the synthetic post-startup tick
+-- (handled by doing nothing — the outer wrapper around every event still
+-- records the fresh extents) and a Jev ranking answer, tagged with the
+-- generation it was asked for ('stJevGen', 'applyJevRanking').
+data AppEvent = Tick | JevRanked Int (Either String (Map.Map Text Double))
 
-app :: App St Tick Name
+app :: App St AppEvent Name
 app = App
   { appDraw         = draw
   , appChooseCursor = showFirstCursor
@@ -999,7 +1027,7 @@ offerGhost col od = do
 -- position the dropdown against (see 'dropdownLayer'). This is the outer
 -- wrapper every branch runs through, not a per-branch call, so nothing can
 -- forget it.
-handleEvent :: BrickEvent Name e -> EventM Name St ()
+handleEvent :: BrickEvent Name AppEvent -> EventM Name St ()
 handleEvent ev = do
   handleEventInner ev
   inputExt <- lookupExtent Input
@@ -1011,7 +1039,7 @@ handleEvent ev = do
 -- here rather than guarded at twenty branches: the command bar while it is
 -- open, live-script mode's own keys while the mode is on, and otherwise the
 -- ordinary REPL exactly as it always was.
-handleEventInner :: BrickEvent Name e -> EventM Name St ()
+handleEventInner :: BrickEvent Name AppEvent -> EventM Name St ()
 handleEventInner ev = do
   st <- get
   case stScriptBar st of
@@ -1023,7 +1051,7 @@ handleEventInner ev = do
 -- | The command bar owns every key while it is open. Enter submits it, Esc
 -- closes it unused, everything else edits its one line — no completion, no
 -- history, nothing shared with the document's own editor.
-handleBarEvent :: St -> Editor Text Name -> BrickEvent Name e -> EventM Name St ()
+handleBarEvent :: St -> Editor Text Name -> BrickEvent Name AppEvent -> EventM Name St ()
 handleBarEvent st bar ev = case ev of
   VtyEvent (V.EvKey V.KEnter []) ->
     scriptBarSubmit st (concatMap Text.unpack (getEditContents bar))
@@ -1067,7 +1095,7 @@ handleBarEvent st bar ev = case ev of
 -- distinguishes them: they are commits and navigation, not edits. Accepting a
 -- completion into a parked line is not distinguished, and should not be — it
 -- rewrites the line like any other keystroke.
-handleScriptEvent :: BrickEvent Name e -> EventM Name St ()
+handleScriptEvent :: BrickEvent Name AppEvent -> EventM Name St ()
 handleScriptEvent ev = do
   before <- get
   dispatchScriptEvent ev
@@ -1107,7 +1135,7 @@ severBelow i = do
     }
   followInput
 
-dispatchScriptEvent :: BrickEvent Name e -> EventM Name St ()
+dispatchScriptEvent :: BrickEvent Name AppEvent -> EventM Name St ()
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
@@ -1170,7 +1198,7 @@ dispatchScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
 dispatchScriptEvent (VtyEvent (V.EvKey (V.KChar 'x') [V.MCtrl])) = openScriptBar
 dispatchScriptEvent ev = handleReplEvent ev
 
-handleReplEvent :: BrickEvent Name e -> EventM Name St ()
+handleReplEvent :: BrickEvent Name AppEvent -> EventM Name St ()
 handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
@@ -1240,7 +1268,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEsc [])) = do
     -- and was never asked for. Quitting is still `:quit`.
     (Just ld@(LoadDropdown _ (Just _)), _) ->
       put st { stDropdown = Just ld { ldSelected = Nothing }, stArrowsReleased = True }
-    (_, Just od@(OfferDropdown _ (Just _) _ _)) ->
+    (_, Just od@(OfferDropdown _ (Just _) _ _ _)) ->
       put st { stOfferDropdown = Just od { odSelected = Nothing }, stArrowsReleased = True }
     (Just _, _) -> do
       let line = concatMap Text.unpack (getEditContents (stInput st))
@@ -1343,7 +1371,8 @@ handleReplEvent (MouseDown _ _ _ _) = pure ()
 -- | The startup tick ('runTui', the only 'Tick' there is) does nothing
 -- itself — the outer wrapper has already recorded the fresh extents by
 -- the time this runs, which is the whole point of it.
-handleReplEvent (AppEvent _) = pure ()
+handleReplEvent (AppEvent Tick) = pure ()
+handleReplEvent (AppEvent (JevRanked gen result)) = applyJevRanking gen result
 handleReplEvent ev =
   Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
 
@@ -1381,7 +1410,7 @@ acceptOfferRow st od ins = do
 navigateCompletion
   :: (Maybe Int -> Int -> Int)
   -> ([Int] -> Maybe Int -> Maybe Int)
-  -> BrickEvent Name e
+  -> BrickEvent Name AppEvent
   -> EventM Name St ()
 navigateCompletion moveLoad moveOffer ev = do
   st <- get
@@ -1440,7 +1469,7 @@ navigateCompletion moveLoad moveOffer ev = do
 -- 'navigateCompletion' is handed — those are flipped for the popup's screen
 -- direction ('popupAbove'), and "older"/"newer" means the same thing
 -- wherever the popup would have been drawn.
-documentOrHistory :: BrickEvent Name e -> EventM Name St ()
+documentOrHistory :: BrickEvent Name AppEvent -> EventM Name St ()
 documentOrHistory ev = do
   st <- get
   case ev of
@@ -2127,9 +2156,72 @@ refreshOfferDropdown = do
         put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = underlineSpan ov, stArrowsReleased = False }
         -- Same rule as 'refreshDropdown': new rows start at the top, same
         -- rows keep their scroll — above the line, at the bottom instead.
-        if maybe [] odRows new /= oldRows
+        let rowsChanged = maybe [] odRows new /= oldRows
+        if rowsChanged
           then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll OfferPopup)
           else pure ()
+        -- Score the dropdown, not every keystroke: only when the
+        -- candidate set actually changed (same guard as the scroll reset
+        -- above), there's a key to spend, and more than one candidate is
+        -- worth ordering. Never awaited — 'fireJevRanking' only sends,
+        -- 'applyJevRanking' is where an answer, if one ever comes back,
+        -- is read.
+        case new of
+          Just od | rowsChanged, Just jcfg <- stJevConfig st
+                   , length (filter (isJust . rowInsert) (odRows od)) >= 2 ->
+            fireJevRanking jcfg (Text.pack (take col line)) od
+          _ -> pure ()
+
+-- | Sends one ranking request to Jev in the background and returns
+-- immediately — nothing here ever blocks a keystroke on the network.
+-- Bumps 'stJevGen' so a slower, earlier request can't land after a
+-- faster, later one and put a stale order back on screen
+-- ('applyJevRanking' checks the generation it comes back with).
+fireJevRanking :: JevConfig -> Text -> OfferDropdown -> EventM Name St ()
+fireJevRanking jcfg typedSoFar od = do
+  st <- get
+  let gen = stJevGen st + 1
+      chan = stJevChan st
+      candidates =
+        [ (Text.pack (rowLabel r), Text.pack (rowLabel r))
+        | r <- odRows od
+        , isJust (rowInsert r)
+        ]
+  put st { stJevGen = gen }
+  liftIO $ do
+    _ <- forkIO $ do
+      result <- rankCandidates jcfg typedSoFar candidates
+      writeBChan chan (JevRanked gen result)
+    pure ()
+
+-- | Reads a ranking answer back in — 'Left' (a failed call) and a
+-- generation that no longer matches both mean the same thing: do
+-- nothing, the dropdown 'refreshOfferDropdown' already built stands.
+applyJevRanking :: Int -> Either String (Map.Map Text Double) -> EventM Name St ()
+applyJevRanking gen result = do
+  st <- get
+  case (gen == stJevGen st, result, stOfferDropdown st) of
+    (True, Right scores, Just od) -> put st { stOfferDropdown = Just (reorderByScore scores od) }
+    _ -> pure ()
+
+-- | Reorders each of the dropdown's two groups by score — never across
+-- 'odSplit', so "tokens before productions" stands exactly as it did
+-- before Jev existed. A row Jev's answer doesn't mention (which should
+-- only happen if the answer is short — every real candidate was sent as
+-- a criterion) scores last within its group, and 'sortOn' being stable
+-- keeps unmentioned rows in their original alphabetical order against
+-- each other. The previously selected row, if any, is found again by
+-- label after the reorder rather than by its old index, so a highlight
+-- the user set with Up/Down follows its candidate instead of landing on
+-- whatever is now in that slot.
+reorderByScore :: Map.Map Text Double -> OfferDropdown -> OfferDropdown
+reorderByScore scores od = od { odRows = newRows, odSelected = newSelected }
+  where
+    (tokenRows, productionRows) = splitAt (odSplit od) (odRows od)
+    score r = Map.findWithDefault (-1) (Text.pack (rowLabel r)) scores
+    newRows = sortOn (negate . score) tokenRows <> sortOn (negate . score) productionRows
+    selectedLabel = rowLabel . (odRows od !!) <$> odSelected od
+    newSelected = selectedLabel >>= \lbl -> listToMaybe [i | (i, r) <- zip [0 ..] newRows, rowLabel r == lbl]
 
 -- | The offset range 'renderInputContent' underlines — his `.jalivert/
 -- TUI.md` #7, a visible cue that the line (or the literal under the
@@ -2182,7 +2274,7 @@ buildOfferDropdown autoSelect col ov
   -- **Unless `:preselect off`** (`.jalivert/TUI.md` #23) — then a fresh
   -- dropdown opens with nothing highlighted, same as an exhausted list
   -- always has, and an arrow key is what picks a row instead.
-  | otherwise = Just (OfferDropdown allRows initialSelection wordStart replaceLen)
+  | otherwise = Just (OfferDropdown allRows initialSelection wordStart replaceLen splitPoint)
   where
     initialSelection = if autoSelect then listToMaybe (selectableIxs allRows) else Nothing
     bareWord = case offeredRecovered ov of
@@ -2232,6 +2324,7 @@ buildOfferDropdown autoSelect col ov
     allRows
       | bareWord  = tokenRows
       | otherwise = tokenRows <> productionRows
+    splitPoint = length tokenRows
     -- | A bare word replaces the partial word itself ('recoveredColumn'/
     -- 'recoveredText' name that span exactly). Every other case — an
     -- ordinary offer, or inside a literal, where 'recoveredText' names the
