@@ -2718,6 +2718,24 @@ Three consequences a user meets:
     ; okNode a b da db -> \ u -> succ (size3 a da (node u u)) }
   ```
 
+  **And a split inside the arm refines such a premise like any other name**, so
+  the call spells it as what the arm made it — which is the same thing, the
+  premise being gone from scope there:
+
+  ```
+  size4 : ∀ (t : Tr) -> Ok t -> Tr -> Nat
+  size4 = \ t d u -> induction d of
+    { okLeaf -> zero
+    ; okNode a b da db -> case u of
+        { leaf -> succ (size4 a da leaf)
+        ; node l r -> succ (size4 a da (node l r)) } }
+  ```
+
+  Writing `u` in either arm says the same, because the split has already made it
+  that constructor. **Naming a different one is still refused**, and that is
+  where it has to be said: the premise carries no equation, so nothing later
+  would notice that a call in the `leaf` arm claims the hypothesis at a `node`.
+
   This is the one thing about an `induction` that the *shape* of the proof
   decides rather than its statement, and it is why a lemma that strengthens its
   own hypothesis — `chain n c`'s distinctness, where the recursion is at `c` with

@@ -90,6 +90,7 @@ import Data.List (elemIndex, nub, stripPrefix)
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Level (Level (..))
+import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -121,7 +122,32 @@ import Thena.Tactics.Eliminate (spineOf)
 -- generalised copy's pair is nowhere near that shape, and an arm the specialiser
 -- rewrote keeps only the binders the equations left. Both are positions in one
 -- list, so one list of pairs says all three.
-data Shape = Shape Int [(Int, Int, Prefix)]
+data Shape = Shape Int [(Int, Int, Prefix)] [Refines]
+  deriving (Eq, Show)
+
+-- | __What a split refines one of the declaration's premises to, inside one of
+-- its methods__ (MS9 phase 238, @~5kcb4@).
+--
+-- A split's target may be a premise the body introduced before it, and where it
+-- is, the arm holds that premise at the constructor's own form: the premise is
+-- not in scope there, so no argument of a recursive call can name it and
+-- 'through' answers 'Nothing' for every spelling of it. 'varies' still has to
+-- tell the call that passes what the premise /is/ here from the one that passes
+-- something else — a premise the enclosing split fixed has no equation to catch
+-- the difference later — so what it compares against is this.
+--
+-- __Both halves of a split refine a premise__, and the two are one thing here:
+-- the target's premise becomes the constructor's own form, and the premise an
+-- /index/ of the split is becomes that constructor's index expression. Neither
+-- states an equation where the enclosing split had fixed the premise, so
+-- neither is caught downstream.
+--
+-- The form is carried over __the constructor's own argument variables__, with
+-- where each of those sits in the method's telescope, and not as a finished
+-- term: a method the specialiser rewrote keeps only the binders its equations
+-- left, and 'subgoalShape' translates a position where it cannot translate a
+-- term.
+data Refines = Refines Var Core [(Var, Int)]
   deriving (Eq, Show)
 
 -- | What an induction hypothesis asks for before the recursive call's own
@@ -157,6 +183,12 @@ data Prefix
 data Walking = Walking
   { subject    :: Var
   , aliases    :: [(Var, Core)]
+  , refinedTo  :: [(Var, Core)]
+    -- ^ a premise an enclosing split has refined, and the form it has here.
+    -- 'aliases' is the same question the other way round — what a variable
+    -- /is/ — and the two are not one table because 'through' reads 'aliases'
+    -- to answer which premise a term names, and a refined premise is a term
+    -- that names no variable at all
   , hypotheses :: [(Var, Var, Prefix)]
   , binders    :: Context
     -- ^ every binder descended under, so a refusal can name what the user
@@ -191,7 +223,7 @@ resolveRecursion env n0 tm = case tm of
     let (f, n1) = fresh n0
         -- The assumed name itself is a binder, so a refusal names the function
         -- rather than a variable number.
-        start = Walking f [] [] [Hypothesis f i ty] [] (arityOf f ty) True
+        start = Walking f [] [] [] [Hypothesis f i ty] [] (arityOf f ty) True
      in case go start (open f sc) n1 of
           (Left e, _, n2)   -> (Left e, n2)
           (Right b, _, n2)
@@ -205,8 +237,9 @@ resolveRecursion env n0 tm = case tm of
     -- is the same parameter 'Thena.Global.Env.Scheme' is: @caseD@'s methods are
     -- the eliminator's minus their hypotheses, so a method of one has pairs to
     -- state and a method of the other has none.
-    shapesOf withHyps def =
-      [ shape (length args) (recursive args) | c <- inductiveConstructors def
+    shapesOf withHyps def refTo =
+      [ shape (length args) (recursive args) (refinesAt c args)
+      | c <- inductiveConstructors def
       , let args = constructorArguments c ]
       where
         dn = inductiveName def
@@ -214,10 +247,32 @@ resolveRecursion env n0 tm = case tm of
         recursive args =
           [ k | (k, e) <- zip [0 ..] args
               , Just _ <- [recursiveArgument dn np (entryType e)] ]
-        shape nargs recs
+        -- A 'Canonical' carries the datatype's parameters and then the
+        -- constructor's own arguments (§12 invariant 6), so the arm's form for
+        -- the target's premise is this constructor at those parameters and at
+        -- its own argument variables — and the form for an index's premise is
+        -- this constructor's index expression, which is stored over the same
+        -- variables once the parameters are put in.
+        refinesAt c args =
+          [ Refines p t [ (entryVar e, j) | (j, e) <- zip [0 ..] args ]
+          | (ls, ps, tgtP, idxPs) <- refTo
+          , (p, t) <-
+              [ (q, Canonical (constructorName c) ls
+                      (take np ps ++ map (Free . entryVar) args))
+              | Just q <- [tgtP] ]
+              ++ [ (q, atParameters ps i)
+                 | (Just q, i) <- zip idxPs (constructorIndices c) ]
+          ]
+        -- The stored index expressions are over the datatype's parameter
+        -- variables, and the use site says what those are here.
+        atParameters ps t =
+          foldl (\acc (v, a) -> instantiate a (close v acc)) t
+                (zip (map entryVar (inductiveParameters def)) ps)
+        shape nargs recs refs
           | withHyps  = Shape (nargs + length recs)
                               [ (r, nargs + i, NoPrefix) | (i, r) <- zip [0 ..] recs ]
-          | otherwise = Shape nargs []
+                              refs
+          | otherwise = Shape nargs [] refs
 
     -- | Which ambient entries a split generalised, read off its use site.
     --
@@ -257,7 +312,7 @@ resolveRecursion env n0 tm = case tm of
     -- 'through' reads only @let@s, so the call's argument for it cannot be
     -- resolved back to the premise either — it is exempt for the same reason
     -- and has to be said here, where the list of them is in hand.
-    withCopies hyps gen pre (Shape count pairs) =
+    withCopies hyps gen pre (Shape count pairs refs) =
       Shape (count + length gen)
             ([ (i, j, pre) | (i, j, _) <- pairs ]
                ++ [ (count + i, count + j, widen inherited)
@@ -265,6 +320,7 @@ resolveRecursion env n0 tm = case tm of
                   , Just i <- [elemIndex x gen]
                   , Just j <- [elemIndex h gen]
                   ])
+            refs
       where
         widen NoPrefix                    = NoPrefix
         widen (Prefix poss amb refls ref) =
@@ -272,11 +328,32 @@ resolveRecursion env n0 tm = case tm of
 
     -- One shape per constructor, in declaration order, as an infinite list so a
     -- method of an undeclared datatype is simply not reported.
-    methodShapes w withHyps d gen pre = case lookupInductive d env of
+    methodShapes w withHyps d gen pre refTo = case lookupInductive d env of
       Just def -> map (Just . withCopies (hypotheses w) gen pre)
-                      (shapesOf withHyps def)
+                      (shapesOf withHyps def refTo)
                     ++ repeat Nothing
       Nothing  -> repeat Nothing
+
+    -- | __Which of the declaration's premises a split refines, read off its use
+    -- site__ (MS9 phase 238): the premise its target is, if it is one, and the
+    -- premise each of its indices is. 'Refines' says what it is for.
+    --
+    -- __The levels and the parameters come off the target's own type__ and not
+    -- off the eliminator's spine, because an eliminator's level list also
+    -- carries the motive's universe while a 'Canonical' carries the datatype's
+    -- alone.
+    refinesFor w is tgt = [ (ls, ps, aPremise w tgt, map (aPremise w) is) ]
+      where
+        (ls, ps) = case aPremise w tgt of
+          Just p
+            | ty : _ <- [ entryType e | e <- binders w, entryVar e == p ]
+            , Just (_, ls', args) <- spineOf (expand w ty) -> (ls', args)
+          _ -> ([], [])
+
+    -- One of the declaration's own premises, where that is what a term names.
+    aPremise w t = case through w t of
+      Just p | p `elem` premises w -> Just p
+      _                            -> Nothing
 
     -- | __What this split's own induction hypotheses ask for first__ (MS9 phase
     -- 198, @~krvdx@), or 'NoPrefix' where they ask for nothing.
@@ -320,6 +397,9 @@ resolveRecursion env n0 tm = case tm of
     analysedBy (GlobalName w) = do
       rest <- stripPrefix "case" w
       lookupInductive (GlobalName rest) env
+
+    -- A pair's second half under a partial function.
+    traverseSnd f (v, i) = fmap ((,) v) (f i)
 
     -- An item of a list, by position.
     at i xs = case drop i xs of
@@ -502,10 +582,32 @@ resolveRecursion env n0 tm = case tm of
            , j /= k, j `notElem` poss
            , Just p <- [at j (premises w)]
            , p `notElem` ref
-           , through w a /= Just p
+           , not (argIs w a p)
            ] of
         (p, a) : _ -> Just (p, expand w a)
         []         -> Nothing
+
+    -- | __An argument that /is/ a fixed premise__: the variable, read through
+    -- the local definitions — or, where a nested split has refined the premise,
+    -- the form that split gave it (MS9 phase 238, @~5kcb4@).
+    --
+    -- The second is not an exemption. A nested split leaves the premise out of
+    -- scope, so a call in that arm can only spell it as what it has become, and
+    -- __a call that spells a different constructor is still refused__ — which
+    -- matters here and nowhere else, because a premise the enclosing split fixed
+    -- states no equation and nothing downstream would catch it.
+    argIs w a p =
+      through w a == Just p
+        || any (sameHead w (expand w a)) [ t | (q, t) <- refinedTo w, q == p ]
+
+    -- __The two spellings of a constructor are not alpha-equal__, so the
+    -- comparison is at the head and not on the written term: what a user writes
+    -- resolves to the generated wrapper — \u00a73.6, the resolver never builds a
+    -- 'Canonical' — while the form a split gives a premise is the 'Canonical'
+    -- itself. Reducing both answers the question actually being asked, which is
+    -- whether the argument /is/ what the premise has become.
+    sameHead w x y =
+      x == y || whnf env (binders w) x == whnf env (binders w) y
 
     prefixed w as h poss amb refls =
       let copies = [ a | Just a <- map (`at` as) poss ]
@@ -578,6 +680,7 @@ resolveRecursion env n0 tm = case tm of
         let gen    = generalisedIn as
             shapes = methodShapes w True d gen
                        (prefixFor w gen is (drop (length gen) as))
+                       (refinesFor w is tgt)
             used = [ (v, sh) | (Free v, Just sh) <- zip ms shapes ]
          in methods w (zip ms shapes) n `andThen` \ms' n1 ->
             go w mot n1      `andThen` \mot' n2 ->
@@ -602,6 +705,8 @@ resolveRecursion env n0 tm = case tm of
           -- state: a 'Shape' with no pairs has nowhere to put one.
           shapes = methodShapes w False (inductiveName def)
                      (generalisedIn (drop (np + 1 + nc + ni + 1) as)) NoPrefix
+                     (concatMap (refinesFor w (take ni (drop (np + 1 + nc) as)))
+                                (take 1 (drop (np + 1 + nc + ni) as)))
           used = [ (v, sh) | (Free v, Just sh) <- zip ms shapes ]
           shapeAt k
             | k >= np + 1, k < np + 1 + nc = shapes !! (k - (np + 1))
@@ -620,7 +725,7 @@ resolveRecursion env n0 tm = case tm of
     -- A term that is not the chain the declaration describes is walked as an
     -- ordinary term with the hypotheses already in scope. That is the
     -- specialised case, and refusing a call inside it is the point.
-    peel w (Shape count pairs) = chain []
+    peel w (Shape count pairs refs) = chain []
       where
         chain args u j
           | length args >= count =
@@ -629,6 +734,7 @@ resolveRecursion env n0 tm = case tm of
               -- binders are not premises and are the reason this is two walks.
               go w { hypotheses = bound args ++ hypotheses w
                    , binders    = binders w ++ map snd args
+                   , refinedTo  = refinedAs args ++ refinedTo w
                    , inBody     = True } u j
           | otherwise = case u of
               Lam i ty sc ->
@@ -636,6 +742,18 @@ resolveRecursion env n0 tm = case tm of
                  in chain (args ++ [(v, Hypothesis v i ty)]) (open v sc) j1
                       `andThen` \b -> done (Lam i ty (close v b))
               _ -> go w u j
+
+        -- __The premise this split refined, at this method's own binders__
+        -- (MS9 phase 238). Dropped rather than guessed at where a binder the
+        -- constructor's argument sits at is not there, which is the same policy
+        -- 'bound' has for a pair.
+        refinedAs args =
+          [ (p, foldl put t binds)
+          | Refines p t poss <- refs
+          , Just binds <- [mapM (\(v, i) -> fmap ((,) v . fst) (at i args)) poss]
+          ]
+          where
+            put acc (v, y) = instantiate (Free y) (close v acc)
 
         -- The hypotheses, once the whole chain is bound, as the shape names
         -- them: a pair of positions in it.
@@ -661,7 +779,7 @@ resolveRecursion env n0 tm = case tm of
     -- from the hole's chain, so the telescope's position @i@ is at whatever
     -- place the term passes that binder, and a pair whose either half was solved
     -- is dropped rather than guessed at.
-    subgoalShape w (Shape count pairs) v n =
+    subgoalShape w (Shape count pairs refs) v n =
       let (vs, body, n1) = openAll v n
           found =
             [ (z, args)
@@ -676,6 +794,10 @@ resolveRecursion env n0 tm = case tm of
                       | (i, j, pre) <- pairs
                       , Just i' <- [place vs args i]
                       , Just j' <- [place vs args j]
+                      ]
+                      [ Refines p t poss'
+                      | Refines p t poss <- refs
+                      , Just poss' <- [mapM (traverseSnd (place vs args)) poss]
                       ]) ]
               , n1 )
             _ -> ([], n1)

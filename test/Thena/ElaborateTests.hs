@@ -1646,6 +1646,180 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
 
+    -- ----------------------------------------------------------------
+    -- THE SHAPES THE NEXT ROUND NAMED (MS9 phase 238, @~5kcb4@)
+    -- ----------------------------------------------------------------
+
+    -- __FOUR NESTED GENERALISING SPLITS, AND FIVE__, which phase 217 left as
+    -- the first untested depth once its own fix made the axis uniform. Each
+    -- split refines an index the one outside it did not, so the innermost arm's
+    -- indices are built from a pattern variable of every enclosing arm, and the
+    -- call is the outermost hypothesis reached through three copies and then
+    -- four. **Both compute**, asserted by @refl@ inside the module.
+  , testCase "a recursion crosses four nested generalising splits" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+            [ "fourDeep : \8704 (x : N) (y : N) (w : N) (v : N) (p : P x y) \
+              \(q : P y w) (r : P w v) (t : P v x) -> N"
+            , "fourDeep = \\ x y w v p q r t -> induction p of { pz c -> z \
+              \; pr a b rp -> case q of { pz c -> \
+              \; pr a2 b2 rq -> case r of { pz c -> \
+              \; pr a3 b3 rr -> case t of { pz c -> \
+              \; pr a4 b4 rt -> s (fourDeep a b b2 b3 rp rq rr rt) } } } }"
+            , "check : Eq N (fourDeep (s z) (s z) (s z) (s z) (pr z z (pz z)) \
+              \(pr z z (pz z)) (pr z z (pz z)) (pr z z (pz z))) (s z)"
+            , "check = refl N (s z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+  , testCase "a recursion crosses five nested generalising splits" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+            [ "fiveDeep : \8704 (x : N) (y : N) (w : N) (v : N) (u : N) \
+              \(p : P x y) (q : P y w) (r : P w v) (t : P v u) (g : P u x) -> N"
+            , "fiveDeep = \\ x y w v u p q r t g -> induction p of { pz c -> z \
+              \; pr a b rp -> case q of { pz c -> \
+              \; pr a2 b2 rq -> case r of { pz c -> \
+              \; pr a3 b3 rr -> case t of { pz c -> \
+              \; pr a4 b4 rt -> case g of { pz c -> \
+              \; pr a5 b5 rg -> s (fiveDeep a b b2 b3 b4 rp rq rr rt rg) \
+              \} } } } }"
+            , "check : Eq N (fiveDeep (s z) (s z) (s z) (s z) (s z) \
+              \(pr z z (pz z)) (pr z z (pz z)) (pr z z (pz z)) \
+              \(pr z z (pz z)) (pr z z (pz z))) (s z)"
+            , "check = refl N (s z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND A FAMILY WHOSE INDICES ARE NOT ALL OF ONE TYPE__, the other shape
+    -- phase 217 left unnamed. @M@ is indexed by an @N@ and a @B@ and its
+    -- constructor wraps both, so the split states two equations at two
+    -- different types and the recursion has to rebuild a generalised premise at
+    -- each — @allQ n@ at the @N@ and @allQb c@ at the @B@. @both@ then nests a
+    -- split on a @B@-indexed family inside it, where the tie is at the other
+    -- type than the enclosing split's.
+  , testCase "a recursion crosses a split whose indices are of two types" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (mixedModule ++
+            [ "mixed : \8704 (x : N) (d : B) (hx : Q x) (hd : Qb d) \
+              \(m : M x d) -> N"
+            , "mixed = \\ x d hx hd m -> induction m of { mz -> z \
+              \; mr n c r -> s (mixed n c (allQ n) (allQb c) r) }"
+            , "both : \8704 (x : N) (d : B) (hx : Q x) (m : M x d) (k : K d) -> N"
+            , "both = \\ x d hx m k -> induction m of \
+              \{ mz -> case k of { kz -> z ; kr c r -> } \
+              \; mr n c r -> case k of { kz -> \
+              \; kr c2 r2 -> s (both n c (allQ n) r r2) } }"
+            , "check1 : Eq N (mixed (s z) (bw bz) (qs z qz) (qbs bz qbz) \
+              \(mr z bz mz)) (s z)"
+            , "check1 = refl N (s z)"
+            , "check2 : Eq N (both (s z) (bw bz) (qs z qz) (mr z bz mz) \
+              \(kr bz kz)) (s z)"
+            , "check2 = refl N (s z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND THE SHAPE THAT FAILED: A RECURSION UNDER A SPLIT ON A PREMISE THE
+    -- ENCLOSING SPLIT HAD FIXED__ (MS9 phase 238).
+    --
+    -- @e@ is not generalised by the split on @p@ — nothing mentions it — so the
+    -- motive fixes it and the hypothesis is the statement at @e@ itself. The arm
+    -- then splits on @e@, which leaves it out of scope: every spelling of it,
+    -- the ambient name included, arrives as @c1@ or @c2@, so 'varies' saw a call
+    -- passing something else for a fixed premise and refused the body. **The
+    -- same proof with @e@ introduced inside the arm loaded**, which is the
+    -- distinction his ruling of 2026-10-20 says a reader must not be able to
+    -- make.
+    --
+    -- @sandwich@ is the plain case and @deepSandwich@ puts a generalising split
+    -- back under the non-generalising one; @viaName@ passes the ambient name
+    -- rather than the constructor, and @viaInduction@ is the other spelling of
+    -- the inner split. @idx@ is the second half: the inner split refines @u@ as
+    -- an /index/ rather than as its target, and a premise refined that way is
+    -- just as far out of reach. **All of them compute.**
+  , testCase "a recursion under a split on a premise the split fixed" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (fixedModule ++
+            [ "sandwich : \8704 (x : N) (y : N) (hx : Q x) (p : P x y) (e : C) -> N"
+            , "sandwich = \\ x y hx p e -> induction p of { pz c -> z \
+              \; pr a b rp -> case e of \
+              \{ c1 -> s (sandwich a b (allQ a) rp c1) \
+              \; c2 -> s (sandwich a b (allQ a) rp c2) } }"
+            , "viaName : \8704 (x : N) (y : N) (hx : Q x) (p : P x y) (e : C) -> N"
+            , "viaName = \\ x y hx p e -> induction p of { pz c -> z \
+              \; pr a b rp -> case e of \
+              \{ c1 -> s (viaName a b (allQ a) rp e) \
+              \; c2 -> s (viaName a b (allQ a) rp e) } }"
+            , "viaInduction : \8704 (x : N) (y : N) (hx : Q x) (p : P x y) \
+              \(e : C) -> N"
+            , "viaInduction = \\ x y hx p e -> induction p of { pz c -> z \
+              \; pr a b rp -> induction e of \
+              \{ c1 -> s (viaInduction a b (allQ a) rp c1) \
+              \; c2 -> s (viaInduction a b (allQ a) rp c2) } }"
+            , "deepSandwich : \8704 (x : N) (y : N) (w : N) (hx : Q x) \
+              \(p : P x y) (e : C) (q : P y w) -> N"
+            , "deepSandwich = \\ x y w hx p e q -> induction p of { pz c -> z \
+              \; pr a b rp -> case e of \
+              \{ c1 -> case q of { pz c -> \
+              \; pr a2 b2 rq -> s (deepSandwich a b b2 (allQ a) rp c1 rq) } \
+              \; c2 -> case q of { pz c -> \
+              \; pr a2 b2 rq -> s (deepSandwich a b b2 (allQ a) rp c2 rq) } } }"
+            , "idx : \8704 (x : N) (y : N) (hx : Q x) (p : P x y) (u : N) \
+              \(e : D u) -> N"
+            , "idx = \\ x y hx p u e -> induction p of { pz c -> z \
+              \; pr a b rp -> case e of \
+              \{ dz -> s (idx a b (allQ a) rp u dz) \
+              \; ds k d -> s (idx a b (allQ a) rp u (ds k d)) } }"
+            , "check1 : Eq N (sandwich (s z) (s z) (qs z qz) \
+              \(pr z z (pz z)) c1) (s z)"
+            , "check1 = refl N (s z)"
+            , "check2 : Eq N (deepSandwich (s z) (s z) (s z) (qs z qz) \
+              \(pr z z (pz z)) c1 (pr z z (pz z))) (s z)"
+            , "check2 = refl N (s z)"
+            , "check3 : Eq N (idx (s z) (s z) (qs z qz) (pr z z (pz z)) z dz) \
+              \(s z)"
+            , "check3 = refl N (s z)"
+            , "check4 : Eq N (viaName (s z) (s z) (qs z qz) \
+              \(pr z z (pz z)) c2) (s z)"
+            , "check4 = refl N (s z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND THE GUARD STILL BITES INSIDE SUCH AN ARM__, which is why the fix is
+    -- a comparison and not an exemption: the arm holds @e@ at @c1@, so a call
+    -- spelling @c2@ is the hypothesis at a premise the proof does not have.
+    -- Nothing downstream would catch it — a fixed premise states no equation —
+    -- so this is the one place it can be said.
+  , refusesIn fixedModule "a recursion naming the other constructor of a fixed premise is refused"
+      [ "wrongArm : \8704 (x : N) (y : N) (hx : Q x) (p : P x y) (e : C) -> N"
+      , "wrongArm = \\ x y hx p e -> induction p of { pz c -> z \
+        \; pr a b rp -> case e of \
+        \{ c1 -> s (wrongArm a b (allQ a) rp c2) ; c2 -> z } }"
+      ]
+      "stuck: the split fixed e and this call passes c2, so it is not the \
+      \induction hypothesis \8212 a premise the induction varies is bound \
+      \inside the arm and not before the split: wrongArm a b (allQ a) rp c2"
+
+    -- __AND PHASE 208'S OWN CASE IS UNTOUCHED__: with no split on @e@ at all,
+    -- the premise is in scope and a call naming anything else for it still
+    -- reads as a statement the proof does not have.
+  , refusesIn fixedModule "a recursion varying a fixed premise is still refused"
+      [ "noSplit : \8704 (x : N) (y : N) (hx : Q x) (p : P x y) (e : C) -> N"
+      , "noSplit = \\ x y hx p e -> induction p of { pz c -> z \
+        \; pr a b rp -> s (noSplit a b (allQ a) rp c1) }"
+      ]
+      "stuck: the split fixed e and this call passes c1, so it is not the \
+      \induction hypothesis \8212 a premise the induction varies is bound \
+      \inside the arm and not before the split: noSplit a b (allQ a) rp c1"
+
     -- __AND THE RECURSION DEMANDS A COPY THE ARMS DO NOT__ (MS9 phase 205,
     -- @~wk9qh@). Every shape above has its premises introduced where the split
     -- can reach them /and/ a constructor whose conclusion index asks for a copy.
@@ -2207,6 +2381,76 @@ splittingTree =
       , "data Ev : N -> Type\8320 where"
       , "  evz : Ev z"
       , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+      , ""
+      ]
+    -- Phase 238's shapes (@~5kcb4@): @C@ for a premise an inner split refines
+    -- by being split on — two nullary constructors, so the arm holds it at a
+    -- constructor and not at a variable — and @D@ for the same premise refined
+    -- as an /index/ of such a split. @P@ and @Q@ are @deepModule@'s, repeated
+    -- because a fixture is one module and these probes need both halves in one.
+    fixedModule =
+      [ "module Fixed where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data C : Type\8320 where"
+      , "  c1 : C"
+      , "  c2 : C"
+      , ""
+      , "data Q : N -> Type\8320 where"
+      , "  qz : Q z"
+      , "  qs : \8704 (n : N) (q : Q n) -> Q (s n)"
+      , ""
+      , "allQ : \8704 (n : N) -> Q n"
+      , "allQ = \\ n -> induction n of { z -> qz ; s m -> qs m (allQ m) }"
+      , ""
+      , "data P : N -> N -> Type\8320 where"
+      , "  pz : \8704 (c : N) -> P z c"
+      , "  pr : \8704 (a : N) (b : N) (r : P a b) -> P (s a) (s b)"
+      , ""
+      , "data D : N -> Type\8320 where"
+      , "  dz : D z"
+      , "  ds : \8704 (k : N) (d : D k) -> D (s k)"
+      , ""
+      ]
+    -- Phase 238's other shape: a family indexed by two /different/ types, whose
+    -- constructor wraps one of each, so a split on it states an equation at an
+    -- @N@ and one at a @B@. @K@ is indexed by the @B@ alone, for a nested split
+    -- whose tie is at the other type than the enclosing one's.
+    mixedModule =
+      [ "module Mixed where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data B : Type\8320 where"
+      , "  bz : B"
+      , "  bw : B -> B"
+      , ""
+      , "data Q : N -> Type\8320 where"
+      , "  qz : Q z"
+      , "  qs : \8704 (n : N) (q : Q n) -> Q (s n)"
+      , ""
+      , "allQ : \8704 (n : N) -> Q n"
+      , "allQ = \\ n -> induction n of { z -> qz ; s m -> qs m (allQ m) }"
+      , ""
+      , "data Qb : B -> Type\8320 where"
+      , "  qbz : Qb bz"
+      , "  qbs : \8704 (c : B) (q : Qb c) -> Qb (bw c)"
+      , ""
+      , "allQb : \8704 (c : B) -> Qb c"
+      , "allQb = \\ c -> induction c of { bz -> qbz ; bw d -> qbs d (allQb d) }"
+      , ""
+      , "data M : N -> B -> Type\8320 where"
+      , "  mz : M z bz"
+      , "  mr : \8704 (n : N) (c : B) (r : M n c) -> M (s n) (bw c)"
+      , ""
+      , "data K : B -> Type\8320 where"
+      , "  kz : K bz"
+      , "  kr : \8704 (c : B) (r : K c) -> K (bw c)"
       , ""
       ]
     -- Phase 201's shape (@~zv8kf@): a family whose constructor wraps /both/ its
