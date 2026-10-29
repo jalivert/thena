@@ -2311,10 +2311,32 @@ and keeps the equation otherwise.** More arguments put the new equations in a pa
 there is then no single proof to rebuild from; indices make the law an equation between
 packaged chains rather than between proofs.
 
-**One of the four steps still cannot cross a chain, and a split that needs it is refused
-by name.** Deleting an equation whose proof a later one mentions would need K, which is
-the line this whole design is drawn around. The message says which step and what is
-missing.
+**And where both sides of an equation are the *same* constructor application, taking it
+apart is offered where deleting it is refused.** Deletion matches such an equation first —
+the two sides are literally the same term — and deletion is the one step that cannot cross
+a chain. But injectivity applies to that very equation, so it is tried instead of refusing,
+and no part of it is K: `s z = s z` is read apart to `z = z`, and that to nothing at all,
+because a constructor with no arguments states no equations. At that bottom the proof is
+rebuilt from the trivial chain and the same round-trip law carries the method back. For
+
+```
+data T : Fin (s (s z)) -> Type₀ where
+  mkT : ∀ (i : Fin (s z)) -> T (fs (s z) i)
+
+pinned : ∀ (x : T (fs (s z) (fz z))) -> Fin (s z)
+pinned = \ x -> case x of { mkT i -> i }
+```
+
+`T`'s index pins `fs`'s first argument to the same term on both sides, so the chain's first
+equation is `Eq N (s z) (s z)`. The split goes through and the arm computes with the
+argument it bound. Before, it was refused with UIP given as the reason.
+
+**One shape still cannot cross a chain, and that one is the K line itself.** An equation
+between a *variable* and itself, with a later equation stated about its proof, has no
+constructor head for injectivity to take apart whatever order the steps are tried in, and
+deleting it is UIP. A split that meets it is refused by name, with the position and what is
+missing. **Agda accepts some of these without K**, by never stating such an equation where
+the position is determined by the index; Thena states it and stops.
 
 **A split also takes a constructor equation apart when the constructor's own arguments are
 dependent.** That is the no-confusion chain rather than the motive's one, and the two are
@@ -2336,11 +2358,11 @@ equations the lemma's dependent pair holds, the first solves `n` and supplies `r
 own proof, the transport in the second computes away and it solves `i`. Before, the
 equation was handed back undischarged and the arm did not typecheck.
 
-**Where it still does not go through is where the constructor's result type pins the
-argument.** `fs n i` and `fs m j` inhabit one `Fin` only when `n` and `m` are the same term,
-so the chain's first equation is a *deletion* over a transport — K again, and said by name.
-What that case wants is deletion at a type known to be a set, which is the Hedberg route
-below rather than a missing construction.
+**The case where the constructor's result type pins the argument is the one the step above
+buys.** `fs n i` and `fs m j` inhabit one `Fin` only when `n` and `m` are the same term, so
+the chain's first equation is between two identical terms — deletion's shape, taken apart by
+injectivity since it is also two applications of one constructor. `pinned` above is that
+case end to end.
 
 **What this costs: nothing you can currently name in language metatheory.** The proofs K
 buys are proofs *about* equality proofs rather than proofs that use them. If one is ever

@@ -59,3 +59,23 @@ tiedTwo = \ m x -> case x of { isFz n -> n }
 -- and only reducing tells them apart.
 twoFromArm : N
 twoFromArm = tiedTwo (s (s z)) (isFz (s (s z)))
+
+-- AND THE SHAPE DELETION MATCHES FIRST, WHICH INJECTIVITY CARRIES TOO. `T`'s
+-- index pins `fs`'s first argument on both sides, so the chain's first equation
+-- is `Eq N (s z) (s z)` — the same term twice. That is the shape deletion
+-- matches, and deletion is the one transition that cannot carry a chain: a
+-- later equation is stated about this one's proof, and deleting it would need
+-- UIP. Injectivity applies to the very same equation, so it is offered that
+-- instead: the chain reads apart to `Eq N z z`, which reads apart again to
+-- `Unit`, where there is no argument left and the proof is rebuilt from `unit`
+-- alone. `isLeftInvN` carries the method back at each step, and no step is K.
+data T : Fin (s (s z)) -> Type₀ where
+  mkT : forall (i : Fin (s z)) -> T (fs (s z) i)
+
+pinned : forall (x : T (fs (s z) (fz z))) -> Fin (s z)
+pinned = \ x -> case x of { mkT i -> i }
+
+-- And the arm is handed the constructor's own argument, which only reducing
+-- says: `pinned` answers with what `mkT` was applied to.
+pinnedFromArm : Fin (s z)
+pinnedFromArm = pinned (mkT (fz z))

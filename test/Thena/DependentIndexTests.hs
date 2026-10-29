@@ -125,6 +125,39 @@ tests =
                 other -> assertFailure ("s applied to " ++ show other)
             other -> assertFailure ("not a successor: " ++ show other)
 
+      -- __AND THE SHAPE DELETION MATCHES FIRST — MS9 phase 234, @~pxgxw@.__
+      -- @T@'s index pins @fs@'s first argument on both sides, so the chain's
+      -- first equation is @Eq N (s z) (s z)@: the same term twice, which is
+      -- deletion's shape, and deletion is the one transition that cannot carry
+      -- a chain. Injectivity applies to that very equation and is offered it,
+      -- the chain reads apart to @Eq N z z@ and then to @Unit@, and the proof
+      -- is rebuilt from @unit@ where no argument is left. Refused by name,
+      -- with UIP as the reason, until that fallthrough existed.
+    , testCase "and a chain deletion matched first is crossed by injectivity" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s tiedTarget
+        case lookupDefinition (GlobalName "pinned") (globals (machineOf s')) of
+          Nothing -> assertFailure "pinned was not admitted"
+          Just d  ->
+            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "T (fs (s z) (fz z)) -> Fin (s z)"
+
+      -- __And that arm binds the constructor's argument too.__ The type says
+      -- nothing about it — @Fin (s z)@ has more than one inhabitant here — so
+      -- reducing at a known argument is what says the arm answered with it.
+    , testCase "and the arm it crossed answers with the argument it bound" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s tiedTarget
+        let m = machineOf s'
+        case lookupDefinition (GlobalName "pinnedFromArm") (globals m) of
+          Nothing -> assertFailure "pinnedFromArm was not admitted"
+          Just d  -> case whnf (globals m) [] (definitionBody d) of
+            Canonical (GlobalName "fz") _ [inner] ->
+              case whnf (globals m) [] inner of
+                Canonical (GlobalName "z") _ [] -> pure ()
+                other -> assertFailure ("fz applied to " ++ show other)
+            other -> assertFailure ("not fz: " ++ show other)
+
       -- The split's one equation is between two @pack@ applications, so
       -- injectivity fires and has to read the lemma's chain apart. Both of the
       -- equations it yields are then discharged, so the arm binds the

@@ -572,6 +572,26 @@ chainTests =
     -- assertion: the first solves @n1@ and supplies @refl@ for its own proof,
     -- the second's transport ι-contracts to @Eq (Fin j) i1 jj@ and solves @i1@,
     -- so the method keeps neither binder and the subgoal is @Nat@.
+    -- __AND THE SHAPE DELETION MATCHES FIRST, WHICH IS THE CHAIN'S BOTTOM —
+    -- MS9 phase 234, `~pxgxw`.__ Both sides are the same term, so deletion
+    -- matched and was blocked; injectivity applies to the same equation and is
+    -- offered it. @succ zero = succ zero@ reads apart to @zero = zero@, which
+    -- reads apart to @Unit@ — a constructor with no arguments states no
+    -- equation — and there the proof is rebuilt from @unit@ alone, with the
+    -- @Unit@ elimination standing in for the η it does not have. **No step is
+    -- UIP**: nothing claims the proof is @refl@, it is carried along
+    -- @isLeftInvNat@.
+    --
+    -- Both equations go, and __both of the method's own binders stay__: the
+    -- two sides here are closed, so nothing is solved and @m@ and @ih@ are
+    -- still the method's to bind. That is the one difference from the two
+    -- fixtures above, where solving @m := k@ removed one.
+  , specialises "a deletion a later equation names is crossed by injectivity"
+      "succ" 2
+      "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat (succ zero) (succ zero)) \
+      \-> Eq {0} (Eq {0} Nat (succ zero) (succ zero)) q q -> Nat"
+      (Just "Nat -> Nat -> Nat")
+
   , specialisesIn eqNatFinPack packContext packCounter
       "injectivity over a dependent argument telescope reads the chain apart"
       "pack" 1

@@ -100,7 +100,7 @@ import Thena.Global.Env
   , lookupInductive
   , recursiveArgument
   )
-import Thena.Global.Generate (dependentPairInScope)
+import Thena.Global.Generate (dependentPairInScope, unitProof, unitType)
 import Thena.Global.NoConfusion (noConfusionInverseNames, noConfusionNames)
 import Thena.Global.NoCycle (noCycleName)
 import Thena.Tactics.Eliminate (MethodShape (..), spineOf)
@@ -554,8 +554,18 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                 -- later equation transported along this one stays in scope
                 -- under the @Empty@ elimination. No 'namedLater' guard.
                 Cycle dn path onLeft -> refute bfr e after n dn path onLeft
+                -- __A BLOCKED DELETION IS OFFERED TO INJECTIVITY — MS9 phase
+                -- 234.__ Deletion is blocked exactly where a later equation
+                -- names this one's proof, and where both sides are the same
+                -- constructor applied, injectivity applies to the very same
+                -- equation and 'crossing' carries it. @Eq N (s z) (s z)@ is
+                -- that shape: identical, so deletion matched first, and
+                -- constructor-headed, so nothing about it needs UIP. The
+                -- refusal is unchanged wherever 'crossing' declines.
                 Delete
-                  | namedLater e after -> blocked ByDeletion
+                  | namedLater e after -> case alsoInjective e of
+                      Just (dn, c) | Just r <- crossing bfr e after n dn c -> r
+                      _ -> blocked ByDeletion
                   | otherwise          -> deletion bfr e after n
                 Inject dn c
                   | namedLater e after -> case crossing bfr e after n dn c of
@@ -677,7 +687,55 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                     lamOver (prefix before e)
                       (App carry
                          (applyTo g (varsOf delta ++ eqnVars before ++ [prf])))
+            -- __THE CHAIN'S BOTTOM, AND IT IS A DELETION DONE WITHOUT K — MS9
+            -- phase 234.__ A constructor with no arguments has @Unit@ for its
+            -- chain, so there is no argument equation to bind and @q@ is
+            -- rebuilt from @unit@ alone. The sub-problem is the method with
+            -- @q := noConfusion‹D›Inv … unit@ and one binder fewer than it had,
+            -- and the two steps back are the same two the case above takes: the
+            -- @Unit@ elimination over @noConfusion‹D› … q@ carries the
+            -- sub-problem from @Φ (inv unit)@ to @Φ (inv (noConfusion‹D› … q))@,
+            -- which is the law's own left side, and the @isLeftInv‹D›@ J carries
+            -- that to @Φ q@.
+            --
+            -- __The elimination is what replaces η for @Unit@__, which is
+            -- declared as a datatype and so has none: @noConfusion‹D› … q@ is a
+            -- term of @Unit@ that is not syntactically @unit@, and eliminating
+            -- it is how the method may assume it is. __No step here is K__ —
+            -- nothing claims @q ≃ refl@; @q@ is carried along the round-trip
+            -- law, which is proved by J.
+            (Just ([], []), n1) -> case (unitAt, confusion dn e) of
+              (Just ul, Just (_, p)) ->
+                let before     = reverse bfr
+                    qback      = inv (unitProof ul)
+                    after'     = map (reduceEqn . substEqn (eqnVar e) qback) after
+                    t'         = substituting (eqnVar e) qback t
+                    residueAt qq =
+                      substituting (eqnVar e) qq (piOver (map entry after) t)
+                    (carry, n2) = transporting lv i lhs rhs law residueAt n1
+                    (w, n3)     = fresh n2
+                 in Just $ continue (before ++ after') t' n3 $ \g ->
+                      lamOver (prefix before e)
+                        (App carry
+                           (Eliminate
+                              { eliminated = truth
+                              , levels     = [ul]
+                              , parameters = []
+                              , motive     = Lam (Ident "chain") (unitType ul)
+                                               (close w (residueAt (inv (Free w))))
+                              , methods    = [ applyTo g (varsOf delta
+                                                            ++ eqnVars before) ]
+                              , indices    = []
+                              , target     = p
+                              }))
+              _ -> Nothing
             (_, _) -> Nothing
+          where
+            -- The level the chain's @Unit@ is stated at, read off the chain
+            -- rather than assumed to be the datatype's.
+            unitAt = case linkOf env ctx <$> confusionFamily dn e of
+              Just (LinkUnit [ul]) -> Just ul
+              _                    -> Nothing
 
         -- __solution.__ The binder goes and everything to its right is
         -- substituted. What the sub-problem then proves is this method at the
@@ -801,6 +859,18 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           _ -> Nothing
 
         atOrAfter x = map entryVar (dropWhile ((/= x) . entryVar) delta)
+
+    -- __The second transition an equation admits, where the first is
+    -- blocked.__ 'transition' answers with one verdict and 'go' takes it; this
+    -- says whether injectivity would have been that verdict had deletion not
+    -- matched first. Both sides being the same term, the two constructors
+    -- always agree, so there is no conflict to report here.
+    alsoInjective e
+      | Just (dn, cu, _) <- former (eqnLeft e)
+      , Just (_,  cv, _) <- former (eqnRight e)
+      , Just _ <- confusionOf dn
+      , cu == cv  = Just (dn, cu)
+      | otherwise = Nothing
 
     -- The datatype, the constructor and its arguments, for a term that is a
     -- saturated constructor application. __The parameters are dropped__: a
@@ -947,9 +1017,12 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- it — which is exactly what applying the earlier proofs to the
         -- sub-problem's Π type instantiates it to.
         chain tyH tyP p n0' = case (linkOf env ctx tyH, linkOf env ctx tyP) of
-          -- A nullary constructor, so @Unit@ — and the two sides were α-equal,
-          -- so deletion fired rather than injectivity.
-          (LinkUnit, LinkUnit) -> (Just ([], []), n0')
+          -- A nullary constructor, so @Unit@: there is no argument to state an
+          -- equation about. __This is the bottom of the recursion and it is
+          -- reachable__ — a blocked deletion is offered to injectivity (MS9
+          -- phase 234), and @s z = s z@ is read apart to @z = z@, which lands
+          -- here. 'crossing' rebuilds the proof from @unit@.
+          (LinkUnit _, LinkUnit _) -> (Just ([], []), n0')
           (LinkLast, LinkLast) ->
             let (v, n1) = fresh n0'
              in case eqnAt v tyH of
@@ -1124,16 +1197,27 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- the next equation through ι-contract, which is why reading each domain
     -- after the step before it is enough. @≢@'s own chain compares @small@ with
     -- itself throughout, so the proof is never reached there.
-    overChain small big q = go
+    -- __THE EQUATION'S OWN PROOF IS LOOKED FOR FIRST, AND THAT ORDER IS LOAD
+    -- BEARING — MS9 phase 234.__ Where @small@ and @big@ are the /same/ term
+    -- both guards match the element's own domain, and taking reflexivity there
+    -- builds @noConfusion‹D› u u refl@ — a chain of the right type that says
+    -- nothing about this equation's proof, so @isLeftInv‹D›@ no longer speaks
+    -- about the method's own binder and 'crossing' cannot carry it back. It
+    -- was unreachable until a blocked deletion was offered to injectivity,
+    -- which is exactly the case where the two sides are alike.
+    --
+    -- @q@ is supplied at most once, so an index position that happens to match
+    -- both sides cannot take it from the element's.
+    overChain small big q = go True
       where
-        go ty tm = case whnf env ctx ty of
+        go unused ty tm = case whnf env ctx ty of
           Pi _ dom sc -> case spineOf (whnf env ctx dom) of
             Just (GlobalName "Eq", [l], [i, a, b])
-              | alike a b                 -> step (reflAt l i a) sc tm
-              | alike a small, alike b big -> step q sc tm
+              | unused, alike a small, alike b big -> step False q sc tm
+              | alike a b                 -> step unused (reflAt l i a) sc tm
             _ -> Nothing
           _ -> Just (ty, tm)
-        step arg sc tm = go (instantiate arg sc) (App tm arg)
+        step unused arg sc tm = go unused (instantiate arg sc) (App tm arg)
 
     -- A proof of @small ≡ big@, which is this equation read in the direction
     -- the chain states it — itself, or the symmetric one.
@@ -1450,6 +1534,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     reflAt l i a = Canonical reflexivity [l] [i, a]
 
     emptiness        = GlobalName "Empty"
+    truth            = GlobalName "Unit"
     equality         = GlobalName "Eq"
     reflexivity      = GlobalName "refl"
     conjunction      = GlobalName "And"
@@ -1520,7 +1605,7 @@ survivingEquations env ctx = go []
 -- exactly where a later equation is stated about its proof, and in @And@ where
 -- one is not. Reading the nesting back is how the two stay in step.
 data Link
-  = LinkUnit                    -- ^ @Unit@, so the constructor takes no arguments
+  = LinkUnit [Level]            -- ^ @Unit@, so the constructor takes no arguments
   | LinkAnd [Level] Core Core   -- ^ @And A B@ — the rest of the chain is independent
   | LinkPair [Level] Core Core  -- ^ @DPair A B@ — it is a function of this proof
   | LinkLast                    -- ^ anything else, which must be the final equation
@@ -1533,7 +1618,7 @@ data Link
 -- equations inside are left spelled as the generator wrote them.
 linkOf :: GlobalEnv -> Context -> Core -> Link
 linkOf env ctx t = case spineOf (whnf env ctx t) of
-  Just (GlobalName "Unit",  _,  [])     -> LinkUnit
+  Just (GlobalName "Unit",  ls, [])     -> LinkUnit ls
   Just (GlobalName "And",   ls, [a, b]) -> LinkAnd ls a b
   Just (GlobalName "DPair", ls, [a, b]) -> LinkPair ls a b
   _                                     -> LinkLast
