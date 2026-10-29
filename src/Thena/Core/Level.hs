@@ -49,6 +49,7 @@ module Thena.Core.Level
   ) where
 
 import Data.List (nub, sortOn)
+import qualified Data.Set as Set
 
 -- | A universe level.
 --
@@ -700,12 +701,23 @@ equated :: [Obligation] -> [(LevelVar, Level)]
 equated obs =
   take 1
     [ (v, k)
-    | AtMost l k <- obs
-    , AtMost k' l' <- obs
-    , normalise k == normalise k', normalise l == normalise l'
+    | (l, k, nl, nk) <- normalised
+    , (nk, nl) `Set.member` stated
     , Just v <- [loneMeta l]
     , v `notElem` metasIn k
     ]
+  where
+    -- **Each side is normalised once and the other direction is looked up**,
+    -- rather than the two obligations being paired off by a nested
+    -- comprehension over @obs@. That shape normalised four levels for every
+    -- /pair/, and a round that equates nothing walks all of them — so the pass
+    -- was quadratic in the number of obligations with 'normalise', which sorts
+    -- and allocates, as the constant. Measured: one surface @induction@ over a
+    -- typing derivation put about twice as many obligations on a single
+    -- 'Thena.Kernel.certify' as the eliminator it replaced, and so cost four
+    -- times as much — two thirds of the whole file's load, inside 'normalise'.
+    normalised = [ (l, k, normalise l, normalise k) | AtMost l k <- obs ]
+    stated     = Set.fromList [ (nl, nk) | (_, _, nl, nk) <- normalised ]
 
 -- | The metas whose lower and upper bounds have met, read off the pending
 -- obligations. Empty when nothing is forced, which is what ends the fixpoint.

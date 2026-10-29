@@ -26,7 +26,8 @@ one paragraph, not three; the full argument lives in the design notes.
 
 ### An identifier may contain almost anything
 
-*Decided 2026-08-25; consequences accepted 2026-08-29.*
+*Decided 2026-08-25; consequences accepted 2026-08-29. The keyword list is
+reviewed whenever a word is reserved — most recently 2026-10-19.*
 
 Most languages reserve a generous set of punctuation and give you the rest.
 Thena does the opposite: it reserves as little as it can, so you can name things
@@ -39,10 +40,14 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
 | whitespace | |
-| keywords | `let` `in` `elim` `forall` `where` `do` `rule` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
+
+**A keyword is a whole token, so a word that merely *contains* one is a name.**
+`caseNat` and `datatype-of` are each one identifier; the lexer takes the longest
+match, so a keyword rule can only win on the whole word.
 
 **What follows, and it is the part that will catch you out.** `:` and `=` are
 *not* reserved, so they can sit inside a name. The lexer takes the longest
@@ -1983,6 +1988,444 @@ it can contain no name at all.
 the type binder is renamed because the term being substituted in has a free type
 variable, and renaming only the term binders would have captured it.
 
+### Thena does not assume K, and a dependent index telescope is handled by transported equations
+
+**Thena's identity type is the ordinary Martin-Löf one and K — uniqueness of identity
+proofs — is not assumed.** So `uip : (q : Eq A a a) -> Eq (Eq A a a) q (refl A a)` is not
+provable here, as it is not in Agda under `--without-K`:
+
+```
+uip = \ A a q -> case q of { refl b -> refl (Eq A b b) (refl A b) }
+
+stuck: the goal does not survive generalising the target
+```
+
+**The reason is structural rather than a check.** Splitting on a target of an indexed
+family works by generalising the family's indices into the motive and carrying one equation
+per index into each method. A motive abstracts the indices *separately*, so the arm's goal
+has to make sense when they differ — and a goal that needs the equality proof to be `refl`
+has no such reading. There is nothing to switch off: the K-needing goal cannot be written
+down.
+
+**The deletion step is kept, and keeping it is sound.** An equation `Eq I t t` constrains
+nothing and its binder is bound and ignored. This is the step that requires K in a system
+where a clause's right-hand side may depend on the equality proof; in Thena the goal never
+mentions these proofs, so the step is the proof-irrelevant one.
+
+**Where an index's type depends on an earlier index, the equation is stated after
+transporting along the earlier one.** `Eq (Vec A n) as as'` is ill-typed when
+`as' : Vec A n'`; what is stated instead is the equation between `as` transported along
+`n ≡ n'` and `as'`, so every equation stays homogeneous. This is the homogeneous
+*telescopic equality* of Cockx, Devriese and Piessens, *Pattern Matching Without K* (2014),
+and it is what Thena uses in place of a heterogeneous ("John Major") equality, whose
+elimination rule is equivalent to K.
+
+**That is built for a constructor's arguments, which is where the no-confusion equipment
+needs it.** Every `data` gets its `NoConfusion` family and `noConfusion` lemma now,
+including `Vec`, `Fin` and any judgment whose rule takes an argument typed by an earlier
+one; before, such a datatype was declared without equipment and the load said so. For a
+two-argument constructor the lemma's diagonal case reads
+
+```
+NoConfusionFin (fs n i) (fs n' i')
+  = DPair (Eq N n n') (λ q. Eq (Fin n') (transport q i) i')
+```
+
+— a *dependent* pair, because the second equation's type mentions the first equation's
+proof. Where the rest of the chain does not mention an equation's proof the pair is the
+ordinary `And` it always was, so nothing written against the old shape changed. **Which of
+the two it is, is read off the equation that was built and not predicted from the
+telescope**: an argument may be carried along inside a chain while nothing mentions the
+argument itself, and the rest of the chain still mentions its proof.
+
+**And the same construction is now built one telescope over, for the family's own
+indices.** Eliminating `b : Below (succ m) (fz m)` — where `Below : ∀ (n : Nat) (i : Fin n)
+-> Type₀` — used to be refused outright, because `Eq (Fin i₁) i₂ (fz m)` has its two sides
+at `Fin i₁` and `Fin (succ m)`. Each method now carries
+
+```
+∀ (m₁ : Nat) (q : Eq Nat (succ m₁) (succ m))
+  -> Eq (Fin (succ m)) (transport q (fz m₁)) (fz m) -> …
+```
+
+The carrier is the *actual* earlier index, so the equation is homogeneous; the actual side
+is left bare, which is what keeps it in reach of the unifier; and the generalised side is
+carried there along the earlier equation. Where no index's type mentions an earlier one the
+chain is empty and the equation is the one it always was.
+
+**And a transport carries whatever moves with it, so an index telescope may be chained to
+any depth.** The hard shape is `Chain : ∀ (n : N) (i : Fin n) (b : Below n i) -> Type₀` —
+the third index's type mentions both earlier ones, and the second's type mentions the
+first. A transport whose motive reads `λ l r q. residue l -> residue r` cannot state that:
+moving `n`, the right-hand side `Below r i` leaves `i` typed `Fin l`. So the motive binds
+the positions that move with the one being transported and states the right-hand side at
+those positions carried along the **same** proof:
+
+```
+λ l r q. ∀ (y : Fin l) -> Below l y -> Below r (coe q y)
+```
+
+`coe q y` is that same transport one level down, on `Fin` rather than on the residue, so
+this is one construction used recursively and not a second mechanism — which is what lets a
+moving position have a moving position of its own. The method is `λ s y at. at`, and it
+typechecks because `coe refl y` reduces to `y`. **Nothing here is K and no equality is
+packaged**: every equation is still an `Eq` between two terms of a single type.
+
+**It is not cheap, and the cost is per chained position.** Measured on the printed term of
+the admitted split: 3,835 characters for one transport, 13,269 with one chained position,
+49,840 with two — about fourfold each time, with load time following it. Nothing in the
+languages Thena models has an index typed by two mutually dependent indices, so this is a
+gap closed rather than a cost anybody pays: where no index's type mentions an earlier one
+not a byte of it is generated. `examples/chained-index-telescope.thena` and
+`examples/chained-index-telescope-deep.thena` are the two worked shapes.
+
+**One shape of index telescope is still refused**, and it may not be reachable: a *tied*
+index — one whose position the target pins to a constructor application, so that it states
+an equation — whose type mentions a *friendly* one, which is abstracted outright and has no
+equation to carry anything along. A friendly index is a variable no other index mentions,
+while a tied index's own term pins every index its type mentions, so the two conditions look
+incompatible; no written family reaches it. The refusal is kept because that is an argument
+rather than a proof, and it names the position and the identifier:
+
+```
+index 3 (b) has a type depending on an earlier index
+  that is abstracted outright, so there is no equation to carry it along
+```
+
+**And for an indexed family the no-confusion pair gives each element its own indices.** A
+pair that puts both elements at one index group says nothing about two elements at two
+*different* indices — and that is what acyclicity needs, its last step being an assumed
+equation between two constructor applications whose indices are not visibly the same. So
+the family takes an index group per element, and the lemma takes a *chain* where it took a
+single `Eq`:
+
+```
+NoConfusionEv : ∀ (n : N) -> Ev n -> ∀ (n' : N) -> Ev n' -> Type₀
+noConfusionEv : ∀ (n : N) (a : Ev n) (n' : N) (b : Ev n')
+                  (q : Eq N n n')
+               -> Eq (Ev n') (transport q a) b
+               -> NoConfusionEv n a n' b
+```
+
+The chain is **curried**, one argument per equation, rather than packaged into a pair: a
+split holds its equations as separate binders, one per tied index, so a lemma it calls
+takes them that way. The payload is unchanged — on the diagonal both sides are the same
+constructor, whose own arguments determine both index groups, so the indices need no
+equations of their own.
+
+**Where a family has no indices this is the shape it always had**, the chain being its one
+equation, so a proof written against the old lemma is untouched: all 318 uses across the
+examples needed no change. The two shapes lived side by side under separate names for a
+day — the telescopic one was generated first and replaced the other once it was known to
+sit snugly, so that no corpus measurement had to separate two changes at once.
+
+**It costs one thing: a family whose index telescope is dependent now needs `DPair` to get
+a no-confusion lemma at all.** The reason is worth following, because it is a constraint on
+anyone writing a prelude rather than a detail of the generator.
+
+The chain is stated over the telescope `(indices; element)`, and each equation of a chain
+is stated after *transporting* the earlier side along the earlier equation. A transport
+needs a motive — `λ z . A[x := z]` — and where a *later* entry's type also mentions `x`
+that motive cannot be written: it would have to mention the later entry at a type it no
+longer has. The entries that must move together are therefore packaged, moved once, and
+walked down one component at a time; and a package of two entries or more is a dependent
+pair. For
+
+```
+Below : ∀ (n : Nat) (i : Fin n) -> Type₀
+```
+
+`i`'s type mentions `n` and the element's type mentions both, so comparing a `Below n i`
+with a `Below n' i'` packages `i` with the element and the chain wants `DPair`.
+
+**The homogeneous lemma never wanted it**, because both elements sat at one index group and
+there was nothing to transport — so this is a need the replacement introduced, and it joins
+the per-datatype questions the generator already asks (`Empty` only with two or more
+constructors, `Unit` only for a nullary diagonal, and so on). **Asking once, for every
+datatype, would be wrong**: the prelude must declare `Eq` before `DPair`, since `DPair`'s
+own no-confusion states equations — so a blanket demand would silently lose `NoConfusionEq`
+at the very line the rest is built on. `Eq`'s two indices mention neither each other nor
+anything else, so `Eq` is not in this position and neither is anything else Thena ships.
+
+**What a prelude that gets it wrong loses is the whole lemma for that one datatype**, not a
+weaker version of it: declaring a dependently indexed family before `DPair` now yields no
+no-confusion for it, where before the replacement it yielded the homogeneous one. That is
+the price of having one shape instead of two, and it is paid in a corner nothing reaches.
+
+**And every `data` gets the acyclicity equipment: `BelowD`, `NotEqD`, `NotBelowD` and
+`NotBelowEqD`.** These are what a *cycle* is discharged with — an equation between a
+variable and a term that contains it structurally, `k ≃ s k`, which is how a case the user
+correctly omitted is recognised as impossible rather than merely undischarged. For `N`:
+
+```
+BelowN      : ∀ (P : N -> Type₀) (n : N) -> Type₀
+NotEqN      : ∀ (x : N) (y : N) -> Type₀
+NotBelowN   : ∀ (x : N) (y : N) -> Type₀
+NotBelowEqN : ∀ (x : N) (y : N) -> Type₀
+```
+
+`BelowN P n` is the tuple asserting `P` of everything structurally smaller than `n` —
+`Unit` at a constructor with no recursive argument, and `And ‹the sub-tuple› (P a)` per
+recursive argument otherwise. It is **one elimination at a type-valued motive**, and the
+inductive hypothesis the eliminator hands each method *is* the sub-tuple, because the
+elimination computes a type rather than a proof. `NotEqN` is `≢`, `NotBelowN` is
+`≮ := Below (λ w . x ≢ w)`, and `NotBelowEqN` is `≰ := ≮ × ≢`.
+
+**`belowD` and `recD` — the tuple's inhabitant and the structural recursor built from it —
+are not generated, and that was measured rather than assumed.** Every elimination the
+acyclicity construction needs is an ordinary `elim D` at a motive the generator writes, so
+nothing ever mentions them.
+
+**For an indexed family the two sides sit at two different index groups**, related by the
+same curried chain the telescopic lemma takes: a cycle compares a variable with a
+constructor application, and for an indexed family those are at different indices. So
+
+```
+NotEqEv : ∀ (n : N) -> Ev n -> ∀ (n' : N) -> Ev n' -> Type₀
+```
+
+reduces to `(q : Eq N n n') (r : Eq (Ev n') (transport q x) y) -> Empty`.
+
+**Four more names are reserved per datatype, in the same shared namespace**, so a
+definition already called `BelowFoo` makes `data Foo` refuse. **The equipment has its own
+precondition and is skipped on its own**: it needs `Unit` where a constructor has no
+recursive argument, and a datatype that cannot have it keeps its no-confusion lemma
+regardless. It costs about 4% of the time it takes to load the example corpus, measured.
+
+**And the acyclicity theorem itself: `noCycleDiagD` and `noCycleD`.** The first says no term
+is structurally below itself; the second says nothing equal to a term is below it either,
+and it is what a *cycle* is discharged with. For `N`:
+
+```
+noCycleDiagN : ∀ (n : N) -> NotBelowN n n
+noCycleN     : ∀ (x : N) (y : N) -> Eq N x y -> NotBelowN x y
+```
+
+So the user's correctly omitted case — the one where a split leaves `n ≃ s n` behind
+because the case cannot arise — is discharged by
+
+```
+noSelfN : ∀ (n : N) -> Eq N n (s n) -> Empty
+noSelfN = \ n e -> andRight (NotBelowN n n) (NotEqN n n) (noCycleN n (s n) e) (refl N n)
+```
+
+**For an indexed family the equation is the chain**, so `noCycleD` takes it curried and the
+contradiction is reached by supplying reflexivity, which makes every transport contract. No
+appeal to UIP anywhere, and no heterogeneous equality.
+
+`noCycleDiagD` carries the appendix's `Step` lemma **inline** at each recursive argument of
+each constructor, rather than under a name of its own: each is used exactly once, so a name
+would reserve one per recursive argument of every constructor and buy nothing.
+
+### When `noCycle` is not generated, and what you see if it is not
+
+*Decided 2026-10-27, and the condition changed the same week.*
+
+**Whether a datatype gets `noCycleDiagD` and `noCycleD` is decided by the checker and not
+by a question about the telescope.** The two are generated, checked, and kept if they
+check; if the checker refuses one, both are withheld and the declaration goes through
+without them. The four relations above, and the no-confusion pair, are generated
+regardless.
+
+**No shape of constructor telescope is known to be withheld today.** It used to be one — a
+constructor with a *middle* argument, one that both depends on an earlier argument and is
+depended on by a later one:
+
+```
+enode : ∀ (x : A) (y : B x) (r : E) -> E              -- y depends on x; nothing depends on y
+fnode : ∀ (x : A) (y : B x) (z : C x y) (r : F) -> F  -- y is in the middle
+```
+
+Both get their acyclicity equipment now. An argument that a later argument depends on
+cannot be transported on its own — the motive would have to mention the later argument at a
+type it no longer has — so it travels packaged with the arguments that depend on it, and
+the chain reads each component back out by *projection*. **The package holds exactly the
+arguments that have to travel, and is moved one component at a time**, along the equations
+that component's own type mentions and in the order those equations were stated. Taking the
+contiguous span over them instead dragged in an argument that nothing in the package
+mentions, and that argument's own equation then came out as a projection out of a pair
+transported along its neighbour's proof — a transport no step of the nested `J` eliminates.
+
+**What you lose where they are withheld.** Exactly one thing: a split over such a family
+keeps a cyclic equation instead of refuting it, so a case you were right to omit is refused
+with `no clause of case-must-vanish applies here` rather than accepted. Nothing is accepted
+that should not be — the loss is capability — and nothing else about the declaration
+changes.
+
+**The whole acyclicity bundle — six definitions per `data` — costs about 8% of the time it
+takes to load the example corpus**, and about 30% on the largest single development in it.
+Measured by generating and not generating, two runs each.
+
+### Every shape of index telescope declares, and the fourth dependent index does not finish
+
+*Measured 2026-10-28.*
+
+**A family whose index telescope has several indices each depending on an earlier one, with
+the family's own element depending on all of them, declares and splits.** A relation between
+two vectors — `Append`, `Permutation` — has that shape, and it was refused outright until
+2026-10-28 with `the generated noConfusionD does not typecheck, which is a bug in Thena`.
+
+```
+data One   : ∀ (n : Nat) (as : Vec A n) -> Type₀                           -- fine
+data After : ∀ (n : Nat) (as : Vec A n) (m : Nat) -> Type₀                 -- fine
+data Pair2 : ∀ (n : Nat) (as : Vec A n) (bs : Vec A n) -> Type₀            -- fine
+data Both2 : ∀ (n : Nat) (as : Vec A n) (m : Nat) (bs : Vec A m) -> Type₀  -- fine
+data Three : ∀ (n : Nat) (as bs cs : Vec A n) -> Type₀                     -- fine, ~9 s
+data Four  : ∀ (n : Nat) (as bs cs ds : Vec A n) -> Type₀      -- does not finish
+```
+
+**What that last line is, and it is a cost rather than a rule.** The telescopic equality
+such a family generates grows by about eight times with each dependent index: the chain and
+the proof of it come to 47 KB together for one dependent index, 520 KB for two and 5 MB for
+three. Checking them costs 0.05 s, 0.7 s and 9 s. **A fourth does not finish**, so a
+relation over four vectors of one length is not usable today, and it stops rather than
+telling you so.
+
+**It was 25× before, and three did not finish.** What came down is duplication, not work:
+the pair a package travels in writes its second parameter six times and `J` writes its
+motive three, and both of those hold every projection read out of the package so far.
+Naming them with a `let` — which changes nothing a term *means* — took the three-index chain
+from 77 MB to 5 MB.
+
+**A level-polymorphic index type.** The equipment generated over an index telescope is
+stated at the datatype's own level joined with every index type's, and not at the
+datatype's alone. An index is not a constructor argument: the size restriction bounds an
+argument's type below the datatype's level, and nothing bounds an index's, so
+`data Only (A : Type) : ∀ (n : Nat) -> Vec A n -> Type` relates the two not at all. Stating
+the chain at the datatype's level refused that declaration outright unless some constructor
+argument happened to force the two levels together.
+
+**Two shapes are still refused, and both are a missing step of that chain rather than a
+missing equality.** An index whose type mentions an earlier index that was *abstracted
+outright* has no equation to transport along; and two mentioned indices that are themselves
+chained — `Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀` — need a motive
+abstracting the equality *proof* as well as its endpoint.
+
+**And splitting on such a family solves its chain.** A later equation of the chain is
+stated about an earlier one's *proof*, so the step that solves the earlier one removes the
+binder that proof is — and so it supplies `refl` for that proof as it goes, every transport
+along it computes away, and the next equation is an ordinary homogeneous one. For
+
+```
+data Q : ∀ (n : N) -> Fin n -> Type₀ where
+  mk : ∀ (n : N) (i : Fin n) -> Q n i
+
+tied : ∀ (m : N) (x : Q (s m) (fz m)) -> N
+tied = \ m x -> case x of { mk n i -> m }
+```
+
+both equations are discharged and the arm binds `n` and `i` and nothing else. Before, this
+was refused.
+
+**This is the paper's own `solution` step, and it is derived rather than assumed.** The
+step wants *based path induction* — a motive over the end that varies and the proof, with
+the other end fixed — while Thena's `Eq` has both ends as indices and so gives the
+symmetric Martin-Löf rule. The gap is closed by the singleton `Σ (y : I). y ≡ t`, which has
+one inhabitant up to `Eq`: the ordinary rule proves that, and carrying the goal along it is
+an ordinary transport. **No universe is spent**, which the obvious alternative — quantifying
+over the goal family — would have cost.
+
+**Taking a constructor equation *apart* crosses a chain too, and that is what makes a
+pinned index splittable.** For
+
+```
+data Small : ∀ (n : N) -> Fin n -> Type₀ where
+  isFz : ∀ (n : N) -> Small (s n) (fz n)
+
+tiedTwo : ∀ (m : N) (x : Small (s m) (fz m)) -> N
+tiedTwo = \ m x -> case x of { isFz n -> n }
+```
+
+the first equation is between two applications of `s`, so injectivity fires where
+`tied`'s solution did. It replaces that equation with one about `s`'s argument and drops
+its binder — and the second equation was stated about that binder. **The no-confusion
+lemma run backwards turns the new equation back into a proof of the old one, and its
+round-trip law says the proof it rebuilds is the one that was given**, so the second
+equation is restated along the rebuilt proof and the law carries the method back. Both
+definitions are generated per datatype beside `noConfusion` itself. Before, this was
+refused.
+
+**It crosses a chain for a constructor of one argument over a datatype with no indices,
+and keeps the equation otherwise.** More arguments put the new equations in a pair, and
+there is then no single proof to rebuild from; indices make the law an equation between
+packaged chains rather than between proofs.
+
+**And where both sides of an equation are the *same* constructor application, taking it
+apart is offered where deleting it is refused.** Deletion matches such an equation first —
+the two sides are literally the same term — and deletion is the one step that cannot cross
+a chain. But injectivity applies to that very equation, so it is tried instead of refusing,
+and no part of it is K: `s z = s z` is read apart to `z = z`, and that to nothing at all,
+because a constructor with no arguments states no equations. At that bottom the proof is
+rebuilt from the trivial chain and the same round-trip law carries the method back. For
+
+```
+data T : Fin (s (s z)) -> Type₀ where
+  mkT : ∀ (i : Fin (s z)) -> T (fs (s z) i)
+
+pinned : ∀ (x : T (fs (s z) (fz z))) -> Fin (s z)
+pinned = \ x -> case x of { mkT i -> i }
+```
+
+`T`'s index pins `fs`'s first argument to the same term on both sides, so the chain's first
+equation is `Eq N (s z) (s z)`. The split goes through and the arm computes with the
+argument it bound. Before, it was refused with UIP given as the reason.
+
+**And where the index *pins* a constructor argument, the equation is taken apart by
+projection, which states no equation about the pinned one at all.** Splitting
+
+```
+headAll : ∀ (A : Type₀) (P : A -> Type₀) (m : N) (a : A) (as : Vec A m)
+            (ps : All A P (s m) (vcons A m a as)) -> P a
+headAll = \ A P m a as ps -> case ps of { allNil -> ; allCons n b bs pb qs -> pb }
+```
+
+asks what `vcons A m b bs = vcons A m a as` tells you, and taking a constructor equation
+apart states one equation per argument — including the **length**, which is `m` on both
+sides because `vcons`'s own result type says the length is the index. That equation says
+nothing, and deleting it is K, so the split used to stop there. Now each argument's
+equation comes instead from a function out of the family *at that index*, so every
+equation is stated at the pinned type and none mentions another's proof — and the pinned
+argument, whose two sides are the same by typing, gets no equation at all. **Agda accepts
+this definition without K for the same reason**: its unifier never states an equation for
+a position the index determines.
+
+**One shape still cannot cross a chain, and that one is the K line itself.** An equation
+between a *variable* and itself that nothing pins, with a later equation stated about its
+proof, has no constructor head for injectivity to take apart whatever order the steps are
+tried in, and deleting it is UIP. A split that meets it is refused by name, with the
+position and what is missing.
+
+**A split also takes a constructor equation apart when the constructor's own arguments are
+dependent.** That is the no-confusion chain rather than the motive's one, and the two are
+independent: a datatype with no indices at all can have it. For
+
+```
+data Pack : Type₀ where
+  pack : ∀ (n : N) (i : Fin n) -> Pack
+
+data Holds : Pack -> Type₀ where
+  holds : ∀ (n : N) (i : Fin n) -> Holds (pack n i)
+
+depth : ∀ (m : N) (j : Fin m) (x : Holds (pack m j)) -> N
+depth = \ m j x -> case x of { holds n i -> s n }
+```
+
+the split's one equation is `Eq Pack (pack n i) (pack m j)`; taking it apart gives the two
+equations the lemma's dependent pair holds, the first solves `n` and supplies `refl` for its
+own proof, the transport in the second computes away and it solves `i`. Before, the
+equation was handed back undischarged and the arm did not typecheck.
+
+**The case where the constructor's result type pins the argument is the one the step above
+buys.** `fs n i` and `fs m j` inhabit one `Fin` only when `n` and `m` are the same term, so
+the chain's first equation is between two identical terms — deletion's shape, taken apart by
+injectivity since it is also two applications of one constructor. `pinned` above is that
+case end to end.
+
+**What this costs: nothing you can currently name in language metatheory.** The proofs K
+buys are proofs *about* equality proofs rather than proofs that use them. If one is ever
+needed, K is provable rather than assumed for any type with decidable equality (Hedberg),
+so it can be had for one datatype instead of assumed everywhere.
+
 ## The development calculus
 
 ### There are five components, not McBride's four — the fifth is `∀`
@@ -2198,6 +2641,716 @@ an `elim`" is a third positive test, the way `let`'s annotated and bare clauses
 are two. **It also removed a choice point from every name-headed application** —
 elaborating `succ y` used to record one, because a second clause matched and
 could be offered.
+
+### A recursive call *is* the induction hypothesis, and that is the whole termination story
+
+Write a function by splitting, and call it recursively:
+
+```
+double : Nat -> Nat
+double = \ n -> induction n of { zero -> zero ; succ m -> succ (succ (double m)) }
+```
+
+`double (succ (succ zero))` is four. There is no `fix`, no case tree and no
+termination checker — `double m` in the `succ` arm *is* the induction hypothesis
+the eliminator already supplies, and elaboration replaces it with that
+hypothesis.
+
+**So the guard is not a check, it is what can be said.** An eliminator makes the
+hypothesis available only at the smaller index, so there is nothing to verify:
+
+```
+loop = \ n -> induction n of { zero -> zero ; succ m -> loop zero }
+  no induction hypothesis is about this call, so it is not structurally
+  smaller: loop zero
+```
+
+`loop zero` names nothing that the `succ` method received a hypothesis about, so
+it does not elaborate. Coq checks a guard condition in the kernel; Thena has
+nothing to check, because an unguarded recursion cannot be written down.
+
+**How the call finds its hypothesis is worth knowing, because the obvious way
+does not work.** The name being defined is in scope in its own body as an
+ordinary assumption, and a pass over the elaborated term replaces each
+application of it. Which binder of a method is a hypothesis is read off the
+datatype — a method takes the constructor's arguments and then one hypothesis per
+*recursive* argument, in order — and a call resolves to the hypothesis about the
+argument it **names**. Types cannot decide it: in `double`'s `succ` arm both the
+pattern variable `m` and the hypothesis about it have type `Nat`, so a search by
+type would pick either and still typecheck.
+
+Three consequences a user meets:
+
+- **A call naming two recursive arguments is refused**, because which one it
+  recurses on is not written down. `g l r` in a `node l r` arm is that case.
+- **Where a split pins an index, the arm's hypotheses are guarded by an equation
+  and no call resolves there.** That is not a restriction being imposed: an
+  inversion lemma's hypotheses are genuinely unusable, which is why the ones
+  written by hand are bound and ignored.
+- **A premise bound before the split is fixed, and the recursion may pass it but
+  not vary it.** The motive quantifies what the split generalises and what it
+  refines, and nothing else — so a premise already introduced stays at the one
+  value it had, and the hypothesis is the statement at that value. Passing it is
+  free, and the argument is simply dropped:
+
+  ```
+  size : ∀ (t : Tr) -> Ok t -> Tr -> Nat
+  size = \ t d u -> induction d of
+    { okLeaf -> zero ; okNode a b da db -> succ (size a da u) }
+  ```
+
+  Varying it is not the hypothesis, and says so:
+
+  ```
+  size2 = \ t d u -> induction d of
+    { okLeaf -> zero ; okNode a b da db -> succ (size2 a da (node u u)) }
+    the split fixed u and this call passes node u u, so it is not the
+    induction hypothesis — a premise the induction varies is bound inside
+    the arm and not before the split: size2 a da (node u u)
+  ```
+
+  **Bind it inside the arm and it varies freely**, because the motive then
+  quantifies it and the hypothesis takes it:
+
+  ```
+  size3 = \ t d -> induction d of
+    { okLeaf -> \ u -> zero
+    ; okNode a b da db -> \ u -> succ (size3 a da (node u u)) }
+  ```
+
+  **And a split inside the arm refines such a premise like any other name**, so
+  the call spells it as what the arm made it — which is the same thing, the
+  premise being gone from scope there:
+
+  ```
+  size4 : ∀ (t : Tr) -> Ok t -> Tr -> Nat
+  size4 = \ t d u -> induction d of
+    { okLeaf -> zero
+    ; okNode a b da db -> case u of
+        { leaf -> succ (size4 a da leaf)
+        ; node l r -> succ (size4 a da (node l r)) } }
+  ```
+
+  Writing `u` in either arm says the same, because the split has already made it
+  that constructor. **Naming a different one is still refused**, and that is
+  where it has to be said: the premise carries no equation, so nothing later
+  would notice that a call in the `leaf` arm claims the hypothesis at a `node`.
+
+  This is the one thing about an `induction` that the *shape* of the proof
+  decides rather than its statement, and it is why a lemma that strengthens its
+  own hypothesis — `chain n c`'s distinctness, where the recursion is at `c` with
+  one more prime — writes that premise to the right of the split.
+
+### A split whose equation has no solution hands you the equation, and says which one
+
+Splitting a value asks whether the constructor's indices can be made equal to the
+ones the thing you are splitting has. Thena discharges such a question by
+substituting one side for the other, by discriminating two different
+constructors, or by reading a constructor apart — and where the index is built by
+a function that is not injective, none of those applies and none ever could:
+
+```
+data Cat : String -> Type₀ where
+  mk : forall (a : String) (b : String) -> Cat (appendString a b)
+
+pick : forall (x : String) (y : String) (p : Cat (appendString x y)) -> String
+pick = \ x y p -> case p of { mk a b -> a }
+```
+
+`appendString a b` and `appendString x y` can be the same string without `a` and
+`x` being the same — `"ab"` then `"c"` is `"a"` then `"bc"` — so nothing can
+conclude `a = x`.
+
+**The split is still offered, and the equation becomes a hypothesis of the arm.**
+It is true where you stand, so taking it costs one binder and the proof goes
+through:
+
+```
+pick = \ x y p -> case p of { mk a b -> \ q -> a }
+```
+
+**Refusing the split instead would withdraw that proof**, which is why Thena
+keeps the equation where the standard presentation reports a failure. An arm that
+does not take it is refused, and the refusal names the equation it owes:
+
+```
+stuck: String and Eq {0} String (appendString a b) (appendString x y) -> String
+       cannot be made equal
+  they differ by one argument, which the shorter side has to take first:
+  Eq {0} String (appendString a b) (appendString x y)
+```
+
+The second line is said of any two types that differ by one argument, so an
+under-applied term says it too.
+
+**And writing no arm, or an arm with no body, says the same thing from the other
+side.** Leaving a case out is the claim that it cannot arise; this one can, and
+the refusal says what keeps it alive:
+
+```
+pick = \ x y p -> case p of { }
+  stuck: this case did not vanish: it keeps
+         Eq {0} String (appendString a b) (appendString x y),
+         which no transition can discharge, so there is something to prove here
+```
+
+**It does not say which repair**, because the same fact is reported where no arm
+was written, where an arm has no body, and where no arms were written at all —
+what to change differs in each and you know which you wrote, while what the
+system knows is only that the case is live.
+
+### Dot patterns are optional here, because we run the eliminator and not the clause
+
+When a split determines one of a constructor's arguments, that argument has no
+binder left in the case it produces. Splitting `v : Vec A (succ n)` makes `vcons`'s
+own length equal to `n`, so
+
+```
+vcons : ∀ (k : Nat) (a : A) (as : Vec A k) -> Vec A (succ k)
+```
+
+yields a case binding two arguments, not three. A reader who knows Agda will expect
+to have to write `.n` there, and to be *required* to.
+
+**Thena lets you write a name instead, and binds it as a definition.** Both spellings
+exist; the dot is a way to say more, never an obligation.
+
+**The reason is that the requirement protects something Thena does not have.**
+Inaccessible terms — Agda's dot patterns — were introduced to keep a *left-hand side*
+matchable: a matcher needs its pattern linear in the variables it binds, and
+specialisation naturally wants one variable in two positions. Marking the position
+inaccessible makes it bind nothing, and linearity survives. In the literature those
+marks are inserted *by the translation*; requiring the programmer to write them is a
+separate choice.
+
+Thena has no left-hand side to keep linear. `induction t of { … }` elaborates to an
+application of the datatype's eliminator, and the definition computes by that
+eliminator's reduction rule:
+
+```
+pred = \ n -> induction n of { zero -> zero ; succ m -> m }
+  elaborates to   elim Nat () (λ target -> Nat) (zeroMethod succMethod) () n
+  and  pred (succ (succ zero))  reduces to  succ zero
+```
+
+There is no matcher in that term, so nothing needs to be linear and nothing has to be
+marked.
+
+**Nor does the determined fact have to be carried.** The transition that forces the
+argument eliminates it by substitution, so the case is handed types already written in
+the outer names — the sub-derivations of an inverted typing judgment have type
+`Has m …`, not `Has m1 …`. And where you do name the position, the name is a
+definition, so the equality is *definitional*: `m1` and `m` are convertible, and `refl`
+proves `m1 = m` with no transport.
+
+**What is given up is a check, not an ability.** With dots required, the mark is an
+assertion the system verifies. Without them, the same text means a binder or a
+definition depending on an inference you cannot see, and changing a lemma's statement
+can silently change which. The answer to that is the dot, written where you want the
+check — and, later, an editor that can say it about the arm your cursor is in. **Loading a
+file says nothing about it**, deliberately: a line per determined position, over a file of
+fifty theorems, is noise rather than information.
+
+**So the dot is the check, written where you want it.** Four things are legal in a
+determined position and all four mean something different:
+
+```
+case xs of { vcons n  a as -> … }   -- n is a DEFINITION equal to the forced term
+case xs of { vcons _  a as -> … }   -- ask for nothing
+case xs of { vcons .n a as -> … }   -- ASSERT it is determined, and to n
+case xs of { vcons ._ a as -> … }   -- assert it is determined, decline to say to what
+```
+
+A dot binds nothing. The term after it is an ordinary term — `.n` for a name,
+`.(succ n)` for anything larger — elaborated at the type the position has and then
+unified with the term the equation forced it to. So the type is checked as well as the
+value: `.true` where a `Nat` was determined is refused before the comparison is
+reached. And because a placeholder elaborates to a hole that unification solves, `._`
+costs nothing beyond the assertion it makes.
+
+**A dot on a position nothing determined is refused.** That is the assertion failing,
+and it is the whole of what the notation buys: splitting a `Vec A n` with `n` a plain
+variable generalises it and leaves `vcons`'s own length a genuine binder, so there is
+nothing there to assert. `examples/dot-patterns.thena` has all of it, the refusals
+included.
+
+**What a dot cannot do is destructure.** A position can be determined to a compound
+term — splitting `Vec A (succ (succ n))` determines `vcons`'s length to `succ n` — and
+either spelling can name it or ignore it; an inaccessible position binds nothing, so
+there is no sub-pattern inside one. That is a refusal under both spellings alike.
+
+### A case that cannot happen is an arm with no body, and there is no `impossible`
+
+Splitting a `Vec A (succ n)` leaves no `vnil` case: `succ n = zero` is a conflict, so
+that method is discharged by the conflict and there is nothing to prove. Agda has you
+write an absurd pattern; Idris has you write `impossible`. **Thena has you write the arm
+and stop at the arrow.**
+
+```
+vtail : forall (A : Type₀) (n : Nat) -> Vec A (succ n) -> Vec A n
+vtail = \ A n v -> induction v of { vnil -> ; vcons k a as -> as }
+```
+
+The whole split may also be written with no arms at all — `induction d of { }` — which
+is how the inversion lemmas in `examples/canonical.thena` are written, and **an empty
+arm is that same notion for one case rather than for all of them.** A keyword would have
+been a second spelling for something the syntax could already say.
+
+**And it would have spent the name.** A tactic called `impossible` — one that takes a
+case you believe cannot arise and finds the contradiction for you — is wanted, and a
+tactic in Thena is an ordinary rule whose name is an ordinary identifier. One lexer
+serves the surface and the rule language, so a word reserved for `induction … of` is a
+word no rule can be called.
+
+**Writing a body there is a refusal, not a redundancy.** The case being gone is
+something the system has a proof of, so a term written in that arm is a claim that the
+case can arise, against that proof. The converse is a refusal too: an empty arm for a
+case that *did* survive is refused, so believing a case impossible when the system
+could not discharge it is something you find out at the split. **What the refusal says
+today is only that the arm needs a body**; it does not hand you the method, and
+improving that is open work.
+
+**Underneath it is one law — every arm you wrote was asked for.** Elaboration walks the
+datatype's constructors asking for an arm for each, and the law is the other direction.
+It is what refuses an arm for a case that vanished, an arm headed by a constructor of
+some other datatype, and a second arm for a constructor that already has one — three
+mistakes, one rule, and nothing in the system has to tell them apart.
+
+### A split refines variables bound before it, where it has to and not otherwise
+
+A split's motive abstracts the *indices* of the family, so splitting `e : Ev (s m)`
+abstracts `s m` — not `m`. On its own that leaves `m` fixed, and a goal about `m` rather
+than about `s m` has nothing for the motive to abstract. **So where it has to, the motive
+also quantifies a fresh copy of the outside variable**, states the equation about the
+copy, and the use site passes the variable itself together with `refl`. The copy is a
+binder the elaborator introduced, so the specialiser can solve it; the variable stays
+where it was. This is all that is needed:
+
+```
+refined : forall (m : N) (e : Ev (s m)) -> IsSucc m
+refined = \ m e -> case e of { evs n en -> isucc n }
+```
+
+`evs n en` forces `m`'s copy to be `s n`, the goal arrives as `IsSucc (s n)`, and
+`isucc n` is the arm. It computes, too: `refined (s z) (evs z evz)` is `isucc z` by `refl`.
+
+**A hypothesis about a refined variable comes with it**, because a hypothesis whose type
+mentions a refined variable is refined too — otherwise the arm would hold a hypothesis
+about something that no longer means what it meant. Inside the arm it arrives under its
+own name:
+
+```
+usesHyp : forall (m : N) (h : Ev m) (e : Ev (s m)) -> IsSucc m
+usesHyp = \ m h e -> case e of { evs n en -> isucc n }
+```
+
+**AND "WHERE IT HAS TO" IS DECIDED BY LOOKING, POSITION BY POSITION.** Compare the rule's
+own index with the scrutinee's. If the rule's side is one of the **rule's own variables** —
+`eSucc c1` against `succ p` — then that variable is the one that moves, the equation is
+solved with no copy involved, and nothing is generalised. Only where the rule's side has
+something else facing a bare outside variable — `eIfTrue`'s `true` against `p` — is a copy
+the only thing a solution can reach, and only there is one made.
+
+**That is not an optimisation.** Generalising where it was not needed costs real proofs,
+because the copy is quantified *after* the rule's own binders: a rule variable that would
+have been solved to a term mentioning the copy cannot be, since that points backwards, and
+the equation is kept instead. Making a copy only where nothing else will do is what keeps
+both kinds of case working at once.
+
+**A STATEMENT ABOUT THE THING YOU SPLIT IS REFINED, GOAL AND PREMISES TOGETHER.** The
+ordinary dependent statement — *here is a thing, here is a fact about the thing* — splits:
+
+```
+data L : Type₀ where { ln : L ; lc : N -> L -> L }
+data P : L -> Type₀ where { mkP : forall (l : L) -> P l }
+
+bothWays : forall (l : L) (q : P l) -> P l
+bothWays = \ l q -> case l of { ln -> mkP ln ; lc a as -> q }
+```
+
+The `ln` arm is asked for `P ln`, not for `P l`, and `q` there is a `P ln`. Both halves
+have to move at once: refining the goal alone would leave the arm holding a fact about
+`l`, which inside the arm means `ln` and so can no longer be named.
+
+**Unlike an index, the thing you split on is refined everywhere it appears and never
+leaves an equation behind** — it is the subject of the elimination, so in each arm it
+simply *is* that arm's constructor. The looking-position-by-position rule above is about
+indices only; a premise mentioning the subject is always carried.
+
+**BUT A SPLIT GENERALISES WHOLE PREMISES, AND NEVER A PART OF AN INDEX.** This is the one
+place where a hand-written eliminator can still state a motive a split cannot, and a proof
+that needs it says so in its own statement:
+
+```
+-- the induction varies the Δ INSIDE the context, so the context and the
+-- equation are arguments — which is the motive, written down
+tyRebindAt : forall (G : Ctx) (Xn : String) (A : Ty) (B : Ty) (C : Ctx) (T : Ty)
+               (h : ty C T) (D : Ctx) (e : Eq Ctx C (append (bindTy G Xn A) D))
+               -> ty (append (bindTy G Xn B) D) T
+
+tyRebind = \ G Xn A B D T h ->
+  tyRebindAt G Xn A B (append (bindTy G Xn A) D) T h D
+    (refl Ctx (append (bindTy G Xn A) D))
+```
+
+`examples/poplmark/03-wellformed.thena` and `06-transitivity.thena` each have exactly one
+lemma of that shape, and the wrapper means no caller sees it. **Where the index IS a
+variable there is nothing to say**: the split abstracts it, and `examples/progress.thena`
+is made of that case.
+
+**AND A PREMISE ABOUT AN INDEX IS CARRIED TOO.** The position-by-position rule decides
+whether the *index* gets a copy, which is a question about what a method can be stated at;
+whether an *arm* can use a fact you already have is a different question, and the answer is
+the same as for the subject:
+
+```
+h : forall (a : String) (c : String) -> R a c -> Eq String a c -> R c a
+h = \ a c p q -> case q of { refl u -> p }
+```
+
+Splitting the equation makes `a` and `c` the same `u`, so `p` is an `R u u` and it is the
+answer. Nothing demands a copy of either index — `refl`'s index is its own argument at both
+positions — so until MS9 `p` was left standing at `R a c` beside an arm whose subject was
+`u`, and the lemma could not be written at all.
+
+**AND THE SCRUTINEE ITSELF IS ONE OF THE NAMES THAT MEANS THE REFINED THING.** Inside an
+arm the thing being split *is* the constructor applied to that arm's own variables, so the
+name you gave it means that:
+
+```
+p19 : forall (U : Ty) (d : D U) -> D U
+p19 = \ U d -> case d of { mk V -> d }
+```
+
+`d` in the arm is `mk V`, and the proof computes. Writing `mk V` there instead is the same
+proof, which is the point: which positions a split refined, and under which names, is
+elaboration's business and not something the author should have to spell differently.
+
+**A recursion across such a split is written as an ordinary recursive call, whatever the
+split had to generalise** — one index tied or several, a premise introduced before the
+subject or after it, a premise the recursion varies or one it does not. The induction
+hypothesis is reached by calling the function being defined; nothing in an arm binds one
+or names one.
+
+**A RECURSIVE CALL MAY BE WRITTEN INSIDE A SPLIT THAT GENERALISES.** A split that
+generalises makes each case prove something *more general* than the goal it came from — the
+case is about a fresh copy of the subject — so the hypothesis the case has to use is the
+copy of the enclosing arm's, which the split quantified along with everything else whose
+type mentions the subject. The recursion check follows that: a call inside such an arm is
+tied to the copy, and the copy is an unguarded premise of the method, so no termination
+argument is spent.
+
+**AND NOTHING IN THE ARM SAYS A SPLIT GENERALISED.** A name the split refined means the
+refined thing, whether the refinement came from a surviving copy or from one an equation
+solved outright. Where the case solves the copy of an outside variable — `eIf`'s own `c1`
+becomes the copy of `p` — the outside name is bound in the arm as a definition equal to
+that term, so the arm is written exactly as it would be if nothing had been copied:
+
+```
+; eIf p p' a b sr -> \ u s -> case s of
+    { …
+    ; eIf c1 c1' c2 c3 sr2 -> cong Term Term (\ x -> ifthen x c2 c3) p' c1' (determinacy p p' sr c1' sr2) }
+```
+
+`p` there is the inner case's own subject and `sr` is the copy, refined to `Step p p'`,
+which is what makes the call typecheck with nothing transported. The `eSucc` arm, whose
+split generalises nothing, is written the same way — and that is the point, because an
+author has no way of knowing which of the two they are in.
+
+**AND THAT HOLDS WHERE NOTHING WAS COPIED AT ALL.** An index the scrutinee supplies as a
+plain variable that no other premise mentions needs no equation: the motive abstracts it
+outright, which already generalises everything that mentions it. Nothing is copied and
+nothing is solved there — and the author's name for it still means what the case made of
+it:
+
+```
+indexIsRefined : forall (m : N) (e : Ev m) -> Eq N m m
+indexIsRefined = \ m e -> case e of { evz -> refl N m ; evs n en -> refl N m }
+```
+
+`m` is `Ev m`'s index, and one `refl N m` answers both arms because in the first it is `z`
+and in the second it is `s (s n)`. The same holds when the index is the constructor's own
+argument: splitting a `d : D m` on `mk k` leaves `m` meaning `k`, and `mk m` is the same
+term as `mk k`.
+
+**Which positions a split copied, and which copies it solved, is elaboration's business.**
+Elaboration is compilation: nobody should write a proof differently because of how it is
+compiled. **Agda and Idris show none of it either**, because a clause's whole left-hand
+side is one unification problem rather than one scrutinee with everything to its left
+fixed.
+
+**A RECURSION MAY ALSO VARY A PREMISE THE SPLIT DID NOT SPLIT ON.** A proof by induction
+on one premise may recurse at a different value of another, and nothing has to be said:
+
+```
+varies : forall (n : N) (x : A n) (u : N) (f : F n u) -> N
+varies = \ n x u f -> induction x of
+  { az -> z ; as k p -> case f of { fs j m r -> s (varies k p m r) } }
+```
+
+The induction is on `x`, and the call recurses at `m` rather than at `u`. What makes it
+work is that the split generalises `u` along with `f`, because `f`'s type mentions it — a
+copy is only useful if it is a copy of everything it is about.
+
+**A RECURSION MAY SUPPLY A PREMISE THE SPLIT HAD TO GENERALISE.** Where the statement's own
+premises include one the split generalises, the recursive call says what it is at the
+smaller subject and nothing else changes:
+
+```
+takesPremise : forall (n : N) (x : A n) (e : Eq N n n) -> N
+takesPremise = \ n x e -> induction x of
+  { az -> z ; as k p -> s (takesPremise k p (refl N k)) }
+```
+
+`e` is generalised because its type mentions `n`, the target's index. The recursion is at
+`k`, so the premise it needs is `refl N k` and that is what is written. **Passing the arm's
+own `e` instead is refused**, and it should be: the split refined `e` to the copy at
+`s k`, which is not a premise about `k`.
+
+**AND WHERE YOU INTRODUCE A PREMISE IS NOT PART OF THE PROOF EITHER.** A statement says
+what the premises are, not the order a proof takes them in, so `\ n x u f ->` across the top
+and a `\ u f ->` inside each arm are the same proof and both load:
+
+```
+inside  = \ n x -> induction x of
+  { az -> \ u f -> z ; as k p -> \ u f -> case f of { fs j m r -> m } }
+outside = \ n x u -> induction x of
+  { az -> \ f -> z ; as k p -> \ f -> case f of { fs j m r -> m } }
+```
+
+Both are `forall (n : N) (x : A n) (u : N) (f : F n u) -> N`, and in both the inner split
+has to generalise the ambient `u` — `fs`'s own `s m` faces it and there is nothing on the
+rule's side to move. The second spelling was refused until MS9: the generalisation a nested
+split needed was cancelled by what the elaborator had left in scope for the arms before it,
+which is nothing a proof can see or plan around.
+
+**And where the family recurses at one index and concludes at another, the recursion is
+what asks for the copy — MS9.** No *arm* needs one from
+
+```
+data T : N -> Type₀ where
+  tv : forall (g : N) -> T g
+  tl : forall (g : N) (p : T (s g)) -> T g
+```
+
+because `tl` concludes at its own `g`, which the split solves away. But the induction
+hypothesis is the motive at the *premise's* index, `s g`, so a proof that varies a premise
+across the recursion
+
+```
+atTop : forall (g : N) (d : T g) (g1 : N) (inc : Inc g g1) -> N
+atTop = \ g d g1 inc -> induction d of
+  { tv g0 -> g1
+  ; tl g0 p -> atTop (s g0) p (s g1) (mkInc (s g0) (s g1)) }
+```
+
+gets a hypothesis constrained against the variable outside the split, which no call can
+satisfy. **So the same question is asked of each recursive premise's indices as of the
+constructor's conclusion**, and that is the whole rule — it demands nothing extra where
+the premise sits at one of the constructor's own arguments, which is why `vtail` over
+`Vec` still copies nothing. **Where you introduce a premise does not decide whether your
+proof loads**, and that is the property these rules exist to keep.
+
+**An arm can be written to take a leftover equation** — `evs n en -> \ q -> …` — and then
+transport by hand. It type-checks, and it is deliberately not how the examples are written:
+an arm whose right-hand side is a function of an equation you had no way to predict is
+elaboration showing through the surface, not a way to write proofs.
+`examples/determinacy-patterns.thena` has no such arm, and no `elim` either.
+
+### The hand-driven induction tactic does not generalise, and the generalising one has its own name
+
+*Decided 2026-10-22, built 2026-10-26.*
+
+The motive above is built by one function, and the surface's `induction … of` is not its
+only caller: `eliminate-core ⌜ t ⌝` at the prompt reaches the same construction and hands
+you one hole per case to fill in by hand. **A copy is free only where something solves
+it.** Elaborating a split runs `specialise` over every method, which solves each copy and
+drops its binder, so the arm never sees one. Driving the tactic by hand there is no
+specialiser, so every copy is a further argument to every method you write — and every
+later widening of *what a split generalises* lands on the proof scripts again.
+
+So there are two tactics, and the plain word is the plain construction:
+
+```
+eliminate-core ⌜ t ⌝                -- §3.7: the target and its indices, premises fixed
+eliminate-generalising-core ⌜ t ⌝   -- … and a fresh copy of the premises the indices mention
+```
+
+**Two rules and not one with a flag.** A rule says only what it is about, and these are
+about two motives; a `generalise?` argument would be a mode. Underneath, one function with
+one more parameter, exactly as `induction` and `case` are one function with a scheme
+parameter — nothing in `Core` or the kernel can tell any of the three results apart.
+
+**The generalising one is reachable by any rule**, not reserved to elaboration, because a
+construction that is right for one caller may be right for another; what it is not is the
+word a person reaches for first.
+
+**What it costs**: a hand-written method cannot refine a variable bound outside its split
+unless it asks for the generalising tactic. That is the behaviour the tactic path had
+before the generalising motive existed, and it is the right default — the surface language
+is where refinement is meant to come from for free.
+
+### The split has a spelling you type, and it hands you one goal per case
+
+*Decided and built 2026-10-28.*
+
+`eliminate-core` gives you the eliminator's methods, equations and all. **The split is a
+different thing and now has its own words**:
+
+```
+induction-core core`t`    -- one hole per case, inside that case's own binders
+case-core core`t`         -- the same, without the induction hypotheses
+```
+
+They run what the surface language runs — the generalising motive, then `specialise` over
+every method — and then, instead of elaborating an arm, they leave the method open. So
+each case's hole is already under that case's binders, the equations the split stated are
+already discharged, and what you write is the body of the arm:
+
+```
+thena spine> induction-core core`n`
+subgoals: zeroMethod, succMethod
+subgoals: zeroCase
+subgoals: succCase
+thena spine> goto-named "succCase1"
+thena spine> :where
+…
+context
+  n : Nat
+  u : Nat
+  ih : Eq {0} Nat (plus u zero) u
+  n1 = succ u : Nat
+type
+  Eq {0} Nat (plus (succ u) zero) (succ u)
+```
+
+Three things follow from it being the same mechanism. **A name bound outside the split
+means what the split refined it to**, so `n` is a definition — `succ u` — inside the step
+case. **A forced constructor argument is a definition too** rather than a binder, which is
+the same rule an arm gets. And **a case the split proves impossible is never posted**: its
+method is closed on the way past, so you are shown what is left to do and nothing else.
+
+**Where a constructor names its arguments, those are the names you get.** Where it does
+not — `succ : Nat -> Nat` writes a bare arrow — a name is minted, `u` for an argument and
+`ih` for the hypothesis about it, because a goal binding `_` is not usable. The written
+path never needed this: an arm names the arguments itself, and a recursive call finds its
+hypothesis without naming it.
+
+**What is still hand work** is navigation: each case is reached with `goto-named`, and the
+plumbing between a filled case and the finished proof is solved by hand. Focusing the next
+goal by itself is a separate thing and is not built.
+
+### `case` says the arm does not recurse, and the type is what says it
+
+```
+predC : Nat -> Nat
+predC = \ n -> case n of { zero -> zero ; succ m -> m }
+
+double : Nat -> Nat
+double = \ n -> induction n of { zero -> zero ; succ m -> succ (succ (double m)) }
+```
+
+Two words, one mechanism. `induction t of { … }` elaborates to the datatype's
+eliminator, whose every method is handed one inductive hypothesis per recursive
+argument. `case t of { … }` elaborates to the generated `caseNat` — the same
+eliminator with those hypotheses dropped — so a `case` arm has nothing to recurse
+with:
+
+```
+dblC = \ n -> case n of { zero -> zero ; succ m -> succ (succ (dblC m)) }
+  no induction hypothesis is about this call, so it is not structurally smaller: dblC m
+```
+
+**Nothing checks for that.** There is no rule anywhere that says a `case` arm may
+not recurse. The hypothesis is simply not in scope, so the call has nothing to tie
+to and is refused by the same mechanism that refuses a call at the wrong index
+under `induction`. Writing `case` is therefore a claim the type carries, not a
+comment: `examples/canonical.thena` is all `case`, because inversion never
+recurses, and `examples/progress.thena` has exactly one `induction` in it.
+
+**Everything else about the two is identical.** The same motive generalising the
+indices, the same equations recovering their specificity, the same forced
+positions, the same vanished cases. `case` over an indexed family forces a
+constructor argument exactly as `induction` does:
+
+```
+vtailC : ∀ (A : Type₀) (n : Nat) -> Vec A (succ n) -> Vec A n
+vtailC = \ A n v -> case v of { vcons k a as -> as }
+```
+
+**And the kernel cannot tell them apart**, which is the point of doing it this
+way. `caseNat` is an ordinary definition whose body is an `elim Nat` with a λ
+discarding each hypothesis, so it δ-unfolds to the elimination and is checked as
+one. Nothing was added to the core language, and a proof written either way is the
+same term up to unfolding.
+
+### Writing no arms is the claim that every case is impossible
+
+```
+trueNotNat : forall (d : HasType true nat) -> Empty
+trueNotNat = \ d -> induction d of { }
+```
+
+`HasType` has seven constructors, and none of them can have built this derivation:
+every one disagrees with `true` or with `nat`. So the split has nothing to answer,
+and writing no arms is how you say that. Each method is closed by its own
+conflicting equation and the proof is complete.
+
+**It is not a second form of split.** The same walk runs over the same methods,
+and the only thing the empty brace changes is that *every* method is now required
+to vanish. A datatype with no constructors — `case e of { }` at `e : Empty` —
+satisfies that by having no methods at all, which is how the two cases turned out
+to be one. A method that survives is refused by name:
+
+```
+oops = \ t n -> induction n of { }
+  no clause of case-must-vanish applies here      -- nvZero did not vanish
+```
+
+**`induction` and `case` mean the same thing here, and that is a consequence
+rather than a convenience.** The two words differ by whether a method carries
+inductive hypotheses; with no method surviving there is nothing for a hypothesis
+to be attached to, so there is nothing left for them to differ about.
+
+**One consequence worth knowing, and it is about universes rather than splitting.**
+A declaration's statement is level-polymorphic in any level it does not pin, and
+`Empty` is a family with a level. The seven-method proof pinned level 0 along the
+way, because it passed `Empty` to `absurd`, whose argument is declared at `Type₀`.
+The arm-less proof names nothing, so the lemma you get is the more general one:
+
+```
+trueNotNat {ℓ} : HasType true nat -> Empty {ℓ}
+```
+
+Both readings are lemmas you can use, and `trueNotNat {0}` is the old one. **Writing
+a shorter proof of the same signature can therefore give you a more general global**
+— worth knowing, and not a thing to work around.
+
+### The same lesson, one level on: a search must not be a choice point over the work
+
+`induction t of { … }` elaborates by walking a datatype's constructors against
+the method holes an elimination claimed, and for each one finding the arm the
+user wrote for it. The obvious shape is one rule that matches the constructor's
+name *and* elaborates that arm's body.
+
+**That shape loses every error the body produces.** With one name test and an
+ordering, both clauses of the search match whenever the names agree, so the
+engine keeps the other as an alternative; a body that then fails to elaborate
+backtracks into the search, which walks on through the remaining arms, runs out,
+and reports *itself*. A recursive call with nothing to resolve to, a pattern of
+the wrong arity and a missing arm all came back as the same sentence about the
+search.
+
+**So the search answers with the arm and does nothing else, and its two clauses
+are made mutually exclusive by a pair of complementary tests** — `same-name` and
+`different-name`, the way `let`'s annotated and bare clauses are two positive
+tests rather than a negation. The caller elaborates, and the caller's failure is
+its own. Each of those three now says what actually happened.
+
+**This is why the head language still has no negation and does not need one.**
+Every exclusive pair so far has been writable as two positive tests, and each
+time that has also removed a choice point the user would otherwise have been
+offered.
 
 **A rule body may be empty**, which it could not before. `E⟦_⟧` is *do nothing*:
 the hole is already there and unification is expected to find it. A clause that
@@ -2845,6 +3998,115 @@ that reach it from the root, so a click compiles to `goto-root` and then those
 moves — an ordinary program you could have typed, snapshotted and undoable like
 any line. Clicking the top of a development is `goto-root` on its own.
 
+### Every datatype generates `caseD` as well as `elimD`
+
+*Decided 2026-10-18.*
+
+`elimD` is induction: every method is handed one inductive hypothesis per
+recursive argument, whether it wants one or not. Analysing the cases of a term
+and *not* recursing on it is the other thing you do with a datatype, and through
+`elimD` you cannot ask for it — you bind the hypothesis and ignore it at every
+method. So a second definition is generated, the same scheme with those binders
+dropped:
+
+```
+thena spine> :elim Nat
+elim Nat : ∀ (P : Nat -> Type₀) -> P zero -> (∀ (x : Nat) -> P x -> P (succ x)) -> ∀ (target : Nat) -> P target
+thena spine> :show caseNat
+caseNat {ℓ} : ∀ (P : Nat -> Type ℓ) -> P zero -> (∀ (x : Nat) -> P (succ x)) -> ∀ (target : Nat) -> P target
+caseNat = λ P method method1 target -> elim Nat () P (method (λ x ih -> method1 x)) () target
+```
+
+So `pred` is `caseNat (λ t -> Nat) zero (λ m -> m)`, and the method for `succ`
+takes the predecessor and nothing else.
+
+**It is a definition and not a new kind of term.** Its body is an `elim D` whose
+methods are its own under a λ per hypothesis, so `caseD` δ-unfolds to an
+ordinary elimination, reduces like one and is checked like one. Nothing in the
+kernel can tell a case analysis from an induction, and `caseNat` and `elimNat`
+with the hypotheses ignored are the same term.
+
+**Its name is one more the declaration takes.** Generated names share your
+namespace, so declaring `Nat` when something called `caseNat` already exists is
+refused, exactly as it is for `elimNat` and for `noConfusionNat`.
+
+---
+
+### `specialise` discharges the equations an elimination hands you, and keeps the ones it cannot
+
+*Decided 2026-10-18.*
+
+Eliminating a family at specific indices gives you one method per constructor
+with the equations that recover those indices attached. Splitting `v : Vec A (succ n)`
+to prove `Vec A n` hands over
+
+```
+nilMethod  : Eq {0} Nat zero (succ n) -> Vec A n
+consMethod : ∀ (n1 : Nat) -> A -> Vec A n1
+           -> (Eq {0} Nat n1 (succ n) -> Vec A n)
+           -> Eq {0} Nat (succ n1) (succ n) -> Vec A n
+```
+
+and until now you discharged each one by hand, with a generated `noConfusion`
+and an `Empty` elimination for the branches that cannot occur and a transport
+for the ones that can. `specialise ‹constructor› ‹equations›` does it instead.
+At `nilMethod` it leaves **no subgoal at all** — `zero` against `succ n` cannot
+hold — and at `consMethod` it leaves
+
+```
+A -> Vec A n -> (Eq {0} Nat n (succ n) -> Vec A n) -> Vec A n
+```
+
+The binder `n1` is gone, because the equation determined it, and the vector is
+at `n` rather than at `n1` — which is exactly the coercion you were writing.
+
+**It is one instruction and not four**, for the same reason `prim-eliminate` is
+one: everything it does is term construction over a declaration, and a granular
+version would need a term-building sub-vocabulary that nothing else has asked
+for. What is *not* inside it is the choice of what to split, which is an
+ordinary rule — a wrong choice is a failed elaboration, while a wrong proof term
+would be a lie, and the second is the one the kernel has to be the judge of. So
+everything `specialise` builds is checked against the method it claims to prove
+before you are given it.
+
+**There are five transitions, and the fifth is what recognises a case you were
+right to leave out.** An equation of a term with itself goes; two different
+constructors close the method; the same constructor splits into its arguments; a
+binder the equation determines is substituted away; and — since 2026-10-27 — an
+equation between a term and something that *contains it structurally*, `Eq Nat m
+(succ m)`, closes the method too. Nothing inhabits such an equation, so the case
+it belongs to cannot arise.
+
+**So a correctly omitted case is accepted, and nothing is said about it.** `case`
+with empty braces, or an arm with no body, is how you write that the case cannot
+happen; before this, the equation survived, the method stayed open and the
+omission was refused. The proof is the generated acyclicity equipment above:
+`noCycleD` says the equation puts one side structurally below the other, the
+tuple it answers with holds `x ≢ x`, and reflexivity makes that an `Empty`. For
+
+```
+data Step : N -> N -> Type₀ where
+  down : ∀ (n : N) -> Step (s n) n
+
+noSelf : ∀ (n : N) (st : Step n n) -> Empty
+noSelf = \ n st -> case st of { }
+```
+
+the tied target asks for a number that is its own successor, and the braces are
+empty. `examples/omitted-cases.thena` is the same thing at four shapes. **A case
+that does arise is still refused**, by name, as it always was.
+
+**An equation it cannot simplify is kept, not refused.** When none of the five
+applies, the equation stays a hypothesis of the simplified method — that is what
+you were handed before, so the worst case is the behaviour this replaces.
+
+**`prim-eliminate` now answers with a number**: how many equations each of its
+methods carries. A method type is Π binders all the way down and does not say
+which of them are the equations, so `specialise` has to be told — and the
+elimination that stated them is the only thing that knows.
+
+---
+
 ---
 
 ## The REPL and the session
@@ -2922,12 +4184,11 @@ the loader.
 **succeed and say something**:
 
 ```
-thena spine> :load proof examples/canonical.thena
-module Canonical
-  declared Term
+thena spine> :load proof examples/stlc.thena
+module STLC
+  declared Ty
   ...
-warning: no noConfusionNV: nvSucc's argument 2 (n) has a type that depends on an
-  earlier argument, so its equation cannot be stated
+warning: in the grammar of LC, production vacuous: x binds in nothing
 ```
 
 Everything named as declared **is** declared — a warning is a remark about a
@@ -3817,6 +5078,39 @@ Every name position takes one: a λ or ∀ binder, a `let`, a claim, a guess, an
 
 **A level position needs no splice**: build the universe with `universe-at` and
 splice the term.
+
+### A variable that is definitionally another variable prints as that one
+
+*Decided 2026-10-29.*
+
+Elaboration parks every argument it has elaborated in a `=`-binding of the
+development, so a term you wrote arrives at a message with a name the elaborator
+minted standing where your variable stood. Writing `.(s q)` on a position the
+split determined to `p` used to be refused with
+
+```
+s a and p cannot be made equal
+```
+
+naming an `a` that is in no source file. **A context entry whose definiens is a
+bare variable now prints under the name that variable already has**, so the same
+refusal reads
+
+```
+s q and p cannot be made equal
+```
+
+This is a display name. Nothing about the term changes, every binding is still in
+the development, and `:where` still shows them.
+
+**It is one rule for every definition, not a rule about generated names.** A
+forced position you name yourself is a `=`-binding too — `vcons k hd tl` where the
+split determined `n` puts `k = n` in scope — and it prints as `n` for the same
+reason. The system cannot tell a binding it minted from one you asked for, and the
+alternative is a message that names neither.
+
+**It never prints a definition's body.** The collapse fires only where the
+definiens is a bare variable, so it replaces one name with another name.
 
 ## Building a frontend
 

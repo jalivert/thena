@@ -153,7 +153,7 @@ the level left to be worked out:
 thena spine> :infer Type₀
 Type₀ : Type₁
 thena spine> :infer Type
-Type : Type (suc ?ℓ2465)
+Type : Type (suc ?ℓ4695)
 ```
 
 `?ℓ229` is an unknown level. It is not a default and it is not zero — it is
@@ -185,8 +185,8 @@ of it writes that level in braces:
 
 ```
 thena spine> :show Eq
-data Eq {ℓ₈₈} (A : Type (ℓ₈₈)) : A -> A -> Type (ℓ₈₈) where
-  { refl : ∀ (a : A) -> Eq {ℓ₈₈} A a a }
+data Eq {ℓ₈₉} (A : Type (ℓ₈₉)) : A -> A -> Type (ℓ₈₉) where
+  { refl : ∀ (a : A) -> Eq {ℓ₈₉} A a a }
 ```
 
 So `Eq` on its own is not a term — `Eq {0} Nat x y` is. **Written on the
@@ -195,7 +195,7 @@ one unknown per parameter, and unification settles them.
 
 ```
 thena spine> :infer refl
-refl : ∀ (A : Type (?ℓ2472)) (a : A) -> Eq {?ℓ2472} A a a
+refl : ∀ (A : Type (?ℓ4702)) (a : A) -> Eq {?ℓ4702} A a a
 ```
 
 Written in the development calculus they are explicit, and **prenex** — a use
@@ -214,8 +214,8 @@ join:
 
 ```
 thena spine> :show And
-data And {ℓ₂₃₇ ℓ₂₃₈} (A : Type (ℓ₂₃₇)) (B : Type (ℓ₂₃₈)) : Type (ℓ₂₃₇ ⊔ ℓ₂₃₈) where
-  { both : A -> B -> And {ℓ₂₃₇ ℓ₂₃₈} A B }
+data And {ℓ₅₈₅ ℓ₅₈₆} (A : Type (ℓ₅₈₅)) (B : Type (ℓ₅₈₆)) : Type (ℓ₅₈₅ ⊔ ℓ₅₈₆) where
+  { both : A -> B -> And {ℓ₅₈₅ ℓ₅₈₆} A B }
 ```
 
 `⊔` is the one symbol that is printed and never written: the join is computed
@@ -310,8 +310,8 @@ constructors' own levels, and becomes a level parameter if nothing pins it:
 thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
-data Box {ℓ₂₅₁₉} (A : Type (ℓ₂₅₁₉)) : Type (ℓ₂₅₁₉) where
-  { box : A -> Box {ℓ₂₅₁₉} A }
+data Box {ℓ₄₉₁₀} (A : Type (ℓ₄₉₁₀)) : Type (ℓ₄₉₁₀) where
+  { box : A -> Box {ℓ₄₉₁₀} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
@@ -347,19 +347,33 @@ equal" and "constructors are injective" usable in a proof:
 
 ```
 thena spine> :show noConfusionNat
-noConfusionNat : ∀ (x : Nat) (y : Nat) -> Eq {0} Nat x y -> NoConfusionNat x y
-noConfusionNat = λ (x : Nat) (y : Nat) (e : Eq {0} Nat x y) -> elim Eq {0} …
+noConfusionNat : ∀ (x : Nat) (x' : Nat) -> Eq {0} Nat x x' -> NoConfusionNat x x'
+noConfusionNat = λ (u : Nat) (v : Nat) (q : Eq {0} Nat u v) -> elim Eq {0} …
 ```
 
 (`:show` prints the body too; it is one long line and is elided here.)
 
-Indexed families work too. Where a constructor's argument types depend on
-earlier arguments, the no-confusion lemma cannot be stated, and the system says
-so plainly rather than failing:
+Indexed families get one too, and there the lemma gives **each side its own
+indices**: a `Ladder x` and a `Ladder x'` are compared by a *chain* of equations
+— one between the indices, then one between the elements with the first
+transported along it — rather than by a single `Eq`. That is what lets the lemma
+be applied where the two sides are not visibly at the same index, which is what
+acyclicity needs. Where a family has no indices the chain is the one equation it
+always was, and the lemma reads exactly as `noConfusionNat` does above.
+
+The same chain is how an argument whose *type* mentions an earlier argument is
+handled: the later equation is stated after transporting along the earlier one,
+so every equation is still between two terms of one type.
 
 ```
-no noConfusionNV: nvSucc's argument p has a type that depends on an earlier argument, so its equation cannot be stated
+thena spine> data Ladder : Nat -> Type₀ where { base : Ladder zero ; step : ∀ (n : Nat) (r : Ladder n) -> Ladder (succ n) }
+declared Ladder
+thena spine> :infer noConfusionLadder
+noConfusionLadder : ∀ (x : Nat) (x1 : Ladder x) (x' : Nat) (x'1 : Ladder x') (q : Eq {0} Nat x x') -> Eq {0} (Ladder x') ((elim Eq {0} (Nat) (λ (u : Nat) (v : Nat) (w : Eq {0} Nat u v) -> Ladder u -> Ladder v) ((λ (a : Nat) (z : Ladder a) -> z)) (x x') q) x1) x'1 -> NoConfusionLadder x x1 x' x'1
 ```
+
+`DECISIONS.md`, *Thena does not assume K*, says what that buys and what it does
+not.
 
 ---
 
@@ -452,11 +466,11 @@ unknown becomes a parameter:
 
 ```
 thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
-proving idPoly : ∀ (A : Type (?ℓ2554)) -> A -> A
+proving idPoly : ∀ (A : Type (?ℓ5790)) -> A -> A
 thena spine> try-core ⌜ \ (A : Type) (a : A) -> a ⌝
 thena spine> solve
 thena spine> qed
-idPoly {ℓ₂₅₆₆} : ∀ (A : Type (ℓ₂₅₆₆)) -> A -> A   ∎
+idPoly {ℓ₅₈₀₂} : ∀ (A : Type (ℓ₅₈₀₂)) -> A -> A   ∎
 ```
 
 Sometimes one level is not enough, and the proof leaves a *relation* between two
@@ -465,11 +479,11 @@ before a `⊢`:
 
 ```
 thena spine> :theorem lift : Type -> Type
-proving lift : Type (?ℓ2568) -> Type (?ℓ2569)
+proving lift : Type (?ℓ5804) -> Type (?ℓ5805)
 thena spine> try-core ⌜ \ (x : Type) -> x ⌝
 thena spine> solve
 thena spine> qed
-lift {ℓ₂₅₇₇ ℓ₂₅₇₈} : (ℓ₂₅₇₇ ≤ ℓ₂₅₇₈) ⊢ Type (ℓ₂₅₇₇) -> Type (ℓ₂₅₇₈)   ∎
+lift {ℓ₅₈₁₃ ℓ₅₈₁₄} : (ℓ₅₈₁₃ ≤ ℓ₅₈₁₄) ⊢ Type (ℓ₅₈₁₃) -> Type (ℓ₅₈₁₄)   ∎
 ```
 
 Read it as *given `ℓ₂₃₈ ≤ ℓ₂₃₉`, this type*. A constraint that held at every
@@ -712,6 +726,98 @@ follow the target into the abstraction, because the induction it could give you
 there would be too weak to use. The workaround is the ordinary one — do not
 `intro` something you need generalised.
 
+There is a second induction tactic, `eliminate-generalising-core`, which does
+follow them: it proves the more general statement, over a fresh copy of every
+premise the target's indices mention, and applies it to the premises you have.
+That is what the surface language's `induction … of` and `case … of` are built
+on, and there the extra copies are solved away case by case so you never see
+them. Driving it by hand you do see them, as a further argument to every method
+you write — unless you ask for the split rather than for the eliminator, which
+is the next section.
+
+### One goal per case, with its binders already in scope
+
+`induction-core core`target`` is the same split the surface language writes,
+driven by hand. It posts one hole per case, and each hole is *inside* that
+case's own binders, with the equations the split stated already discharged. So
+you write the body of the arm and nothing else.
+
+(`core`…`` and `⌜ … ⌝` are the same fence, spelled two ways; the corners are on
+their way out.)
+
+```
+thena spine> :theorem plusZeroAgain : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
+proving plusZeroAgain : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
+thena spine> attack
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> induction-core core`n`
+subgoals: zeroMethod, succMethod
+subgoals: zeroCase
+subgoals: succCase
+```
+
+`zeroCase` and `succCase` are the two to prove. Walk into the step case and
+look at it:
+
+```
+thena spine> goto-named "succCase1"
+thena spine> :where
+focus
+  let ? succCase1 : Eq {0} Nat (plus (succ u) zero) (succ u) in
+path
+  root ▸ ≐ plusZeroAgain ▸ n ▸ zeroCase ▸ zeroMethod ▸ ≐ succCase ▸ u ▸ ih ▸ n1
+context
+  n : Nat
+  zeroCase : Eq {0} Nat (plus zero zero) zero
+  zeroMethod : Eq {0} Nat (plus zero zero) zero
+  u : Nat
+  ih : Eq {0} Nat (plus u zero) u
+  n1 = succ u : Nat
+type
+  Eq {0} Nat (plus (succ u) zero) (succ u)
+```
+
+Three things to notice. The constructor's argument is `u` and the induction
+hypothesis is `ih`, both in scope as ordinary assumptions — `succ`'s argument
+has no name in the declaration, so one was minted; where a constructor does name
+its arguments, those are the names you get. `n`, the variable the proof was
+about, is a *definition* inside this case: `succ u`, which is what the split
+refined it to. And the goal is the one you would expect, with no equation left
+to discharge, where `eliminate-core` would have handed you the method type and
+left the lambda to you.
+
+Fill both cases and finish:
+
+```
+thena spine> try-core core`congSucc {0 0} (plus u zero) u ih`
+thena spine> solve
+thena spine> goto-named "succCase"
+thena spine> solve
+thena spine> goto-named "zeroCase1"
+thena spine> try-core core`refl {0} Nat zero`
+thena spine> solve
+thena spine> goto-named "zeroCase"
+thena spine> solve
+thena spine> goto-named "zeroMethod"
+thena spine> solve
+thena spine> goto-named "succMethod"
+thena spine> solve
+thena spine> goto-named "plusZeroAgain1"
+thena spine> solve
+thena spine> goto-root
+thena spine> solve
+thena spine> qed
+plusZeroAgain : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n   ∎
+```
+
+Each case can be proved in any order, and `goto-named` is how you get to one:
+the holes keep their names for as long as they are open. `case-core` is the
+other word — the same thing without the induction hypotheses, for a proof that
+takes a value apart rather than recursing on it. A case the split proves
+impossible is not posted at all; you are shown only what is left to do.
+
 ---
 
 ## 8. The rule engine
@@ -732,6 +838,76 @@ prove
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
+no-nesting []
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
+reverse-onto [] ‹acc›
+reverse-onto [x, ...xs] ‹acc›
+apply-all ‹f› []
+apply-all ‹f› [x, ...xs]
+instantiate-with ‹f› ‹vs›
+name-or-stem ‹n› ‹stem›
+name-or-stem ‹n› ‹stem›
+intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
+intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+bind-friendlies [] ‹vs› ‹ds›
+bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
+bind-solved [] ‹k›
+bind-solved [(n, v), ...ds] ‹k›
+same-length [] []
+same-length [p, ...ps] [n, ...ns]
+arm-for ‹t› ‹c›
+arm-for ‹t› ‹c›
+pick ‹w› ‹c› ‹p› ‹b› ‹r›
+pick ‹w› ‹c› ‹p› ‹b› ‹r›
+arm-needs-body ‹k› (some b)
+arm-needs-body ‹k› none
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
+vanished-case-takes-no-body none
+vanished-case-takes-no-body (some (p, none))
+case-must-vanish none
+case-must-vanish (some h)
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
+one-case ‹t› ‹c› none ‹bs› ‹fs›
+one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
+arm-must-be-for-this-datatype ‹a› ‹b›
+arms-are-for-this-datatype ‹t› ‹d›
+arms-are-for-this-datatype ‹t› ‹d›
+one-arm-per-constructor ‹a› ‹b›
+arm-not-repeated ‹w› ‹t›
+arm-not-repeated ‹w› ‹t›
+arms-are-distinct ‹t›
+arms-are-distinct ‹t›
+split-cases ‹t› [] [] ‹m›
+split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
+split-over ‹t› ‹cs› (hs, m)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
+split-elaborate ‹t›
+argument-patterns [] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-pattern ‹b›
+open-case ‹mh› none ‹bs› ‹fs›
+open-case ‹mh› (some sub) ‹bs› ‹fs›
+split-holes [] [] ‹m›
+split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
+split-holes-over ‹cs› (hs, m)
+with-hypotheses []
+with-hypotheses [c, ...cs]
+without-hypotheses []
+without-hypotheses [c, ...cs]
 run-block ‹t›
 intro-binders ‹t› ‹k›
 intro-binders ‹t› ‹k›
@@ -740,7 +916,7 @@ intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
-chose 2784: intro
+chose 5340: intro
 ```
 
 Three rules matched, so the engine reports which one it took and leaves a
@@ -748,7 +924,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-2784  intro   untried: solve, regret, prove
+5340  intro   untried: solve, regret, prove
 ```
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
@@ -757,13 +933,13 @@ undoes the whole thing:
 
 ```
 thena spine> retry
-retrying 2784: solve
-backtracking to 2784: regret
+retrying 5340: solve
+backtracking to 5340: regret
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-2784  regret   untried: prove
+5340  regret   untried: prove
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -784,11 +960,11 @@ line left is yours to reach with `retry`, and nothing reaches it for you:
 thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
 proving t : ∀ (A : Type₀) -> A -> A
 thena spine> prove
-chose 2460: attack
+chose 4690: attack
 thena spine> regret
 thena spine> back
 stuck: already at the root
-  undoing that would backtrack to 2460, which was chosen before this line — retry 2460 to take it
+  undoing that would backtrack to 4690, which was chosen before this line — retry 4690 to take it
 ```
 
 `regret` took the guess back off and `back` had nothing left to pop. Without the
@@ -816,6 +992,7 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+eliminate-generalising-core ‹t›
 prove
 …
 ```
@@ -872,26 +1049,26 @@ pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ2487)
+  l = Type (?ℓ4878)
 stack
   call, 14 instruction(s) to resume
-  call, 6 instruction(s) to resume
-  call, 148 instruction(s) to resume (returned)
+  call, 8 instruction(s) to resume
+  call, 178 instruction(s) to resume (returned)
 thena spine> :run 6
 pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ2489)
+  l = Type (?ℓ4880)
 stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
-  call, 6 instruction(s) to resume
-  call, 148 instruction(s) to resume (returned)
+  call, 8 instruction(s) to resume
+  call, 178 instruction(s) to resume (returned)
 thena spine> :run
-solved: ?ℓ2485
-solved: ?ℓ2487
-solved: ?ℓ2489
+solved: ?ℓ4876
+solved: ?ℓ4878
+solved: ?ℓ4880
 already equal
 thena spine> :step off
 ```
@@ -1324,6 +1501,9 @@ language and elaborated on load.
 | `assume ⌜‹S›⌝` / `claim ⌜‹S›⌝` | the same, asking for the name |
 | `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve by unification |
 | `eliminate-core ⌜ target ⌝` | induction |
+| `eliminate-generalising-core ⌜ target ⌝` | the same, and it generalises the premises the target's indices mention |
+| `induction-core core`target`` | the split: one hole per case, inside that case's own binders |
+| `case-core core`target`` | the same without the induction hypotheses |
 | `reduce` | reduce the focused term in place |
 | `along` `into` `back` | move on the chain |
 | `cross type` / `cross val` | move into a term |

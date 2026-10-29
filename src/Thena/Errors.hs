@@ -50,6 +50,9 @@ module Thena.Errors
 
     -- * The elimination tactic (§3.7)
   , ElimError (..)
+  , SpecialiseError (..)
+  , ChainBlocker (..)
+  , RecursionError (..)
 
     -- * Reading a term (§2.5, §2.6) — moved here at phase 17b
   , SyntaxError (..)
@@ -83,12 +86,12 @@ import Thena.Syntax.Parser (ParseError)
 -- had a @NoEquality@, and a grammar warning should not import a declaration
 -- module to raise one.
 data Warning
-  = NoConfusionSkipped GlobalName Skipped
-    -- ^ the datatype went in, and its no-confusion equipment did not. **The
-    -- one diagnostic the system already had and could not report during a
-    -- module load**, because a load discards the op-level messages a prompt
-    -- shows — which is what phase 98 was written to fix.
-  | VacuousBinder BlockKind String String String
+  -- **@NoConfusionSkipped@ was removed at MS9 phase 212**, with the only
+  -- 'Skipped' that was ever about the declaration the user wrote. A datatype no
+  -- longer goes in without its no-confusion equipment on account of its own
+  -- shape, and the two environment cases left were silent already, so nothing
+  -- could produce this.
+  = VacuousBinder BlockKind String String String
     -- ^ the block, the production, and a binder declared @as binders@ that no
     -- @[…]@ mentions (@ms6\/SPEC.md@ §4.5, MS6 phase 101). A vacuous binder is
     -- allowed — that is why it can be declared — and worth saying.
@@ -140,29 +143,20 @@ data Skipped
     -- why it is silent.
   | NoProducts
     -- ^ a prelude type this datatype's own table would be written out of —
-    -- @And@, @Unit@ or @Empty@ — is missing or misshapen. Silent for
+    -- @DPair@, @Unit@ or @Empty@ — is missing or misshapen. Silent for
     -- 'NoEqInScope'\'s reason and arising in the same situation, a prelude-free
     -- script, which is why the two are tested together.
     --
     -- **Asked per datatype, not once**, and that is load-bearing rather than
-    -- fastidious: the prelude declares @Eq@ before @And@, so a blanket
+    -- fastidious: the prelude declares @Eq@ before @DPair@, so a blanket
     -- precondition would refuse @NoConfusionEq@ — which phase 14 generated —
     -- for a name it was never going to write. See 'productsInScope'.
-  | DependentArguments GlobalName Int Ident
-    -- ^ this constructor's argument telescope is dependent, so the equation for
-    -- the named argument is ill-typed. @cons : (n : Nat) (a : A) (as : Vec A n)
-    -- -> Vec A (succ n)@ wants @Eq (Vec A n) as as'@ while @as' : Vec A n'@.
-    -- An MS1 limit and not unsoundness — the way out is a transported chain of
-    -- equations, which nothing in MS1 wants (@AGENDA.md@).
-    --
-    -- **The position is carried as well as the name** (2026-09-13), because the
-    -- name alone does not identify the argument: an anonymous arrow argument is
-    -- stored as @Ident \"x\"@ deliberately (@Syntax.Resolve@\'s @RawArrow@ case
-    -- says why, and the printer freshens a repeat), so a constructor written
-    -- @hop : ∀ (x y z : A) -> Chain A x y -> Chain A y z -> Chain A x z@ has
-    -- /three/ arguments called @x@ and this said only *argument x*.
-    -- 'Thena.Errors.IndexTypeDepends' — the same condition one telescope over —
-    -- has carried its position since it was written.
+  -- **A third case, @DependentArguments@, was removed at MS9 phase 212.** A
+  -- constructor whose argument telescope is dependent used to be declined — it
+  -- wanted @Eq (Vec A n) as as'@ where @as' : Vec A n'@ — and that is now the
+  -- transported chain of equations @Thena.Global.NoConfusion.telescopic@
+  -- states, so nothing is declined for it and no datatype is without a
+  -- no-confusion lemma on account of its telescope.
   deriving (Eq, Show)
 
 -- | Why an operation failed. Structured, never a string (§12 invariant 2).
@@ -352,6 +346,13 @@ data FailReason
   | CannotEliminate ElimError
     -- ^ the elimination tactic could not build a scheme for the target it was
     -- given (§3.7, phase 17)
+  | CannotSpecialise SpecialiseError
+  | CannotTieRecursion RecursionError
+    -- ^ a recursive call could not be tied to an induction hypothesis (MS9
+    -- phase 186). 'RecursionError' says why
+    -- ^ specialisation by unification could not run on the method it was given
+    -- (MS9 phase 177). Not raised when a transition simply does not apply —
+    -- 'SpecialiseError' says why
 
     -- Elaboration and @Call@ (§7.2, §8), added at phase 17b.
   | NoElaborationRule String
@@ -387,6 +388,29 @@ data FailReason
     -- **Each reader is paired with the test that makes it total in the clause
     -- using it** — @when (surface-is-name s) then w = surface-name s@ — so this
     -- is what a body reaching one any other way gets, rather than a guess.
+  | NotDeclaredAs String String
+    -- ^ a declaration reader was given a name that is not the kind of thing it
+    -- reads (MS9 phase 176): the name, then what the op wanted it to be — @"a
+    -- datatype"@ or @"a constructor"@.
+    --
+    -- **'ExpectedSurfaceShape'\'s shape, for its reason**: one case carrying
+    -- the thing it wanted, rather than a constructor per op. Six readers share
+    -- it and a seventh needs no new case.
+    --
+    -- **It is how a rule tells a constructor pattern from a variable one.**
+    -- @constructor-datatype@ failing /is/ the answer "that name is not a
+    -- constructor", so a splitting rule asks and lets the clause fail rather
+    -- than needing a separate test.
+  | CaseSurvived Context [Core]
+    -- ^ **a case the specialiser could not close, and the equations that keep it
+    -- alive** (MS9 phase 230). Raised by @case-survived@ where the coverage
+    -- rules used to refuse by having no clause — @no clause of
+    -- case-must-vanish applies here@ named a rule of the implementation where
+    -- what the author needs is which equation survived.
+    --
+    -- **The list is empty when nothing about the method is an equation**, which
+    -- is a case that survived for some other reason; the renderer says so
+    -- rather than printing an empty list.
   | NoClauseMatched String Int [Int]
     -- ^ @call ‹name› ‹args›@ found nothing to run: the name, the number of
     -- arguments it was given, and the arities of the rules that do bear that
@@ -637,17 +661,30 @@ data ElimError
     -- 2026-08-11), and the named one is not declared. Only ever raised for a
     -- family that has indices: without them the scheme states no equations
   | IndexTypeDepends Int Ident
-    -- ^ §3.7's stated limit, and it binds a /tied/ index only. The type of
-    -- index @n@ (counting from 1, named) mentions an earlier index, so the
-    -- homogeneous @Eq I i a@ that constrains it cannot be written down: @i@ is
-    -- at the generalised index and @a@ at the actual one, which are two
-    -- different types. A /friendly/ index states no equation, so it is
-    -- abstracted and this is not raised for it (phase 19).
+    -- ^ §3.7's stated limit, and __what is left of it after MS9 phase 213__.
+    -- The type of index @n@ (counting from 1, named) mentions an earlier index
+    -- that the motive cannot be transported past. A /friendly/ index states no
+    -- equation, so it is abstracted and this is not raised for it (phase 19);
+    -- a /tied/ one has its equation stated at the actual earlier indices, with
+    -- its generalised side carried there along the earlier equations.
     --
-    -- Not @Vec@: a one-element index telescope has no earlier index to depend
-    -- on, so @Vec@ and @Fin@ eliminate fine. The shape is
-    -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@, two indices with the second
-    -- typed by the first. @AGENDA.md@ item 10
+    -- Neither @Vec@ nor @Below@ any more: a one-element index telescope has no
+    -- earlier index to depend on, and
+    -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ eliminates at a tied @fz m@
+    -- since phase 213. __And not @Chain@ either, since MS9 phase 237__: two
+    -- mentioned indices that are /chained/ — @Iₙ@ mentioning both @j@ and @m@
+    -- while @Iₘ@ mentions @j@, as in
+    -- @Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀@ — are carried
+    -- by a motive that binds the position moving with the one being
+    -- transported, which needs no packaged equality (@~fq5gp@).
+    --
+    -- __ONE SHAPE REMAINS AND IT MAY BE UNREACHABLE.__ A tied index whose type
+    -- mentions a /friendly/ one: there is no equation about a friendly index to
+    -- carry anything along. A friendly index is a variable no other index
+    -- mentions, while a tied index's term pins every index its type mentions —
+    -- which makes the two look incompatible, and no shape anybody has written
+    -- reaches it. That is an argument and not a proof, so this constructor
+    -- stays rather than being deleted.
   | IndexTypeIllTyped TypeError
     -- ^ a tied index's type has no universe (MS3 phase 31d). Needed because
     -- the equation @Eq Iₖ iₖ aₖ@ is stated at @Iₖ@'s **level** now, which has
@@ -659,6 +696,104 @@ data ElimError
   | SchemeIllTyped TypeError
     -- ^ the assembled elimination does not have the goal's type. Unreachable if
     -- the motive typechecked and the generated eliminator type is right
+  deriving (Eq, Show)
+
+-- | What specialisation by unification refused (MS9 phase 177).
+--
+-- **There is no "no transition applies" case, and that is deliberate.**
+-- @eliminating.pdf@ Definition 19 makes that a failure; "Thena.Tactics.Specialise"
+-- keeps the equation as a hypothesis instead, which is what the user is handed
+-- today, so the specialiser can only refuse for a reason that is about its
+-- /caller/ rather than about the problem.
+-- | Which transition a transported chain stopped at, and so what Thena would
+-- need to carry one (MS9 phase 214, @~7gmvr@ step three).
+--
+-- **All three are named by what is missing rather than by what failed**,
+-- because each is a different piece of the paper's §3.5 and they are not one
+-- another's consequences.
+data ChainBlocker
+  = ByDeletion
+    -- ^ the equation says nothing, and dropping its binder would need
+    -- @q ≃ refl@ for an arbitrary proof of @Eq I t t@ — the K axiom, which
+    -- /Pattern Matching Without K/ §3.5 identifies as exactly a dependent
+    -- deletion rule. Thena is a without-K system, so this one is not coming
+  | ByInjectivity
+    -- ^ the equation is between two applications of one constructor, and
+    -- restating the later transport along the argument equations would need
+    -- @noConfusion@ backwards and its round-trip law — the paper's @noConfD⁻¹@
+    -- and @isLeftInvD@. "Thena.Global.NoConfusion" generates neither
+  | BySolution
+    -- ^ the construction that does carry a chain needs the prelude's
+    -- @DPair@ — the singleton whose contractibility derives based path
+    -- induction — and this session has no such declaration
+  deriving (Eq, Show)
+
+data SpecialiseError
+  = NotThatConstructor GlobalName
+    -- ^ the name a method was to be specialised for is not a constructor. A
+    -- method type says nothing about which constructor it belongs to, so the
+    -- caller names it; this is that name being wrong
+  | MethodNotShaped Int Int Core
+    -- ^ the type has fewer Π binders than the constructor's telescope and the
+    -- stated equation count together — so it is not that constructor's method,
+    -- or not an elimination's method at all. Carries both counts and the type
+  | NotAnEquation [Core]
+    -- ^ a binder in the equation block is not an application of @Eq@. Carries
+    -- every domain in that block, because which one is wrong is the question
+  | TransportedEquation ChainBlocker Int Core
+    -- ^ a later equation is stated about this one's __proof__, and the
+    -- transition that would fire on it removes the binder that proof is (MS9
+    -- phase 214, @~7gmvr@). Carries which transition, the position counting
+    -- from 1, and the equation.
+    --
+    -- §3.2 of /Pattern Matching Without K/ states a telescopic equality
+    -- homogeneously, by transporting each side along the equations before it,
+    -- so "Thena.Tactics.Eliminate" states the motive for a family like
+    -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ at a tied index. **The
+    -- solution transition carries such a chain** — §3.5's own @solution@,
+    -- derived from the contractible singleton; 'ChainBlocker' is the three ways
+    -- the other transitions do not. Declined rather than attempted, so that a
+    -- split refuses where it stands instead of handing back a
+    -- 'SpecialisedIllTyped' about generated variables
+  | SpecialisedIllTyped TypeError
+    -- ^ the term built does not inhabit the method type it was built for. A
+    -- **generator bug**, like 'Thena.Global.NoConfusion.Rejected': the whole of
+    -- §7.2's bargain for a coarse op is that this is caught here
+  deriving (Eq, Show)
+
+-- | What tying a recursive call to its induction hypothesis refused (MS9
+-- phase 186).
+--
+-- **Every case is about one call, or about the shape the driver handed over.**
+-- There is no case for "this definition is not recursive": a body that never
+-- mentions the name it is defining passes through untouched, which is what
+-- makes assuming the name on every declaration uniform rather than a mode.
+data RecursionError
+  = RecursionNotAbstracted
+    -- ^ the term is not a λ, so it is not a body elaborated under an assumed
+    -- name. A **driver bug**, not a user error
+  | RecursiveNameNotApplied
+    -- ^ the name being defined occurs somewhere that is not the head of an
+    -- application — passed as a value, say. There is no induction hypothesis
+    -- for that, and leaving it would make the body open
+  | CallMatchesNoHypothesis Context Core
+    -- ^ a recursive call none of the hypotheses in scope is about. Carries the
+    -- call. **This is structural recursion refusing**, and it is the whole of
+    -- the guard: @double zero@ inside the @succ@ arm names no smaller thing
+  | CallMatchesSeveral Context Core Int
+    -- ^ a recursive call naming more than one of the arguments that have a
+    -- hypothesis, so which one it recurses on is not written down. Carries the
+    -- call and how many matched
+  | CallVariesAFixedPremise Context Core Core Core
+    -- ^ a recursive call that passes something other than the premise the split
+    -- fixed (MS9 phase 208). Carries the call, the premise as the split holds
+    -- it, and what the call passes instead.
+    --
+    -- **A premise the induction varies is bound inside the arm.** Bound before
+    -- the split it is not quantified by the motive, so the hypothesis is the
+    -- statement at that one value and a call at another value is not it. The
+    -- argument would otherwise be dropped in silence and the call would read as
+    -- a statement it is not
   deriving (Eq, Show)
 
 -- --------------------------------------------------------------------------

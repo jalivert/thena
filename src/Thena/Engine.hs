@@ -50,7 +50,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
-import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
+import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar)
 import Thena.Core.Term
   ( Core (..)
   , close
@@ -126,18 +126,32 @@ import Thena.Global.Declare (buildInductive)
 import Thena.Global.Env
   ( GlobalEnv
   , InductiveDefinition
+  , Scheme (..)
   , declaredNames
+  , recursiveArgument
   , definitionLevels
   , isDeclared
   , lookupDefinition
   , eliminatorName
+  , constructorArguments
+  , constructorName
   , inductiveConstructors
   , inductiveIndices
+  , inductiveName
   , inductiveParameters
+  , lookupConstructor
   , lookupInductive
   )
 import qualified Thena.Instral.Ops as Op
-import Thena.Tactics.Eliminate (Elimination (..), eliminate)
+import Thena.Tactics.Eliminate
+  ( Elimination (..)
+  , Premises (..)
+  , eliminate
+  , spineOf
+  )
+import Thena.Tactics.Recurse (resolveRecursion)
+import Thena.Tactics.Specialise
+  (Binder (..), Specialisation (..), specialise, survivingEquations)
 import Thena.Rules
   (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
 import Thena.Syntax.Lexer (isIdentifier)
@@ -830,6 +844,51 @@ perform instr rest m = case operation instr of
     Right v -> produce (VOption (Just v)) m
   Op.None -> produce (VOption Nothing) m
 
+  -- **A list with one more element at the front** — 'Op.Prepend'. The pattern
+  -- form @[x, ...xs]@ has taken a list apart since MS5 phase 65 and nothing put
+  -- one together, so a rule that accumulates had to be given its list whole by
+  -- an op; the walk over a split's binder report is the one that needed it
+  -- (MS9 phase 195).
+  -- **A case the specialiser could not close, refused by name** (MS9 phase
+  -- 230). It takes the handle the specialiser answered with, reads that hole's
+  -- type where it stands and refuses with the equations still in it.
+  --
+  -- **The only op that cannot succeed.** A rule refuses by having no clause and
+  -- that refusal carries a rule's name and nothing else, so the coverage family
+  -- could not name the equation keeping a case alive — his instruction of
+  -- 2026-10-28 is that it should.
+  Op.CaseSurvivedOp h -> case term h of
+    Left r -> failure r m
+    -- **The hole's CLAIM, not an inferred type.** A hole is not in scope at
+    -- itself, and the coverage rules refuse from inside the arm — so inferring
+    -- the handle fails exactly where this op is wanted. Going to the hole and
+    -- reading what it claims is the same move @goto@ makes, and it works from
+    -- wherever the refusal happens to be.
+    Right (Free x) -> case Cursor.goto x (cursor (development m)) of
+      Left e -> failure (CannotMove e) m
+      Right cur -> case focus cur of
+        -- **A claim or a guess, because which one it is depends on where the
+        -- refusal came from**: a missing arm is refused before the method's
+        -- hole is attacked and an empty arm after, and @prim-attack@ turns the
+        -- one into the other. Both carry the type, which is all this needs.
+        OnComponent c | Just s <- claimed c ->
+          let (eqs, with, n1) =
+                survivingEquations (globals m) (focusContext (Development cur))
+                                   (names m) s
+           in failure (CaseSurvived with eqs) m { names = n1 }
+        _ -> failure NotAHole m
+      where
+        claimed (Component.Claim _ _ s)   = Just s
+        claimed (Component.Guess _ _ _ s) = Just s
+        claimed _                         = Nothing
+    Right _ -> failure (CannotMove NoSuchHole) m
+
+  Op.Prepend a b -> case (,) <$> operandValue (env (exec m)) a
+                             <*> operandValue (env (exec m)) b of
+    Left e -> failure e m
+    Right (v, VList vs) -> produce (VList (v : vs)) m
+    Right (_, _)        -> failure ExpectedList m
+
   -- **What this body hands back** (MS5 phase 63) — 'Op.Return'.
   --
   -- It ends the body: the rest of @pc@ is dropped and control goes to the
@@ -1203,32 +1262,126 @@ perform instr rest m = case operation instr of
   -- Qualified because "Thena.Core.Term" has an 'Eliminate' too. The two are
   -- exactly one apart: this op /decides/ to eliminate, that node /is/ the
   -- elimination it builds. The same shape as @Component.Claim@ beside 'Claim'.
-  Op.Eliminate tgt -> case term tgt of
-    Left r  -> failure r m
-    Right t -> case focus (cursor (development m)) of
+  Op.Eliminate tgt -> eliminating Inductive Generalised tgt
+
+  -- **@case … of@'s half, and it differs by one argument** (MS9 phase 188). The
+  -- methods come off @caseD@'s type instead of the eliminator's, so each is the
+  -- same method minus its inductive hypotheses, and the term is an application
+  -- of that global rather than an 'Eliminate' node.
+  --
+  -- **Two ops rather than one taking a tag**, because instral has no enum to
+  -- pass and because a user asks for these by two different words. The tactic
+  -- is one and the 'Scheme' is its parameter — "Thena.Tactics.Eliminate"'s
+  -- header has the argument.
+  Op.CaseAnalyse tgt -> eliminating CaseAnalysis Generalised tgt
+
+  -- **§3.7 and nothing more, for a method written by hand** (MS9 phase 211,
+  -- @~84x46@). The same elimination the other two build, with every premise
+  -- left fixed: nothing here solves a copy, so a motive that quantified one
+  -- would hand the author a binder to take and an arm to rewrite. This is the
+  -- op @eliminate-core@ runs.
+  --
+  -- **A third op rather than a tag**, for 'Op.CaseAnalyse'\'s stated reason,
+  -- and the whole of the difference is the 'Premises' passed one line down.
+  Op.EliminateFixed tgt -> eliminating Inductive Fixed tgt
+
+    -- **Tying a recursive call to the induction hypothesis it is** (MS9 phase
+  -- 186) — his ruling of 2026-10-19. The driver assumes the name being defined
+  -- while the body elaborates, so this is handed @λ f -> body@ and answers the
+  -- body with every application of @f@ replaced.
+  --
+  -- **It touches no development**, which is why it takes a term and not a
+  -- focus: by the time it runs the development has been extracted and put
+  -- away. "Thena.Tactics.Recurse" has the walk and why it is a pass.
+  Op.TieRecursion t -> case term t of
+    Left r   -> failure r m
+    Right t' -> case resolveRecursion (globals m) (names m) t' of
+      (Left e,   n1) -> failure (CannotTieRecursion e) m { names = n1 }
+      (Right t'', n1) -> produce (VTerm t'') m { names = n1 }
+
+  -- **Specialisation by unification** (MS9 phase 177) — the five transitions
+  -- over the equations the elimination above stated, in one coarse op by his
+  -- ruling of 2026-10-18. "Thena.Tactics.Specialise" has the argument that
+  -- decided it.
+  --
+  -- The same shape as 'Op.Eliminate' and deliberately: the goal is the focus,
+  -- the subgoal goes in above it so that it can be seen, and the goal itself
+  -- becomes the guess that uses it. The one difference is that there may be
+  -- **no** subgoal at all — a conflicting equation closes the method, which is
+  -- the impossible case vanishing — and then nothing is claimed and the guess
+  -- mentions nothing.
+  Op.Specialise c hyps gk ->
+    case (,,) <$> text c
+              <*> operandValue (env (exec m)) hyps
+              <*> operandValue (env (exec m)) gk of
+    Left e -> failure e m
+    -- **The hypotheses this method carries, as the list the arm will bind**
+    -- (MS9 phase 188). Reading the count off the declaration instead assumed the
+    -- inductive scheme, and @caseD@'s methods carry none, so the caller — which
+    -- knows which word was written — answers it with @ihs-for@.
+    --
+    -- **The NAMES are used and not only the count** (MS9 phase 192): they go
+    -- into the binder report, because a method type spells every hypothesis
+    -- binder @ih@ and the name an arm freshens is nowhere in the type.
+    --
+    -- **And what the motive added to every method, as the elimination answered
+    -- it** (MS9 phase 191, a type of its own since phase 196): the copies, the
+    -- equation count, the indices abstracted outright, the parameters, the
+    -- target. It is threaded rather than taken apart because nothing between
+    -- the two ops has any business in it — see
+    -- 'Thena.Tactics.Eliminate.MethodShape'.
+    Right (w, VList hs, VMethodShape shape) ->
+      case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
-        case eliminate (globals m) contextAt (names m) s t of
-          (Left e,   n1) -> failure (CannotEliminate e) m { names = n1 }
-          (Right el, n1) ->
-            -- The methods go in above the goal, innermost first, so the goal
-            -- can see them; then the goal itself becomes the guess that uses
-            -- them. Both halves are one op because a half-applied elimination
-            -- — holes claimed, nothing attached — is not a state any rule
-            -- should be able to observe.
-            let holes = foldl claimAbove (cursor (development m)) (elimMethods el)
-                -- Freshened one at a time, against the development as it grows,
-                -- so two methods never share a name either (phase 24b).
-                claimAbove c (v, hi, hty) =
-                  insertAbove
-                    (Component.Claim v (Cursor.freshIdent (Cursor.identsIn c) hi) hty) c
-                guess = Component.Guess x i (Trailing (elimTerm el)) s
+        case specialise (globals m) contextAt (names m) (GlobalName w)
+                        [ Ident n | VText n <- hs ] shape s of
+          (Left e,  n1) -> failure (CannotSpecialise e) m { names = n1 }
+          (Right sp, n1) ->
+            let (holes, named) = claimSubgoals (cursor (development m)) (specialisedGoal sp)
+                guess = Component.Guess x i (Trailing (specialisedTerm sp)) s
              in case replaceComponent guess holes of
                   Left e    -> failure (CannotMove e) m
                   Right cur ->
-                    Saying (subgoalMessage (elimMethods el))
-                           (advance m { development = Development cur, names = n1 })
+                    -- **The subgoal it claimed, or none** (MS9 phase 184), by
+                    -- the rule his 2026-10-19 ruling set for 'Op.Eliminate': an
+                    -- op that makes a hole hands back the handle that reaches
+                    -- it. There are only ever one or none — a conflicting
+                    -- equation closes the method outright — so it is an option
+                    -- and not a list.
+                    --
+                    -- **A rule cannot tell the two apart any other way.** The
+                    -- @no subgoals@ message is text, and the hole's display name
+                    -- is freshened, so @goto-named@ is the trap `~w23j5`
+                    -- measured.
+                    --
+                    -- **And which arguments it forced, beside the handle**
+                    -- (MS9 phase 185). One entry per constructor argument, so a
+                    -- clause walks the arm's patterns against it and binds a
+                    -- survivor with @prim-lambda@ and a forced position with
+                    -- @define@ — his ruling of 2026-10-19. The list is answered
+                    -- even where nothing was claimed; a vanished case has no arm
+                    -- to introduce binders for, so nothing reads it there.
+                    producing (Saying (subgoalMessage (map snd named)))
+                              (VPair
+                                 (VOption (case named of
+                                             (v, _) : _ -> Just (VTerm (Free v))
+                                             []         -> Nothing))
+                                 (VPair
+                                    (VList [ VPair (VBinder b) (VOption (fmap VTerm f))
+                                           | (b, f) <- specialisedBinders sp ])
+                                    -- **And what this method makes of each
+                                    -- name bound outside the split** (MS9 phase
+                                    -- 196): the name, and a function of the
+                                    -- binders that survived. The arm binds each
+                                    -- with @define@ once its telescope is
+                                    -- bound, which is what makes the name mean
+                                    -- the refined thing (@~8v3pg@).
+                                    (VList [ VPair (VText nm) (VTerm t)
+                                           | (Ident nm, t) <- specialisedRebound sp ])))
+                              m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
+    Right _ -> failure ExpectedInt m
 
   -- Thesis §2.7's @naive-refine@ with the search taken out (phase 25): the
   -- head's type is inferred here, and 'saturate' does the walking.
@@ -1418,6 +1571,68 @@ perform instr rest m = case operation instr of
     Right (VLevel l) -> produce (VTerm (Universe l)) m
     Right _          -> failure ExpectedLevel m
 
+  -- **The six declaration readers** (MS9 phase 176). Until this phase
+  -- @make-data@ could declare a datatype and nothing could read one back, so a
+  -- rule could not ask how many constructors a family has — which is the
+  -- question a splitting tree asks at every node.
+  --
+  -- **Each answers names or counts and never a telescope.** A constructor's
+  -- argument types and index expressions are terms in the declaration's own
+  -- scope, and a rule has nothing to instantiate them with; see
+  -- 'Thena.Instral.Ops.DatatypeOf' for why that is a decision rather than a
+  -- gap.
+  --
+  -- **The datatype a type is an application of**, found by the same @spineOf@
+  -- "Thena.Tactics.Eliminate" uses. It is shared rather than copied because of
+  -- what that function's own comment records: a saturated family application is
+  -- a 'Canonical' while a written @Vec A n@ is @App@s over a 'Global' until δ
+  -- unfolds the wrapper, and reading only one form is a bug that prints as
+  -- /"Nat is not a datatype"/. **So the type is reduced first.**
+  Op.DatatypeOf a -> case term a of
+    Left e  -> failure e m
+    Right t -> case spineOf (whnf (globals m) contextAt t) of
+      Just (GlobalName w, _, _)
+        | isDatatype w -> produce (VText w) m
+        | otherwise    -> failure (NotDeclaredAs w "a datatype") m
+      Nothing -> failure (NotDeclaredAs "that type" "a datatype") m
+
+  Op.DatatypeParameters a -> datatypeCount a inductiveParameters
+  Op.DatatypeIndices a    -> datatypeCount a inductiveIndices
+
+  -- **In declaration order, and that order is load-bearing**: it is the order
+  -- the eliminator's methods are in, so a rule walking methods and a rule
+  -- walking constructors agree without either being told.
+  Op.ConstructorsOf a -> withDatatype a $ \d ->
+    produce (VList [ VText c
+                   | GlobalName c <- map constructorName (inductiveConstructors d) ]) m
+
+  -- **Failing here IS the answer "that name is not a constructor"**, which is
+  -- how a splitting rule tells a constructor pattern from a variable one
+  -- without a test of its own.
+  Op.ConstructorDatatype a -> withConstructor a $ \d _ ->
+    case inductiveName d of GlobalName dn -> produce (VText dn) m
+
+  -- Names, so a split can name its pattern variables after them — the courtesy
+  -- 'Op.Eliminate' already does for its method holes. Their count is this
+  -- list's length, which is the pattern's arity.
+  Op.ConstructorArguments a -> withConstructor a $ \_ k ->
+    produce (VList [ VText i
+                   | Ident i <- map entryIdent (constructorArguments k) ]) m
+
+  -- **The recursive ones, which is one induction hypothesis each** (MS9 phase
+  -- 184). 'Thena.Global.Env.recursiveArgument' is the same test
+  -- 'Thena.Global.Env' uses to build the methods, read here rather than copied,
+  -- so a clause counting hypotheses and the generator making them cannot
+  -- disagree.
+  Op.ConstructorRecursiveArguments a -> withConstructor a $ \d k ->
+    produce (VList [ VText i
+                   | e <- constructorArguments k
+                   , let Ident i = entryIdent e
+                   , Just _ <- [ recursiveArgument (inductiveName d)
+                                   (length (inductiveParameters d))
+                                   (entryType e) ]
+                   ]) m
+
   -- **What a name denotes, Γ first and then the globals, with a definition's
   -- level arguments inserted** (MS4 phase 48).
   --
@@ -1526,6 +1741,76 @@ perform instr rest m = case operation instr of
   Op.TrustedBody x -> surfaceMove x "a trusted term" $ \s -> case s of
     Concrete.SurfaceTrusted ty e -> Just (Zipper.intoTrustedTerm ty e)
     _                            -> Nothing
+
+  -- **The three moves into a split** (MS9 phase 181). @split-arm-body@ and
+  -- @split-tail@ both speak about the /first/ arm, so each is refused by name
+  -- on a split with none — @split-has-no-arms@ is the test a clause stops on,
+  -- and it stops before either is reached.
+  Op.SplitTarget x -> surfaceMove x "a split" $ \s -> case s of
+    Concrete.SurfaceSplit an tgt arms -> Just (Zipper.intoSplitTarget an arms tgt)
+    _                                -> Nothing
+  -- **@none@ for an arm with no body** (MS9 phase 189): an empty arm is how a
+  -- case that cannot arise is written, so there is no handle to hand back and
+  -- that is not a refusal. The refusals it keeps are the shape ones.
+  Op.SplitArmBody x -> case operandSurface (env (exec m)) x of
+    Left r  -> failure r m
+    Right z -> case Zipper.focus z of
+      Concrete.SurfaceSplit an tgt (Concrete.SurfaceArm pat rhs : later) ->
+        produce (VOption (fmap (\b -> VSurface (Zipper.intoSplitArmBody an tgt pat later b z)) rhs)) m
+      _ -> failure (ExpectedSurfaceShape "a split with at least one arm") m
+  Op.SplitTail x -> surfaceMove x "a split with at least one arm" $ \s -> case s of
+    Concrete.SurfaceSplit an tgt (first : later) ->
+      Just (Zipper.intoSplitTail an tgt first later)
+    _ -> Nothing
+
+  -- **The pattern readers** (MS9 phase 183). A pattern is not a term, so these
+  -- answer with a 'VPattern' rather than a focused surface zipper — there is no
+  -- path to carry, because nothing elaborates a pattern: a clause reads it to
+  -- decide which constructor an arm is for.
+  Op.SplitArmPattern x -> case surfaceAt x of
+    Left r -> failure r m
+    Right (Concrete.SurfaceSplit _ _ (Concrete.SurfaceArm pat _ : _)) ->
+      produce (VPattern pat) m
+    Right _ -> failure (ExpectedSurfaceShape "a split with at least one arm") m
+  Op.PatternHead x -> case patternAt x of
+    Left r -> failure r m
+    Right (Concrete.PatternName w _) -> produce (VText w) m
+    Right _ -> failure (ExpectedSurfaceShape "a pattern written as a word") m
+  -- **The one pattern op that builds** (MS9 phase 231). @pattern-for-name@ is
+  -- 'Op.PatternHead'\'s inverse: the interactive spelling of a split has no
+  -- written patterns, so it names each position after the method's own binder
+  -- and hands that name over as a pattern, which is what lets it walk the same
+  -- @intro-arm-binders@ the written arms walk.
+  Op.PatternForName x -> case operandValue (env (exec m)) x of
+    Left e -> failure e m
+    Right (VText w) -> produce (VPattern (Concrete.PatternName w [])) m
+    Right _ -> failure ExpectedText m
+  Op.PatternArguments x -> case patternAt x of
+    Left r -> failure r m
+    Right (Concrete.PatternName _ ps) -> produce (VList (map VPattern ps)) m
+    -- **A wildcard takes no arguments and is not an error**: it is a pattern
+    -- with none, exactly as a bare name is, so a walk over the arguments of
+    -- either stops immediately. **A dot is the same** (MS9 phase 228) — an
+    -- inaccessible position binds nothing, so there is nothing in it to nest.
+    Right Concrete.PatternWildcard -> produce (VList []) m
+    Right (Concrete.PatternDot _)  -> produce (VList []) m
+
+  -- **The inaccessible pattern's reader** (MS9 phase 228). It answers with the
+  -- term rooted at itself: a pattern carries no path — see @split-arm-pattern@
+  -- above — and a dot is not made the one exception to that.
+  Op.PatternDotTerm x -> case patternAt x of
+    Left r -> failure r m
+    Right (Concrete.PatternDot e) -> produce (VSurface (Zipper.rootedAt e)) m
+    Right _ -> failure (ExpectedSurfaceShape "an inaccessible pattern") m
+
+  -- **The binder report's accessor** (MS9 phase 192). A role is read by a head
+  -- test, so the only thing a body asks of a binder is the name to bind it
+  -- under — and that composes with @prim-lambda@, @define@ and @fresh-name@,
+  -- which is the whole of what the walk over the report does.
+  Op.BinderName x -> case operandValue (env (exec m)) x of
+    Left e -> failure e m
+    Right (VBinder (Binder _ (Ident w))) -> produce (VText w) m
+    Right _ -> failure ExpectedText m
 
   -- **A plain binder only** — no annotation and no braces. That is the whole of
   -- what the λ case cannot elaborate, and saying it here means the clause finds
@@ -1775,6 +2060,41 @@ perform instr rest m = case operation instr of
   -- there. Elaboration's @FILL@ is what wanted it; see 'Thena.Instral.Ops.UnifyInto'.
   UnifyInto l r -> unifying unifyInto l r
   where
+    -- The whole of all three elimination ops: the goal is the focus, the
+    -- methods go in above it, and the goal becomes the guess that uses them.
+    -- 'Scheme' and 'Premises' are the only things the three pass differently.
+    eliminating sch prem tgt = case term tgt of
+      Left r  -> failure r m
+      Right t -> case focus (cursor (development m)) of
+        OnComponent (Component.Claim x i s) ->
+          case eliminate (globals m) contextAt sch prem (names m) s t of
+            (Left e,   n1) -> failure (CannotEliminate e) m { names = n1 }
+            (Right el, n1) ->
+              -- The methods go in above the goal, innermost first, so the goal
+              -- can see them; then the goal itself becomes the guess that uses
+              -- them. Both halves are one op because a half-applied
+              -- elimination — holes claimed, nothing attached — is not a state
+              -- any rule should be able to observe.
+              let (holes, named) = claimSubgoals (cursor (development m)) (elimMethods el)
+                  guess = Component.Guess x i (Trailing (elimTerm el)) s
+               in case replaceComponent guess holes of
+                    Left e    -> failure (CannotMove e) m
+                    Right cur ->
+                      -- **The holes it claimed, and what the motive added to
+                      -- every method, as a pair** — his ruling of 2026-10-19,
+                      -- the second half grown in MS9 phase 191.
+                      -- 'Thena.Instral.Ops.resultOf' carries the argument. The
+                      -- holes are variables because 'Thena.Instral.Ops.Goto' is
+                      -- the only move a rule can aim at a hole it /found/; the
+                      -- shape is one fact about every method, which is what
+                      -- @specialise@ needs and nothing else can work out.
+                      producing (Saying (subgoalMessage (map snd named)))
+                                (VPair (VList [ VTerm (Free v) | (v, _) <- named ])
+                                       (VMethodShape (elimShape el)))
+                                m { development = Development cur, names = n1 }
+        OnComponent _ -> failure NotAHole m
+        _             -> failure (CannotMove NotOnTheSpine) m
+
     -- The two unification ops differ in one argument and share everything
     -- else, including the type being inferred from the LEFT side. That is not
     -- arbitrary now that there is a direction: @unify-into s t@ asks whether
@@ -1798,6 +2118,29 @@ perform instr rest m = case operation instr of
     text    = operandText (env (exec m))
     term    = operandTerm (env (exec m))
 
+    -- **The three readers' shared plumbing** (MS9 phase 176). Each takes the
+    -- operand that names a declaration and hands the declaration to its
+    -- caller, so the six cases above say what they read and nothing about how
+    -- the name was got or how the failure is shaped.
+    isDatatype w = case lookupInductive (GlobalName w) (globals m) of
+      Just _  -> True
+      Nothing -> False
+
+    withDatatype a k = case text a of
+      Left e  -> failure e m
+      Right w -> case lookupInductive (GlobalName w) (globals m) of
+        Just d  -> k d
+        Nothing -> failure (NotDeclaredAs w "a datatype") m
+
+    withConstructor a k = case text a of
+      Left e  -> failure e m
+      Right w -> case lookupConstructor (GlobalName w) (globals m) of
+        Just (d, c) -> k d c
+        Nothing     -> failure (NotDeclaredAs w "a constructor") m
+
+    -- A count off a telescope, which is what both of the counting readers are.
+    datatypeCount a f = withDatatype a (\d -> produce (VInt (length (f d))) m)
+
     advance m' = m' { exec = (exec m') { pc = rest } }
 
     -- **Where a call's value goes, if it was asked for** (MS5 phase 63). The
@@ -1815,11 +2158,16 @@ perform instr rest m = case operation instr of
     -- to be zipped onto a name. A refutable pattern that does not fit is a
     -- failure — his ruling — so this is the one place an op that /succeeded/
     -- can still fail the instruction.
-    produce v m' = case instr of
-      Do _ -> Continue (advance m')
+    produce = producing Continue
+
+    -- **'produce' with the outcome left open** (MS9 phase 177), for the one op
+    -- that both says something and answers with a value: @prim-eliminate@
+    -- reports its subgoals /and/ hands back how many equations they carry.
+    producing k v m' = case instr of
+      Do _ -> k (advance m')
       Bind p _ _ -> case Op.matchPattern (globals m) p v of
         Nothing -> failure (BindingDidNotMatch p) m'
-        Just bs -> Continue (advance m' { exec = (exec m') { env = bs ++ env (exec m') } })
+        Just bs -> k (advance m' { exec = (exec m') { env = bs ++ env (exec m') } })
 
     -- 'Assume' and 'Claim' differ only in which component they build, and both
     -- produce the variable they bound: §7.3's sketch reads @?x <- claim S@.
@@ -1845,6 +2193,9 @@ perform instr rest m = case operation instr of
 
     -- The surface term an operand names, focus and all (MS4 phase 49).
     surfaceAt x = Zipper.focus <$> operandSurface (env (exec m)) x
+
+    -- The written pattern an operand names (MS9 phase 183).
+    patternAt x = operandPattern (env (exec m)) x
 
     -- **One shape for every surface move** (MS4 phase 49b): read the zipper,
     -- ask the node for the move it admits, and produce the zipper that move
@@ -2024,10 +2375,37 @@ perform instr rest m = case operation instr of
 -- changes the development in a way the user cannot see at the focus has to say
 -- so. After an elimination the focus is still the goal, now a guess, while the
 -- new holes are above it and off screen.
-subgoalMessage :: [(Var, Ident, Core)] -> String
+subgoalMessage :: [Ident] -> String
 subgoalMessage [] = "no subgoals"
 subgoalMessage hs =
-  "subgoals: " ++ intercalate ", " [ n | (_, Ident n, _) <- hs ]
+  "subgoals: " ++ intercalate ", " [ n | Ident n <- hs ]
+
+-- | Claim each subgoal above the focus, innermost first, and answer with the
+-- idents they were actually given.
+--
+-- The holes go in above the goal so that the goal can see them; the caller
+-- then turns the goal itself into the guess that uses them. Freshened one at a
+-- time, against the development as it grows, so two of them never share a name
+-- either (phase 24b).
+--
+-- **It answers with the freshened idents, and that is the whole reason it
+-- exists as a function.** 'Thena.Development.Cursor.freshIdent' renames a hint
+-- that is already taken, and a hint /is/ taken whenever a split nests: an
+-- @elim@ inside @succMethod@ hands both its own methods the hints
+-- @zeroMethod@ and @succMethod@, and the second of those is the guess it is
+-- being claimed under. So the names that come back are @zeroMethod1@ and
+-- @succMethod1@, and 'subgoalMessage' built from the hints instead named two
+-- holes that do not exist — while @goto-named "succMethod"@ went to the
+-- enclosing method, silently, because that one does.
+-- **The variable comes back beside the ident** so that the two never drift:
+-- what a caller hands a rule to @goto@ and what it says it claimed are read
+-- off one list.
+claimSubgoals :: Cursor -> [(Var, Ident, Core)] -> (Cursor, [(Var, Ident)])
+claimSubgoals cur0 = foldl claimAbove (cur0, [])
+  where
+    claimAbove (c, named) (v, hi, hty) =
+      let i = Cursor.freshIdent (Cursor.identsIn c) hi
+       in (insertAbove (Component.Claim v i hty) c, named ++ [(v, i)])
 
 -- | What 'Reduce' says when it orphans one or more holes (§4.7). Plain text:
 -- these are the identifiers the user themselves wrote for a 'Claim' or a
@@ -2161,6 +2539,16 @@ operandSurface :: Env -> Operand -> Either FailReason SurfaceZipper
 operandSurface e o = operandValue e o >>= \v -> case v of
   VSurface z -> Right z
   _          -> Left ExpectedSurface
+
+-- | A written pattern an operand names (MS9 phase 183).
+--
+-- 'operandSurface' one category over, and there is no zipper: a pattern is read
+-- to decide which constructor an arm is for, and nothing elaborates one, so
+-- there is no path worth carrying.
+operandPattern :: Env -> Operand -> Either FailReason Concrete.SurfacePattern
+operandPattern e o = operandValue e o >>= \v -> case v of
+  VPattern pt -> Right pt
+  _           -> Left ExpectedSurface
 
 -- ---------------------------------------------------------------------------
 -- Tagged term literals (MS6 phase 104)

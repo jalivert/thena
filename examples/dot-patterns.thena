@@ -1,0 +1,92 @@
+-- Inaccessible patterns — the dot — MS9 phase 228.
+--
+-- When a split determines one of a constructor's arguments, that argument has
+-- no binder left in the case it produces. Splitting a `Vec A (s n)` makes
+-- `vcons`'s own length equal to `n`, so the case binds two arguments and not
+-- three.
+--
+-- Thena lets you write THREE things in such a position, and all three are
+-- legal here on purpose:
+--
+--   * a NAME, which is bound as a definition equal to the term the position
+--     was determined to. `k = n` is then in the context and `refl` proves
+--     `k = n`, the equality being definitional.
+--   * `_`, which asks for nothing at all.
+--   * a DOT, `.n` or `.(s n)`, which binds nothing and ASSERTS that the
+--     position is determined and by what. It is checked: the written term is
+--     elaborated at the type the position has and unified with the term the
+--     equation forced.
+--
+-- The dot is OPTIONAL and can never be made mandatory — his ruling of
+-- 2026-10-19. Agda demands it to keep a left-hand side linear so that a
+-- matcher can run; Thena elaborates to an eliminator and has no left-hand side
+-- to keep linear, so the constraint that forces Agda's hand does not reach
+-- here. What a dot buys is a CHECK: a name means a binder or a definition
+-- depending on a unification you cannot see, and a dot says which you expected.
+--
+-- `DECISIONS.md`, *Dot patterns are optional here*, has the whole argument.
+
+module DotPatterns where
+
+data N : Type₀ where
+  z : N
+  s : N -> N
+
+data Vec (A : Type) : N -> Type where
+  vnil : Vec A z
+  vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n)
+
+-- The forced position written as a dot. `vcons`'s `n` is determined to be `m`,
+-- because the target's index is `s m` and `vcons`'s conclusion is `s n`.
+vtailDotted : forall (A : Type₀) (m : N) (xs : Vec A (s m)) -> Vec A m
+vtailDotted = \ A m xs -> case xs of { vnil -> ; vcons .m a as -> as }
+
+-- The same proof with the position NAMED, which is what the ruling keeps
+-- working. Nothing here is second-class: this is the spelling a user who has
+-- never heard of an inaccessible pattern writes.
+vtailNamed : forall (A : Type₀) (m : N) (xs : Vec A (s m)) -> Vec A m
+vtailNamed = \ A m xs -> case xs of { vnil -> ; vcons n a as -> as }
+
+-- And with `_`, which asks for no name.
+vtailAnon : forall (A : Type₀) (m : N) (xs : Vec A (s m)) -> Vec A m
+vtailAnon = \ A m xs -> case xs of { vnil -> ; vcons _ a as -> as }
+
+-- A position forced to a COMPOUND term needs the parentheses, and the written
+-- term is an ordinary term: splitting a `Vec A (s (s m))` forces `vcons`'s `n`
+-- to `s m`.
+vtailTwo : forall (A : Type₀) (m : N) (xs : Vec A (s (s m))) -> Vec A (s m)
+vtailTwo = \ A m xs -> case xs of { vnil -> ; vcons .(s m) a as -> as }
+
+-- `._` is the dot's own placeholder: it asserts the position is determined and
+-- declines to say by what. A placeholder elaborates to a hole and unification
+-- solves it, so this costs nothing beyond the assertion.
+vtailDotAnon : forall (A : Type₀) (m : N) (xs : Vec A (s m)) -> Vec A m
+vtailDotAnon = \ A m xs -> case xs of { vnil -> ; vcons ._ a as -> as }
+
+-- A split that forces nothing. `len`'s target is `Vec A m` with `m` a plain
+-- variable, so the split generalises it and `vcons`'s own `n` SURVIVES as a
+-- binder. Writing a dot there is refused — that is the whole of what the
+-- notation buys, and the two lines below are the illegal ones:
+--
+--   len = \ A m xs -> induction xs of
+--           { vnil -> z ; vcons .m a as -> s m }
+--
+-- refused: no clause of dotted-position-is-forced applies here
+--
+-- and a dot whose term is not the one the equation forced:
+--
+--   vtailDotted = \ A m xs -> case xs of
+--                   { vnil -> ; vcons .(s m) a as -> as }
+--
+-- refused: s m and m cannot be made equal
+len : forall (A : Type₀) (m : N) (xs : Vec A m) -> N
+len = \ A m xs -> induction xs of { vnil -> z ; vcons n a as -> s (len A n as) }
+
+-- The dot is checked at the position's TYPE as well as its value, so a term of
+-- the wrong type is refused before the unification is reached:
+--
+--   vcons .A a as -> as    refused: Type₀ and N cannot be made equal
+--
+-- A closed value, so the whole file really computes.
+two : N
+two = len N (s z) (vcons N z z (vnil N))

@@ -39,8 +39,8 @@ import Thena.Core.Level
   , metasIn
   , solveLevels
   )
-import Thena.Core.Typing (infer)
-import Thena.Errors (DataBuildError (..), ResolveError (..), Skipped (..), TypeError (..))
+import Thena.Core.Typing (check, infer)
+import Thena.Errors (DataBuildError (..), ResolveError (..), TypeError (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
@@ -55,9 +55,10 @@ import Thena.Core.Term
   )
 import Thena.Language.Regex (RegexError)
 import Thena.Language.Grammar (GrammarError)
+import Thena.Global.Generate (Generated (..), rewriting)
+import Thena.Global.NoCycle (generateNoCycle)
 import Thena.Global.NoConfusion
-  ( Generated (..)
-  , generateNoConfusion
+  ( generateNoConfusion
   )
 import Thena.Global.Env
   ( ArgRole (..)
@@ -69,6 +70,8 @@ import Thena.Global.Env
   , addDefinition
   , addInductive
   , constructorType
+  , caseName
+  , caseWrapper
   , eliminatorName
   , eliminatorWrapper
   , formerType
@@ -161,13 +164,15 @@ data DeclareError
 -- phase 6). @define-data@ yields the resolved declaration through the single
 -- channel and the driver runs this, exactly as §7.5 has the driver run kernel
 -- policy for @Certify@ at phase 12. No instruction writes globals.
--- **Also reports what no-confusion did not do.** The 'Skipped' is a fact about
--- the declaration the user just wrote — @Vec@ gets no @noConfusionVec@ — and
--- the driver says it. 'Thena.Global.NoConfusion.NoEqInScope' is the one case
--- that is about the environment instead, and it is silent.
+-- **It no longer reports what no-confusion did not do** (MS9 phase 212). It
+-- used to hand back a 'Skipped' for the driver to warn about, and the only case
+-- that was ever about the declaration the user wrote — a dependent argument
+-- telescope — is now generated rather than declined. What is left of 'Skipped'
+-- is two facts about the /environment/, both of which a prelude-free script is
+-- entitled to and both of which were already silent.
 declare
   :: GlobalEnv -> Int -> InductiveDefinition
-  -> Either DeclareError (GlobalEnv, Int, Maybe Skipped)
+  -> Either DeclareError (GlobalEnv, Int)
 declare env n d0 = do
   checkNames env d0
   n1 <- foldM
@@ -204,12 +209,22 @@ declare env n d0 = do
   -- renaming the post-'universes' counter and leaving these three branches
   -- naming the old one.
   case generateNoConfusion env1 n5 d of
-    Generated env2 n6   -> Right (env2, n6, Nothing)
-    Declined NoEqInScope -> Right (env1, n5, Nothing)
-    Declined NoProducts -> Right (env1, n5, Nothing)
-    Declined why        -> Right (env1, n5, Just why)
-    Clash g             -> Left (AlreadyDeclared g)
-    Rejected g e        -> Left (NoConfusionRejected g e)
+    Generated env2 n6 -> admitted d env2 n6
+    Declined _        -> Right (env1, n5)
+    Clash g           -> Left (AlreadyDeclared g)
+    Rejected g e      -> Left (NoConfusionRejected g e)
+  where
+    -- **The acyclicity equipment is its own bundle with its own precondition**
+    -- (MS9 phase 219), which is why it is a second call and not more of the
+    -- first: a datatype whose no-confusion is generated may still be missing a
+    -- prelude type @Below@ needs, and sharing one guard is what
+    -- @.claude\/HAZARDS.md@ records as /an additive artifact is not additive if
+    -- it shares the bundle's up-front guard/.
+    admitted d' env2 n6 = case generateNoCycle env2 n6 d' of
+      Generated env3 n7 -> Right (env3, n7)
+      Declined _        -> Right (env2, n6)
+      Clash g           -> Left (AlreadyDeclared g)
+      Rejected g e      -> Left (NoConfusionRejected g e)
 
 -- --------------------------------------------------------------------------
 -- Checking
@@ -296,8 +311,9 @@ universes
   -> Either DeclareError ([(LevelVar, Level)], [Obligation], Int)
 universes env n0 d = do
   (ls, obs, n1) <- argumentLevels env n0 d
-  let sized = [ AtMost l (inductiveLevel d) | (_, _, l) <- ls ]
-      owed  = obs ++ sized
+  let (ixs, n2) = indexLevels env n1 d
+      sized = [ AtMost l (inductiveLevel d) | (_, _, l) <- ls ]
+      owed  = obs ++ ixs ++ sized
   case solveLevels owed of
     -- **The substitution is kept** (phase 50). It used to be discarded, so
     -- even a bound this function itself formed pinned nothing: the comment on
@@ -309,7 +325,7 @@ universes env n0 d = do
     -- settles the metas the bounds only /constrain/, so the question this
     -- function can answer is the one it asks — whether the constraints are
     -- outright impossible.
-    Right (sub, residue) -> Right (sub, residue, n1)
+    Right (sub, residue) -> Right (sub, residue, n2)
     -- Which argument to name: the first whose own relation does not hold on
     -- its own. There is always one when the size restriction is what failed —
     -- and when it is not, the failure came from typing an argument rather than
@@ -318,6 +334,52 @@ universes env n0 d = do
               , solveLevels [AtMost l (inductiveLevel d)] /= Right ([], []) ] of
            (g, i, l) : _ -> Left (ArgumentTooLarge g i l (inductiveLevel d))
            []            -> Left (ArgumentLevelsUnmet (inductiveName d))
+
+-- | The obligations typing a constructor's TARGET INDICES owes (MS9).
+--
+-- **Nothing typed them at all, and the gap is about levels rather than types.**
+-- @onlyB : OnlyB A (vnil A)@ stores @vnil@ at a level meta of its own, and with
+-- nothing relating that meta to the one in the index telescope's @Vec A z@,
+-- 'minimised' read it as a meta that says nothing and pinned it at zero. The
+-- stored index is then @vnil {0} A@ under @A : Type ℓ@, so the family's own
+-- eliminator is ill-typed — @elim OnlyB@'s method wants
+-- @P (vnil {0} A) …@ — and the kernel refuses it as soon as anyone
+-- eliminates above @Type₀@. A family whose index telescope is
+-- level-polymorphic was unusable, in silence, and
+-- @examples\/vector-families.thena@ has carried one since MS9 phase 216.
+--
+-- Checking each index at the type the telescope declares for it is what relates
+-- the two metas, and what it owes goes where 'argumentLevels'' does —
+-- 'solveLevels' then pins the constructor's meta to the telescope's instead of
+-- leaving it for 'minimised'.
+--
+-- **A target that cannot be typed owes nothing rather than being refused.** The
+-- question here is what the indices owe; /whether/ an untypeable target should
+-- refuse the declaration is a check nothing performs today and a separate
+-- question, so a failure leaves the declaration exactly as it was before this
+-- walk existed.
+--
+-- The context is the parameters and then this constructor's own arguments, which
+-- is what the stored index terms are written against. An index entry's type may
+-- name the entries before it, and those are supplied by the terms this
+-- constructor targets them at — the same move 'Thena.Core.Reduce' makes for a
+-- recursive argument's indices.
+indexLevels :: GlobalEnv -> Int -> InductiveDefinition -> ([Obligation], Int)
+indexLevels env n0 d = foldl eachConstructor ([], n0) (inductiveConstructors d)
+  where
+    provisional = addConstant (inductiveName d) (inductiveLevels d) (formerType d) env
+
+    eachConstructor acc c =
+      go acc (inductiveParameters d ++ constructorArguments c) []
+         (zip (inductiveIndices d) (constructorIndices c))
+      where
+        go res _   _  []                 = res
+        go (owed, n) ctx ss ((e, i) : rest) =
+          let (verdict, obs, n1) = check provisional ctx n i (rewriting ss (entryType e))
+              gained             = case verdict of
+                                     Left _   -> []
+                                     Right () -> obs
+           in go (owed ++ gained, n1) ctx (ss ++ [(entryVar e, i)]) rest
 
 -- | The universe a bare @Type@ in the declared position stands for: the least
 -- one that contains every constructor argument (MS3 phase 33c).
@@ -447,15 +509,16 @@ ownReferences d =
 -- | Every name a declaration introduces must be free, and distinct from the
 -- others it introduces.
 --
--- **The eliminator\'s wrapper is one of them** (MS4 phase 49e). It is generated
--- like a former\'s, so it can clash like one, and this is where a clash is
--- caught — 'Thena.Global.NoConfusion.generateNoConfusion' answers @Clash@ for
+-- **The eliminator\'s wrapper is one of them** (MS4 phase 49e), and @caseD@ is
+-- another (MS9 phase 178). Each is generated like a former\'s, so each can clash
+-- like one, and this is where a clash is caught — 'Thena.Global.NoConfusion.generateNoConfusion' answers @Clash@ for
 -- its own two names for the same reason.
 checkNames :: GlobalEnv -> InductiveDefinition -> Either DeclareError ()
 checkNames env d =
   go []
     ( inductiveName d
     : eliminatorName (inductiveName d)
+    : caseName (inductiveName d)
     : map constructorName (inductiveConstructors d)
     )
   where
@@ -547,7 +610,9 @@ positive dn cn i = peel False
 -- under-applied 'Canonical' (§12 invariant 6).
 generate :: InductiveDefinition -> Int -> GlobalEnv -> (GlobalEnv, Int)
 generate d n0 env =
-  (addInductive dn d (eliminator (foldl former env (typeFormer : map value cs))), n2)
+  ( addInductive dn d
+      (analysis (eliminator (foldl former env (typeFormer : map value cs))))
+  , n4 )
   where
     dn = inductiveName d
     ps = inductiveParameters d
@@ -573,6 +638,24 @@ generate d n0 env =
     eliminator e =
       addDefinition (eliminatorName dn) (MkDefinition elvs [] ety ebody)
         (addConstant (eliminatorName dn) elvs ety e)
+
+    -- **Case analysis, beside the eliminator** (MS9 phase 178): the same scheme
+    -- with every method's inductive hypotheses dropped, which is what
+    -- @case … of@ means as against @induction … of@. Its body is an
+    -- @elim D@ that binds those hypotheses and does not use them, so it is an
+    -- ordinary definition and the kernel checks it as one.
+    --
+    -- **Its own motive level**, minted here rather than shared with the
+    -- eliminator's: two definitions with one rigid level parameter between them
+    -- would instantiate independently anyway, and reading the same variable in
+    -- two signatures invites the reader to think otherwise.
+    (clv, n3)        = freshLevelRigid n2
+    (cty, cbody, n4) = caseWrapper d (LVar clv) n3
+    clvs             = inductiveLevels d ++ [clv]
+
+    analysis e =
+      addDefinition (caseName dn) (MkDefinition clvs [] cty cbody)
+        (addConstant (caseName dn) clvs cty e)
 
     -- **The wrapper inherits the datatype's level parameters** (phase 31b),
     -- and its body instantiates the 'Canonical' at exactly those parameters —

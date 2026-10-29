@@ -70,6 +70,13 @@ tests =
         , ":whnf elim Fin () (\\ (n : Nat) (i : Fin n) -> Nat) \
           \((\\ (n : Nat) -> zero) (\\ (n : Nat) (i : Fin n) (ih : Nat) -> succ ih)) \
           \((succ (succ zero))) (fs (succ zero) (fz zero))"
+          -- **Case analysis, which is the eliminator minus the hypotheses**
+          -- (MS9 phase 178). @:show@ is the whole of what the generator did:
+          -- the type takes no @P x ->@ in its @succ@ method, and the body is an
+          -- @elim Nat@ whose methods bind the hypothesis and drop it. Then it
+          -- computes, which is the only thing a type cannot show.
+        , ":show caseNat"
+        , ":whnf caseNat (\\ (t : Nat) -> Nat) zero (\\ (m : Nat) -> m) (succ (succ zero))"
         , ":elim Foo"
         , ":elim Nat Nat"
         , ":elim"
@@ -737,8 +744,18 @@ tests =
         , "attack"
         , "eliminate-core ⌜ n ⌝"
         , ":abandon"
-        -- And the refusal that remains: index 2 is @fz m@, a constructor
-        -- application, so it is tied and does want an equation.
+        -- And the TIED dependent index, which was the refusal that remained
+        -- until MS9 phase 213: index 2 is @fz m@, a constructor application, so
+        -- it is tied and does want an equation — and @Eq (Fin i₁) i₂ (fz m)@
+        -- cannot be written down, the two sides standing at @Fin i₁@ and
+        -- @Fin (succ m)@.
+        --
+        -- __The @:where@ is the phase's deliverable, and the second equation is
+        -- the thing to read__: @Eq {0} (Fin (succ m)) (elim Eq … q) (fz m)@. The
+        -- carrier is at the __actual__ first index, the actual side is the bare
+        -- @fz m@, and the generalised side is @i₂@ carried there along the first
+        -- equation — §3.2 of /Pattern Matching Without K/, with no heterogeneous
+        -- equality anywhere in it.
         , ":theorem tied : ∀ (m : Nat) (b : Below (succ m) (fz m)) -> Nat"
         , "attack"
         , "intro"
@@ -747,6 +764,29 @@ tests =
         , "along"
         , "along"
         , "eliminate-core ⌜ b ⌝"
+        , ":where"
+        , ":abandon"
+        -- __AND THE CHAINED TELESCOPE, WHICH WAS THE REFUSAL THAT REMAINED
+        -- UNTIL MS9 phase 237.__ @Chain@'s third index is tied and its type
+        -- mentions BOTH earlier ones, while the second's type mentions the
+        -- first. Transporting past the first used to leave the second's binder
+        -- typed at the old one; the motive now binds the second and states the
+        -- right-hand residue at it carried along the same proof.
+        --
+        -- __The subgoal line is the whole of what this pins here__ — the motive
+        -- is three nested transports and @:where@ would print several thousand
+        -- characters of them, which is churn and not evidence.
+        -- @examples/chained-index-telescope.thena@ is where the term is judged,
+        -- by the kernel, with the arm's own payload reduced out of it.
+        , "data Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀ where { c0 : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Chain n i b }"
+        , ":theorem chained : ∀ (m : Nat) (c : Chain (succ m) (fz m) (bz m)) -> Nat"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "into"
+        , "along"
+        , "along"
+        , "eliminate-core ⌜ c ⌝"
         , ":quit"
         ]
     , -- Thesis §2.7, and the phase's deliverable. The interesting half is the

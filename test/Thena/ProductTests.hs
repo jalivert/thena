@@ -53,12 +53,15 @@ tests =
     , statementOf "snd"
         "∀ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> B (fst A B s)"
 
-      -- @Sigma@ is exactly the shape 'Thena.Global.NoConfusion.dependentArgument'
-      -- refuses — @b@'s type mentions @a@ — so the prelude declares a type that
-      -- gets no lemma. Deliberate, and the reason @And@ is a separate
-      -- declaration rather than @Sigma A (λ _ . B)@: @And@ keeps its lemma.
+      -- **@Sigma@ gets its lemma since MS9 phase 212**, and it asserted the
+      -- opposite until then: @b@'s type mentions @a@, which is the shape the
+      -- generator used to decline, and 'Thena.Global.NoConfusion.telescopic'
+      -- now states the second equation after transporting along the first.
+      -- @And@ is still a declaration of its own rather than @Sigma A (λ _ . B)@,
+      -- and keeps its own lemma.
     , declares "NoConfusionAnd" True
-    , declares "NoConfusionSigma" False
+    , declares "NoConfusionSigma" True
+    , declares "NoConfusionDPair" True
     ]
   where
     statementOf g ty = testCase ("the prelude's " ++ g ++ " has its dependent type") $ do

@@ -13,6 +13,27 @@
 -- that is FALSE for a context that repeats a name. So the law the paper gets
 -- from its notation is written down here instead, as two judgments, and
 -- carried as a hypothesis — which is what careful papers do anyway.
+--
+-- == It is written in splits, and 26 `elim`s became none
+--
+-- **The inversion lemmas carry the result.** Eight of the proofs here invert a
+-- lookup or a `#` against one shape of context, and each used to eliminate the
+-- derivation under a motive taking an `Eq Ctx` that pinned the index, then
+-- apply `noConfusionCtx` in every arm to get the equations back out.
+-- `bindTyInBindTm` was eleven lines of that; it is now
+--
+--     case i of { bindTy-there-bindTm G0 W S0 w' S' p -> p }
+--
+-- because the two rules that cannot conclude at a term binding have no arm, and
+-- the one that can arrives with its sub-lookup already at the right context.
+--
+-- **One proof had to say more than its statement did.** `tyRebind` inducts on a
+-- `ty` derivation and its quantifier case recurses at `Δ , X <: T1` — so the
+-- induction varies the Δ *inside* the `append` that the paper's comma stands
+-- for, and a split can generalise a whole premise but never a part of an index.
+-- So `tyRebindAt` below takes the context and the equation as arguments, which
+-- is the motive the hand-written elimination wrote, said in the statement
+-- instead; `tyRebind` closes it with `refl` and nothing else changed.
 
 module FsubWellformed where
 
@@ -20,10 +41,10 @@ module FsubWellformed where
 -- The usual four, as 07 defines them: equality is an ordinary datatype here.
 
 absurdly : forall (C : Type₀) (e : Empty) -> C
-absurdly = \ C e -> elim Empty () (\ t -> C) () () e
+absurdly = \ C e -> case e of { }
 
 substEq : forall (A : Type₀) (P : A -> Type₀) (a : A) (b : A) (e : Eq A a b) (p : P a) -> P b
-substEq = \ A P a b e p -> elim Eq (A) (\ x y q -> P x -> P y) ((\ c -> \ z -> z)) (a b) e p
+substEq = \ A P a b e p -> case e of { refl c -> p }
 
 symEq : forall (A : Type₀) (a : A) (b : A) (e : Eq A a b) -> Eq A b a
 symEq = \ A a b e -> substEq A (\ z -> Eq A z a) a b e (refl A a)
@@ -103,20 +124,10 @@ judgment ok = ⊢ Γ ok where
 -- that any two names differ.
 
 yNotX : Eq String "Y" "X" -> Empty
-yNotX = \ q ->
-  elim Eq (String)
-    (\ u v r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "Y" u)
-                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "Y" v))
-    ((\ u d -> d))
-    ("Y" "X") q unit
+yNotX = \ q -> substEq String (\ z -> isSame (eqString "Y" z)) "Y" "X" q unit
 
 xNotY : Eq String "X" "Y" -> Empty
-xNotY = \ q ->
-  elim Eq (String)
-    (\ u v r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "X" u)
-                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "X" v))
-    ((\ u d -> d))
-    ("X" "Y") q unit
+xNotY = \ q -> substEq String (\ z -> isSame (eqString "X" z)) "X" "Y" q unit
 
 -- ---------------------------------------------------------------------------
 -- Derivations.
@@ -154,29 +165,15 @@ goodAll =
 
 -- Nothing is declared in the empty context.
 bindTyInEmpty : forall (Y : String) (U : Ty) (i : bindTy-in Y U Ctx`·`) -> Empty
-bindTyInEmpty = \ Y U i ->
-  elim bindTy-in () (\ Y1 U1 C1 i1 -> Eq Ctx C1 Ctx`·` -> Empty)
-    ((\ G W S e -> noConfusionCtx (bindTy G W S) Ctx`·` e)
-     (\ G W S w S' p ih e -> noConfusionCtx (bindTm G w S') Ctx`·` e)
-     (\ G W S W' S' ne p ih e -> noConfusionCtx (bindTy G W' S') Ctx`·` e))
-    (Y U Ctx`·`) i (refl Ctx Ctx`·`)
+bindTyInEmpty = \ Y U i -> case i of { }
 
 -- A type lookup past a TERM binding is a lookup in what is underneath: the
 -- generated relation has no inequality to discharge here, because shadowing
 -- is within a namespace.
 bindTyInBindTm : forall (G : Ctx) (w : String) (S : Ty) (Y : String) (U : Ty)
                    (i : bindTy-in Y U (bindTm G w S)) -> bindTy-in Y U G
-bindTyInBindTm = \ G w S Y U i ->
-  elim bindTy-in () (\ Y1 U1 C1 i1 -> Eq Ctx C1 (bindTm G w S) -> bindTy-in Y1 U1 G)
-    ((\ G0 W S0 e ->
-        absurdly (bindTy-in W S0 G) (noConfusionCtx (bindTy G0 W S0) (bindTm G w S) e))
-     (\ G0 W S0 w' S' p ih e ->
-        substEq Ctx (\ c -> bindTy-in W S0 c) G0 G
-          (andLeft (Eq Ctx G0 G) (And (Eq String w' w) (Eq Ty S' S))
-            (noConfusionCtx (bindTm G0 w' S') (bindTm G w S) e)) p)
-     (\ G0 W S0 W' S' ne p ih e ->
-        absurdly (bindTy-in W S0 G) (noConfusionCtx (bindTy G0 W' S') (bindTm G w S) e)))
-    (Y U (bindTm G w S)) i (refl Ctx (bindTm G w S))
+bindTyInBindTm = \ G w S Y U i -> case i of
+  { bindTy-there-bindTm G0 W S0 w' S' p -> p }
 
 -- A type lookup past a TYPE binding is either that binding, or a lookup
 -- underneath it at a different name.
@@ -187,31 +184,13 @@ FoundTy = \ G W S Y U ->
 
 bindTyInBindTy : forall (G : Ctx) (W : String) (S : Ty) (Y : String) (U : Ty)
                    (i : bindTy-in Y U (bindTy G W S)) -> FoundTy G W S Y U
-bindTyInBindTy = \ G W S Y U i ->
-  elim bindTy-in () (\ Y1 U1 C1 i1 -> Eq Ctx C1 (bindTy G W S) -> FoundTy G W S Y1 U1)
-    ((\ G0 W0 S0 e ->
-        orLeft (And (Eq String W0 W) (Eq Ty S0 S)) (And (Eq String W0 W -> Empty) (bindTy-in W0 S0 G))
-          (both (Eq String W0 W) (Eq Ty S0 S)
-            (andLeft (Eq String W0 W) (Eq Ty S0 S)
-              (andRight (Eq Ctx G0 G) (And (Eq String W0 W) (Eq Ty S0 S))
-                (noConfusionCtx (bindTy G0 W0 S0) (bindTy G W S) e)))
-            (andRight (Eq String W0 W) (Eq Ty S0 S)
-              (andRight (Eq Ctx G0 G) (And (Eq String W0 W) (Eq Ty S0 S))
-                (noConfusionCtx (bindTy G0 W0 S0) (bindTy G W S) e)))))
-     (\ G0 W0 S0 w' S' p ih e ->
-        absurdly (FoundTy G W S W0 S0) (noConfusionCtx (bindTm G0 w' S') (bindTy G W S) e))
-     (\ G0 W0 S0 W' S' ne p ih e ->
-        orRight (And (Eq String W0 W) (Eq Ty S0 S)) (And (Eq String W0 W -> Empty) (bindTy-in W0 S0 G))
-          (both (Eq String W0 W -> Empty) (bindTy-in W0 S0 G)
-            (\ q -> ne (transEq String W0 W W' q
-                          (symEq String W' W
-                            (andLeft (Eq String W' W) (Eq Ty S' S)
-                              (andRight (Eq Ctx G0 G) (And (Eq String W' W) (Eq Ty S' S))
-                                (noConfusionCtx (bindTy G0 W' S') (bindTy G W S) e))))))
-            (substEq Ctx (\ c -> bindTy-in W0 S0 c) G0 G
-              (andLeft (Eq Ctx G0 G) (And (Eq String W' W) (Eq Ty S' S))
-                (noConfusionCtx (bindTy G0 W' S') (bindTy G W S) e)) p))))
-    (Y U (bindTy G W S)) i (refl Ctx (bindTy G W S))
+bindTyInBindTy = \ G W S Y U i -> case i of
+  { bindTy-here G0 W0 S0 ->
+      orLeft (And (Eq String W0 W) (Eq Ty S0 S)) (And (Eq String W0 W -> Empty) (bindTy-in W0 S0 G))
+        (both (Eq String W0 W) (Eq Ty S0 S) (refl String W0) (refl Ty S0))
+  ; bindTy-there-bindTy G0 W0 S0 W' S' ne p ->
+      orRight (And (Eq String W0 W) (Eq Ty S0 S)) (And (Eq String W0 W -> Empty) (bindTy-in W0 S0 G))
+        (both (Eq String W0 W -> Empty) (bindTy-in W0 S0 G) ne p) }
 
 
 -- ---------------------------------------------------------------------------
@@ -220,55 +199,30 @@ bindTyInBindTy = \ G W S Y U i ->
 
 notInBindTm : forall (Z : String) (G : Ctx) (y : String) (T : Ty)
                 (f : notIn Z (bindTm G y T)) -> notIn Z G
-notInBindTm = \ Z G y T f ->
-  elim notIn () (\ Z1 C1 f1 -> Eq Ctx C1 (bindTm G y T) -> notIn Z1 G)
-    ((\ Z1 e -> absurdly (notIn Z1 G) (noConfusionCtx Ctx`·` (bindTm G y T) e))
-     (\ Z1 G1 y1 T1 p ih e ->
-        substEq Ctx (\ c -> notIn Z1 c) G1 G
-          (andLeft (Eq Ctx G1 G) (And (Eq String y1 y) (Eq Ty T1 T))
-            (noConfusionCtx (bindTm G1 y1 T1) (bindTm G y T) e)) p)
-     (\ Z1 G1 Y1 T1 ne p ih e ->
-        absurdly (notIn Z1 G) (noConfusionCtx (bindTy G1 Y1 T1) (bindTm G y T) e)))
-    (Z (bindTm G y T)) f (refl Ctx (bindTm G y T))
+notInBindTm = \ Z G y T f -> case f of
+  { NI-bindTm Z1 G1 y1 T1 p -> p }
 
 NotInSplit : String -> Ctx -> String -> Type₀
 NotInSplit = \ Z G Y -> And (Eq String Z Y -> Empty) (notIn Z G)
 
 notInBindTy : forall (Z : String) (G : Ctx) (Y : String) (T : Ty)
                 (f : notIn Z (bindTy G Y T)) -> NotInSplit Z G Y
-notInBindTy = \ Z G Y T f ->
-  elim notIn () (\ Z1 C1 f1 -> Eq Ctx C1 (bindTy G Y T) -> NotInSplit Z1 G Y)
-    ((\ Z1 e -> absurdly (NotInSplit Z1 G Y) (noConfusionCtx Ctx`·` (bindTy G Y T) e))
-     (\ Z1 G1 y1 T1 p ih e ->
-        absurdly (NotInSplit Z1 G Y) (noConfusionCtx (bindTm G1 y1 T1) (bindTy G Y T) e))
-     (\ Z1 G1 Y1 T1 ne p ih e ->
-        both (Eq String Z1 Y -> Empty) (notIn Z1 G)
-          (\ q -> ne (transEq String Z1 Y Y1 q
-                       (symEq String Y1 Y
-                         (andLeft (Eq String Y1 Y) (Eq Ty T1 T)
-                           (andRight (Eq Ctx G1 G) (And (Eq String Y1 Y) (Eq Ty T1 T))
-                             (noConfusionCtx (bindTy G1 Y1 T1) (bindTy G Y T) e))))))
-          (substEq Ctx (\ c -> notIn Z1 c) G1 G
-            (andLeft (Eq Ctx G1 G) (And (Eq String Y1 Y) (Eq Ty T1 T))
-              (noConfusionCtx (bindTy G1 Y1 T1) (bindTy G Y T) e)) p)))
-    (Z (bindTy G Y T)) f (refl Ctx (bindTy G Y T))
+notInBindTy = \ Z G Y T f -> case f of
+  { NI-bindTy Z1 G1 Y1 T1 ne p -> both (Eq String Z1 Y -> Empty) (notIn Z1 G) ne p }
 
 -- A name that is not declared is not found. This is what turns distinctness
 -- into the weakening the proof in 06 needs.
 freshNotFound : forall (Z : String) (G : Ctx) (f : notIn Z G) (U : Ty)
                   (i : bindTy-in Z U G) -> Empty
-freshNotFound = \ Z G f ->
-  elim notIn () (\ Z1 C1 f1 -> forall (U : Ty) (i : bindTy-in Z1 U C1) -> Empty)
-    ((\ Z1 U i -> bindTyInEmpty Z1 U i)
-     (\ Z1 G1 y1 T1 p ih U i -> ih U (bindTyInBindTm G1 y1 T1 Z1 U i))
-     (\ Z1 G1 Y1 T1 ne p ih U i ->
-        elim Or ((And (Eq String Z1 Y1) (Eq Ty U T1))
-                 (And (Eq String Z1 Y1 -> Empty) (bindTy-in Z1 U G1)))
-          (\ o -> Empty)
-          ((\ h -> ne (andLeft (Eq String Z1 Y1) (Eq Ty U T1) h))
-           (\ h -> ih U (andRight (Eq String Z1 Y1 -> Empty) (bindTy-in Z1 U G1) h)))
-          () (bindTyInBindTy G1 Y1 T1 Z1 U i)))
-    (Z G) f
+freshNotFound = \ Z G f -> induction f of
+  { NI-empty Z1 -> \ U i -> bindTyInEmpty Z1 U i
+  ; NI-bindTm Z1 G1 y1 T1 p -> \ U i ->
+      freshNotFound Z1 G1 p U (bindTyInBindTm G1 y1 T1 Z1 U i)
+  ; NI-bindTy Z1 G1 Y1 T1 ne p -> \ U i ->
+      case (bindTyInBindTy G1 Y1 T1 Z1 U i) of
+        { orLeft h -> ne (andLeft (Eq String Z1 Y1) (Eq Ty U T1) h)
+        ; orRight h -> freshNotFound Z1 G1 p U
+                         (andRight (Eq String Z1 Y1 -> Empty) (bindTy-in Z1 U G1) h) } }
 
 
 -- ---------------------------------------------------------------------------
@@ -295,83 +249,70 @@ NarrowFound = \ G Xn Q P D Y U -> Or (NFound1 G Xn P D Y U) (NFound2 G Xn Q P D 
 narrowLookup : forall (G : Ctx) (Xn : String) (Q : Ty) (P : Ty) (D : Ctx)
                  (Y : String) (U : Ty) (i : bindTy-in Y U (append (bindTy G Xn Q) D))
                  -> NarrowFound G Xn Q P D Y U
-narrowLookup = \ G Xn Q P D ->
-  elim Ctx () (\ D0 -> forall (Y : String) (U : Ty)
-                         (i : bindTy-in Y U (append (bindTy G Xn Q) D0))
-                         -> NarrowFound G Xn Q P D0 Y U)
-    (-- Δ is empty: the lookup is in Γ , X <: Q itself.
-     (\ Y U i ->
-        elim Or ((And (Eq String Y Xn) (Eq Ty U Q))
-                 (And (Eq String Y Xn -> Empty) (bindTy-in Y U G)))
-          (\ o -> NarrowFound G Xn Q P Ctx`·` Y U)
-          ((\ h -> orRight (NFound1 G Xn P Ctx`·` Y U) (NFound2 G Xn Q P Ctx`·` Y U)
-                     (both (And (Eq String Y Xn) (Eq Ty U Q))
-                           (bindTy-in Xn P (append (bindTy G Xn P) Ctx`·`))
-                       h (bindTy-here G Xn P)))
-           (\ h -> orLeft (NFound1 G Xn P Ctx`·` Y U) (NFound2 G Xn Q P Ctx`·` Y U)
-                     (bindTy-there-bindTy G Y U Xn P
-                       (andLeft (Eq String Y Xn -> Empty) (bindTy-in Y U G) h)
-                       (andRight (Eq String Y Xn -> Empty) (bindTy-in Y U G) h))))
-          () (bindTyInBindTy G Xn Q Y U i))
-     -- Δ ends in a term binding: step over it on both sides.
-     (\ D0 w S ih Y U i ->
-        elim Or ((NFound1 G Xn P D0 Y U) (NFound2 G Xn Q P D0 Y U))
-          (\ o -> NarrowFound G Xn Q P (bindTm D0 w S) Y U)
-          ((\ h -> orLeft (NFound1 G Xn P (bindTm D0 w S) Y U)
-                          (NFound2 G Xn Q P (bindTm D0 w S) Y U)
-                     (bindTy-there-bindTm (append (bindTy G Xn P) D0) Y U w S h))
-           (\ h -> orRight (NFound1 G Xn P (bindTm D0 w S) Y U)
-                           (NFound2 G Xn Q P (bindTm D0 w S) Y U)
-                     (both (And (Eq String Y Xn) (Eq Ty U Q))
-                           (bindTy-in Xn P (append (bindTy G Xn P) (bindTm D0 w S)))
-                       (andLeft (And (Eq String Y Xn) (Eq Ty U Q))
-                                (bindTy-in Xn P (append (bindTy G Xn P) D0)) h)
-                       (bindTy-there-bindTm (append (bindTy G Xn P) D0) Xn P w S
-                         (andRight (And (Eq String Y Xn) (Eq Ty U Q))
-                                   (bindTy-in Xn P (append (bindTy G Xn P) D0)) h)))))
-          () (ih Y U (bindTyInBindTm (append (bindTy G Xn Q) D0) w S Y U i)))
-     -- Δ ends in a type binding: it may be the entry found, and then it is in
-     -- Δ and the swap of Q for P does not touch it.
-     (\ D0 W S ih Y U i ->
-        elim Or ((And (Eq String Y W) (Eq Ty U S))
-                 (And (Eq String Y W -> Empty) (bindTy-in Y U (append (bindTy G Xn Q) D0))))
-          (\ o -> NarrowFound G Xn Q P (bindTy D0 W S) Y U)
-          ((\ h -> orLeft (NFound1 G Xn P (bindTy D0 W S) Y U)
-                          (NFound2 G Xn Q P (bindTy D0 W S) Y U)
-                     (substEq String (\ z -> bindTy-in z U (bindTy (append (bindTy G Xn P) D0) W S)) W Y
-                       (symEq String Y W (andLeft (Eq String Y W) (Eq Ty U S) h))
-                       (substEq Ty (\ V -> bindTy-in W V (bindTy (append (bindTy G Xn P) D0) W S)) S U
-                         (symEq Ty U S (andRight (Eq String Y W) (Eq Ty U S) h))
-                         (bindTy-here (append (bindTy G Xn P) D0) W S))))
-           (\ h ->
-              elim Or ((NFound1 G Xn P D0 Y U) (NFound2 G Xn Q P D0 Y U))
-                (\ o -> NarrowFound G Xn Q P (bindTy D0 W S) Y U)
-                ((\ g -> orLeft (NFound1 G Xn P (bindTy D0 W S) Y U)
-                                (NFound2 G Xn Q P (bindTy D0 W S) Y U)
-                           (bindTy-there-bindTy (append (bindTy G Xn P) D0) Y U W S
-                             (andLeft (Eq String Y W -> Empty)
-                                      (bindTy-in Y U (append (bindTy G Xn Q) D0)) h)
-                             g))
-                 (\ g -> orRight (NFound1 G Xn P (bindTy D0 W S) Y U)
-                                 (NFound2 G Xn Q P (bindTy D0 W S) Y U)
-                           (both (And (Eq String Y Xn) (Eq Ty U Q))
-                                 (bindTy-in Xn P (append (bindTy G Xn P) (bindTy D0 W S)))
-                             (andLeft (And (Eq String Y Xn) (Eq Ty U Q))
-                                      (bindTy-in Xn P (append (bindTy G Xn P) D0)) g)
-                             (bindTy-there-bindTy (append (bindTy G Xn P) D0) Xn P W S
-                               (\ q -> andLeft (Eq String Y W -> Empty)
-                                               (bindTy-in Y U (append (bindTy G Xn Q) D0)) h
-                                         (transEq String Y Xn W
-                                           (andLeft (Eq String Y Xn) (Eq Ty U Q)
-                                             (andLeft (And (Eq String Y Xn) (Eq Ty U Q))
-                                                      (bindTy-in Xn P (append (bindTy G Xn P) D0)) g))
-                                           q))
-                               (andRight (And (Eq String Y Xn) (Eq Ty U Q))
-                                         (bindTy-in Xn P (append (bindTy G Xn P) D0)) g)))))
-                () (ih Y U (andRight (Eq String Y W -> Empty)
-                                     (bindTy-in Y U (append (bindTy G Xn Q) D0)) h))))
-          () (bindTyInBindTy (append (bindTy G Xn Q) D0) W S Y U i)))
-    () D
+narrowLookup = \ G Xn Q P D -> induction D of
+  -- Δ is empty: the lookup is in Γ , X <: Q itself.
+  { empty -> \ Y U i -> case (bindTyInBindTy G Xn Q Y U i) of
+      { orLeft h -> orRight (NFound1 G Xn P Ctx`·` Y U) (NFound2 G Xn Q P Ctx`·` Y U)
+                      (both (And (Eq String Y Xn) (Eq Ty U Q))
+                            (bindTy-in Xn P (append (bindTy G Xn P) Ctx`·`))
+                        h (bindTy-here G Xn P))
+      ; orRight h -> orLeft (NFound1 G Xn P Ctx`·` Y U) (NFound2 G Xn Q P Ctx`·` Y U)
+                       (bindTy-there-bindTy G Y U Xn P
+                         (andLeft (Eq String Y Xn -> Empty) (bindTy-in Y U G) h)
+                         (andRight (Eq String Y Xn -> Empty) (bindTy-in Y U G) h)) }
+  -- Δ ends in a term binding: step over it on both sides.
+  ; bindTm D0 w S -> \ Y U i ->
+      case (narrowLookup G Xn Q P D0 Y U
+              (bindTyInBindTm (append (bindTy G Xn Q) D0) w S Y U i)) of
+        { orLeft h -> orLeft (NFound1 G Xn P (bindTm D0 w S) Y U)
+                             (NFound2 G Xn Q P (bindTm D0 w S) Y U)
+                        (bindTy-there-bindTm (append (bindTy G Xn P) D0) Y U w S h)
+        ; orRight h -> orRight (NFound1 G Xn P (bindTm D0 w S) Y U)
+                               (NFound2 G Xn Q P (bindTm D0 w S) Y U)
+                          (both (And (Eq String Y Xn) (Eq Ty U Q))
+                                (bindTy-in Xn P (append (bindTy G Xn P) (bindTm D0 w S)))
+                            (andLeft (And (Eq String Y Xn) (Eq Ty U Q))
+                                     (bindTy-in Xn P (append (bindTy G Xn P) D0)) h)
+                            (bindTy-there-bindTm (append (bindTy G Xn P) D0) Xn P w S
+                              (andRight (And (Eq String Y Xn) (Eq Ty U Q))
+                                        (bindTy-in Xn P (append (bindTy G Xn P) D0)) h))) }
+  -- Δ ends in a type binding: it may be the entry found, and then it is in
+  -- Δ and the swap of Q for P does not touch it.
+  ; bindTy D0 W S -> \ Y U i ->
+      case (bindTyInBindTy (append (bindTy G Xn Q) D0) W S Y U i) of
+        { orLeft h -> orLeft (NFound1 G Xn P (bindTy D0 W S) Y U)
+                             (NFound2 G Xn Q P (bindTy D0 W S) Y U)
+                        (substEq String (\ z -> bindTy-in z U (bindTy (append (bindTy G Xn P) D0) W S)) W Y
+                          (symEq String Y W (andLeft (Eq String Y W) (Eq Ty U S) h))
+                          (substEq Ty (\ V -> bindTy-in W V (bindTy (append (bindTy G Xn P) D0) W S)) S U
+                            (symEq Ty U S (andRight (Eq String Y W) (Eq Ty U S) h))
+                            (bindTy-here (append (bindTy G Xn P) D0) W S)))
+        ; orRight h ->
+            case (narrowLookup G Xn Q P D0 Y U
+                    (andRight (Eq String Y W -> Empty)
+                              (bindTy-in Y U (append (bindTy G Xn Q) D0)) h)) of
+              { orLeft g -> orLeft (NFound1 G Xn P (bindTy D0 W S) Y U)
+                                   (NFound2 G Xn Q P (bindTy D0 W S) Y U)
+                              (bindTy-there-bindTy (append (bindTy G Xn P) D0) Y U W S
+                                (andLeft (Eq String Y W -> Empty)
+                                         (bindTy-in Y U (append (bindTy G Xn Q) D0)) h)
+                                g)
+              ; orRight g -> orRight (NFound1 G Xn P (bindTy D0 W S) Y U)
+                                     (NFound2 G Xn Q P (bindTy D0 W S) Y U)
+                                (both (And (Eq String Y Xn) (Eq Ty U Q))
+                                      (bindTy-in Xn P (append (bindTy G Xn P) (bindTy D0 W S)))
+                                  (andLeft (And (Eq String Y Xn) (Eq Ty U Q))
+                                           (bindTy-in Xn P (append (bindTy G Xn P) D0)) g)
+                                  (bindTy-there-bindTy (append (bindTy G Xn P) D0) Xn P W S
+                                    (\ q -> andLeft (Eq String Y W -> Empty)
+                                                    (bindTy-in Y U (append (bindTy G Xn Q) D0)) h
+                                              (transEq String Y Xn W
+                                                (andLeft (Eq String Y Xn) (Eq Ty U Q)
+                                                  (andLeft (And (Eq String Y Xn) (Eq Ty U Q))
+                                                           (bindTy-in Xn P (append (bindTy G Xn P) D0)) g))
+                                                q))
+                                    (andRight (And (Eq String Y Xn) (Eq Ty U Q))
+                                              (bindTy-in Xn P (append (bindTy G Xn P) D0)) g))) } } }
 
 
 -- ---------------------------------------------------------------------------
@@ -384,56 +325,57 @@ narrowLookup = \ G Xn Q P D ->
 notInRebind : forall (G : Ctx) (Xn : String) (A : Ty) (B : Ty) (D : Ctx) (Z : String)
                 (f : notIn Z (append (bindTy G Xn A) D))
                 -> notIn Z (append (bindTy G Xn B) D)
-notInRebind = \ G Xn A B D ->
-  elim Ctx () (\ D0 -> forall (Z : String) (f : notIn Z (append (bindTy G Xn A) D0))
-                         -> notIn Z (append (bindTy G Xn B) D0))
-    ((\ Z f ->
-        NI-bindTy Z G Xn B
-          (andLeft (Eq String Z Xn -> Empty) (notIn Z G) (notInBindTy Z G Xn A f))
-          (andRight (Eq String Z Xn -> Empty) (notIn Z G) (notInBindTy Z G Xn A f)))
-     (\ D0 w S ih Z f ->
-        NI-bindTm Z (append (bindTy G Xn B) D0) w S
-          (ih Z (notInBindTm Z (append (bindTy G Xn A) D0) w S f)))
-     (\ D0 W S ih Z f ->
-        NI-bindTy Z (append (bindTy G Xn B) D0) W S
-          (andLeft (Eq String Z W -> Empty) (notIn Z (append (bindTy G Xn A) D0))
-            (notInBindTy Z (append (bindTy G Xn A) D0) W S f))
-          (ih Z (andRight (Eq String Z W -> Empty) (notIn Z (append (bindTy G Xn A) D0))
-                  (notInBindTy Z (append (bindTy G Xn A) D0) W S f)))))
-    () D
+notInRebind = \ G Xn A B D Z f -> induction D of
+  { empty ->
+      NI-bindTy Z G Xn B
+        (andLeft (Eq String Z Xn -> Empty) (notIn Z G) (notInBindTy Z G Xn A f))
+        (andRight (Eq String Z Xn -> Empty) (notIn Z G) (notInBindTy Z G Xn A f))
+  ; bindTm D0 w S ->
+      NI-bindTm Z (append (bindTy G Xn B) D0) w S
+        (notInRebind G Xn A B D0 Z (notInBindTm Z (append (bindTy G Xn A) D0) w S f))
+  ; bindTy D0 W S ->
+      NI-bindTy Z (append (bindTy G Xn B) D0) W S
+        (andLeft (Eq String Z W -> Empty) (notIn Z (append (bindTy G Xn A) D0))
+          (notInBindTy Z (append (bindTy G Xn A) D0) W S f))
+        (notInRebind G Xn A B D0 Z
+          (andRight (Eq String Z W -> Empty) (notIn Z (append (bindTy G Xn A) D0))
+            (notInBindTy Z (append (bindTy G Xn A) D0) W S f))) }
 
+tyRebindAt : forall (G : Ctx) (Xn : String) (A : Ty) (B : Ty) (C : Ctx) (T : Ty)
+               (h : ty C T) (D : Ctx) (e : Eq Ctx C (append (bindTy G Xn A) D))
+               -> ty (append (bindTy G Xn B) D) T
+tyRebindAt = \ G Xn A B C T h D e -> induction h of
+  { ty-tvar X T1 C0 lk ->
+      case (narrowLookup G Xn A B D X T1
+              (substEq Ctx (\ c -> bindTy-in X T1 c) C0 (append (bindTy G Xn A) D) e lk)) of
+        { orLeft g -> ty-tvar X T1 (append (bindTy G Xn B) D) g
+        ; orRight g -> substEq String (\ z -> ty (append (bindTy G Xn B) D) Ty`${z}`) Xn X
+                         (symEq String X Xn
+                           (andLeft (Eq String X Xn) (Eq Ty T1 A)
+                             (andLeft (And (Eq String X Xn) (Eq Ty T1 A))
+                               (bindTy-in Xn B (append (bindTy G Xn B) D)) g)))
+                         (ty-tvar Xn B (append (bindTy G Xn B) D)
+                           (andRight (And (Eq String X Xn) (Eq Ty T1 A))
+                             (bindTy-in Xn B (append (bindTy G Xn B) D)) g)) }
+  ; ty-top C0 -> ty-top (append (bindTy G Xn B) D)
+  ; ty-arrow C0 T1 T2 h1 h2 ->
+      ty-arrow (append (bindTy G Xn B) D) T1 T2
+        (tyRebindAt G Xn A B C0 T1 h1 D e) (tyRebindAt G Xn A B C0 T2 h2 D e)
+  ; ty-all X C0 T1 T2 f h1 h2 ->
+      ty-all X (append (bindTy G Xn B) D) T1 T2
+        (notInRebind G Xn A B D X (substEq Ctx (\ c -> notIn X c) C0 (append (bindTy G Xn A) D) e f))
+        (tyRebindAt G Xn A B C0 T1 h1 D e)
+        (tyRebindAt G Xn A B (bindTy C0 X T1) T2 h2 (bindTy D X T1)
+          (substEq Ctx (\ c -> Eq Ctx (bindTy C0 X T1) (bindTy c X T1))
+            C0 (append (bindTy G Xn A) D) e (refl Ctx (bindTy C0 X T1)))) }
+
+-- And the lemma as the rest of the file asks for it, with the equation closed.
 tyRebind : forall (G : Ctx) (Xn : String) (A : Ty) (B : Ty) (D : Ctx) (T : Ty)
              (h : ty (append (bindTy G Xn A) D) T)
              -> ty (append (bindTy G Xn B) D) T
 tyRebind = \ G Xn A B D T h ->
-  elim ty () (\ C0 T0 h0 -> forall (D1 : Ctx) (e : Eq Ctx C0 (append (bindTy G Xn A) D1))
-                              -> ty (append (bindTy G Xn B) D1) T0)
-    ((\ X T1 C0 lk D1 e ->
-        elim Or ((NFound1 G Xn B D1 X T1) (NFound2 G Xn A B D1 X T1))
-          (\ o -> ty (append (bindTy G Xn B) D1) Ty`${X}`)
-          ((\ g -> ty-tvar X T1 (append (bindTy G Xn B) D1) g)
-           (\ g -> substEq String (\ z -> ty (append (bindTy G Xn B) D1) Ty`${z}`) Xn X
-                     (symEq String X Xn
-                       (andLeft (Eq String X Xn) (Eq Ty T1 A)
-                         (andLeft (And (Eq String X Xn) (Eq Ty T1 A))
-                           (bindTy-in Xn B (append (bindTy G Xn B) D1)) g)))
-                     (ty-tvar Xn B (append (bindTy G Xn B) D1)
-                       (andRight (And (Eq String X Xn) (Eq Ty T1 A))
-                         (bindTy-in Xn B (append (bindTy G Xn B) D1)) g))))
-          () (narrowLookup G Xn A B D1 X T1
-               (substEq Ctx (\ c -> bindTy-in X T1 c) C0 (append (bindTy G Xn A) D1) e lk)))
-     (\ C0 D1 e -> ty-top (append (bindTy G Xn B) D1))
-     (\ C0 T1 T2 h1 h2 ih1 ih2 D1 e ->
-        ty-arrow (append (bindTy G Xn B) D1) T1 T2 (ih1 D1 e) (ih2 D1 e))
-     (\ X C0 T1 T2 f h1 h2 ih1 ih2 D1 e ->
-        ty-all X (append (bindTy G Xn B) D1) T1 T2
-          (notInRebind G Xn A B D1 X
-            (substEq Ctx (\ c -> notIn X c) C0 (append (bindTy G Xn A) D1) e f))
-          (ih1 D1 e)
-          (ih2 (bindTy D1 X T1)
-            (substEq Ctx (\ c -> Eq Ctx (bindTy C0 X T1) (bindTy c X T1))
-              C0 (append (bindTy G Xn A) D1) e (refl Ctx (bindTy C0 X T1))))))
-    ((append (bindTy G Xn A) D) T) h D (refl Ctx (append (bindTy G Xn A) D))
+  tyRebindAt G Xn A B (append (bindTy G Xn A) D) T h D
+    (refl Ctx (append (bindTy G Xn A) D))
 
 
 -- Inversion of well-formedness, one shape of context at a time.
@@ -442,90 +384,51 @@ OkTm : Ctx -> Ty -> Type₀
 OkTm = \ G T -> And (ok G) (ty G T)
 
 okBindTm : forall (G : Ctx) (w : String) (S : Ty) (o : ok (bindTm G w S)) -> OkTm G S
-okBindTm = \ G w S o ->
-  elim ok () (\ C0 o0 -> Eq Ctx C0 (bindTm G w S) -> OkTm G S)
-    ((\ e -> absurdly (OkTm G S) (noConfusionCtx Ctx`·` (bindTm G w S) e))
-     (\ G1 T1 x1 o1 h1 ih1 e ->
-        both (ok G) (ty G S)
-          (substEq Ctx (\ c -> ok c) G1 G
-            (andLeft (Eq Ctx G1 G) (And (Eq String x1 w) (Eq Ty T1 S))
-              (noConfusionCtx (bindTm G1 x1 T1) (bindTm G w S) e)) o1)
-          (substEq Ty (\ t -> ty G t) T1 S
-            (andRight (Eq String x1 w) (Eq Ty T1 S)
-              (andRight (Eq Ctx G1 G) (And (Eq String x1 w) (Eq Ty T1 S))
-                (noConfusionCtx (bindTm G1 x1 T1) (bindTm G w S) e)))
-            (substEq Ctx (\ c -> ty c T1) G1 G
-              (andLeft (Eq Ctx G1 G) (And (Eq String x1 w) (Eq Ty T1 S))
-                (noConfusionCtx (bindTm G1 x1 T1) (bindTm G w S) e)) h1)))
-     (\ G1 X1 T1 o1 f1 h1 ih1 e ->
-        absurdly (OkTm G S) (noConfusionCtx (bindTy G1 X1 T1) (bindTm G w S) e)))
-    ((bindTm G w S)) o (refl Ctx (bindTm G w S))
+okBindTm = \ G w S o -> case o of
+  { ok-bindTm G1 T1 x1 o1 h1 -> both (ok G) (ty G S) o1 h1 }
 
 OkTy : Ctx -> String -> Ty -> Type₀
 OkTy = \ G W S -> And (ok G) (And (notIn W G) (ty G S))
 
 okBindTy : forall (G : Ctx) (W : String) (S : Ty) (o : ok (bindTy G W S)) -> OkTy G W S
-okBindTy = \ G W S o ->
-  elim ok () (\ C0 o0 -> Eq Ctx C0 (bindTy G W S) -> OkTy G W S)
-    ((\ e -> absurdly (OkTy G W S) (noConfusionCtx Ctx`·` (bindTy G W S) e))
-     (\ G1 T1 x1 o1 h1 ih1 e ->
-        absurdly (OkTy G W S) (noConfusionCtx (bindTm G1 x1 T1) (bindTy G W S) e))
-     (\ G1 X1 T1 o1 f1 h1 ih1 e ->
-        both (ok G) (And (notIn W G) (ty G S))
-          (substEq Ctx (\ c -> ok c) G1 G
-            (andLeft (Eq Ctx G1 G) (And (Eq String X1 W) (Eq Ty T1 S))
-              (noConfusionCtx (bindTy G1 X1 T1) (bindTy G W S) e)) o1)
-          (both (notIn W G) (ty G S)
-            (substEq String (\ z -> notIn z G) X1 W
-              (andLeft (Eq String X1 W) (Eq Ty T1 S)
-                (andRight (Eq Ctx G1 G) (And (Eq String X1 W) (Eq Ty T1 S))
-                  (noConfusionCtx (bindTy G1 X1 T1) (bindTy G W S) e)))
-              (substEq Ctx (\ c -> notIn X1 c) G1 G
-                (andLeft (Eq Ctx G1 G) (And (Eq String X1 W) (Eq Ty T1 S))
-                  (noConfusionCtx (bindTy G1 X1 T1) (bindTy G W S) e)) f1))
-            (substEq Ty (\ t -> ty G t) T1 S
-              (andRight (Eq String X1 W) (Eq Ty T1 S)
-                (andRight (Eq Ctx G1 G) (And (Eq String X1 W) (Eq Ty T1 S))
-                  (noConfusionCtx (bindTy G1 X1 T1) (bindTy G W S) e)))
-              (substEq Ctx (\ c -> ty c T1) G1 G
-                (andLeft (Eq Ctx G1 G) (And (Eq String X1 W) (Eq Ty T1 S))
-                  (noConfusionCtx (bindTy G1 X1 T1) (bindTy G W S) e)) h1)))))
-    ((bindTy G W S)) o (refl Ctx (bindTy G W S))
+okBindTy = \ G W S o -> case o of
+  { ok-bindTy G1 X1 T1 o1 f1 h1 ->
+      both (ok G) (And (notIn W G) (ty G S)) o1
+        (both (notIn W G) (ty G S) f1 h1) }
 
 -- And so a well-formed context stays well-formed when one bound is replaced by
 -- another type that is well-formed where it is declared.
 okRebind : forall (G : Ctx) (Xn : String) (A : Ty) (B : Ty) (D : Ctx)
              (o : ok (append (bindTy G Xn A) D)) (tb : ty G B)
              -> ok (append (bindTy G Xn B) D)
-okRebind = \ G Xn A B D o tb ->
-  elim Ctx () (\ D0 -> forall (o0 : ok (append (bindTy G Xn A) D0))
-                         -> ok (append (bindTy G Xn B) D0))
-    ((\ o0 ->
-        ok-bindTy G Xn B
-          (andLeft (ok G) (And (notIn Xn G) (ty G A)) (okBindTy G Xn A o0))
-          (andLeft (notIn Xn G) (ty G A)
-            (andRight (ok G) (And (notIn Xn G) (ty G A)) (okBindTy G Xn A o0)))
-          tb)
-     (\ D0 w S ih o0 ->
-        ok-bindTm (append (bindTy G Xn B) D0) S w
-          (ih (andLeft (ok (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S)
-                (okBindTm (append (bindTy G Xn A) D0) w S o0)))
-          (tyRebind G Xn A B D0 S
-            (andRight (ok (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S)
-              (okBindTm (append (bindTy G Xn A) D0) w S o0))))
-     (\ D0 W S ih o0 ->
-        ok-bindTy (append (bindTy G Xn B) D0) W S
-          (ih (andLeft (ok (append (bindTy G Xn A) D0))
-                 (And (notIn W (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S))
-                (okBindTy (append (bindTy G Xn A) D0) W S o0)))
-          (notInRebind G Xn A B D0 W
-            (andLeft (notIn W (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S)
-              (andRight (ok (append (bindTy G Xn A) D0))
-                (And (notIn W (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S))
-                (okBindTy (append (bindTy G Xn A) D0) W S o0))))
-          (tyRebind G Xn A B D0 S
-            (andRight (notIn W (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S)
-              (andRight (ok (append (bindTy G Xn A) D0))
-                (And (notIn W (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S))
-                (okBindTy (append (bindTy G Xn A) D0) W S o0))))))
-    () D o
+okRebind = \ G Xn A B D o tb -> induction D of
+  { empty ->
+      ok-bindTy G Xn B
+        (andLeft (ok G) (And (notIn Xn G) (ty G A)) (okBindTy G Xn A o))
+        (andLeft (notIn Xn G) (ty G A)
+          (andRight (ok G) (And (notIn Xn G) (ty G A)) (okBindTy G Xn A o)))
+        tb
+  ; bindTm D0 w S ->
+      ok-bindTm (append (bindTy G Xn B) D0) S w
+        (okRebind G Xn A B D0
+          (andLeft (ok (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S)
+            (okBindTm (append (bindTy G Xn A) D0) w S o)) tb)
+        (tyRebind G Xn A B D0 S
+          (andRight (ok (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S)
+            (okBindTm (append (bindTy G Xn A) D0) w S o)))
+  ; bindTy D0 W S ->
+      ok-bindTy (append (bindTy G Xn B) D0) W S
+        (okRebind G Xn A B D0
+          (andLeft (ok (append (bindTy G Xn A) D0))
+             (And (notIn W (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S))
+            (okBindTy (append (bindTy G Xn A) D0) W S o)) tb)
+        (notInRebind G Xn A B D0 W
+          (andLeft (notIn W (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S)
+            (andRight (ok (append (bindTy G Xn A) D0))
+              (And (notIn W (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S))
+              (okBindTy (append (bindTy G Xn A) D0) W S o))))
+        (tyRebind G Xn A B D0 S
+          (andRight (notIn W (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S)
+            (andRight (ok (append (bindTy G Xn A) D0))
+              (And (notIn W (append (bindTy G Xn A) D0)) (ty (append (bindTy G Xn A) D0) S))
+              (okBindTy (append (bindTy G Xn A) D0) W S o)))) }

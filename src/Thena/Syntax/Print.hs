@@ -18,6 +18,7 @@
 -- ("Thena.View.SourceTests").
 module Thena.Syntax.Print
   ( renderSurface
+  , surfacePattern
     -- * The written pieces, for printers built on this one
   , rawInstruction
   , rawOperation
@@ -78,11 +79,14 @@ import Thena.Language.Reader
   )
 import Thena.Syntax.Lexer (BlockKind (..))
 import Thena.Surface.Concrete
-  ( ObjectPiece (..)
+  ( Analysis (..)
+  , ObjectPiece (..)
   , Plicity (..)
   , Surface (..)
   , SurfaceArg (..)
+  , SurfaceArm (..)
   , SurfaceBinder (..)
+  , SurfacePattern (..)
   )
 
 -- | A surface term, as written (MS4 phase 39).
@@ -222,10 +226,45 @@ surf p (SurfaceAnnot e ty)  =
 -- grammar, so the parentheses are legibility rather than necessity.
 surf p (SurfaceTrusted ty e) =
   paren (p >= Tight) ("trusted " ++ surf Tight ty ++ " " ++ surf Tight e)
+-- **Printed with explicit braces and semicolons**, like a @do@ block above and
+-- for the same reason: the grammar accepts both spellings and this is the one
+-- that is unambiguous on one line. An arm's body is a @Term@, so it stays
+-- @Loose@; the target is an @App@, so it is @Tight@.
+surf p (SurfaceSplit a tgt as) =
+  paren (p >= Tight)
+    (word a ++ " " ++ surf Tight tgt ++ " of { "
+       ++ intercalate " ; " (map arm as) ++ " }")
+  where
+    word ByInduction = "induction"
+    word ByCases     = "case"
+    -- **An empty arm stops at the arrow and prints no trailing space**, so
+    -- what this prints reads back as the same tree (MS9 phase 189).
+    arm (SurfaceArm pat Nothing)  = surfacePattern pat ++ " ->"
+    arm (SurfaceArm pat (Just b)) = surfacePattern pat ++ " -> " ++ surf Loose b
 surf p (SurfaceElim d ps mot ms is tgt) =
   paren (p >= Tight)
     ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
        ++ " " ++ list is ++ " " ++ surf Tight tgt)
+
+-- | A written pattern, back as it was written.
+--
+-- **An argument is parenthesised and a head is not**, which is the grammar's
+-- own split: a pattern's argument is an atom, so @cons n a (cons m b nil)@
+-- round-trips and @cons n a cons m b nil@ — which is not what it means — cannot
+-- be produced.
+surfacePattern :: SurfacePattern -> String
+surfacePattern = go False
+  where
+    go _ PatternWildcard        = "_"
+    go _ (PatternName x [])     = x
+    go nested (PatternName x ps) =
+      (if nested then \t -> "(" ++ t ++ ")" else id)
+        (unwords (x : map (go True) ps))
+    -- **A dot keeps its parentheses unless the term is a bare name**, which is
+    -- the grammar's own two forms: @.n@ round-trips as @.n@ and anything else
+    -- needs the brackets back, @.(succ n)@ included.
+    go _ (PatternDot (SurfaceName x)) = "." ++ x
+    go _ (PatternDot e)               = ".(" ++ surf Loose e ++ ")"
 
 objectPiece :: ObjectPiece -> String
 objectPiece pc = case pc of

@@ -344,13 +344,25 @@ iota env d ls ps m ms cg cargs = do
 -- datatype would reduce by a rule its own eliminator is not typed for. That
 -- function also carries the standing caveat — the classification is complete
 -- only while "Thena.Global.Declare" rejects higher-order recursion.
--- Those stored types are written against the *declaration's own* formal
--- variables — the parameter telescope's and the earlier arguments' — so the
--- substitution seeds itself with the parameters (formal var ↦ @ps@, the
--- actual ones this elimination supplies) and then grows one entry at a time
--- as the telescope is walked, using 'close' then 'instantiate' to replace one
--- 'Free' variable throughout a type — the same two primitives 'whnf' itself
--- uses, composed instead of a new one written for this.
+-- **WHICH ARGUMENTS ARE RECURSIVE IS READ OFF THE DECLARED TYPE, AND ONLY THE
+-- INDICES ARE ACTUALISED** (MS9). Substituting this elimination's actual
+-- parameters in /before/ asking changes the answer and not merely the indices:
+-- @both@'s second argument is declared at the parameter @B@, so eliminating an
+-- @And A (And B C)@ substitutes @B ↦ And B C@ and the argument then reads as a
+-- recursive occurrence of @And@. 'eliminatorType' asks the declaration's own
+-- types and so states no hypothesis for it, and ι was applying the method to one
+-- argument more than the method takes — the very disagreement
+-- 'recursiveArgument'\'s header exists to rule out. A nested pair is where it
+-- showed: @andLeft A (And B C) (both A (And B C) x y)@ reduced to @x@ applied to
+-- a spurious hypothesis.
+--
+-- The *indices* do have to be actualised, and that is what the substitution is
+-- for. They are written against the declaration's own formal variables — the
+-- parameter telescope's and the earlier arguments' — so it seeds itself with the
+-- parameters (formal var ↦ @ps@, the actual ones this elimination supplies) and
+-- then grows one entry at a time as the telescope is walked, using 'close' then
+-- 'instantiate' to replace one 'Free' variable throughout a type — the same two
+-- primitives 'whnf' itself uses, composed instead of a new one written for this.
 recursiveCalls
   :: InductiveDefinition -> [Level] -> [Core] -> Core -> [Core]
   -> ConstructorDefinition -> [Core]
@@ -363,12 +375,13 @@ recursiveCalls def ls ps m ms con = go (constructorArguments con) seed
 
     go []       _     []       = []
     go (e : es) subst (a : as) =
-      let ty' = foldl (\ty (x, v) -> substFree x v ty) (entryType e) subst
-          rest = go es ((entryVar e, a) : subst) as
-       in case recursiveArgument dn np ty' of
-            Just is -> Eliminate dn ls ps m ms is a : rest
+      let rest = go es ((entryVar e, a) : subst) as
+       in case recursiveArgument dn np (entryType e) of
+            Just is -> Eliminate dn ls ps m ms (map (actual subst) is) a : rest
             Nothing -> rest
     go _ _ _ = []   -- mismatched arities: not a saturated value of this constructor
+
+    actual subst ty = foldl (\t (x, v) -> substFree x v t) ty subst
 
 -- | Substitute a free variable throughout a term. Not new machinery: 'close'
 -- abstracts every occurrence of @x@ to a bound index, and 'instantiate'

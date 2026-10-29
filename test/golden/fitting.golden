@@ -5,27 +5,28 @@ declared P
 thena spine> :theorem t0 : Nat -> Nat
 proving t0 : Nat -> Nat
 thena spine> fit-core ⌜ succ ⌝
-chose 19: fit-core
+chose 31: fit-core
 already equal
 thena spine> :show
   let refined = succ : Nat -> Nat in
 ▶ let t0 = refined : Nat -> Nat in
   t0
 thena spine> :choices
-19  fit-core   untried: fit-core
+31  fit-core   untried: fit-core
 thena spine> :undo
 ▶ let ? t0 : Nat -> Nat in
   t0
 thena spine> apply-core ⌜ succ ⌝
 stuck: Nat and Nat -> Nat cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Nat
 thena spine> :abandon
 abandoned t0
 thena spine> :theorem t1 : Nat
 proving t1 : Nat
 thena spine> fit-core ⌜ succ ⌝
-chose 26: fit-core
-backtracking to 26: fit-core
-chose 30: fit-core
+chose 38: fit-core
+backtracking to 38: fit-core
+chose 42: fit-core
 already equal
 thena spine> :show
   let ? a : Nat in
@@ -37,11 +38,11 @@ abandoned t1
 thena spine> :theorem t2 : P
 proving t2 : P
 thena spine> fit-core ⌜ mk ⌝
-chose 34: fit-core
-backtracking to 34: fit-core
-chose 39: fit-core
-backtracking to 39: fit-core
-chose 43: fit-core
+chose 46: fit-core
+backtracking to 46: fit-core
+chose 51: fit-core
+backtracking to 51: fit-core
+chose 55: fit-core
 already equal
 thena spine> :show
   let ? a : Nat in
@@ -59,9 +60,9 @@ thena spine> :goal ∀ (b : Bool) -> Maybe Bool
 ▶ let ? goal : Bool -> Maybe Bool in
   goal
 thena spine> fit-core ⌜ Just ⌝
-chose 62: fit-core
-backtracking to 62: fit-core
-chose 67: fit-core
+chose 86: fit-core
+backtracking to 86: fit-core
+chose 91: fit-core
 solved: a
 thena spine> :show
   let a = Bool : Type₀ in
@@ -69,5 +70,5 @@ thena spine> :show
 ▶ let goal = refined : Bool -> Maybe Bool in
   goal
 thena spine> :choices
-67  fit-core   untried: fit-core
+91  fit-core   untried: fit-core
 thena spine> :quit

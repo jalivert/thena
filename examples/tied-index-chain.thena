@@ -1,0 +1,81 @@
+-- A family whose index telescope is DEPENDENT, split at a TIED index — which is
+-- what MS9 phase 214 built, and what was refused outright before it.
+--
+-- `Q`'s second index is typed by its first, so the motive states the second
+-- equation only after transporting its side along the first (§3.2 of Pattern
+-- Matching Without K). The second equation is therefore stated about the FIRST
+-- ONE'S PROOF, and solving the first removes the binder that proof is. The
+-- solution transition supplies `refl` for it as it goes, every transport
+-- ι-contracts, both equations are discharged, and the arm binds the
+-- constructor's arguments alone.
+--
+-- Compare `dependent-index.thena.script` beside this one: `Below`'s indices are
+-- plain variables there, so the dependent one is FRIENDLY and states no
+-- equation at all. The difference is the whole of what this file is for.
+--
+-- And the shape below `tied`, where the first equation is between two
+-- CONSTRUCTOR applications so that INJECTIVITY rather than solution fires on
+-- it. That one needs no-confusion backwards and its round-trip law, which are
+-- generated per datatype since MS9: injectivity replaces the equation's proof
+-- with one about the constructor's arguments, the later equation is restated
+-- along the proof rebuilt from it, and the law carries the method back.
+
+module TiedIndexChain where
+
+data N : Type₀ where
+  z : N
+  s : N -> N
+
+data Fin : N -> Type₀ where
+  fz : forall (n : N) -> Fin (s n)
+  fs : forall (n : N) (i : Fin n) -> Fin (s n)
+
+data Q : forall (n : N) -> Fin n -> Type₀ where
+  mk : forall (n : N) (i : Fin n) -> Q n i
+
+-- Both of the split's equations are discharged: the first solves `n`, which
+-- supplies `refl` for its own proof, and the second then reads `Eq (Fin (s m)) i
+-- (fz m)` with no transport left and solves `i`.
+tied : forall (m : N) (x : Q (s m) (fz m)) -> N
+tied = \ m x -> case x of { mk n i -> m }
+
+-- INJECTIVITY over the same kind of chain. `isFz`'s target pins the first index
+-- to `s n`, so the first equation is `Eq N (s n) (s m)` — two applications of
+-- `s`, where `mk`'s above was a variable against a term. Injectivity replaces it
+-- with `Eq N n m` and drops its binder, so the second equation, which was stated
+-- about that binder, is restated along `noConfusionNInv` of the new proof;
+-- `isLeftInvN` is what makes the method's own type and the sub-problem's agree.
+-- Both equations are then discharged and the arm binds `n` alone.
+data Small : forall (n : N) -> Fin n -> Type₀ where
+  isFz : forall (n : N) -> Small (s n) (fz n)
+
+-- The arm answers with the constructor's own `n`, not with the ambient `m`, so
+-- reducing it at a known index is what tells the two apart.
+tiedTwo : forall (m : N) (x : Small (s m) (fz m)) -> N
+tiedTwo = \ m x -> case x of { isFz n -> n }
+
+-- And it reduces through the arm, which is what says the arm was handed the
+-- constructor's own `n` rather than the ambient `m`: both are `s (s z)` here,
+-- and only reducing tells them apart.
+twoFromArm : N
+twoFromArm = tiedTwo (s (s z)) (isFz (s (s z)))
+
+-- AND THE SHAPE DELETION MATCHES FIRST, WHICH INJECTIVITY CARRIES TOO. `T`'s
+-- index pins `fs`'s first argument on both sides, so the chain's first equation
+-- is `Eq N (s z) (s z)` — the same term twice. That is the shape deletion
+-- matches, and deletion is the one transition that cannot carry a chain: a
+-- later equation is stated about this one's proof, and deleting it would need
+-- UIP. Injectivity applies to the very same equation, so it is offered that
+-- instead: the chain reads apart to `Eq N z z`, which reads apart again to
+-- `Unit`, where there is no argument left and the proof is rebuilt from `unit`
+-- alone. `isLeftInvN` carries the method back at each step, and no step is K.
+data T : Fin (s (s z)) -> Type₀ where
+  mkT : forall (i : Fin (s z)) -> T (fs (s z) i)
+
+pinned : forall (x : T (fs (s z) (fz z))) -> Fin (s z)
+pinned = \ x -> case x of { mkT i -> i }
+
+-- And the arm is handed the constructor's own argument, which only reducing
+-- says: `pinned` answers with what `mkT` was applied to.
+pinnedFromArm : Fin (s z)
+pinnedFromArm = pinned (mkT (fz z))

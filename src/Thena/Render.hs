@@ -22,6 +22,7 @@ module Thena.Render
   , renderingIn
   , renderCore
   , renderSurface
+  , surfacePattern
   , renderLevel
   , renderPartial
   , renderPattern
@@ -118,14 +119,16 @@ import Thena.Engine
   )
 import Thena.Errors
   ( BuildError (..)
+  , ChainBlocker (..)
   , ObjectError (..)
   , DataBuildError (..)
-  , Skipped (..)
   , Warning (..)
   , Clash (..)
   , ConversionFailure (..)
   , DevForm (..)
   , ElimError (..)
+  , SpecialiseError (..)
+  , RecursionError (..)
   , FailReason (..)
   , KernelError (..)
   , MoveError (..)
@@ -142,7 +145,6 @@ import Thena.Language.Grammar (grammarName, typeFormerProductions, Grammar, Gram
 import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
-import Thena.Global.NoConfusion (noConfusionNames)
 import Thena.Syntax.Print
   ( Env
   , escapeChar
@@ -154,6 +156,7 @@ import Thena.Syntax.Print
   , renderLevelAtom
   , renderSurface
   , subscript
+  , surfacePattern
   , tick
   )
 import Thena.Surface.Concrete (PairingError (..), Plicity (..))
@@ -172,6 +175,7 @@ import Thena.Instral.Ops
   , Value (..)
   , operandsOf
   )
+import Thena.Tactics.Specialise (binderWord)
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Instral.Ops as Ops
 import Thena.Syntax.Lexer (BlockKind (..), LexError (..), Pos (..), Token (..))
@@ -500,6 +504,7 @@ describe t = case t of
   -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
   TChar c     -> show c
   TSpread     -> "..."
+  TDot        -> "."
   TLBracket   -> "["
   TRBracket   -> "]"
   TComma      -> ","
@@ -523,6 +528,9 @@ describe t = case t of
   TIn         -> "in"
   TElim       -> "elim"
   TTrusted    -> "trusted"
+  TInduction  -> "induction"
+  TCase       -> "case"
+  TOf         -> "of"
   TWhere      -> "where"
   TData       -> "data"
   TModule     -> "module"
@@ -602,8 +610,65 @@ data Prec
 renderCore :: Rendering -> Context -> Core -> String
 renderCore ren ctx = go ren (envOf ctx) AtTop
 
+-- | __The one thing a mismatch can say beyond the two types it names__ (MS9
+-- phase 229).
+--
+-- A method the specialiser could not simplify keeps the equation no transition
+-- applied to, so an arm's body is checked against @Eq … -> X@ where the author
+-- wrote an @X@ — and @X and Eq … -> X cannot be made equal@ names neither the
+-- argument that is missing nor its type. On
+-- @mk : ∀ (a b : String) -> P (appendString a b)@ split at
+-- @P (appendString x y)@ that is the whole of what the reader is told, and the
+-- repair — one @\\ q ->@ in the arm — is invisible. @~2d9xj@ is the item.
+--
+-- __Read off the two types and nothing else, and said in neither direction.__
+-- It reports what the two differ BY, never where the Π came from: a renderer
+-- that guessed at the cause would say the same sentence for every
+-- under-applied term.
+--
+-- __Symmetric because a 'Mismatch' is__: every one in the system comes from
+-- "Thena.Core.Unify", where the two sides are the halves of a unification
+-- problem and @related@ may hand them over either way round. So the sentence
+-- names the shorter side rather than /the term/ or /the expected type/, neither
+-- of which this constructor distinguishes.
+owedArgument :: Rendering -> Context -> Core -> Core -> [String]
+owedArgument ren ctx a b = case (a, b) of
+  (Pi{}, Pi{})    -> []
+  (_, Pi _ dom _) -> [differ dom]
+  (Pi _ dom _, _) -> [differ dom]
+  _               -> []
+  where
+    differ dom =
+      "they differ by one argument, which the shorter side has to take first: "
+        ++ renderCore ren ctx dom
+
 -- | Display names for a context's variables, freshened as the chain printer
 -- freshens a component's.
+--
+-- __A variable that is definitionally another variable prints as that one__
+-- (MS9 phase 236, his direction of 2026-10-29). @fill@ parks every elaborated
+-- argument in a @=@-binding, so a term the user wrote arrives here with a name
+-- the elaborator minted standing where the user's variable stood: @.(s q)@
+-- against a forced @p@ refused with @s a and p cannot be made equal@, naming an
+-- @a@ that is in no source file. The entry is always @a = refined1@ and
+-- @refined1 = q@ — every link one variable equal to another and nothing else —
+-- so the chain is collapsed by giving the alias the name its endpoint already
+-- has, and the message says @s q and p@. Nothing about the term changes; this
+-- is a display name and the development still holds every binding.
+--
+-- __It is one rule for every definition, not a rule about generated names.__
+-- Whether a @=@-binding was minted by @fill@ or written by the user naming a
+-- forced position is not a distinction this module can draw — the name is a
+-- string a rule asked @fresh-name@ for either way — and inventing the
+-- distinction is the special case the first design principle forbids. So a
+-- forced position the user named @k@ where the split determined @n@ prints as
+-- @n@ too. That is the same term under the name the reader can also see, which
+-- is the trade this takes: the alias loses a name that was equal to another,
+-- where before every refusal lost the name the user actually typed.
+--
+-- __The chain costs nothing to follow__ because the fold already runs
+-- outermost-first and a definiens may only mention variables bound before it,
+-- so an alias's endpoint is in @e@ by the time the alias is reached.
 envOf :: Context -> Env
 envOf = foldl add []
   where
@@ -611,7 +676,12 @@ envOf = foldl add []
       let (v, hint) = case entry of
             Hypothesis x (Ident h) _   -> (x, h)
             Definition x (Ident h) _ _ -> (x, h)
-       in (v, freshen hint e) : e
+       in (v, nameFor e entry hint) : e
+
+    nameFor e entry hint = case entry of
+      Definition _ _ (Free w) _
+        | Just name <- lookup w e -> name
+      _                         -> freshen hint e
 
 go :: Rendering -> Env -> Prec -> Core -> String
 
@@ -1154,6 +1224,15 @@ renderValue ren ctx v = case v of
   -- they do everywhere else.
   VLevel l           -> renderLevel l
   VTerm t            -> "⌜" ++ renderCore ren ctx t ++ "⌝"
+  -- **A pattern prints as it was written** (MS9 phase 183), which is what
+  -- 'Thena.Syntax.Print.surfacePattern' is for — and the printer is the parser's
+  -- inverse here, so what a user sees is what they typed.
+  VPattern pt        -> surfacePattern pt
+  -- **A binder of a specialised method prints as what it is** (MS9 phase 192):
+  -- there is no written form for one, so the group and the name it is bound
+  -- under are what there is to say.
+  VBinder b          -> "‹" ++ binderWord b ++ "›"
+  VMethodShape _     -> "‹method shape›"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
   -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
   -- printer for the written syntax, and there has never been one: every other
@@ -1233,6 +1312,7 @@ renderFailReason ren r = case r of
     "there is no call to return from here"
   Mismatch ctx a b ->
     renderCore ren ctx a ++ " and " ++ renderCore ren ctx b ++ " cannot be made equal"
+      ++ concatMap ("\n  " ++) (owedArgument ren ctx a b)
   OccursCheck ctx x t ->
     "solving " ++ nameIn ctx x ++ " with " ++ renderCore ren ctx t
       ++ " would define it in terms of itself"
@@ -1261,6 +1341,8 @@ renderFailReason ren r = case r of
       ++ show i
       ++ " to take it"
   CannotEliminate e -> renderElimError ren e
+  CannotSpecialise e -> renderSpecialiseError ren e
+  CannotTieRecursion e -> renderRecursionError ren e
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
@@ -1294,6 +1376,10 @@ renderFailReason ren r = case r of
   -- that it *"is misleading and ambiguous"*.
   ExpectedSurface   -> "expected a surface term"
   ExpectedSurfaceShape what -> "expected a surface term that is " ++ what
+  -- **It names the thing and what was wanted of it** (MS9 phase 176), because
+  -- a reader refusing is routinely the answer rather than a mistake: asking
+  -- whether a pattern's head is a constructor is how a split finds out.
+  NotDeclaredAs what wanted -> what ++ " is not " ++ wanted
   -- **The four ways a tagged term literal does not become a term** (MS6 phase
   -- 104). One renderer, because both readers raise the same 'ObjectError'
   -- (phase 110); the third is the message @:parse@ gives, from the same
@@ -1302,6 +1388,26 @@ renderFailReason ren r = case r of
   -- One reason, three messages (§8, phase 23): the name is unknown, the name
   -- is known at other arities, or clauses of the right arity all failed their
   -- heads. Which one it is falls out of the arities the reason carries.
+  -- **The coverage family names the equation that keeps the case alive** — his
+  -- instruction of 2026-10-28. Until MS9 phase 230 every one of these said
+  -- @no clause of case-must-vanish applies here@, naming a rule of the
+  -- implementation where the author needs to know which equation survived and
+  -- that nothing can discharge it.
+  --
+  -- **It does not say which repair, and that is deliberate.** The same reason is
+  -- raised from three positions — no arm, an arm with no body, and no arms at
+  -- all — and what the author has to change differs in each, while what the
+  -- system knows is the same: the case is live. Naming the repair would mean the
+  -- op being told which caller it was reached from, which is a caller's concern
+  -- in an op's head.
+  CaseSurvived ctx eqs
+    | null eqs  -> "this case did not vanish, so there is something to prove here"
+    | otherwise ->
+        "this case did not vanish: it keeps "
+          ++ orList [ renderCore ren ctx e | e <- eqs ]
+          ++ ", which no transition can discharge, so there is something to \
+             \prove here"
+
   NoClauseMatched g got want
     | null want        -> "no rule is called " ++ g
     | got `notElem` want ->
@@ -1622,19 +1728,6 @@ renderWarning w = "warning: " ++ case w of
     blockAt k g ++ ": no character may be appended to every name " ++ cls
       ++ " accepts, so a binder renamed to avoid capture will not print in this"
       ++ " notation. Substitution is unaffected"
-  NoConfusionSkipped d why ->
-    "no " ++ nameString (snd (noConfusionNames d)) ++ ": " ++ because
-    where
-      because = case why of
-        NoEqInScope -> "there is no Eq in scope"
-        NoProducts -> "there is no And, Unit and Empty in scope"
-        -- Position and name both, as 'Thena.Errors.IndexTypeDepends' says it
-        -- one telescope over: several arguments of one constructor may carry
-        -- the same 'Ident', so the name alone does not say which.
-        DependentArguments c k (Ident i) ->
-          nameString c ++ "'s argument " ++ show k ++ " (" ++ i ++ ") has a type"
-            ++ " that depends on an earlier argument, so its equation cannot be"
-            ++ " stated"
 
 renderDeclareError :: Rendering -> DeclareError -> String
 renderDeclareError ren e = case e of
@@ -1829,14 +1922,28 @@ renderDeclareError ren e = case e of
 --
 -- 'IndexTypeDepends' is the one worth reading twice: it is not a bug and not a
 -- typo, it is §3.7's stated limit — homogeneous @Eq@ cannot state a constraint
--- on an index whose /type/ mentions an earlier index, and lifting it is what
--- \"John Major\" equality is for (@AGENDA.md@ item 10, deferred past MS1). The
--- message says so, because a user meeting it has done nothing wrong.
+-- on an index whose /type/ mentions an earlier index. The message says so,
+-- because a user meeting it has done nothing wrong.
 --
 -- Since phase 19 it is raised only for an index that is /tied/ — one that
 -- actually states an equation. A friendly index is abstracted outright and its
 -- type may depend on an earlier index freely, which is why eliminating a
--- @Below n i@ whose indices are plain variables now works.
+-- @Below n i@ whose indices are plain variables works.
+--
+-- And since MS9 phase 213 a tied index's equation is stated at the /actual/
+-- earlier indices, its generalised side carried there along the earlier
+-- equations, so this is raised only where that chain has a missing step. The
+-- message names the chain rather than \"John Major\" equality, which Thena does
+-- not declare.
+--
+-- __MS9 phase 237 left it ONE shape, and that shape may be unreachable from the
+-- surface.__ Chained mentions are carried now (@~fq5gp@), so what is left is a
+-- tied index whose type mentions a /friendly/ one — and a friendly index is a
+-- variable mentioned by no other index, while a tied index's own term pins
+-- every index its type mentions, which makes the two conditions look
+-- incompatible. That is an argument and not a proof, so the guard stays: it
+-- costs one list comprehension, and the alternative to refusing here is
+-- 'SchemeIllTyped' from a motive nobody can read.
 renderElimError :: Rendering -> ElimError -> String
 renderElimError ren e = case e of
   TargetNotTypeable te ->
@@ -1847,8 +1954,8 @@ renderElimError ren e = case e of
   NoEquality g ->
     "eliminating at indices needs " ++ nameString g ++ ", which is not declared"
   IndexTypeDepends k (Ident i) ->
-    "index " ++ show k ++ " (" ++ i ++ ") has a type that depends on an earlier index,"
-      ++ "\n  so the equation constraining it cannot be stated"
+    "index " ++ show k ++ " (" ++ i ++ ") has a type depending on an earlier index"
+      ++ "\n  that is abstracted outright, so there is no equation to carry it along"
   IndexTypeIllTyped te ->
     "the type of a tied index has no universe, so its equation cannot be stated"
       ++ concatMap ("\n  " ++) (renderTypeError ren te)
@@ -1858,6 +1965,56 @@ renderElimError ren e = case e of
   SchemeIllTyped te ->
     "the elimination does not prove this goal"
       ++ concatMap ("\n  " ++) (renderTypeError ren te)
+
+-- | Why specialisation by unification could not run (MS9 phase 177).
+-- | Why a recursive call could not be tied to an induction hypothesis (MS9
+-- phase 186).
+renderRecursionError :: Rendering -> RecursionError -> String
+renderRecursionError ren e = case e of
+  RecursionNotAbstracted ->
+    "the body was not elaborated under the name being defined"
+  RecursiveNameNotApplied ->
+    "the name being defined is used as a value, and only a call to it can be \
+    \an induction hypothesis"
+  CallMatchesNoHypothesis ctx t ->
+    "no induction hypothesis is about this call, so it is not structurally \
+    \smaller: " ++ renderCore ren ctx t
+  CallMatchesSeveral ctx t k ->
+    "this call names " ++ show k ++ " arguments that have an induction \
+    \hypothesis, so which one it recurses on is not written down: "
+      ++ renderCore ren ctx t
+  CallVariesAFixedPremise ctx t p a ->
+    "the split fixed " ++ renderCore ren ctx p ++ " and this call passes "
+      ++ renderCore ren ctx a ++ ", so it is not the induction hypothesis — a \
+      \premise the induction varies is bound inside the arm and not before the \
+      \split: " ++ renderCore ren ctx t
+
+renderSpecialiseError :: Rendering -> SpecialiseError -> String
+renderSpecialiseError ren e = case e of
+  NotThatConstructor g -> nameString g ++ " is not a constructor"
+  MethodNotShaped want eqs _ ->
+    "that is not a method of this constructor: it needs "
+      ++ count want "binder" ++ " and " ++ count eqs "equation"
+  NotAnEquation tys ->
+    "the equation block has " ++ count (length tys) "binder"
+      ++ " and one of them is not an equation"
+  TransportedEquation why k _ ->
+    "a later equation is stated about equation " ++ show k ++ "'s proof,"
+      ++ "\n  and " ++ blockedBy why
+  SpecialisedIllTyped te ->
+    "the specialised method does not prove this one"
+      ++ concatMap ("\n  " ++) (renderTypeError ren te)
+
+-- | What a transported chain is waiting on, in the words a reader can act on.
+-- 'Thena.Errors.ChainBlocker' carries why each one is what it is.
+blockedBy :: ChainBlocker -> String
+blockedBy why = case why of
+  ByDeletion ->
+    "deleting it would need UIP, which this system does not have"
+  ByInjectivity ->
+    "taking it apart would need no-confusion backwards, which is not generated"
+  BySolution ->
+    "solving it needs the prelude's DPair, which is not declared here"
 
 renderTypeError :: Rendering -> TypeError -> [String]
 renderTypeError ren e = case e of

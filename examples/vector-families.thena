@@ -1,0 +1,107 @@
+-- The `Vec`-style families, which the corpus had never had — MS9 phase 216,
+-- and the last step of dependent index telescopes.
+--
+-- Three things are here, and each is a different telescope being dependent.
+--
+-- `Vec` itself is the easy one: one index, a `N`, and nothing depends on
+-- anything. Splitting a `Vec A (s m)` conflicts `z` against `s m`, so `vnil`'s
+-- case VANISHES and its arm is written with no body.
+--
+-- `All`'s INDEX telescope is dependent — `as`'s type is `Vec A n`, which
+-- mentions the index before it — so a split on an `All` states its second
+-- equation only after transporting along the first. Both of `count`'s indices
+-- are ambient variables, so both equations are solutions and the transports
+-- ι-contract; `tied-index-chain.thena` beside this one is the same chain where
+-- the actual indices are not variables.
+--
+-- `allCons`'s own ARGUMENT telescope is dependent in a shape nothing else in
+-- the suite has: `ps : All A P n as` reaches back past `pa`, so the chain's
+-- package holds `as; pa; ps` and `pa` is INTERIOR to it. The rest of the
+-- package is transported along `pa`'s own equation while nothing mentions `pa`
+-- itself, and a `noConfusionAll` that predicted the pair from the telescope
+-- left that proof free. See `dependent-argument-chain.thena` for the chain
+-- with no gap in it.
+--
+-- `Vec` is declared at `A : Type`, so its level is a parameter and everything
+-- below instantiates it at zero.
+
+module VectorFamilies where
+
+data N : Type₀ where
+  z : N
+  s : N -> N
+
+data Vec (A : Type) : N -> Type where
+  vnil : Vec A z
+  vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n)
+
+-- `vnil` would need `z` to be `s m`, which conflict refuses, so the case
+-- vanishes and the arm has no body.
+vhead : forall (A : Type₀) (m : N) (xs : Vec A (s m)) -> A
+vhead = \ A m xs -> case xs of { vnil -> ; vcons n a as -> a }
+
+vtail : forall (A : Type₀) (m : N) (xs : Vec A (s m)) -> Vec A m
+vtail = \ A m xs -> case xs of { vnil -> ; vcons n a as -> as }
+
+-- Every element satisfies `P`. The index telescope is dependent, and
+-- `allCons`'s argument telescope has an interior member.
+data All (A : Type₀) (P : A -> Type₀) : forall (n : N) -> Vec A n -> Type₀ where
+  allNil : All A P z (vnil A)
+  allCons : forall (n : N) (a : A) (as : Vec A n) (pa : P a) (ps : All A P n as) -> All A P (s n) (vcons A n a as)
+
+-- A recursion over the dependent index telescope: the split generalises both
+-- indices, the recursive call is at the shorter vector, and the induction
+-- hypothesis is found at it.
+count : forall (A : Type₀) (P : A -> Type₀) (m : N) (xs : Vec A m) (ps : All A P m xs) -> N
+count = \ A P m xs ps -> induction ps of { allNil -> z ; allCons n a as pa qs -> s (count A P n as qs) }
+
+-- A closed value, so the recursion really reduces: one element, so `s z`.
+one : N
+one = count N (\ k -> N) (s z) (vcons N z z (vnil N)) (allCons N (\ k -> N) z z (vnil N) z (allNil N (\ k -> N)))
+
+-- `Pairwise` is the shape where TWO indices reach back to the SAME earlier one:
+-- both vectors are `Vec A n`. Two components then come out of one package, and
+-- each one's projection mentions the other's argument — a projection names the
+-- package and the package names every argument in it — so the chain's
+-- substitution cannot be a fold in either order. Every family of this shape had
+-- its declaration refused until MS9 phase 226.
+data Pairwise (A : Type₀) : forall (n : N) -> Vec A n -> Vec A n -> Type₀ where
+  pwNil : Pairwise A z (vnil A) (vnil A)
+  pwCons : forall (n : N) (a : A) (b : A) (as : Vec A n) (bs : Vec A n) (ps : Pairwise A n as bs) -> Pairwise A (s n) (vcons A n a as) (vcons A n b bs)
+
+-- A recursion over it: the split generalises the length and both vectors, all
+-- three equations are discharged, and each arm binds the constructor's own
+-- arguments and nothing else.
+pcount : forall (A : Type₀) (n : N) (as : Vec A n) (bs : Vec A n) (ps : Pairwise A n as bs) -> N
+pcount = \ A n as bs ps -> induction ps of { pwNil -> z ; pwCons k a b xs ys qs -> s (pcount A k xs ys qs) }
+
+-- `Only`'s index type `Vec A n` lives at `A`'s level, and **nothing in its
+-- constructors mentions `A`**, so nothing forces `Only`'s own level to reach
+-- that far. An index is not a constructor argument: the size restriction bounds
+-- an argument and nothing bounds an index, so the two levels are unrelated
+-- parameters. The equipment generated over the index telescope is stated at the
+-- two joined (MS9 phase 227); at the datatype's own level it asked `Eq` to take
+-- a `Vec A n` it could not, and the declaration was refused with two level
+-- parameters that "are different".
+data Only (A : Type) : forall (n : N) -> Vec A n -> Type where
+  only : Only A z (vnil A)
+
+-- And it reduces: one pair of elements, so `s z`.
+two : N
+two = pcount N (s z) (vcons N z z (vnil N)) (vcons N z (s z) (vnil N)) (pwCons N z z (s z) (vnil N) (vnil N) (pwNil N))
+
+-- A PROJECTION OUT OF `All` AT A PINNED INDEX — MS9 phase 235. The split is
+-- not a recursion and the index is not a variable: `vcons A m a as` pins
+-- `vcons`'s own arguments, so taking the index equation apart states one
+-- equation per argument of `vcons` — including its LENGTH, which is `m` on
+-- both sides because `vcons`'s result type `Vec A (s n)` says so. That
+-- equation says nothing and cannot be deleted either, deletion over a chain
+-- being the K axiom, and the split stopped there until injectivity learned to
+-- read a pinned index apart by projection instead.
+headAll : forall (A : Type₀) (P : A -> Type₀) (m : N) (a : A) (as : Vec A m)
+            (ps : All A P (s m) (vcons A m a as)) -> P a
+headAll = \ A P m a as ps -> case ps of { allNil -> ; allCons n b bs pb qs -> pb }
+
+-- And the arm answers with the proof it bound, which only reducing says.
+headTwo : N
+headTwo = headAll N (\ k -> N) z z (vnil N) (allCons N (\ k -> N) z z (vnil N) (s (s z)) (allNil N (\ k -> N)))

@@ -9,6 +9,7 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+eliminate-generalising-core ‹t›
 prove
 fill ‹t›
 unify-refine-core ‹t›
@@ -22,6 +23,81 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+no-nesting []
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
+reverse-onto [] ‹acc›
+reverse-onto [x, ...xs] ‹acc›
+apply-all ‹f› []
+apply-all ‹f› [x, ...xs]
+instantiate-with ‹f› ‹vs›
+name-or-stem ‹n› ‹stem›
+name-or-stem ‹n› ‹stem›
+intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, oc), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+dotted-position-is-forced ‹e› (some f) ‹vs› ‹k›
+intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+bind-friendlies [] ‹vs› ‹ds›
+bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
+bind-solved [] ‹k›
+bind-solved [(n, v), ...ds] ‹k›
+same-length [] []
+same-length [p, ...ps] [n, ...ns]
+arm-for ‹t› ‹c›
+arm-for ‹t› ‹c›
+pick ‹w› ‹c› ‹p› ‹b› ‹r›
+pick ‹w› ‹c› ‹p› ‹b› ‹r›
+arm-needs-body ‹k› (some b)
+arm-needs-body ‹k› none
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› none
+vanished-case-takes-no-body none
+vanished-case-takes-no-body (some (p, none))
+case-must-vanish none
+case-must-vanish (some h)
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
+one-case ‹t› ‹c› none ‹bs› ‹fs›
+one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
+arm-must-be-for-this-datatype ‹a› ‹b›
+arms-are-for-this-datatype ‹t› ‹d›
+arms-are-for-this-datatype ‹t› ‹d›
+one-arm-per-constructor ‹a› ‹b›
+arm-not-repeated ‹w› ‹t›
+arm-not-repeated ‹w› ‹t›
+arms-are-distinct ‹t›
+arms-are-distinct ‹t›
+split-cases ‹t› [] [] ‹m›
+split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
+split-over ‹t› ‹cs› (hs, m)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
+split-elaborate ‹t›
+argument-patterns [] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-patterns [(b, oc), ...bs] ‹acc›
+argument-pattern ‹b›
+open-case ‹mh› none ‹bs› ‹fs›
+open-case ‹mh› (some sub) ‹bs› ‹fs›
+split-holes [] [] ‹m›
+split-holes [(c, ihs), ...cs] [mh, ...ms] ‹m›
+split-holes-over ‹cs› (hs, m)
+with-hypotheses []
+with-hypotheses [c, ...cs]
+without-hypotheses []
+without-hypotheses [c, ...cs]
+induction-core ‹t›
+case-core ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -147,6 +223,7 @@ thena spine> :goal ∀ (b : Bool) -> Maybe Bool
   goal
 thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Bool
 thena spine> :show
 ▶ let ? goal : Bool -> Maybe Bool in
   goal
@@ -154,9 +231,11 @@ thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
 proving h : Bool -> Maybe Bool
 thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Bool
 thena spine> assume "q" ⌜ Bool ⌝
 thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Bool
 thena spine> :abandon
 abandoned h
 thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool

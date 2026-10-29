@@ -16,7 +16,7 @@
 -- the end rather than stopping, and that @determinacy@ is a global with the
 -- statement it is supposed to have.
 --
--- == Two versions, and they must prove the same theorem
+-- == Three versions, and they must prove the same theorem
 --
 -- **@examples\/determinacy-surface.thena@ is the same proof in the surface
 -- language** (MS4 tier 3): a proof module of 278 lines where the script is
@@ -25,11 +25,34 @@
 -- from @examples\/determinacy.py@ — one generator, two targets — so the proof
 -- itself is stated once.
 --
--- **The assertion that ties them together is the statement**: each is checked
--- against the /same/ rendered type for @determinacy@, so a version that proved
--- something weaker would fail here rather than pass quietly.
+-- **@examples\/determinacy-patterns.thena@ is the same theorem by dependent
+-- pattern matching** (MS9), written by hand — and it exists to be read beside
+-- the generated one, which is why it is in the suite rather than in a report.
+-- **Every one of its eight lemmas is a split**: no @elim@ anywhere, and the
+-- generated proof's 148 appeals to @noConfusionTerm@ become none.
+--
+-- **EVERY ARM OF @determinacy@ IS INLINE, NOTHING TAKES AN INDUCTION HYPOTHESIS
+-- AS A PARAMETER, AND ALL TEN ARMS RECURSE THE SAME WAY.** A split that
+-- generalises makes each case prove something more general than the goal it came
+-- from, so the hypothesis that reaches the copy is the one the split generalised
+-- and a call inside such an arm is tied to that — and the author writes
+-- @determinacy p p' sr c1' sr2@ either way, because the ambient name means
+-- whatever the case refined it to. **That is the assertion worth making about
+-- this file now**: three of its arms are the generalising kind and nothing in
+-- them says so. Which positions a split copied, and which copies it solved, is
+-- elaboration's business (his ruling, 2026-10-20).
+--
+-- A copy is demanded only where a rule's own index cannot be made to fit the
+-- scrutinee's by moving one of the /rule's/ binders — @eSucc@'s @succ c1@ fits
+-- @succ p@ by moving @c1@, @eIfTrue@'s @true@ facing @p@ has nothing to move.
+--
+-- **The assertion that ties all three together is the statement**: each is
+-- checked against the /same/ rendered type for @determinacy@, so a version that
+-- proved something weaker would fail here rather than pass quietly.
 module Thena.DeterminacyTests (tests) where
 
+import Data.Char (isAlpha)
+import Data.List (isPrefixOf)
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
@@ -52,6 +75,9 @@ target = "examples/determinacy-tactics.thena.script"
 
 surfaceTarget :: FilePath
 surfaceTarget = "examples/determinacy-surface.thena"
+
+patternTarget :: FilePath
+patternTarget = "examples/determinacy-patterns.thena"
 
 tests :: TestTree
 tests =
@@ -87,8 +113,69 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s surfaceTarget
         statementOf s' @?= Just theorem
+
+      -- **The same theorem by pattern matching** (MS9). A proof module like the
+      -- one above, so the same path loads it; the golden is what the splitter
+      -- let the user get away with not writing.
+    , goldenVsString "determinacy-patterns" "test/golden/determinacy-patterns.golden" $ do
+        (s, trouble) <- startingSession
+        (s', out, _) <- loadProofFile s patternTarget
+        pure (toLazyByteString (stringUtf8 (unlines
+          (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
+
+    , testCase "and the pattern version proves the same statement" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s patternTarget
+        statementOf s' @?= Just theorem
+
+      -- **The style, not the theorem** — and it is here because 'HAZARDS.md'
+      -- asked for it after a green suite said nothing while six of this file's
+      -- arms were written in the one style the project had just ruled out. A
+      -- suite that checks the statement and the trust level cannot see how a
+      -- proof is written, and this file exists to demonstrate how it is
+      -- written. So the header's claim is an assertion: every lemma is a split
+      -- except the ones named here, which a split cannot reach and which are
+      -- @determinacy.py@'s own.
+      --
+      -- **The list is EMPTY, and that is the claim**: not one lemma in the file
+      -- appeals to @elim@. It fails when the boundary moves, which is the
+      -- point — a phase that has to paste a generated lemma back in changes
+      -- this line and the header together.
+    , testCase "and every lemma in it is a split" $ do
+        src <- readFile patternTarget
+        [ n | (n, body) <- definitions src, any ("elim " `isPrefixOf`) (tails' body) ]
+          @?= []
     ]
   where
+    -- The file's top-level equations, as (name, text). An equation begins at a
+    -- line @‹name› = @ in the first column and runs to the next such line or to
+    -- the next signature; everything before the first one is the preamble.
+    -- **Comment lines are dropped**, or the prose between two lemmas — which
+    -- says the words @elim Step@ — would be read as part of the lemma above it.
+    definitions src =
+      [ (n, unlines [ l | l <- ls, not (comment l) ])
+      | (n, ls) <- chunks (lines src)
+      ]
+      where
+        comment = isPrefixOf "--" . dropWhile (== ' ')
+        chunks [] = []
+        chunks (l : rest) = case equationName l of
+          Nothing -> chunks rest
+          Just n  ->
+            let (mine, more) = break (\x -> headed x && not (indented x)) rest
+             in (n, l : mine) : chunks more
+        headed x = case x of
+          c : _ -> isAlpha c
+          []    -> False
+        indented x = " " `isPrefixOf` x
+        equationName l = case span (\c -> isAlpha c || c `elem` "'0123456789") l of
+          (n@(_ : _), rest) | " = " `isPrefixOf` rest -> Just n
+          _                                           -> Nothing
+
+    tails' xs = case xs of
+      []       -> [[]]
+      _ : rest -> xs : tails' rest
+
     statementOf s' =
       renderCore (Rendering [] (names (machineOf s'))) [] . definitionType
         <$> lookupDefinition (GlobalName "determinacy") (globals (machineOf s'))

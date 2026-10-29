@@ -70,13 +70,18 @@ module Thena.Surface.Zipper
   , intoTrustedType
   , intoTrustedTerm
   , intoElimField
+  , intoSplitTarget
+  , intoSplitArmBody
+  , intoSplitTail
   ) where
 
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Surface.Concrete
-  (Plicity, Surface (..), SurfaceArg (..), SurfaceBinder (..))
+  ( Analysis, Plicity, Surface (..), SurfaceArg (..), SurfaceArm (..)
+  , SurfaceBinder (..), SurfacePattern
+  )
 
 -- | A surface term, and where it sits in the one it came from.
 --
@@ -135,6 +140,19 @@ data Frame
   | InElimField String [Surface] Surface [Surface] [Surface] Surface Int
     -- ^ the focus is one field of an @elim@, at flat position @k@ in the order
     -- the elaborator walks them: parameters, motive, methods, indices, target
+  | InSplitTarget Analysis [SurfaceArm]
+    -- ^ the focus is the term a split analyses (MS9 phase 181)
+  | InSplitArmBody Analysis Surface SurfacePattern [SurfaceArm]
+    -- ^ the focus is the __first__ arm's right-hand side: the analysis, the
+    -- target, that arm's own pattern, and the arms after it.
+    --
+    -- **Only the first**, because that is the only one a clause descends into
+    -- — 'intoSplitTail' peels an arm and the clause recurses, exactly as
+    -- @E\u27e6x \u20d7a\u27e7@ walks a spine with 'InAppTail'. An indexed frame like
+    -- 'InElimField' would buy a move nothing performs.
+  | InSplitTail Analysis Surface SurfaceArm
+    -- ^ the focus is the split that is left once its first arm is taken —
+    -- 'InAppTail' for a split, and merged on the way out for the same reason
   deriving (Eq, Show)
 
 -- | The whole term, focused at its root.
@@ -191,6 +209,16 @@ rebuild s f = case f of
   InLetType x v body -> SurfaceLet x (Just s) v body
   InLetValue x ann body -> SurfaceLet x ann s body
   InLetBody x ann v -> SurfaceLet x ann v s
+  InSplitTarget a arms -> SurfaceSplit a s arms
+  -- **@Just@ and not a 'Maybe' in the frame**: you can only be inside a body
+  -- that was written, so an arm rebuilt from here always has one.
+  InSplitArmBody a tgt p rest -> SurfaceSplit a tgt (SurfaceArm p (Just s) : rest)
+  -- **Merged, for 'InAppTail'\'s reason**: the arm goes back on the front of
+  -- whatever arms the focus has. The analysis and the target come from the
+  -- frame, which holds them as they were.
+  InSplitTail a tgt arm -> case s of
+    SurfaceSplit _ _ arms -> SurfaceSplit a tgt (arm : arms)
+    _                     -> SurfaceSplit a tgt [arm]
   InAnnotType e -> SurfaceAnnot e s
   InAnnotTerm ty -> SurfaceAnnot s ty
   InTrustedType e -> SurfaceTrusted s e
@@ -332,6 +360,28 @@ intoElimField
   -> Int -> Surface -> SurfaceZipper -> SurfaceZipper
 intoElimField d ps mot ms is tgt k fld =
   push fld (InElimField d ps mot ms is tgt k)
+
+-- | Focus the term a split analyses.
+intoSplitTarget
+  :: Analysis -> [SurfaceArm] -> Surface -> SurfaceZipper -> SurfaceZipper
+intoSplitTarget a arms tgt = push tgt (InSplitTarget a arms)
+
+-- | Focus the first arm's right-hand side.
+intoSplitArmBody
+  :: Analysis -> Surface -> SurfacePattern -> [SurfaceArm] -> Surface
+  -> SurfaceZipper -> SurfaceZipper
+intoSplitArmBody a tgt p rest body = push body (InSplitArmBody a tgt p rest)
+
+-- | Focus the split that is left once its first arm is taken.
+--
+-- **The analysis and the target are carried over unchanged**, so the tail is a
+-- split of the same thing with one fewer arm — and a split with /no/ arms is a
+-- legal node, which is what makes this recursion need no special base case.
+intoSplitTail
+  :: Analysis -> Surface -> SurfaceArm -> [SurfaceArm]
+  -> SurfaceZipper -> SurfaceZipper
+intoSplitTail a tgt arm rest =
+  push (SurfaceSplit a tgt rest) (InSplitTail a tgt arm)
 
 push :: Surface -> Frame -> SurfaceZipper -> SurfaceZipper
 push s f (SurfaceZipper _ fs) = SurfaceZipper s (f : fs)

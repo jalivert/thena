@@ -25,6 +25,9 @@ module Thena.Surface.Concrete
   , PairingError (..)
   , SurfaceArg (..)
   , SurfaceBinder (..)
+  , SurfacePattern (..)
+  , SurfaceArm (..)
+  , Analysis (..)
   , Plicity (..)
   , blocksIn
   ) where
@@ -159,6 +162,26 @@ data Surface
     --
     -- **No level arguments.** A use writes them in the development calculus and
     -- phase 44 decides how, or whether, they are written here.
+  | SurfaceSplit Analysis Surface [SurfaceArm]
+    -- ^ @induction t of { p -> e ; … }@ and @case t of { p -> e ; … }@ (MS9
+    -- phase 179) — __the target, and one arm per written pattern__.
+    --
+    -- __One node for both words, and the 'Analysis' says which was written.__
+    -- They differ in one thing only: whether an arm is handed the induction
+    -- hypotheses of the constructor it matched. Everything else — the target,
+    -- the patterns, how an arm is printed, where the zipper may go — is the
+    -- same, so two constructors would be two identical cases in every consumer
+    -- that is not elaboration. **And @by ‹eliminator›@ is a third value of that
+    -- field** rather than a third node, which is what settles it: the field is
+    -- /which scheme analyses the target/, and the node is the analysis.
+    --
+    -- __It is self-delimiting, so it is an atom__ — @of@ opens a block, which
+    -- the offside rule closes, exactly as @do@ and @where@ already do. So it
+    -- stands where a name stands and needs no parentheses to be an argument.
+    --
+    -- __No arms is legal and useful__: @case t of { }@ is the whole of a case
+    -- analysis on @Empty@. The same reason 'SurfaceData' admits a datatype with
+    -- no constructors.
   | SurfaceTrusted Surface Surface
     -- ^ @trusted T e@ (MS8 phase 150) — **two operands, where
     -- 'Thena.Core.Term.Trusted' has three.** The third is the type @e@ was
@@ -189,6 +212,81 @@ data ObjectPiece
 
 -- | One argument of a spine, and whether it was written in braces.
 data SurfaceArg = SurfaceArg Plicity Surface
+  deriving (Eq, Show)
+
+-- | Which scheme a 'SurfaceSplit' analyses its target with (MS9 phase 179).
+--
+-- __It is the word the user wrote and nothing more.__ What each one means is
+-- elaboration's: @induction@ reaches for the generated eliminator, whose methods
+-- carry an inductive hypothesis per recursive argument, and @case@ reaches for
+-- the generated @caseD@, whose methods carry none.
+--
+-- __@by ‹eliminator›@ belongs here when it arrives__, as a third case carrying
+-- the term that is to do the eliminating — a non-default induction principle,
+-- which is what POPLMark 1A's nested induction needs and cannot say today. That
+-- it fits as a case of this type rather than as a node of its own is why
+-- 'SurfaceSplit' is one constructor.
+data Analysis
+  = ByInduction   -- ^ @induction t of …@
+  | ByCases       -- ^ @case t of …@
+  deriving (Eq, Show)
+
+-- | One arm of a 'SurfaceSplit': the pattern, and what to do when it matches —
+-- or __nothing at all__, which is how a case that cannot arise is written.
+--
+-- __@->@ and not @=@ — his ruling, 2026-10-18__: /"obviously @->@ for case and
+-- induction syntax"/. @=@ stays for a clause, which is a declaration and not an
+-- arm.
+--
+-- __AN EMPTY BODY IS THE VANISHED CASE — his ruling, 2026-10-20__, and it is why
+-- there is no @impossible@ keyword. Splitting a @Vec A (succ n)@ leaves no @vnil@
+-- case, @succ n = zero@ being a conflict, so there is no method and nothing to
+-- prove: the user writes @vnil ->@ and stops. The whole split may be written with
+-- no arms at all — @induction d of { }@ — and an empty arm is that same notion for
+-- one case rather than for all of them, which is why no word was reserved for it.
+-- @DECISIONS.md@ carries the decision and the reason.
+data SurfaceArm = SurfaceArm SurfacePattern (Maybe Surface)
+  deriving (Eq, Show)
+
+-- | A written pattern (MS9 phase 179).
+--
+-- __A bare name does not say whether it is a variable or a nullary
+-- constructor, and the tree must not pretend otherwise.__ @nil@ and @n@ are the
+-- same shape written down; which one is which is a question about the globals,
+-- so elaboration answers it with @constructor-datatype@ and the tree carries
+-- the name. **This is the opposite of 'Thena.Instral.Pattern'**, whose decision
+-- 1 is that a bare identifier /is/ a variable and a named constructor cannot be
+-- matched — that is a pattern over @instral@'s own values, and it is not this.
+--
+-- __Nested patterns are parenthesised__, so an argument of a pattern is itself
+-- one and @cons n a (cons m b nil)@ is three of these deep.
+--
+-- __An inaccessible pattern carries a term__ (MS9 phase 228), which is what
+-- makes it the one pattern with something to elaborate. __What is deliberately
+-- not here yet__ is a literal pattern; it is additive, a case of this type, and
+-- not foreclosed.
+data SurfacePattern
+  = PatternName String [SurfacePattern]
+    -- ^ @c p₁ … pₙ@, and with no arguments a bare name
+  | PatternWildcard
+    -- ^ @_@ — a variable the user did not care to name. **Not
+    -- 'SurfacePlaceholder'**, which is a term that elaborates by not
+    -- elaborating; a pattern binds, and there is nothing here to solve.
+  | PatternDot Surface
+    -- ^ @.e@ — an __inaccessible pattern__ (MS9 phase 228, on his ruling of
+    -- 2026-10-19). It binds nothing and __asserts__: this position is
+    -- determined, and by this term.
+    --
+    -- **It is optional and may never be made mandatory**, which is the whole of
+    -- the ruling — naming a forced position binds the name as a definition and
+    -- goes on working. Thena has no left-hand side to keep linear, so the
+    -- constraint that makes Agda demand the dot does not reach here; the dot is
+    -- kept because it __says more than a name can__.
+    --
+    -- **The term is a 'Surface' and not a 'SurfacePattern'**: @.(succ n)@ is an
+    -- ordinary term that elaborates in the arm's own context, and an
+    -- inaccessible position binds nothing, so there is nothing in it to
+    -- destructure and no sub-pattern to carry.
   deriving (Eq, Show)
 
 -- | One bound name, its plicity, and its type if it was written.
@@ -285,6 +383,7 @@ data PairingError
 blocksIn :: Surface -> [[RawInstr]]
 blocksIn t = case t of
   SurfaceDo is        -> [is]
+  SurfaceSplit _ tg as -> blocksIn tg ++ concatMap (\(SurfaceArm _ b) -> foldMap blocksIn b) as
   SurfaceApp f as     -> blocksIn f ++ concatMap (\(SurfaceArg _ a) -> blocksIn a) (toList as)
   SurfaceLam bs b     -> concatMap binder (toList bs) ++ blocksIn b
   SurfacePi bs b      -> concatMap binder (toList bs) ++ blocksIn b

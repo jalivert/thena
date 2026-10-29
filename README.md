@@ -122,9 +122,11 @@ next loaded in the same session, so "load in order" means what it says.
 The earliest proofs, written before object languages existed. The language is
 the untyped arithmetic of Pierce's *Types and Programming Languages*, chapter 3
 — a hand-written `data Term`, a numeric-value predicate, and a ten-rule
-small-step relation — plus the simply-typed layer of TAPL chapter 8. The proofs
-use `elim` throughout, and all but two files are also test fixtures, so the
-suite fails if one stops loading.
+small-step relation — plus the simply-typed layer of TAPL chapter 8. The four
+hand-written proofs are dependent pattern matching, with no `elim` and no
+appeal to no-confusion in them; the generated determinacy pair beside them is
+`elim` throughout, which is what makes the two readable side by side. All but
+two files are also test fixtures, so the suite fails if one stops loading.
 
 | theorem | file | statement |
 |---|---|---|

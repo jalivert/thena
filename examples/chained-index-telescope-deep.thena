@@ -1,0 +1,45 @@
+-- One rung deeper than `chained-index-telescope.thena`, which is what says the
+-- construction RECURSES rather than handling a single shape. Read that file
+-- first: it has the argument, the motive and the reason a transport needs to
+-- carry the positions that move with it.
+--
+-- `Over`'s own index telescope is already chained, so `Deep`'s fourth index is
+-- typed by a type that is itself typed by two moving positions. Transporting
+-- the first position has to carry `i`, carrying `i` has to carry nothing, and
+-- carrying `b` has to carry `i` first. That is two levels of the recursion in
+-- one split.
+--
+-- IT IS A FILE OF ITS OWN BECAUSE IT IS EXPENSIVE. The generated term grows
+-- about fourfold per chained index — measured, and recorded in DECISIONS.md —
+-- so this one split is most of a load on its own. Nothing in the modelled
+-- languages has this shape; it is here so that the recursion is exercised by
+-- something rather than reasoned about.
+
+module ChainedIndexTelescopeDeep where
+
+data N : Type₀ where
+  z : N
+  s : N -> N
+
+data Fin : N -> Type₀ where
+  fz : forall (m : N) -> Fin (s m)
+  fs : forall (m : N) (j : Fin m) -> Fin (s m)
+
+data Below : forall (n : N) (i : Fin n) -> Type₀ where
+  bz : forall (m : N) -> Below (s m) (fz m)
+  bs : forall (m : N) (j : Fin m) (b : Below m j) -> Below (s m) (fs m j)
+
+data Over : forall (n : N) (i : Fin n) (b : Below n i) -> Type₀ where
+  ov : forall (m : N) -> Over (s m) (fz m) (bz m)
+
+data Deep : forall (n : N) (i : Fin n) (b : Below n i) (c : Over n i b) -> Type₀ where
+  d0 : forall (n : N) (i : Fin n) (b : Below n i) (c : Over n i b) (w : N)
+       -> Deep n i b c
+
+deep : forall (m : N) (x : Deep (s m) (fz m) (bz m) (ov m)) -> N
+deep = \ m x -> case x of { d0 n i b c w -> w }
+
+-- And the arm answers with the constructor's own payload, which only reducing
+-- says.
+deepPayload : N
+deepPayload = deep z (d0 (s z) (fz z) (bz z) (ov z) (s (s z)))

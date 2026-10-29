@@ -68,6 +68,51 @@ data Ty
     -- this constructor out; he decided the language's vocabulary is fixed here
     -- even where the signature table never mentions it. MS5's doctrine is
     -- completeness over minimality and this is an instance of it.
+  | TPattern
+    -- ^ **a pattern an arm of a surface split was written with** (MS9 phase
+    -- 183) — @Thena.Surface.Concrete.SurfacePattern@.
+    --
+    -- **Its own type and not 'TSurface'**, although every pattern has a surface
+    -- term that looks like it. A pattern's @_@ /binds/, where a term's @_@ is a
+    -- hole for elaboration to solve, and 'SurfacePattern' draws that
+    -- distinction on purpose; a projection into 'TSurface' would collapse it.
+    -- The category is also documented to grow — an inaccessible pattern and a
+    -- literal pattern are both a further case of it — and neither has a term
+    -- that looks like it.
+    --
+    -- **Narrow by intention.** @`~6z6nx`@'s stage b would subsume the ops over
+    -- this by letting a rule head match the shape directly; this is what MS9
+    -- needs in the meantime, and his instruction is that accessors outlive the
+    -- pattern syntax that replaces them anyway.
+  | TMethodShape
+    -- ^ **what the motive added to every method of one elimination, and what
+    -- the target was** (MS9 phase 196) —
+    -- @Thena.Tactics.Eliminate.MethodShape@.
+    --
+    -- **Opaque on purpose: no rule reads it.** @prim-eliminate@ answers it and
+    -- @specialise@ takes it, and everything in it is something a method type
+    -- cannot say — which binders are the copies, how many equations there are,
+    -- which indices were abstracted outright, the family's parameters, the
+    -- target. It was five components of a nested pair until this phase, spelled
+    -- out in three rule signatures that could not be read and in a signature
+    -- table that repeated them.
+  | TBinder
+    -- ^ **one binder of a specialised method** (MS9 phase 192) —
+    -- @Thena.Tactics.Specialise.Binder@.
+    --
+    -- **It is what a split reports instead of a convention.** A method's
+    -- binders are the constructor's arguments, then its induction hypotheses,
+    -- then the copies the motive generalised, and until phase 192 three rules
+    -- each rebuilt one of those groups by position, in an order each of them
+    -- had to know and none of them stated. A value of this type says which
+    -- group a binder is in and under what name, so one walk binds all three —
+    -- his ruling of 2026-10-20, fourth session.
+    --
+    -- **Its own type for 'TPattern'\'s reason.** The three roles are three
+    -- things a rule does differently, so a 'TName' tagged by text would make
+    -- every clause a string comparison and the group a spelling. The idiom is
+    -- the one 'TPattern' set: three head tests over a three-case type, which
+    -- the category is free to grow past.
   | TList Ty             -- ^ @[a, b, c]@
   | TPair Ty Ty          -- ^ @(a, b)@
   | TOption Ty           -- ^ @some x@ and @none@
@@ -180,6 +225,9 @@ renderTy = go False
       TSurface     -> "Surface"
       TCore        -> "Core"
       TDevelopment -> "Development"
+      TPattern     -> "Pattern"
+      TBinder      -> "Binder"
+      TMethodShape -> "MethodShape"
       TFun as r    -> wrap p (intercalate " -> " (map (go True) as ++ [go True r]))
       TList a      -> wrap p ("List " ++ go True a)
       TOption a    -> wrap p ("Option " ++ go True a)

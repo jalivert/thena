@@ -40,6 +40,10 @@ import qualified Thena.DevelopmentTests
 import qualified Thena.DriverTests
 import qualified Thena.SurfaceTests
 import qualified Thena.SurfaceZipperTests
+import qualified Thena.DeclarationReadersTests
+import qualified Thena.SpecialiseTests
+import qualified Thena.DotPatternTests
+import qualified Thena.InteractiveSplitTests
 import qualified Thena.EliminateTests
 import qualified Thena.EliminatorTests
 import qualified Thena.EngineTests
@@ -58,6 +62,7 @@ import qualified Thena.TokenTests
 import qualified Thena.LoadTests
 import qualified Thena.ManualTests
 import qualified Thena.NoConfusionTests
+import qualified Thena.NoCycleTests
 import qualified Thena.InstralInferTests
 import qualified Thena.InstralTypeTests
 import qualified Thena.RulesTests
@@ -113,6 +118,10 @@ main =
       , Thena.DriverTests.tests
       , Thena.SurfaceTests.tests
       , Thena.SurfaceZipperTests.tests
+      , Thena.DeclarationReadersTests.tests
+      , Thena.SpecialiseTests.tests
+      , Thena.DotPatternTests.tests
+      , Thena.InteractiveSplitTests.tests
       , Thena.EliminateTests.tests
       , Thena.EliminatorTests.tests
       , Thena.EngineTests.tests
@@ -131,6 +140,7 @@ main =
       , Thena.LoadTests.tests
   , Thena.ManualTests.tests
       , Thena.NoConfusionTests.tests
+      , Thena.NoCycleTests.tests
       , Thena.InstralInferTests.tests
       , Thena.InstralTypeTests.tests
       , Thena.RulesTests.tests
