@@ -1377,10 +1377,13 @@ handleReplEvent (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 1
 -- inert rather than quietly yanking.)
 handleReplEvent (MouseUp _ _ _) = pure ()
 handleReplEvent (MouseDown _ _ _ _) = pure ()
--- | The startup tick ('runTui', the only 'Tick' there is) does nothing
--- itself — the outer wrapper has already recorded the fresh extents by
--- the time this runs, which is the whole point of it.
-handleReplEvent (AppEvent Tick) = pure ()
+-- | The startup tick ('runTui', the only 'Tick' there is) always did
+-- nothing for the extents — the outer wrapper already recorded those by
+-- the time this runs, which was the whole point of it — but it is also
+-- the first and only chance to score the launch dropdown, which
+-- 'refreshOfferDropdown' never built and so never would have scored on
+-- its own ('fireJevForCurrentDropdown').
+handleReplEvent (AppEvent Tick) = fireJevForCurrentDropdown
 handleReplEvent (AppEvent (JevRanked gen result)) = applyJevRanking gen result
 handleReplEvent ev =
   Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
@@ -2171,15 +2174,30 @@ refreshOfferDropdown = do
           else pure ()
         -- Score the dropdown, not every keystroke: only when the
         -- candidate set actually changed (same guard as the scroll reset
-        -- above), there's a key to spend, and more than one candidate is
-        -- worth ordering. Never awaited — 'fireJevRanking' only sends,
-        -- 'applyJevRanking' is where an answer, if one ever comes back,
-        -- is read.
-        case new of
-          Just od | rowsChanged, Just jcfg <- stJevConfig st
-                   , length (filter (isJust . rowInsert) (odRows od)) >= 2 ->
-            fireJevRanking jcfg (Text.pack (take col line)) od
-          _ -> pure ()
+        -- above). 'fireJevForCurrentDropdown' re-reads 'stOfferDropdown'
+        -- itself, which is 'new' by now (just 'put').
+        if rowsChanged then fireJevForCurrentDropdown else pure ()
+
+-- | Fires a ranking request for whatever dropdown is on screen right
+-- now, if there's a key and more than one real candidate to order.
+--
+-- **Also called once, unconditionally, straight after startup** (the
+-- post-launch 'Tick') — the launch dropdown (his `.jalivert/TUI.md` #14:
+-- the empty line opens with the full rule list already showing) is built
+-- directly in 'runTui', never through 'refreshOfferDropdown', so without
+-- this call Jev never saw it at all. That gap is exactly his report,
+-- 2026-10-29: *"I just opened it, dropdown is shown... not a single one
+-- is green"* — not a scoring bug, a dropdown Jev was never asked about.
+fireJevForCurrentDropdown :: EventM Name St ()
+fireJevForCurrentDropdown = do
+  st <- get
+  let line = concatMap Text.unpack (getEditContents (stInput st))
+      (_, col) = getCursorPosition (stInput st)
+  case (stOfferDropdown st, stJevConfig st) of
+    (Just od, Just jcfg)
+      | length (filter (isJust . rowInsert) (odRows od)) >= 2 ->
+        fireJevRanking jcfg (Text.pack (take col line)) od
+    _ -> pure ()
 
 -- | Sends one ranking request to Jev in the background and returns
 -- immediately — nothing here ever blocks a keystroke on the network.
