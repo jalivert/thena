@@ -60,6 +60,14 @@ data Theme = Theme
                              -- of its own rather than reusing whichever pane
                              -- accent happens to be lightest, so retuning a
                              -- pane never moves the marker with it.
+  , themeJevPick :: V.Color -- ^ text colour for a dropdown row Jev floated
+                             -- to the top ('floatJevPicks') — his
+                             -- experiment, 2026-10-29, *"a shade of Blue
+                             -- Green"*. A fixed blue-green across all three
+                             -- themes rather than drawn from each theme's
+                             -- own accent family, same reasoning as a
+                             -- status colour: it means "Jev said so," which
+                             -- should read the same regardless of theme.
   }
 
 rgb :: Int -> Int -> Int -> V.Color
@@ -104,6 +112,7 @@ neonPinkDark = Theme
   , themePopup   = rgb 112 8 64
   , themePopupInk = rgb 255 232 248
   , themeSoft    = rgb 255 140 240
+  , themeJevPick = rgb 70 235 205
   }
 
 -- | Ranked second. Accents confirmed from the real source
@@ -127,6 +136,7 @@ gruyere = Theme
   , themePopup   = rgb 86 34 136
   , themePopupInk = rgb 248 238 255
   , themeSoft    = rgb 237 255 130
+  , themeJevPick = rgb 70 235 205
   }
 
 -- | Ranked third. `editor.background` confirmed from the shipped theme JSON
@@ -148,6 +158,7 @@ synthwave84 = Theme
   , themePopup   = rgb 112 50 152
   , themePopupInk = rgb 255 244 255
   , themeSoft    = rgb 254 222 93
+  , themeJevPick = rgb 70 235 205
   }
 
 themes :: [Theme]

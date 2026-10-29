@@ -192,11 +192,13 @@ data OfferDropdown = OfferDropdown
     -- ^ how many characters after 'odWordStart' an accept removes — the
     -- recovered text's own length when recovered; one placeholder character
     -- when the cursor sits on a box ('offeredReplaces'); zero otherwise.
-  , odSplit :: Int
-    -- ^ how many leading 'odRows' are token rows — the rest are
-    -- productions. Exists only so a Jev ranking ('applyJevRanking') can
-    -- reorder within each group without disturbing his "tokens before
-    -- productions" ruling; nothing else reads it.
+  , odJevPicked :: Int
+    -- ^ how many leading 'odRows' are Jev's own picks, floated to the top
+    -- of the whole list by 'floatJevPicks' — crossing "tokens before
+    -- productions" on purpose, his call, 2026-10-29: *"Jev's top three
+    -- pick can be anything Jev wants."* Zero on a freshly built dropdown
+    -- (every keystroke) until an answer actually lands; 'offerRowToPopup'
+    -- reads it to colour exactly that many rows and no more.
   }
 
 data St = St
@@ -495,6 +497,7 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "placeholder.recovered", V.withStyle (ink (themeRepl th)) V.underline)
   , (attrName "accent.output",  ink (themeSoft th))
   , (attrName "dropdown",          surface (themePopup th) (themePopupInk th))
+  , (attrName "dropdown.jevpick",  surface (themePopup th) (themeJevPick th))
   -- A real background swap for the selected row, not a foreground tint
   -- beside an arrow — his `.jalivert/TUI.md` #20: the arrow was the only
   -- thing marking a row selected, which read as weak. The repl accent as a
@@ -770,19 +773,19 @@ dropdownLayer st = case (stDropdown st, loadPathPrefix line) of
 -- row is noise (his `.jalivert/TUI.md` #2). Values may trail a slash
 -- ('loadDropdownEntries'), which is not part of the name.
 loadRow :: Maybe Int -> Int -> String -> PopupRow
-loadRow selected i name = PopupRow (takeFileName (dropTrailingPathSeparator name)) (Just i == selected) False
+loadRow selected i name = PopupRow (takeFileName (dropTrailingPathSeparator name)) (Just i == selected) False False
 
 -- | The completion dropdown, positioned the same way — see 'popupAt'.
 offerDropdownLayer :: St -> [Widget Name]
 offerDropdownLayer st = case stOfferDropdown st of
   Just od | not (null (odRows od)) ->
     popupAt st (odWordStart od) (length (odRows od)) OfferPopup
-      (zipWith (offerRowToPopup (odSelected od)) [0 :: Int ..] (odRows od))
+      (zipWith (offerRowToPopup (odSelected od) (odJevPicked od)) [0 :: Int ..] (odRows od))
   _ -> []
 
-offerRowToPopup :: Maybe Int -> Int -> OfferRow -> PopupRow
-offerRowToPopup selected i (OfferRow label ins) =
-  PopupRow label (Just i == selected) (isNothing ins)
+offerRowToPopup :: Maybe Int -> Int -> Int -> OfferRow -> PopupRow
+offerRowToPopup selected jevPicked i (OfferRow label ins) =
+  PopupRow label (Just i == selected) (isNothing ins) (i < jevPicked)
 
 -- | One row of any dropdown, before it becomes a 'Widget' — shared by
 -- ':load''s directory listing and the completion dropdown so both scroll
@@ -800,6 +803,11 @@ data PopupRow = PopupRow
                           -- that information goes instead — is open, and a
                           -- muted row is one of the answers still on the
                           -- table.
+  , prJevPick  :: Bool  -- ^ one of Jev's own top three, floated to the
+                          -- head of the list ('floatJevPicks') — drawn in
+                          -- 'themeJevPick' so it reads as Jev's say-so and
+                          -- not the engine's. 'False' for every row of the
+                          -- ':load' dropdown, which never asks Jev anything.
   }
 
 -- | **A dropdown with room to breathe, symmetric all round** — his
@@ -843,6 +851,7 @@ renderPopup vp padSide rows =
       where
         styled
           | prSelected r = withAttr (attrName "dropdown.selected")
+          | prJevPick r  = withAttr (attrName "dropdown.jevpick")
           | prDim r      = withAttr (attrName "dim")
           | otherwise    = id
         mark = if prSelected r then visible else id
@@ -2201,25 +2210,33 @@ applyJevRanking :: Int -> Either String (Map.Map Text Double) -> EventM Name St 
 applyJevRanking gen result = do
   st <- get
   case (gen == stJevGen st, result, stOfferDropdown st) of
-    (True, Right scores, Just od) -> put st { stOfferDropdown = Just (reorderByScore scores od) }
+    (True, Right scores, Just od) -> put st { stOfferDropdown = Just (floatJevPicks scores od) }
     _ -> pure ()
 
--- | Reorders each of the dropdown's two groups by score — never across
--- 'odSplit', so "tokens before productions" stands exactly as it did
--- before Jev existed. A row Jev's answer doesn't mention (which should
--- only happen if the answer is short — every real candidate was sent as
--- a criterion) scores last within its group, and 'sortOn' being stable
--- keeps unmentioned rows in their original alphabetical order against
--- each other. The previously selected row, if any, is found again by
--- label after the reorder rather than by its old index, so a highlight
--- the user set with Up/Down follows its candidate instead of landing on
--- whatever is now in that slot.
-reorderByScore :: Map.Map Text Double -> OfferDropdown -> OfferDropdown
-reorderByScore scores od = od { odRows = newRows, odSelected = newSelected }
+-- | Jev's top three, whatever they are, float to the very top of the
+-- whole list — his call, 2026-10-29, over the bucket-preserving version
+-- this replaced: *"Jev's top three pick can be anything Jev wants...
+-- for now."* Crossing "tokens before productions" for that band is the
+-- experiment, not an oversight; 'odJevPicked' is how 'offerRowToPopup'
+-- knows to colour exactly those rows.
+--
+-- Only a row Jev's answer actually names can be picked — 'Map.toList'
+-- over the scores, not over 'odRows', so a short or empty answer
+-- promotes fewer than three (never zero scored rows dressed up as
+-- three). The rest keep their original relative order below the band,
+-- same stability guarantee as before. The previously selected row, if
+-- any, is found again by label rather than by its old index, so a
+-- highlight set with Up/Down follows its candidate rather than landing
+-- on whatever the reorder put in that slot.
+floatJevPicks :: Map.Map Text Double -> OfferDropdown -> OfferDropdown
+floatJevPicks scores od = od { odRows = newRows, odSelected = newSelected, odJevPicked = length picked }
   where
-    (tokenRows, productionRows) = splitAt (odSplit od) (odRows od)
-    score r = Map.findWithDefault (-1) (Text.pack (rowLabel r)) scores
-    newRows = sortOn (negate . score) tokenRows <> sortOn (negate . score) productionRows
+    label = Text.pack . rowLabel
+    scored = [ (r, s) | r <- odRows od, Just s <- [Map.lookup (label r) scores] ]
+    picked = map fst (take 3 (sortOn (negate . snd) scored))
+    pickedLabels = map rowLabel picked
+    rest = filter (\r -> rowLabel r `notElem` pickedLabels) (odRows od)
+    newRows = picked <> rest
     selectedLabel = rowLabel . (odRows od !!) <$> odSelected od
     newSelected = selectedLabel >>= \lbl -> listToMaybe [i | (i, r) <- zip [0 ..] newRows, rowLabel r == lbl]
 
@@ -2274,7 +2291,7 @@ buildOfferDropdown autoSelect col ov
   -- **Unless `:preselect off`** (`.jalivert/TUI.md` #23) — then a fresh
   -- dropdown opens with nothing highlighted, same as an exhausted list
   -- always has, and an arrow key is what picks a row instead.
-  | otherwise = Just (OfferDropdown allRows initialSelection wordStart replaceLen splitPoint)
+  | otherwise = Just (OfferDropdown allRows initialSelection wordStart replaceLen 0)
   where
     initialSelection = if autoSelect then listToMaybe (selectableIxs allRows) else Nothing
     bareWord = case offeredRecovered ov of
@@ -2324,7 +2341,6 @@ buildOfferDropdown autoSelect col ov
     allRows
       | bareWord  = tokenRows
       | otherwise = tokenRows <> productionRows
-    splitPoint = length tokenRows
     -- | A bare word replaces the partial word itself ('recoveredColumn'/
     -- 'recoveredText' name that span exactly). Every other case — an
     -- ordinary offer, or inside a literal, where 'recoveredText' names the
