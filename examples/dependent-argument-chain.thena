@@ -1,0 +1,47 @@
+-- A constructor whose own ARGUMENT telescope is dependent, split through — which
+-- is what MS9 phase 215 built, and what was handed back as a residual equation
+-- before it.
+--
+-- `pack`'s second argument is typed by its first, so `noConfusionPack` answers
+-- with a chain whose second equation is stated about the first one's PROOF: it
+-- is `i` transported along that proof rather than `i` itself (§3.2 of Pattern
+-- Matching Without K). Injectivity now reads that chain apart instead of
+-- declining it, and the two equations it yields are then ordinary work for the
+-- transitions — the first solves `n`, which supplies `refl` for its own proof
+-- and contracts the transport, and the second solves `i`.
+--
+-- COMPARE `tied-index-chain.thena` BESIDE THIS ONE. There the chain is in the
+-- MOTIVE, because the family's INDEX telescope is dependent; here it is in the
+-- no-confusion LEMMA, because a CONSTRUCTOR's telescope is. They are different
+-- telescopes and neither is downstream of the other: `Pack` has no indices at
+-- all, so this file's split states nothing in its motive.
+--
+-- And `Pack` having no indices is why it works. `fs`'s telescope is dependent
+-- too, but its result type `Fin (s n)` pins its first argument, so an equation
+-- between two `fs` applications is well typed only where both name the same
+-- `n` — and injectivity's first equation is then a DELETION over a transported
+-- chain, which is UIP. `Pack` pins nothing, the two sides differ in the first
+-- argument, and the first equation is a solution.
+
+module DependentArgumentChain where
+
+data N : Type₀ where
+  z : N
+  s : N -> N
+
+data Fin : N -> Type₀ where
+  fz : forall (n : N) -> Fin (s n)
+  fs : forall (n : N) (i : Fin n) -> Fin (s n)
+
+data Pack : Type₀ where
+  pack : forall (n : N) (i : Fin n) -> Pack
+
+data Holds : Pack -> Type₀ where
+  holds : forall (n : N) (i : Fin n) -> Holds (pack n i)
+
+-- The split's one equation is `Eq Pack (pack n i) (pack m j)`, and injectivity
+-- takes it apart into the two the chain holds. Both are discharged, so the arm
+-- binds the constructor's arguments alone — and it really binds them: the body
+-- answers with the constructor's own `n`, not with the ambient `m`.
+depth : forall (m : N) (j : Fin m) (x : Holds (pack m j)) -> N
+depth = \ m j x -> case x of { holds n i -> s n }

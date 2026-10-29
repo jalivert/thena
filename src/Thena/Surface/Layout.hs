@@ -60,6 +60,18 @@ layoutKeyword t = case t of
   -- was @then@\'s job from phase 75 until @then@ stopped being a word. One
   -- keyword now opens every block of instructions there is.
   TDo    -> True
+  -- **Added at MS9 phase 179**, for the arms of @induction t of …@ and
+  -- @case t of …@. The fourth and, as phase 40 said of @do@, the machinery
+  -- below did not change.
+  --
+  -- **It is @of@ and not @induction@ or @case@**, because the block starts after
+  -- the target and a block opened at the first word would swallow it.
+  --
+  -- **One spelling 'closesBlock' does not reach**: @let x = induction v of
+  -- nil -> a in x@, all on one line, where @in@ has two implicit blocks to close
+  -- and closes one. That is a parse error and not silence, which is the
+  -- condition that function's own header sets for this list.
+  TOf    -> True
   _      -> False
 
 -- | Tokens that close an implicit block by appearing.

@@ -1,0 +1,93 @@
+-- A SPLIT TAKEN INTERACTIVELY, AT A HOLE (MS9 phase 231).
+--
+-- `induction-core` and `case-core` are the tactic spelling of what
+-- `induction … of { … }` and `case … of { … }` write out. The author gets one
+-- hole per case, with that case's own binders already introduced and the
+-- split's equations already discharged, and fills them in whatever order they
+-- like.
+--
+-- WHAT TO COMPARE IT WITH: `dependent-index.thena.script`, beside this file,
+-- proves the same `belowRefl` by hand. There the author writes each method's
+-- whole lambda out and takes the generalised quantifier and its equation as
+-- arguments —
+--
+--   try-core core`\ (m : Nat) (q : Eq {0} Nat (succ m) n) -> refl {0} (Fin (succ m)) (fz m)`
+--
+-- — because `eliminate-core` hands back the eliminator's methods, equations and
+-- all. Here the specialiser has already discharged them, so the goal really is
+-- `Eq {0} (Fin (succ m)) (fz m) (fz m)` and `refl` is the whole of the answer.
+
+data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+data Fin : Nat -> Type₀ where { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }
+data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }
+
+-- `Below`'s index telescope is dependent — the second index is typed by the
+-- first — and both are plain variables at the scrutinee, so the split
+-- generalises them and every equation it states is solved.
+:theorem belowRefl : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Eq {0} (Fin n) i i
+attack
+intro
+intro
+intro
+into
+along
+along
+along
+induction-core core`b`
+
+-- THE BINDERS ARE THE DECLARATION'S OWN NAMES. `bz`'s argument is `m`, and the
+-- ambient `n` and `i` are definitions inside the case — `succ m` and `fz m` —
+-- so a name written here means what the split refined it to.
+goto-named "bzCase1"
+try-core core`refl {0} (Fin (succ m)) (fz m)`
+solve
+goto-named "bzCase"
+solve
+
+goto-named "bsCase1"
+try-core core`refl {0} (Fin (succ m)) (fs m j)`
+solve
+goto-named "bsCase"
+solve
+
+goto-named "bzMethod"
+solve
+goto-named "bsMethod"
+solve
+goto-named "belowRefl1"
+solve
+goto-root
+solve
+qed
+
+-- AND `case-core`, WHOSE METHODS CARRY NO INDUCTION HYPOTHESIS — the same
+-- division the two written words make. The scrutinee's index is PINNED to
+-- `succ m` here, so `vnil`'s equation is a conflict: that case vanishes, the
+-- specialiser closes its method, and the author is never shown it. `vcons`'s
+-- own `n` is forced to the ambient `m` and is a definition rather than a
+-- binder, which is why only `a` and `as` are λ-bound.
+data N : Type₀ where { z : N ; s : N -> N }
+data Vec (A : Type₀) : forall (n : N) -> Type₀ where { vnil : Vec A z ; vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n) }
+
+:theorem vhead : ∀ (A : Type₀) (m : N) (xs : Vec A (s m)) -> A
+attack
+intro
+intro
+intro
+into
+along
+along
+along
+case-core core`xs`
+goto-named "vconsCase1"
+try-core core`a`
+solve
+goto-named "vconsCase"
+solve
+goto-named "vconsMethod"
+solve
+goto-named "vhead1"
+solve
+goto-root
+solve
+qed

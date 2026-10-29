@@ -60,7 +60,7 @@ import Thena.Core.Term
   , instantiate
   , open
   )
-import Thena.Global.Env (Definition (..), GlobalEnv, lookupDefinition)
+import Thena.Global.Env (Definition (..), GlobalEnv (..), lookupDefinition)
 
 -- ---------------------------------------------------------------------------
 -- The level
@@ -506,22 +506,25 @@ trustIn env ctx n t
 -- them trusting anything.
 --
 -- Almost every term in the system rests on nothing, so almost every call stops
--- here. **It terminates** because the set of definitions already looked at only
--- grows, which is the same fact the walk's own termination rests on.
+-- here.
+--
+-- **IT IS ONE WALK OF THE TERM NOW, AND NOT A WALK OF THE WHOLE CLOSURE — MS9
+-- phase 207, @~2dqc3@, his ruling of 2026-10-22.** It used to answer by
+-- breadth-first search out from the term through every definition it mentions,
+-- every definition those mention, and so on, reading each body in full. That is
+-- the same answer, and it cost **4.4 s of an 8.5 s load** of
+-- @examples\/07-preservation.thena@ — the largest single cost in it, paid again
+-- on every @certify@, with 167 million association-list lookups beneath it.
+--
+-- **Whether a definition rests on a trusted claim never changes once it is in
+-- the table**, so @Thena.Global.Env.addDefinition@ works it out once and
+-- 'restingOnTrust' holds the answer. What is left here is the part that is
+-- genuinely about the term in hand: does it hold a claim of its own, and does it
+-- name any definition that holds one. **The list is almost always empty**, which
+-- is why this is now a walk of @t@ and nothing else.
 reaches :: GlobalEnv -> Core -> Bool
-reaches env t0 = go [] [t0]
-  where
-    go _ [] = False
-    go seen (t : ts)
-      | holdsTrusted t = True
-      | otherwise      = go (seen ++ fresh') (ts ++ bodies)
-      where
-        fresh' = [ g | g <- globalsIn t, g `notElem` seen ]
-        bodies =
-          [ definitionBody d
-          | g <- fresh'
-          , Just d <- [lookupDefinition g env]
-          ]
+reaches env t =
+  holdsTrusted t || any (`elem` restingOnTrust env) (globalsIn t)
 
 -- | The claims found, the definitions already taken apart, and the name
 -- counter. Not exported: 'trustIn' is the whole of what it is for.

@@ -345,7 +345,17 @@ tests =
         -- not the development — different relation, different consumer. No pair.
         [ testCase ":accepts finds a rule by its parameter" $
             fittingNames (snd (command withRules ":accepts Surface"))
-              @?= ["elaborate", "run-block", "intro-binders", "spine-arguments"]
+              -- The splitting tree's rules that take a Surface (MS9) sit
+              -- where the base declares them, between elaborate and run-block.
+              @?= [ "elaborate"
+                  , "ihs-for", "dotted-position-is-forced"
+                  , "arm-for", "pick", "elaborate-arm"
+                  , "case-needs-an-arm", "one-case"
+                  , "arms-are-for-this-datatype", "arm-not-repeated"
+                  , "arms-are-distinct"
+                  , "split-cases", "split-over", "split-claim", "split-elaborate"
+                  , "run-block", "intro-binders", "spine-arguments"
+                  ]
           -- **One thing in the shipped base returns a @Core@ since MS5 phase
           -- 89** — @fresh-universe@, which stopped being an op and became a
           -- function over @fresh-level@ and @universe-at@. Before that nothing
@@ -354,7 +364,16 @@ tests =
             case snd (command withRules ":produces Core") of
               Fitting v _ rows -> do
                 v @?= "gives"
-                [ n | (GlobalName n, _, _, _) <- rows ] @?= ["intro-binders", "fresh-universe"]
+                -- @intro-arm-binders@ is the splitting tree's one walk over
+                -- the report the split made (MS9 phase 192), and it answers
+                -- the hole it left; @intro-binders@ is the λ group's.
+                -- @apply-all@ is the fold over @apply-to@ that applies a solved
+                -- binder's term to the binders it is a function of (MS9 phase
+                -- 195).
+                [ n | (GlobalName n, _, _, _) <- rows ]
+                  @?= [ "apply-all", "instantiate-with", "intro-arm-binders"
+                      , "intro-binders", "fresh-universe"
+                      ]
               other -> assertFailure ("expected a listing, got " ++ show other)
           -- **It lists rules and functions both** (his ruling), and the two are
           -- told apart in the row rather than in two commands.

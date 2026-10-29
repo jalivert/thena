@@ -36,7 +36,7 @@ look at this
 thena spine> do { say h }
 instruction 1: wanted String, got Core
 thena spine> yield
-chose 17: attack
+chose 24: attack
 thena spine> yield
 nothing has yielded
 thena spine> :quit

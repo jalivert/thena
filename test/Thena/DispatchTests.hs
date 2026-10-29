@@ -300,14 +300,51 @@ dispatchableTests =
     [ testCase "matches shows try, dispatch does not" $ do
         let std = expectedBase
         names' (matches std emptyGlobals hole)
-          @?= ["attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
+          @?= ["attack", "try-core", "abandon", "eliminate-core"
+             , "eliminate-generalising-core", "prove", "fill"
              , "unify-refine-core", "apply-core"
                -- **@fit-core@'s two clauses both pass, and dispatch runs
                -- neither** (MS2 phase 27) — it takes a parameter, exactly like
                -- @try-core@ above, which is what this test is about.
              , "fit-core", "fit-core"
              , "claim", "assume", "quantify"]
-               ++ replicate 19 "elaborate" ++ ["run-block"]
+               ++ replicate 7 "elaborate"
+               ++ [ "no-nesting", "ihs-for", "ihs-for"
+                  , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
+                  , "instantiate-with"
+                  , "name-or-stem", "name-or-stem" ]
+               ++ replicate 6 "intro-arm-binders"
+               ++ ["dotted-position-is-forced"]
+               ++ replicate 3 "intro-arm-binders"
+               ++ [ "bind-friendlies", "bind-friendlies", "bind-solved", "bind-solved"
+                  , "same-length", "same-length"
+                  , "arm-for", "arm-for", "pick", "pick", "arm-needs-body"
+                  , "arm-needs-body"
+                  , "elaborate-arm", "case-needs-an-arm", "case-needs-an-arm"
+                  , "vanished-case-takes-no-body", "vanished-case-takes-no-body"
+                  , "case-must-vanish", "case-must-vanish"
+                  , "one-case", "one-case", "one-case"
+                  , "arm-must-be-for-this-datatype"
+                  , "arms-are-for-this-datatype", "arms-are-for-this-datatype"
+                  , "one-arm-per-constructor"
+                  , "arm-not-repeated", "arm-not-repeated"
+                  , "arms-are-distinct", "arms-are-distinct"
+                  , "split-cases", "split-cases", "split-over"
+                  , "split-claim", "split-claim", "split-elaborate"
+                  ]
+               -- **The interactive spelling** (MS9 phase 231). @induction-core@
+               -- and @case-core@ take a parameter, so dispatch runs neither —
+               -- which is this test's own subject, one tactic on.
+               ++ replicate 4 "argument-patterns"
+               ++ [ "argument-pattern"
+                  , "open-case", "open-case"
+                  , "split-holes", "split-holes", "split-holes-over"
+                  , "with-hypotheses", "with-hypotheses"
+                  , "without-hypotheses", "without-hypotheses"
+                  , "induction-core", "case-core"
+                  ]
+               ++ replicate 15 "elaborate"
+               ++ ["run-block"]
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals hole)
           @?= ["attack", "abandon", "prove"]

@@ -1,0 +1,85 @@
+-- A case the user is RIGHT to leave out, accepted with nothing said — which is
+-- what MS9 phase 221 built, and what was refused outright before it.
+--
+-- A split states one equation per tied index, and specialisation discharges
+-- them by McBride's five unification transitions. Four of the five have been
+-- here since phase 177; the fifth is CYCLE, and it is the one that recognises
+-- an impossible case. An equation between a term and something that CONTAINS
+-- it structurally — `n ≃ s n` — has no solution, so the case it belongs to
+-- cannot arise, so the arm for it is not merely unnecessary but unwritable.
+--
+-- The proof is generated with the datatype. `NotBelowN x y` is the tuple of
+-- everything structurally below `y` that `x` is not equal to, `noCycleN` says
+-- the equation puts `x` below `y`, and the contradiction is the component of
+-- that tuple reading `x ≢ x`. None of it is written here; see `DECISIONS.md`,
+-- "`specialise` discharges the equations an elimination hands you".
+--
+-- What is ILLEGAL is writing an arm with a body for one of these cases: the
+-- case has been proved not to arise, so a body for it claims otherwise, and
+-- `vanished-case-takes-no-body` refuses it. An arm with no body at all is
+-- legal and says the same thing `{ }` says one level out.
+
+module OmittedCases where
+
+data N : Type₀ where
+  z : N
+  s : N -> N
+
+-- `down`'s two indices are `s n` and `n`. A target that TIES them — `Step n n`
+-- — asks for a number that is its own successor, so `case` has no case left to
+-- answer and the braces are empty.
+
+data Step : N -> N -> Type₀ where
+  down : ∀ (n : N) -> Step (s n) n
+
+noSelf : ∀ (n : N) (st : Step n n) -> Empty
+noSelf = \ n st -> case st of { }
+
+-- Two constructors down works the same way, the tuple nesting one level
+-- further: `over` asks for `s (s n) ≃ n`.
+
+data Skip : N -> N -> Type₀ where
+  over : ∀ (n : N) -> Skip (s (s n)) n
+
+noSkip : ∀ (n : N) (sk : Skip n n) -> Empty
+noSkip = \ n sk -> case sk of { }
+
+-- And it is the STRUCTURE that matters, not the position: `onRight` puts the
+-- subject at `node l r`'s second recursive argument, and the tuple is reached
+-- past the first.
+
+data Tree : Type₀ where
+  leaf : Tree
+  node : Tree -> Tree -> Tree
+
+data Sub : Tree -> Tree -> Type₀ where
+  onRight : ∀ (l : Tree) (r : Tree) -> Sub r (node l r)
+
+noSub : ∀ (t : Tree) (sb : Sub t t) -> Empty
+noSub = \ t sb -> case sb of { }
+
+-- A family with a parameter is no different. `tl` relates a list to its own
+-- cons cell, and no list is its own tail.
+
+data Lst (A : Type₀) : Type₀ where
+  lnil : Lst A
+  lcons : ∀ (a : A) (as : Lst A) -> Lst A
+
+data Tail (A : Type₀) : Lst A -> Lst A -> Type₀ where
+  tl : ∀ (a : A) (as : Lst A) -> Tail A as (lcons A a as)
+
+noTail : ∀ (A : Type₀) (xs : Lst A) (t : Tail A xs xs) -> Empty
+noTail = \ A xs t -> case t of { }
+
+-- The counter-case, and it is what keeps the rest honest: `Step (s n) n` is
+-- exactly what `down` builds, so the case DOES arise and leaving it out is an
+-- error. Uncommented, the line below is refused with
+-- `no clause of case-must-vanish applies here`.
+--
+--   bogus : ∀ (n : N) (st : Step (s n) n) -> Empty
+--   bogus = \ n st -> case st of { }
+--
+-- A case that survives and an arm with a body is the ordinary way to write it:
+
+stepDown : ∀ (n : N) (st : Step (s n) n) -> N
+stepDown = \ n st -> case st of { down m -> m }

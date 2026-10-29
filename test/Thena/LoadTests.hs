@@ -21,7 +21,7 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (GlobalName (..))
-import Thena.Errors (FailReason (..), Skipped (..), Warning (..))
+import Thena.Errors (FailReason (..))
 import Thena.Driver
   ( LoadError (..)
   , Loaded (..)
@@ -405,35 +405,27 @@ moduleTests =
         (_, ProofLoaded nm ds _ _) -> (nm, ds) @?= ("M", ["Nat", "one"])
         (_, other)             -> assertFailure (show other)
 
-  -- **The warning channel** (MS6 phase 98). Before it, this diagnostic was a
-  -- 'Thena.Engine.Message', and a module load drops those — so the one thing
-  -- the system had to warn about was reported at the prompt and silently lost
-  -- in a file. These three say what a warning is: it reaches the caller, it is
-  -- structured, and it changes nothing.
-  , testCase "a load that warns still says what it declared" $ do
+  -- **This module used to be the warning channel's fixture** (MS6 phase 98),
+  -- because @link@'s @q@ premise depends on @y@ and the no-confusion generator
+  -- declined @Chain@ for it. MS9 phase 212 states a transported chain of
+  -- equations for exactly that shape, so the load is silent and the lemma is
+  -- there — which is what these now say. The channel itself is exercised by
+  -- "Thena.GrammarTests", whose module load warns about a vacuous binder.
+  , testCase "a dependent argument telescope no longer warns" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 dependentModule of
         (_, ProofLoaded nm ds _ ws) -> do
           (nm, ds) @?= ("W", ["Chain"])
-          length ws @?= 1
+          ws @?= []
         (_, other) -> assertFailure (show other)
 
-  , testCase "and the warning names the datatype and why" $ do
-      (s0, _) <- startingSession
-      case loadProofSource s0 dependentModule of
-        (_, ProofLoaded _ _ _ [NoConfusionSkipped d why]) -> do
-          d @?= GlobalName "Chain"
-          case why of
-            DependentArguments c k _ -> (c, k) @?= (GlobalName "link", 4)
-            other -> assertFailure ("wrong reason: " ++ show other)
-        (_, other) -> assertFailure (show other)
-
-  -- A warning is a remark about a declaration that went in, which is the whole
-  -- of what separates it from a refusal.
-  , testCase "and what it warned about is installed anyway" $ do
+  , testCase "and it gets its no-confusion lemma like any other datatype" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 dependentModule
-      isDeclared (GlobalName "Chain") (globals (machineOf s1)) @?= True
+          g = globals (machineOf s1)
+      map (\n -> isDeclared (GlobalName n) g)
+          ["Chain", "NoConfusionChain", "noConfusionChain"]
+        @?= [True, True, True]
 
   , testCase "a load with nothing to say warns about nothing" $ do
       (s0, _) <- startingSession

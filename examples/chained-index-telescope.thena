@@ -1,0 +1,67 @@
+-- A family whose index telescope is CHAINED — one index typed by an earlier
+-- one, and a later index mentioning both of them — split at every position.
+-- MS9 phase 237 built it; before that the split was refused by position and
+-- name.
+--
+-- Compare the two files beside this one, because the three are a ladder:
+--
+--   * `dependent-index.thena.script` — `Below`'s indices are plain variables,
+--     so the dependent one is FRIENDLY and states no equation at all.
+--   * `tied-index-chain.thena` — `Q`'s second index is TIED and typed by the
+--     first, so its equation is stated after transporting its side along the
+--     first one's proof. One transport, and the position it moves is not itself
+--     mentioned by anything.
+--   * this file — `Chain`'s third index is tied and its type mentions BOTH
+--     earlier ones, while the second's type mentions the first.
+--
+-- WHY THE LAST RUNG NEEDED A DIFFERENT TERM. A transport's motive reads
+-- `λ l r q -> residue l -> residue r`, and that is well typed only when nothing
+-- in the residue is TYPED BY the position being moved. Here something is:
+-- moving `n` in `Below n i`, the right-hand side reads `Below r i` while `i` is
+-- still typed `Fin l`, and the residue does not typecheck. So the motive binds
+-- the positions that move with this one and states the right-hand side at them
+-- carried along the SAME proof:
+--
+--     λ l r q -> forall (y : Fin l) -> Below l y -> Below r (coe q y)
+--
+-- `coe q y` is that same transport one level down, on `Fin` instead of on the
+-- residue, so this is one construction used recursively rather than a second
+-- mechanism. The method is `λ s y at -> at`, and it typechecks because
+-- `coe refl y` reduces to `y`.
+--
+-- NOTHING HERE IS THE K AXIOM and no equality is packaged. Every equation is
+-- still an `Eq` between two terms of one type, which is the same bargain the
+-- rest of the elimination machinery keeps.
+
+module ChainedIndexTelescope where
+
+data N : Type₀ where
+  z : N
+  s : N -> N
+
+data Fin : N -> Type₀ where
+  fz : forall (m : N) -> Fin (s m)
+  fs : forall (m : N) (j : Fin m) -> Fin (s m)
+
+data Below : forall (n : N) (i : Fin n) -> Type₀ where
+  bz : forall (m : N) -> Below (s m) (fz m)
+  bs : forall (m : N) (j : Fin m) (b : Below m j) -> Below (s m) (fs m j)
+
+-- THREE INDICES, AND EACH DEPENDS ON EVERY EARLIER ONE. The constructor
+-- carries an `N` so that an arm has a payload to answer with: a split that
+-- typechecked but refined nothing would still admit `chained`, and only
+-- reducing `chainedPayload` says the arm was really handed the constructor's
+-- own argument.
+data Chain : forall (n : N) (i : Fin n) (b : Below n i) -> Type₀ where
+  c0 : forall (n : N) (i : Fin n) (b : Below n i) (w : N) -> Chain n i b
+
+chained : forall (m : N) (c : Chain (s m) (fz m) (bz m)) -> N
+chained = \ m c -> case c of { c0 n i b w -> w }
+
+chainedPayload : N
+chainedPayload = chained (s z) (c0 (s (s z)) (fz (s z)) (bz (s z)) (s (s (s z))))
+
+-- ONE RUNG DEEPER IS ITS OWN FILE, `chained-index-telescope-deep.thena`, and
+-- the reason is cost: the generated term grows about fourfold per chained
+-- index, so that split alone is most of a load. The measurement is in
+-- DECISIONS.md under the decision this file demonstrates.

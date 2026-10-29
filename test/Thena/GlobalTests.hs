@@ -314,7 +314,7 @@ declareAll = foldl one (Right (emptyGlobals, 0))
     one acc src = do
       (env, n)  <- acc
       (d, n1)      <- shown (parseDeclaration [] env n src)
-      (env', n2, _) <- shown (declare env n1 d)
+      (env', n2)   <- shown (declare env n1 d)
       Right (env', n2)
 
     shown :: Show e => Either e a -> Either String a
@@ -552,11 +552,16 @@ nameTests =
     -- 49e): §3.7 item 2 generates a global for it the way it does for a former
     -- and a constructor, which is what lets @elim D …@ elaborate as an
     -- ordinary application.
+    -- **And @caseD@ is another of them** (MS9 phase 178), generated the same
+    -- way and so able to clash the same way.
+  , refused "a constructor named after the case analysis"
+      "T : Type\8320 where { caseT : T }"
+      (RepeatedName (named "caseT"))
   , testCase "everything a declaration introduces is declared afterwards" $
       sequence_
         [ isDeclared (named g) natVec @?= True
-        | g <- [ "Nat", "zero", "succ", "elimNat"
-               , "Vec", "nil", "cons", "elimVec"
+        | g <- [ "Nat", "zero", "succ", "elimNat", "caseNat"
+               , "Vec", "nil", "cons", "elimVec", "caseVec"
                ]
         ]
   , testCase "and nothing else is" $

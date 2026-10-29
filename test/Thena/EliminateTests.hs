@@ -27,7 +27,13 @@ import Thena.Driver
 import Thena.Standard (withRules)
 
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
+import Thena.Core.Term
+  ( Core (..)
+  , GlobalName (..)
+  , Ident (..)
+  , fresh
+  , instantiate
+  )
 import Thena.Declared
   ( eqNat
   , eqNatCounter
@@ -39,12 +45,17 @@ import Thena.Declared
   )
 import Thena.Driver (parseCore)
 import Thena.Errors (ElimError (..))
-import Thena.Global.Env (GlobalEnv)
+import Thena.Global.Env (GlobalEnv, Scheme (..))
 import Thena.Driver (Response (..), command, loadProofSource)
 import Thena.Files (startingSession)
 import Thena.Render ( Rendering (..)
   ,renderCore, renderResponse)
-import Thena.Tactics.Eliminate (Elimination (..), eliminate)
+import Thena.Tactics.Eliminate
+  ( Elimination (..)
+  , MethodShape (..)
+  , Premises (..)
+  , eliminate
+  )
 
 tests :: TestTree
 tests =
@@ -56,7 +67,80 @@ tests =
     , testGroup "what it refuses" refusalTests
     , testGroup "a DEPENDENT motive, over the adversarial corpus" dependentMotives
     , testGroup "a goal that is an unfolded definition (MS6 phase 109c)" unfoldedGoal
+    , testGroup "a NESTED split: what it says it claimed, it claimed" nestedNames
+    , testGroup "Fixed against Generalised: the same elimination, no copies"
+        premisesTests
     ]
+
+-- --------------------------------------------------------------------------
+-- The two constructions (MS9 phase 211, `~84x46`)
+-- --------------------------------------------------------------------------
+
+-- | **One fixture, both 'Premises', and the only difference is the copies.**
+--
+-- @p a b u : Term@, @d : Step (ifthen p a b) u@ — the state
+-- @examples\/determinacy-patterns.thena@ reaches at its inner split, and the
+-- shape phase 191 was built for. The fixture's @Step@ is the first three rules
+-- of TAPL's, which is enough: the generalisation is decided by @eIfTrue@. The left index is @ifthen p a b@, constructed
+-- and so tied, and @eIfTrue@\'s own left index is @ifthen true t2 t3@: position
+-- by position that is @true@ facing the ambient variable @p@, which the copy
+-- is the only thing a solution can reach. So @p@ is a seed.
+--
+-- Under 'Generalised' the motive therefore quantifies a fresh copy of @p@ after
+-- the target and states the equation about the copy, and a method's arm can
+-- write @p := true@. Under 'Fixed' the equation is about @p@ itself, which is
+-- rigid — §3.7 exactly, and what @eliminate-core@ did before phase 191 and does
+-- again.
+--
+-- **The right index @u@ is friendly under both**, and that is why it is
+-- asserted: 'Fixed' turns off the ambient copies and touches nothing else. The
+-- equation count and the method count are the two constructions' shared half.
+premisesTests :: [TestTree]
+premisesTests =
+  [ testCase "Generalised copies the ambient variable a tied index demands" $
+      case fst (attempt env ctx n1 "Term" "d") of
+        Left e   -> assertFailure (show e)
+        Right el -> do
+          shapeGeneralised (elimShape el) @?= [Ident "p"]
+          shapeEquations (elimShape el) @?= 1
+          length (elimMethods el) @?= 3
+
+  , testCase "Fixed copies nothing, and leaves the rest of §3.7 alone" $
+      case fst (attemptFixed env ctx n1 "Term" "d") of
+        Left e   -> assertFailure (show e)
+        Right el -> do
+          shapeGeneralised (elimShape el) @?= []
+          shapeEquations (elimShape el) @?= 1
+          length (elimMethods el) @?= 3
+
+    -- **Every method is one binder shorter, and it is the copy that went.** The
+    -- count is what a hand-written method pays: @~84x46@'s whole cost was that
+    -- each of these binders had to be taken and the arm rewritten about it, on
+    -- every phase that widened the closure.
+  , testCase "so every method of Fixed is one binder shorter" $
+      case (fst (attempt env ctx n1 "Term" "d"), fst (attemptFixed env ctx n1 "Term" "d")) of
+        (Right gen, Right fix) ->
+          methodBinders fix @?= map (subtract 1) (methodBinders gen)
+        _ -> assertFailure "both constructions should succeed on this fixture"
+  ]
+  where
+    (ctx, n1) = contextOf env n0
+      [ ("p", "Term"), ("a", "Term"), ("b", "Term"), ("u", "Term")
+      , ("d", "Step (ifthen p a b) u")
+      ]
+    env = eqStep
+    n0  = eqStepCounter
+
+    methodBinders el = [ binders ty | (_, _, ty) <- elimMethods el ]
+
+-- | How many leading Π binders a method type has — the only shape of a method
+-- that says what the motive added, and the whole of what 'Premises' changes.
+-- The body is instantiated at a global rather than opened, since nothing here
+-- reads it.
+binders :: Core -> Int
+binders t = case t of
+  Pi _ _ sc -> 1 + binders (instantiate (Global (GlobalName "_") []) sc)
+  _         -> 0
 
 -- --------------------------------------------------------------------------
 -- A dependent motive, over datatypes chosen to be awkward (2026-09-13)
@@ -66,10 +150,9 @@ tests =
 --
 -- That is what let a real bug survive a behaviour-preserved check — the goal
 -- did not mention the target, so generalising it was a no-op and nothing about
--- the motive was exercised. `BUGHUNT.md` H says the same thing about the
--- type-check sweep in @GlobalTests@: it asks whether the generated equipment is
--- well formed, not whether it is the right shape, and only a proof that /uses/
--- it notices the difference.
+-- the motive was exercised. The type-check sweep in @GlobalTests@ asks
+-- whether the generated equipment is well formed, not whether it is the right
+-- shape, and only a proof that /uses/ it notices the difference.
 --
 -- So: each datatype below is eliminated at a goal that mentions the target, and
 -- the kernel is asked afterwards. @Eq {0} D x x@ is the smallest goal that is
@@ -343,9 +426,13 @@ friendlyTests =
           (without, n2) = contextOf env n0 [("n", "Nat"), ("i", "Fin n")]
        in do
             map (rendered with . thirdOf') (elimMethods (run "tied" env with n1 "Eq {0} Nat n n" "i"))
-              @?= [ "∀ (n1 : Nat) -> Eq {0} Nat (succ n1) n -> Eq {0} Nat (succ n1) (succ n1)"
-                  , "∀ (n1 : Nat) -> Fin n1 -> (Eq {0} Nat n1 n -> Eq {0} Nat n1 n1) \
-                    \-> Eq {0} Nat (succ n1) n -> Eq {0} Nat (succ n1) (succ n1)"
+              @?= [ "∀ (n1 : Nat) (n2 : Nat) -> Eq {0} Nat n2 n2 \
+                    \-> Eq {0} Nat (succ n1) n2 -> Eq {0} Nat (succ n1) (succ n1)"
+                  , "∀ (n1 : Nat) -> Fin n1 \
+                    \-> (∀ (n2 : Nat) -> Eq {0} Nat n2 n2 \
+                    \-> Eq {0} Nat n1 n2 -> Eq {0} Nat n1 n1) \
+                    \-> ∀ (n2 : Nat) -> Eq {0} Nat n2 n2 \
+                    \-> Eq {0} Nat (succ n1) n2 -> Eq {0} Nat (succ n1) (succ n1)"
                   ]
             map (rendered without . thirdOf') (elimMethods (run "free" env without n2 "Eq {0} Nat n n" "i"))
               @?= [ "∀ (n1 : Nat) -> Eq {0} Nat (succ n1) (succ n1)"
@@ -357,10 +444,53 @@ friendlyTests =
     -- the first freely. Before phase 19 this whole family was refused.
   , testCase "a dependent index telescope is fine when the dependent index is friendly" $
       map (rendered belowContext . thirdOf') (elimMethods belowProbe)
-        @?= [ "∀ (m : Nat) -> Eq {0} Nat (succ m) n -> Nat"
-            , "∀ (m : Nat) (j : Fin m) -> Below m j -> (Eq {0} Nat m n -> Nat) \
-              \-> Eq {0} Nat (succ m) n -> Nat"
+        @?= [ "∀ (m : Nat) (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat"
+            , "∀ (m : Nat) (j : Fin m) -> Below m j \
+              \-> (∀ (n1 : Nat) -> Eq {0} Nat m n1 -> Nat) \
+              \-> ∀ (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat"
             ]
+
+    -- __MS9 phase 213, @~7gmvr@ step two, and this is the phase.__ Index 2 is
+    -- @fz m@, a constructor application, so it is tied and does want an
+    -- equation — and until this phase @Eq (Fin i1) i2 (fz m)@ was the one that
+    -- could not be written down, its two sides standing at @Fin i1@ and
+    -- @Fin (succ m)@.
+    --
+    -- Three things to read in the second equation, and they are the whole of
+    -- §3.2 of /Pattern Matching Without K/:
+    --
+    --   * the carrier is @Fin (succ m)@ — the __actual__ first index, not the
+    --     generalised @i1@, so the equation is homogeneous;
+    --   * the actual side is the bare @fz m@, which is what keeps @solution@'s
+    --     reach;
+    --   * the generalised side is this method's own index carried there along
+    --     the first equation, @q@ — one J, built as
+    --     "Thena.Tactics.Specialise"'s @coerce@ is.
+    --
+    -- @bsMethod@'s induction hypothesis carries the same chain at @m1@, which
+    -- is what says the motive is right rather than just statable.
+  , testCase "a tied dependent index states its equation transported" $
+      let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl]
+          (ctx, n1) = contextOf env n0
+            [("m", "Nat"), ("b", "Below (succ m) (fz m)")]
+       in map (rendered ctx . thirdOf') (elimMethods (run "tiedDep" env ctx n1 "Nat" "b"))
+            @?= [ "∀ (m1 : Nat) (q : Eq {0} Nat (succ m1) (succ m)) \
+                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
+                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
+                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
+                  \((succ m1) (succ m)) q) (fz m1)) (fz m) -> Nat"
+                , "∀ (m1 : Nat) (j : Fin m1) -> Below m1 j \
+                  \-> (∀ (q : Eq {0} Nat m1 (succ m)) \
+                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
+                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
+                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
+                  \(m1 (succ m)) q) j) (fz m) -> Nat) \
+                  \-> ∀ (q : Eq {0} Nat (succ m1) (succ m)) \
+                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
+                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
+                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
+                  \((succ m1) (succ m)) q) (fs m1 j)) (fz m) -> Nat"
+                ]
 
     -- The load-bearing artifact of phase 19, and the thing @check@ alone would
     -- not have caught: the motive's own telescope is dependent, and its second
@@ -369,7 +499,8 @@ friendlyTests =
   , testCase "and the motive's telescope carries the dependency" $
       rendered (withMethods belowContext belowProbe) (elimTerm belowProbe)
         @?= "(elim Below () (λ (n1 : Nat) (i1 : Fin n1) (target : Below n1 i1) \
-            \-> Eq {0} Nat n1 n -> Nat) (bzMethod bsMethod) (n i) b) (refl {0} Nat n)"
+            \-> ∀ (n2 : Nat) -> Eq {0} Nat n1 n2 -> Nat) (bzMethod bsMethod) (n i) b) \
+            \n (refl {0} Nat n)"
 
     -- A 'Definition' has a value as well as a type, and abstracting the
     -- variable would leave the value behind. Conservative on purpose: tying it
@@ -427,16 +558,25 @@ refusalTests =
         Left (TargetNotInductive {}) -> pure ()
         other                        -> assertFailure (show (fmap (const ()) other))
 
-    -- §3.7's limit, and it binds a /tied/ index only (phase 19). Here index 2
-    -- is @fz m@ — a constructor application, so it states an equation, and
-    -- @Eq {0} (Fin i1) i2 (fz m)@ is the one that cannot be written down.
-  , testCase "a dependent index that is tied is refused, by position and name" $
-      let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl]
-          (ctx, n1) = contextOf env n0
-            [("m", "Nat"), ("b", "Below (succ m) (fz m)")]
-       in case fst (attempt env ctx n1 "Nat" "b") of
-            Left e  -> e @?= IndexTypeDepends 2 (Ident "i")
-            Right _ -> assertFailure "expected a refusal"
+    -- __TWO MENTIONED INDICES THAT ARE CHAINED ARE NO LONGER REFUSED — MS9
+    -- phase 237, @~fq5gp@.__ @Chain@'s index 3 is @bz m@, a constructor
+    -- application, so it is tied and its type @Below i1 i2@ mentions both
+    -- earlier indices — while @i2@'s own type @Fin i1@ mentions @i1@.
+    -- Transporting past @i1@ used to leave @i2@'s binder typed at the old one;
+    -- the motive now binds @i2@ and states the right-hand residue at it carried
+    -- along the same proof, so the elimination is built.
+    --
+    -- __It is asserted here as a build and nowhere else as a string__: the
+    -- motive is three nested transports and pinning its text would say nothing
+    -- a reader could check. @Thena.DependentIndexTests@ runs
+    -- @examples/chained-index-telescope.thena@ through the kernel instead,
+    -- which is the judge that matters, and asserts the arm computes.
+  , testCase "two chained dependent indices are eliminated, not refused" $
+      let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl, chainDecl]
+          (ctx, n1) = contextOf env n0 [("m", "Nat")]
+       in case fst (attempt env ctx n1 "Nat" "c0 (succ m) (fz m) (bz m)") of
+            Right _ -> pure ()
+            Left e  -> assertFailure ("refused: " ++ show e)
 
     -- §3.7, decided 2026-08-11: @Eq@ and @refl@ are named, not designated. A
     -- family with no indices states no equations and so needs neither, which
@@ -502,6 +642,14 @@ belowDecl =
   \where { bz : \8704 (m : Nat) -> Below (succ m) (fz m) \
   \; bs : \8704 (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
 
+-- | Three indices, the third typed by the first /two/ — the shape MS9 phase
+-- 213's transport chain cannot state, because @Fin n@ makes index 2 depend on
+-- index 1 and so transporting past index 1 leaves index 2's binder behind.
+chainDecl :: String
+chainDecl =
+  "Chain : \8704 (n : Nat) (i : Fin n) (b : Below n i) -> Type\8320 \
+  \where { c0 : \8704 (n : Nat) (i : Fin n) (b : Below n i) -> Chain n i b }"
+
 -- | Build a context by parsing each entry's type against what precedes it, so
 -- that a dependent context can be written down as the user would type it.
 contextOf :: GlobalEnv -> Int -> [(String, String)] -> (Context, Int)
@@ -530,14 +678,28 @@ run label env ctx n goal tgt = case fst (attempt env ctx n goal tgt) of
   Right el -> el
   Left e   -> error (label ++ ": " ++ show e)
 
+-- | Every fixture above asks for 'Generalised', which is what a surface split
+-- asks for and what the whole suite was written against.
 attempt
   :: GlobalEnv -> Context -> Int -> String -> String
   -> (Either ElimError Elimination, Int)
-attempt env ctx n goal tgt = case parseCore [] env ctx n goal of
+attempt = attemptWith Generalised
+
+-- | … and 'Fixed' is §3.7 with every premise left alone — @eliminate-core@'s
+-- construction (MS9 phase 211, `~84x46`).
+attemptFixed
+  :: GlobalEnv -> Context -> Int -> String -> String
+  -> (Either ElimError Elimination, Int)
+attemptFixed = attemptWith Fixed
+
+attemptWith
+  :: Premises -> GlobalEnv -> Context -> Int -> String -> String
+  -> (Either ElimError Elimination, Int)
+attemptWith prem env ctx n goal tgt = case parseCore [] env ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
   Right (g, n1) -> case parseCore [] env ctx n1 tgt of
     Left e        -> error ("fixture does not parse: " ++ show e)
-    Right (t, n2) -> eliminate env ctx n2 g t
+    Right (t, n2) -> eliminate env ctx Inductive prem n2 g t
 
 -- | The context the refinement is well typed in: the goal's, plus the holes
 -- the tactic asked for. 'Thena.Engine' puts them there with @insertAbove@; a
@@ -587,3 +749,52 @@ unfoldedGoal =
       if "subgoals: sameMethod, differentMethod" `elem` said && any ("valid" `isInfixOf`) said
         then pure ()
         else assertFailure (unlines said)
+
+-- --------------------------------------------------------------------------
+-- A nested split, and the name the message gives
+-- --------------------------------------------------------------------------
+
+-- | @subgoals:@ names the holes that now exist, not the hints they were asked
+-- for (MS9, 2026-10-19).
+--
+-- A method's hint is the constructor's name with @Method@ after it, and the
+-- hole it ends up with is that hint put through
+-- 'Thena.Development.Cursor.freshIdent'. **The two differ exactly when a split
+-- nests**: eliminating again /inside/ @succMethod@ asks for @zeroMethod@ and
+-- @succMethod@ a second time, and the second of those is the very guess the
+-- new holes are going in above — so they are claimed as @zeroMethod1@ and
+-- @succMethod1@.
+--
+-- The message was built from the hints, so it named two holes that do not
+-- exist, and it did so in the one situation where a reader most needs it:
+-- @goto-named "succMethod"@ at that point is accepted and focuses the
+-- /enclosing/ method, because that name is real and the one the message
+-- offered is not. Nothing was wrong with the development — @:revalidate@ is
+-- happy either way, which is why no suite caught this.
+--
+-- **Teeth**: build 'Thena.Engine.subgoalMessage' from the hints again and the
+-- second assertion below fails.
+nestedNames :: [TestTree]
+nestedNames =
+  [ testCase "the inner elimination's methods are named as they were claimed" $
+      let said = map show (loadedResponses (loadSource withRules (unlines script)))
+          says w = any ((("subgoals: " ++ w) `isInfixOf`)) said
+       in if says "zeroMethod, succMethod"
+             && says "zeroMethod1, succMethod1"
+             && any ("valid" `isInfixOf`) said
+            then pure ()
+            else assertFailure (unlines script ++ "\n  said: " ++ unlines said)
+  ]
+  where
+    -- Prelude-free, like every script in the suite (phase 11).
+    script =
+      [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , ":theorem twice : \8704 (m : Nat) (n : Nat) -> Nat"
+      , "attack", "intro", "intro", "into", "along", "along"
+        -- The outer split, whose methods take the hints unchanged.
+      , "eliminate-core core`m`"
+        -- Into the one whose name the inner split will ask for again.
+      , "goto-named \"succMethod\""
+      , "eliminate-core core`n`"
+      , ":revalidate"
+      ]

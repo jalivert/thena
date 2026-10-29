@@ -12,11 +12,13 @@
 module Thena.CanonicalTests (tests) where
 
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
+import Data.List (isInfixOf, isPrefixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Level (Level (..), instantiateLevels)
+import Thena.Core.Term (GlobalName (..), substLevelsIn)
 import Thena.Driver (machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
@@ -42,28 +44,61 @@ tests =
       -- this before progress.
     , testCase "a well-typed boolean value is true or false" $ do
         st <- statementOf "canonicalBool"
-        st @?= Just "∀ (v : Term) -> Value v -> HasType v bool \
-               \-> Or (Eq {0} Term v true) (Eq {0} Term v false)"
+        st @?= Just (0, "∀ (v : Term) -> Value v -> HasType v bool \
+               \-> Or (Eq {0} Term v true) (Eq {0} Term v false)")
 
       -- **The nat half**, and it is the one that carries the numeric-value
       -- predicate the determinacy example already had.
     , testCase "and a well-typed numeric value really is one" $ do
         st <- statementOf "canonicalNat"
-        st @?= Just "∀ (v : Term) -> Value v -> HasType v nat -> NV v"
+        st @?= Just (0, "∀ (v : Term) -> Value v -> HasType v nat -> NV v")
 
-      -- The three inversion lemmas underneath them, stated so that a proof
-      -- weakened into vacuity would show.
-    , testCase "true is not a natural number" $ do
+      -- The inversion lemmas underneath them, stated so that a proof weakened
+      -- into vacuity would show.
+      --
+      -- **These two are level-polymorphic and the others are not**, which is
+      -- the intended behaviour and not an accident: a declared type's level is
+      -- generalised into a prenex parameter, and nothing in a proof by
+      -- @induction d of { }@ mentions @Empty@, so nothing pins it. The two
+      -- lemmas above conclude in @Or@ and @NV@, whose own parameters are at
+      -- @Type₀@, so theirs is pinned.
+      --
+      -- **The parameter's PRINTED NAME carries the session's counter**, so it
+      -- is not what to assert. 'statementOf' answers with how many level
+      -- parameters there are and with the statement read at level 0 — which
+      -- pins the generality and the old monomorphic reading at once.
+    , testCase "true is not a natural number, at any level" $ do
         st <- statementOf "trueNotNat"
-        st @?= Just "HasType true nat -> Empty {0}"
+        st @?= Just (1, "HasType true nat -> Empty {0}")
 
-    , testCase "and a numeric value is not a boolean" $ do
+    , testCase "and a numeric value is not a boolean, at any level" $ do
         st <- statementOf "nvNotBool"
-        st @?= Just "∀ (t : Term) -> NV t -> HasType t bool -> Empty {0}"
+        st @?= Just (1, "∀ (t : Term) -> NV t -> HasType t bool -> Empty {0}")
+
+      -- **Nothing in the file appeals to @elim@ any more.** @absurd@'s own body
+      -- was the last one, kept while @normal.thena@ and @preservation.thena@
+      -- still used it; MS9 rewrote both of those as splits and @case e of { }@
+      -- says what @elim Empty@ said. The whole TAPL chain is now dependent
+      -- pattern matching, which @README.md@ claims and this asserts.
+    , testCase "and every proof in it is a split" $ do
+        src <- code <$> readFile target
+        (any ("elim" `isInfixOf`) src, any ("noConfusion" `isInfixOf`) src)
+          @?= (False, False)
     ]
   where
+    -- The file without its prose, which names what the splits replaced.
+    code = filter (not . isPrefixOf "--" . dropWhile (== ' ')) . lines
+
     statementOf n = do
       (s, _) <- startingSession
       (s', _, _) <- loadProofFile s target
-      pure ( renderCore (Rendering [] (names (machineOf s'))) [] . definitionType
-               <$> lookupDefinition (GlobalName n) (globals (machineOf s')) )
+      pure (atZero (machineOf s') <$>
+              lookupDefinition (GlobalName n) (globals (machineOf s')))
+
+    -- Every prenex level parameter read at 0, with how many there were.
+    atZero m d =
+      let ps  = definitionLevels d
+          sub = maybe [] id (instantiateLevels ps (map (const LZero) ps))
+       in ( length ps
+          , renderCore (Rendering [] (names m)) []
+              (substLevelsIn sub (definitionType d)) )

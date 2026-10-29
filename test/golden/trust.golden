@@ -3,59 +3,59 @@ declared Nat
 thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
 thena spine> declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)
-solved: ?ℓ44
+solved: ?ℓ233
 already equal
 already equal
-solved: ?ℓ44
-solved: ?ℓ55
+solved: ?ℓ233
+solved: ?ℓ245
 already equal
 already equal
-solved: ?ℓ55
-solved: ?ℓ66
+solved: ?ℓ245
+solved: ?ℓ256
 already equal
 solved: A
-solved: ?ℓ53
+solved: ?ℓ243
 thena spine> :trust none
 trust: no trust
   resting on nothing
 thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
-solved: ?ℓ76
+solved: ?ℓ284
 already equal
 already equal
 already equal
-solved: ?ℓ76
-solved: ?ℓ89
+solved: ?ℓ284
+solved: ?ℓ298
 already equal
 already equal
 already equal
-solved: ?ℓ89
-solved: ?ℓ102
+solved: ?ℓ298
+solved: ?ℓ311
 already equal
 solved: A
-solved: ?ℓ87
+solved: ?ℓ296
 the trust level refused it
 trust: no trust
   undischargeable, written here
-    claims Eq {ℓ₁₀₉} Nat zero (succ zero)
+    claims Eq {ℓ₃₃₈} Nat zero (succ zero)
     body   Eq {0} Nat zero zero
 thena spine> :trust any
 trust: any trust
   resting on nothing
 thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
-solved: ?ℓ112
+solved: ?ℓ341
 already equal
 already equal
 already equal
-solved: ?ℓ112
-solved: ?ℓ125
+solved: ?ℓ341
+solved: ?ℓ355
 already equal
 already equal
 already equal
-solved: ?ℓ125
-solved: ?ℓ138
+solved: ?ℓ355
+solved: ?ℓ368
 already equal
 solved: A
-solved: ?ℓ123
+solved: ?ℓ353
 thena spine> :trust none
 trust: no trust
   resting on nothing

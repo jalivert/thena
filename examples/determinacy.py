@@ -606,12 +606,32 @@ def lam(bs, body):
         return surface(body)
     return "\\ %s -> %s" % (" ".join(n for n, _ in bs), surface(body))
 
+# ---------------------------------------------------------------------------
+# What this generator no longer mirrors
+# ---------------------------------------------------------------------------
+#
+# MS9 phase 191 made `eliminate-core` quantify a FRESH COPY of every ambient
+# entry the target's tied index mentions, and this file grew a mirror of that
+# rule — the seeds, the dependency closure, and a renamer that said each arm
+# about the copies instead of the entries. It cost 90 of the 157 `try-core`
+# lines, and it was paid again when phase 199 closed the closure backwards.
+#
+# **MS9 phase 211 removed the need for it** (`~84x46`): `eliminate-core` is
+# §3.7 again — the motive abstracts the target and its indices, every premise
+# stays fixed — and the generalising construction is `eliminate-generalising-core`,
+# which nothing here calls. So the mirror is deleted rather than maintained, and
+# a later widening of what a *split* generalises cannot land on this file again.
+#
 def branch(lem, ct):
     goal = lem['goal'](arg(ct['rhs']))
     bs = list(ct['tel'])
     if ct['rec']:
+        # **The hypothesis is the motive at the recursive argument**, which under
+        # §3.7's scheme is the goal with the target replaced and the equation
+        # restated — nothing else.
         bs.append(("sr", "Step c1 c2"))
-        bs.append(("ih", "Eq {0} Term c1 %s -> %s" % (arg(lem['L']), lem['goal']("c2"))))
+        bs.append(("ih", "Eq {0} Term c1 %s -> %s"
+                         % (arg(lem['L']), lem['goal']("c2"))))
     bs.append(("q", "Eq {0} Term %s %s" % (arg(ct['lhs']), arg(lem['L']))))
     res, leaves = decompose(ct['lhs'], lem['L'], 'q', goal, itertools.count(1))
     body = res if leaves is None else compose(res, lem['fin'][ct['n']](leaves, goal))

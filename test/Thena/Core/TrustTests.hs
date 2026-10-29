@@ -44,7 +44,7 @@ import Thena.Core.Trust
   , trustIn
   )
 import Thena.Driver (parseCore)
-import Thena.Global.Env (Definition (..), GlobalEnv, addDefinition)
+import Thena.Global.Env (Definition (..), GlobalEnv, addDefinition, restingOnTrust)
 
 import Thena.Declared (eqNat, eqNatCounter)
 
@@ -137,7 +137,36 @@ tests =
     , testGroup "the positional test is deep" positional
     , testGroup "the walk, and which site each verdict came from" walk
     , testGroup "what a level permits" rungs
+    , testGroup "which definitions rest on trust, stored once" stored
     ]
+
+-- --------------------------------------------------------------------------
+-- The stored answer
+-- --------------------------------------------------------------------------
+
+-- | __'restingOnTrust' is the pre-pass's whole input now__ (MS9 phase 207,
+-- @~2dqc3@). @reaches@ used to walk out from a term through every definition it
+-- mentioned, reading each body in full, on every @certify@;
+-- 'Thena.Global.Env.addDefinition' answers the same question once.
+--
+-- **The fixture already had the three cases this needs**, which is why it is
+-- asserted here and not against a new one: @cheatNat@ holds a trusted node of
+-- its own, @through@ holds none and calls @cheatNat@, and @plain@ and @Alias@
+-- hold none and call nothing that does. **So the list is the transitivity, and
+-- the two absences are what keeps it from being everything.**
+stored :: [TestTree]
+stored =
+  [ testCase "a definition holding a trusted node, and one that only calls it" $
+      restingOnTrust env @?= map GlobalName ["through", "cheatNat"]
+
+    -- __And the term's own claim is still the term's__: the stored list says
+    -- nothing about a 'Trusted' node standing in the term being examined, so
+    -- both halves of @reaches@ are needed and this is the half that is not
+    -- stored.
+  , testCase "a bare trusted node rests on itself with nothing stored" $
+      assertBool "the claim is reported"
+        (not (null (rests (term "trusted Nat Nat zero"))))
+  ]
 
 -- --------------------------------------------------------------------------
 -- Classifying

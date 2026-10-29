@@ -57,7 +57,9 @@ import Thena.Development.Cursor (Part (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Global.Env (ArgRole, GlobalEnv, InductiveDefinition)
 import Thena.Language.Reader (Block)
-import Thena.Surface.Concrete (Plicity)
+import Thena.Surface.Concrete (Plicity, SurfacePattern)
+import Thena.Tactics.Eliminate (MethodShape)
+import Thena.Tactics.Specialise (Binder)
 import Thena.Syntax.Concrete (Raw, splicesIn)
 import Thena.Surface.Zipper (SurfaceZipper)
 
@@ -154,6 +156,23 @@ data Value
     -- the lexer would take two constructor names away from every object
     -- language. They are read where an operand is read, before a local is
     -- looked up, which is what @cross type@ and @ask \"?\" name@ already do.
+  | VPattern SurfacePattern
+    -- ^ **a pattern an arm of a surface split was written with** (MS9 phase
+    -- 183). 'Thena.Instral.Type.TPattern' carries why it is not a 'VSurface'.
+  | VMethodShape MethodShape
+    -- ^ **what the motive added to every method of one elimination** (MS9 phase
+    -- 196) — 'Thena.Instral.Type.TMethodShape' carries why it is a type of its
+    -- own, and the short of it is that no rule reads one: it goes from
+    -- @prim-eliminate@ to @specialise@ and nothing in between has any business
+    -- in it.
+  | VBinder Binder
+    -- ^ **one binder of a specialised method** (MS9 phase 192) — which of the
+    -- three groups it is in, and the name it is bound under.
+    --
+    -- 'Thena.Instral.Type.TBinder' carries why it is a type of its own, and
+    -- "Thena.Tactics.Specialise" is the only thing that makes one: a method's
+    -- binders are what the five transitions rewrote, and nothing else can say
+    -- which of them survived.
   | VList    [Value]
     -- ^ @[a, b, c]@ (MS5 phase 65) — **homogeneous by intention and not by
     -- construction**: nothing checks that the elements agree until phase 66's
@@ -527,6 +546,38 @@ data Op
     -- ^ @some x@ — an 'VOption' that is there (MS5 phase 65).
   | None
     -- ^ @none@ — one that is not.
+  | CaseSurvivedOp Operand
+    -- ^ **refuse, naming the equations that keep this case alive** (MS9 phase
+    -- 230). It takes the subgoal handle the specialiser answered with, reads
+    -- its type where it stands and refuses with 'Thena.Errors.CaseSurvived'.
+    --
+    -- __It is the only op that cannot succeed, and that is what it is for.__ A
+    -- rule refuses by having no clause, and that refusal carries a rule's name
+    -- and nothing else — so a refusal that has to name a /term/ cannot be a
+    -- rule's. The coverage rules call this where they used to simply have no
+    -- clause.
+    --
+    -- __Its head says only what it is about__: here is a case that survived,
+    -- say so. Whether there was an arm to take the equation is the caller's
+    -- question and is not asked here.
+  | Prepend Operand Operand
+    -- ^ @prepend x xs@ — a list with one more element at the front (MS9 phase
+    -- 195).
+    --
+    -- __A RULE COULD TAKE A LIST APART AND COULD NOT BUILD ONE.__ @[x, ...xs]@
+    -- is a /pattern/ and has been since MS5 phase 65; the operand form
+    -- 'ListOf' is a fixed run of elements, so a rule that walks a list and
+    -- accumulates had nothing to accumulate /into/ and every list a rule held
+    -- came from an op. That is what @~tzwjk@ ran into — a walk over a split's
+    -- binder report has to carry one term per binder it has introduced — and
+    -- the gap is the rule language's, not that item's.
+    --
+    -- __The one operation, and not a library.__ Cons is what the pattern form
+    -- already matches, so this is the operand side of a shape the language
+    -- has; @reverse-onto@ and @apply-all@ in @rules\/standard.thena.rules@ are
+    -- written with it as ordinary rules, which is where list code belongs. The
+    -- sugar @[x, ...xs]@ in operand position is deliberately __not__ added: it
+    -- is a second spelling for this, and nothing yet asks for it.
   | Return Operand
     -- ^ **what this rule hands back to whoever called it** (MS5 phase 63) —
     -- @return ‹operand›@.
@@ -669,6 +720,90 @@ data Op
   | AscriptionTerm Operand   -- ^ … its @e@
   | TrustedClaim Operand     -- ^ the @T@ of a surface @trusted T e@ (MS8 phase 150)
   | TrustedBody Operand      -- ^ … its @e@
+  | SplitTarget Operand
+    -- ^ the term a surface @induction t of …@ or @case t of …@ analyses (MS9
+    -- phase 181)
+  | SplitArmBody Operand
+    -- ^ the __first__ arm's right-hand side, __or @none@ where the arm was
+    -- written with no body at all__ (MS9 phase 189).
+    --
+    -- **The first and not the @k@th**, because 'SplitTail' peels an arm and the
+    -- clause recurses — the shape @E\u27e6x \u20d7a\u27e7@ already uses for a spine.
+    --
+    -- **An option and not a refusal**, by the rule his 2026-10-19 ruling set for
+    -- 'Eliminate' and 'Specialise': an arm with no body is a legal arm, so the
+    -- answer is @none@ and the caller decides what that means. A focus that is
+    -- not a split, or a split with no arms, is still a refusal — that is the
+    -- shape the paired head test rules out.
+  | SplitArmPattern Operand
+    -- ^ the __first__ arm's pattern — @split-arm-pattern t@ (MS9 phase 183).
+    --
+    -- 'SplitArmBody'\'s twin: the two halves of an arm, and a clause walks the
+    -- arms with 'SplitTail' as it does a spine.
+  | PatternHead Operand
+    -- ^ a pattern's head — @pattern-head p@.
+    --
+    -- **It is a 'Thena.Instral.Type.TName' and that is what makes the splitting
+    -- tree possible**: it composes with @constructor-datatype@ and
+    -- @constructors-of@, which take names, so a rule can ask whether the word an
+    -- arm was written with is a constructor of the family being split. A bare
+    -- pattern variable is a head with no arguments, so this is also how an arm
+    -- names the variables it binds.
+  | PatternForName Operand
+    -- ^ the pattern that names a variable — @pattern-for-name n@ (MS9 phase
+    -- 231).
+    --
+    -- **'PatternHead'\'s inverse, and the one pattern op that builds rather than
+    -- reads.** It exists because the interactive spelling of a split
+    -- (@induction-core@) walks the same @intro-arm-binders@ the written arms
+    -- walk, and that walk takes its name for each position from the pattern the
+    -- user wrote. An interactive split has no written patterns: the name it
+    -- introduces each position under is the method's own binder, so it supplies
+    -- that name /as/ a pattern and the walk is reached unchanged.
+    --
+    -- **Only a bare name is buildable here**, which is the whole of what the
+    -- caller needs: a wildcard would say the user did not care to name a
+    -- position nobody asked about, and a dot asserts something no tactic is in a
+    -- position to assert on the author's behalf.
+  | BinderName Operand
+    -- ^ the name a binder of a specialised method is bound under —
+    -- @binder-name b@ (MS9 phase 192).
+    --
+    -- **A 'Thena.Instral.Type.TName', so it composes with @prim-lambda@,
+    -- @define@ and @fresh-name@**, which is the whole of what a walk over the
+    -- report does with it. Total over the three roles, and each takes its name
+    -- from a different place: an argument's is the method type's own binder, a
+    -- hypothesis's is the recursive argument it is about, a copy's is the
+    -- ambient entry it copies.
+  | PatternDotTerm Operand
+    -- ^ **the term inside an inaccessible pattern** (MS9 phase 228) — the @e@
+    -- of @.e@, as a surface term ready to elaborate.
+    --
+    -- **It is the one pattern reader that answers with a term**, and it is why
+    -- 'Thena.Surface.Concrete.SurfacePattern' is otherwise read into a
+    -- 'Thena.Instral.Ops.VPattern' with no path to carry: nothing elaborates a
+    -- pattern, and a dot is not a pattern being elaborated — it is a term that
+    -- happens to be written in a pattern's place.
+    --
+    -- **The term is rooted at itself**, with no frame back into the arm. A
+    -- pattern has no path — that is the rule @split-arm-pattern@ already
+    -- states — and a dot does not become the one exception to it: nothing
+    -- navigates into a pattern, so a frame would buy a move no caller performs
+    -- and would be the only reachable position inside one. It is additive if an
+    -- editor ever wants it.
+  | PatternArguments Operand
+    -- ^ a pattern's arguments, in order — @pattern-arguments p@.
+    --
+    -- **Patterns and not names, because a pattern nests**:
+    -- @cons n a (cons m b nil)@ parses today. A rule recurses on these, and a
+    -- reader that flattened them to names would be wrong on syntax the parser
+    -- already accepts.
+  | SplitTail Operand
+    -- ^ the split that is left once its first arm is taken.
+    --
+    -- **A split with no arms is a legal node**, so this recursion needs no
+    -- base case of its own: @split-has-no-arms@ is the test that stops it, and
+    -- what it stops at is an ordinary term.
     -- ^ **Moves, not readers**: each answers with a 'VSurface' focused on that
     -- part, so the path the zipper carries is extended rather than thrown away
     -- (MS4 phase 46). A clause pairs each with the test that makes it total —
@@ -1036,6 +1171,178 @@ data Op
     -- It takes an operand where the other hole ops take none, for 'Try'\'s
     -- reason: the goal is the focus, but the target has nowhere else to come
     -- from.
+    --
+    -- **It answers with the holes it claimed and what the motive added to every
+    -- method** — his ruling of 2026-10-19, and the second half grew a component
+    -- in MS9 phase 191. 'resultOf' carries why the holes come back at all; the
+    -- short of it is that a rule which /found/ a case rather than writing it
+    -- down can reach that case's hole only through 'Goto', and 'Goto' takes the
+    -- variable. Written @do (hs, m) = prim-eliminate t@, where
+    -- @m = (gens, k)@ is the __ambient entries the motive generalised__, under
+    -- the names they already had, and the __equation count__.
+    --
+    -- **Those two travel together because they are one fact about every
+    -- method's shape**, and @specialise@ is the only thing that reads either:
+    -- the copies and the equations are consecutive runs of binders standing
+    -- between the constructor's telescope and the method's body, and nothing in
+    -- the type marks where one ends. The names are in it because the /caller/
+    -- binds the copies, under the ambient names, which is what refines an arm's
+    -- view of its own context — see "Thena.Tactics.Eliminate"'s header.
+
+    -- **Asking a declaration what it says** (MS9 phase 176). Six readers over
+    -- 'Thena.Global.Env.InductiveDefinition', and until this phase there were
+    -- none: @make-data@ /declares/ a datatype and nothing could /read/ one, so
+    -- a rule could not find out how many constructors a family has, let alone
+    -- which. A splitting tree is exactly that question asked repeatedly, which
+    -- is why `~kq4kc` starts here.
+    --
+    -- **They answer with names and counts, never with a telescope — and that is
+    -- a decision, not an omission.** A constructor's argument /types/ and its
+    -- index /expressions/ are terms in the declaration's own scope, so handing
+    -- one to a rule hands it free variables the rule has nothing to instantiate
+    -- with. @instral@ owns no telescope type and inventing one is a design
+    -- question nobody has asked yet (§12 invariant 5). The terms stay inside
+    -- the specialiser, which is where they are used correctly.
+    --
+    -- **All six are read-only**: none touches the development, none mints a
+    -- name, none can fail in a way that moves anything.
+  | CaseAnalyse Operand
+    -- ^ @prim-case ‹t›@ — 'Eliminate' with the methods' inductive hypotheses
+    -- gone (MS9 phase 188): the surface's @case … of@.
+    --
+    -- __Two ops and not one taking a tag.__ instral has no enum to pass, and a
+    -- user asks for these by two different words, so the word they wrote picks
+    -- the op. The tactic underneath is one function with a
+    -- 'Thena.Global.Env.Scheme' parameter — nothing in the kernel can tell the
+    -- results apart, because @caseD@ is an ordinary definition that δ-unfolds
+    -- to an elimination.
+    --
+    -- __It answers exactly what 'Eliminate' answers__, the method holes and the
+    -- equation count, so @split-over@ and everything under it is shared.
+  | EliminateFixed Operand
+    -- ^ @prim-eliminate-fixed ‹t›@ — §3.7's elimination and nothing more: the
+    -- motive abstracts the target and its indices, and __every premise stays
+    -- fixed__ (MS9 phase 211, @~84x46@).
+    --
+    -- __The third op for the same reason there is a second.__ instral has no
+    -- enum to pass, and the two constructions are asked for by two different
+    -- callers: 'Eliminate' and 'CaseAnalyse' serve a /split/, which runs
+    -- 'Specialise' over every method and so solves away each copy the motive
+    -- quantified; this one serves a method written __by hand__, where nothing
+    -- solves a copy and every one of them is a binder its author must take.
+    -- 'Thena.Tactics.Eliminate.Premises' is the parameter underneath and has the
+    -- argument.
+    --
+    -- __It answers exactly what 'Eliminate' answers__, so a rule may take either
+    -- apart the same way; under this one 'Thena.Tactics.Eliminate.shapeGeneralised'
+    -- is always empty.
+    --
+    -- __It is the op @eliminate-core@ runs__, which is what gives the word back
+    -- its pre-phase-191 meaning while elaboration keeps the generalising one.
+  | DatatypeOf Operand
+    -- ^ the datatype a /type/ is an application of — @datatype-of ty@.
+    --
+    -- **It reduces first**, because a saturated family application is a
+    -- 'Thena.Core.Term.Canonical' and a written @Vec A n@ is nested
+    -- 'Thena.Core.Term.App's over a 'Thena.Core.Term.Global' until δ unfolds
+    -- the former wrapper — §12 invariant 6, and reading only one of the two
+    -- forms is a bug that surfaces as /"Nat is not a datatype"/. It shares
+    -- "Thena.Tactics.Eliminate"'s @spineOf@ rather than carrying a second copy
+    -- of that lesson.
+  | DatatypeParameters Operand
+    -- ^ how many parameters a datatype takes — @datatype-parameters d@.
+  | DatatypeIndices Operand
+    -- ^ … and how many indices. **Two ops and not one pair**, because a rule
+    -- that wants one does not want to destructure to get it, and §3.7's split
+    -- between the two is the whole reason the question is asked.
+  | ConstructorsOf Operand
+    -- ^ a datatype's constructors, **in declaration order** — @constructors-of d@.
+    --
+    -- The order is load-bearing: it is the order the eliminator's methods are
+    -- in, so a rule walking methods and a rule walking constructors agree
+    -- without either being told.
+    --
+    -- **The first op in the language to answer with a list.** 'VList' and
+    -- 'Thena.Instral.Type.TList' have existed since MS5 phase 65 with nothing
+    -- producing one; a rule destructures this with @[c, ...rest]@.
+  | ConstructorDatatype Operand
+    -- ^ the datatype a /constructor/ belongs to — @constructor-datatype c@.
+    --
+    -- **What a pattern is checked against.** A clause writes @vcons n a v@ and
+    -- something has to say whether @vcons@ is a constructor of the family being
+    -- split; this is that, and it fails for a name that is not a constructor at
+    -- all, which is how a rule tells a constructor pattern from a variable one.
+  | ConstructorRecursiveArguments Operand
+    -- ^ the subset of a constructor's arguments whose type is the datatype
+    -- being declared — @constructor-recursive-arguments c@ (MS9 phase 184).
+    --
+    -- **It is the induction hypothesis count, which is what a splitting tree
+    -- needs and cannot otherwise get.** An @induction@ method binds the
+    -- constructor's arguments and then one hypothesis per recursive argument,
+    -- so a clause introducing the arm's pattern variables has to know how many
+    -- binders are left before the goal. **Counting Π binders instead does not
+    -- work**: a method's goal may itself be a function type, so the binders
+    -- after the hypotheses are indistinguishable from them — the same reason
+    -- 'Eliminate' has to answer with the equation count.
+    --
+    -- **Names, as its five siblings answer with names**, and a @case@ split
+    -- wants the list empty rather than a different op: @caseD@ is the
+    -- eliminator minus exactly these.
+  | ConstructorArguments Operand
+    -- ^ a constructor's argument names, in order — @constructor-arguments c@.
+    --
+    -- **Names, so a split can name its pattern variables after them** — the
+    -- same courtesy 'Eliminate' already does for its method holes. Their
+    -- /number/ is this list's length, which is a constructor pattern's arity,
+    -- so no separate arity op: one question, one answer.
+
+    -- **Specialisation by unification** (MS9 phase 177): the five transitions
+    -- over the equations an elimination's method carries, in one coarse op —
+    -- __his ruling, 2026-10-18__, with the argument that decided it: the
+    -- splitting tree is rules, because a wrong tree is a failed elaboration
+    -- while a wrong proof term is caught by @check@.
+    --
+    -- The goal is the focus, as with 'Eliminate' and the other hole ops, and
+    -- the two operands are the facts a method type does not carry: __which
+    -- constructor's method this is__, which gives the length of its telescope,
+    -- and __how many equations follow it__, which is what 'Eliminate' now
+    -- answers with. See "Thena.Tactics.Specialise".
+    --
+    -- **It claims zero or one hole**, and zero is the impossible case
+    -- vanishing: a conflicting equation closes the method outright, so there is
+    -- nothing left to prove and nothing to go to.
+    --
+    -- **And it REPORTS WHAT EACH BINDER OF THE METHOD IS** (MS9 phase 192) —
+    -- one @(Binder, Option Core)@ per binder, in the order the method binds
+    -- them: which of the three groups it is in and under what name, then
+    -- @none@ for one that survived as a binder of the subgoal and @some t@ for
+    -- one an equation determined.
+    --
+    -- **It is the only thing that knows**: the subgoal has fewer binders than
+    -- the method's telescope has and nothing in it says which are missing, so a
+    -- clause naming an arm's variables cannot work it out — which is why phase
+    -- 184's clause failed on @vtail@.
+    --
+    -- **It was two positional slices and a count until phase 192**, and three
+    -- rules then introduced one group each in an order none of them stated.
+    -- His ruling of 2026-10-20, fourth session: a convention against an
+    -- explicit mechanism is not a decision. @binder-is-argument@,
+    -- @binder-is-hypothesis@ and @binder-is-copy@ are how a clause reads a
+    -- group, and the three differ in where the name comes from and in what a
+    -- @some t@ means there.
+  | Specialise Operand Operand Operand
+
+    -- **Tying a recursive call to the induction hypothesis it is** (MS9 phase
+    -- 186) — __his ruling of 2026-10-19__: the arm writes an ordinary call,
+    -- the name being defined is assumed while the body elaborates, and this
+    -- rewrites each application of that assumption into the hypothesis it
+    -- denotes. See "Thena.Tactics.Recurse" for why it is a pass over the term
+    -- rather than a lookup at the call site.
+    --
+    -- **It takes the whole body, not a hole, and answers a term**, so it is
+    -- the one coarse operation here that touches no development at all: the
+    -- driver runs it between @pop-development@ and @define-global@.
+  | TieRecursion Operand
   deriving (Eq, Show)
 
 -- @Reduce@ is a move, not a value-producing op, for the same reason 'Along'
@@ -1233,6 +1540,15 @@ resultOf o = case o of
   AscriptionTerm _ -> Just TSurface
   TrustedClaim _ -> Just TSurface
   TrustedBody _ -> Just TSurface
+  SplitTarget _ -> Just TSurface
+  SplitArmBody _ -> Just (TOption TSurface)
+  SplitTail _ -> Just TSurface
+  SplitArmPattern _ -> Just TPattern
+  PatternHead _ -> Just TName
+  PatternForName _ -> Just TPattern
+  PatternArguments _ -> Just (TList TPattern)
+  PatternDotTerm _ -> Just TSurface
+  BinderName _ -> Just TName
   MakeTrusted {} -> Just TCore
   Goal         -> Just TCore
   Typing _     -> Just TCore
@@ -1280,11 +1596,57 @@ resultOf o = case o of
   Return _     -> Nothing   -- it ends a body; there is nothing after it to bind
   Some _       -> Just (TOption (TVar 0))
   None         -> Just (TOption (TVar 0))
+  CaseSurvivedOp _ -> Nothing
+  Prepend _ _  -> Just (TList (TVar 0))
   -- **An 'Option', not the element** — an empty list has no head, and phase 65
   -- chose to answer with 'None' rather than to fail. The table said @a@ until
   -- MS5 phase 73, which the engine cross-check could not catch: a bare variable
   -- is inhabited by every value, so the row asserted nothing.
-  Eliminate _  -> Nothing
+  -- **The method holes it claimed, and how many equations each of them
+  -- carries** — his ruling of 2026-10-19, MS9 phase 180.
+  --
+  -- The holes come back as variables, in declaration order, which is
+  -- @constructors-of@'s order too — so a rule walks the two in step without
+  -- either being told. **That is what makes a splitting tree possible**: a
+  -- hole a rule /found/ rather than wrote can only be reached by 'Goto', which
+  -- takes the variable, and this is the only op that has them. Every other
+  -- op that extends the development with a hole or a binding already answers
+  -- this way — 'Claim', 'Assume', 'Quantify', 'Define' — and this one
+  -- answering with a bare count was the odd row in that set.
+  --
+  -- **The count is one number for the whole elimination**, not one per method:
+  -- it is how many indices were tied, so it is the same for every method, and
+  -- a list of pairs would repeat it. @specialise@ needs it and nothing else in
+  -- the language can work it out — a method type is Π binders all the way
+  -- down, and the binders after the equations belong to the /goal/, so
+  -- counting them is wrong wherever the goal is itself a function type. So the
+  -- op that states the equations is what says how many it stated.
+  --
+  -- A body that wants neither half discards the pair, as every rule shipped
+  -- before phase 177 does.
+  Eliminate _  -> Just (TPair (TList TCore) TMethodShape)
+  CaseAnalyse _ -> Just (TPair (TList TCore) TMethodShape)
+  EliminateFixed _ -> Just (TPair (TList TCore) TMethodShape)
+  -- **The subgoal it claimed, or none** (MS9 phase 184). A conflicting
+  -- equation closes the method outright and claims nothing, which is the
+  -- impossible case vanishing, so there is never more than one.
+    -- **The handle and the binder report, as a pair**, which is 'Eliminate'\'s
+    -- own shape and for its reason: one op answers everything only it knows, and
+    -- a rule takes the pair apart in a head.
+  Specialise _ _ _ ->
+    Just (TPair (TOption TCore)
+                (TPair (TList (TPair TBinder (TOption TCore)))
+                       (TList (TPair TName TCore))))
+  TieRecursion _ -> Just TCore
+  -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
+  -- first row in this table to answer with a list.
+  DatatypeOf _ -> Just TName
+  DatatypeParameters _ -> Just TInt
+  DatatypeIndices _ -> Just TInt
+  ConstructorsOf _ -> Just (TList TName)
+  ConstructorDatatype _ -> Just TName
+  ConstructorArguments _ -> Just (TList TName)
+  ConstructorRecursiveArguments _ -> Just (TList TName)
   ApplyNext _ _ -> Just TCore  -- the spine, one argument longer
   ExpandImplicits _ -> Just TSurface
   AppHead _ -> Just TSurface
@@ -1407,11 +1769,33 @@ operandTypes o = case o of
   AscriptionTerm x -> [(x, TSurface)]
   TrustedClaim x -> [(x, TSurface)]
   TrustedBody x -> [(x, TSurface)]
+  SplitTarget x -> [(x, TSurface)]
+  SplitArmBody x -> [(x, TSurface)]
+  SplitTail x -> [(x, TSurface)]
+  SplitArmPattern x -> [(x, TSurface)]
+  PatternHead x -> [(x, TPattern)]
+  PatternForName x -> [(x, TName)]
+  PatternArguments x -> [(x, TPattern)]
+  PatternDotTerm x -> [(x, TPattern)]
+  BinderName x -> [(x, TBinder)]
   MakeTrusted a b c -> [(a, TCore), (b, TCore), (c, TCore)]
   Goal         -> []
   Typing a     -> [(a, TCore)]
   Define a b   -> [(a, TName), (b, TCore)]
   Eliminate a  -> [(a, TCore)]
+  CaseAnalyse a -> [(a, TCore)]
+  EliminateFixed a -> [(a, TCore)]
+  Specialise c h gk ->
+    [(c, TName), (h, TList TName), (gk, TMethodShape)]
+  TieRecursion t -> [(t, TCore)]
+  -- @datatype-of@ reads a type; the other five read a declared name.
+  DatatypeOf a -> [(a, TCore)]
+  DatatypeParameters a -> [(a, TName)]
+  DatatypeIndices a -> [(a, TName)]
+  ConstructorsOf a -> [(a, TName)]
+  ConstructorDatatype a -> [(a, TName)]
+  ConstructorArguments a -> [(a, TName)]
+  ConstructorRecursiveArguments a -> [(a, TName)]
   -- The spine, and the name to claim the next domain hole under.
   ApplyNext f x -> [(f, TCore), (x, TName)]
   ExpandImplicits a -> [(a, TSurface)]
@@ -1427,6 +1811,8 @@ operandTypes o = case o of
   Return a     -> [(a, TVar 0)]
   Some a       -> [(a, TVar 0)]
   None         -> []
+  CaseSurvivedOp a -> [(a, TCore)]
+  Prepend a b  -> [(a, TVar 0), (b, TList (TVar 0))]
   Prove        -> []
   DefineData _ -> []
   Along        -> []
@@ -1660,6 +2046,86 @@ data Test
   | SurfaceIsTrusted Operand       -- ^ @trusted T e@ (MS8 phase 150)
   | SurfaceIsElim Operand          -- ^ @elim D … t@
   | SurfaceIsDo Operand            -- ^ @do { … }@
+  | SurfaceIsSplit Operand
+    -- ^ @induction t of { … }@ or @case t of { … }@ (MS9 phase 181).
+    --
+    -- **One test for both words**, because they are one node; which was
+    -- written is 'SplitIsInduction' / 'SplitIsCases' below. That split is
+    -- 'LetIsAnnotated' / 'LetIsBare'\'s arrangement — a node's own test, and
+    -- then a pair over the field two clauses have to tell apart.
+  | SplitIsInduction Operand
+    -- ^ … and the word was @induction@, so each method carries the inductive
+    -- hypotheses of the constructor it matched
+  | SplitIsCases Operand
+    -- ^ … or it was @case@, so no method carries any.
+    --
+    -- **A third value of the field is coming** — @by ‹eliminator›@ — so these
+    -- are two tests and not one boolean: a clause matching on @split-is-cases@
+    -- keeps declining a @by@ it was never written for, where @not induction@
+    -- would silently take it.
+  | SplitHasArms Operand
+    -- ^ … and it has at least one arm, so @split-arm-body@ and @split-tail@
+    -- both apply
+  | PatternIsName Operand
+    -- ^ a pattern written as a word, with or without arguments (MS9 phase 183)
+  | PatternIsWildcard Operand
+    -- ^ … or written @_@.
+  | PatternIsDot Operand
+    -- ^ … or written @.e@, an __inaccessible pattern__ (MS9 phase 228).
+    --
+    -- **Three tests over a three-case type**, which is @let-is-annotated@ /
+    -- @let-is-bare@'s arrangement, and the category is still documented to grow
+    -- — a literal pattern is a further case — so a clause that matches on
+    -- @pattern-is-name@ keeps declining what it was never written for. That is
+    -- what let this one be added without touching a clause: before it, a dot
+    -- reached @intro-arm-binders@ and matched nothing, which is a refusal and
+    -- not a wrong answer.
+  | BinderIsArgument Operand
+    -- ^ a binder of a specialised method that is an argument of the constructor
+    -- (MS9 phase 192), so the arm's __pattern__ names it
+  | BinderIsHypothesis Operand
+    -- ^ … or an induction hypothesis the method carries, so it is bound under a
+    -- __freshened__ name: the argument it is about is already in the
+    -- development, and shadowing it would build the proof out of the wrong
+    -- variable with nothing failing
+  | BinderIsCopy Operand
+    -- ^ … or a copy of an ambient entry the motive generalised, so it is bound
+    -- under __the ambient name itself__, shadowing the entry — which is what
+    -- makes the arm's body read the refined type (MS9 phase 191).
+    --
+    -- **Three tests over a three-case type**, which is @pattern-is-name@ /
+    -- @pattern-is-wildcard@'s arrangement one category over, and for the same
+    -- reason: a clause that matches on one keeps declining a group it was never
+    -- written for. The three really are three — each is bound under a name from
+    -- a different place.
+  | SameName Operand Operand
+    -- ^ two names are the same word — @same-name a b@ (MS9 phase 183).
+    --
+    -- **THE FIRST TEST IN THE LANGUAGE THAT IS NOT A SHAPE QUESTION ABOUT ONE
+    -- OPERAND**, and it is here because a splitting tree cannot be written
+    -- without it. Constructors arrive from @constructors-of@ and arms from the
+    -- surface, in whatever order the user wrote them, so pairing an arm with a
+    -- constructor is a comparison of two names read at run time. **Nothing
+    -- catches a mispairing otherwise**: @specialise@ accepts a constructor that
+    -- is not the one its hole is for, names the subgoal after it, and the kernel
+    -- still calls the development valid.
+    --
+    -- A pattern that is written out compares already — a literal matches a
+    -- 'VText' only when equal — so what is new is comparing two /read/ values.
+  | DifferentName Operand Operand
+    -- ^ … and its complement — @different-name a b@ (MS9 phase 184).
+    --
+    -- **A pair of complementary tests and not a negation**, which is what
+    -- @let-is-annotated@ / @let-is-bare@ and @lambda-binds-more@ /
+    -- @lambda-binds-one@ already are. **It exists so that the arm search has no
+    -- choice point**: with one test and an ordering, both clauses match when
+    -- the names agree, and a failure anywhere /after/ the search backtracks
+    -- into it, walks on through the arms and reports the search instead of the
+    -- real error. MS8 phase 170 found exactly that in the application clauses.
+  | SplitHasNoArms Operand
+    -- ^ … or it has none, which __is a legal split__ and is the whole of a
+    -- case analysis on a datatype with no constructors. It is also what the
+    -- recursion over arms stops at.
   | AppArgsAreExplicit Operand
     -- ^ a spine with no argument written in braces (MS4 phase 49d).
     --
@@ -1794,6 +2260,8 @@ opKeyword o = case o of
   Call _ _     -> "call"
   Return _     -> "return"
   Some _       -> "some"
+  CaseSurvivedOp _ -> "case-survived"
+  Prepend _ _  -> "prepend"
   None         -> "none"
   FreshName _  -> "fresh-name"
   Here         -> "here"
@@ -1826,6 +2294,15 @@ opKeyword o = case o of
   AscriptionType _ -> "ascription-type"
   TrustedClaim _ -> "trusted-claim"
   TrustedBody _ -> "trusted-body"
+  SplitTarget _ -> "split-target"
+  SplitArmBody _ -> "split-arm-body"
+  SplitTail _ -> "split-tail"
+  SplitArmPattern _ -> "split-arm-pattern"
+  PatternHead _ -> "pattern-head"
+  PatternForName _ -> "pattern-for-name"
+  PatternArguments _ -> "pattern-arguments"
+  PatternDotTerm _ -> "pattern-dot-term"
+  BinderName _ -> "binder-name"
   MakeTrusted {} -> "make-trusted"
   AscriptionTerm _ -> "ascription-term"
   Goal         -> "goal"
@@ -1841,6 +2318,17 @@ opKeyword o = case o of
   PushDevelopment _ -> "push-development"
   PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"
+  CaseAnalyse _ -> "prim-case"
+  EliminateFixed _ -> "prim-eliminate-fixed"
+  Specialise _ _ _ -> "specialise"
+  TieRecursion _ -> "tie-recursion"
+  DatatypeOf _ -> "datatype-of"
+  DatatypeParameters _ -> "datatype-parameters"
+  DatatypeIndices _ -> "datatype-indices"
+  ConstructorsOf _ -> "constructors-of"
+  ConstructorDatatype _ -> "constructor-datatype"
+  ConstructorArguments _ -> "constructor-arguments"
+  ConstructorRecursiveArguments _ -> "constructor-recursive-arguments"
   ApplyNext _ _ -> "apply-next"
   ExpandImplicits _ -> "expand-implicits"
   AppHead _ -> "app-head"

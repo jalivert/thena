@@ -29,11 +29,17 @@ import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
 import Thena.Core.Typing (check)
+import Thena.Driver (Response (..), loadProofSource)
+import Thena.Files (startingSession)
+import Thena.Render (renderResponse)
 import Thena.Declared
   ( declared
   , eqDecl
   , eqNat
   , eqNatCounter
+  , eqNatFin
+  , eqNatVec
+  , eqNatVecSpan
   , eqTapl
   , eqTaplCounter
   , finDecl
@@ -46,8 +52,15 @@ import Thena.Driver
   , parseDeclaration
   )
 import Thena.Global.Declare (DeclareError (..), declare)
-import Thena.Global.Env (GlobalEnv, definitionBody, definitionType, lookupDefinition)
-import Thena.Errors (Skipped (..))
+import Thena.Global.Env
+  ( GlobalEnv
+  , definitionBody
+  , definitionType
+  , inductiveName
+  , isDeclared
+  , lookupDefinition
+  )
+import Thena.Global.NoConfusion (noConfusionNames)
 import Thena.Kernel (certify)
 import Thena.Render ( Rendering (..)
   ,renderCore)
@@ -59,6 +72,7 @@ tests =
     [ testGroup "the family computes the right case" caseTests
     , testGroup "the lemma is usable, which is the point of it" useTests
     , testGroup "the kernel accepts what was generated" kernelTests
+    , testGroup "the telescopic lemma, applied across two indices" acrossTests
     , testGroup "what gets none, and why" skipTests
     , testGroup "one namespace, shared with generated names" clashTests
     ]
@@ -122,7 +136,7 @@ caseTests =
         @?= Just "Term -> Term -> Type₀"
   , testCase "the lemma's own type" $
       typeOfGlobal eqTapl eqTaplCounter "noConfusionTerm"
-        @?= Just "∀ (x : Term) (y : Term) -> Eq {0} Term x y -> NoConfusionTerm x y"
+        @?= Just "∀ (x : Term) (x' : Term) -> Eq {0} Term x x' -> NoConfusionTerm x x'"
   ]
 
 typeOfGlobal :: GlobalEnv -> Int -> String -> Maybe String
@@ -204,6 +218,70 @@ useTests =
 -- Both definitions are closed, which is what lets the kernel take them at all
 -- (§5.3) — and it is a fact about the generator, since a stray 'Free' left
 -- unabstracted would be the natural mistake to make in a term this size.
+-- | What the homogeneous lemma cannot do at all, done from the surface.
+--
+-- **The point is the APPLICATION and not the type.** @noConfusionEv@ asks for
+-- one index group and both elements in it, so the appendix\'s last step — which
+-- assumes an equation between two constructor applications that sit at two
+-- different indices — cannot even pass it its arguments. These two load the
+-- generated telescopic lemma through the whole pipeline instead: the index
+-- equation, the element equation transported along it, and the family reducing
+-- off the diagonal to @Empty@ and on it to the arguments\' own chain.
+acrossTests :: [TestTree]
+acrossTests =
+  [ testCase "two constructors at two different indices are confused by nothing" $
+      loads
+        [ "module Across where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "data Ev : N -> Type\8320 where"
+        , "  evz : Ev z"
+        , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+        , ""
+        , "evzNotEvs : \8704 (k : N) (ek : Ev k)"
+        , "              (q1 : (Eq N z (s (s k)) : Type\8320))"
+        , "              (q2 : (Eq (Ev (s (s k)))"
+        , "                        (transport N (\\ w -> Ev w) z (s (s k)) q1 evz)"
+        , "                        (evs k ek) : Type\8320))"
+        , "           -> Empty"
+        , "evzNotEvs = \\ k ek q1 q2 ->"
+        , "  noConfusionEv z evz (s (s k)) (evs k ek) q1 q2"
+        ]
+  , testCase "and the same constructor at two indices gives its own chain" $
+      loads
+        [ "module AcrossDiag where"
+        , ""
+        , "data N : Type\8320 where"
+        , "  z : N"
+        , "  s : N -> N"
+        , ""
+        , "data Ev : N -> Type\8320 where"
+        , "  evz : Ev z"
+        , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+        , ""
+        , "evsInj : \8704 (m : N) (em : Ev m) (k : N) (ek : Ev k)"
+        , "           (q1 : (Eq N (s (s m)) (s (s k)) : Type\8320))"
+        , "           (q2 : (Eq (Ev (s (s k)))"
+        , "                     (transport N (\\ w -> Ev w) (s (s m)) (s (s k)) q1"
+        , "                        (evs m em))"
+        , "                     (evs k ek) : Type\8320))"
+        , "        -> NoConfusionEv (s (s m)) (evs m em) (s (s k)) (evs k ek)"
+        , "evsInj = \\ m em k ek q1 q2 ->"
+        , "  noConfusionEv (s (s m)) (evs m em) (s (s k)) (evs k ek) q1 q2"
+        ]
+  ]
+
+-- | Load a surface module and insist it went in.
+loads :: [String] -> Assertion
+loads ls = do
+  (s0, _) <- startingSession
+  case loadProofSource s0 (unlines ls) of
+    (_,  ProofLoaded {}) -> pure ()
+    (s1, other)          -> assertFailure (unwords (renderResponse s1 other))
+
 kernelTests :: [TestTree]
 kernelTests =
   [ testCase "Nat's family" (certified eqNat "NoConfusionNat")
@@ -215,6 +293,16 @@ kernelTests =
     -- 31g generalises the generator to the datatype's own level, and @Eq@'s
     -- own table is the case that proves it — a polymorphic, indexed family.
   , testCase "Eq's own, which is an indexed family" (certified eqNat "noConfusionEq")
+    -- **A dependent argument telescope, which got no equipment at all before
+    -- MS9 phase 212** — @fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n)@, whose
+    -- second equation is stated at @Fin n'@ with @i@ transported along the
+    -- first. The kernel accepting the lemma is the whole claim of that phase:
+    -- the family is checked at declaration, and this says the trusted core
+    -- agrees.
+  , testCase "Fin's family, whose telescope is dependent" (certified eqNatFin "NoConfusionFin")
+  , testCase "Fin's lemma, which is the transported chain" (certified eqNatFin "noConfusionFin")
+  , testCase "Vec's family, with a parameter as well" (certified eqNatVec "NoConfusionVec")
+  , testCase "Vec's lemma" (certified eqNatVec "noConfusionVec")
 
     -- **Found by phase 17, and it was a real bug.** The generator freshens a
     -- telescope in two places, and 'freshen' gave each entry a new variable
@@ -226,10 +314,72 @@ kernelTests =
     -- telescope named the first copy's variable, and @NoConfusionBelow@ came
     -- out ill-typed — reported as @DeclareError@'s @NoConfusionRejected@,
     -- which is precisely the "unreachable if the generator is right" case.
+    -- **The fixture gained the whole prelude at MS9 phase 222.** @Below@'s
+    -- second index is a @Fin@ of its first, so the chain packages the index with
+    -- the element and @DPair@ is what holds the package — and since the chain
+    -- is the only shape generated now, a prelude without @DPair@ gets no pair
+    -- for this datatype at all. 'skipTests' pins that, and the phase-17 bug is
+    -- still what these two catch.
   , testCase "an index telescope that is dependent (phase 17)" $
-      certified belowEnv "NoConfusionBelow"
+      certified preludeBelowEnv "NoConfusionBelow"
   , testCase "and its lemma" $
-      certified belowEnv "noConfusionBelow"
+      certified preludeBelowEnv "noConfusionBelow"
+
+    -- **Found by MS9 phase 216, and it was a real bug.** @span@'s last argument
+    -- reaches back past the one before it, so the chain's package holds an
+    -- argument nothing mentions — and the rest of the package is still
+    -- transported along /that/ argument's equation. The generator predicted the
+    -- pair from the telescope instead of reading the type it had just built,
+    -- answered @And@ where the second conjunct mentions the proof, and left the
+    -- proof variable free. @Pack@ and @Fin@ have no gap, which is why nothing
+    -- here caught it.
+  , testCase "a chain with an argument interior to it (phase 216)" $
+      certified eqNatVecSpan "NoConfusionSpan"
+  , testCase "and its lemma" $
+      certified eqNatVecSpan "noConfusionSpan"
+
+    -- ------------------------------------------------------------------
+    -- THE TELESCOPIC PAIR (MS9 phase 218)
+    -- ------------------------------------------------------------------
+    --
+    -- **The homogeneous lemma puts both elements at ONE index group**, which is
+    -- what the appendix's @noCycleD@ cannot use: its last step applies
+    -- no-confusion to an equation whose two sides are at two /different/
+    -- indices, and @noConfusionFin@ cannot even be applied there. The
+    -- telescopic pair quantifies an index group per element and takes the chain
+    -- between them — the index equations, then the element equation transported
+    -- along them — curried rather than packaged, because a specialiser holds
+    -- its equations as separate binders.
+    --
+    -- Each case below is a shape the walk has to get right, and the kernel is
+    -- what says it did.
+  , testCase "Nat's telescopic family, with no indices at all" $
+      certified eqNat "NoConfusionNat"
+  , testCase "and its lemma, where the chain is the one element equation" $
+      certified eqNat "noConfusionNat"
+  , testCase "Eq's own telescopic lemma, two indices and polymorphic" $
+      certified eqNat "noConfusionEq"
+  , testCase "Fin's telescopic family" (certified eqNatFin "NoConfusionFin")
+  , testCase "and its lemma, one index and a dependent argument telescope" $
+      certified eqNatFin "noConfusionFin"
+  , testCase "Vec's telescopic lemma, with a parameter as well" $
+      certified eqNatVec "noConfusionVec"
+  , testCase "Term's telescopic lemma, four constructors and no indices" $
+      certified eqTapl "noConfusionTerm"
+  , testCase "a chain with an argument interior to it, telescopically" $
+      certified eqNatVecSpan "noConfusionSpan"
+
+    -- **A dependent INDEX telescope is the shape that asks for a pair the
+    -- homogeneous lemma never did**, and it is the one the old @Below@ fixture
+    -- could not show: @Below@'s own environment has no @DPair@, so the
+    -- telescopic pair is skipped there rather than generated. With the prelude
+    -- behind it the walk packages @i@ together with the element and transports
+    -- the package, which is @telescopicInScope@'s
+    -- whole reason to exist.
+  , testCase "a dependent index telescope, telescopically (phase 218)" $
+      certified preludeBelowEnv "NoConfusionBelow"
+  , testCase "and its lemma, where the index travels with the element" $
+      certified preludeBelowEnv "noConfusionBelow"
   ]
 
 -- | @Below@\'s second index has the first in its type — a dependent /index/
@@ -237,6 +387,12 @@ kernelTests =
 -- telescope 'skipTests' pins, and which nothing else in the suite has.
 belowEnv :: GlobalEnv
 belowEnv = fst (declared [eqDecl, natDecl, finDecl, belowDecl])
+
+-- | The same datatype with the whole prelude behind it, which is what the
+-- telescopic pair needs: a dependent index telescope packages the index with
+-- the element and @DPair@ is what holds the package.
+preludeBelowEnv :: GlobalEnv
+preludeBelowEnv = fst (declared (preludeDecls ++ [natDecl, finDecl, belowDecl]))
 
 belowDecl :: String
 belowDecl =
@@ -254,41 +410,46 @@ certified env g = case lookupDefinition (GlobalName g) env of
 -- What gets none
 -- --------------------------------------------------------------------------
 
--- | Declare one datatype into an environment and keep what no-confusion did.
-skipped :: [String] -> String -> Either DeclareError (Maybe Skipped)
-skipped before src = case parseDeclaration [] env n src of
-  Left e       -> error ("fixture does not parse: " ++ show e)
-  Right (d, n1) -> (\(_, _, s) -> s) <$> declare env n1 d
+-- | Declare one datatype into an environment and say whether its no-confusion
+-- lemma came with it.
+--
+-- **It used to report the 'Thena.Errors.Skipped' the declaration handed back**,
+-- which MS9 phase 212 removed along with the one case that was ever about the
+-- declaration itself. Asking the environment is the stronger question anyway:
+-- what a caller can observe is whether the lemma is there.
+generated :: [String] -> String -> Either DeclareError Bool
+generated before src = case parseDeclaration [] env n src of
+  Left e        -> error ("fixture does not parse: " ++ show e)
+  Right (d, n1) ->
+    (\(env', _) -> isDeclared (snd (noConfusionNames (inductiveName d))) env')
+      <$> declare env n1 d
   where (env, n) = declared before
 
 skipTests :: [TestTree]
 skipTests =
-  [ -- The MS1 limit. @cons@ wants @Eq {0} (Vec A n) as as'@ while @as' : Vec A n'@,
-    -- and a transported chain of equations is the way out — not MS1's.
-    --
-    -- **The position is asserted with the name** (2026-09-13): an anonymous
-    -- arrow argument is stored as @Ident "x"@ on purpose, so one constructor may
-    -- have several arguments of that name and the name alone does not say which
-    -- one stopped the table being written.
-    testCase "Vec: cons's telescope is dependent" $
-      skipped (preludeDecls ++ [natDecl]) vecDecl
-        @?= Right (Just (DependentArguments (GlobalName "cons") 3 (Ident "as")))
-  , testCase "Fin: so is fs's" $
-      skipped (preludeDecls ++ [natDecl]) finDecl
-        @?= Right (Just (DependentArguments (GlobalName "fs") 2 (Ident "i")))
+  [ -- **These two were the MS1 limit and are not a limit any more** (MS9 phase
+    -- 212). @cons@ wants @Eq (Vec A n) as as'@ where @as' : Vec A n'@, and
+    -- 'Thena.Global.NoConfusion.telescopic' now states that equation after
+    -- transporting @as@ along the equation between @n@ and @n'@. Nothing is
+    -- skipped for a dependent telescope, which is what these assert — the
+    -- equipment itself is in 'kernelTests'.
+    testCase "Vec: cons's dependent telescope gets its lemma now" $
+      generated (preludeDecls ++ [natDecl]) vecDecl @?= Right True
+  , testCase "Fin: so does fs's" $
+      generated (preludeDecls ++ [natDecl]) finDecl @?= Right True
   , -- **This asserted the opposite until MS3 phase 31g**, and the change is
     -- §2 item 2: the generator states its equations at the *datatype's own*
     -- level rather than at @Type₀@, so a family above @Type₀@ gets its table
     -- like any other. Cumulativity is what makes the equations conjoinable —
     -- @wrap@'s argument type is @Type₀@, which lifts into @Type₁@.
     testCase "a datatype above Type₀ gets one now" $
-      skipped preludeDecls "Big : Type\8321 where { wrap : Type\8320 -> Big }"
-        @?= Right Nothing
+      generated preludeDecls "Big : Type\8321 where { wrap : Type\8320 -> Big }"
+        @?= Right True
   , -- Silent, and it has to be: this is the state every prelude-free golden
     -- transcript declares its datatypes in, and a note on every @data@ line
     -- would be noise about the environment rather than about the declaration.
     testCase "no Eq in scope at all — skipped, and quietly" $
-      skipped [] natDecl @?= Right Nothing
+      generated [] natDecl @?= Right False
   , testCase "and then nothing was generated" $
       lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [natDecl]))
         `seq` (lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [natDecl])) == Nothing)
@@ -305,9 +466,19 @@ skipTests =
     testCase "Eq alone: its own table needs no product, so it is generated" $
       (lookupDefinition (GlobalName "NoConfusionEq") (fst (declared [eqDecl])) == Nothing)
         @?= False
+  , -- **A dependent index telescope wants @DPair@ — MS9 phase 222.** The chain
+    -- is stated over @(indices; element)@, so where an index's type mentions an
+    -- earlier index the two travel packaged together, and @packType@ of two
+    -- entries is a dependent pair. Until phase 222 the homogeneous pair had no
+    -- such need and was generated here; now there is one shape and it needs the
+    -- product, so the datatype gets no pair in this prelude.
+    testCase "a dependent index telescope with no DPair — skipped" $
+      generated [eqDecl, natDecl, finDecl] belowDecl @?= Right False
+  , testCase "and then nothing was generated" $
+      (lookupDefinition (GlobalName "NoConfusionBelow") belowEnv == Nothing) @?= True
   , -- Two constructors want an off-diagonal @Empty {0}@, and there is none.
     testCase "Nat with Eq but no Empty — skipped, and quietly" $
-      skipped [eqDecl] natDecl @?= Right Nothing
+      generated [eqDecl] natDecl @?= Right False
   , testCase "and then nothing was generated" $
       (lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [eqDecl, natDecl]))
         == Nothing) @?= True
@@ -323,9 +494,9 @@ skipTests =
 clashTests :: [TestTree]
 clashTests =
   [ testCase "the family's name taken" $
-      skipped (preludeDecls ++ ["NoConfusionNat : Type\8320 where { }"]) natDecl
+      generated (preludeDecls ++ ["NoConfusionNat : Type\8320 where { }"]) natDecl
         @?= Left (AlreadyDeclared (GlobalName "NoConfusionNat"))
   , testCase "the lemma's name taken" $
-      skipped (preludeDecls ++ ["noConfusionNat : Type\8320 where { }"]) natDecl
+      generated (preludeDecls ++ ["noConfusionNat : Type\8320 where { }"]) natDecl
         @?= Left (AlreadyDeclared (GlobalName "noConfusionNat"))
   ]

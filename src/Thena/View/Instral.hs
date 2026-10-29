@@ -41,6 +41,7 @@ import Thena.Instral.Ops
   , opKeyword
   , operandsOf
   )
+import Thena.Tactics.Specialise (binderWord)
 import Thena.Instral.Pattern (Pattern (..))
 import Thena.Instral.Type (renderTy)
 import Thena.Language.Grammar (Grammar)
@@ -48,7 +49,7 @@ import Thena.View.Address (Address)
 import Thena.View.Core (Budget, Display, displayCore)
 import Thena.View.Surface (SurfaceShape, displaySurface)
 import Thena.Surface.Zipper (focus)
-import Thena.Syntax.Print (Env, escapeChar, escapeString, renderLevel)
+import Thena.Syntax.Print (Env, escapeChar, escapeString, renderLevel, surfacePattern)
 import Thena.Core.Term (Var)
 
 -- | One instruction, positioned.
@@ -238,6 +239,19 @@ displayValue gs budget env bs n at v = case v of
   VInt k -> ValInt k
   VChar c -> ValChar (escapeChar c)
   VBool b -> ValBool b
+  -- **A pattern goes out as 'ValOpaque', which is the escape this type has for
+  -- exactly this** (MS9 phase 183): a frontend has nothing to do with a
+  -- pattern yet, and giving 'ValueView' a case of its own would break every
+  -- total match over it across the boundary for no present gain. A structured
+  -- view is owed when something asks — `~6z6nx`'s stage b is when a pattern
+  -- stops being a value a rule carries at all.
+  VPattern pt -> ValOpaque (surfacePattern pt)
+  -- **And a binder of a specialised method rides out the same way** (MS9 phase
+  -- 192), for the same reason: nothing on a frontend displays the report, and a
+  -- case of its own would break every total match over 'ValueView' for no
+  -- present gain.
+  VBinder b -> ValOpaque (binderWord b)
+  VMethodShape _ -> ValOpaque "method shape"
   VList vs -> ValList (map go vs)
   VOption Nothing -> ValNone
   VOption (Just v') -> ValSome (go v')

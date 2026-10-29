@@ -120,6 +120,11 @@ tokens :-
   -- /contains/ dots — @a...b@ — is untouched, because this rule can only win at
   -- the start of a token.
   "..."         { keyword TSpread }
+  -- **@.@ is a token too, and @...@ still wins** (MS9 phase 228): Alex takes the
+  -- longest match, so @...@ is one 'TSpread' and never three of these. It
+  -- reserves nothing either, for the reason above — no identifier has ever begun
+  -- with a dot — and a lone @.@ was a lexical error before this line.
+  "."           { keyword TDot }
   "["           { keyword TLBracket }
   "]"           { keyword TRBracket }
   ","           { keyword TComma }
@@ -130,6 +135,24 @@ tokens :-
   "let"         { keyword TLet }
   "in"          { keyword TIn }
   "elim"        { keyword TElim }
+  -- **Three words reserved at MS9 phase 179**, for @induction t of …@ and
+  -- @case t of …@. A notation cannot exist without a token — the alternative is
+  -- an ordinary name that elaborates specially, which is the special case the
+  -- first design principle forbids, and it is the same argument @trusted@ was
+  -- reserved on.
+  --
+  -- **They narrow identifiers project-wide**, as every word here does, and
+  -- nothing in either repository used one as a name: the only occurrences of
+  -- @induction@ and @of@ anywhere in @examples\/@ are in comments, and @case@
+  -- does not occur at all. **An identifier that merely contains one is
+  -- untouched**, because a rule here can only win on a whole token —
+  -- @datatype-of@ and @constructors-of@ are each one 'TIdent'.
+  "induction"   { keyword TInduction }
+  "case"        { keyword TCase }
+  -- @of@ is the layout keyword, not @induction@ or @case@: the arms are what the
+  -- offside rule governs, and the target sits between the two words.
+  -- "Thena.Surface.Layout" has the line.
+  "of"          { keyword TOf }
   -- **Reserved at MS8 phase 149's successor, phase 150.** The notation
   -- @trusted T e@ is his, 2026-10-05, and a notation cannot exist without a
   -- token: the alternative is an ordinary name that elaborates specially, which
@@ -254,6 +277,9 @@ data Token
   | TIn
   | TElim
   | TTrusted
+  | TInduction
+  | TCase
+  | TOf
   | TWhere
   | TDashes
     -- ^ @--@ not followed by a space, which is therefore /not/ a comment
@@ -281,6 +307,7 @@ data Token
   | TRBracket
   | TComma
   | TSpread      -- ^ @...@, the list-pattern tail marker (MS5 phase 82)
+  | TDot         -- ^ @.@, the inaccessible-pattern marker (MS9 phase 228)
   | TUniverse Int
   | TUniverseOpen
   | TIdent String

@@ -18,7 +18,15 @@ import Thena.Core.TermTests (genTerm, poolVars)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, fresh)
-import Thena.Declared (nat, natFin, natFinCounter, natVec, natVecCounter)
+import Thena.Declared
+  ( nat
+  , natAnd
+  , natAndCounter
+  , natFin
+  , natFinCounter
+  , natVec
+  , natVecCounter
+  )
 import Thena.Driver
   ( SyntaxError
   , parseCore
@@ -35,6 +43,7 @@ tests =
     , testGroup "iota — Nat" iotaNatTests
     , testGroup "iota — an indexed family carries its OWN index" iotaVecTests
     , testGroup "iota — an indexed family with no parameters" iotaFinTests
+    , testGroup "iota — a parameter instantiated with the datatype itself" iotaParameterTests
     , testGroup "iota refuses an unsaturated target" iotaSaturationTests
     , testGroup "whnf leaves neutral terms alone" neutralTests
     , testGroup "elim's arity is checked at resolve [] time" elimShapeTests
@@ -262,8 +271,8 @@ iotaVecTests =
 -- | What 'iotaVecTests' above cannot catch: @np@ is zero.
 --
 -- 'Thena.Global.Env.recursiveArgument' answers with @drop np args@, and
--- "Thena.Core.Reduce" substitutes the parameters into a constructor's argument
--- types before asking. With @Vec@ both numbers are one, so an off-by-one in
+-- "Thena.Core.Reduce" substitutes the elimination's actual parameters into the
+-- indices it answers with. With @Vec@ both numbers are one, so an off-by-one in
 -- either direction still lines up on some case; with @Fin@ the parameter
 -- telescope is empty and the index is the first argument, so a @drop@ that is
 -- one too many silently loses the index it should recurse at.
@@ -293,6 +302,49 @@ iotaFinTests =
     elimFin indices target =
       whnf natFin ctx
         (term' natFin natFinCounter ctx ("elim Fin () Pf (mfz mfs) " ++ indices ++ " " ++ target))
+
+-- --------------------------------------------------------------------------
+-- iota — a parameter instantiated with the datatype itself (MS9)
+-- --------------------------------------------------------------------------
+
+-- | **An argument declared at a parameter is never a recursive argument, however
+-- that parameter is instantiated.** @both@'s @b : B@ is the case and a nested
+-- pair is where it bites: the reducer substituted this elimination's actual
+-- parameters into the argument's type and /then/ asked whether the type was an
+-- application of the datatype, so @B ↦ And B C@ made @b@ read as a recursive
+-- occurrence of @And@ and ι handed the method an induction hypothesis that
+-- 'Thena.Global.Env.eliminatorType' states no binder for. The method was
+-- over-applied, so @andLeft A (And B C) (both A (And B C) x y)@ reduced to @x@
+-- applied to that hypothesis — a well-typed closed term whose reduct is
+-- ill-typed.
+--
+-- Neither group above can see it: @Nat@, @Vec@ and @Fin@ all have arguments
+-- that are genuinely recursive or genuinely not, and nothing in the project
+-- nested a pair inside a pair until the backwards half of no-confusion packaged
+-- three equations.
+iotaParameterTests :: [TestTree]
+iotaParameterTests =
+  [ testCase "a flat pair: the method takes the two components and nothing else" $
+      elimAnd "(A B)" "(both A B x y)" @?= App (App (Free m) (Free x)) (Free y)
+  , testCase "the datatype as its own second parameter: still no hypothesis" $
+      elimAnd "(A (And B C))" "(both A (And B C) x y)"
+        @?= App (App (Free m) (Free x)) (Free y)
+  ]
+  where
+    (_, ea, c1) = hyp natAndCounter "A"
+    (_, eb, c2) = hyp c1 "B"
+    (_, ec, c3) = hyp c2 "C"
+    (x, ex, c4) = hyp c3 "x"
+    (y, ey, c5) = hyp c4 "y"
+    (_, ep, c6) = hyp c5 "P"
+    (m, em, _)  = hyp c6 "m"
+
+    ctx = [ea, eb, ec, ex, ey, ep, em]
+
+    elimAnd params target =
+      whnf natAnd ctx
+        (term' natAnd natAndCounter ctx
+           ("elim And " ++ params ++ " P (m) () " ++ target))
 
 -- --------------------------------------------------------------------------
 -- iota refuses an unsaturated target

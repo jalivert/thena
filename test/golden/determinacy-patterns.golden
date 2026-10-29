@@ -1,0 +1,13 @@
+module Determinacy
+  declared Term
+  declared NV
+  declared Step
+  declared absurd
+  declared sym
+  declared subst
+  declared cong
+  declared trueNoStep
+  declared falseNoStep
+  declared zeroNoStep
+  declared nvNoStep
+  declared determinacy

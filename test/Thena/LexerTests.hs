@@ -7,6 +7,9 @@
 -- and never through the fence, so raw text never contains another region.
 module Thena.LexerTests (tests) where
 
+import Data.Char (isAsciiLower)
+import Data.List (sort)
+
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -17,7 +20,8 @@ tests :: TestTree
 tests =
   testGroup
     "Thena.Syntax.Lexer — tagged regions"
-    [ testGroup
+    [ reservedWords
+    , testGroup
         "the extent of a region"
         [ lexes "a plain region" "s`f x`" [TTagOpen "s", TRaw "f x", TTagClose]
         , lexes "an empty one emits no chunk" "s``" [TTagOpen "s", TTagClose]
@@ -262,3 +266,72 @@ tokensReadBack =
 
     excluded =
       [ TTagOpen "s", TTagClose, TRaw "raw", TEscapeOpen, TEscapeClose ]
+
+-- --------------------------------------------------------------------------
+-- The reserved words, crossed against the public documentation
+-- --------------------------------------------------------------------------
+
+-- | __@DECISIONS.md@'s keyword row says what a user may not name, and nothing
+-- was keeping it true__ (MS9 phase 179).
+--
+-- It was written at MS1 with eight words in it and was never revisited; by this
+-- phase the lexer reserved eighteen, so the public documentation was
+-- under-reporting by ten — @data@, @module@, @language@, @context@, @judgment@,
+-- @notation@ and @trusted@ among them. Each had its own careful note in
+-- @Lexer.x@ saying it narrowed identifiers project-wide, and the one place a
+-- user would look did not say so.
+--
+-- __This is the standing lesson applied to a document__: an invariant has to be
+-- checked by different code from the code that maintains it. The lexer rules
+-- are the authority and the table is the copy, so the test reads both files and
+-- compares.
+--
+-- __Only the words spelled in ASCII letters.__ Punctuation is reserved by other
+-- rows of the same table and a @keyword@ rule covers both, so which row a
+-- spelling belongs to is editorial; this test is about the row that drifted.
+-- **@λ@ is the case that makes the restriction ASCII and not merely
+-- alphabetic**: @Data.Char.isAlpha@ says yes to a Greek letter, and the table
+-- puts @λ@ with the operators.
+reservedWords :: TestTree
+reservedWords =
+  testGroup
+    "the reserved words"
+    [ testCase "DECISIONS.md's keyword row is exactly the lexer's keywords" $ do
+        inLexer <- keywordsInLexer <$> readFile "src/Thena/Syntax/Lexer.x"
+        inDoc   <- keywordsInDecisions <$> readFile "DECISIONS.md"
+        sort inDoc @?= sort inLexer
+
+      -- The authority really is an authority: a word in the list lexes as
+      -- something other than a name.
+    , testCase "and every one of them lexes as a keyword" $ do
+        inLexer <- keywordsInLexer <$> readFile "src/Thena/Syntax/Lexer.x"
+        [ w | w <- inLexer, Right [Located _ (TIdent _)] <- [lexTokens w] ] @?= []
+    ]
+
+-- | Every @  "word"  { keyword … }@ rule whose word is alphabetic.
+keywordsInLexer :: String -> [String]
+keywordsInLexer = concatMap one . lines
+  where
+    one l = case words l of
+      q : "{" : "keyword" : _
+        | Just w <- unquote q
+        , all isAsciiLower w
+        , not (null w) -> [w]
+      _ -> []
+
+    unquote ('"' : rest) = case span (/= '"') rest of
+      (w, "\"") -> Just w
+      _         -> Nothing
+    unquote _ = Nothing
+
+-- | The backquoted words of the table row that begins @| keywords |@.
+keywordsInDecisions :: String -> [String]
+keywordsInDecisions src = case [ l | l <- lines src, take 13 l == "| keywords | " ] of
+  l : _ -> ticked (drop 13 l)
+  []    -> []
+  where
+    ticked t = case dropWhile (/= '`') t of
+      '`' : rest -> case span (/= '`') rest of
+        (w, '`' : more) -> w : ticked more
+        _               -> []
+      _ -> []
