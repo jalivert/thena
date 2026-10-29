@@ -1,0 +1,15 @@
+#!/bin/sh
+# tc — type-check surface modules and rule bases, in the order given.
+#
+#   ./tc examples/01-stlc-syntax.thena examples/04-taking-terms-apart.thena.rules …
+#
+# The shipped rule base and the prelude are loaded first, then each file as
+# `:load` would take it; the extension says which kind it is. Exits non-zero at
+# the first file that is not accepted, so it chains with && like any compiler.
+#
+# `cabal build` is quiet and incremental, so it is run first rather than leaving
+# a stale binary to answer: `cabal run` would print its own build chatter into
+# the middle of the output, which is what -v0 here is avoiding.
+cd "$(dirname "$0")" || exit 1
+cabal build -v0 thena-check || exit 1
+exec cabal run -v0 thena-check -- "$@"
