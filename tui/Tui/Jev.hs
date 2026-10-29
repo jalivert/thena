@@ -41,6 +41,7 @@ import Network.HTTP.Client.TLS (tlsManagerSettings)
 import System.Directory (XdgDirectory (XdgCache), createDirectoryIfMissing, getXdgDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
+import Data.Time.Clock.POSIX (getPOSIXTime)
 
 -- | Where 'jevLog' writes — exported so a cold session (or him, by hand)
 -- can find it without re-deriving the path. Everything in this module
@@ -55,12 +56,15 @@ jevLogPath = do
 
 -- | Best-effort: a failure writing the log is swallowed exactly like a
 -- network failure is, never surfaced, never retried, never blocking
--- whatever called it.
+-- whatever called it. Each line opens with seconds since the epoch —
+-- plenty to see how long a round trip actually took without pulling in
+-- a formatting library for a debug log nobody reads as a calendar date.
 jevLog :: String -> IO ()
 jevLog msg =
   (do
     path <- jevLogPath
-    appendFile path (msg <> "\n")
+    now <- getPOSIXTime
+    appendFile path (show now <> " " <> msg <> "\n")
   )
     `catch` (\(_ :: SomeException) -> pure ())
 

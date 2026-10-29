@@ -239,6 +239,7 @@ library tui
         microlens-mtl     >=0.2.1 && <0.3,
         text              >=2.1  && <2.2,
         text-zipper       >=0.13 && <0.14,
+        time              >=1.12 && <1.15,
         vty               >=6.0  && <7,
         vty-unix          >=0.4  && <0.5
 
