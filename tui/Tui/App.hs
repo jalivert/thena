@@ -73,7 +73,7 @@ import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStr, stdout)
 
-import Tui.Jev (JevConfig, loadJevConfig, rankCandidates)
+import Tui.Jev (JevConfig, jevLog, loadJevConfig, rankCandidates)
 
 import Thena.Driver (Response (..), Session, oneLine)
 import Thena.Files (following, startingSession)
@@ -2193,11 +2193,14 @@ fireJevForCurrentDropdown = do
   st <- get
   let line = concatMap Text.unpack (getEditContents (stInput st))
       (_, col) = getCursorPosition (stInput st)
+      selectable = maybe 0 (length . filter (isJust . rowInsert) . odRows) (stOfferDropdown st)
   case (stOfferDropdown st, stJevConfig st) of
     (Just od, Just jcfg)
-      | length (filter (isJust . rowInsert) (odRows od)) >= 2 ->
+      | selectable >= 2 ->
         fireJevRanking jcfg (Text.pack (take col line)) od
-    _ -> pure ()
+    (_, Nothing) -> liftIO (jevLog "skip: no key loaded")
+    (Nothing, Just _) -> liftIO (jevLog "skip: no dropdown on screen")
+    (Just _, Just _) -> liftIO (jevLog ("skip: only " <> show selectable <> " selectable candidate(s)"))
 
 -- | Sends one ranking request to Jev in the background and returns
 -- immediately — nothing here ever blocks a keystroke on the network.
