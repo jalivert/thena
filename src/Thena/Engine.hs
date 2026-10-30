@@ -2555,12 +2555,19 @@ operandText e o = operandValue e o >>= \v -> case v of
 -- 2026-09-12 that a literal is accepted at either type, now that the two types
 -- have different values. Inference refuses a /variable/ of
 -- 'Thena.Instral.Type.TString' in a name position, so a 'VText' arrives here
--- only from something written down — and nothing written down is dotted: the
--- dot is reserved, so a path on a literal could not be lexed back anyway.
+-- only from something written down.
+--
+-- **A dotted literal is refused rather than split** (MS10 phase 245). The dot
+-- is reserved, so no /written name/ can be dotted — but a string literal is not
+-- read by the lexer, so @"String.eq"@ was rooted and became a name whose word
+-- held the dots, which is the one shape a path forbids. Nothing refused it, so
+-- @define-global "A.b"@ installed a forbidden name. A rule that means a path
+-- writes @String.eq@, a name literal, which carries one.
 operandName :: Env -> Operand -> Either FailReason GlobalName
 operandName e o = operandValue e o >>= \v -> case v of
   VName g -> Right g
-  VText s -> Right (rootName s)
+  VText s | '.' `elem` s -> Left (DottedTextName s)
+          | otherwise    -> Right (rootName s)
   _       -> Left ExpectedName
 
 -- | …and the bare word of one, where only a name in the development can stand.

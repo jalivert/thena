@@ -974,6 +974,10 @@ blockTests =
     spellingFor :: RawOperand -> Maybe String
     spellingFor o = case o of
       RawRef{}     -> Just "y"
+      -- **A dotted word, which is the only thing that tells it from a
+      -- 'RawRef'** (MS10 phase 245): a binding has no path, so a path is what
+      -- makes a written word a name rather than a reference.
+      RawGlobal{}  -> Just "Ns.thing"
       RawPos{}     -> Just "2"
       RawText{}    -> Just "\"done\""
       RawChar{}    -> Just "'c'"
@@ -996,6 +1000,7 @@ blockTests =
     operandForms :: [RawOperand]
     operandForms =
       [ RawRef "y"
+      , RawGlobal ["Ns"] "thing"
       , RawPos 2
       , RawText "done"
       , RawChar 'c'

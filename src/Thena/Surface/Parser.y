@@ -231,6 +231,8 @@ InstrOperand :: { RawOperand }
 -- grammar over.
 InstrValueOperand :: { RawOperand }
   : '(' InstrLambda ')'                    { $2 }
+  -- @Thena.Syntax.Parser@\'s name literal, one grammar over (MS10 phase 245).
+  | qident                                 { RawGlobal (init $1) (last $1) }
   | num                                    { RawPos (fromInteger $1) }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }

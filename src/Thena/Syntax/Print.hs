@@ -160,6 +160,7 @@ rawOperand :: RawOperand -> String
 rawOperand a = case a of
   RawLambda ps b -> "\\ " ++ unwords (map rawPattern ps) ++ " -> " ++ rawFunBody b
   RawRef x  -> x
+  RawGlobal ps w -> nameDotted (GlobalName ps w)
   RawPos k  -> show k
   RawText t -> escapeString t
   RawChar c -> escapeChar c

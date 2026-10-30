@@ -439,6 +439,16 @@ Operand :: { RawOperand }
 -- of an @=@ can take one without @x = y@ becoming ambiguous — it is a call.
 ValueOperand :: { RawOperand }
   : '(' ident Operands ')'                 { RawNested $2 (reverse $3) }
+  -- **A dotted word is a name literal** (MS10 phase 245), where a bare one is a
+  -- reference to a binding: only a global name has a path, so the dot is the
+  -- whole of the distinction. It is what lets the prelude write
+  -- @declare-primitive String.eq@.
+  --
+  -- **It belongs here and not beside 'RawRef'**, so that it is also writable on
+  -- the right of an @=@. A bare word is excluded there because @x = y@ is a
+  -- /call/ of @y@; a qualified one cannot be, because an op word and a rule name
+  -- are both a single @ident@ — so there is nothing for it to be ambiguous with.
+  | qident                                 { RawGlobal (init $1) (last $1) }
   -- **A lambda in an argument takes parentheses**, like every other compound
   -- argument (§6.0.1); bare, it is what stands right of an @=@.
   | '(' Lambda ')'                         { $2 }

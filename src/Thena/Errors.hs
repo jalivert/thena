@@ -212,6 +212,13 @@ data FailReason
   | ExpectedName
     -- ^ an operand was not a name (MS10) — neither a @VName@ nor the string
     -- literal that reads as one at the root.
+  | DottedTextName String
+    -- ^ a string literal in a name position holds a dot (MS10 phase 245).
+    --
+    -- **A string literal reads as a name at the /root/**, so its whole text is
+    -- the base word — and a word may not hold a dot, because a path is
+    -- structure and not punctuation. Refused rather than split: a rule that
+    -- means a path writes a name literal, @String.eq@, which carries one.
   | ExpectedRaw
     -- ^ an op wanting an unresolved core term — a @core@ region — got something
     -- else (MS5 phase 61b).

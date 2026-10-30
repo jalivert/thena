@@ -459,12 +459,25 @@ resolveTests =
           Left (CannotRead _) -> pure ()
           other -> assertFailure ("expected CannotRead, got " ++ show (fmap (const ()) other))
 
-      -- **Nor is the dotted spelling of it**, which is the shape §3.6 forbids
-      -- and the one the old code built.
-    , testCase "and neither is a root name whose word holds the dots" $
+      -- **A dotted string literal is refused where it is read, not left to
+      -- fail to resolve** (MS10 phase 245). It used to be rooted and then not
+      -- found, which is the right answer by luck: @define-global@ took the same
+      -- operand and /installed/ the forbidden shape. The refusal is now the
+      -- reading itself, so every name operand gets it.
+    , testCase "a dotted string literal is not a name at all" $
         case runIn qualified hole [Do (ResolveName (Lit (VText "Ns.thing")))] of
-          Left (CannotRead _) -> pure ()
-          other -> assertFailure ("expected CannotRead, got " ++ show (fmap (const ()) other))
+          Left (DottedTextName w) -> w @?= "Ns.thing"
+          other -> assertFailure ("expected DottedTextName, got " ++ show (fmap (const ()) other))
+
+      -- **And it is refused where it would have been installed**, which is the
+      -- half that mattered: nothing else stood between a rule writing
+      -- @\"A.b\"@ and a global whose word held a dot.
+    , testCase "and a declaration cannot be named by one either" $
+        case runIn qualified hole
+               [ Do (DeclarePrimitive (Lit (VText "String.eq"))
+                                      (Lit (VTerm type0))) ] of
+          Left (DottedTextName w) -> w @?= "String.eq"
+          other -> assertFailure ("expected DottedTextName, got " ++ show (fmap (const ()) other))
 
       -- **A name in the development's own scope may not have a path** — there
       -- are no namespaces there for one to name anything in, so @assume@

@@ -275,6 +275,21 @@ data RawOperand
     -- is made in, which is a thing that happens at run time, so it cannot be a
     -- literal.
   | RawRef String
+  | RawGlobal [String] String
+    -- ^ @String.eq@ — **a global name written out**: its path's steps, then its
+    -- base word (MS10 phase 245).
+    --
+    -- **A dotted word is a literal where a bare one is a 'RawRef'**, and that
+    -- is not a special case: a binding in a body lives in the body's own scope,
+    -- which has no namespaces (§3.6), so only a /global/ name can have a path
+    -- at all. The dot is therefore the whole of what distinguishes them, and a
+    -- name with no path is still written as a string where a literal is wanted.
+    --
+    -- It exists because @declare-primitive@ and @define-global@ read their name
+    -- operand as a name, and until this phase the only two things writable
+    -- there were a bare word and a string literal — so a rule could not name
+    -- @String.eq@ at all, and the primitives could not move into their type's
+    -- namespace.
   | RawPos Int
     -- ^ a numeral. **It is a /position/ only where a field word wants one** —
     -- @arg 2@, @param 0@ — and an 'Thena.Instral.Ops.VInt' literal everywhere else (MS5

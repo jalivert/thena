@@ -619,8 +619,8 @@ renderCore ren ctx = go ren (envOf ctx) AtTop
 -- applied to, so an arm's body is checked against @Eq … -> X@ where the author
 -- wrote an @X@ — and @X and Eq … -> X cannot be made equal@ names neither the
 -- argument that is missing nor its type. On
--- @mk : ∀ (a b : String) -> P (appendString a b)@ split at
--- @P (appendString x y)@ that is the whole of what the reader is told, and the
+-- @mk : ∀ (a b : String) -> P (String.append a b)@ split at
+-- @P (String.append x y)@ that is the whole of what the reader is told, and the
 -- repair — one @\\ q ->@ in the arm — is invisible. @~2d9xj@ is the item.
 --
 -- __Read off the two types and nothing else, and said in neither direction.__
@@ -1355,6 +1355,12 @@ renderFailReason ren r = case r of
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
   ExpectedName      -> "expected a name"
+  DottedTextName s  ->
+    show s
+      ++ " is text, so all of it is one word — and a word may not hold a dot."
+      ++ "\n  write the name itself, "
+      ++ s
+      ++ ", where its path is structure rather than spelling"
   ExpectedTerm      -> "expected a term"
   ExpectedRaw       -> "expected a core region"
   CannotResolve e   -> renderSyntaxError (ResolveFailed e)

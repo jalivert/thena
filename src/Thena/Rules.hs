@@ -1014,6 +1014,10 @@ headOperand o = case o of
   RawRef "true"  -> Just (Lit (VBool True))
   RawRef "false" -> Just (Lit (VBool False))
   RawRef n  -> Just (Ref n)
+  -- **A name literal, and a head may carry one** (MS10 phase 245): it is written
+  -- down and nothing is run to build it, so it is a literal exactly as a string
+  -- is.
+  RawGlobal ps w -> Just (Lit (VName (GlobalName ps w)))
   RawText t -> Just (Lit (VText t))
   RawChar c -> Just (Lit (VChar c))
   RawPos k  -> Just (Lit (VInt k))
@@ -1385,6 +1389,7 @@ operandOf gs g i w o = case o of
   RawRef "true"  -> Right (Lit (VBool True))
   RawRef "false" -> Right (Lit (VBool False))
   RawRef n  -> Right (Ref n)
+  RawGlobal steps base -> Right (Lit (VName (GlobalName steps base)))
   RawText t -> Right (Lit (VText t))
   RawChar c -> Right (Lit (VChar c))
   -- **A numeral is a value here** (MS5 phase 64), where it is a field
