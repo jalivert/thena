@@ -1456,11 +1456,15 @@ loadProofSource s src = case parseSurfaceModule src of
 -- **Split out of 'loadProofSource' at MS7 phase 112b, and it is the seam the
 -- whole storage design rests on.** A module reaches the session as a name and a
 -- list of items; whether those items came from a text file through
--- 'parseSurfaceModule' or from a stored JSON tree is not something anything
--- below this line can tell. That is what makes loading **one pipeline with two
--- front doors** rather than two paths to keep in step
+-- 'parseSurfaceModule' or were handed over as items by a caller is not something
+-- anything below this line can tell. That is what makes loading **one pipeline
+-- with two front doors** rather than two paths to keep in step
 -- (@discussion\/editor-protocol.md@ §4 A2, @ms7\/MS7.md@), and it is only true
 -- because the stored form is the tree as written.
+--
+-- **The second door used to be a JSON spelling of the tree. It is not** — text is
+-- the only stored form (his ruling, 2026-09-27), and the JSON went with the
+-- project manifest; see "Thena.View.Source".
 loadProofItems :: Session -> String -> [Item] -> (Session, Response)
 loadProofItems s nm items =
     let machine  = sessionMachine s
