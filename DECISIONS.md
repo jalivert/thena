@@ -225,10 +225,12 @@ equipment is already in its namespace** — `Nat.elim`, `Nat.case`,
 `Nat.noConfusion`, `Nat.Below` and the rest — so `:show Nat.case` is how you ask
 for one. **A language's generated substitution is too**, as `LC.fv-x`,
 `LC.subst-x`, `LC.subst-all` and `LC.fresh-x`, and **a declaration of your own
-may be written with a path**: `Ty.lemma : …` declares `lemma` in `Ty`. **A
-datatype's constructors and the type itself are not yet**: those stay at the root
-until a written name can be resolved outward from the namespace it sits in, and
-the spellings below may still move.*
+may be written with a path**: `Ty.lemma : …` declares `lemma` in `Ty`. **The four
+primitive functions have moved in too** — `String.eq`, `Char.eq`, `Int.eq` and
+`String.append`, where they were `eqString`, `eqChar`, `eqInt` and
+`appendString`. **A datatype's constructors and the type itself are not yet**:
+those stay at the root until a written name can be resolved outward from the
+namespace it sits in, and the spellings below may still move.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something
@@ -251,6 +253,23 @@ declaration. **So two object languages may both declare a production called
 `var`** — `LC.var` and `STLC.var` are different names — which is the collision
 this replaces. A grammar *is* a datatype here, so its productions are its
 constructors and they are scoped with it.
+
+**In a rule, a dotted word is the name itself.** A rule body's bare word is a
+reference to something bound earlier in the body, which is why a name used to be
+written as a string — and a string is a name at the *root*, so there was no way
+for a rule to name `String.eq` at all. A word with a path is not a reference,
+because a binding in a rule body has no path to have; so `String.eq` written
+where an operand goes *is* that name, and the prelude declares the primitives
+with it:
+
+```
+do declare-primitive String.eq (resolve-core core`String -> String -> Comparison`)
+```
+
+A string literal is still read as a name where one is wanted, and still means a
+name at the root — but **a string with a dot in it is now refused** rather than
+becoming a name whose single word contains dots. A path is structure, and
+nothing may hold it as spelling.
 
 A file is the unit of import and is **not** a namespace: you import a file by
 its path, and what things are called comes from the `namespace` blocks they sit
