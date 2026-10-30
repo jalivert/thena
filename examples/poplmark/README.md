@@ -21,8 +21,8 @@ cabal run thena
 
 | file | what it shows |
 |---|---|
-| `01-syntax` | Part 2's whole language. Two token classes, so types read `X` and terms read `x`; `Ty` with `⊤`, the arrow and the quantifier; `Tm` **binding at both levels in one grammar** — `λ x : T . t` binds a term variable and `Λ X <: T . t` a type variable. The generated substitutions, `Tm-subst-X` among them: type substitution into a term |
-| `02-contexts` | `Γ` with **two extension forms**, `x : T` and `X <: T`, and the two lookup relations that come with them; `append` given **the paper's comma** by a `notation` block, so `Γ , X <: Q , Δ` parses as a rule's index; `Ctx-subst-X` for `Γ[X -> T]` |
+| `01-syntax` | Part 2's whole language. Two token classes, so types read `X` and terms read `x`; `Ty` with `⊤`, the arrow and the quantifier; `Tm` **binding at both levels in one grammar** — `λ x : T . t` binds a term variable and `Λ X <: T . t` a type variable. The generated substitutions, `Tm.subst-X` among them: type substitution into a term |
+| `02-contexts` | `Γ` with **two extension forms**, `x : T` and `X <: T`, and the two lookup relations that come with them; `append` given **the paper's comma** by a `notation` block, so `Γ , X <: Q , Δ` parses as a rule's index; `Ctx.subst-X` for `Γ[X -> T]` |
 | `03-wellformed` | `X # Γ` and `Γ ⊢ T ty` and `⊢ Γ ok`: the laws the paper gets from its notation and we have to say out loud. `#` is a hand-written family given paper notation, because its last rule needs a side condition. Then the lemmas that make them work: inversion, and **rebinding** — nothing that only cares which names are declared can tell `Γ , X <: Q , Δ` from `Γ , X <: P , Δ` |
 | `04-subtyping` | The five algorithmic subtyping rules, with **one premise added** to `SA-All`: `⊢ Γ , X <: T1 ok`. Derivations |
 | `05-typing` | The six typing rules with subsumption. `T-TApp`'s conclusion is `T12[X -> T2]`, so the kernel computes the type of an instantiation rather than being told it |

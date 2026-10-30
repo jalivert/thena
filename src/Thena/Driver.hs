@@ -3252,7 +3252,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
                      []    -> delta
               (fs, n1)
                 | installs = surfaceProgram (names m)
-                    ([ ItemTheorem (rootName x) ty body | (x, ty, body) <- substitutionDefinitions gs' g' ]
+                    ([ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions gs' g' ]
                        ++ map ItemGrammar (substitutionNotations gs' g'))
                 | otherwise = ([], names m)
               m' = (Engine.splicing fs m) { grammars = gs', names = n1 }
@@ -3294,7 +3294,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
           -- one notation the system used to privilege is now an instance of the
           -- one a user declares.
           (fs, n2) = surfaceProgram n1
-                       ([ ItemTheorem (rootName x) ty body | (x, ty, body) <- substitutionDefinitions (g : grammars m) g ]
+                       ([ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions (g : grammars m) g ]
                           ++ map ItemGrammar (substitutionNotations (g : grammars m) g))
           -- **A context's lookup relation, and its notation** (MS6 phase 107,
           -- §5.3): a datatype like any other, and a grammar installed beside the

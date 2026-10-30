@@ -1,7 +1,7 @@
 -- | Generated substitution (MS6 phase 105; @ms6\/SPEC.md@ §4.7).
 --
 -- **The load-bearing test is the de Bruijn crossing**: a random term and a
--- random simultaneous map, substituted by the generated @L-subst-all@ and
+-- random simultaneous map, substituted by the generated @L.subst-all@ and
 -- then converted to de Bruijn form, must be what de Bruijn substitution — which
 -- cannot capture, having no names to capture with — makes of the converted
 -- term. Named substitution against nameless, each written without the other.
@@ -27,6 +27,7 @@ import Test.Tasty.QuickCheck
 import Thena.Core.Level (Level (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), rootName, nameDotted)
+import Thena.Declared (named)
 import Thena.Driver
   ( Response (..)
   , machineOf
@@ -66,13 +67,13 @@ tests =
 -- The priming character (MS6 closeout 23, phase 146)
 
 -- | A language whose identifier class refuses @'@ — the case the closeout item
--- is about. @L-fresh@ used to append @'@ unconditionally, so a binder renamed to
+-- is about. @L.fresh@ used to append @'@ unconditionally, so a binder renamed to
 -- avoid capture became a name the notation could not write: it printed inside a
 -- splice, and an object grammar has no splice production, so the printed term
 -- could not be read back at all.
 --
 -- **The two definitions at the end are the assertions, and the load is what runs
--- them.** Conversion reduces @PL-fresh-n@ fully, so @mintsALetter@ type-checks only
+-- them.** Conversion reduces @PL.fresh-n@ fully, so @mintsALetter@ type-checks only
 -- if the generated code appends a character @\/[a-z]+\/@ accepts; and
 -- @readsBack@ type-checks only if the notation can write that name, which is the
 -- half that was lost.
@@ -89,7 +90,7 @@ primedSource =
     , "  pabs : n as binder     -> ( lam n . E[n] )"
     , "  papp                   -> ( M N )"
     , ""
-    , "mintsALetter : Eq String (PL-fresh-n \"y\" (cons String \"y\" (nil String))) \"ya\""
+    , "mintsALetter : Eq String (PL.fresh-n \"y\" (cons String \"y\" (nil String))) \"ya\""
     , "mintsALetter = refl String \"ya\""
     , ""
     , "readsBack : Eq PL (pabs \"ya\" (pvar \"y\")) PL`( lam ya . y )`"
@@ -139,7 +140,7 @@ primed =
 -- | **One language, two notions of a variable** — `~tmnrr`'s half. Two
 -- occurrence productions at two different classes, which MS6 refused outright
 -- and which is now one substitution family per class over one simultaneous
--- @D-subst-all@.
+-- @D.subst-all@.
 twoOwnSource :: String
 twoOwnSource =
   unlines
@@ -161,7 +162,7 @@ twoOwnSource =
 -- | **F-sub in miniature** — `~5k3mg`'s half, and the reason the milestone has
 -- this item. @Ty@ owns the type class @X@; @Tm@ owns the term class @x@ and
 -- /binds/ @X@ from a term production, while every occurrence of @X@ is in a
--- type. So @Tm@ reaches a class it does not own, and @Tm-subst-X@ — type
+-- type. So @Tm@ reaches a class it does not own, and @Tm.subst-X@ — type
 -- substitution into a term — is the function POPLMark part 2A is written with.
 --
 -- **The three definitions at the end are the assertions and the load runs
@@ -191,15 +192,15 @@ fsubSource =
     , "  tabs : X as binder     -> ( Lam X <: T . M[X] )"
     , "  tapp                   -> ( M @ T )"
     , ""
-    , "captured : Eq Tm (Tm-subst-x (tabs \"X\" top (var \"z\")) \"z\" (abs \"y\" (tvar \"X\") (var \"y\")))"
+    , "captured : Eq Tm (Tm.subst-x (tabs \"X\" top (var \"z\")) \"z\" (abs \"y\" (tvar \"X\") (var \"y\")))"
     , "                 (tabs \"X'\" top (abs \"y\" (tvar \"X\") (var \"y\")))"
     , "captured = refl Tm (tabs \"X'\" top (abs \"y\" (tvar \"X\") (var \"y\")))"
     , ""
-    , "untouched : Eq Tm (Tm-subst-x (tabs \"X\" top (var \"z\")) \"z\" (var \"w\"))"
+    , "untouched : Eq Tm (Tm.subst-x (tabs \"X\" top (var \"z\")) \"z\" (var \"w\"))"
     , "                  (tabs \"X\" top (var \"w\"))"
     , "untouched = refl Tm (tabs \"X\" top (var \"w\"))"
     , ""
-    , "intoTheType : Eq Tm (Tm-subst-X (abs \"y\" (tvar \"Z\") (var \"y\")) \"Z\" top)"
+    , "intoTheType : Eq Tm (Tm.subst-X (abs \"y\" (tvar \"Z\") (var \"y\")) \"Z\" top)"
     , "                    (abs \"y\" top (var \"y\"))"
     , "intoTheType = refl Tm (abs \"y\" top (var \"y\"))"
     ]
@@ -208,8 +209,8 @@ classes :: [TestTree]
 classes =
   [ testCase "two occurrence productions at two classes install, one family each" $ do
       env <- loadedFrom twoOwnSource
-      [ typeOf env f | f <- [ "D-fresh-x", "D-fresh-i", "D-fv-x", "D-fv-i"
-                            , "D-subst-all", "D-subst-x", "D-subst-i" ] ]
+      [ typeOf env f | f <- [ "D.fresh-x", "D.fresh-i", "D.fv-x", "D.fv-i"
+                            , "D.subst-all", "D.subst-x", "D.subst-i" ] ]
         @?= [ Just "String -> List String -> String"
             , Just "String -> List String -> String"
             , Just "D -> List String"
@@ -230,12 +231,12 @@ classes =
         , "x : Token String", "x = /[a-z]+/", ""
         , "language K, A where", "  kvar : x as occurrence -> x", ""
         , "language L, M where", "  lvar : x as occurrence -> x" ])
-      [ typeOf env f | f <- ["K-subst-x", "L-subst-x"] ]
+      [ typeOf env f | f <- ["K.subst-x", "L.subst-x"] ]
         @?= [Just "K -> String -> K -> K", Just "L -> String -> L -> L"]
   , testCase "a class another language owns gives a substitution into that language" $ do
       env <- loadedFrom fsubSource
-      [ typeOf env f | f <- [ "Tm-subst-all", "Tm-subst-x", "Tm-subst-X", "Tm-fv-X"
-                            , "Tm-fresh-X", "Ty-fresh-X", "Ty-subst-all" ] ]
+      [ typeOf env f | f <- [ "Tm.subst-all", "Tm.subst-x", "Tm.subst-X", "Tm.fv-X"
+                            , "Tm.fresh-X", "Ty.fresh-X", "Ty.subst-all" ] ]
         @?= [ Just "Tm -> List (And String Tm) -> List (And String Ty) -> Tm"
             , Just "Tm -> String -> Tm -> Tm"
             , Just "Tm -> String -> Ty -> Tm"
@@ -256,7 +257,9 @@ classes =
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
     typeOf env f =
       unlevelled . renderCore (Rendering [] 0) [] . definitionType
-        <$> lookupDefinition (rootName f) env
+        -- **'named' and not @rootName@**: the generated family lives in the
+        -- language's namespace, so @LC.fv-x@ is a path and a word.
+        <$> lookupDefinition (named f) env
 
 -- ---------------------------------------------------------------------------
 -- The fixture
@@ -347,9 +350,12 @@ listOfStrings env t = case whnf env [] t of
   where lastTwo as = drop (length as - 2) as
 
 -- | A global applied, at level zero for every level it takes.
+-- | **'named', so a generated function is reached by its path** (MS10 phase
+-- 244): @LC.subst-x@ is @subst-x@ in @LC@, and a root-level name holding the
+-- dots is nothing at all.
 call :: GlobalEnv -> String -> [Core] -> Core
-call env f = foldl App (Global (rootName f) (replicate levels LZero))
-  where levels = maybe 0 (length . definitionLevels) (lookupDefinition (rootName f) env)
+call env f = foldl App (Global (named f) (replicate levels LZero))
+  where levels = maybe 0 (length . definitionLevels) (lookupDefinition (named f) env)
 
 stringList :: GlobalEnv -> [String] -> Core
 stringList env = foldr (\s r -> call env "cons" [str, Primitive (LString s), r]) (call env "nil" [str])
@@ -469,7 +475,7 @@ declared :: IO GlobalEnv -> [TestTree]
 declared io =
   [ testCase (f ++ " : " ++ ty) $ do
       env <- io
-      case lookupDefinition (rootName f) env of
+      case lookupDefinition (named f) env of
         Nothing -> assertFailure (f ++ " was not declared")
         Just d -> (unlevelled (renderCore (Rendering [] 0) [] (definitionType d)), length (definitionLevels d))
                     @?= (ty, levels)
@@ -478,17 +484,17 @@ declared io =
   -- that mention them are too. Nothing is defaulted (his ruling), so this is
   -- what the type is, and it is asserted rather than printed away.
   | (f, ty, levels) <-
-      [ ("LC-fresh-x", "String -> List String -> String", 1)
-      , ("LC-fv-x", "LC -> List String", 1)
-      , ("LC-subst-all", "LC -> List (And String LC) -> LC", 3)
-      , ("LC-subst-x", "LC -> String -> LC -> LC", 0)
-      , ("LB-subst-x", "LB -> String -> LB -> LB", 0)
+      [ ("LC.fresh-x", "String -> List String -> String", 1)
+      , ("LC.fv-x", "LC -> List String", 1)
+      , ("LC.subst-all", "LC -> List (And String LC) -> LC", 3)
+      , ("LC.subst-x", "LC -> String -> LC -> LC", 0)
+      , ("LB.subst-x", "LB -> String -> LB -> LB", 0)
       ]
   ]
     ++ [ testCase "a language that reaches no class gets none" $ do
            env <- io
-           map (\f -> isNothing (lookupDefinition (rootName f) env))
-               ["Ty-fresh-x", "Ty-fv-x", "Ty-subst-all", "Ty-subst-x"]
+           map (\f -> isNothing (lookupDefinition (named f) env))
+               ["Ty.fresh-x", "Ty.fv-x", "Ty.subst-all", "Ty.subst-x"]
              @?= [True, True, True, True]
          -- **A class only ever bound gets nothing** (MS8 phase 155): @LB@'s
          -- @y@ is a second binder class that no occurrence production reads, so
@@ -497,8 +503,8 @@ declared io =
          -- @BinderClassUnowned@ warned about, correct rather than said.
        , testCase "a class that is only bound gets none, and is not renamed" $ do
            env <- io
-           map (\f -> isNothing (lookupDefinition (rootName f) env))
-               ["LB-fresh-y", "LB-fv-y", "LB-subst-y"]
+           map (\f -> isNothing (lookupDefinition (named f) env))
+               ["LB.fresh-y", "LB.fv-y", "LB.subst-y"]
              @?= [True, True, True]
        ]
 
@@ -521,12 +527,12 @@ worked io =
   , subst "a bound occurrence is not replaced" (abs' "x" (var "x")) "x" (var "y") (abs' "x" (var "x"))
   , testCase "a list is simultaneous: x and y swap" $ do
       env <- io
-      fromCore env (call env "LC-subst-all"
+      fromCore env (call env "LC.subst-all"
                       [toCore (app' (var "x") (var "y")), substMap env "LC" [("x", var "y"), ("y", var "x")]])
         @?= Just (app' (var "y") (var "x"))
   , testCase "of two pairs for one name, the first is the one taken" $ do
       env <- io
-      fromCore env (call env "LC-subst-all"
+      fromCore env (call env "LC.subst-all"
                       [toCore (var "x"), substMap env "LC" [("x", var "y"), ("x", var "z")]])
         @?= Just (var "y")
   -- Two binders in one production: x must be primed, and its first priming is
@@ -535,14 +541,14 @@ worked io =
   , testCase "a primed binder does not take a later binder's name" $ do
       env <- io
       let t = Tm "lam2" [Name "x", Name "x'", Sub (bapp (bvar "x") (bapp (bvar "x'") (bvar "z")))]
-      fromCore env (call env "LB-subst-x" [toCore t, Primitive (LString "z"), toCore (bvar "x")])
+      fromCore env (call env "LB.subst-x" [toCore t, Primitive (LString "z"), toCore (bvar "x")])
         @?= Just (Tm "lam2" [Name "x''", Name "x'", Sub (bapp (bvar "x''") (bapp (bvar "x'") (bvar "x")))])
   , testCase "free variables, each once here, bound ones not at all" $ do
       env <- io
-      listOfStrings env (call env "LC-fv-x" [toCore (abs' "y" (app' (var "x") (var "y")))]) @?= Just ["x"]
+      listOfStrings env (call env "LC.fv-x" [toCore (abs' "y" (app' (var "x") (var "y")))]) @?= Just ["x"]
   , testCase "a fresh name is the first priming not taken" $ do
       env <- io
-      map (\avoid -> whnf env [] (call env "LC-fresh-x" [Primitive (LString "x"), stringList env avoid]))
+      map (\avoid -> whnf env [] (call env "LC.fresh-x" [Primitive (LString "x"), stringList env avoid]))
           [[], ["y"], ["x"], ["x", "x'"], ["x'", "x"]]
         @?= map (Primitive . LString) ["x", "x", "x'", "x''", "x''"]
   -- The kernel gap found building this phase: refl at a closed String.
@@ -552,7 +558,7 @@ worked io =
           (s2, r) = loadProofSource s1 (unlines
             [ "module Worked where"
             , ""
-            , "captured : Eq LC (LC-subst-x (abs \"y\" base (var \"x\")) \"x\" (var \"y\")) (abs \"y'\" base (var \"y\"))"
+            , "captured : Eq LC (LC.subst-x (abs \"y\" base (var \"x\")) \"x\" (var \"y\")) (abs \"y'\" base (var \"y\"))"
             , "captured = refl LC (abs \"y'\" base (var \"y\"))"
             , ""
             , "named : Eq String \"a\" \"a\""
@@ -565,7 +571,7 @@ worked io =
           (_, r) = loadProofSource s1 (unlines
             [ "module Wrong where"
             , ""
-            , "captured : Eq LC (LC-subst-x (abs \"y\" base (var \"x\")) \"x\" (var \"y\")) (abs \"y\" base (var \"y\"))"
+            , "captured : Eq LC (LC.subst-x (abs \"y\" base (var \"x\")) \"x\" (var \"y\")) (abs \"y\" base (var \"y\"))"
             , "captured = refl LC (abs \"y\" base (var \"y\"))"
             ])
       case r of
@@ -575,7 +581,7 @@ worked io =
   where
     subst what t x n want = testCase what $ do
       env <- io
-      fromCore env (call env "LC-subst-x" [toCore t, Primitive (LString x), toCore n]) @?= Just want
+      fromCore env (call env "LC.subst-x" [toCore t, Primitive (LString x), toCore n]) @?= Just want
     var x = Tm "var" [Name x]
     abs' x e = Tm "abs" [Name x, Other base, Sub e]
     app' a b = Tm "app" [Sub a, Sub b]
@@ -596,13 +602,13 @@ crossing io =
               avoid = concatMap image (freeVars roles (rootName "x") t)
               want = until (`notElem` avoid) (++ "'") x
           -- Only the binder is read: the body is the crossing's business.
-          pure $ case whnf env [] (call env "LC-subst-all" [toCore t, substMap env "LC" sigma]) of
+          pure $ case whnf env [] (call env "LC.subst-all" [toCore t, substMap env "LC" sigma]) of
             Canonical (GlobalName [] "abs") _ (z : _) -> whnf env [] z === Primitive (LString want)
             other -> counterexample (show other) False
   , testProperty "LC: the free variables are the free variables" $
       withNumTests 300 $ forAll genLC $ \t -> ioProperty $ do
         env <- io
-        pure $ fmap (sort . nub) (listOfStrings env (call env "LC-fv-x" [toCore t]))
+        pure $ fmap (sort . nub) (listOfStrings env (call env "LC.fv-x" [toCore t]))
           === Just (sort (freeVars (rolesOf env "LC") (rootName "x") t))
   ]
   where
@@ -615,7 +621,7 @@ crossing io =
         withNumTests n $ forAll (resize 8 ((,) <$> gen <*> genMap gen)) $ \(t, sigma) -> ioProperty $ do
           env <- io
           let roles = rolesOf env lang
-              got = fromCore env (call env (lang ++ "-subst-all") [toCore t, substMap env lang sigma])
+              got = fromCore env (call env (lang ++ ".subst-all") [toCore t, substMap env lang sigma])
           pure $ counterexample (show got) $
             fmap (nameless roles []) got
               === Just (namelessSubst roles (rootName cls) sigma (nameless roles [] t))
@@ -656,8 +662,8 @@ refused =
       , "language L, M where", "  v : x as occurrence -> x", "  bind : x as binder -> ( \955 x . A[x] )" ]
       "refused: in the grammar of L, production bind: a binder is free in A, which is of K, and nothing K reaches occurs at x, so there is nothing there to rename"
   , refusal "a generated name already declared"
-      ["L-fv-x : String", "L-fv-x = \"taken\"", "", "language L, M where", "  v : x as occurrence -> x"]
-      "refused: L's substitution function L-fv-x is already declared"
+      ["L.fv-x : String", "L.fv-x = \"taken\"", "", "language L, M where", "  v : x as occurrence -> x"]
+      "refused: L's substitution function L.fv-x is already declared"
   ]
   where
     refusal what body want = testCase what $ do
@@ -689,14 +695,14 @@ followed =
       , "absurdly : forall (C : Type\8320) (e : Empty) -> C"
       , "absurdly = \\ C e -> elim Empty () (\\ t -> C) () () e"
       , ""
-      , "varHit : forall (x : String) (N : LC) -> Eq LC (LC-subst-x (var x) x N) N"
+      , "varHit : forall (x : String) (N : LC) -> Eq LC (LC.subst-x (var x) x N) N"
       , "varHit = \\ x N ->"
       , "  elim Dec ((Eq String x x))"
       , "    (\\ d -> Eq LC (elim Dec ((Eq String x x)) (\\ d -> LC) ((\\ p -> N) (\\ n -> var x)) () d) N)"
       , "    ((\\ p -> refl LC N) (\\ n -> absurdly (Eq LC (var x) N) (n (refl String x))))"
       , "    () (decString x x)"
       , ""
-      , "varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty) -> Eq LC (LC-subst-x (var y) x N) (var y)"
+      , "varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty) -> Eq LC (LC.subst-x (var y) x N) (var y)"
       , "varMiss = \\ y x N ne ->"
       , "  elim Dec ((Eq String y x))"
       , "    (\\ d -> Eq LC (elim Dec ((Eq String y x)) (\\ d -> LC) ((\\ p -> N) (\\ n -> var y)) () d) (var y))"

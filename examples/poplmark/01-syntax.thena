@@ -6,7 +6,7 @@
 -- subtyping, 03 typing, and 04 proves the challenge's problem 1A.
 --
 -- Load it with   :load examples/poplmark/01-syntax.thena
--- then try       :show Ty      :show Tm-subst-X
+-- then try       :show Ty      :show Tm.subst-X
 --                :parse Tm ( Λ X <: ⊤ . ( λ y : X . y ) )
 --
 -- LOAD IN A FRESH SESSION. The numbered series in examples/ declares its own
@@ -72,43 +72,43 @@ polyIdAtTop = Tm`( ${polyId} [ ⊤ ] )`
 --
 -- `Ty` owns X, so it gets all four:
 --
---   Ty-subst-X   : Ty -> String -> Ty -> Ty          S[X -> T]
---   Ty-subst-all : Ty -> List (And String Ty) -> Ty
---   Ty-fv-X      : Ty -> List String
---   Ty-fresh-X   : String -> List String -> String
+--   Ty.subst-X   : Ty -> String -> Ty -> Ty          S[X -> T]
+--   Ty.subst-all : Ty -> List (And String Ty) -> Ty
+--   Ty.fv-X      : Ty -> List String
+--   Ty.fresh-X   : String -> List String -> String
 --
 -- `Tm` owns x and REACHES X, through the types in its own slots, so it gets
 --
---   Tm-subst-x   : Tm -> String -> Tm -> Tm          t[x -> s]
---   Tm-subst-X   : Tm -> String -> Ty -> Tm          t[X -> T]
---   Tm-subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
---   Tm-fv-x      : Tm -> List String
---   Tm-fv-X      : Tm -> List String
---   Tm-fresh-x   : String -> List String -> String
+--   Tm.subst-x   : Tm -> String -> Tm -> Tm          t[x -> s]
+--   Tm.subst-X   : Tm -> String -> Ty -> Tm          t[X -> T]
+--   Tm.subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
+--   Tm.fv-x      : Tm -> List String
+--   Tm.fv-X      : Tm -> List String
+--   Tm.fresh-x   : String -> List String -> String
 --
--- and no Tm-fresh-X: minting a type variable belongs to the language whose
+-- and no Tm.fresh-X: minting a type variable belongs to the language whose
 -- notation can write one.
 
 -- Type substitution into a type.
-substIntoArrow : Eq Ty (Ty-subst-X Ty`( X -> ⊤ )` "X" Ty`⊤`) Ty`( ⊤ -> ⊤ )`
+substIntoArrow : Eq Ty (Ty.subst-X Ty`( X -> ⊤ )` "X" Ty`⊤`) Ty`( ⊤ -> ⊤ )`
 substIntoArrow = refl Ty Ty`( ⊤ -> ⊤ )`
 
 -- It stops at a binding of the same name: the inner X is a different variable.
-substStopsAtBinder : Eq Ty (Ty-subst-X Ty`( ∀ X <: ⊤ . X )` "X" Ty`⊤`) Ty`( ∀ X <: ⊤ . X )`
+substStopsAtBinder : Eq Ty (Ty.subst-X Ty`( ∀ X <: ⊤ . X )` "X" Ty`⊤`) Ty`( ∀ X <: ⊤ . X )`
 substStopsAtBinder = refl Ty Ty`( ∀ X <: ⊤ . X )`
 
 -- TYPE substitution into a TERM — the function part 2A's substitution lemmas
 -- are written with. It replaces X in every type a term carries.
-substIntoTerm : Eq Tm (Tm-subst-X Tm`( λ y : X . y )` "X" Ty`⊤`) Tm`( λ y : ⊤ . y )`
+substIntoTerm : Eq Tm (Tm.subst-X Tm`( λ y : X . y )` "X" Ty`⊤`) Tm`( λ y : ⊤ . y )`
 substIntoTerm = refl Tm Tm`( λ y : ⊤ . y )`
 
 -- And TERM substitution into a term, which leaves the types alone.
-substTermIntoTerm : Eq Tm (Tm-subst-x Tm`( y z )` "z" Tm`( λ w : ⊤ . w )`) Tm`( y ( λ w : ⊤ . w ) )`
+substTermIntoTerm : Eq Tm (Tm.subst-x Tm`( y z )` "z" Tm`( λ w : ⊤ . w )`) Tm`( y ( λ w : ⊤ . w ) )`
 substTermIntoTerm = refl Tm Tm`( y ( λ w : ⊤ . w ) )`
 
 -- The two classes of free variable are asked for separately.
-freeTypeVars : Eq (List String) (Tm-fv-X Tm`( λ y : X . y )`) (cons String "X" (nil String))
+freeTypeVars : Eq (List String) (Tm.fv-X Tm`( λ y : X . y )`) (cons String "X" (nil String))
 freeTypeVars = refl (List String) (cons String "X" (nil String))
 
-freeTermVars : Eq (List String) (Tm-fv-x Tm`( λ y : X . y )`) (nil String)
+freeTermVars : Eq (List String) (Tm.fv-x Tm`( λ y : X . y )`) (nil String)
 freeTermVars = refl (List String) (nil String)

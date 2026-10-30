@@ -30,11 +30,12 @@ module Thena.Surface.Concrete
   , Analysis (..)
   , Plicity (..)
   , blocksIn
+  , surfaceName
   ) where
 
 import Data.List.NonEmpty (NonEmpty, toList)
 
-import Thena.Core.Term (Literal (..))
+import Thena.Core.Term (GlobalName (..), Literal (..))
 
 -- | **`instral` is shared, and it is term-free**, which is what makes sharing it
 -- possible: a 'Thena.Instral.Concrete.RawOperand' is an identifier, a number or
@@ -414,3 +415,12 @@ blocksIn t = case t of
     piece pc = case pc of
       ObjectText _   -> []
       ObjectSplice e -> blocksIn e
+
+-- | A global's name, written out as a name (MS10 phase 244).
+--
+-- **For a generator**: what the substitution family and a reading of an object
+-- term write is a name that is already resolved, and a reference to one in a
+-- namespace has to carry its path or the context would be searched for its base
+-- word first. Writing it is the same thing a user does with @Ty.subst-X@.
+surfaceName :: GlobalName -> Surface
+surfaceName n = SurfaceName (nameSteps n) (nameWord n)

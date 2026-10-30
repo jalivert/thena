@@ -43,6 +43,11 @@ module Thena.Language.Grammar
   , typeReading
   , builtInTags
   , substitutionNames
+  , substitutionFamily
+  , freshOf
+  , fvOf
+  , substOf
+  , allOf
   , lookupNames
   , lookupNamesOf
   , extensionsOf
@@ -64,7 +69,7 @@ import Data.Maybe (isJust, listToMaybe)
 
 import Thena.Core.Level (Normal (..), normalise)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, rootName, Ident (..), Literal (..), instantiate, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), inDeclarationOf, nameDotted, nameFromText, rootName, Ident (..), Literal (..), instantiate, tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Regex (Regex, andThen, fromRanges, matches, oneOf, parseRegex, primingChar, singleChar, star)
@@ -430,7 +435,7 @@ checkGrammar installed env b = do
 
     -- **A language whose identifier class no character extends** (MS6 closeout
     -- 23, phase 146). 'Thena.Language.Regex.primingChar' decides it on the
-    -- automaton; when it answers 'Nothing' the generated @L-fresh@ falls back to
+    -- automaton; when it answers 'Nothing' the generated @L.fresh@ falls back to
     -- @'@ and a renamed binder is a name the notation cannot write. Said here
     -- because this is where an author finds out, and said rather than refused
     -- because nothing is actually broken but the printing.
@@ -457,9 +462,14 @@ checkGrammar installed env b = do
       [ (m, grammarName g) | g <- installed, m <- grammarMetavars g ]
 
     -- A global, or a name a grammar already installed will generate.
+    --
+    -- **Read as a name and not rooted** (MS10 phase 244): what is checked is a
+    -- written spelling, and a generated one is dotted — @L.fv-x@ is already
+    -- declared when the environment holds @fv-x@ in @L@, which a root-level
+    -- name whose word held the dots would never have matched.
     taken x =
-      isDeclared (rootName x) env
-        || rootName x `elem` concat
+      isDeclared (nameFromText x) env
+        || nameFromText x `elem` concat
              [ grammarName g : map gproductionName (grammarProductions g) | g <- installed ]
 
     -- **This block's metavariables first, then every other grammar's**, which
@@ -478,7 +488,7 @@ checkGrammar installed env b = do
       let pkind | kind == JudgmentBlock = TypeFormer
                 | otherwise = Constructor
           vacuous = [ VacuousBinder kind name (productionName p) x | x <- vacuousNames ]
-      Right (GProduction (rootName (productionName p)) items arguments pkind, vacuous)
+      Right (GProduction (productionGlobal p) items arguments pkind, vacuous)
 
 -- | **A production's items, its arguments and their roles** (§4.2, §4.3, §4.7) —
 -- everything about a production's /shape/, which is the same question whether a
@@ -781,7 +791,7 @@ checkNotation installed env b = do
       Nothing -> []
 
     production g p
-      | isHeader p || rootName (productionName p) `elem` constructorsOf g = declaring g p
+      | isHeader p || productionGlobal p `elem` constructorsOf g = declaring g p
       | otherwise = applying g p
 
     -- **A type former's or a constructor's spelling**: its shape is a
@@ -856,7 +866,7 @@ checkNotation installed env b = do
       case (productionMetadata p, editing) of
         (Just _, True) -> Left (RolesAfterTheGrammar (grammarName g))
         _ -> Right ()
-      let f = rootName (productionName p)
+      let f = productionGlobal p
       if isHeader p then Right () else if taken f then Left FunctionHasNotation else Right ()
       (domains, kind') <-
         if isHeader p
@@ -875,7 +885,7 @@ checkNotation installed env b = do
       case productionMetadata p of
         Nothing -> Right ()
         Just _  -> Left FunctionMetadata
-      let f = rootName (productionName p)
+      let f = productionGlobal p
       if taken f then Left FunctionHasNotation else Right ()
       (domains, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
       if typeNamed env result == Just (grammarName g)
@@ -1093,32 +1103,61 @@ substitutable gs g = do
 -- an owner.
 --
 -- **One per class, and the class is in the name — MS8 phase 155.** The names
--- used to come from the language alone (@LC-fv@, @LC-subst@), which two classes
+-- used to come from the language alone (@LC.fv@, @LC.subst@), which two classes
 -- collide on, and keeping the unsuffixed name when there happens to be one class
 -- would be a special case in the naming rule. His ruling on the context's lookup
 -- relation, 2026-10-04, settled the same question the same way and accepted the
 -- migration.
 --
--- * @L-fresh-‹k›@ for each class @L@ **owns**, because minting a name of a class
+-- * @L.fresh-‹k›@ for each class @L@ **owns**, because minting a name of a class
 --   belongs to the language whose notation can write one — so a grammar that
 --   reaches a class without owning it calls the owner's.
--- * @L-fv-‹k›@ and @L-subst-‹k›@ for each class @L@ **reaches**, owning it or
+-- * @L.fv-‹k›@ and @L.subst-‹k›@ for each class @L@ **reaches**, owning it or
 --   not: a class can occur free inside a slot of another language.
--- * one @L-subst-all@, taking one map per class reached. Simultaneous
+-- * one @L.subst-all@, taking one map per class reached. Simultaneous
 --   substitution is the primitive one, and now across classes too — renaming a
 --   binder of one class to avoid capture needs the map of every class.
-substitutionNames :: [Grammar] -> Grammar -> [String]
-substitutionNames gs g
+-- **They live in the LANGUAGE'S OWN NAMESPACE since MS10 phase 244** — @LC.fv-x@
+-- and not @LC.fv-x@ — through 'Thena.Core.Term.inDeclarationOf', the one helper
+-- every generated name is minted by, so none of these four decides a placement
+-- of its own.
+substitutionFamily :: [Grammar] -> Grammar -> [GlobalName]
+substitutionFamily gs g
   | null reached = []
   | otherwise =
-      [ n ++ "-fresh-" ++ k | k <- owned ]
-        ++ [ n ++ "-fv-" ++ k | k <- reached ]
-        ++ [ n ++ "-subst-all" ]
-        ++ [ n ++ "-subst-" ++ k | k <- reached ]
+      [ freshOf n k | k <- owned ]
+        ++ [ fvOf n k | k <- reached ]
+        ++ [ allOf n ]
+        ++ [ substOf n k | k <- reached ]
   where
-    n = nameDotted (grammarName g)
+    n = grammarName g
     reached = map nameDotted (classesSubstituted gs g)
     owned = map (nameDotted . fst) (variableProductions g)
+
+-- | …and their spellings, which is what a clash is checked against: a written
+-- word is compared with the whole dotted name, so a production may no more be
+-- called @LC.fv-x@ than it could be called @LC.fv-x@ before.
+substitutionNames :: [Grammar] -> Grammar -> [String]
+substitutionNames gs g = map nameDotted (substitutionFamily gs g)
+
+-- | A production's name as written, **split on the reserved dot** (MS10 phase
+-- 244) — so a production may name something in a namespace, which is what
+-- generated substitution's own notation does: @LC.subst-x@ is the function
+-- @subst-x@ in @LC@ and not a root-level name with a dot in its word, the one
+-- shape his ruling of 2026-10-30 forbids.
+productionGlobal :: Production -> GlobalName
+productionGlobal = nameFromText . productionName
+
+-- | Where each of the four lives. **The language's declaration opens the
+-- namespace** (his ruling, 2026-10-30), so the word is what is left of the old
+-- name once the language's own prefix has become a step.
+freshOf, fvOf, substOf :: GlobalName -> String -> GlobalName
+freshOf l k = inDeclarationOf l ("fresh-" ++ k)
+fvOf l k = inDeclarationOf l ("fv-" ++ k)
+substOf l k = inDeclarationOf l ("subst-" ++ k)
+
+allOf :: GlobalName -> GlobalName
+allOf l = inDeclarationOf l "subst-all"
 
 -- | **Every occurrence class the language reads, with the production that
 -- reads it** — one entry per class, in declaration order (MS8 phase 153).
@@ -1234,7 +1273,7 @@ grammarsReached gs g = walk [] [g]
 --
 -- **A context as well as a language — MS8 phase 157, `~mnr39`.** It is the same
 -- question and the same answer: a context reaches the classes of the languages
--- in its slots, so F-sub's Γ reaches the type class and gets @Ctx-subst-X@,
+-- in its slots, so F-sub's Γ reaches the type class and gets @Ctx.subst-X@,
 -- which is the @[X↦P]Δ@ of the type-substitution lemma. Nothing special had to
 -- be written for it — a context simply /owns/ no class, so it generates no
 -- @fresh@, and its name slots are neither occurrences nor binders, so nothing in
@@ -1267,11 +1306,11 @@ classOwner gs g cls = case
     _ -> Nothing
 
 -- | **The regular expression of one of a language's occurrence classes** — the
--- class's own, so that a generated @L-fresh-‹k›@ mints names that class accepts
+-- class's own, so that a generated @L.fresh-‹k›@ mints names that class accepts
 -- (MS6 closeout 23, per class at MS8 phase 155).
 --
 -- 'Nothing' for a class this language reads no occurrence at, or one whose
--- occurrence is not at a class — neither has an @L-fresh-‹k›@ to name.
+-- occurrence is not at a class — neither has an @L.fresh-‹k›@ to name.
 variableRegex :: Grammar -> GlobalName -> Maybe Regex
 variableRegex g cls =
   listToMaybe [ re | (c, p) <- variableProductions g, c == cls

@@ -22,7 +22,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), rootName, nameDotted)
+import Thena.Core.Term (Core (..), GlobalName (..), rootName, nameDotted)
 import Thena.Driver
   ( Response (..)
   , RuleFileError (..)
@@ -388,7 +388,7 @@ meaning =
         [g] -> do
           [ (gproductionName p, gproductionItems p)
             | p <- grammarProductions g, gproductionKind p == Function ]
-            @?= [ ( rootName "LC-subst-x"
+            @?= [ ( GlobalName ["LC"] "subst-x"
                   , [ Slot "e" (lang "LC") []
                     , Terminal "["
                     , Slot "x" str []
@@ -431,7 +431,7 @@ meaning =
         (_, other) -> assertFailure (show other)
     -- **A binder scoping into another language installs and says nothing**
     -- (MS8 phase 154 lifted the refusal; 155 made the generator walk the slot).
-    -- It warned in between, because a method of @L-subst-all@ was given a
+    -- It warned in between, because a method of @L.subst-all@ was given a
     -- recursive result only for an argument of its own language and rebuilt a
     -- foreign one as written.
   , testCase "a binder free in another language's slot installs, and nothing is owed" $ do
@@ -563,8 +563,8 @@ notating =
       said byHand ":show Lam" @?= said byBlock ":show Lam"
       -- The family, which the hand-written route generated from the roles its
       -- @notation@ block declared.
-      said byHand ":infer Lam-subst-w" @?= ["Lam-subst-w : Lam -> String -> Lam -> Lam"]
-      said byHand ":infer Lam-subst-w" @?= said byBlock ":infer Lam-subst-w"
+      said byHand ":infer Lam.subst-w" @?= ["Lam.subst-w : Lam -> String -> Lam -> Lam"]
+      said byHand ":infer Lam.subst-w" @?= said byBlock ":infer Lam.subst-w"
       -- And @same@ in the fixture is `refl`, so the load itself asserts that
       -- the notation builds exactly the hand-written constructor application.
       map gproductionKind (concat [ grammarProductions g | g <- grammars (machineOf byHand)

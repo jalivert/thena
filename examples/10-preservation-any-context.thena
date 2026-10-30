@@ -10,7 +10,7 @@
 -- `07` proves the same theorem for CLOSED terms. The obstruction with an open
 -- one is that the argument of a β-redex may have free names, so substituting it
 -- under a binder can capture — and then the generated substitution RENAMES the
--- binder, to `LC-fresh-x x ‹names to avoid›`. Proving the proof then needs to
+-- binder, to `LC.fresh-x x ‹names to avoid›`. Proving the proof then needs to
 -- know that the minted name really is fresh.
 --
 -- == What this file trusts, and what it proves
@@ -24,7 +24,7 @@
 -- reach but the reducer honours.
 --
 -- **The chooser's specification is a THEOREM here, not a claim.** `freshIsFresh`
--- used to be a trusted core term asserting that `LC-fresh-x y avoid` is absent
+-- used to be a trusted core term asserting that `LC.fresh-x y avoid` is absent
 -- from `avoid`. It is now proved, from those three laws, by the argument the
 -- generated code is built on: the candidates `y`, `y'`, `y''`, … are pairwise
 -- distinct, each rejection spends one name of the list, and the fuel — which is
@@ -278,7 +278,7 @@ freshFrom = \ avoid fuel -> induction fuel of
       ; different -> c } }
 
 freshIs : forall (y : String) (avoid : List String)
-       -> Eq String (LC-fresh-x y avoid) (freshFrom avoid avoid y)
+       -> Eq String (LC.fresh-x y avoid) (freshFrom avoid avoid y)
 freshIs = \ y avoid -> refl String (freshFrom avoid avoid y)
 
 -- Every candidate that is in `avoid` is still in the working copy.
@@ -329,15 +329,15 @@ walk = \ avoid fuel -> induction fuel of
 
 -- What used to be the trusted claim. Same name, same type, and now a theorem.
 freshIsFresh : forall (y : String) (avoid : List String)
-            -> (In (LC-fresh-x y avoid) avoid : Type₀) -> (Empty : Type₀)
+            -> (In (LC.fresh-x y avoid) avoid : Type₀) -> (Empty : Type₀)
 freshIsFresh = \ y avoid ->
   walk avoid avoid y avoid (chainDistinct avoid y) (chainLonger avoid y) (\ d jd ja -> ja)
 
 -- ---------------------------------------------------------------------------
--- Free variables: four facts about `fvA`, 07's spelled-out `LC-fv-x`.
+-- Free variables: four facts about `fvA`, 07's spelled-out `LC.fv-x`.
 --
 -- `fvA t bound acc` walks t, carrying the names bound on the way down and an
--- accumulator, and `LC-fv-x t` is `fvA t · ·` — proved by `refl` in 07 as
+-- accumulator, and `LC.fv-x t` is `fvA t · ·` — proved by `refl` in 07 as
 -- `fvIs`. Nothing below is about trust; it is the bookkeeping the renaming case
 -- of the substitution lemma needs, and 07 never needed it because it never
 -- renamed.
@@ -668,40 +668,40 @@ appendRight = \ l r w h -> induction l of
 
 -- Every free name of the image of a listed name is a name to avoid.
 imagesCovers : forall (s : List (And String LC)) (ys : List String) (y : String) (w : String)
-                 (hy : In y ys) (hw : In w (LC-fv-x (look y s)))
+                 (hy : In y ys) (hw : In w (LC.fv-x (look y s)))
                  -> In w (images s ys)
 imagesCovers = \ s ys y w hy hw -> induction ys of
   { nil -> absurdly (In w (images s (nil String))) hy
   ; cons a as -> case hy of
-      { orLeft q -> appendLeft (LC-fv-x (look a s)) (images s as) w
-                      (subst String (\ z -> In w (LC-fv-x (look z s))) y a q hw)
-      ; orRight i -> appendRight (LC-fv-x (look a s)) (images s as) w
+      { orLeft q -> appendLeft (LC.fv-x (look a s)) (images s as) w
+                      (subst String (\ z -> In w (LC.fv-x (look z s))) y a q hw)
+      ; orRight i -> appendRight (LC.fv-x (look a s)) (images s as) w
                        (imagesCovers s as y w i hw) } }
 
 -- The binder substitution chooses, and the one trusted fact about it.
 chosen : String -> Ty -> LC -> List (And String LC) -> String
-chosen = \ x T E s -> LC-fresh-x x (images s (LC-fv-x (abs x T E)))
+chosen = \ x T E s -> LC.fresh-x x (images s (LC.fv-x (abs x T E)))
 
 absIsC : forall (x : String) (T : Ty) (E : LC) (s : List (And String LC))
-           -> Eq LC (LC-subst-all (abs x T E) s)
+           -> Eq LC (LC.subst-all (abs x T E) s)
                     (abs (chosen x T E s) T
-                         (LC-subst-all E (cons (And String LC)
+                         (LC.subst-all E (cons (And String LC)
                             (both String LC x (var (chosen x T E s))) s)))
-absIsC = \ x T E s -> refl LC (LC-subst-all (abs x T E) s)
+absIsC = \ x T E s -> refl LC (LC.subst-all (abs x T E) s)
 
 appIsC : forall (M : LC) (N : LC) (s : List (And String LC))
-           -> Eq LC (LC-subst-all (app M N) s)
-                    (app (LC-subst-all M s) (LC-subst-all N s))
-appIsC = \ M N s -> refl LC (LC-subst-all (app M N) s)
+           -> Eq LC (LC.subst-all (app M N) s)
+                    (app (LC.subst-all M s) (LC.subst-all N s))
+appIsC = \ M N s -> refl LC (LC.subst-all (app M N) s)
 
 -- The chosen name is free in no image of a free name of the node. THIS IS THE
 -- ONLY PLACE `freshIsFresh` IS USED, and it is what 07 could not have.
 chosenNotInImage : forall (x : String) (T : Ty) (E : LC) (s : List (And String LC))
-                     (y : String) (hy : In y (LC-fv-x (abs x T E)))
-                     (h : In (chosen x T E s) (LC-fv-x (look y s))) -> Empty
+                     (y : String) (hy : In y (LC.fv-x (abs x T E)))
+                     (h : In (chosen x T E s) (LC.fv-x (look y s))) -> Empty
 chosenNotInImage = \ x T E s y hy h ->
-  freshIsFresh x (images s (LC-fv-x (abs x T E)))
-    (imagesCovers s (LC-fv-x (abs x T E)) y (chosen x T E s) hy h)
+  freshIsFresh x (images s (LC.fv-x (abs x T E)))
+    (imagesCovers s (LC.fv-x (abs x T E)) y (chosen x T E s) hy h)
 
 
 -- ---------------------------------------------------------------------------
@@ -721,33 +721,33 @@ chosenNotInImage = \ x T E s y hy h ->
 
 GoodOn : Ctx -> Ctx -> List (And String LC) -> LC -> Type₀
 GoodOn = \ G D s t ->
-  forall (y : String) (U : Ty) (i : extend-in y U G) (hf : In y (LC-fv-x t))
+  forall (y : String) (U : Ty) (i : extend-in y U G) (hf : In y (LC.fv-x t))
     -> typing D (look y s) U
 
 substAll : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T)
              (D : Ctx) (s : List (And String LC)) (g : GoodOn G D s t)
-             -> typing D (LC-subst-all t s) T
+             -> typing D (LC.subst-all t s) T
 substAll = \ G t T d -> induction d of
   -- A variable: the map's image for it, which the invariant types.
   { T-var x T0 G0 i -> \ D s g ->
-      subst LC (\ m -> typing D m T0) (look x s) (LC-subst-all (var x) s)
-        (sym LC (LC-subst-all (var x) s) (look x s) (lookIsVar x s))
+      subst LC (\ m -> typing D m T0) (look x s) (LC.subst-all (var x) s)
+        (sym LC (LC.subst-all (var x) s) (look x s) (lookIsVar x s))
         (g x T0 i (orLeft (Eq String x x) (In x (nil String)) (refl String x)))
   -- A λ: the binder is renamed to `chosen`, and the body is substituted with
   -- the map extended by that renaming.
   ; T-abs G0 x S E T0 d1 -> \ D s g ->
       subst LC (\ m -> typing D m (arrow S T0))
         (abs (chosen x S E s) S
-             (LC-subst-all E (cons (And String LC)
+             (LC.subst-all E (cons (And String LC)
                 (both String LC x (var (chosen x S E s))) s)))
-        (LC-subst-all (abs x S E) s)
-        (sym LC (LC-subst-all (abs x S E) s)
+        (LC.subst-all (abs x S E) s)
+        (sym LC (LC.subst-all (abs x S E) s)
                 (abs (chosen x S E s) S
-                     (LC-subst-all E (cons (And String LC)
+                     (LC.subst-all E (cons (And String LC)
                         (both String LC x (var (chosen x S E s))) s)))
                 (absIsC x S E s))
         (T-abs D (chosen x S E s) S
-           (LC-subst-all E (cons (And String LC) (both String LC x (var (chosen x S E s))) s)) T0
+           (LC.subst-all E (cons (And String LC) (both String LC x (var (chosen x S E s))) s)) T0
            (substAll (extend G0 x S) E T0 d1 (extend D (chosen x S E s) S)
               (cons (And String LC) (both String LC x (var (chosen x S E s))) s)
               (\ y U i hf -> case (ctxInvExtend G0 x S y U i) of
@@ -801,10 +801,10 @@ substAll = \ G t T d -> induction d of
   -- free names.
   ; T-app G0 M S T0 N d1 d2 -> \ D s g ->
       subst LC (\ m -> typing D m T0)
-        (app (LC-subst-all M s) (LC-subst-all N s)) (LC-subst-all (app M N) s)
-        (sym LC (LC-subst-all (app M N) s)
-                (app (LC-subst-all M s) (LC-subst-all N s)) (appIsC M N s))
-        (T-app D (LC-subst-all M s) S T0 (LC-subst-all N s)
+        (app (LC.subst-all M s) (LC.subst-all N s)) (LC.subst-all (app M N) s)
+        (sym LC (LC.subst-all (app M N) s)
+                (app (LC.subst-all M s) (LC.subst-all N s)) (appIsC M N s))
+        (T-app D (LC.subst-all M s) S T0 (LC.subst-all N s)
            (substAll G0 M (arrow S T0) d1 D s (\ y U i hf ->
               g y U i (fvAMono M (nil String) (nil String) (fvA N (nil String) (nil String))
                          (\ w hw -> absurdly (In w (fvA N (nil String) (nil String))) hw) y hf)))
@@ -816,22 +816,22 @@ substAll = \ G t T d -> induction d of
 -- The single substitution, which is what a β step performs.
 
 substXIs : forall (E : LC) (x : String) (N : LC)
-             -> Eq LC (LC-subst-x E x N)
-                      (LC-subst-all E (cons (And String LC) (both String LC x N) (nil (And String LC))))
-substXIs = \ E x N -> refl LC (LC-subst-x E x N)
+             -> Eq LC (LC.subst-x E x N)
+                      (LC.subst-all E (cons (And String LC) (both String LC x N) (nil (And String LC))))
+substXIs = \ E x N -> refl LC (LC.subst-x E x N)
 
 lookNil : forall (y : String) -> Eq LC (look y (nil (And String LC))) (var y)
 lookNil = \ y -> sym LC (var y) (look y (nil (And String LC))) (lookIsVar y (nil (And String LC)))
 
 substOne : forall (G : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty) (N : LC)
              (d : typing (extend G x S) E T) (dn : typing G N S)
-             -> typing G (LC-subst-x E x N) T
+             -> typing G (LC.subst-x E x N) T
 substOne = \ G x S E T N d dn ->
   subst LC (\ m -> typing G m T)
-    (LC-subst-all E (cons (And String LC) (both String LC x N) (nil (And String LC))))
-    (LC-subst-x E x N)
-    (sym LC (LC-subst-x E x N)
-            (LC-subst-all E (cons (And String LC) (both String LC x N) (nil (And String LC))))
+    (LC.subst-all E (cons (And String LC) (both String LC x N) (nil (And String LC))))
+    (LC.subst-x E x N)
+    (sym LC (LC.subst-x E x N)
+            (LC.subst-all E (cons (And String LC) (both String LC x N) (nil (And String LC))))
             (substXIs E x N))
     (substAll (extend G x S) E T d G
        (cons (And String LC) (both String LC x N) (nil (And String LC)))
@@ -918,7 +918,7 @@ yNotW : Eq String "y" "w" -> Empty
 yNotW = \ q -> neqFromDifferent "y" "w" (refl Comparison different) q
 
 -- The substitution really does rename, and this `refl` is the proof.
-renamesTheBinder : Eq LC (LC-subst-x LC`( λ y : ι . x )` "x" LC`( λ w : ι . y )`)
+renamesTheBinder : Eq LC (LC.subst-x LC`( λ y : ι . x )` "x" LC`( λ w : ι . y )`)
                          LC`( λ y' : ι . ( λ w : ι . y ) )`
 renamesTheBinder = refl LC LC`( λ y' : ι . ( λ w : ι . y ) )`
 

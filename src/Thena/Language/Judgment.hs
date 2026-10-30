@@ -36,7 +36,7 @@ import Data.List (nub)
 import Data.Maybe (listToMaybe)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (GlobalName (..), rootName, nameDotted)
+import Thena.Core.Term (GlobalName (..), nameFromText, rootName, nameDotted)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (Piece (..), Start (..), Tree (..))
 import Thena.Language.Grammar
@@ -56,6 +56,7 @@ import Thena.Language.Grammar
   , RulePart (..)
   , RuleProblem (..)
   , Sort (..)
+  , allOf
   , earleyRules
   , classOwner
   , classesSubstituted
@@ -67,7 +68,7 @@ import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Build (arguments, production)
 import Thena.Language.Reader (RawRule (..))
 import Thena.Language.Regex (Regex (..), alternatives, andThen, complement, fromRanges, oneOf, singleChar, star)
-import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..), SurfaceConstructor (..), SurfaceData (..))
+import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..), SurfaceConstructor (..), SurfaceData (..), surfaceName)
 import Thena.Surface.Read (parseSurfaceText)
 import Thena.Syntax.Lexer (BlockKind (..))
 
@@ -368,22 +369,23 @@ term gs rename t = case t of
   -- **Not renamed** (MS8 phase 172): the premise binder carries the user's own
   -- name, so this is the name of the thing it reaches.
   Node n _ | [PremiseRef x] <- special n -> Right (SurfaceName [] x)
-  -- §6.3: a comma list is @L-subst-all@ — simultaneous, and across classes, so
+  -- §6.3: a comma list is @L.subst-all@ — simultaneous, and across classes, so
   -- each class's map takes the pairs written at it and the rest are empty (MS8
   -- phase 155). **A single pair never reaches here since MS8 phase 159**: it is
   -- a generated @notation@ production, so it is an ordinary 'Node' and the
-  -- clause below builds @L-subst-‹k›@ applied without knowing anything about it.
+  -- clause below builds @L.subst-‹k›@ applied without knowing anything about it.
   Node n [e, s] | [SubstituteIn l] <- special n -> do
     e' <- go e
     ps <- pairs s
-    Right (app (SurfaceName [] (l ++ "-subst-all"))
+    Right (app (surfaceName (allOf (nameFromText l)))
              (e' : [ foldr (cons l c) (nil l c) [ (x, m) | (c', x, m) <- ps, c' == c ]
                    | h <- grammarNamed gs l, c <- substitutedClasses gs h ]))
   Node n children -> case production gs n of
     Nothing -> Left (NoSuchProduction n)
     Just p -> do
       slots <- arguments p children
-      app (SurfaceName [] n) <$> traverse slot slots
+      -- **The production's own name, path and all** (MS10 phase 244).
+      app (surfaceName (gproductionName p)) <$> traverse slot slots
   _ -> Left (NotForSlot "" (show t))
   where
     go = term gs rename

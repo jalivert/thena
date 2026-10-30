@@ -6,10 +6,10 @@
 -- definitions and elaborated like any other — §1: nothing a block generates is
 -- out of reach of a hand-written file.
 --
--- > L-fresh-‹k›  : String -> List String -> String      -- for each class L owns
--- > L-fv-‹k›     : L -> List String                     -- for each class L reaches
--- > L-subst-all  : L -> List (And String O₁) -> … -> L   -- one map per class
--- > L-subst-‹k›  : L -> String -> O‹k› -> L              -- for each class L reaches
+-- > L.fresh-‹k›  : String -> List String -> String      -- for each class L owns
+-- > L.fv-‹k›     : L -> List String                     -- for each class L reaches
+-- > L.subst-all  : L -> List (And String O₁) -> … -> L   -- one map per class
+-- > L.subst-‹k›  : L -> String -> O‹k› -> L              -- for each class L reaches
 --
 -- @O‹k›@ is the language that /owns/ class @k@ — the one whose variable
 -- production reads an occurrence at it. For a one-class language that owns its
@@ -23,7 +23,7 @@
 -- a term that is not a subterm.
 --
 -- **And it is simultaneous across classes too, which is why there is one
--- @L-subst-all@ and not one per class — his correction, 2026-10-04.**
+-- @L.subst-all@ and not one per class — his correction, 2026-10-04.**
 -- Substituting for one class renames binders of /every/ class, so the recursive
 -- call needs every map: substituting @λ y : X . y@, which has a free type
 -- variable, for @x@ in @Λ X <: Top . x@ captures that @X@ unless the type binder
@@ -31,14 +31,14 @@
 -- @j@-names of the images of /every/ map, which is what @avoid-‹j›@ is.
 --
 -- **A binder is renamed only when keeping it would capture** — his choice,
--- 2026-09-21 — and @L-fresh-‹k› x avoid@ is the first of @x@, @x'@, @x''@, … not
+-- 2026-09-21 — and @L.fresh-‹k› x avoid@ is the first of @x@, @x'@, @x''@, … not
 -- among them, so @x@ itself whenever nothing would be captured. **A binder at a
 -- class no language owns is never renamed at all**, because nothing can occur at
 -- it; that falls out of the class not being in the set, with no branch of its own.
 --
 -- **A slot of another language is walked through that language's own
--- substitution** (MS8 phase 155, @ms8\/CLOSEOUT.md@ 25): @L-subst-all@ calls
--- @P-subst-all@ with the maps for the classes @P@ reaches, extended by any binder
+-- substitution** (MS8 phase 155, @ms8\/CLOSEOUT.md@ 25): @L.subst-all@ calls
+-- @P.subst-all@ with the maps for the classes @P@ reaches, extended by any binder
 -- of @L@ that scopes over the slot. @P@ is declared before @L@, so this is not
 -- mutual recursion — which `~m5dvd` would need.
 --
@@ -69,8 +69,12 @@ import Thena.Language.Grammar
   , constructorProductions
   , Grammar (..)
   , Sort (..)
+  , allOf
   , classOwner
   , classesSubstituted
+  , freshOf
+  , fvOf
+  , substOf
   , substitutionNames
   , variableProductions
   , variableRegex
@@ -78,20 +82,24 @@ import Thena.Language.Grammar
 import Thena.Language.Reader (Param (..), Block (..), Production (..), RawItem (..))
 import Thena.Language.Regex (primingChar)
 import Thena.Syntax.Lexer (BlockKind (..))
-import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
+import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..), surfaceName)
 
 -- | The definitions, as name, type and body, in the order they are declared —
 -- each uses only the ones before it, and the ones of a language declared
 -- earlier. None for a language that reaches no class with an owner.
 --
 -- @gs@ is the dependency graph: the grammars installed, including this one.
-substitutionDefinitions :: [Grammar] -> Grammar -> [(String, Surface, Surface)]
+-- **Each is named in the language's own namespace** (MS10 phase 244), and a
+-- reference to one is written with its path — @LC.fv-x@ — because that is what
+-- the ordinary declaration path now admits and what the environment holds.
+substitutionDefinitions :: [Grammar] -> Grammar -> [(GlobalName, Surface, Surface)]
 substitutionDefinitions gs g =
-  [ (freshOf lang k, arrows [string, listOf string] string, freshBody k) | k <- owned ]
-    ++ [ (fvOf lang k, arrows [self] (listOf string), fvBody k) | k <- reached ]
-    ++ [ (allOf lang, arrows (self : map mapType reached) self, allBody) | not (null reached) ]
-    ++ [ (substOf lang k, arrows [self, string, ownerSelf k] self, oneBody k) | k <- reached ]
+  [ (freshOf langName k, arrows [string, listOf string] string, freshBody k) | k <- owned ]
+    ++ [ (fvOf langName k, arrows [self] (listOf string), fvBody k) | k <- reached ]
+    ++ [ (allOf langName, arrows (self : map mapType reached) self, allBody) | not (null reached) ]
+    ++ [ (substOf langName k, arrows [self, string, ownerSelf k] self, oneBody k) | k <- reached ]
   where
+    langName = grammarName g
     lang = nameDotted (grammarName g)
     reached = map nameDotted (classesSubstituted gs g)
     owned = map (nameDotted . fst) (variableProductions g)
@@ -180,7 +188,7 @@ substitutionDefinitions gs g =
         ys
 
     -- ---------------------------------------------------------------------
-    -- L-fresh-‹k›: the fuel is the list itself. Among x, xc, …, xc⁽ⁿ⁾ one is not
+    -- L.fresh-‹k›: the fuel is the list itself. Among x, xc, …, xc⁽ⁿ⁾ one is not
     -- among n names, so n primings are enough and the recursion is on the list.
     --
     -- **The priming character comes from the class, not from a hardcoded @'@**
@@ -209,7 +217,7 @@ substitutionDefinitions gs g =
              [v "y"])
 
     -- ---------------------------------------------------------------------
-    -- L-fv-‹k›: an accumulator and the names bound on the way down, so that
+    -- L.fv-‹k›: an accumulator and the names bound on the way down, so that
     -- neither an append nor a removal is needed for this language's own
     -- subterms. A name may be listed twice; it is a list, not a set, and
     -- everything that reads it only asks membership.
@@ -236,14 +244,14 @@ substitutionDefinitions gs g =
             -- A slot of another language that can hold a free k-name: ask that
             -- language, then take out the names bound on the way in.
             (Scope bs, Nothing, OfLanguage l) | k `elem` reachedBy l ->
-              without (app (name (fvOf (nameOf l) k)) [v a]) (under bs) acc
+              without (app (global (fvOf l k)) [v a]) (under bs) acc
             (Plain, Nothing, OfLanguage l) | k `elem` reachedBy l ->
-              without (app (name (fvOf (nameOf l) k)) [v a]) (v "bound") acc
+              without (app (global (fvOf l k)) [v a]) (v "bound") acc
             _ -> acc
        in lamL (as ++ rs ++ ["bound", "acc"]) (foldr step (v "acc") (zip as args))
 
     -- ---------------------------------------------------------------------
-    -- L-subst-all.
+    -- L.subst-all.
     allBody =
       lamL ["t"]
         (elimOn lang [] (lamL ["u"] (arrows (map mapType reached) self))
@@ -301,7 +309,7 @@ substitutionDefinitions gs g =
             -- Nothing to do when that language reaches no class: nothing in it
             -- can mention a name.
             (Nothing, OfLanguage l) | not (null (reachedBy l)) ->
-              app (name (allOf (nameOf l))) (v a : mapsOf (reachedBy l) bs)
+              app (global (allOf l)) (v a : mapsOf (reachedBy l) bs)
             _ -> v a
           rebuilt = app (name (conName p))
             [ case argumentRole arg of
@@ -321,16 +329,16 @@ substitutionDefinitions gs g =
                        , lamL ["y", "ys", "ry"]
                            (elimOn "List" [string] (lamL ["l"] (listOf string))
                               [ v "ry", lamL ["h", "hs", "rh"] (consOf string (v "h") (v "rh")) ]
-                              (app (name (fvOf (ownerName k) c)) [lookupIn k (v "y") (v (mapVar k))]))
+                              (app (global (fvOf (grammarName (owner k)) c)) [lookupIn k (v "y") (v (mapVar k))]))
                        ]
-                       (app (name (fvOf lang k)) [app (name (conName p)) (map v as)]))
+                       (app (global (fvOf langName k)) [app (name (conName p)) (map v as)]))
                   (nilOf string)
                   [ k | k <- reached, c `elem` reachedBy (grammarName (owner k)) ]
           withRenamings =
             foldr (\i body ->
                      let c = fromMaybe "" (binderAt args i)
                       in SurfaceLet (local (renamed i)) (Just string)
-                           (app (name (freshOf (ownerName c) c)) [v (as !! i), avoidTerm i c]) body)
+                           (app (global (freshOf (grammarName (owner c)) c)) [v (as !! i), avoidTerm i c]) body)
                   rebuilt binders
        in lamL (as ++ rs ++ map mapVar reached) $ case (map argumentRole args, as) of
             -- A variable production: the whole node is what its class's map says.
@@ -343,7 +351,7 @@ substitutionDefinitions gs g =
     -- ---------------------------------------------------------------------
     oneBody k =
       lamL ["e", "y", "n"]
-        (app (name (allOf lang))
+        (app (global (allOf langName))
            (v "e" : [ if c == k
                         then consOf (pairType c)
                                (app (name "both") [string, ownerSelf c, v "y", v "n"])
@@ -366,9 +374,6 @@ binderAt :: [Argument] -> Int -> Maybe String
 binderAt args i = case drop i args of
   a : _ | Binder cn <- argumentRole a -> Just (nameDotted cn)
   _ -> Nothing
-
-nameOf :: GlobalName -> String
-nameOf = nameDotted
 
 -- | The @notation@ block generated substitution declares — @E[x -> M]@, one
 -- production per class the grammar has substitution for (§6.3, §4.8; MS8 phase
@@ -400,7 +405,7 @@ nameOf = nameDotted
 --
 -- **Only the one-pair form.** @E[x -> M, y -> N]@ is simultaneous substitution and
 -- builds a /list/ per class, which no object grammar spells, so it stays what it
--- was: sugar in a rule's own grammar, elaborating to @L-subst-all@. The split is
+-- was: sugar in a rule's own grammar, elaborating to @L.subst-all@. The split is
 -- principled rather than arbitrary — the one-pair form /is/ a function applied to
 -- what its slots hold, which is exactly what a notation production is, and the
 -- list form constructs an argument instead.
@@ -417,7 +422,7 @@ substitutionNotations gs g
     -- @notation@ production names its arguments now, so the generator says what
     -- it means and no grammar has to carry a word for it.
     prods =
-      [ Production 0 (substOf lang k)
+      [ Production 0 (nameDotted (substOf (grammarName g) k))
           [ Param (target k) Nothing, Param k (Just k), Param (replacement k) Nothing ]
           Nothing
           (map Word [target k, "[", k, "->", replacement k, "]"])
@@ -437,19 +442,20 @@ substitutionNotations gs g
     replacement k = pick "n" [ c | c <- ["n", "n1"], c /= k, c /= target k ]
     pick dflt cs = fromMaybe dflt (listToMaybe cs)
 
-freshOf, fvOf, substOf :: String -> String -> String
-freshOf l k = l ++ "-fresh-" ++ k
-fvOf l k = l ++ "-fv-" ++ k
-substOf l k = l ++ "-subst-" ++ k
-
-allOf :: String -> String
-allOf l = l ++ "-subst-all"
-
 -- ---------------------------------------------------------------------------
 -- Surface, written by hand
 
 name :: String -> Surface
 name = SurfaceName []
+
+-- | A reference to a generated global, written with its path (MS10 phase 244).
+--
+-- **Qualified and never short**, because the short word would be looked for in
+-- the context first and the recursion assumption of the declaration being
+-- elaborated is the one local there — @LC.subst-all@ reaching for @subst-all@
+-- while @LC.subst-x@ is being declared would find nothing at all.
+global :: GlobalName -> Surface
+global = surfaceName
 
 app :: Surface -> [Surface] -> Surface
 app f [] = f

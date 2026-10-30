@@ -84,7 +84,7 @@ judgment swap = M ⇄ N where
   Swap:  ------------------------------------------
          ( x_1 x_2 ) ⇄ ( x_1 x_2 )[x_1->x_2, x_2->x_1]
 
--- The kernel runs LC-subst-all to check the right-hand side.
+-- The kernel runs LC.subst-all to check the right-hand side.
 swapped : swap`( a b ) ⇄ ( b a )`
 swapped = Swap "a" "b"
 

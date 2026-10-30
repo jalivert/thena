@@ -39,7 +39,7 @@ module Thena.Language.Build
 import Data.List (elemIndex, intercalate)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, rootName, Literal (..))
+import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, nameFromText, rootName, Literal (..))
 import Thena.Errors (BuildError (..))
 import Thena.Language.Earley (Piece (..), Tree (..), placeholderChar)
 import qualified Thena.Language.Earley as Earley
@@ -57,7 +57,7 @@ import Thena.Core.Level (levelOfNat)
 import Thena.Syntax.Lexer (rawEscapes)
 import Thena.Instral.Pattern (Skeleton (..), Slot (..))
 import Thena.Language.Regex (matches)
-import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..))
+import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), surfaceName)
 
 -- | The term a reading denotes.
 --
@@ -77,7 +77,9 @@ buildCore gs splices = build
       Node name children -> do
         p <- maybe (Left (NoSuchProduction name)) Right (production gs name)
         args <- traverse (slot name) =<< arguments p children
-        Right (foldl App (Global (rootName name) []) args)
+        -- **The production's own name**, which carries its path (MS10 phase
+        -- 244) — re-deriving it from the node's word would root it.
+        Right (foldl App (Global (gproductionName p) []) args)
       _ -> Left (NotForSlot "" (shapeOf tree))
 
     slot name (a, child) = case (argumentSort a, child) of
@@ -124,10 +126,10 @@ buildSurface gs splices = build
       Node name children -> do
         p <- maybe (Left (NoSuchProduction name)) Right (production gs name)
         args <- traverse (slot name) =<< arguments p children
-        Right $ case args of
-          [] -> SurfaceName [] name
-          a : as -> SurfaceApp (SurfaceName [] name)
-                      (NE.map (SurfaceArg Explicit) (a NE.:| as))
+        let f = surfaceName (gproductionName p)
+         in Right $ case args of
+              [] -> f
+              a : as -> SurfaceApp f (NE.map (SurfaceArg Explicit) (a NE.:| as))
       _ -> Left (NotForSlot "" (shapeOf tree))
 
     slot name (a, child) = case (argumentSort a, child) of
@@ -166,7 +168,7 @@ skeletonOf gs holes = go
       Node name children -> do
         p <- maybe (Left (NoSuchProduction name)) Right (production gs name)
         kids <- traverse (slot name) =<< arguments p children
-        Right (SNode (rootName name) kids)
+        Right (SNode (gproductionName p) kids)
       _ -> Left (NotForSlot "" (shapeOf tree))
 
     slot name (a, child) = case (argumentSort a, child) of
@@ -468,7 +470,7 @@ fenceAt (i : is) d = case d of
 
 production :: [Grammar] -> String -> Maybe GProduction
 production gs name =
-  case [ p | g <- gs, p <- grammarProductions g, gproductionName p == rootName name ] of
+  case [ p | g <- gs, p <- grammarProductions g, gproductionName p == nameFromText name ] of
     p : _ -> Just p
     [] -> Nothing
 

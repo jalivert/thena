@@ -382,11 +382,11 @@ the generator writes for you, beside the substitution functions themselves:
 
 ```
 notation LC where
-  LC-subst-x e (x : x) n -> e [ x -> n ]
+  LC.subst-x e (x : x) n -> e [ x -> n ]
 ```
 
 The middle parameter is the one that is ascribed: it reads a *name* of the class
-`x`, and `LC-subst-x`'s declaration says only `String` there.
+`x`, and `LC.subst-x`'s declaration says only `String` there.
 
 So it is an ordinary production — it works in a term literal, not only in a rule,
 and a stuck substitution prints in it. **The comma list `E[x -> M, y -> N]` is

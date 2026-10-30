@@ -12,7 +12,7 @@ module FsubTyping where
 -- supertype, and the derivation says where that was used.
 --
 -- T-TApp's conclusion computes its own type. `T12[X -> T2]` is the generated
--- Ty-subst-X, so the kernel works the result out rather than being told it.
+-- Ty.subst-X, so the kernel works the result out rather than being told it.
 judgment typing = Γ ⊢ t : T where
 
   T-Var:   x : T ∈ Γ

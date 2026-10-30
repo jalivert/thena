@@ -467,7 +467,7 @@ inclusion r s = search (Set.singleton (0, 0)) [((0, 0), [])]
 -- without leaving it** (MS6 closeout 23, phase 146).
 --
 -- So if @c@ comes back, then @y@, @y ++ [c]@, @y ++ [c,c]@, … are all in the
--- class whenever @y@ is — which is what a generated @L-fresh@ needs, since it
+-- class whenever @y@ is — which is what a generated @L.fresh-\8249k\8250@ needs, since it
 -- renames a captured binder by extending it until the name is unused. Appending
 -- @'@ unconditionally is what it used to do, and a class such as @\/[a-z]+\/@
 -- does not accept it, so the renamed binder was a name the language could not

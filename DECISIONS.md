@@ -223,9 +223,12 @@ reserved, and a qualified name can be written and resolved in a core term, in a
 term you are elaborating, and in a rule. **A `data` declaration's generated
 equipment is already in its namespace** — `Nat.elim`, `Nat.case`,
 `Nat.noConfusion`, `Nat.Below` and the rest — so `:show Nat.case` is how you ask
-for one. **Its constructors and the type itself are not yet**: those stay at the
-root until a written name can be resolved outward from the namespace it sits in,
-and the spellings below may still move.*
+for one. **A language's generated substitution is too**, as `LC.fv-x`,
+`LC.subst-x`, `LC.subst-all` and `LC.fresh-x`, and **a declaration of your own
+may be written with a path**: `Ty.lemma : …` declares `lemma` in `Ty`. **A
+datatype's constructors and the type itself are not yet**: those stay at the root
+until a written name can be resolved outward from the namespace it sits in, and
+the spellings below may still move.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something
@@ -491,7 +494,7 @@ preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 
 ```
 
 in the surface language, with `elim` and no proof sugar. **It is about the
-generated `LC-subst-all`**, not a substitution written for the proof: the
+generated `LC.subst-all`**, not a substitution written for the proof: the
 proof names the generated function's pieces, checks with `refl` that they are
 the same terms, and follows its `decString` decisions case by case.
 
@@ -534,7 +537,7 @@ claimed and actual become convertible, and the node contracts — `:whnf
 appendAssoc "a" "b" "c"` is its own body. They are pending exactly where they
 carry weight.
 
-**The name chooser's specification is a theorem.** `L-fresh-‹k› y avoid` is not
+**The name chooser's specification is a theorem.** `L.fresh-‹k› y avoid` is not
 in `avoid` — that used to be the trusted claim, and it is now derived from the
 three laws by the argument the generated code is built on: the candidates `y`,
 `y'`, `y''`, … are pairwise distinct, each rejection spends one name of the
@@ -574,11 +577,11 @@ name nobody knows can follow the decision:
 
 ```
 varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty)
-            -> Eq LC (LC-subst (var y) x N) (var y)
+            -> Eq LC (LC.subst-x (var y) x N) (var y)
 ```
 
 **Generated substitution decides with `decString`**, which is what lets a
-proof about `LC-subst` follow it at all. What is trusted is the same as for
+proof about `LC.subst-x` follow it at all. What is trusted is the same as for
 `eqString`: the verdict on two literals. The refutation it writes is built
 from `decString` itself and checked by the kernel.
 
@@ -1242,14 +1245,14 @@ Generated substitution now writes the block a user would have written —
 
 ```
 notation LC where
-  LC-subst-x -> M [ x -> N ]
+  LC.subst-x -> M [ x -> N ]
 ```
 
 — as a surface item, checked the same way. Two things follow and both are gains.
 It **parses outside a rule**, so `` LC`x[x -> y]` `` is an ordinary term literal
 where it used to be a parse error; and it **prints back**, so a rule whose index
 substitutes reads ``sub`${Γ} [ ${X} -> ${T} ] ⊢ …` `` instead of splicing
-`${Ctx-subst-X Γ X T}`.
+`${Ctx.subst-X Γ X T}`.
 
 **The comma list stays sugar**, because `E[x -> M, y -> N]` builds a *list* per
 class and no object grammar spells a list. So the one-pair form is a production
@@ -1814,8 +1817,8 @@ the first premise continues the one above:
 
 A premise may be named, `d : Γ ⊢ M : T`; one that is
 not is `d1`, `d2`, … by position. A premise is never named like a
-metavariable, so `x : T ∈ Γ` is always the lookup. `E[x->N]` is `LC-subst E x
-N`; `E[x->M, y->N]` is `LC-subst-all`, simultaneous; `E[x->M][y->N]` is one
+metavariable, so `x : T ∈ Γ` is always the lookup. `E[x->N]` is `LC.subst-x E x
+N`; `E[x->M, y->N]` is `LC.subst-all`, simultaneous; `E[x->M][y->N]` is one
 after the other.
 
 **The annotated tier writes the quantification**, which fixes the argument
@@ -1908,14 +1911,14 @@ kind of name its entries can hold, it gets the free-variables function and the
 substitution — so F-sub's Γ, whose entries hold types, gets:
 
 ```
-Ctx-fv-X     : Ctx -> List String
-Ctx-subst-X  : Ctx -> String -> Ty -> Ctx
-Ctx-subst-all : Ctx -> List (And String Ty) -> Ctx
+Ctx.fv-X     : Ctx -> List String
+Ctx.subst-X  : Ctx -> String -> Ty -> Ctx
+Ctx.subst-all : Ctx -> List (And String Ty) -> Ctx
 ```
 
-`Ctx-subst-X` is the `[X↦P]Δ` that System F's type-substitution lemma is written
+`Ctx.subst-X` is the `[X↦P]Δ` that System F's type-substitution lemma is written
 with, and a rule may write it in notation: `Γ[X -> T]` elaborates to
-`Ctx-subst-X Γ X T`.
+`Ctx.subst-X Γ X T`.
 
 It is a plain fold with **no capture avoidance and no renaming**, because a
 context's name slot is an ordinary name and not a binder: `Γ , x : T` has no body
@@ -1935,10 +1938,10 @@ for every kind of name it can contain, right after its datatype — here the one
 kind, `x`:
 
 ```
-LC-fresh-x   : String -> List String -> String
-LC-fv-x      : LC -> List String
-LC-subst-all : LC -> List (And String LC) -> LC     -- simultaneous
-LC-subst-x   : LC -> String -> LC -> LC             -- LC-subst-x E x N is E[x->N]
+LC.fresh-x   : String -> List String -> String
+LC.fv-x      : LC -> List String
+LC.subst-all : LC -> List (And String LC) -> LC     -- simultaneous
+LC.subst-x   : LC -> String -> LC -> LC             -- LC.subst-x E x N is E[x->N]
 ```
 
 **The kind is in the name even when there is only one**, because leaving it out
@@ -1949,7 +1952,7 @@ They are ordinary definitions, written by `elim` and elaborated like anything
 you write. They compute, so a substitution's answer is provable by `refl`:
 
 ```
-captured : Eq LC (LC-subst-x (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
+captured : Eq LC (LC.subst-x (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
 captured = refl LC (abs "y'" base (var "y"))
 ```
 
@@ -1963,7 +1966,7 @@ What it needs of the language, each refused at the block with a message: one
 variable production **per kind of name**, taking only its occurrence; and a
 binder free only in an argument of a language that reads names of that binder's
 kind — see the next entry. A language that can contain no name at all (`Ty` in
-the example above) gets nothing. The four names are yours to keep free — declaring `LC-fv` first
+the example above) gets nothing. The four names are yours to keep free — declaring `LC.fv-x` first
 is refused.
 
 A binder of one kind does not bind names of another: the kinds are separate
@@ -1974,7 +1977,7 @@ Two things arrived with it. **`List`, with `nil` and `cons`, is in the
 prelude**, so those names are taken from every object language until imports
 exist. **`appendString : String -> String -> String`** is the one way to build
 a `String`, and it computes only on two literals. The types that mention `List`
-carry a level parameter, `LC-fv {ℓ}`, because a list of names is a list at any
+carry a level parameter, `LC.fv-x {ℓ}`, because a list of names is a list at any
 level and nothing is defaulted.
 
 ### A binder may scope into another language, if that language reads that kind of name
@@ -2013,13 +2016,13 @@ way now is nothing.
 substitution for each:
 
 ```
-Tm-subst-x   : Tm -> String -> Tm -> Tm     -- a term for a term variable
-Tm-subst-X   : Tm -> String -> Ty -> Tm     -- a TYPE for a type variable
-Tm-subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
+Tm.subst-x   : Tm -> String -> Tm -> Tm     -- a term for a term variable
+Tm.subst-X   : Tm -> String -> Ty -> Tm     -- a TYPE for a type variable
+Tm.subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
 ```
 
 **A kind of name belongs to the language whose variable production reads it**, and
-that is what a substitution for it replaces a name *with* — so `Tm-subst-X` takes
+that is what a substitution for it replaces a name *with* — so `Tm.subst-X` takes
 a type. Two unrelated languages may both read `x : Token String`, each the owner
 for itself; what is refused is one language reaching two that read the same kind,
 where the substitution would have no single language to replace a name with.
