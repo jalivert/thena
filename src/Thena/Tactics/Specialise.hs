@@ -79,7 +79,6 @@ import Thena.Core.Reduce (atLevels, whnf)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
-  , nameDotted
   , Ident (..)
   , Var
   , close

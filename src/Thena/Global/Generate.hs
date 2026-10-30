@@ -597,7 +597,7 @@ simultaneously ss t n =
 -- whole thing is then one type, with one motive, that a single J can move.
 packType :: Level -> [(Var, Core)] -> Context -> Int -> (Core, Int)
 packType dl ss es n = case es of
-  []       -> (Global (rootName "Unit") [dl], n)
+  []       -> (unitType dl, n)
   [e]      -> simultaneously ss (entryType e) n
   e : rest -> let ((a, b), n1) = packParts dl ss e rest n
                in (dpairAt dl a b, n1)
@@ -1090,9 +1090,9 @@ unpackChain dl hs goal pkg body n = case hs of
         mot         = Lam (Ident "p") pairTy (close pv goal)
         meth        = Lam (Ident "q") eq (close qv
                         (Lam (Ident "r") sndTy (close rv inner)))
-        former      = if dependent then "DPair" else "And"
+        former      = if dependent then dependentPairName else conjunctionName
         args        = if dependent then [eq, binder] else [eq, restTy]
-     in (Eliminate (rootName former) [dl, dl] args mot [meth] [] pkg, n3)
+     in (Eliminate former [dl, dl] args mot [meth] [] pkg, n3)
 
 -- --------------------------------------------------------------------------
 -- Preconditions
@@ -1145,7 +1145,7 @@ conjunctionInScope env = case lookupInductive conjunctionName env of
       inductiveLevel e == LMax (LVar l0) (LVar l1)
         && entryType a == Universe (LVar l0)
         && entryType b == Universe (LVar l1)
-        && constructorName c == rootName "both"
+        && constructorName c == bothName
         && case constructorArguments c of
              [x, y] -> entryType x == Free (entryVar a)
                          && entryType y == Free (entryVar b)
@@ -1174,7 +1174,7 @@ dependentPairInScope env = case lookupInductive dependentPairName env of
       inductiveLevel e == LMax (LVar l0) (LVar l1)
         && entryType a == Universe (LVar l0)
         && secondIsAFamilyOver a l1 (entryType b)
-        && constructorName c == rootName "dpair"
+        && constructorName c == dpairName
         && case constructorArguments c of
              [x, y] -> entryType x == Free (entryVar a)
                          && entryType y == App (Free (entryVar b)) (Free (entryVar x))
@@ -1197,7 +1197,7 @@ truthInScope env = case lookupInductive truthName env of
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     ([], [], [c]) | [lv] <- inductiveLevels e ->
       inductiveLevel e == LVar lv
-        && constructorName c == rootName "unit"
+        && constructorName c == unitName
         && null (constructorArguments c)
         && null (constructorIndices c)
     _ -> False
