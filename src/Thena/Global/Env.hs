@@ -342,7 +342,7 @@ data GlobalEnv = GlobalEnv
     -- They are apart from 'constants' because 'Thena.Syntax.Resolve' does not
     -- resolve a name in that table, deliberately — an eliminator there /"would
     -- be a trap: it would resolve in term position"/. A primitive is the
-    -- opposite case: @String@ and @eqString@ are written in ordinary terms and
+    -- opposite case: @String@ and @String.eq@ are written in ordinary terms and
     -- have to resolve. One table each, rather than a flag on 'Constant', so the
     -- resolver asks a question with one answer.
   , definitions :: [(GlobalName, Definition)]           -- ^ a type and a body

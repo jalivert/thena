@@ -298,10 +298,10 @@ hopeless env ctx claimed actual = fst (go ctx seed claimed actual)
     -- cost a false @Undischargeable@** (MS8 phase 152). A primitive's rule
     -- reads its arguments' /shape/ rather than their number
     -- ("Thena.Core.Reduce"'s @primitiveStep@ fires when both are literals), so
-    -- substituting a literal for a variable changes the head: @eqString a a@
-    -- stands with @eqString@ at the head and @eqString "x" "x"@ is the
+    -- substituting a literal for a variable changes the head: @String.eq a a@
+    -- stands with @String.eq@ at the head and @String.eq "x" "x"@ is the
     -- constructor @same@. Calling the first rigid made the prelude's own
-    -- @eqString a a ≡ same@ claim impossible-by-position at its definition
+    -- @String.eq a a ≡ same@ claim impossible-by-position at its definition
     -- site, which at 'NoUndischargeableTrust' refuses every proof that decides
     -- a string equality. The rule above is answer 'False' unless certain, and
     -- about a primitive this is never certain.

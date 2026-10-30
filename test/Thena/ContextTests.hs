@@ -2,7 +2,7 @@
 --
 -- **The proofs are the load-bearing tests.** A lookup at the top of a context
 -- is @extend-here@; one under a later binding of a different name is @extend-there-extend@,
--- whose @ne@ is proved with no axiom from @eqString@ alone, which is what
+-- whose @ne@ is proved with no axiom from @String.eq@ alone, which is what
 -- §2.1 promised and what phase 109's proofs will have to do. And a lookup
 -- that would skip a binding of the /same/ name is refused, because @ne@ has no
 -- proof — that is the shadowing §5.3 generates @ne@ for.
@@ -189,7 +189,7 @@ substituted =
         , ["stuck: not in scope: Ctx.fv-x"] ]
   ]
 
--- | @x ≠ y@, from @eqString@ and nothing else: the motive sends a string to
+-- | @x ≠ y@, from @String.eq@ and nothing else: the motive sends a string to
 -- @Unit@ when it is @"x"@ and to @Empty@ otherwise, and @Eq@'s eliminator
 -- carries @unit@ from one side to the other.
 xNotY :: [String]
@@ -197,8 +197,8 @@ xNotY =
   [ "xNotY : Eq String \"x\" \"y\" -> Empty"
   , "xNotY = \\ q ->"
   , "  elim Eq (String)"
-  , "    (\\ a b r -> elim Comparison () (\\ c -> Type\8320) ((Unit) (Empty)) () (eqString \"x\" a)"
-  , "                -> elim Comparison () (\\ c -> Type\8320) ((Unit) (Empty)) () (eqString \"x\" b))"
+  , "    (\\ a b r -> elim Comparison () (\\ c -> Type\8320) ((Unit) (Empty)) () (String.eq \"x\" a)"
+  , "                -> elim Comparison () (\\ c -> Type\8320) ((Unit) (Empty)) () (String.eq \"x\" b))"
   , "    ((\\ a d -> d))"
   , "    (\"x\" \"y\") q unit"
   , ""

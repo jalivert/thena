@@ -52,14 +52,14 @@ You land at a prompt with a small prelude already loaded, and one empty goal.
 
 `String`, `Char`, `Int` and `Token` are in scope as well — those are built in
 rather than declared, so they are there in any environment — along with the
-four primitive functions, `eqString`, `eqChar`, `eqInt` and `appendString`.
+four primitive functions, `String.eq`, `Char.eq`, `Int.eq` and `String.append`.
 
 `decString a b` answers `yes` with a proof that `a` and `b` are equal, or `no`
 with a refutation, and on a name it does not know it is stuck — so a proof that
 eliminates it gets the equality in one branch and its refutation in the other.
-That is what `eqString` alone cannot give you, and it is the reason the prelude
+That is what `String.eq` alone cannot give you, and it is the reason the prelude
 has both. `decString` is a *definition*, written in `prelude/prelude.thena`,
-and what it rests on is two `trusted` claims about `eqString`: that a `same`
+and what it rests on is two `trusted` claims about `String.eq`: that a `same`
 answer means the two really are equal (`eqStringEqual`), and that the
 comparison answers `same` of a literal and itself (`eqStringRefl`). Chapter 9
 is what those are; `isSame` is the helper that tells the two answers apart.
@@ -1239,10 +1239,10 @@ provable that way. Treat the middle setting as hygiene, not as safety.
 
 This is not only a facility for your own proofs: the prelude uses it. Deciding
 whether two strings are equal is the case, and it is the one that forced the
-feature. `eqString` computes — it answers `same` or `different` on two literals
+feature. `String.eq` computes — it answers `same` or `different` on two literals
 — but nothing in the type theory connects that answer to the equality type, and
 no term you can write closes the gap. So `decString` is a definition resting on
-two claims about `eqString`, and `:trust` names both:
+two claims about `String.eq`, and `:trust` names both:
 
 ```
 thena spine> :trust no-undischargeable
@@ -1262,7 +1262,7 @@ trust: no undischargeable trust
     claims Eq {0} String a b
     body   Eq {0} String a a
   pending, in decString · eqStringRefl
-    claims Eq {0} Comparison (eqString a a) same
+    claims Eq {0} Comparison (String.eq a a) same
     body   Eq {0} Comparison same same
 thena spine> qed
 decides : Dec {0 0} (Eq {0} String "x" "x")   ∎
@@ -1270,7 +1270,7 @@ decides : Dec {0 0} (Eq {0} String "x" "x")   ∎
     claims Eq {0} String a b
     body   Eq {0} String a a
   pending, in decString · eqStringRefl
-    claims Eq {0} Comparison (eqString a a) same
+    claims Eq {0} Comparison (String.eq a a) same
     body   Eq {0} Comparison same same
 ```
 

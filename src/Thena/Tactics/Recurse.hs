@@ -661,8 +661,8 @@ resolveRecursion env n0 tm = case tm of
     -- The same walk, kept as a term: what a copy is defined as, for a message.
     --
     -- __Through the whole term and not only its head__ (MS9 phase 208): an
-    -- argument that is itself built out of copies — @appendString c "'"@ comes
-    -- back as @appendString a2 a3@ — would otherwise be reported in generated
+    -- argument that is itself built out of copies — @String.append c "'"@ comes
+    -- back as @String.append a2 a3@ — would otherwise be reported in generated
     -- names nobody wrote. @close@ then @instantiate@ because those are the only
     -- way in and out of a 'Thena.Core.Term.Scope' (§3.4).
     expand w = look (0 :: Int)

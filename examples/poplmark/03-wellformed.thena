@@ -118,16 +118,16 @@ judgment ok = ⊢ Γ ok where
 
 
 -- ---------------------------------------------------------------------------
--- Two literals differ, with no axiom: eqString computes on them and Eq carries
+-- Two literals differ, with no axiom: String.eq computes on them and Eq carries
 -- the fact from one name to the other. One per pair, because the proof needs
--- eqString to REDUCE — a version quantified over two names would be claiming
+-- String.eq to REDUCE — a version quantified over two names would be claiming
 -- that any two names differ.
 
 yNotX : Eq String "Y" "X" -> Empty
-yNotX = \ q -> substEq String (\ z -> isSame (eqString "Y" z)) "Y" "X" q unit
+yNotX = \ q -> substEq String (\ z -> isSame (String.eq "Y" z)) "Y" "X" q unit
 
 xNotY : Eq String "X" "Y" -> Empty
-xNotY = \ q -> substEq String (\ z -> isSame (eqString "X" z)) "X" "Y" q unit
+xNotY = \ q -> substEq String (\ z -> isSame (String.eq "X" z)) "X" "Y" q unit
 
 -- ---------------------------------------------------------------------------
 -- Derivations.

@@ -677,7 +677,7 @@ refused =
 
 -- | **What @decString@ was for.** At @var y@ the generated code eliminates
 -- @decString y x@; a proof about a name it does not know eliminates the same
--- term, and each branch hands it the evidence it needs. With @eqString@ there
+-- term, and each branch hands it the evidence it needs. With @String.eq@ there
 -- the @same@ branch had no @Eq String y x@ and neither lemma could be stated
 -- and proved. These are the base case of the substitution lemma phase 109b
 -- builds.

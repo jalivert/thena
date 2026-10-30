@@ -15,7 +15,7 @@
 --
 -- == What this file trusts, and what it proves
 --
--- **It trusts three laws about `appendString` and derives the rest.** The three
+-- **It trusts three laws about `String.append` and derives the rest.** The three
 -- are `appendAssoc`, `primeDiffers` and `primeMoreDiffers` below: appending is
 -- associative, and a string differs from itself with a `'` appended, with or
 -- without more after it. Each is a one-line fact about a primitive that
@@ -41,7 +41,7 @@
 -- `trusted` node; `:show freshIsFresh` prints the derivation, with none. On
 -- literals each law DISCHARGES, because both sides reduce and the node
 -- contracts — `:whnf appendAssoc "a" "b" "c"` is the body, `refl String
--- (appendString "a" (appendString "b" "c"))`. They are pending exactly on
+-- (String.append "a" (String.append "b" "c"))`. They are pending exactly on
 -- arguments nobody knows, which is where they are load-bearing.
 --
 -- `:trust` reports on the proof in front of you and not on the environment, so
@@ -62,7 +62,7 @@
 --
 --   * **a scrutinee that is COMPUTED, where the arm needs the verdict as an
 --     equation.** `inRemove`, `removeLonger` and `walk` each ask
---     `eqString c a` or `member c avoid` and then call a lemma —
+--     `String.eq c a` or `member c avoid` and then call a lemma —
 --     `eqStringEqual`, `neqFromDifferent`, `sameIsIn` — that takes the answer
 --     as an `Eq`. A `case` refines the goal, which is what `remove`'s own
 --     unfolding needs, but it cannot hand the arm that equation. This is the
@@ -81,24 +81,24 @@
 module StlcPreservationAny where
 
 -- ---------------------------------------------------------------------------
--- THE THREE TRUSTED LAWS. All three are about `appendString` and `eqString` on
+-- THE THREE TRUSTED LAWS. All three are about `String.append` and `String.eq` on
 -- arguments nobody knows, which is exactly where a primitive goes neutral.
 
 appendAssoc : forall (a : String) (b : String) (c : String)
-           -> (Eq String (appendString (appendString a b) c) (appendString a (appendString b c)) : Type₀)
+           -> (Eq String (String.append (String.append a b) c) (String.append a (String.append b c)) : Type₀)
 appendAssoc = \ a b c ->
-  trusted (Eq String (appendString (appendString a b) c) (appendString a (appendString b c)))
-          (refl String (appendString a (appendString b c)))
+  trusted (Eq String (String.append (String.append a b) c) (String.append a (String.append b c)))
+          (refl String (String.append a (String.append b c)))
 
 primeDiffers : forall (a : String)
-            -> (Eq Comparison (eqString a (appendString a "'")) different : Type₀)
+            -> (Eq Comparison (String.eq a (String.append a "'")) different : Type₀)
 primeDiffers = \ a ->
-  trusted (Eq Comparison (eqString a (appendString a "'")) different) (refl Comparison different)
+  trusted (Eq Comparison (String.eq a (String.append a "'")) different) (refl Comparison different)
 
 primeMoreDiffers : forall (a : String) (b : String)
-                -> (Eq Comparison (eqString a (appendString (appendString a "'") b)) different : Type₀)
+                -> (Eq Comparison (String.eq a (String.append (String.append a "'") b)) different : Type₀)
 primeMoreDiffers = \ a b ->
-  trusted (Eq Comparison (eqString a (appendString (appendString a "'") b)) different)
+  trusted (Eq Comparison (String.eq a (String.append (String.append a "'") b)) different)
           (refl Comparison different)
 
 -- ---------------------------------------------------------------------------
@@ -107,15 +107,15 @@ primeMoreDiffers = \ a b ->
 symEq : forall (A : Type₀) (x : A) (y : A) -> (Eq A x y : Type₀) -> (Eq A y x : Type₀)
 symEq = \ A x y e -> case e of { refl c -> refl A c }
 
--- `eqString a a` does not reduce on an open `a`, so the `refl` comes from
+-- `String.eq a a` does not reduce on an open `a`, so the `refl` comes from
 -- `eqStringRefl` and the contradiction is transported along it.
 neqFromDifferent : forall (a : String) (c : String)
-                -> (Eq Comparison (eqString a c) different : Type₀)
+                -> (Eq Comparison (String.eq a c) different : Type₀)
                 -> (Eq String a c : Type₀) -> (Empty : Type₀)
 neqFromDifferent = \ a c dq q -> case q of
-  { refl u -> transport Comparison isSame (eqString u u) different dq
-                (transport Comparison isSame same (eqString u u)
-                   (symEq Comparison (eqString u u) same (eqStringRefl u)) unit) }
+  { refl u -> transport Comparison isSame (String.eq u u) different dq
+                (transport Comparison isSame same (String.eq u u)
+                   (symEq Comparison (String.eq u u) same (eqStringRefl u)) unit) }
 
 -- ---------------------------------------------------------------------------
 -- The chain of candidates, and that it is pairwise distinct
@@ -124,35 +124,35 @@ neqFromDifferent = \ a c dq q -> case q of
 chain : List String -> String -> List String
 chain = \ n -> induction n of
   { nil -> \ c -> cons String c (nil String)
-  ; cons h hs -> \ c -> cons String c (chain hs (appendString c "'")) }
+  ; cons h hs -> \ c -> cons String c (chain hs (String.append c "'")) }
 
 Tail : String -> String -> Type₀
-Tail = \ c d -> Sigma String (\ b -> Eq String d (appendString c b))
+Tail = \ c d -> Sigma String (\ b -> Eq String d (String.append c b))
 
 Shape : String -> String -> Type₀
-Shape = \ c d -> Or (Eq String d (appendString c "'")) (Tail (appendString c "'") d)
+Shape = \ c d -> Or (Eq String d (String.append c "'")) (Tail (String.append c "'") d)
 
 -- Everything in a chain that starts one prime up is `c'` or `c'` with more
 -- after it. The ONE use of associativity is here, in the step.
 chainShape : forall (n : List String) (c : String) (d : String)
-          -> (In d (chain n (appendString c "'")) : Type₀) -> (Shape c d : Type₀)
+          -> (In d (chain n (String.append c "'")) : Type₀) -> (Shape c d : Type₀)
 chainShape = \ n -> induction n of
   { nil -> \ c d i -> case i of
-      { orLeft e -> orLeft (Eq String d (appendString c "'")) (Tail (appendString c "'") d) e
+      { orLeft e -> orLeft (Eq String d (String.append c "'")) (Tail (String.append c "'") d) e
       ; orRight z -> absurdly (Shape c d) z }
   ; cons h hs -> \ c d i -> case i of
-      { orLeft e -> orLeft (Eq String d (appendString c "'")) (Tail (appendString c "'") d) e
-      ; orRight j -> case (chainShape hs (appendString c "'") d j) of
-          { orLeft e -> orRight (Eq String d (appendString c "'")) (Tail (appendString c "'") d)
-                          (pair String (\ b -> Eq String d (appendString (appendString c "'") b)) "'" e)
+      { orLeft e -> orLeft (Eq String d (String.append c "'")) (Tail (String.append c "'") d) e
+      ; orRight j -> case (chainShape hs (String.append c "'") d j) of
+          { orLeft e -> orRight (Eq String d (String.append c "'")) (Tail (String.append c "'") d)
+                          (pair String (\ b -> Eq String d (String.append (String.append c "'") b)) "'" e)
           ; orRight s -> case s of
-              { pair b e -> orRight (Eq String d (appendString c "'")) (Tail (appendString c "'") d)
-                              (pair String (\ b1 -> Eq String d (appendString (appendString c "'") b1))
-                                    (appendString "'" b)
+              { pair b e -> orRight (Eq String d (String.append c "'")) (Tail (String.append c "'") d)
+                              (pair String (\ b1 -> Eq String d (String.append (String.append c "'") b1))
+                                    (String.append "'" b)
                                     (transport String (\ z -> Eq String d z)
-                                       (appendString (appendString (appendString c "'") "'") b)
-                                       (appendString (appendString c "'") (appendString "'" b))
-                                       (appendAssoc (appendString c "'") "'" b)
+                                       (String.append (String.append (String.append c "'") "'") b)
+                                       (String.append (String.append c "'") (String.append "'" b))
+                                       (appendAssoc (String.append c "'") "'" b)
                                        e)) } } } }
 
 Distinct : List String -> Type₀
@@ -161,20 +161,20 @@ Distinct = \ xs -> induction xs of
   ; cons h hs -> And (In h hs -> Empty) (Distinct hs) }
 
 headNotInTail : forall (n : List String) (c : String)
-             -> (In c (chain n (appendString c "'")) : Type₀) -> (Empty : Type₀)
+             -> (In c (chain n (String.append c "'")) : Type₀) -> (Empty : Type₀)
 headNotInTail = \ n c i -> case (chainShape n c c i) of
-  { orLeft e -> neqFromDifferent c (appendString c "'") (primeDiffers c) e
+  { orLeft e -> neqFromDifferent c (String.append c "'") (primeDiffers c) e
   ; orRight s -> case s of
-      { pair b e -> neqFromDifferent c (appendString (appendString c "'") b)
+      { pair b e -> neqFromDifferent c (String.append (String.append c "'") b)
                       (primeMoreDiffers c b) e } }
 
 chainDistinct : forall (n : List String) (c : String) -> (Distinct (chain n c) : Type₀)
 chainDistinct = \ n -> induction n of
   { nil -> \ c -> both (In c (nil String) -> Empty) Unit (\ z -> z) unit
-  ; cons h hs -> \ c -> both (In c (chain hs (appendString c "'")) -> Empty)
-                             (Distinct (chain hs (appendString c "'")))
+  ; cons h hs -> \ c -> both (In c (chain hs (String.append c "'")) -> Empty)
+                             (Distinct (chain hs (String.append c "'")))
                              (\ i -> headNotInTail hs c i)
-                             (chainDistinct hs (appendString c "'")) }
+                             (chainDistinct hs (String.append c "'")) }
 
 -- ---------------------------------------------------------------------------
 -- Longer, and removing one name: the counting, with no numbers in it
@@ -191,13 +191,13 @@ Longer = \ xs -> induction xs of
 chainLonger : forall (n : List String) (c : String) -> (Longer (chain n c) n : Type₀)
 chainLonger = \ n -> induction n of
   { nil -> \ c -> unit
-  ; cons h hs -> \ c -> chainLonger hs (appendString c "'") }
+  ; cons h hs -> \ c -> chainLonger hs (String.append c "'") }
 
 -- The first occurrence only, so the length drops by exactly one.
 remove : String -> List String -> List String
 remove = \ c xs -> induction xs of
   { nil -> nil String
-  ; cons h hs -> case (eqString c h) of
+  ; cons h hs -> case (String.eq c h) of
       { same -> hs
       ; different -> cons String h (remove c hs) } }
 
@@ -207,11 +207,11 @@ inRemove = \ d c xs i nq -> induction xs of
   { nil -> absurdly (In d (remove c (nil String))) i
     -- The one shape no split can take: the scrutinee is COMPUTED, and the arm
     -- needs the equation that says which way it went — @eqStringEqual@ asks for
-    -- it. A @case@ on @eqString c a@ refines the goal, which is what @remove@'s
+    -- it. A @case@ on @String.eq c a@ refines the goal, which is what @remove@'s
     -- own unfolding needs, but it cannot hand the arm that equation.
   ; cons a as ->
       elim Comparison ()
-        (\ q -> Eq Comparison (eqString c a) q
+        (\ q -> Eq Comparison (String.eq c a) q
              -> In d (elim Comparison () (\ q1 -> List String) ((as) (cons String a (remove c as))) () q))
         ((\ eq -> case i of
             { orLeft e -> absurdly (In d as)
@@ -221,7 +221,7 @@ inRemove = \ d c xs i nq -> induction xs of
          (\ eq -> case i of
             { orLeft e -> orLeft (Eq String d a) (In d (remove c as)) e
             ; orRight j -> orRight (Eq String d a) (In d (remove c as)) (inRemove d c as j nq) }))
-        () (eqString c a) (refl Comparison (eqString c a)) }
+        () (String.eq c a) (refl Comparison (String.eq c a)) }
 
 removeLonger : forall (c : String) (ys : List String) (xs : List String) (x : String)
             -> (In c ys : Type₀) -> (Longer (cons String x xs) ys : Type₀)
@@ -232,7 +232,7 @@ removeLonger = \ c ys -> induction ys of
     -- below asks for the verdict as an equation.
   ; cons a as -> \ xs x i hl ->
       elim Comparison ()
-        (\ q -> Eq Comparison (eqString c a) q
+        (\ q -> Eq Comparison (String.eq c a) q
              -> Longer xs (elim Comparison () (\ q1 -> List String)
                              ((as) (cons String a (remove c as))) () q))
         ((\ eq -> hl)
@@ -244,7 +244,7 @@ removeLonger = \ c ys -> induction ys of
                      { orLeft e -> absurdly (In c as) (neqFromDifferent c a eq e)
                      ; orRight j -> j })
                   hl }))
-        () (eqString c a) (refl Comparison (eqString c a)) }
+        () (String.eq c a) (refl Comparison (String.eq c a)) }
 
 -- ---------------------------------------------------------------------------
 -- The two directions of 07's `member`, from its own spec
@@ -274,7 +274,7 @@ freshFrom : List String -> List String -> String -> String
 freshFrom = \ avoid fuel -> induction fuel of
   { nil -> \ c -> c
   ; cons h hs -> \ c -> case (member c avoid) of
-      { same -> freshFrom avoid hs (appendString c "'")
+      { same -> freshFrom avoid hs (String.append c "'")
       ; different -> c } }
 
 freshIs : forall (y : String) (avoid : List String)
@@ -303,22 +303,22 @@ walk = \ avoid fuel -> induction fuel of
       elim Comparison ()
         (\ q -> Eq Comparison (member c avoid) q
              -> In (elim Comparison () (\ q1 -> String)
-                      ((freshFrom avoid t (appendString c "'")) (c)) () q) avoid
+                      ((freshFrom avoid t (String.append c "'")) (c)) () q) avoid
              -> Empty)
         ((\ eq ii ->
-            walk avoid t (appendString c "'") (remove c av)
-               (andRight (In c (chain t (appendString c "'")) -> Empty)
-                         (Distinct (chain t (appendString c "'"))) dd)
-               (removeLonger c av (chain t (appendString c "'")) c
-                  (cv c (orLeft (Eq String c c) (In c (chain t (appendString c "'"))) (refl String c))
+            walk avoid t (String.append c "'") (remove c av)
+               (andRight (In c (chain t (String.append c "'")) -> Empty)
+                         (Distinct (chain t (String.append c "'"))) dd)
+               (removeLonger c av (chain t (String.append c "'")) c
+                  (cv c (orLeft (Eq String c c) (In c (chain t (String.append c "'"))) (refl String c))
                       (sameIsIn c avoid eq))
                   lg)
                (\ d jd ja ->
                   inRemove d c av
-                    (cv d (orRight (Eq String d c) (In d (chain t (appendString c "'"))) jd) ja)
-                    (\ e -> andLeft (In c (chain t (appendString c "'")) -> Empty)
-                                    (Distinct (chain t (appendString c "'"))) dd
-                              (transport String (\ z -> In z (chain t (appendString c "'"))) d c e jd)))
+                    (cv d (orRight (Eq String d c) (In d (chain t (String.append c "'"))) jd) ja)
+                    (\ e -> andLeft (In c (chain t (String.append c "'")) -> Empty)
+                                    (Distinct (chain t (String.append c "'"))) dd
+                              (transport String (\ z -> In z (chain t (String.append c "'"))) d c e jd)))
                ii)
          (\ eq ii ->
             transport Comparison isSame same different

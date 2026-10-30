@@ -202,7 +202,7 @@ awkward =
 -- The primitives' rule (MS6 phase 97b)
 -- --------------------------------------------------------------------------
 
--- | An environment with a two-constructor answer type and @eqString@ declared
+-- | An environment with a two-constructor answer type and @String.eq@ declared
 -- to answer with it.
 --
 -- **The answer type is deliberately not the prelude's** @Comparison@: the rule
@@ -210,7 +210,7 @@ awkward =
 -- a name written in the reducer. If the rule ever hard-codes one, these tests
 -- are what notices, because @yes@ and @no@ appear nowhere in @src/@.
 answering :: GlobalEnv
-answering = addPrimitive (rootName "eqString") eqTy withAnswer
+answering = addPrimitive (GlobalName ["String"] "eq") eqTy withAnswer
   where
     withAnswer = fst (declared ["Answer : Type₀ where { yes : Answer ; no : Answer }"])
     eqTy = arrow str (arrow str (Global (rootName "Answer") []))
@@ -240,8 +240,8 @@ computing =
         @?= [answer "yes", answer "no"]
   , testCase "so is a redex that reduces to one" $
       reduced (apply [App identity (str "a"), str "a"]) @?= answer "yes"
-  -- appendString (MS6 phase 105): the one way a String is built.
-  , testCase "appendString puts two literals together" $
+  -- String.append (MS6 phase 105): the one way a String is built.
+  , testCase "String.append puts two literals together" $
       reduced (append [str "x", str "'"]) @?= str "x'"
   , testCase "and reads a definition of one, as a comparison does" $
       reduced (append [named "a", str "b"]) @?= str "ab"
@@ -252,8 +252,8 @@ computing =
     v = fst (fresh 500)
     str s = Primitive (LString s)
     named g = Global (rootName g) []
-    apply = foldl App (Global (rootName "eqString") [])
-    append = foldl App (Global (rootName "appendString") [])
+    apply = foldl App (Global (GlobalName ["String"] "eq") [])
+    append = foldl App (Global (GlobalName ["String"] "append") [])
     reduced = whnf withA ctx
     withA = addDefinition (rootName "a") (MkDefinition [] [] stringTy (str "a")) answering
     stringTy = Global (rootName "String") []
@@ -267,19 +267,19 @@ computing =
 refusals :: [TestTree]
 refusals =
   [ refusedCase "a name with no rule" (rootName "myAxiom") (twoOf "String")
-  , refusedCase "the wrong argument type" (rootName "eqString") (twoOf "Int")
-  , refusedCase "too few arguments" (rootName "eqString") oneArgument
-  , refusedCase "an answer that is not a datatype" (rootName "eqString") intoAUniverse
-  , refusedCase "an answer with the wrong constructors" (rootName "eqInt") intoAnswerOfOne
+  , refusedCase "the wrong argument type" (GlobalName ["String"] "eq") (twoOf "Int")
+  , refusedCase "too few arguments" (GlobalName ["String"] "eq") oneArgument
+  , refusedCase "an answer that is not a datatype" (GlobalName ["String"] "eq") intoAUniverse
+  , refusedCase "an answer with the wrong constructors" (GlobalName ["Int"] "eq") intoAnswerOfOne
   , testCase "and the declaration this phase ships is accepted" $
-      isRight (checkedPrimitive answering (rootName "eqString") (twoOf "String")) @?= True
-  -- appendString's rule reads no declared type: it is String -> String ->
+      isRight (checkedPrimitive answering (GlobalName ["String"] "eq") (twoOf "String")) @?= True
+  -- String.append's rule reads no declared type: it is String -> String ->
   -- String exactly, and a comparison's shape is not that.
-  , refusedCase "appendString answering with a datatype" (rootName "appendString") (twoOf "String")
-  , refusedCase "appendString over Int" (rootName "appendString")
+  , refusedCase "String.append answering with a datatype" (GlobalName ["String"] "append") (twoOf "String")
+  , refusedCase "String.append over Int" (GlobalName ["String"] "append")
       (arrow (named "Int") (arrow (named "Int") (named "Int")))
-  , testCase "appendString at its own type is accepted" $
-      isRight (checkedPrimitive answering (rootName "appendString")
+  , testCase "String.append at its own type is accepted" $
+      isRight (checkedPrimitive answering (GlobalName ["String"] "append")
                  (arrow (named "String") (arrow (named "String") (named "String")))) @?= True
   ]
   where

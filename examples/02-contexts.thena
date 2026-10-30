@@ -40,13 +40,13 @@ fIsThere : extend-in`f : ( ι -> ι ) ∈ ·, x : ι, f : ( ι -> ι )`
 fIsThere = extend-here Ctx`·, x : ι` "f" Ty`( ι -> ι )`
 
 -- x is one further down, past f. `extend-there-extend` asks for a proof that x is not f.
--- There is no axiom for that: `eqString` compares the two literals, and
+-- There is no axiom for that: `String.eq` compares the two literals, and
 -- eliminating `Eq` carries a proof of one fact to the other.
 xNotF : Eq String "x" "f" -> Empty
 xNotF = \ q ->
   elim Eq (String)
-    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
-                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (String.eq "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (String.eq "x" b))
     ((\ a d -> d))
     ("x" "f") q unit
 

@@ -74,8 +74,8 @@ identityTyped =
 xNotY : Eq String "x" "y" -> Empty
 xNotY = \ q ->
   elim Eq (String)
-    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
-                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (String.eq "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (String.eq "x" b))
     ((\ a d -> d))
     ("x" "y") q unit
 

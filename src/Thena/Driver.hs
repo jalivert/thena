@@ -3219,7 +3219,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- type must be the shape that rule reads — @P -> P -> B@ for the primitive's
   -- own @P@, with @B@ a datatype of two constructors that take nothing.
   --
-  -- A user may therefore write @primitive eqString : String -> String -> Bool@
+  -- A user may therefore write @primitive String.eq : String -> String -> Bool@
   -- and choose what @Bool@ is; they may not write @primitive myAxiom : Empty@.
   -- **A grammar is installed only if every check of §4.5 passes** (MS6 phase
   -- 101); its warnings join the load's, in source order.

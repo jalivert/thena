@@ -266,7 +266,7 @@ narrowing = \ wk G Xn Q D M N P o tp d dp ->
 -- type.
 
 zNotB : Eq String "Z" "B" -> Empty
-zNotB = \ q -> substEq String (\ z -> isSame (eqString "Z" z)) "Z" "B" q unit
+zNotB = \ q -> substEq String (\ z -> isSame (String.eq "Z" z)) "Z" "B" q unit
 
 okB : ok`⊢ · , B <: ⊤ ok`
 okB = ok-bindTy Ctx`·` "B" Ty`⊤` ok-empty (NI-empty "B") (ty-top Ctx`·`)

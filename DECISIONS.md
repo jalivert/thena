@@ -465,12 +465,12 @@ greeting : String
 greeting = "hello"
 ```
 
-Two literals of a primitive type are compared with `eqString`, `eqChar` or
-`eqInt`, which answer with the prelude's `Comparison` (`same` or `different`)
+Two literals of a primitive type are compared with `String.eq`, `Char.eq` or
+`Int.eq`, which answer with the prelude's `Comparison` (`same` or `different`)
 and compute only on literals:
 
 ```
-thena spine> :whnf ⌜ eqString "a" "b" ⌝
+thena spine> :whnf ⌜ String.eq "a" "b" ⌝
 different
 ```
 
@@ -506,7 +506,7 @@ case — and reaches the same statement as `preservation-tactics`.
 **`07` is stated for closed terms**, as Software Foundations states it. The
 argument substituted in a β-step is then closed, so no binder is ever renamed.
 
-### And for any context, resting on three laws about `appendString`
+### And for any context, resting on three laws about `String.append`
 
 *Decided 2026-10-12; the trust narrowed to the three laws on 2026-10-16.*
 `examples/10-preservation-any-context.thena` proves the same theorem with no
@@ -522,12 +522,12 @@ renames the binder — `( λ y : ι . x )[x -> ( λ w : ι . y )]` is
 `( λ y' : ι . ( λ w : ι . y ) )`, which the file proves by `refl`. The proof then
 has to know the minted name really is fresh.
 
-**Three laws about `appendString` are trusted and everything else is proved**:
+**Three laws about `String.append` are trusted and everything else is proved**:
 
 ```
 appendAssoc      (a ++ b) ++ c  =  a ++ (b ++ c)
-primeDiffers     eqString a (a ++ "'")           is  different
-primeMoreDiffers eqString a ((a ++ "'") ++ b)    is  different
+primeDiffers     String.eq a (a ++ "'")           is  different
+primeMoreDiffers String.eq a ((a ++ "'") ++ b)    is  different
 ```
 
 Each is a fact about a primitive that computes only on two literals and goes
@@ -556,7 +556,7 @@ have traded one trusted law for two and widened the kernel permanently.
 
 ### `decString` compares two strings and hands you the proof
 
-*Decided 2026-09-21.* Beside `eqString`, `eqChar` and `eqInt`, the prelude
+*Decided 2026-09-21.* Beside `String.eq`, `Char.eq` and `Int.eq`, the prelude
 declares `decString`, `decChar` and `decInt`:
 
 ```
@@ -572,7 +572,7 @@ refutation›` — a real proof of `Eq String "a" "b" -> Empty` that the kernel
 checks like any other. On a name you do not know it does not compute, and that
 is where it earns its place: **eliminating `decString y x` gives you
 `Eq String y x` in one branch and its refutation in the other**, where
-`eqString y x` tells you only which branch you are in. So a proof about a
+`String.eq y x` tells you only which branch you are in. So a proof about a
 name nobody knows can follow the decision:
 
 ```
@@ -582,7 +582,7 @@ varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty
 
 **Generated substitution decides with `decString`**, which is what lets a
 proof about `LC.subst-x` follow it at all. What is trusted is the same as for
-`eqString`: the verdict on two literals. The refutation it writes is built
+`String.eq`: the verdict on two literals. The refutation it writes is built
 from `decString` itself and checked by the kernel.
 
 ### Trust is a term, and it reduces away when it stops being needed
@@ -932,16 +932,16 @@ true and unprovable in its own theory — and the cheap answer is to add a built
 function for each one, which is an escape hatch with no structure and nothing a
 user can inspect. Thena's answer is to split the two jobs a built-in was doing.
 
-Deciding whether two strings are equal is the case that forced it. `eqString`
+Deciding whether two strings are equal is the case that forced it. `String.eq`
 *computes*: on two literals it answers `same` or `different`, and nothing in the
 core term language can do that, so it stays a reduction rule. What it cannot do
-is tie that answer to the equality type — `eqString y x` says nothing about
+is tie that answer to the equality type — `String.eq y x` says nothing about
 `Eq String y x` for an unknown `y` — and that gap is a *typing* claim, so it is
 written as one:
 
 ```
-eqStringEqual : ∀ (a b : String) -> Eq Comparison (eqString a b) same -> Eq String a b
-eqStringRefl  : ∀ (a : String) -> Eq Comparison (eqString a a) same
+eqStringEqual : ∀ (a b : String) -> Eq Comparison (String.eq a b) same -> Eq String a b
+eqStringRefl  : ∀ (a : String) -> Eq Comparison (String.eq a a) same
 ```
 
 Both are definitions in the prelude whose bodies are `trusted` terms, and
@@ -1883,14 +1883,14 @@ slots in order**, as a judgment's are, so the context comes last.
 
 **A later binding shadows an earlier one of the same name.** `extend-there-extend`
 asks for a proof that the two names differ. For two literals that proof needs no
-axiom; `eqString` and `Eq`'s eliminator give it:
+axiom; `String.eq` and `Eq`'s eliminator give it:
 
 ```
 xNotY : Eq String "x" "y" -> Empty
 xNotY = \ q ->
   elim Eq (String)
-    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
-                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (String.eq "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (String.eq "x" b))
     ((\ a d -> d))
     ("x" "y") q unit
 ```
@@ -1975,7 +1975,7 @@ because nothing can ever occur at it.
 
 Two things arrived with it. **`List`, with `nil` and `cons`, is in the
 prelude**, so those names are taken from every object language until imports
-exist. **`appendString : String -> String -> String`** is the one way to build
+exist. **`String.append : String -> String -> String`** is the one way to build
 a `String`, and it computes only on two literals. The types that mention `List`
 carry a level parameter, `LC.fv-x {ℓ}`, because a list of names is a list at any
 level and nothing is defaulted.
@@ -2808,13 +2808,13 @@ a function that is not injective, none of those applies and none ever could:
 
 ```
 data Cat : String -> Type₀ where
-  mk : forall (a : String) (b : String) -> Cat (appendString a b)
+  mk : forall (a : String) (b : String) -> Cat (String.append a b)
 
-pick : forall (x : String) (y : String) (p : Cat (appendString x y)) -> String
+pick : forall (x : String) (y : String) (p : Cat (String.append x y)) -> String
 pick = \ x y p -> case p of { mk a b -> a }
 ```
 
-`appendString a b` and `appendString x y` can be the same string without `a` and
+`String.append a b` and `String.append x y` can be the same string without `a` and
 `x` being the same — `"ab"` then `"c"` is `"a"` then `"bc"` — so nothing can
 conclude `a = x`.
 
@@ -2831,10 +2831,10 @@ keeps the equation where the standard presentation reports a failure. An arm tha
 does not take it is refused, and the refusal names the equation it owes:
 
 ```
-stuck: String and Eq {0} String (appendString a b) (appendString x y) -> String
+stuck: String and Eq {0} String (String.append a b) (String.append x y) -> String
        cannot be made equal
   they differ by one argument, which the shorter side has to take first:
-  Eq {0} String (appendString a b) (appendString x y)
+  Eq {0} String (String.append a b) (String.append x y)
 ```
 
 The second line is said of any two types that differ by one argument, so an
@@ -2847,7 +2847,7 @@ the refusal says what keeps it alive:
 ```
 pick = \ x y p -> case p of { }
   stuck: this case did not vanish: it keeps
-         Eq {0} String (appendString a b) (appendString x y),
+         Eq {0} String (String.append a b) (String.append x y),
          which no transition can discharge, so there is something to prove here
 ```
 
@@ -3593,11 +3593,11 @@ pins it:
 
 ```
 eqStringEqual : ∀ (a : String) (b : String)
-  -> (Eq Comparison (eqString a b) same : Type₀) -> (Eq String a b : Type₀)
+  -> (Eq Comparison (String.eq a b) same : Type₀) -> (Eq String a b : Type₀)
 ```
 
 and the stored type is exactly what the development calculus wrote,
-`-> Eq {0} Comparison (eqString a b) same -> Eq {0} String a b`, with no
+`-> Eq {0} Comparison (String.eq a b) same -> Eq {0} String a b`, with no
 ascription left in it. **A body needs no such thing**: a level argument in a term
 is inserted at the use.
 

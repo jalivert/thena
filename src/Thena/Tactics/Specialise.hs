@@ -1887,7 +1887,7 @@ entry e = Hypothesis (eqnVar e) (eqnIdent e) (eqnType e)
 -- disagree about.
 --
 -- __Every binder is opened, which is why the context comes back too.__ An
--- equation mentions @Δ@'s own binders — @appendString a b@ names the
+-- equation mentions @Δ@'s own binders — @String.append a b@ names the
 -- constructor's arguments — so a renderer handed the equation alone would
 -- print @Bound@ indices. The context returned holds every binder peeled on the
 -- way, in order.

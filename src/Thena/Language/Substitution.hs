@@ -43,14 +43,14 @@
 -- mutual recursion — which `~m5dvd` would need.
 --
 -- **Everything is done by @elim@**, and the only primitives are @decString@ and
--- @appendString@: two names are compared by eliminating a @Dec@, and a fresh one
+-- @String.append@: two names are compared by eliminating a @Dec@, and a fresh one
 -- is made by priming.
 --
--- **@decString@, not @eqString@** (MS6 phase 109a, his choice on
+-- **@decString@, not @String.eq@** (MS6 phase 109a, his choice on
 -- @ms6\/CLOSEOUT.md@ 32). A proof about substitution has to follow the same
 -- decision the function makes, and on a name it does not know it can only do
 -- that by eliminating the same term. @decString y x@ hands each branch its
--- evidence — @Eq String y x@ or its refutation — where @eqString y x@ said only
+-- evidence — @Eq String y x@ or its refutation — where @String.eq y x@ said only
 -- which branch, so no proof over an open name could get past it.
 module Thena.Language.Substitution
   ( substitutionDefinitions
@@ -145,7 +145,7 @@ substitutionDefinitions gs g =
                 in h : map conName (grammarProductions k) ++ substitutionNames gs k
              | k <- gs ]
         ++ [ "String", "List", "And", "Comparison", "nil", "cons", "both", "same", "different"
-           , "Dec", "yes", "no", "Eq", "decString", "appendString" ]
+           , "Dec", "yes", "no", "Eq", "decString" ]
     local x | x `elem` referenced = local (x ++ "'")
             | otherwise = x
     v = name . local
@@ -210,7 +210,7 @@ substitutionDefinitions gs g =
                 [ lamL ["c"] (v "c")
                 , lamL ["a", "rest", "r", "c"]
                     (decide string (member (v "c") (v "avoid"))
-                       (app (v "r") [app (name "appendString") [v "c", SurfaceLiteral (LString [primeChar k])]])
+                       (app (v "r") [app (qname ["String"] "append") [v "c", SurfaceLiteral (LString [primeChar k])]])
                        (v "c"))
                 ]
                 (v "avoid"))
@@ -447,6 +447,15 @@ substitutionNotations gs g
 
 name :: String -> Surface
 name = SurfaceName []
+
+-- | A name with a path, which no local can shadow (MS10 phase 246).
+--
+-- **@String.append@ is why this exists.** A primitive lives in its type's
+-- namespace, and a qualified name is resolved by its path alone — so it is not
+-- in 'referenced' above, where every /root/ name the generated code mentions
+-- has to be, to stop a bound variable shadowing one.
+qname :: [String] -> String -> Surface
+qname = SurfaceName
 
 -- | A reference to a generated global, written with its path (MS10 phase 244).
 --
