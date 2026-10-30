@@ -15,6 +15,7 @@ import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , declarationNamed
+  , inDeclarationOf
   , nameDotted
   , rootName
   , Ident (..)
@@ -526,7 +527,15 @@ resolveData gr env n (RawData name ps ty cs) = do
   Right (InductiveDefinition dn [] params indices level cs', n4)
   where
     gs = globalsOf env
-    dn = rootName name
+    -- **The declaration lives in the namespace it opens** (MS10 phase 248), the
+    -- same placement 'Thena.Driver.datatypeProgram' gives a @data@ item in a
+    -- file: @data Nat@ typed at the REPL declares @Nat.Nat@, @Nat.zero@ and
+    -- @Nat.elim@. Rooting it here left @elim@ and @case@ at the root — a name
+    -- 'Thena.Global.Env.eliminatorName' derives from the datatype's, and
+    -- 'inDeclarationOf' of a root name is a root name — so the FIRST datatype a
+    -- session declared took the global @elim@ and the second was refused
+    -- @elim is already declared@.
+    dn = declarationNamed (rootName name)
 
 constructors
   :: [Grammar] -> GlobalEnv -> Globals -> GlobalName -> Context -> Int -> Local
@@ -538,7 +547,7 @@ constructors gr env gs dn params want local n (RawConstructor cn ty : rest) = do
   (tgt', n2)              <- core gr env gs [] [] inside n1 tgt
   ixs                     <- targetIndices dn params want cn tgt'
   (rest', n3)             <- constructors gr env gs dn params want local n2 rest
-  Right (ConstructorDefinition (rootName cn) args ixs (map (const Plain) args) : rest', n3)
+  Right (ConstructorDefinition (inDeclarationOf dn cn) args ixs (map (const Plain) args) : rest', n3)
 
 -- --------------------------------------------------------------------------
 -- Telescopes
