@@ -449,7 +449,7 @@ allOf l = l ++ "-subst-all"
 -- Surface, written by hand
 
 name :: String -> Surface
-name = SurfaceName
+name = SurfaceName []
 
 app :: Surface -> [Surface] -> Surface
 app f [] = f

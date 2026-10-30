@@ -125,8 +125,8 @@ buildSurface gs splices = build
         p <- maybe (Left (NoSuchProduction name)) Right (production gs name)
         args <- traverse (slot name) =<< arguments p children
         Right $ case args of
-          [] -> SurfaceName name
-          a : as -> SurfaceApp (SurfaceName name)
+          [] -> SurfaceName [] name
+          a : as -> SurfaceApp (SurfaceName [] name)
                       (NE.map (SurfaceArg Explicit) (a NE.:| as))
       _ -> Left (NotForSlot "" (shapeOf tree))
 
@@ -137,7 +137,7 @@ buildSurface gs splices = build
       (OfLanguage _, _) -> build child
       (OfUniverse _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfUniverse _, Node n kids) | Just r <- typeReading n kids -> case r of
-        TypeCalled l  -> Right (SurfaceName l)
+        TypeCalled l  -> Right (SurfaceName [] l)
         AtUniverse k  -> Right (SurfaceUniverse k)
         TypeInside t  -> build t
       (OfUniverse _, _) -> Left (NotForSlot (argumentName a) (shapeOf child))

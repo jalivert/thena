@@ -50,7 +50,7 @@ import Data.List (intercalate)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level, Normal (..), levelVarName, normalise)
-import Thena.Core.Term (Literal (..), Var)
+import Thena.Core.Term (GlobalName (..), Literal (..), Var, nameDotted)
 import Thena.Instral.Concrete
   ( RawDecl (..)
   , RawFunction (..)
@@ -179,7 +179,7 @@ rawOperand a = case a of
   RawNested w as    -> "(" ++ unwords (w : map rawOperand as) ++ ")"
 
 surf :: SurfacePrec -> Surface -> String
-surf _ (SurfaceName x)      = x
+surf _ (SurfaceName ps x)     = nameDotted (GlobalName ps x)
 surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
 surf _ (SurfaceLiteral l)   = case l of
   LString s -> escapeString s
@@ -263,7 +263,7 @@ surfacePattern = go False
     -- **A dot keeps its parentheses unless the term is a bare name**, which is
     -- the grammar's own two forms: @.n@ round-trips as @.n@ and anything else
     -- needs the brackets back, @.(succ n)@ included.
-    go _ (PatternDot (SurfaceName x)) = "." ++ x
+    go _ (PatternDot (SurfaceName ps x)) = "." ++ nameDotted (GlobalName ps x)
     go _ (PatternDot e)               = ".(" ++ surf Loose e ++ ")"
 
 objectPiece :: ObjectPiece -> String

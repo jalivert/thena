@@ -14,6 +14,7 @@ import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , nameDotted
   , rootName
   , Ident (..)
   , Scope
@@ -194,13 +195,16 @@ core gr env gs sp ctx local n raw = case raw of
   -- Local, then the ambient context, then the globals. A binder shadows a
   -- global of the same name, which is what one namespace (§3.6) requires: the
   -- names collide and the innermost wins.
-  RawName s -> case lookup s local of
+  -- **A qualified name is a global and nothing else** (MS10 phase 240): a
+  -- binder and a context entry have no path, so there is nothing for the two
+  -- lookups to find and nothing local can shadow @Nat.elim@.
+  RawName ps s | not (null ps) -> plain (GlobalName ps s)
+
+  RawName _ s -> case lookup s local of
     Just v  -> Right (Free v, n)
     Nothing -> case lookupEntry s ctx of
       Just v  -> Right (Free v, n)
-      Nothing
-        | rootName s `elem` gs -> Right (Global (rootName s) [], n)
-        | otherwise              -> Left (NotInScope s)
+      Nothing -> plain (rootName s)
 
   -- **A hole in the template, filled from the binding it names** (MS5 phase
   -- 81). The value arrived already resolved — it is a 'Core' the rule built —
@@ -231,15 +235,13 @@ core gr env gs sp ctx local n raw = case raw of
 
   -- @foo {ℓ 0}@ — a global at level arguments. **Refused on a local**: only a
   -- definition has level parameters, and a λ-bound name has none to give.
-  RawAt i rls -> nameOf sp i >>= \s -> case lookup s local of
-    Just _  -> Left (LevelArgumentsOnALocal s)
-    Nothing -> case lookupEntry s ctx of
-      Just _ -> Left (LevelArgumentsOnALocal s)
-      Nothing
-        | rootName s `elem` gs -> do
-            let args = map levelOfNat rls
-            Right (Global (rootName s) args, n)
-        | otherwise -> Left (NotInScope s)
+  RawAt ps i rls -> nameOf sp i >>= \s ->
+    let at g = plainAt g (map levelOfNat rls)
+     in if not (null ps) then at (GlobalName ps s) else case lookup s local of
+          Just _  -> Left (LevelArgumentsOnALocal s)
+          Nothing -> case lookupEntry s ctx of
+            Just _  -> Left (LevelArgumentsOnALocal s)
+            Nothing -> at (rootName s)
 
   RawApp f a -> do
     (f', n1) <- core gr env gs sp ctx local n f
@@ -318,6 +320,16 @@ core gr env gs sp ctx local n raw = case raw of
   RawClaim {}   -> Left (NotACoreTerm AHole)
   RawGuess {}   -> Left (NotACoreTerm AGuess)
   RawPending {} -> Left (NotACoreTerm AConstraint)
+  where
+    -- | A global, at no level arguments, or the refusal that names it in full.
+    plain g = plainAt g []
+
+    -- | A global at level arguments. **The refusal prints the whole path**,
+    -- because that is what was written: @Nat.elim is not in scope@ and
+    -- @elim is not in scope@ are different reports (MS10 phase 240).
+    plainAt g args
+      | g `elem` gs = Right (Global g args, n)
+      | otherwise   = Left (NotInScope (nameDotted g))
 
 -- | Resolve @elim@\'s head through the ordinary scope chain, and insist it
 -- named a global.
@@ -337,7 +349,7 @@ core gr env gs sp ctx local n raw = case raw of
 datatypeNamed
   :: [Grammar] -> GlobalEnv -> Globals -> Splices -> Context -> Local -> String
   -> Either ResolveError GlobalName
-datatypeNamed gr env gs sp ctx local d = case core gr env gs sp ctx local 0 (RawName d) of
+datatypeNamed gr env gs sp ctx local d = case core gr env gs sp ctx local 0 (RawName [] d) of
   Right (Global g _, _) -> Right g
   _                   -> Left (NotADatatype d)
 

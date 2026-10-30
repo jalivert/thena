@@ -592,8 +592,8 @@ producesTests =
     -- @succ zero@, as a focused surface term.
     succZero =
       Lit (VSurface (rootedAt
-        (SurfaceApp (SurfaceName "succ")
-           (SurfaceArg Explicit (SurfaceName "zero") NE.:| []))))
+        (SurfaceApp (SurfaceName [] "succ")
+           (SurfaceArg Explicit (SurfaceName [] "zero") NE.:| []))))
 
     -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to
     -- call.

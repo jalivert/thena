@@ -24,7 +24,12 @@ $lower  = [a-z]
 $upper  = [A-Z]
 -- Reserved characters: the brackets, the separators, and every character that
 -- spells an operator on its own. Nothing else is off limits inside a name.
-$reserved = [\( \) \{ \} \[ \] \; \, \" \` ⟨ ⟩ λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
+--
+-- **The dot joined them at MS10 phase 240**, when a global name gained a
+-- namespace path: @.@ now separates a path's steps, so it cannot also be an
+-- ordinary character inside one. @List.map@ was a single identifier before this
+-- and is a qualified name now — see @\@qualified@ below.
+$reserved = [\( \) \{ \} \[ \] \; \, \" \` \. ⟨ ⟩ λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
 
 -- A name starts with a letter — ASCII, or any non-reserved character above the
 -- ASCII range — and continues with anything that is neither reserved nor
@@ -70,6 +75,15 @@ $rechar = [$printable \t] # [\/ \\]
 @regex  = \/ ($rechar | \\ [$printable \t])+ \/
 
 @ident    = $idstart $idchar*
+
+-- A qualified name: the path's steps and its base word, glued by dots.
+--
+-- **Glued, with no spaces, and that is what tells it from the two other things
+-- a dot does.** @...@ is 'TSpread' and a lone @.@ is 'TDot', the
+-- inaccessible-pattern marker (MS9 phase 228) — which stands /before/ a name,
+-- @.n@, where a step stands /after/ one. Alex takes the longest match, so
+-- @k .n@ is three tokens and @k.n@ is one, exactly as it reads.
+@qualified = @ident (\. @ident)+
 @universe = "Type" ($digit+ | $sub+)
 
 tokens :-
@@ -220,6 +234,7 @@ tokens :-
   -- identifier contains one and this rule cannot take a longer name apart.
   @ident \[ @ident \] \` { \p str -> Located (posOf p) (tagAt (init str)) }
   "⟨"           { keyword (TTagOpen "surface") }
+  @qualified    { \p s -> Located (posOf p) (TQIdent (steps s)) }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
 
 {
@@ -311,6 +326,11 @@ data Token
   | TUniverse Int
   | TUniverseOpen
   | TIdent String
+  | TQIdent [String]
+    -- ^ @List.map@ — a qualified name, already in pieces: every step of the
+    -- path and then the base word, which is the last of them and is always
+    -- present (MS10 phase 240). Two or more pieces, since one piece is a
+    -- 'TIdent'.
     -- The tagged-region tokens (MS5 phase 60). A region is @name\`…\`@: the
     -- lexer finds its extent and hands over **raw text**, because an object
     -- language has its own lexical rules and tokenising it here would impose
@@ -344,6 +364,17 @@ tagAt :: String -> Token
 tagAt str = case break (== '[') str of
   (lang, _ : rest) -> TTagOpenAt lang (takeWhile (/= ']') rest)
   (lang, [])       -> TTagOpen lang
+
+-- | The pieces of a qualified name, in order: every step of the path, then the
+-- base word. @"List.map"@ is @["List","map"]@.
+--
+-- Total on what @\@qualified@ can match, which is the only thing that reaches
+-- it: that pattern has at least one dot, and a non-empty @\@ident@ on each side
+-- of every one.
+steps :: String -> [String]
+steps s = case break (== '.') s of
+  (piece, '.' : rest) -> piece : steps rest
+  (piece, _)          -> [piece]
 
 posOf :: AlexPosn -> Pos
 posOf (AlexPn _ line col) = Pos line col

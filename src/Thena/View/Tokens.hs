@@ -182,6 +182,8 @@ kindOf t = case t of
   TPending      -> AHole
 
   TIdent _      -> AnIdentifier
+  -- A qualified name is an identifier with a path; nothing in it is a keyword.
+  TQIdent _     -> AnIdentifier
   TNumber _     -> ANumber
   TUniverse _   -> ANumber
   TUniverseOpen -> ANumber

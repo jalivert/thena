@@ -49,7 +49,7 @@ module Thena.View.Surface
 import Data.List (intercalate)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (Literal (..))
+import Thena.Core.Term (GlobalName (..), Literal (..), nameDotted)
 import Thena.Surface.Concrete
   ( Analysis (..)
   , ObjectPiece (..)
@@ -155,7 +155,7 @@ data SurfacePieceView
 
 displaySurface :: Surface -> SurfaceShape
 displaySurface s = case s of
-  SurfaceName x -> ASurfaceName x
+  SurfaceName ps x -> ASurfaceName (nameDotted (GlobalName ps x))
   SurfaceUniverse l -> ASurfaceUniverse l
   SurfaceUniverseOpen -> ASurfaceUniverseOpen
   SurfaceLiteral l -> ASurfaceLiteral (literalText l)

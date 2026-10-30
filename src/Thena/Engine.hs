@@ -1449,7 +1449,7 @@ perform instr rest m = case operation instr of
               -- fact stated elsewhere.
               spine =
                 Concrete.SurfaceApp
-                  (Concrete.SurfaceName e)
+                  (Concrete.SurfaceName [] e)
                   (foldr NE.cons
                          (explicit mot
                             NE.:| map explicit (ms ++ is ++ [tgt]) ++ extra)
@@ -1672,7 +1672,7 @@ perform instr rest m = case operation instr of
   Op.SurfaceNameOf x -> case surfaceAt x of
     Left r  -> failure r m
     Right s -> case s of
-      Concrete.SurfaceName w -> produce (VText w) m
+      Concrete.SurfaceName ps w -> produce (VText (nameDotted (GlobalName ps w))) m
       _                      -> failure (ExpectedSurfaceShape "a name") m
 
   -- The literal at the focus, as the term it elaborates to (MS6 phase 97c).
@@ -1848,8 +1848,8 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right z -> case Zipper.focus z of
       Concrete.SurfaceApp h as
-        | Concrete.SurfaceName g <- h
-        , Just as' <- expand (plicitiesOf g) (NE.toList as) ->
+        | Concrete.SurfaceName ps w <- h
+        , Just as' <- expand (plicitiesOf (GlobalName ps w)) (NE.toList as) ->
             case as' of
               []     -> failure (ExpectedSurfaceShape "an application") m
               a : bs -> produce
@@ -2253,7 +2253,7 @@ perform instr rest m = case operation instr of
     -- What the machine recorded about this name\'s argument positions, if it
     -- recorded anything. A name with no entry — every DC-declared global, and
     -- every local — takes what was written and nothing more.
-    plicitiesOf g = case lookup (rootName g) (signatures m) of
+    plicitiesOf g = case lookup g (signatures m) of
       Just ps -> ps
       Nothing -> []
 

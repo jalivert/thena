@@ -90,7 +90,7 @@ judgmentDatatype gs g rules = do
     -- production to a judgment's grammar too, and that is notation and not an
     -- index (MS8 phase 158); the rules are the constructors.
     indices = concatMap gproductionArguments (typeFormerProductions g)
-    typeOf = SurfaceName . sortType . argumentSort
+    typeOf = SurfaceName [] . sortType . argumentSort
 
 -- | One rule, as a constructor.
 constructor :: [Grammar] -> Grammar -> RawRule -> Either RuleProblem (SurfaceConstructor, [ArgRole])
@@ -150,7 +150,7 @@ constructor gs g r = do
           fresh used x | x `elem` avoid || x `elem` used = fresh used (x ++ "'")
                        | otherwise = x
           renamed = go [] mentioned
-       in Right ( [ SurfaceBinder Explicit x' (Just (SurfaceName t)) | (_, x', t) <- renamed ]
+       in Right ( [ SurfaceBinder Explicit x' (Just (SurfaceName [] t)) | (_, x', t) <- renamed ]
                 , \x -> case [ x' | (y, x', _) <- renamed, y == x ] of
                     x' : _ -> x'
                     [] -> x )
@@ -358,16 +358,16 @@ mentions gs t = case t of
 -- | A reading as a surface term, its metavariables named through @rename@.
 term :: [Grammar] -> (String -> String) -> Tree -> Either BuildError Surface
 term gs rename t = case t of
-  Node n [Token x] | [MetavariableOf _] <- special n -> Right (SurfaceName (rename x))
+  Node n [Token x] | [MetavariableOf _] <- special n -> Right (SurfaceName [] (rename x))
   -- **A reading at a universe** (phase 160). A grammar's own name is the type
   -- that grammar's datatype is; @𝕌₀@ is @Type₀@. Neither is renamed — a type
   -- is not a metavariable.
   Node n [child] | [TypeWrapper] <- special n -> term gs rename child
-  Node n _ | [TypeNamed l] <- special n -> Right (SurfaceName l)
+  Node n _ | [TypeNamed l] <- special n -> Right (SurfaceName [] l)
   Node n [Token u] | [UniverseRead] <- special n -> Right (SurfaceUniverse (maybe 0 id (universeWord u)))
   -- **Not renamed** (MS8 phase 172): the premise binder carries the user's own
   -- name, so this is the name of the thing it reaches.
-  Node n _ | [PremiseRef x] <- special n -> Right (SurfaceName x)
+  Node n _ | [PremiseRef x] <- special n -> Right (SurfaceName [] x)
   -- §6.3: a comma list is @L-subst-all@ — simultaneous, and across classes, so
   -- each class's map takes the pairs written at it and the rest are empty (MS8
   -- phase 155). **A single pair never reaches here since MS8 phase 159**: it is
@@ -376,32 +376,32 @@ term gs rename t = case t of
   Node n [e, s] | [SubstituteIn l] <- special n -> do
     e' <- go e
     ps <- pairs s
-    Right (app (SurfaceName (l ++ "-subst-all"))
+    Right (app (SurfaceName [] (l ++ "-subst-all"))
              (e' : [ foldr (cons l c) (nil l c) [ (x, m) | (c', x, m) <- ps, c' == c ]
                    | h <- grammarNamed gs l, c <- substitutedClasses gs h ]))
   Node n children -> case production gs n of
     Nothing -> Left (NoSuchProduction n)
     Just p -> do
       slots <- arguments p children
-      app (SurfaceName n) <$> traverse slot slots
+      app (SurfaceName [] n) <$> traverse slot slots
   _ -> Left (NotForSlot "" (show t))
   where
     go = term gs rename
     slot (a, child) = case (argumentSort a, child) of
-      (OfClass {}, Token x) -> Right (SurfaceName (rename x))
+      (OfClass {}, Token x) -> Right (SurfaceName [] (rename x))
       _ -> go child
     pairs s = case s of
       Node n [a, b] | [PairsIn _] <- special n -> (++) <$> pairs a <*> pairs b
       Node n [Token x, m] | [PairIn _ cls] <- special n ->
-        (\m' -> [(cls, SurfaceName (rename x), m')]) <$> go m
+        (\m' -> [(cls, SurfaceName [] (rename x), m')]) <$> go m
       _ -> Left (NotForSlot "" (show s))
-    pairType l c = app (SurfaceName "And") [SurfaceName (classType gs c), SurfaceName (ownerOf gs l c)]
+    pairType l c = app (SurfaceName [] "And") [SurfaceName [] (classType gs c), SurfaceName [] (ownerOf gs l c)]
     cons l c (x, m) rest =
-      app (SurfaceName "cons")
+      app (SurfaceName [] "cons")
         [ pairType l c
-        , app (SurfaceName "both") [SurfaceName (classType gs c), SurfaceName (ownerOf gs l c), x, m]
+        , app (SurfaceName [] "both") [SurfaceName [] (classType gs c), SurfaceName [] (ownerOf gs l c), x, m]
         , rest ]
-    nil l c = app (SurfaceName "nil") [pairType l c]
+    nil l c = app (SurfaceName [] "nil") [pairType l c]
 
 app :: Surface -> [Surface] -> Surface
 app f [] = f

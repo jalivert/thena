@@ -141,7 +141,7 @@ relationOf g e = do
       gamma = fresh [] (argumentName ctxArg)
       (outer, used1) = names [gamma] (map argumentName others)
 
-      ref = SurfaceName
+      ref = SurfaceName []
       binder x a = SurfaceBinder Explicit x (Just (typeOf a))
       -- An extension applied, with the context and the entry's own names.
       extend k ctx entry = app (ref (nm (gproductionName k)))
@@ -199,6 +199,6 @@ relationOf g e = do
       -- generated; a @context@ production carrying one is refused by
       -- @UniverseSlot@ (MS8 phase 160). The spelling is what it would be named.
       OfUniverse n -> universeSpelling n
-    typeOf = SurfaceName . typeName . argumentSort
+    typeOf = SurfaceName [] . typeName . argumentSort
     app f [] = f
     app f xs = SurfaceApp f (NE.fromList (map (SurfaceArg Explicit) xs))

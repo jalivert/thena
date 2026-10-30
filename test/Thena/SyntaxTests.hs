@@ -83,7 +83,7 @@ genRaw = sized . go
     leaf scope =
       oneof $
         (RawUniverse <$> elements [0, 1])
-          : [RawName <$> elements scope | not (null scope)]
+          : [RawName [] <$> elements scope | not (null scope)]
 
     node scope n =
       oneof

@@ -264,7 +264,7 @@ genSurface = sized go
           h <- smaller
           pure (case h of SurfaceApp g _ -> g; _ -> h)
         annotation = oneof [pure Nothing, Just <$> smaller]
-        args       = neOr (SurfaceArg Explicit (SurfaceName "a"))
+        args       = neOr (SurfaceArg Explicit (SurfaceName [] "a"))
                        (listOf1 (SurfaceArg <$> plicity <*> smaller))
         binders    = neOr (SurfaceBinder Explicit "x" Nothing)
                        (listOf1 (SurfaceBinder <$> plicity <*> name <*> annotation))
@@ -277,7 +277,7 @@ genSurface = sized go
 
     leaf =
       oneof
-        [ SurfaceName <$> name
+        [ SurfaceName [] <$> name
         , SurfaceUniverse <$> elements [0, 1, 2]
         , pure SurfaceUniverseOpen
         , pure SurfacePlaceholder
@@ -320,7 +320,7 @@ genPattern = sized go
       oneof
         [ pure PatternWildcard
         , flip PatternName [] <$> patName
-        , PatternDot <$> oneof [SurfaceName <$> patName, resize 3 genSurface]
+        , PatternDot <$> oneof [SurfaceName [] <$> patName, resize 3 genSurface]
         ]
     patName = elements ["n", "zero", "succ", "cons"]
 
@@ -360,8 +360,8 @@ spineTests =
     -- the whole AST turns on: phase 44's @EXPAND@ needs the argument list whole
     -- to know where the implicit positions fall.
     parses "f a b"
-      (SurfaceApp (SurfaceName "f")
-         (SurfaceArg Explicit (SurfaceName "a") :| [SurfaceArg Explicit (SurfaceName "b")]))
+      (SurfaceApp (SurfaceName [] "f")
+         (SurfaceArg Explicit (SurfaceName [] "a") :| [SurfaceArg Explicit (SurfaceName [] "b")]))
 
     -- **Parentheses are not represented**, so these are the same term and the
     -- tree says so. Two application constructors would have made them two
@@ -371,21 +371,21 @@ spineTests =
 
     -- **An empty argument list is not constructible**, which is his ruling:
     -- a head with no arguments is the head.
-  , parses "f" (SurfaceName "f")
+  , parses "f" (SurfaceName [] "f")
 
   , parses "f (g a)"
-      (SurfaceApp (SurfaceName "f")
+      (SurfaceApp (SurfaceName [] "f")
          [SurfaceArg Explicit
-            (SurfaceApp (SurfaceName "g") [SurfaceArg Explicit (SurfaceName "a")])])
+            (SurfaceApp (SurfaceName [] "g") [SurfaceArg Explicit (SurfaceName [] "a")])])
 
     -- The head may be anything, which is why one constructor is enough.
   , parses "(\\ x -> x) a"
-      (SurfaceApp (SurfaceLam [SurfaceBinder Explicit "x" Nothing] (SurfaceName "x"))
-         [SurfaceArg Explicit (SurfaceName "a")])
+      (SurfaceApp (SurfaceLam [SurfaceBinder Explicit "x" Nothing] (SurfaceName [] "x"))
+         [SurfaceArg Explicit (SurfaceName [] "a")])
 
   , parses "f {A} a"
-      (SurfaceApp (SurfaceName "f")
-         (SurfaceArg Implicit (SurfaceName "A") :| [SurfaceArg Explicit (SurfaceName "a")]))
+      (SurfaceApp (SurfaceName [] "f")
+         (SurfaceArg Implicit (SurfaceName [] "A") :| [SurfaceArg Explicit (SurfaceName [] "a")]))
   ]
 
 -- --------------------------------------------------------------------------
@@ -400,8 +400,8 @@ holeTests =
     -- **Neither is a lexer rule**, and this is what that buys: a name may still
     -- contain both characters. @_@ alone is the placeholder and @_foo@ is a
     -- name, exactly as @.claude\/spec\/interface.md@ §2.6 says a name may start with @_@.
-  , parses "_foo" (SurfaceName "_foo")
-  , parses "foo?" (SurfaceName "foo?")
+  , parses "_foo" (SurfaceName [] "_foo")
+  , parses "foo?" (SurfaceName [] "foo?")
 
     -- @?@ cannot start an identifier, so this really is two tokens and the
     -- grammar puts them together. Spaced, it means the same thing.
@@ -420,31 +420,31 @@ binderTests =
   [ -- **The main thing the surface has that the development calculus does
     -- not.** His ruling: lambdas only — @let@, @∀@ and a signature keep theirs.
     parses "\\ x -> x"
-      (SurfaceLam [SurfaceBinder Explicit "x" Nothing] (SurfaceName "x"))
+      (SurfaceLam [SurfaceBinder Explicit "x" Nothing] (SurfaceName [] "x"))
   , refuses "∀ x -> x"
 
   , parses "\\ (x : A) -> x"
-      (SurfaceLam [SurfaceBinder Explicit "x" (Just (SurfaceName "A"))] (SurfaceName "x"))
+      (SurfaceLam [SurfaceBinder Explicit "x" (Just (SurfaceName [] "A"))] (SurfaceName [] "x"))
 
     -- A group is a spelling, not a structure: it expands, **in order**.
   , parses "∀ (x y : A) -> x"
-      (SurfacePi (SurfaceBinder Explicit "x" (Just (SurfaceName "A"))
-                    :| [SurfaceBinder Explicit "y" (Just (SurfaceName "A"))])
-         (SurfaceName "x"))
+      (SurfacePi (SurfaceBinder Explicit "x" (Just (SurfaceName [] "A"))
+                    :| [SurfaceBinder Explicit "y" (Just (SurfaceName [] "A"))])
+         (SurfaceName [] "x"))
 
   , parses "\\ {A} x -> x"
       (SurfaceLam (SurfaceBinder Implicit "A" Nothing
                      :| [SurfaceBinder Explicit "x" Nothing])
-         (SurfaceName "x"))
+         (SurfaceName [] "x"))
   , parses "∀ {A : Type} -> A"
-      (SurfacePi [SurfaceBinder Implicit "A" (Just SurfaceUniverseOpen)] (SurfaceName "A"))
+      (SurfacePi [SurfaceBinder Implicit "A" (Just SurfaceUniverseOpen)] (SurfaceName [] "A"))
 
     -- @let@ keeps its annotation optional here and required in the development
     -- calculus, where there is nothing to infer it with.
   , parses "let x = a in x"
-      (SurfaceLet "x" Nothing (SurfaceName "a") (SurfaceName "x"))
+      (SurfaceLet "x" Nothing (SurfaceName [] "a") (SurfaceName [] "x"))
   , parses "let x : A = a in x"
-      (SurfaceLet "x" (Just (SurfaceName "A")) (SurfaceName "a") (SurfaceName "x"))
+      (SurfaceLet "x" (Just (SurfaceName [] "A")) (SurfaceName [] "a") (SurfaceName [] "x"))
   ]
 
 -- --------------------------------------------------------------------------
@@ -456,17 +456,17 @@ precedenceTests =
   [ -- **Ascription binds loosest**, which is the reading Agda and Haskell both
     -- give it: the lambda is ascribed, not its body.
     parses "\\ x -> x : A"
-      (SurfaceAnnot (SurfaceLam [SurfaceBinder Explicit "x" Nothing] (SurfaceName "x"))
-         (SurfaceName "A"))
+      (SurfaceAnnot (SurfaceLam [SurfaceBinder Explicit "x" Nothing] (SurfaceName [] "x"))
+         (SurfaceName [] "A"))
 
   , parses "A -> B -> C"
-      (SurfaceArrow (SurfaceName "A")
-         (SurfaceArrow (SurfaceName "B") (SurfaceName "C")))
+      (SurfaceArrow (SurfaceName [] "A")
+         (SurfaceArrow (SurfaceName [] "B") (SurfaceName [] "C")))
 
   , parses "f a -> b"
       (SurfaceArrow
-         (SurfaceApp (SurfaceName "f") [SurfaceArg Explicit (SurfaceName "a")])
-         (SurfaceName "b"))
+         (SurfaceApp (SurfaceName [] "f") [SurfaceArg Explicit (SurfaceName [] "a")])
+         (SurfaceName [] "b"))
 
   , parses "Type₀ -> Type"
       (SurfaceArrow (SurfaceUniverse 0) SurfaceUniverseOpen)
@@ -625,52 +625,52 @@ tree src = case parseSurfaceTerm src of
 splitTests :: [TestTree]
 splitTests =
   [ parses "case n of { zero -> a ; succ m -> b }"
-      (SurfaceSplit ByCases (SurfaceName "n")
-        [ SurfaceArm (PatternName "zero" []) (Just (SurfaceName "a"))
-        , SurfaceArm (PatternName "succ" [PatternName "m" []]) (Just (SurfaceName "b"))
+      (SurfaceSplit ByCases (SurfaceName [] "n")
+        [ SurfaceArm (PatternName "zero" []) (Just (SurfaceName [] "a"))
+        , SurfaceArm (PatternName "succ" [PatternName "m" []]) (Just (SurfaceName [] "b"))
         ])
 
     -- **The two words differ in the tree by one field and nothing else.**
   , parses "induction n of { zero -> a }"
-      (SurfaceSplit ByInduction (SurfaceName "n")
-        [SurfaceArm (PatternName "zero" []) (Just (SurfaceName "a"))])
+      (SurfaceSplit ByInduction (SurfaceName [] "n")
+        [SurfaceArm (PatternName "zero" []) (Just (SurfaceName [] "a"))])
 
     -- **The target is an application, not just its head.**
   , parses "case f x of { c -> a }"
       (SurfaceSplit ByCases
-        (SurfaceApp (SurfaceName "f") [SurfaceArg Explicit (SurfaceName "x")])
-        [SurfaceArm (PatternName "c" []) (Just (SurfaceName "a"))])
+        (SurfaceApp (SurfaceName [] "f") [SurfaceArg Explicit (SurfaceName [] "x")])
+        [SurfaceArm (PatternName "c" []) (Just (SurfaceName [] "a"))])
 
     -- **A bare name is not resolved here**, and the tree must not pretend to
     -- know: @zero@ above and @m@ here are the same shape written down, and
     -- which is a constructor is a question about the globals.
   , parses "case n of { m -> m }"
-      (SurfaceSplit ByCases (SurfaceName "n")
-        [SurfaceArm (PatternName "m" []) (Just (SurfaceName "m"))])
+      (SurfaceSplit ByCases (SurfaceName [] "n")
+        [SurfaceArm (PatternName "m" []) (Just (SurfaceName [] "m"))])
 
     -- An argument of a pattern is an atom, so a nested pattern is written in
     -- parentheses — and the same text without them means something else.
   , parses "case v of { cons n a (cons m b nil) -> a }"
-      (SurfaceSplit ByCases (SurfaceName "v")
+      (SurfaceSplit ByCases (SurfaceName [] "v")
         [ SurfaceArm
             (PatternName "cons"
               [ PatternName "n" []
               , PatternName "a" []
               , PatternName "cons" [PatternName "m" [], PatternName "b" [], PatternName "nil" []]
               ])
-            (Just (SurfaceName "a"))
+            (Just (SurfaceName [] "a"))
         ])
 
     -- @_@ reaches the parser as an ordinary identifier and this language says
     -- what it means, exactly as it does for a term's placeholder.
   , parses "case n of { succ _ -> a }"
-      (SurfaceSplit ByCases (SurfaceName "n")
-        [SurfaceArm (PatternName "succ" [PatternWildcard]) (Just (SurfaceName "a"))])
+      (SurfaceSplit ByCases (SurfaceName [] "n")
+        [SurfaceArm (PatternName "succ" [PatternWildcard]) (Just (SurfaceName [] "a"))])
 
     -- **No arms at all**, which is a case analysis on a datatype with no
     -- constructors and the only thing to write for one.
   , parses "case e of { }"
-      (SurfaceSplit ByCases (SurfaceName "e") [])
+      (SurfaceSplit ByCases (SurfaceName [] "e") [])
 
     -- **HIS CONDITION**: /"if implicit works, explicit has to work too."/
   , testCase "the offside rule and explicit braces agree" $
@@ -695,9 +695,9 @@ splitTests =
     -- An arm's body is a @Term@, so an ascription inside one needs no
     -- parentheses.
   , parses "case n of { zero -> a : A }"
-      (SurfaceSplit ByCases (SurfaceName "n")
+      (SurfaceSplit ByCases (SurfaceName [] "n")
         [SurfaceArm (PatternName "zero" [])
-          (Just (SurfaceAnnot (SurfaceName "a") (SurfaceName "A")))])
+          (Just (SurfaceAnnot (SurfaceName [] "a") (SurfaceName [] "A")))])
 
   , refuses "case n of { zero = a }"
   , refuses "case n of { -> a }"
@@ -717,11 +717,11 @@ splitTests =
              ]) of
         Right (_, items) -> items @?=
           [ ItemTheorem "flip2"
-              (SurfaceArrow (SurfaceName "Two") (SurfaceName "Two"))
+              (SurfaceArrow (SurfaceName [] "Two") (SurfaceName [] "Two"))
               (SurfaceLam [SurfaceBinder Explicit "t" Nothing]
-                (SurfaceSplit ByCases (SurfaceName "t")
-                  [ SurfaceArm (PatternName "aa" []) (Just (SurfaceName "bb"))
-                  , SurfaceArm (PatternName "bb" []) (Just (SurfaceName "aa"))
+                (SurfaceSplit ByCases (SurfaceName [] "t")
+                  [ SurfaceArm (PatternName "aa" []) (Just (SurfaceName [] "bb"))
+                  , SurfaceArm (PatternName "bb" []) (Just (SurfaceName [] "aa"))
                   ]))
           ]
         Left e -> assertFailure (show e)
@@ -979,7 +979,7 @@ blockTests =
       , RawNested "concat" []
       , RawLambda [] (BodyRhs (RhsOp (RawOp "concat" [])))
       , RawRegion "surface" Nothing "x"
-      , RawQuoted (RawName "x")
+      , RawQuoted (RawName [] "x")
       ]
 
     writableOperands :: [String]

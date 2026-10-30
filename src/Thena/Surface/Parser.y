@@ -93,6 +93,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   '}$'     { Located _ TEscapeClose }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
+  qident  { Located _ (TQIdent $$) }
 
 %right '->'
 
@@ -337,8 +338,14 @@ Arg :: { SurfaceArg }
   : Atom                                   { SurfaceArg Explicit $1 }
   | '{' Term '}'                           { SurfaceArg Implicit $2 }
 
+-- | A name as written: its path's steps, then its base word (MS10 phase 240).
+-- The lexer has already cut a qualified name into its pieces.
+QName :: { ([String], String) }
+  : ident                                  { ([], $1) }
+  | qident                                 { (init $1, last $1) }
+
 Atom :: { Surface }
-  : ident                                  { name $1 }
+  : QName                                  { qualifiedName (fst $1) (snd $1) }
   -- **@?foo@ is two tokens, not one.** @?@ cannot start an identifier —
   -- @.claude\/spec\/interface.md@ §2.6's @$idstart@ is a letter, @_@, or a character
   -- above ASCII — so the lexer hands over @TQuery@ and then the name. Writing
@@ -529,7 +536,18 @@ name :: String -> Surface
 name x = case x of
   "_"      -> SurfacePlaceholder
   '?' : h  -> SurfaceHole h
-  _        -> SurfaceName x
+  _        -> SurfaceName [] x
+
+-- | A name with its path (MS10 phase 240).
+--
+-- **A qualified name is never a placeholder or a hole.** @_@ and @?foo@ are
+-- spellings of one word, and @A._@ is a name in @A@ whose word happens to be
+-- @_@ — nothing is declared under it, so elaboration refuses it, which is
+-- 'patternName''s reason for not special-casing a wildcard either.
+qualifiedName :: [String] -> String -> Surface
+qualifiedName ps x
+  | null ps   = name x
+  | otherwise = SurfaceName ps x
 
 -- | @_@ is a wildcard; everything else is a name.
 --

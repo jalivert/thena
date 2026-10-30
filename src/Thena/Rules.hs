@@ -458,7 +458,7 @@ holds env cur args t = case t of
     isHypothesis (Spec.Binder r _) = r == Spec.AnHypothesis
     isCopy       (Spec.Binder r _) = r == Spec.ACopy
 
-    isName         s = case s of SurfaceName _ -> True; _ -> False
+    isName         s = case s of SurfaceName _ _ -> True; _ -> False
     isLiteral      s = case s of SurfaceLiteral _ -> True; _ -> False
     isObject       s = case s of SurfaceObject {} -> True; _ -> False
     isUniverse     s = case s of SurfaceUniverse _ -> True; _ -> False
@@ -479,13 +479,13 @@ holds env cur args t = case t of
     isCases        s = case s of SurfaceSplit ByCases _ _ -> True; _ -> False
     hasArms        s = case s of SurfaceSplit _ _ as -> not (null as); _ -> False
     hasNoArms      s = case s of SurfaceSplit _ _ as -> null as; _ -> False
-    headIsName     s = case s of SurfaceApp (SurfaceName _) _ -> True; _ -> False
+    headIsName     s = case s of SurfaceApp (SurfaceName _ _) _ -> True; _ -> False
     headIsElim     s = case s of SurfaceApp (SurfaceElim {}) _ -> True; _ -> False
     -- The third positive test, @let@'s two being the precedent: the head
     -- language has no negation, so "neither a name nor an elim" is written out.
     headIsTerm     s = case s of
       SurfaceApp f _ -> case f of
-        SurfaceName _  -> False
+        SurfaceName _ _  -> False
         SurfaceElim {} -> False
         _              -> True
       _ -> False

@@ -109,6 +109,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   univ    { Located _ (TUniverse $$) }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
+  qident  { Located _ (TQIdent $$) }
 
 %right '->'
 
@@ -481,8 +482,17 @@ App :: { Raw }
   : App Atom                               { RawApp $1 $2 }
   | Atom                                   { $1 }
 
+-- | A name as written: its path's steps, then its base word (MS10 phase 240).
+--
+-- **One piece or several, and the shape is the same either way** — an
+-- unqualified name has no steps. The lexer has already cut a qualified one into
+-- its pieces, so there is no splitting here and no dotted string anywhere.
+QName :: { ([String], String) }
+  : ident                                  { ([], $1) }
+  | qident                                 { (init $1, last $1) }
+
 Atom :: { Raw }
-  : ident                                  { RawName $1 }
+  : QName                                  { RawName (fst $1) (snd $1) }
   -- **The corners are an atom, not a term** (phase 38). They were a @Term@
   -- production, so @⌜ t ⌝@ could not appear in an atom run — and phase 38's
   -- REPL writes every core argument of a rule exactly there. Moving it is
@@ -495,7 +505,7 @@ Atom :: { Raw }
   -- 'Thena.Syntax.Lexer.TEscapeClose' for the one that ends an escape, so this
   -- cannot be confused with a level-argument brace.
   | '${' ident '}$'                        { RawSplice $2 }
-  | ident LevelArgs                        { RawAt (RawWord $1) $2 }
+  | QName LevelArgs                        { RawAt (fst $1) (RawWord (snd $1)) $2 }
   | univ                                   { RawUniverse $1 }
   | Type                                   { RawUniverseOpen }
   -- A literal of a primitive type is an atom, for a name's reason: it stands

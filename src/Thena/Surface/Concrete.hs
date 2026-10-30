@@ -58,7 +58,7 @@ data Plicity = Explicit | Implicit
 
 -- | A written surface term.
 data Surface
-  = SurfaceName String
+  = SurfaceName [String] String
     -- ^ what a name denotes is elaboration's answer, not the tree's
   | SurfaceUniverse Int          -- ^ @Type₀@
   | SurfaceLiteral Literal
@@ -396,7 +396,7 @@ blocksIn t = case t of
       ++ concatMap blocksIn ms ++ blocksIn tg
   -- A splice is a term like any other, so a block inside one is found here.
   SurfaceObject _ _ ps -> concatMap piece ps
-  SurfaceName _       -> []
+  SurfaceName _ _     -> []
   SurfaceUniverse _   -> []
   SurfaceLiteral _    -> []
   SurfaceUniverseOpen -> []

@@ -62,12 +62,12 @@ notationTests :: [TestTree]
 notationTests =
   [ testCase "a dot on a name" $
       armPattern "case v of { c .n a -> a }"
-        @?= Just (PatternName "c" [PatternDot (SurfaceName "n"), PatternName "a" []])
+        @?= Just (PatternName "c" [PatternDot (SurfaceName [] "n"), PatternName "a" []])
   , testCase "a dot on a term needs the brackets" $
       armPattern "case v of { c .(s n) a -> a }"
         @?= Just
               (PatternName "c"
-                 [ PatternDot (SurfaceApp (SurfaceName "s") (arg (SurfaceName "n") :| []))
+                 [ PatternDot (SurfaceApp (SurfaceName [] "s") (arg (SurfaceName [] "n") :| []))
                  , PatternName "a" []
                  ])
   , -- __@._@ is a dot on a placeholder, not a wildcard pattern.__ A wildcard
@@ -86,9 +86,23 @@ notationTests =
   , -- __@...@ still wins__, which is the one thing adding the token could have
     -- broken: the lexer takes the longest match, so the list-pattern tail
     -- marker is still one token and never three of these.
+    --
+    -- **@a...b@ changed at MS10 phase 240 and that is the point of the phase.**
+    -- The dot was an ordinary character inside a name until it became the
+    -- separator of a namespace path, so a name may no longer contain one and
+    -- @a...b@ is three tokens. @...@ winning over @.@ is what this still pins.
     testCase "the spread token is untouched" $
       lexed "... . .n a...b"
-        @?= Right [TSpread, TDot, TDot, TIdent "n", TIdent "a...b"]
+        @?= Right [TSpread, TDot, TDot, TIdent "n", TIdent "a", TSpread, TIdent "b"]
+  , -- __A qualified name is one token, already in pieces__ (MS10 phase 240),
+    -- and the glue is what tells it from the inaccessible-pattern dot: @k.n@ is
+    -- a name in @k@ and @k .n@ is a name and then a dot on another.
+    testCase "a qualified name is one token" $
+      lexed "List.map k.n k .n"
+        @?= Right [ TQIdent ["List", "map"], TQIdent ["k", "n"]
+                  , TIdent "k", TDot, TIdent "n" ]
+  , testCase "and a path may be deeper than one step" $
+      lexed "A.B.c" @?= Right [TQIdent ["A", "B", "c"]]
   ]
 
 -- | What the lexer made of a line, the positions dropped.

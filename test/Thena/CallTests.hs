@@ -192,7 +192,7 @@ headArguments =
       -- too, so the two clauses are told apart by the message instead — only
       -- one of them is ever a candidate, so neither run builds a choice point.
       testCase "the name clause is a candidate for a name" $
-        let (_, out) = runOut (machine (bases [nameClause]) (callPick (SurfaceName "x")))
+        let (_, out) = runOut (machine (bases [nameClause]) (callPick (SurfaceName [] "x")))
          in fmap isGuess out @?= Right True
 
     , testCase "and is not one for anything else" $
@@ -203,7 +203,7 @@ headArguments =
     , -- Both clauses match a name, so this is an ordinary two-candidate call
       -- and the choice point is built exactly as it is for any other pair.
       testCase "two clauses over one argument leave a choice point" $
-        let (msgs, out) = runOut (machine (bases [nameClause, otherClause]) (callPick (SurfaceName "x")))
+        let (msgs, out) = runOut (machine (bases [nameClause, otherClause]) (callPick (SurfaceName [] "x")))
          in do msgs @?= ["chose 1000: pick"]
                fmap (length . choicePoints) out @?= Right 1
 

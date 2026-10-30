@@ -46,7 +46,7 @@ tests =
 -- Fixtures — one per node kind, each with a distinguishable subterm
 
 nm :: String -> Surface
-nm = SurfaceName
+nm = SurfaceName []
 
 -- | @f a b@
 appTerm :: Surface

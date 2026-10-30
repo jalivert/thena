@@ -47,11 +47,13 @@ import Thena.Core.Term (Literal (..))
 -- 'Thena.Core.Term.Bound', a 'Thena.Core.Term.Free' or a
 -- 'Thena.Core.Term.Global'; the tree cannot say which and does not try.
 data Raw
-  = RawName String
+  = RawName [String] String
   | RawUniverse Int
   | RawPrimitive Literal         -- ^ @"ab"@, @'c'@, @3@ (MS6 phase 97a)
   | RawUniverseOpen              -- ^ @Type@ — a universe whose level is inferred
-  | RawAt RawIdent [Int]         -- ^ @foo {0 1}@ — a global at level arguments
+  | RawAt [String] RawIdent [Int]
+    -- ^ @foo {0 1}@, @String.eq {0}@ — a global at level arguments, with the
+    -- steps of its path (MS10 phase 240)
 
   | RawLam [RawBinder] Raw       -- ^ @λ (x : S) (y : T) -> b@
   | RawPi [RawBinder] Raw        -- ^ @∀ (x : S) (y : T) -> B@
@@ -198,10 +200,10 @@ splices t = case t of
   -- **A region's splices are the terms it holds** (MS6 phase 110), in the
   -- order they were written, which is the order they fill the reading's slots.
   RawObject _ _ ps   -> concat [ splices e | RawSpliced e <- ps ]
-  RawName _          -> []
+  RawName _ _        -> []
   RawUniverse _      -> []
   RawUniverseOpen    -> []
-  RawAt n _          -> named n
+  RawAt _ n _        -> named n
   where
     binder (RawBinder n ty) = named n ++ splices ty
 

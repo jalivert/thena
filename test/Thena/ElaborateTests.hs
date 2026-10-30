@@ -453,12 +453,12 @@ leafTests =
     [ -- @E⟦x⟧ = FILL x; SOLVE@ — Brady's variable case. What @elab-var@ did
       -- with a hint, one op does with a surface term.
       testCase "a name in scope is attached and committed" $
-        case elaborating (SurfaceName "a") of
+        case elaborating (SurfaceName [] "a") of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> isGuess m @?= False   -- solved, so it is a definition now
 
     , testCase "a name that is not in scope says so" $
-        case elaborating (SurfaceName "nope") of
+        case elaborating (SurfaceName [] "nope") of
           Left (CannotRead (ResolveFailed (NotInScope x))) -> x @?= "nope"
           other -> assertFailure ("expected a scope error: " ++ show other)
 
@@ -523,7 +523,7 @@ unsupportedTests =
       -- placed, which the fixture's @a@ — a local, with no recorded plicities
       -- — never can.
       refused "an implicit argument this head has no position for"
-        (SurfaceApp (SurfaceName "a") [SurfaceArg Implicit (SurfaceName "a")])
+        (SurfaceApp (SurfaceName [] "a") [SurfaceArg Implicit (SurfaceName [] "a")])
       -- A @∀@ binder must say what it binds. The grammar's @PiBinder@ requires
       -- the annotation, so @∀ x -> B@ does not parse and this is reached only
       -- from a tree built by hand — but 'SurfaceBinder' is shared with λ, where
@@ -531,7 +531,7 @@ unsupportedTests =
       -- the case is constructible and the ∀ clause has to answer for it. There
       -- is no goal to read a Π's domain off.
     , refusedShape "a ∀ whose first binder has a type"
-        (SurfacePi [binder] (SurfaceName "a"))
+        (SurfacePi [binder] (SurfaceName [] "a"))
     ]
   where
     binder = SurfaceBinder Explicit "x" Nothing
@@ -561,7 +561,7 @@ elimTests =
   testGroup
     "an elim names a datatype"
     [ testCase "and an unknown one is a scope error, not a missing rule" $
-        case elaborating (SurfaceElim "D" [] (SurfaceName "a") [] [] (SurfaceName "a")) of
+        case elaborating (SurfaceElim "D" [] (SurfaceName [] "a") [] [] (SurfaceName [] "a")) of
           Left (CannotRead (ResolveFailed (NotADatatype "D"))) -> pure ()
           other -> assertFailure ("expected NotADatatype: " ++ show other)
     ]
@@ -576,7 +576,7 @@ lambdaTests =
       -- @y@ resolves to nothing.
       testCase "the binder takes the surface name" $
         case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" Nothing]
-                                     (SurfaceName "y")) of
+                                     (SurfaceName [] "y")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> identsBound m @?= ["y"]
 
@@ -588,7 +588,7 @@ lambdaTests =
     , testCase "two binders, and the focus still comes back" $
         case elaboratingAt piGoal2 (SurfaceLam [ SurfaceBinder Explicit "y" Nothing
                                                , SurfaceBinder Explicit "z" Nothing ]
-                                      (SurfaceName "z")) of
+                                      (SurfaceName [] "z")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> (identsBound m, focusedVar m) @?= (["y", "z"], Just goalVar)
 
@@ -597,7 +597,7 @@ lambdaTests =
       -- its own @prim-solve@ lands somewhere else.
     , testCase "and the focus comes back to where it started" $
         case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" Nothing]
-                                     (SurfaceName "y")) of
+                                     (SurfaceName [] "y")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> focusedVar m @?= Just goalVar
 
@@ -605,7 +605,7 @@ lambdaTests =
       -- The surface name survives exactly as it does without one.
     , testCase "a written binder type is checked, and the binder is unchanged" $
         case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" (Just (SurfaceUniverse 0))]
-                                     (SurfaceName "y")) of
+                                     (SurfaceName [] "y")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> (identsBound m, focusedVar m) @?= (["y"], Just goalVar)
 
@@ -613,8 +613,8 @@ lambdaTests =
       -- binder of the same group, so it can only be elaborated inside them.
     , testCase "and it may name an earlier binder of the same group" $
         case elaboratingAt piGoalDep (SurfaceLam [ SurfaceBinder Explicit "A" Nothing
-                                                 , SurfaceBinder Explicit "x" (Just (SurfaceName "A")) ]
-                                        (SurfaceName "x")) of
+                                                 , SurfaceBinder Explicit "x" (Just (SurfaceName [] "A")) ]
+                                        (SurfaceName [] "x")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> identsBound m @?= ["A", "x"]
 
@@ -623,14 +623,14 @@ lambdaTests =
     , testCase "and a group mixes written and bare binders" $
         case elaboratingAt piGoal2 (SurfaceLam [ SurfaceBinder Explicit "y" (Just (SurfaceUniverse 0))
                                                , SurfaceBinder Explicit "z" Nothing ]
-                                      (SurfaceName "z")) of
+                                      (SurfaceName [] "z")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> (identsBound m, focusedVar m) @?= (["y", "z"], Just goalVar)
 
       -- **A wrong one fails at the binder it was written on**, not at @qed@.
     , testCase "and a written type that is not the goal's domain is refused" $
-        case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" (Just (SurfaceName "String"))]
-                                     (SurfaceName "y")) of
+        case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" (Just (SurfaceName [] "String"))]
+                                     (SurfaceName [] "y")) of
           Left _  -> pure ()
           Right m -> assertFailure ("elaborated: " ++ show (identsBound m))
 
@@ -638,9 +638,9 @@ lambdaTests =
       -- implicit binder is bare or written like any other, so both shapes reach
       -- the one refusal that names it.
     , refusedShape "a λ whose first binder is explicit"
-        (SurfaceLam [SurfaceBinder Implicit "x" Nothing] (SurfaceName "x"))
+        (SurfaceLam [SurfaceBinder Implicit "x" Nothing] (SurfaceName [] "x"))
     , refusedShape "a λ whose first binder is explicit"
-        (SurfaceLam [SurfaceBinder Implicit "x" (Just (SurfaceUniverse 0))] (SurfaceName "x"))
+        (SurfaceLam [SurfaceBinder Implicit "x" (Just (SurfaceUniverse 0))] (SurfaceName [] "x"))
     ]
   where
     -- **The λ case is clauses now** (MS4 phase 49c, MS8): a plain binder reads

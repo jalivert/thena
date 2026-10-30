@@ -1415,9 +1415,9 @@ grammarDatatype g =
     typeOf p = case gproductionArguments p of
       [] -> self
       args -> SurfacePi (NE.fromList (map binder (renamed args))) self
-    self = SurfaceName (plainName (grammarName g))
+    self = SurfaceName [] (plainName (grammarName g))
 
-    binder (x, srt) = SurfaceBinder Explicit x (Just (SurfaceName (typeName srt)))
+    binder (x, srt) = SurfaceBinder Explicit x (Just (SurfaceName [] (typeName srt)))
     typeName srt = case srt of
       OfLanguage l -> plainName l
       OfClass _ t _ -> plainName t
