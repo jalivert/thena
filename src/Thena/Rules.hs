@@ -52,7 +52,7 @@ module Thena.Rules
   ) where
 
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..))
+import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, rootName)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor (Cursor, Focus (..), context, expectedType, focus)
 import Thena.Global.Env (GlobalEnv)
@@ -975,7 +975,7 @@ resolveRule gs (RawRule nm ps ts body) =
     (_,  _,  Right _)      -> Left (patErrs ++ headErrs)
     (_,  _,  Left bodyErrs) -> Left (patErrs ++ headErrs ++ bodyErrs)
   where
-    g = GlobalName nm
+    g = rootName nm
 
     (patErrs, qs) = partitionEithers (map (resolvePattern gs g) ps)
 
@@ -1057,7 +1057,7 @@ resolveFunction gs (RawFunction nm ps body) =
     ([], qs) -> Rule g qs [] <$> bodyInstrs gs g nm (concatMap patternBinds qs) body
     (es, _)  -> Left es
   where
-    g = GlobalName nm
+    g = rootName nm
 
 -- | Compile what stands right of a function's @=@ or a lambda's @->@.
 --
@@ -1145,7 +1145,7 @@ resolveBlock gs g bound0 body = case partitionEithers (walk 0 bound0 body) of
     -- **A mistake in the type is said about the local, where it was written**
     -- (MS5 phase 90, @ms5\/CLOSEOUT.md@ 43). 'resolveTy' reports against an
     -- owner as a signature does, and this passed it @show g@ — so a user read
-    -- /in the signature of GlobalName "go"/, about a local that is not a
+    -- /in the signature of rootName "go"/, about a local that is not a
     -- signature. 'InAnnotation' carries the rule, the instruction and the local.
     annotated i n t got = do
       ty <- either (Left . InAnnotation g i n) Right (resolveTy n t) >>= \mt -> case mt of
@@ -1446,12 +1446,12 @@ assembled g i tag sk = case sk of
 -- | The installed grammar a tag names, if it names one (MS6 phase 104c).
 objectGrammar :: [Grammar] -> String -> Maybe Grammar
 objectGrammar gs tag =
-  case [ gr | gr <- gs, GlobalName tag == grammarName gr ] of
+  case [ gr | gr <- gs, rootName tag == grammarName gr ] of
     gr : _ -> Just gr
     []     -> Nothing
 
 productionsOf :: Grammar -> [String]
-productionsOf gr = [ n | p <- grammarProductions gr, let GlobalName n = gproductionName p ]
+productionsOf gr = [ n | p <- grammarProductions gr, let n = nameDotted (gproductionName p) ]
 
 startAt :: String -> Maybe String -> Earley.Start
 startAt tag = maybe (Earley.StartAt tag) Earley.StartRule
@@ -1609,7 +1609,7 @@ opArities w =
   , any resolves [ as | as <- samples k, length as == k ]
   ]
   where
-    resolves as = case operation [] (GlobalName "") 0 (RawOp w as) of
+    resolves as = case operation [] (rootName "") 0 (RawOp w as) of
       Right (Call _ _) -> False
       Right _          -> True
       Left _           -> False
@@ -2011,14 +2011,14 @@ surfaceBlocks gs g is = concat <$> traverse one (zip [0 :: Int ..] (blocksUnder 
           inner <- surfaceBlocks gs nm body
           Right (Rule nm [] [] body : inner)
       where
-        nm = GlobalName (unGlobal g ++ ", do block " ++ show (k + 1))
+        nm = rootName (unGlobal g ++ ", do block " ++ show (k + 1))
 
     returns i = case i of
       Do   (Return _)   -> True
       Bind _ _ (Return _) -> True
       _                 -> False
 
-    unGlobal (GlobalName n) = n
+    unGlobal = nameDotted
 
 -- | The written blocks inside every surface literal an instruction run holds.
 blocksUnder :: [Instr] -> [[RawInstr]]

@@ -9,7 +9,7 @@ import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
 import Thena.Core.Convert (convert)
 import Thena.Core.Level (levelOfNat)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), rootName, nameDotted)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
 import Thena.Standard (withRules)
@@ -57,7 +57,7 @@ natCommand :: String
 natCommand = "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 
 declaredIn :: Session -> String -> Bool
-declaredIn s g = isDeclared (GlobalName g) (globals (machineOf s))
+declaredIn s g = isDeclared (rootName g) (globals (machineOf s))
 
 -- | The words of every spelling @:help@ shows, and those of them that are
 -- colon words.
@@ -139,7 +139,7 @@ tests =
             -- **Refused before it runs** since MS5 phase 92: a name nothing
             -- defines is a type error, at the prompt as in a file.
             snd (command withRules "hello")
-              @?= EntryMistyped [Undefined (InBody (GlobalName "entry") 0) "hello" 0 []]
+              @?= EntryMistyped [Undefined (InBody (rootName "entry") 0) "hello" 0 []]
         , testCase "a command that merely starts with :core is not :core" $
             snd (command withRules ":corex") @?= Rejected (NoSuchCommand ":corex")
         , testCase "a view command with no argument says so" $
@@ -151,19 +151,19 @@ tests =
           -- refusals; what changed is who says so.
           testCase "cross must say which field" $
             snd (command withRules "cross")
-              @?= LineRefused [BadOperands (GlobalName "entry") 0 "cross"]
+              @?= LineRefused [BadOperands (rootName "entry") 0 "cross"]
         , testCase "and it must be one of the two there are" $
             snd (command withRules "cross body")
-              @?= LineRefused [BadOperands (GlobalName "entry") 0 "cross"]
+              @?= LineRefused [BadOperands (rootName "entry") 0 "cross"]
         , testCase "a positional descent needs a number" $
             snd (command withRules "param")
-              @?= LineRefused [BadOperands (GlobalName "entry") 0 "param"]
+              @?= LineRefused [BadOperands (rootName "entry") 0 "param"]
         , testCase "and it has to be one" $
             snd (command withRules "param x")
-              @?= LineRefused [BadOperands (GlobalName "entry") 0 "param"]
+              @?= LineRefused [BadOperands (rootName "entry") 0 "param"]
         , testCase "a plain descent takes no argument" $
             snd (command withRules "cod 2")
-              @?= LineRefused [BadOperands (GlobalName "entry") 0 "cod"]
+              @?= LineRefused [BadOperands (rootName "entry") 0 "cod"]
         , testCase ":where answers with the cursor, not with text" $
             case snd (command withRules ":where") of
               Where _ -> pure ()
@@ -233,7 +233,7 @@ tests =
             -- gone is reported before anything runs rather than halting mid-way.
             snd (say [ natCommand, ":theorem t : Nat"
                      , "m = concat \"a\" \"b\"", "say m" ])
-              @?= LineRefused [UnboundInRule (GlobalName "entry") 0 "m"]
+              @?= LineRefused [UnboundInRule (rootName "entry") 0 "m"]
           -- A value may be bound at the prompt now too (phase 68a's `Op.Value`).
         , testCase "a literal may be bound" $
             snd (say [natCommand, ":theorem t : Nat", "n = 42 ; say \"ok\""])
@@ -250,7 +250,7 @@ tests =
               other -> assertFailure ("expected a type error, got " ++ show other)
         , testCase "and an unbound name in one is refused" $
             snd (say [":theorem t : Type\8320", "do { say nope }"])
-              @?= LineRefused [UnboundInRule (GlobalName "entry") 0 "nope"]
+              @?= LineRefused [UnboundInRule (rootName "entry") 0 "nope"]
         , testCase "and the development is as it was" $
             devOf (fst (say [":theorem t : Type\8320", "do { attack ; prim-try 3 }"]))
               @?= devOf (fst (say [":theorem t : Type\8320"]))
@@ -370,7 +370,7 @@ tests =
                 -- @apply-all@ is the fold over @apply-to@ that applies a solved
                 -- binder's term to the binders it is a function of (MS9 phase
                 -- 195).
-                [ n | (GlobalName n, _, _, _) <- rows ]
+                [ nameDotted g | (g, _, _, _) <- rows ]
                   @?= [ "apply-all", "instantiate-with", "intro-arm-binders"
                       , "intro-binders", "fresh-universe"
                       ]
@@ -455,7 +455,7 @@ tests =
           -- that asks for the name, and the op that is given one.
           testCase "assume needs a type" $
             snd (command withRules "assume")
-              @?= EntryMistyped [Undefined (InBody (GlobalName "entry") 0) "assume" 0 [1, 2]]
+              @?= EntryMistyped [Undefined (InBody (rootName "entry") 0) "assume" 0 [1, 2]]
         , testCase "assume resolves its type in the development's context" $
             case snd (say ["assume \"A\" ⌜ Type₀ ⌝", "assume \"x\" ⌜ A ⌝"]) of
               Ran [] _ Completed -> pure ()
@@ -523,7 +523,7 @@ tests =
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase "a declaration the checker refuses stops the run" $
             snd (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])
-              @?= Ran [] [] (Refused (NotStrictlyPositive (GlobalName "c") (Ident "x")))
+              @?= Ran [] [] (Refused (NotStrictlyPositive (rootName "c") (Ident "x")))
         , testCase "and writes nothing" $
             declaredIn (fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])) "T"
               @?= False
@@ -539,7 +539,7 @@ tests =
               other       -> assertFailure ("expected ShownData, got " ++ show other)
         , testCase ":show ‹former› is the generated wrapper, type and body" $
             case snd (say [natCommand, ":show succ"]) of
-              ShownGlobal (GlobalName "succ") _ _ _ _ (Just _) -> pure ()
+              ShownGlobal (GlobalName [] "succ") _ _ _ _ (Just _) -> pure ()
               other -> assertFailure ("expected ShownGlobal, got " ++ show other)
         , testCase "a global is in scope for an ordinary term" $
             case snd (say [natCommand, ":core succ zero"]) of
@@ -693,5 +693,5 @@ reached (s, _) = (development (machineOf s), globals (machineOf s))
 -- | The names a @:accepts@ / @:produces@ listing came back with (MS5 phase 71).
 fittingNames :: Response -> [String]
 fittingNames r = case r of
-  Fitting _ _ fs -> [ n | (GlobalName n, _, _, _) <- fs ]
+  Fitting _ _ fs -> [ nameDotted g | (g, _, _, _) <- fs ]
   _              -> []

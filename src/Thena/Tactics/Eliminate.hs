@@ -108,6 +108,7 @@ import Thena.Core.Term
   ( Core (..)
   , substLevelsIn
   , GlobalName (..)
+  , rootName
   , Ident (..)
   , Var
   , close
@@ -1331,7 +1332,7 @@ eliminate env ctx sch prem n0 goal tgt =
           holes =
             [ (mv, Ident (cn ++ "Method"), mty)
             | (mv, mty, c) <- zip3 mvs methodTys (inductiveConstructors d)
-            , let GlobalName cn = constructorName c
+            , let cn = nameWord (constructorName c)
             ]
           methodEntries = [ Hypothesis mv i mty | (mv, i, mty) <- holes ]
 
@@ -1555,10 +1556,10 @@ eliminate env ctx sch prem n0 goal tgt =
       Definition _ _ s t -> freeVars s ++ freeVars t
 
 equality :: GlobalName
-equality = GlobalName "Eq"
+equality = rootName "Eq"
 
 reflexivity :: GlobalName
-reflexivity = GlobalName "refl"
+reflexivity = rootName "refl"
 
 -- | The head and arguments of a type former application.
 --

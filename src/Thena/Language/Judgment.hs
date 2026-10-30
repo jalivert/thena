@@ -36,7 +36,7 @@ import Data.List (nub)
 import Data.Maybe (listToMaybe)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (GlobalName (..), rootName, nameDotted)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (Piece (..), Start (..), Tree (..))
 import Thena.Language.Grammar
@@ -83,7 +83,7 @@ judgmentDatatype gs g rules = do
   Right ( SurfaceData name [] (foldr (SurfaceArrow . typeOf) (SurfaceUniverse 0) indices) (map fst ctors)
         , map snd ctors )
   where
-    GlobalName name = grammarName g
+    name = nameDotted (grammarName g)
     -- **The judgment's own notation, which is its one type-former production**
     -- (MS8 phase 160) — the spelling of the statement this family makes, so its
     -- slots are the family's indices. A @notation@ block may add a function
@@ -172,7 +172,7 @@ constructor gs g r = do
         b : bs -> SurfacePi (b NE.:| bs) result
   Right (SurfaceConstructor (ruleName r) ty, replicate (length binders) Plain)
   where
-    GlobalName judgment = grammarName g
+    judgment = nameDotted (grammarName g)
     rules = ruleGrammar gs
 
     -- **Left to right, each named premise extending what the rest may write.**
@@ -257,8 +257,8 @@ constructor gs g r = do
         Just (AtUniverse _) -> Nothing
         Just (TypeInside (Node p' _)) ->
           case [ l | h <- gs, q <- grammarProductions h
-                   , gproductionName q == GlobalName p'
-                   , let GlobalName l = grammarName h ] of
+                   , gproductionName q == rootName p'
+                   , let l = nameDotted (grammarName h) ] of
             l : _ -> Just l
             []    -> Nothing
         _ -> Nothing
@@ -283,7 +283,7 @@ constructor gs g r = do
     -- Every type or global the constructor's type can mention, which a
     -- metavariable must not shadow.
     types = nub $
-      [ n | h <- gs, let GlobalName n = grammarName h ]
+      [ n | h <- gs, let n = nameDotted (grammarName h) ]
         ++ [ sortType srt | h <- gs, p <- grammarProductions h, Slot _ srt _ <- gproductionItems p ]
         ++ concatMap (substitutionNames gs) gs
         ++ ["And", "both", "cons", "nil"]
@@ -452,7 +452,7 @@ ruleGrammar gs =
       _ -> s
 
     own g =
-      let GlobalName l = grammarName g
+      let l = nameDotted (grammarName g)
        in Earley.Rule ("metavariable " ++ l) l
             [Earley.Scan ("a metavariable of " ++ l) (metavariables (grammarMetavars g))] []
             : case substitutedClasses gs g of
@@ -548,26 +548,26 @@ special n = case words n of
 -- | The classes a substitution written in a rule may be for — every class the
 -- language has a generated substitution for (§6.3, per class at MS8 phase 155).
 substitutedClasses :: [Grammar] -> Grammar -> [String]
-substitutedClasses gs g = [ x | GlobalName x <- classesSubstituted gs g ]
+substitutedClasses gs g = [ x | x <- map nameDotted (classesSubstituted gs g) ]
 
 -- | The grammar of that name, among those installed.
 grammarNamed :: [Grammar] -> String -> [Grammar]
-grammarNamed gs l = [ g | g <- gs, grammarName g == GlobalName l ]
+grammarNamed gs l = [ g | g <- gs, grammarName g == rootName l ]
 
 -- | The language that owns a class — what the right-hand side of one of its
 -- pairs is a term of, and what its map is a map into.
 ownerOf :: [Grammar] -> String -> String -> String
-ownerOf gs l x = case [ classOwner gs h (GlobalName x) | h <- grammarNamed gs l ] of
-  Just g : _ -> let GlobalName n = grammarName g in n
+ownerOf gs l x = case [ classOwner gs h (rootName x) | h <- grammarNamed gs l ] of
+  Just g : _ -> nameDotted (grammarName g)
   _ -> x
 
 -- | A class's @T@ — @String@ for every class a binder or an occurrence may be
 -- at (§4.5 refuses any other), asked rather than assumed so that `~tmnrr`'s
 -- @Int@ class has one place to change.
 classType :: [Grammar] -> String -> String
-classType gs x = case [ t | g <- gs, (c, _) <- variableProductions g, c == GlobalName x
+classType gs x = case [ t | g <- gs, (c, _) <- variableProductions g, c == rootName x
                           , p <- grammarProductions g
-                          , Slot y (OfClass _ (GlobalName t) _) _ <- gproductionItems p, y == x ] of
+                          , Slot y (OfClass _ tn _) _ <- gproductionItems p, let t = nameDotted tn, y == x ] of
   t : _ -> t
   [] -> "String"
 
@@ -610,4 +610,4 @@ sortType srt = case srt of
   OfUniverse n -> universeSpelling n
 
 nameOf :: GlobalName -> String
-nameOf (GlobalName n) = n
+nameOf = nameDotted

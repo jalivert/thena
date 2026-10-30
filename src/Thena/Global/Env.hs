@@ -71,6 +71,8 @@ import Thena.Core.Term
   ( Core (..)
   , Var
   , GlobalName (..)
+  , rootName
+  , nameDotted
   , Ident (..)
   , close
   , fresh
@@ -392,7 +394,7 @@ emptyGlobals = GlobalEnv [] primitiveTypes [] [] []
 -- only other place these names are written.
 primitiveTypes :: [(GlobalName, Constant)]
 primitiveTypes =
-  [ (GlobalName n, MkConstant [] (Universe LZero))
+  [ (rootName n, MkConstant [] (Universe LZero))
   | n <- ["String", "Char", "Int"]
   ]
   ++ [(tokenName, MkConstant [] tokenType)]
@@ -667,7 +669,7 @@ data Scheme
 -- @elim@ is a keyword, but keywords are whole tokens, so @elimNat@ lexes as one
 -- name and there is nothing to reserve.
 eliminatorName :: GlobalName -> GlobalName
-eliminatorName (GlobalName d) = GlobalName ("elim" ++ d)
+eliminatorName d = rootName ("elim" ++ nameDotted d)
 
 -- | The eliminator as an ordinary global definition — its type and its body
 -- (MS4 phase 49e).
@@ -709,7 +711,7 @@ eliminatorWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
 -- as one name and there is nothing to reserve. The same sentence
 -- 'eliminatorName' carries about @elim@.
 caseName :: GlobalName -> GlobalName
-caseName (GlobalName d) = GlobalName ("case" ++ d)
+caseName d = rootName ("case" ++ nameDotted d)
 
 -- | __Case analysis: the eliminator minus its inductive hypotheses__ (MS9 phase
 -- 178), as an ordinary global definition — its type and its body.

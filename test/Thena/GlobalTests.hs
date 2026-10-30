@@ -32,6 +32,7 @@ import Thena.Core.Term
   , close
   , fresh
   , open
+  , rootName
   )
 import Data.List (isPrefixOf)
 
@@ -124,14 +125,14 @@ computedLevels =
     , atLevel "two constructors, the join is over both" ["Nat"] 0
     , testCase "nothing contributes, so the level stays a parameter" $ do
         env <- declaredWith []
-        case lookupInductive (GlobalName "D") env of
+        case lookupInductive (rootName "D") env of
           Just d | not (null (inductiveLevels d)) -> pure ()
           other -> assertFailure ("expected a level parameter, got " ++ show other)
     ]
   where
     atLevel what args want = testCase what $ do
       env <- declaredWith args
-      case lookupInductive (GlobalName "D") env of
+      case lookupInductive (rootName "D") env of
         Nothing -> assertFailure "D was not declared"
         Just d  -> inductiveLevel d @?= levelOfNat want
 
@@ -339,7 +340,7 @@ natVecCounter :: Int
 natVecCounter = snd (after [natDecl, vecDecl])
 
 named :: String -> GlobalName
-named = GlobalName
+named = rootName
 
 -- --------------------------------------------------------------------------
 -- What a declaration writes
@@ -744,7 +745,7 @@ declareDoorTests =
     -- hole was that the name went in and only a later proof found out.
   , testCase "and nothing of it reaches the environment" $
       let (s, _) = driveTo [":trust none", liarLine]
-       in isDeclared (GlobalName "liar") (globals (machineOf s)) @?= False
+       in isDeclared (rootName "liar") (globals (machineOf s)) @?= False
 
     -- The rung is the user's own setting, so saying so lets it in.
   , testCase "the same line is admitted at any trust" $
@@ -753,7 +754,7 @@ declareDoorTests =
         r -> assertFailure ("expected Completed, got " ++ show r)
   , testCase "and then it is there" $
       let (s, _) = driveTo [":trust any", liarLine]
-       in isDeclared (GlobalName "liar") (globals (machineOf s)) @?= True
+       in isDeclared (rootName "liar") (globals (machineOf s)) @?= True
 
     -- **The check must not refuse what it has no business refusing.**
     -- @honest@'s claim is pending at its declaration — the declared type's

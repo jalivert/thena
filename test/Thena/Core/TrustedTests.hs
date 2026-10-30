@@ -36,7 +36,7 @@ import Thena.Core.Context (Context)
 import Thena.Core.Convert (convert)
 import Thena.Core.Level (Level (..), LevelVar (..))
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..))
+import Thena.Core.Term (Core (..), rootName)
 import Thena.Core.Typing (infer)
 import Thena.Development.Cursor
   ( Cursor
@@ -68,7 +68,7 @@ import Thena.Declared (eqNat, eqNatCounter)
 env :: GlobalEnv
 env =
   addDefinition
-    (GlobalName "Alias")
+    (rootName "Alias")
     MkDefinition
       { definitionLevels = []
       , definitionConstraints = []

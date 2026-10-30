@@ -12,11 +12,13 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
-  , GlobalName (..)
+  
   , Ident (..)
   , Var
   , close
   , fresh
+  , rootName
+  , nameDotted
   )
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, crossType, enter)
@@ -123,7 +125,7 @@ var = fst (fresh 0)
 withArrow :: GlobalEnv
 withArrow =
   addDefinition
-    (GlobalName "Arrow")
+    (rootName "Arrow")
     (MkDefinition [] [] type1 (arrow type0 type0))
     emptyGlobals
 
@@ -131,7 +133,7 @@ matching :: GlobalEnv -> Cursor -> [String]
 matching env cur = map nameOf (drain (matches expectedBase env cur))
 
 nameOf :: Rule -> String
-nameOf r = let GlobalName n = ruleName r in n
+nameOf = nameDotted . ruleName
 
 -- | Walk an iterator to the end with 'next' alone, which is how the driver's
 -- display walks it.
@@ -165,11 +167,11 @@ matchTests =
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
     , testCase "a goal type that only reduces to a Π still matches" $
-        matching withArrow (guessAt (Global (GlobalName "Arrow") []))
+        matching withArrow (guessAt (Global (rootName "Arrow") []))
           @?= ["intro", "solve", "regret", "prove"] ++ walkers
 
     , testCase "and does not, in an environment where it does not unfold" $
-        matching emptyGlobals (guessAt (Global (GlobalName "Arrow") []))
+        matching emptyGlobals (guessAt (Global (rootName "Arrow") []))
           @?= ["solve", "regret", "prove"] ++ walkers
 
       -- The one test that must NOT reduce: whnf δ-reduces a term-level let
@@ -275,7 +277,7 @@ iteratorTests =
 -- helper turns each name into the pattern that binds it and the fixtures below
 -- read exactly as they did.
 named :: String -> [Name'] -> [Instr] -> Rule
-named n ps = Rule (GlobalName n) (map Ops.PVar ps) []
+named n ps = Rule (rootName n) (map Ops.PVar ps) []
 
 type Name' = String
 
@@ -300,7 +302,7 @@ validateTests =
       -- than a check quietly lost.
     , testCase "nor a binding false" $
         validate (named "r" [] [Bind (Ops.PVar "false") Nothing Ops.Here])
-          @?= [ReservedName (GlobalName "r") "false"]
+          @?= [ReservedName (rootName "r") "false"]
     , testCase "and an ordinary name is untouched" $
         validate (named "r" ["t"] [Bind (Ops.PVar "x") Nothing Ops.Here]) @?= []
 
@@ -308,11 +310,11 @@ validateTests =
       -- rule-body operation.
     , testCase "define-data in a body is rejected" $
         validate (named "bad" [] [Do (Ops.DefineData someData)])
-          @?= [DeclarationInBody (GlobalName "bad") 0]
+          @?= [DeclarationInBody (rootName "bad") 0]
 
     , testCase "binding an op that produces nothing is rejected" $
         validate (named "bad" [] [Bind (Ops.PVar "x") Nothing Ops.Attack])
-          @?= [BoundNonProducing (GlobalName "bad") 0 "x"]
+          @?= [BoundNonProducing (rootName "bad") 0 "x"]
 
     , testCase "binding an op that produces something is fine" $
         validate (named "ok" [] [Bind (Ops.PVar "x") Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))])
@@ -320,7 +322,7 @@ validateTests =
 
     , testCase "a Ref to nothing is rejected" $
         validate (named "bad" [] [Do (Ops.Say (Ref "z"))])
-          @?= [UnboundInRule (GlobalName "bad") 0 "z"]
+          @?= [UnboundInRule (rootName "bad") 0 "z"]
 
     , testCase "a parameter binds it" $
         validate (named "ok" ["z"] [Do (Ops.Say (Ref "z"))]) @?= []
@@ -340,7 +342,7 @@ validateTests =
             [ Do (Ops.Say (Ref "z"))
             , Bind (Ops.PVar "z") Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
             ])
-          @?= [UnboundInRule (GlobalName "bad") 0 "z"]
+          @?= [UnboundInRule (rootName "bad") 0 "z"]
 
       -- Every error, not the first: a rule author fixing one at a time would
       -- reload once per mistake.
@@ -351,9 +353,9 @@ validateTests =
             , Do (Ops.DefineData someData)
             , Do (Ops.Say (Ref "z"))
             ])
-          @?= [ BoundNonProducing (GlobalName "bad") 0 "x"
-              , DeclarationInBody (GlobalName "bad") 1
-              , UnboundInRule (GlobalName "bad") 2 "z"
+          @?= [ BoundNonProducing (rootName "bad") 0 "x"
+              , DeclarationInBody (rootName "bad") 1
+              , UnboundInRule (rootName "bad") 2 "z"
               ]
 
     , testCase "validateBase checks every rule" $
@@ -395,7 +397,7 @@ dataTests =
       -- when the base loads, which needs 'Thena.Instral.Ops.refsIn' to look inside.
       testCase "an unbound name inside a list is refused at load" $
         validate (named "r" [] [Do (Ops.Say (ListOf [Ref "nope"]))])
-          @?= [UnboundInRule (GlobalName "r") 0 "nope"]
+          @?= [UnboundInRule (rootName "r") 0 "nope"]
 
       -- **The five destructors are gone** (MS5 phase 86): @list-head@,
       -- @list-tail@, @pair-first@, @pair-second@ and @option-value@. What they
@@ -432,16 +434,16 @@ dataTests =
     -- pieces while it is there.
     shapes =
       ruleBase "shapes" Nothing "" [] []
-        [ Rule (GlobalName "shape") [Ops.PList [] Nothing] []
+        [ Rule (rootName "shape") [Ops.PList [] Nothing] []
             [Do (Ops.Say (Lit (VText "empty")))]
-        , Rule (GlobalName "shape") [Ops.PList [Ops.PWild] (Just Ops.PWild)] []
+        , Rule (rootName "shape") [Ops.PList [Ops.PWild] (Just Ops.PWild)] []
             [Do (Ops.Say (Lit (VText "cons")))]
         ]
 
     clauseFor vs =
       [ w
       | r <- drain (clauses [shapes] emptyGlobals (holeAt type1)
-                            (GlobalName "shape") vs)
+                            (rootName "shape") vs)
       , Do (Ops.Say (Lit (VText w))) <- ruleBody r
       ]
 
@@ -584,7 +586,7 @@ producesTests =
       -- against this table; @Thena.PatternTests@ crosses it against the matcher
       -- instead.
       , ("apply-next",       nat, holeAt natType, [],
-           Ops.ApplyNext (term (Global (GlobalName "succ") [])) (text "a"))
+           Ops.ApplyNext (term (Global (rootName "succ") [])) (text "a"))
       ]
 
     -- @succ zero@, as a focused surface term.
@@ -739,23 +741,23 @@ returning =
     [ returningRule
       -- @return@ ends the body: the @prim-attack@ after it must not run, which
       -- is what makes this rule safe to call at a hole in any state.
-    , Rule (GlobalName "runs-on") [] []
+    , Rule (rootName "runs-on") [] []
         [Do (Ops.Return (Lit (VText "first"))), Do Ops.Attack]
       -- A body with no @return@ at all.
-    , Rule (GlobalName "silent") [] [] [Do (Ops.Say (Lit (VText "nothing")))]
+    , Rule (rootName "silent") [] [] [Do (Ops.Say (Lit (VText "nothing")))]
       -- Two clauses, one arity. The first fails before it can return — it
       -- cannot fail /after/, because @return@ ends the body — so the value the
       -- caller ends up with is the second clause's.
-    , Rule (GlobalName "two-ways") [] []
+    , Rule (rootName "two-ways") [] []
         [Do Ops.Into, Do (Ops.Return (Lit (VText "first")))]
-    , Rule (GlobalName "two-ways") [] []
+    , Rule (rootName "two-ways") [] []
         [Do (Ops.Return (Lit (VText "second")))]
     ]
 
 -- | @rule gives :- do return \"a value\"@.
 returningRule :: Rule
 returningRule =
-  Rule (GlobalName "gives") [] [] [Do (Ops.Return (Lit (VText "a value")))]
+  Rule (rootName "gives") [] [] [Do (Ops.Return (Lit (VText "a value")))]
 
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt = machineIn emptyGlobals
@@ -890,4 +892,4 @@ splitHelpers =
 
 -- | @Nat@, as a core term, for the row above.
 natType :: Core
-natType = Global (GlobalName "Nat") []
+natType = Global (rootName "Nat") []

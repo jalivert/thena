@@ -13,7 +13,7 @@ module Thena.RuleFileTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName, nameDotted)
 import Thena.Driver
   ( CommandError (..)
   , Stop (..)
@@ -117,7 +117,7 @@ basesOf :: Session -> [RuleBase]
 basesOf = rules . machineOf
 
 ruleNames :: RuleBase -> [String]
-ruleNames b = [ n | Rule (GlobalName n) _ _ _ <- baseRules b ]
+ruleNames b = [ nameDotted g | Rule g _ _ _ <- baseRules b ]
 
 loading :: TestTree
 loading =
@@ -164,7 +164,7 @@ loading =
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do frobnicate; prim-solve x")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [UnboundInRule (GlobalName "r") 1 "x"]
+                , RuleIllFormed [UnboundInRule (rootName "r") 1 "x"]
                 )
 
     , -- The load-time pass §2.4 asked for, now running at load rather than in
@@ -173,7 +173,7 @@ loading =
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do prim-try nothing")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [UnboundInRule (GlobalName "r") 0 "nothing"] )
+                , RuleIllFormed [UnboundInRule (rootName "r") 0 "nothing"] )
     ]
   where
     refusal fs = case snd (load1 fs) of
@@ -238,11 +238,11 @@ refusals =
     "the base may not change under a proof"
     [ testCase "while one is being proved" $
         rejected (proving ":load extra.thena.rules")
-          @?= Just (ProofUnderway (GlobalName "t"))
+          @?= Just (ProofUnderway (rootName "t"))
 
     , testCase "or while one is suspended" $
         rejected (suspended ":load extra.thena.rules")
-          @?= Just (ProofsSuspended [GlobalName "t"])
+          @?= Just (ProofsSuspended [rootName "t"])
 
     , testCase "but between theorems it is allowed" $
         case snd (command newSession ":load extra.thena.rules") of

@@ -108,6 +108,8 @@ import Thena.Core.Context (Entry (..), entryType, entryVar, lamOver, piOver)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , nameDotted
+  , rootName
   , Ident (..)
   , close
   , fresh
@@ -160,8 +162,9 @@ import Thena.Global.Generate
 -- name the user could have written, and if they do, the declaration that would
 -- generate it is refused.
 noConfusionNames :: GlobalName -> (GlobalName, GlobalName)
-noConfusionNames (GlobalName d) =
-  (GlobalName ("NoConfusion" ++ d), GlobalName ("noConfusion" ++ d))
+noConfusionNames n =
+  (rootName ("NoConfusion" ++ d), rootName ("noConfusion" ++ d))
+  where d = nameDotted n
 
 -- | The two names the backwards half generates: @noConfusionNatInv@ and
 -- @isLeftInvNat@ — §3.5's @noConfD⁻¹@ and @isLeftInvD@.
@@ -170,8 +173,9 @@ noConfusionNames (GlobalName d) =
 -- datatype whose forward pair is declined has no inverse either, and a caller
 -- that only wants the forward lemma should not have to know these exist.
 noConfusionInverseNames :: GlobalName -> (GlobalName, GlobalName)
-noConfusionInverseNames (GlobalName d) =
-  (GlobalName ("noConfusion" ++ d ++ "Inv"), GlobalName ("isLeftInv" ++ d))
+noConfusionInverseNames n =
+  (rootName ("noConfusion" ++ d ++ "Inv"), rootName ("isLeftInv" ++ d))
+  where d = nameDotted n
 
 -- | Generate, check and admit all four definitions — or say why not.
 --
@@ -589,7 +593,7 @@ generateNoConfusion env n0 d
     -- @elim Empty ⟨λ _ . goal⟩ h@ — an impossible branch, discharged by name.
     absurdAt goal h n =
       let (tv, n1) = fresh n
-       in ( Eliminate (GlobalName "Empty") [dl] []
+       in ( Eliminate (rootName "Empty") [dl] []
               (Lam (Ident "impossible") (emptyType dl) (close tv goal)) [] [] h
           , n1
           )
@@ -672,7 +676,7 @@ generateNoConfusion env n0 d
           dty       = familyAt (varsOf is)
           (mot, n5) = lawMotive is dty n4
           (mh,  n6) = lawMethod is dty n5
-          body      = Eliminate (GlobalName "Eq") [dl] [dty] mot [mh]
+          body      = Eliminate (rootName "Eq") [dl] [dty] mot [mh]
                         [Free vx, Free vy] (Free vq)
        in ( lamOver ps (lamOver is
               (Lam (Ident "x") dty (close vx

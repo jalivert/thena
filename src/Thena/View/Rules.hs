@@ -18,7 +18,7 @@ module Thena.View.Rules
   , displayRule
   ) where
 
-import Thena.Core.Term (GlobalName (..), Var)
+import Thena.Core.Term (nameDotted, Var)
 import Thena.Instral.Ops (Rule (..), Test)
 import Thena.Instral.Pattern (Pattern (..))
 import Thena.Language.Grammar (Grammar)
@@ -79,7 +79,7 @@ displayRule gs budget env bs n at sig r =
     (displayBlock gs budget env bs n at Nothing (ruleBody r))
     (fmap displaySignature sig)
   where
-    nameOf (GlobalName g) = g
+    nameOf = nameDotted
     placeholder pt = case pt of
       PVar x -> "\8249" ++ x ++ "\8250"
       _      -> patternText pt

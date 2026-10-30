@@ -19,7 +19,7 @@ import Test.Tasty.HUnit (testCase, (@?=))
 
 import Data.List (isInfixOf, isPrefixOf)
 import Data.Maybe (isJust)
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Driver
   ( machineOf
   )
@@ -55,7 +55,7 @@ tests =
       -- equation itself, so none of them has anything left to do.
     , testCase "the nine inversion lemmas are gone" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (machineOf s)) . GlobalName)
+        map (isJust . flip lookupDefinition (globals (machineOf s)) . rootName)
             [ "ifGuard", "ifThen", "ifElse"
             , "succArg", "predArg", "isZeroArg"
             , "succAtNat", "predAtNat", "isZeroAtBool"
@@ -82,4 +82,4 @@ tests =
     statementOf n = do
       s <- loaded
       pure ( renderCore (Rendering [] (names (machineOf s))) [] . definitionType
-               <$> lookupDefinition (GlobalName n) (globals (machineOf s)) )
+               <$> lookupDefinition (rootName n) (globals (machineOf s)) )

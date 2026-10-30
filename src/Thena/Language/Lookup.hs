@@ -51,7 +51,7 @@ module Thena.Language.Lookup
 
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (nameDotted, rootName)
 import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
   ( Argument (..)
@@ -102,7 +102,7 @@ notationOf g e = do
   -- production carries is the relation's datatype, so @x : T ∈ Γ@ is a /type/.
   -- That kind is what admits it above a rule's bar, replacing the label this
   -- record used to be admitted by.
-  Just (Grammar JudgmentBlock (GlobalName inN) [inN] [GProduction (GlobalName inN) items args TypeFormer])
+  Just (Grammar JudgmentBlock (rootName inN) [inN] [GProduction (rootName inN) items args TypeFormer])
   where
     own i = case i of
       Slot _ srt _ -> srt == OfLanguage (grammarName g)
@@ -191,7 +191,7 @@ relationOf g e = do
     classOf a = case argumentSort a of
       OfClass cls _ _ -> Just cls
       _ -> Nothing
-    nm (GlobalName n) = n
+    nm = nameDotted
     typeName srt = case srt of
       OfLanguage l -> nm l
       OfClass _ t _ -> nm t

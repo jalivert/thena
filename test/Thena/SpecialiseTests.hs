@@ -32,7 +32,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar)
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh, freeVars)
+import Thena.Core.Term (Core, Ident (..), fresh, freeVars, rootName)
 import Thena.Declared
   ( eqNat
   , eqNatCounter
@@ -470,7 +470,7 @@ refusalTests :: [TestTree]
 refusalTests =
   [ testCase "a name that is not a constructor" $
       refused "Nat" 1 "\8704 (m : Nat) -> Eq {0} Nat m k"
-        @?= Just (NotThatConstructor (GlobalName "Nat"))
+        @?= Just (NotThatConstructor (rootName "Nat"))
 
     -- @succ@'s method binds its argument and its induction hypothesis, so two
     -- binders and an equation is three — and a type with one Π is not it.
@@ -761,7 +761,7 @@ specialisesIn env ctx n what c k src want = testCase what $
 -- | The refusal, for a fixture that is meant to be refused.
 refused :: String -> Int -> String -> Maybe SpecialiseError
 refused c k src =
-  case fst (specialise eqNat natContext natCounter (GlobalName c)
+  case fst (specialise eqNat natContext natCounter (rootName c)
               (hypsOf eqNat c) (plainShape k)
               (term eqNat natContext natCounter src)) of
     Left e  -> Just e
@@ -771,7 +771,7 @@ refused c k src =
 -- fixture, not a test result.
 run' :: GlobalEnv -> Context -> Int -> String -> MethodShape -> Core -> Specialisation
 run' env ctx n c shape mty =
-  case fst (specialise env ctx n (GlobalName c) (hypsOf env c) shape mty) of
+  case fst (specialise env ctx n (rootName c) (hypsOf env c) shape mty) of
   Right s -> s
   Left e  -> error (c ++ ": " ++ show e)
 
@@ -790,7 +790,7 @@ plainShape k = MethodShape [] k [] [] [] []
 -- here instead. It stopped doing that at phase 188 because it was assuming the
 -- caller's scheme, and @caseD@'s methods carry none.
 hypsOf :: GlobalEnv -> String -> [Ident]
-hypsOf env c = case lookupConstructor (GlobalName c) env of
+hypsOf env c = case lookupConstructor (rootName c) env of
   Nothing     -> []
   Just (d, k) ->
     [ entryIdent e

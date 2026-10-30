@@ -33,6 +33,7 @@ import Thena.Core.Term
   , fresh
   , instantiate
   , open
+  , rootName
   )
 
 -- --------------------------------------------------------------------------
@@ -147,7 +148,7 @@ genIdent :: Gen Ident
 genIdent = Ident <$> elements ["x", "y", "z", "n"]
 
 genGlobalName :: Gen GlobalName
-genGlobalName = GlobalName <$> elements ["Nat", "Vec", "S", "plus"]
+genGlobalName = rootName <$> elements ["Nat", "Vec", "S", "plus"]
 
 -- | A closed-at-top term: its free variables come only from 'poolVars'.
 genTerm :: Gen Core
@@ -189,7 +190,7 @@ wellScoped = go 1000
 -- --------------------------------------------------------------------------
 
 tyA :: Core
-tyA = Global (GlobalName "A") []
+tyA = Global (rootName "A") []
 
 -- | @λ ‹name› : A . ‹name›@, built with a variable of its own.
 identityLam :: String -> Int -> Core
@@ -302,7 +303,7 @@ freeVarsTests =
       let vs = take 6 (mintFrom 200)
           node =
             Eliminate
-              { eliminated = GlobalName "Nat"
+              { eliminated = rootName "Nat"
             , levels     = []
               , parameters = [Free (vs !! 0)]
               , motive     = Free (vs !! 1)
@@ -314,7 +315,7 @@ freeVarsTests =
 
   , testCase "a Canonical node's arguments are traversed" $
       let vs = take 2 (mintFrom 300)
-       in asSet (freeVars (Canonical (GlobalName "S") [] (map Free vs)))
+       in asSet (freeVars (Canonical (rootName "S") [] (map Free vs)))
             @?= asSet vs
   ]
 

@@ -33,7 +33,7 @@ import Thena.Core.Level
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Convert (convert)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, close, fresh, open)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, close, fresh, open, rootName)
 import Thena.Core.Typing (check, infer)
 import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Driver (parseCore)
@@ -137,7 +137,7 @@ illTyped src = case typeOf src of
   Right t -> assertFailure ("expected a type error, got the type " ++ show t)
 
 named :: String -> GlobalName
-named = GlobalName
+named = rootName
 
 -- --------------------------------------------------------------------------
 

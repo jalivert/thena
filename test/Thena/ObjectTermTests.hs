@@ -16,7 +16,7 @@ module Thena.ObjectTermTests (tests) where
 import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
+import Thena.Core.Term (Core (..), Literal (..), rootName)
 import Thena.Driver
   ( Response (..)
   , Session
@@ -112,20 +112,20 @@ reading io =
     testCase "a pattern resolves to the shape its production denotes" $ do
       r <- oneRule io (base "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"")
       ruleParams r
-        @?= [ PObject (SNode (GlobalName "app")
+        @?= [ PObject (SNode (rootName "app")
                          [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ]) ]
 
   , testCase "and a token class's text resolves to the literal it denotes" $ do
       r <- oneRule io (base "rule v LC[var]`x` :- do say \"x\"")
       ruleParams r
-        @?= [PObject (SNode (GlobalName "var") [SLit (LString "x")])]
+        @?= [PObject (SNode (rootName "var") [SLit (LString "x")])]
 
     -- **A hole at a token class binds an @instral@ value, not a term** — the
     -- slot's type, which is what 104b's ordering made knowable at load.
   , testCase "a hole at a token class is typed String" $ do
       r <- oneRule io (base "rule v LC[var]`${s}` :- do say s")
       ruleParams r
-        @?= [PObject (SNode (GlobalName "var") [SHole (AtPrimitive (GlobalName "String")) (PVar "s")])]
+        @?= [PObject (SNode (rootName "var") [SHole (AtPrimitive (rootName "String")) (PVar "s")])]
 
   , testCase "and using it as a term is a type error when the base loads" $ do
       r <- refused io (base "rule v LC[var]`${s}` :- do fill s")
@@ -161,7 +161,7 @@ matching io =
     -- tried as written, then reduced and tried again.
     testCase "it matches through a definition and its let-chain" $ do
       (env, p) <- setup "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
-      case matchPattern env p (VTerm (Global (GlobalName "fg") [])) of
+      case matchPattern env p (VTerm (Global (rootName "fg") [])) of
         Just bs -> map fst bs @?= ["f", "a"]
         Nothing -> assertFailure "it did not match"
 
@@ -189,7 +189,7 @@ matching io =
     -- would bind nothing at all rather than refusing it.
   , testCase "a constructor applied to too few arguments does not match" $ do
       (env, p) <- setup "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
-      ( matchPattern env p (VTerm (Global (GlobalName "app") []))
+      ( matchPattern env p (VTerm (Global (rootName "app") []))
         , matchPattern env p (VTerm (con "app" [con "var" [Primitive (LString "f")]])) )
         @?= (Nothing, Nothing)
 
@@ -242,4 +242,4 @@ building io =
         []    -> assertFailure "the rule binds nothing"
 
 con :: String -> [Core] -> Core
-con name = foldl App (Global (GlobalName name) [])
+con name = foldl App (Global (rootName name) [])

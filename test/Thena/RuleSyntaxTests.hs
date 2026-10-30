@@ -17,7 +17,7 @@ import Data.Maybe (listToMaybe)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (GlobalName (..), rootName)
 import Thena.Development.Cursor (Part (..))
 import Thena.Instral.Ops
   ( AnswerKind (..)
@@ -431,7 +431,7 @@ headOperands =
       -- have come from.
       testCase "a head naming something that is not a parameter is refused" $ do
         r <- expectRule "rule r s :- when (surface-is-name q) do prim-solve"
-        validate r @?= [UnboundInHead (GlobalName "r") "q"]
+        validate r @?= [UnboundInHead (rootName "r") "q"]
 
     , testCase "and a parameter it does name is fine" $ do
         r <- expectRule "rule r s :- when (surface-is-name s) do prim-solve"
@@ -493,7 +493,7 @@ shapes =
       -- OBJECTIVE.md have always written rule and test names this way.
       testCase "a hyphenated name is one identifier" $ do
         r <- expectRule "rule elab-app :- when focus-is-hole do prim-solve"
-        ruleName r @?= GlobalName "elab-app"
+        ruleName r @?= rootName "elab-app"
     ]
 
 -- --------------------------------------------------------------------------
@@ -577,7 +577,7 @@ regions =
         -- Emptiness is legal to *delimit* and is not a surface term, so this
         -- fails inside the region rather than at it.
         case errs ("say " ++ tagged "surface" "") of
-          Just [BadRegion (GlobalName "r") 0 "surface" _] -> pure ()
+          Just [BadRegion (GlobalName [] "r") 0 "surface" _] -> pure ()
           other -> assertFailure ("expected a BadRegion, got " ++ show other)
     , testCase "corners are the other spelling of a core region" $ do
         b <- bodyOf "t = resolve-core \8988 Type\8320 \8989"
@@ -590,15 +590,15 @@ regions =
         map opWord b @?= ["call"]
     , testCase "a tag no language answers to is refused at load" $
         errs ("elaborate " ++ tagged "agda" "f x")
-          @?= Just [NoSuchTag (GlobalName "r") 0 "agda"]
+          @?= Just [NoSuchTag (rootName "r") 0 "agda"]
     , testCase "contents that do not parse in the tag's language are refused" $
         case errs ("elaborate " ++ tagged "surface" "(") of
-          Just [BadRegion (GlobalName "r") 0 "surface" _] -> pure ()
+          Just [BadRegion (GlobalName [] "r") 0 "surface" _] -> pure ()
           other -> assertFailure ("expected a BadRegion, got " ++ show other)
     , testCase "a region may not appear in a head" $
         -- Parenthesised because a test with operands is (phase 47).
         case headErrs ("(surface-is-name " ++ tagged "surface" "x" ++ ")") of
-          Just [BadTestOperands (GlobalName "r") "surface-is-name"] -> pure ()
+          Just [BadTestOperands (GlobalName [] "r") "surface-is-name"] -> pure ()
           other -> assertFailure ("expected the head to refuse it, got " ++ show other)
     ]
   where
@@ -628,7 +628,7 @@ mistakes =
     "mistakes"
     [ refused "an unknown test word"
         "rule r :- when focus-is-purple do prim-solve"
-        [NoSuchTest (GlobalName "r") "focus-is-purple"]
+        [NoSuchTest (rootName "r") "focus-is-purple"]
     , -- **A word that names no op is a call** (phase 25e), so this is no
       -- longer a load-time refusal: it resolves, and finds no clause when it
       -- runs. The same trade phase 23 took for explicit @call@.
@@ -694,7 +694,7 @@ mistakes =
       -- match list cheaply and without effects, and a nested call is a call.
       refused "a nested call in a head"
         "rule r s :- when (surface-is-name (f s)) do prim-solve"
-        [BadTestOperands (GlobalName "r") "surface-is-name"]
+        [BadTestOperands (rootName "r") "surface-is-name"]
     , -- **An op word at an arity the op does not have is a CALL** (MS5 phase
       -- 62b, the user's decision). It was 'BadOperands' until then, so that
       -- @claim x@ was caught when the base loaded; his design for the asking
@@ -718,7 +718,7 @@ mistakes =
       -- and fails when it runs.
       refused "an operand no reading of the word admits"
         "rule r :- when focus-is-hole do cross body"
-        [BadOperands (GlobalName "r") 0 "cross"]
+        [BadOperands (rootName "r") 0 "cross"]
     , -- §3.7: a declaration is a command, never a rule-body operation.
       --
       -- **Refused one step earlier again as of MS4 phase 42b**: @data@ is a
@@ -734,8 +734,8 @@ mistakes =
             Right r -> assertFailure ("parsed: " ++ show r)
     , refused "every mistake, not the first"
         "rule r :- when focus-is-purple do frobnicate; cross body"
-        [ NoSuchTest (GlobalName "r") "focus-is-purple"
-        , BadOperands (GlobalName "r") 1 "cross"
+        [ NoSuchTest (rootName "r") "focus-is-purple"
+        , BadOperands (rootName "r") 1 "cross"
         ]
     , testCase "a body is required" $
         case readRule "rule r :- when focus-is-hole" of

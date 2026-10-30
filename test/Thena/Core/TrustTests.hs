@@ -33,7 +33,7 @@ import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Level (Level (..), LevelVar (..))
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, fresh)
+import Thena.Core.Term (Core (..), Ident (..), Var, fresh, rootName, nameDotted)
 import Thena.Core.Trust
   ( TrustClaim (..)
   , TrustClass (..)
@@ -77,7 +77,7 @@ env =
   where
     aliased =
       addDefinition
-        (GlobalName "Alias")
+        (rootName "Alias")
         (MkDefinition [] [] (Universe LZero) (core eqNat "Nat"))
         eqNat
 
@@ -86,7 +86,7 @@ env =
     -- order the dependency graph's acyclicity comes from.
     define nm ty body e =
       addDefinition
-        (GlobalName nm)
+        (rootName nm)
         (MkDefinition [] [] (core e ty) (core e body))
         e
 
@@ -157,7 +157,7 @@ tests =
 stored :: [TestTree]
 stored =
   [ testCase "a definition holding a trusted node, and one that only calls it" $
-      restingOnTrust env @?= map GlobalName ["through", "cheatNat"]
+      restingOnTrust env @?= map rootName ["through", "cheatNat"]
 
     -- __And the term's own claim is still the term's__: the stored list says
     -- nothing about a 'Trusted' node standing in the term being examined, so
@@ -384,7 +384,7 @@ walk =
   ]
   where
     verdicts cs =
-      [ ([ g | GlobalName g <- claimRoute c ], claimSite c, claimClass c)
+      [ ([ g | g <- map nameDotted (claimRoute c) ], claimSite c, claimClass c)
       | c <- cs
       ]
 

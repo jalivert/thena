@@ -17,7 +17,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
-import Thena.Core.Term (GlobalName (..), substLevelsIn)
+import Thena.Core.Term (substLevelsIn, rootName)
 import Thena.Driver
   ( machineOf
   )
@@ -53,7 +53,7 @@ tests =
 
     , testCase "the three inversions underneath are there" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (machineOf s)) . GlobalName)
+        map (isJust . flip lookupDefinition (globals (machineOf s)) . rootName)
             ["trueNoStep", "falseNoStep", "zeroNoStep"]
           @?= [True, True, True]
 
@@ -80,7 +80,7 @@ tests =
     statementOf n = do
       s <- loaded
       pure (atZero (machineOf s) <$>
-              lookupDefinition (GlobalName n) (globals (machineOf s)))
+              lookupDefinition (rootName n) (globals (machineOf s)))
 
     -- Every prenex level parameter read at 0, with how many there were.
     atZero m d =

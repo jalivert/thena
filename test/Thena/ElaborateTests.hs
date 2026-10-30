@@ -39,7 +39,7 @@ import Thena.Standard (withRules)
 
 import Thena.Core.Level (Level (..))
 import qualified Thena.Core.Term
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Literal (..), Var, fresh)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Literal (..), Var, fresh, rootName, nameDotted)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
 import qualified Thena.Development.Cursor as Cursor
@@ -315,7 +315,7 @@ holeAt ty = case Cursor.along top of
         )
 
 stringType :: Core
-stringType = Global (GlobalName "String") []
+stringType = Global (rootName "String") []
 
 hole :: Cursor
 hole = case Cursor.along top of
@@ -483,7 +483,7 @@ leafTests =
     , testCase "and is refused at another type" $
         case elaboratingAt (holeAt stringType) (SurfaceLiteral (LInt 3)) of
           Left (Mismatch _ got want) ->
-            (got, want) @?= (Global (GlobalName "Int") [], stringType)
+            (got, want) @?= (Global (rootName "Int") [], stringType)
           other -> assertFailure ("expected a clash of the two types: " ++ show other)
 
       -- **The placeholder elaborates by not elaborating** — his words. The
@@ -761,7 +761,7 @@ baseTests =
       -- **@fit-core@ is two clauses and both heads pass**, which is the point
       -- of it: the choice point between them is the search.
       testCase "every rule whose head passes is a candidate" $
-        [ n | Rule (GlobalName n) _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
+        [ nameDotted g | Rule g _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
           @?= [ "attack", "try-core", "abandon", "eliminate-core"
               , "eliminate-generalising-core"
               , "prove", "fill", "unify-refine-core", "apply-core"
@@ -808,7 +808,7 @@ baseTests =
               ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $
-        case [ r | r@(Rule (GlobalName "prove") _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
+        case [ r | r@(Rule (GlobalName [] "prove") _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
           [Rule _ ps _ b] -> (ps, b) @?= ([], [Do Ops.Prove])
           other           -> assertFailure ("expected one clause: " ++ show other)
     ]

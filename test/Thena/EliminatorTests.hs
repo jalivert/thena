@@ -23,7 +23,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels, levelOfNat)
-import Thena.Core.Term (Core, GlobalName (..), substLevelsIn)
+import Thena.Core.Term (Core, substLevelsIn, rootName)
 import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Global.Env
   ( GlobalEnv
@@ -158,7 +158,7 @@ analysis name env n0 d l expect = testCase name $
       let (ty, _, _) = caseWrapper def l n0
        in oneLine (renderCore (Rendering [] n0) [] (atZero def ty)) @?= expect
   where
-    g = GlobalName d
+    g = rootName d
 
 -- | One line, so that an exact-string case reads as one line.
 oneLine :: String -> String
@@ -174,7 +174,7 @@ rule name env n0 d l expect = testCase name $
     -- — a counter value, and no business of an assertion about the shape.
     Just def -> renderEliminator (Rendering [] n0) g (atZero def (fst (eliminatorType def l n0))) @?= [expect]
   where
-    g = GlobalName d
+    g = rootName d
 
 -- | A datatype's own level parameters, all instantiated at zero.
 atZero :: InductiveDefinition -> Core -> Core

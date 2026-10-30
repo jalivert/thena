@@ -12,7 +12,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck (counterexample, forAll, property, testProperty, withNumTests)
 
-import Thena.Core.Term (freeVars)
+import Thena.Core.Term (freeVars, rootName)
 import Thena.Core.TermTests (genTerm, poolVars)
 
 import Thena.Core.Context (Context, Entry (..))
@@ -101,7 +101,7 @@ laws =
 -- typing suites so that all three agree about what they are.
 
 named :: String -> GlobalName
-named = GlobalName
+named = rootName
 
 -- | One 'Hypothesis' with a made-up type, and the counter after it. Reduction
 -- never looks at a hypothesis's type — only "Thena.Core.Typing" will, from

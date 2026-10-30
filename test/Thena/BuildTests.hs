@@ -19,7 +19,7 @@ import Test.Tasty.QuickCheck
 
 import Thena.Core.Context (entryType)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
+import Thena.Core.Term (Core (..), Literal (..), rootName, nameDotted)
 import Thena.Core.Typing (infer)
 import Thena.Driver
   ( Response (..)
@@ -94,7 +94,7 @@ loaded = do
 datatypeOf :: String -> IO InductiveDefinition
 datatypeOf name = do
   (env, _) <- loaded
-  maybe (assertFailure (name ++ " was not declared")) pure (lookupInductive (GlobalName name) env)
+  maybe (assertFailure (name ++ " was not declared")) pure (lookupInductive (rootName name) env)
 
 -- ---------------------------------------------------------------------------
 
@@ -121,12 +121,12 @@ generated =
   ]
   where
     shape c =
-      ( case constructorName c of GlobalName n -> n
+      ( nameDotted (constructorName c)
       , [ typeName (entryType e) | e <- constructorArguments c ]
       )
     typeName t = case t of
-      Global (GlobalName n) _ -> n
-      Canonical (GlobalName n) _ _ -> n
+      Global gn__ _ -> nameDotted gn__
+      Canonical gn__ _ _ -> nameDotted gn__
       _ -> show t
 
 roles :: [TestTree]
@@ -143,11 +143,11 @@ roles =
   , testCase "and each names the class it reads, which is x" $ do
       d <- datatypeOf "LC"
       [ (n, r) | c <- inductiveConstructors d
-               , let GlobalName n = constructorName c
+               , let n = nameDotted (constructorName c)
                , r <- constructorRoles c
                , case r of Occurrence _ -> True; Binder _ -> True; _ -> False ]
-        @?= [ ("var", Occurrence (GlobalName "x"))
-            , ("abs", Binder (GlobalName "x")) ]
+        @?= [ ("var", Occurrence (rootName "x"))
+            , ("abs", Binder (rootName "x")) ]
     -- **One role per argument, which nothing checked** (MS8 phase 153).
     -- `~5k3mg` makes 'constructorRoles' the table a class lives on, so anything
     -- reading it by position has to be reading the right positions.
@@ -155,21 +155,21 @@ roles =
       d <- datatypeOf "LC"
       [ (n, length (constructorArguments c), length (constructorRoles c))
         | c <- inductiveConstructors d
-        , let GlobalName n = constructorName c ]
+        , let n = nameDotted (constructorName c) ]
         @?= [ ("var", 1, 1), ("abs", 3, 3), ("app", 2, 2)
             , ("paren", 1, 1), ("twice", 1, 1) ]
   , testCase "a datatype written by hand has none of it" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 "module W where\n\ndata Pair : Type\8320 where\n  mk : String -> String -> Pair\n" of
         (s1, ProofLoaded {}) ->
-          case lookupInductive (GlobalName "Pair") (globals (machineOf s1)) of
+          case lookupInductive (rootName "Pair") (globals (machineOf s1)) of
             Just d -> map constructorRoles (inductiveConstructors d) @?= [[Plain, Plain]]
             Nothing -> assertFailure "Pair was not declared"
         (_, other) -> assertFailure (show other)
   ]
   where
-    occ = Occurrence (GlobalName "x")
-    bnd = Binder (GlobalName "x")
+    occ = Occurrence (rootName "x")
+    bnd = Binder (rootName "x")
 
 -- ---------------------------------------------------------------------------
 
@@ -178,7 +178,7 @@ identity :: Core
 identity = con "abs" [Primitive (LString "x"), con "base" [], con "var" [Primitive (LString "x")]]
 
 con :: String -> [Core] -> Core
-con name = foldl App (Global (GlobalName name) [])
+con name = foldl App (Global (rootName name) [])
 
 terms :: [TestTree]
 terms =
@@ -188,7 +188,7 @@ terms =
   , testCase "and the term type checks as an LC" $ do
       (env, _) <- loaded
       case infer env [] 0 identity of
-        (Right t, _, _) -> t @?= Global (GlobalName "LC") []
+        (Right t, _, _) -> t @?= Global (rootName "LC") []
         (Left e, _, _) -> assertFailure (show e)
   , testCase "the term prints as the text" $ do
       (_, gs) <- loaded
@@ -229,7 +229,7 @@ elaborated decls = do
   case loadProofSource s0 (stlc ++ "\n" ++ decls ++ "\n") of
     (s1, ProofLoaded {}) ->
       let env = globals (machineOf s1)
-       in case lookupDefinition (GlobalName "t") env of
+       in case lookupDefinition (rootName "t") env of
             Just d  -> pure (Right (whnf env [] (definitionBody d)))
             Nothing -> assertFailure "t was not declared"
     (_, Ran _ _ (Halted why)) -> pure (Left why)
@@ -279,7 +279,7 @@ literals =
       r <- elaborated
              ("u : LC\nu = LC[var]" ++ region "q"
                 ++ "\n\nt : LC\nt = LC" ++ region "( ${u} ${u} )")
-      r @?= Right (canon "app" [Global (GlobalName "u") [], Global (GlobalName "u") []])
+      r @?= Right (canon "app" [Global (rootName "u") [], Global (rootName "u") []])
     -- **A class slot takes one too**, and what it supplies is the literal: the
     -- constructor's argument there is a @String@, so the splice elaborates at
     -- that type like any other term.
@@ -328,7 +328,7 @@ literals =
 -- **Only the head**, which is why the arguments below are written with 'con':
 -- weak head normal form reduces the wrapper it is given and nothing under it.
 canon :: String -> [Core] -> Core
-canon name = Canonical (GlobalName name) []
+canon name = Canonical (rootName name) []
 
 readTerm :: [Grammar] -> String -> Either BuildError Core
 readTerm gs src = case parse (earleyRules gs) (Earley.StartAt "LC") (pieces src) of

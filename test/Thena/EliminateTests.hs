@@ -29,10 +29,11 @@ import Thena.Standard (withRules)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Term
   ( Core (..)
-  , GlobalName (..)
+  
   , Ident (..)
   , fresh
   , instantiate
+  , rootName
   )
 import Thena.Declared
   ( eqNat
@@ -139,7 +140,7 @@ premisesTests =
 -- reads it.
 binders :: Core -> Int
 binders t = case t of
-  Pi _ _ sc -> 1 + binders (instantiate (Global (GlobalName "_") []) sc)
+  Pi _ _ sc -> 1 + binders (instantiate (Global (rootName "_") []) sc)
   _         -> 0
 
 -- --------------------------------------------------------------------------
@@ -585,7 +586,7 @@ refusalTests =
       let (env, n0) = declared [natDecl, finDecl]
           (ctx, n1) = contextOf env n0 [("n", "Nat"), ("i", "Fin n")]
        in case fst (attempt env ctx n1 "Nat" "i") of
-            Left e  -> e @?= NoEquality (GlobalName "Eq")
+            Left e  -> e @?= NoEquality (rootName "Eq")
             Right _ -> assertFailure "expected a refusal"
 
     -- Thesis §3.5.2, \"what to fix, what to abstract\", arriving as a refusal.

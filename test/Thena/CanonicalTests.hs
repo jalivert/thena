@@ -18,7 +18,7 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
-import Thena.Core.Term (GlobalName (..), substLevelsIn)
+import Thena.Core.Term (substLevelsIn, rootName)
 import Thena.Driver (machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
@@ -93,7 +93,7 @@ tests =
       (s, _) <- startingSession
       (s', _, _) <- loadProofFile s target
       pure (atZero (machineOf s') <$>
-              lookupDefinition (GlobalName n) (globals (machineOf s')))
+              lookupDefinition (rootName n) (globals (machineOf s')))
 
     -- Every prenex level parameter read at 0, with how many there were.
     atZero m d =

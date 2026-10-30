@@ -69,7 +69,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -993,7 +993,7 @@ instralEntry gs bases src = do
             -- environment, and that is the behaviour already recorded — the
             -- driver has only ever built literals, so a typed command names a
             -- hole and never a reference.
-            (resolveBlock gs (GlobalName "entry") []
+            (resolveBlock gs (rootName "entry") []
                (concatMap hoist (reverse is)))
   -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
   -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
@@ -1006,7 +1006,7 @@ instralEntry gs bases src = do
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts. All three checks are 'checkBlock' since phase 90.
-  case checkBlock gs bases [] (Rule (GlobalName "entry") [] [] prog) of
+  case checkBlock gs bases [] (Rule (rootName "entry") [] [] prog) of
     Just (BlockIll es)      -> Left (LineIllFormed es)
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
@@ -1040,7 +1040,7 @@ entryBindings gs bases src = case instralEntry gs bases src of
   Left _     -> []
   Right prog ->
     boundBy (allSignatures bases) (allCallable bases)
-      (Rule (GlobalName "entry") [] [] prog)
+      (Rule (rootName "entry") [] [] prog)
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
@@ -1355,7 +1355,7 @@ surfaceProgram n0 items = foldl item ([], n0) items
 datatypeProgram :: Int -> SurfaceData -> Maybe [[ArgRole]] -> ([Instr], Int)
 datatypeProgram n d roles =
   let nm      = surfaceDataName d
-      dn      = GlobalName nm
+      dn      = rootName nm
       ps      = surfaceDataParameters d
       cs      = surfaceDataConstructors d
       (l, n1) = freshLevelMeta n
@@ -1381,7 +1381,7 @@ datatypeProgram n d roles =
                | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
                ]
           ++ [ Do (MakeData dn (length ps)
-                     [ GlobalName cn | SurfaceConstructor cn _ <- cs ] roles
+                     [ rootName cn | SurfaceConstructor cn _ <- cs ] roles
                      (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
              ]
       , n1 )
@@ -1409,7 +1409,7 @@ grammarDatatype g =
     -- production names a function that is already declared, so the datatype
     -- this generates is the one it would have generated without it.
     prods = constructorProductions g
-    plainName (GlobalName n) = n
+    plainName = nameDotted
 
     constructor p = SurfaceConstructor (plainName (gproductionName p)) (typeOf p)
     typeOf p = case gproductionArguments p of
@@ -1599,7 +1599,7 @@ dispatch s name arg = case name of
   -- parser what fits there ("Thena.Repl").
   ":parse" -> withArgument $ case break (== ' ') arg of
     (lang, rest)
-      | GlobalName lang `notElem` map grammarName (grammars machine) ->
+      | rootName lang `notElem` map grammarName (grammars machine) ->
           (s, Rejected (NoSuchLanguage lang))
       | null (dropWhile (== ' ') rest) -> (s { sessionParsing = Just lang }, ParsingEntered lang)
       | otherwise -> (s, parseObject machine lang (dropWhile (== ' ') rest))
@@ -1770,9 +1770,9 @@ dispatch s name arg = case name of
     -- its value. Outside a yield 'load' clears the environment, and nothing is.
     Right (SurfaceDo body) ->
       let bound = if Engine.isYielding machine then env (exec machine) else []
-       in case resolveBlock (grammars machine) (GlobalName "entry") (map fst bound) body of
+       in case resolveBlock (grammars machine) (rootName "entry") (map fst bound) body of
         Left errs -> (s, Failed (blockProblem errs))
-        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (GlobalName "entry") [] [] is) of
+        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] [] is) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionFuel s)
@@ -1897,7 +1897,7 @@ dispatch s name arg = case name of
       | null arg  = (s, Rejected (MissingArgument name))
       | otherwise = k
 
-    showRules what = case lookupInductive (GlobalName what) (globals machine) of
+    showRules what = case lookupInductive (rootName what) (globals machine) of
       Just d  -> (s, ShownRules d)
       Nothing -> (s, Rejected (NoSuchGlobal what))
 
@@ -1911,7 +1911,7 @@ dispatch s name arg = case name of
           Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
           Nothing -> (s, Rejected (NoSuchGlobal what))
       where
-        g = GlobalName what
+        g = rootName what
 
     -- | @:elim ‹datatype›@, or @:elim ‹datatype› ‹universe›@.
     --
@@ -1929,7 +1929,7 @@ dispatch s name arg = case name of
         Right l -> (s, ShownEliminator g (fst (eliminatorType d l (names machine))))
       where
         (name', rest) = break (== ' ') what
-        g             = GlobalName name'
+        g             = rootName name'
 
     -- The universe is read with the ordinary term parser, in the empty
     -- context, so @:elim Nat Typ₀@ reports a lex error where it happened
@@ -1961,7 +1961,7 @@ dispatch s name arg = case name of
           | otherwise -> case sortOf (globals machine) [] n1 ty of
               (Left e,  _, _)  -> (s, IllTyped e)
               (Right _, _, n2) -> started g ty n2
-          where g = GlobalName x
+          where g = rootName x
 
     started g ty n =
       let (dev, n1) = newDevelopmentNamed g ty n
@@ -2081,7 +2081,7 @@ dispatch s name arg = case name of
             }
 
     resume what =
-      case break ((== GlobalName what) . attemptName . parkedAttempt) (sessionSuspended s) of
+      case break ((== rootName what) . attemptName . parkedAttempt) (sessionSuspended s) of
         (_, [])          -> (s, Rejected (NoSuchProof what))
         (before, Parked att at : after)
           | Attempting cur <- sessionWork s ->
@@ -2659,7 +2659,7 @@ resolveAll gs raws =
     collisions =
       [ RuleAndFunction n (length (ruleParams f))
       | f <- fns
-      , let GlobalName n = ruleName f
+      , let n = nameDotted (ruleName f)
       , any (\r -> ruleName r == ruleName f
                      && length (ruleParams r) == length (ruleParams f)) ok
       ]
@@ -2697,7 +2697,7 @@ resolveAll gs raws =
     overlapping =
       [ FunctionClauseUnreachable n (length (ruleParams f))
       | (i, f) <- zip [0 :: Int ..] fns
-      , let GlobalName n = ruleName f
+      , let n = nameDotted (ruleName f)
       , any (\g -> ruleName g == ruleName f
                      && length (ruleParams g) == length (ruleParams f)
                      && all Ops.patternIrrefutable (ruleParams g)) (take i fns)
@@ -2775,7 +2775,7 @@ loadReadBases s = go []
     -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then
     -- dropped, and a 'RuleBase' has no field for them. (Until MS6 phase 106 the
     -- reason was also that a block needed every base's MS5 languages.)
-    blocksOf b = case surfaceBlocks (grammars (sessionMachine s)) (GlobalName (baseName b))
+    blocksOf b = case surfaceBlocks (grammars (sessionMachine s)) (rootName (baseName b))
                             (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
       Left errs -> Left (basePath b, errs)
       Right bs  -> case concatMap validate bs of
@@ -3301,7 +3301,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- itself declared above it, and a @language@ block is exactly such a thing.
   --
   -- **The same checker the prompt uses**, so the messages are unchanged.
-  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (GlobalName "do") [] [] is) of
+  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] [] is) of
     Just (BlockIll errs)      -> stop (load [] m) msgs warns (BlockRefused errs)
     Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
     Nothing ->
@@ -3350,9 +3350,9 @@ checkedPrimitive :: GlobalEnv -> GlobalName -> Core -> Either DeclareError ()
 checkedPrimitive env nm ty = case lookup nm primitiveNames of
   Nothing -> Left (NoSuchPrimitive nm)
   Just Appending -> case argumentsOf ty of
-    Just ([a, b], r) | all (== Global (GlobalName "String") []) [a, b, r] -> Right ()
+    Just ([a, b], r) | all (== Global (rootName "String") []) [a, b, r] -> Right ()
     _ -> wrong "at String -> String -> String"
-  Just (Comparing p@(GlobalName pn)) -> case argumentsOf ty of
+  Just (Comparing p) | let pn = nameDotted p -> case argumentsOf ty of
     Just ([a, b], Global d [])
       | a /= Global p [] || b /= Global p [] -> wrong ("with two arguments of type " ++ pn)
       | otherwise -> case lookupInductive d env of
@@ -3385,7 +3385,7 @@ checkedTokenClass env nm ty value = case whnf env [] ty of
   where
     classOf t = do
       (tn, allowed) <- case t of
-        Global g@(GlobalName n) [] | Just l <- lookup n tokenLanguages -> Right (g, l)
+        Global g [] | Just l <- lookup (nameDotted g) tokenLanguages -> Right (g, l)
         _ -> Left (TokenTypeUnsupported t)
       src <- case whnf env [] value of
         App (Primitive (LRegex s)) _ -> Right s
@@ -3438,7 +3438,7 @@ settled sub residue s = s { sessionWork = fmap' (sessionWork s) }
                }
 
 nameOf :: InductiveDefinition -> String
-nameOf d = case inductiveName d of GlobalName x -> x
+nameOf = nameDotted . inductiveName
 
 -- | Why a datatype got no no-confusion (phase 14).
 --

@@ -28,7 +28,7 @@ module Thena.InteractiveSplitTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Driver (Session, command, machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Files (loadFile, startingSession)
@@ -74,7 +74,7 @@ tests =
     , testCase "and the inductive theorem is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadFile s target
-        case lookupDefinition (GlobalName "belowRefl") (globals (machineOf s')) of
+        case lookupDefinition (rootName "belowRefl") (globals (machineOf s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)

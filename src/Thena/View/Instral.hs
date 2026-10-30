@@ -29,7 +29,7 @@ module Thena.View.Instral
 
 import Data.List (intercalate)
 
-import Thena.Core.Term (GlobalName (..), Literal (..))
+import Thena.Core.Term (nameDotted, Literal (..))
 import Thena.Global.Env (inductiveName)
 import Thena.Instral.Ops
   ( AnswerKind (..)
@@ -209,7 +209,7 @@ displayBlock gs budget env bs n at next instrs =
 
     detailOf o = case o of
       Ask _ k'     -> Just (AsksFor (answerKindText k'))
-      DefineData d -> Just (Declares (let GlobalName g = inductiveName d in g))
+      DefineData d -> Just (Declares (nameDotted (inductiveName d)))
       Call nm _    -> Just (Calls nm)
       CrossType    -> Just (Crosses "type")
       CrossValue   -> Just (Crosses "val")
@@ -227,7 +227,7 @@ displayOperand gs budget env bs n at o = case o of
   where
     go = displayOperand gs budget env bs n at
     skeleton sk = case sk of
-      SNode (GlobalName nm) kids -> SkelNode nm (map skeleton kids)
+      SNode sn kids -> SkelNode (nameDotted sn) (map skeleton kids)
       SLit l -> SkelLiteral (literalText l)
       SHole _ o' -> SkelHole (go o')
 
@@ -308,8 +308,8 @@ patternText pt = case pt of
 
 skeletonText :: Skeleton Pattern -> String
 skeletonText sk = case sk of
-  SNode (GlobalName nm) [] -> nm
-  SNode (GlobalName nm) kids -> nm ++ "(" ++ commas (map skeletonText kids) ++ ")"
+  SNode n [] -> nameDotted n
+  SNode n kids -> nameDotted n ++ "(" ++ commas (map skeletonText kids) ++ ")"
   SLit l -> case l of
     LString s -> escapeString s
     LChar c   -> escapeChar c

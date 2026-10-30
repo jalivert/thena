@@ -16,7 +16,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), levelOfNat)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), fresh)
+import Thena.Core.Term (Core (..), Ident (..), fresh, rootName)
 import qualified Thena.Development.Component as Component
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Cursor (Cursor, enter, focus)
@@ -110,16 +110,16 @@ isGuess m = case focus (cursor (development m)) of
 -- arguments to its own, which is why the @Choice@ frame keeps the argument
 -- /values/ rather than a ready-made environment.
 badClause, goodClause :: Rule
-badClause  = Rule (GlobalName "step") [Ops.PVar "x"] [FocusIsHole] [Do Solve]
-goodClause = Rule (GlobalName "step") [Ops.PVar "y"] [FocusIsHole] [Do (Try (Ref "y"))]
+badClause  = Rule (rootName "step") [Ops.PVar "x"] [FocusIsHole] [Do Solve]
+goodClause = Rule (rootName "step") [Ops.PVar "y"] [FocusIsHole] [Do (Try (Ref "y"))]
 
 -- | Same name, one argument fewer. Never a candidate for a two-argument call.
 nullary :: Rule
-nullary = Rule (GlobalName "step") [] [FocusIsHole] [Do Attack]
+nullary = Rule (rootName "step") [] [FocusIsHole] [Do Attack]
 
 -- | Same name and arity, but a head that cannot pass at a hole.
 guessOnly :: Rule
-guessOnly = Rule (GlobalName "step") [Ops.PVar "x"] [FocusIsGuess] [Do Solve]
+guessOnly = Rule (rootName "step") [Ops.PVar "x"] [FocusIsGuess] [Do Solve]
 
 -- --------------------------------------------------------------------------
 -- A head that asks about an argument (MS4 phase 47)
@@ -133,9 +133,9 @@ guessOnly = Rule (GlobalName "step") [Ops.PVar "x"] [FocusIsGuess] [Do Solve]
 -- chosen by a test over the argument.
 nameClause, otherClause :: Rule
 nameClause =
-  Rule (GlobalName "pick") [Ops.PVar "s"] [FocusIsHole, SurfaceIsName (Ref "s")]
+  Rule (rootName "pick") [Ops.PVar "s"] [FocusIsHole, SurfaceIsName (Ref "s")]
     [Do Attack]
-otherClause = Rule (GlobalName "pick") [Ops.PVar "s"] [FocusIsHole] [Do (Try (Lit (VTerm type0)))]
+otherClause = Rule (rootName "pick") [Ops.PVar "s"] [FocusIsHole] [Do (Try (Lit (VTerm type0)))]
 
 callPick :: Surface -> [Instr]
 callPick t = [Do (Ops.Call "pick" [Lit (VSurface (rootedAt t))])]
@@ -221,7 +221,7 @@ headArguments =
       -- parameterised rule has always been.
       testCase "matches lists it, having no argument to ask about" $
         fmap (ruleName . fst) (next (matches (bases [nameClause]) emptyGlobals hole))
-          @?= Just (GlobalName "pick")
+          @?= Just (rootName "pick")
     ]
 
 -- --------------------------------------------------------------------------
@@ -252,7 +252,7 @@ backtracking =
       testCase "an untried clause survives the call succeeding" $
         map (\p -> (pointId p, pointRule p, pointAlts p))
             (choicePoints (ranTo (machine (bases [goodClause, badClause]) callStep)))
-          @?= [(1000, GlobalName "step", [GlobalName "step"])]
+          @?= [(1000, rootName "step", [rootName "step"])]
 
     , testCase "retry reaches the next clause by hand" $
         case retryFrom Nothing (ranTo (machine (bases [goodClause, goodClause]) callStep)) of
@@ -314,14 +314,14 @@ recursion =
     -- @attack@ turns the hole into a guess, so the recursive call reaches the
     -- /other/ clause and stops. A clause that recursed without changing the
     -- state would not terminate, and would not in Prolog either.
-    recurses = Rule (GlobalName "down") [] [FocusIsHole]
+    recurses = Rule (rootName "down") [] [FocusIsHole]
                  [Do Attack, Do (Ops.Call "down" [])]
-    stops    = Rule (GlobalName "down") [] [FocusIsGuess] [Do Regret]
+    stops    = Rule (rootName "down") [] [FocusIsGuess] [Do Regret]
     callDown = [Do (Ops.Call "down" [])]
 
-    callsLater = Rule (GlobalName "first") [] [FocusIsHole]
+    callsLater = Rule (rootName "first") [] [FocusIsHole]
                    [Do (Ops.Call "later" [])]
-    later      = Rule (GlobalName "later") [] [FocusIsHole] [Do Attack]
+    later      = Rule (rootName "later") [] [FocusIsHole] [Do Attack]
     callFirst  = [Do (Ops.Call "first" [])]
 
 
@@ -387,18 +387,18 @@ frameLifetime =
                    ("the counter went backwards: " ++ show (names before)
                       ++ " then " ++ show (names after))
 
-    recurses = Rule (GlobalName "down") [] [FocusIsHole]
+    recurses = Rule (rootName "down") [] [FocusIsHole]
                  [Do Attack, Do (Ops.Call "down" [])]
-    stops    = Rule (GlobalName "down") [] [FocusIsGuess] [Do Regret]
+    stops    = Rule (rootName "down") [] [FocusIsGuess] [Do Regret]
 
     -- Two clauses of one name, both of whose heads pass at a hole: the peek
     -- finds two candidates and builds a @Choice@.
-    choiceA  = Rule (GlobalName "either") [] [FocusIsHole] [Do Attack]
-    choiceB  = Rule (GlobalName "either") [] [FocusIsHole] [Do Attack, Do Regret]
+    choiceA  = Rule (rootName "either") [] [FocusIsHole] [Do Attack]
+    choiceB  = Rule (rootName "either") [] [FocusIsHole] [Do Attack, Do Regret]
 
     -- The first alternative runs an op that cannot apply here, so the search
     -- unwinds into the choice point and takes the second.
-    failsFirst = Rule (GlobalName "either") [] [FocusIsHole] [Do Regret]
+    failsFirst = Rule (rootName "either") [] [FocusIsHole] [Do Regret]
 
-    outer = Rule (GlobalName "outer") [] [FocusIsHole]
+    outer = Rule (rootName "outer") [] [FocusIsHole]
               [Do (Ops.Call "either" []), Do Regret]

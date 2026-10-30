@@ -71,6 +71,7 @@ import Thena.Core.Term
   ( Core (..)
   , Literal (..)
   , GlobalName (..)
+  , nameDotted
   , Ident (..)
   , Scope
   , Var
@@ -697,7 +698,7 @@ go ren@(Rendering gs _) env _ term
 go ren@(Rendering _ n) env prec term = case term of
   Bound i               -> "‹bound " ++ show i ++ "›"
   Free v                -> nameOf v env
-  Global (GlobalName g) ls -> g ++ levelArgs ls
+  Global g ls -> nameString g ++ levelArgs ls
   Universe l            -> renderLevel l
 
   -- A literal prints as it is written (MS6 phase 97a). Not @show@: Haskell
@@ -749,17 +750,17 @@ go ren@(Rendering _ n) env prec term = case term of
   -- qualification. Giving 'Canonical' a spelling of its own was the
   -- alternative and §12 invariant 6 forbids it: two spellings of a saturated
   -- former application is exactly what that invariant exists to prevent.
-  Canonical (GlobalName f) ls as
-    | null as   -> f ++ levelArgs ls
+  Canonical fn ls as
+    | null as   -> nameString fn ++ levelArgs ls
     | otherwise ->
         parensIf (prec > AtApp)
-          (unwords ((f ++ levelArgs ls) : map (go ren env AtAtom) as))
+          (unwords ((nameString fn ++ levelArgs ls) : map (go ren env AtAtom) as))
 
   -- @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
   -- positional, in 'Eliminate'\'s own field order, each group parenthesized
   -- so a motive or a target cannot be mistaken for the start of the next
   -- group the way an unparenthesized term could.
-  Eliminate (GlobalName d) ls ps m ms is t ->
+  Eliminate dn ls ps m ms is t | let d = nameString dn ->
     parensIf (prec > AtTop) $
       unwords
         [ "elim", d ++ levelArgs ls
@@ -1180,9 +1181,9 @@ renderOperand ren ctx o = case o of
 -- none.
 renderSkeleton :: (a -> String) -> Ops.Skeleton a -> String
 renderSkeleton at sk = case sk of
-  Ops.SNode (GlobalName nm) [] -> nm
-  Ops.SNode (GlobalName nm) kids ->
-    nm ++ "(" ++ intercalate ", " (map (renderSkeleton at) kids) ++ ")"
+  Ops.SNode n [] -> nameString n
+  Ops.SNode n kids ->
+    nameString n ++ "(" ++ intercalate ", " (map (renderSkeleton at) kids) ++ ")"
   Ops.SLit l -> case l of
     LString x -> escapeString x
     LChar c   -> escapeChar c
@@ -1761,11 +1762,11 @@ renderDeclareError ren e = case e of
     -- **Per class since MS8 phase 155**: two occurrence productions are two
     -- notions of a variable, which is allowed; two at one class leave a renamed
     -- binder of that class with no term to become.
-    VariableProductions (GlobalName cls) ps ->
+    VariableProductions clsName ps | let cls = nameString clsName ->
       blockAt k g ++ ": " ++ intercalate ", " ps ++ " all declare an occurrence at " ++ cls
         ++ ", and a language has one variable production per class"
-    ClassOwnedTwice (GlobalName cls) ls ->
-      blockAt k g ++ ": " ++ intercalate " and " [ l | GlobalName l <- ls ]
+    ClassOwnedTwice clsName ls | let cls = nameString clsName ->
+      blockAt k g ++ ": " ++ intercalate " and " (map nameString ls)
         ++ " both read an occurrence at " ++ cls
         ++ ", and this grammar reaches both, so a substitution for " ++ cls
         ++ " has no one language to replace a name with"
@@ -1788,7 +1789,7 @@ renderDeclareError ren e = case e of
       OccurrenceNotString x s -> "an occurrence must be a String, and " ++ x ++ " is " ++ sortPhrase s
       ScopesDiffer x -> x ++ " is written with different binders free in it"
       OccurrenceNotAlone x -> "the occurrence " ++ x ++ " must be the production's only argument, because substitution replaces the whole of it"
-      ScopeElsewhere x (GlobalName l) (GlobalName cls) ->
+      ScopeElsewhere x lName clsName | let l = nameString lName, let cls = nameString clsName ->
         "a binder is free in " ++ x ++ ", which is of " ++ l ++ ", and nothing "
           ++ l ++ " reaches occurs at " ++ cls ++ ", so there is nothing there to rename"
       NotationBinds x -> x ++ " is written as a binding form, and a judgment's notation binds nothing"
@@ -1811,7 +1812,7 @@ renderDeclareError ren e = case e of
       -- be a datatype at all, and a stand-in name told them nothing they could
       -- act on. @NotIn returns Type₀, not a Ctx@ says which of the two kinds of
       -- thing they named.
-      FunctionSlot x takes (GlobalName is) ->
+      FunctionSlot x takes isName | let is = nameString isName ->
         p ++ " takes " ++ renderCore ren [] takes ++ " where " ++ x ++ " is a " ++ is
       FunctionResult r -> p ++ " returns " ++ renderCore ren [] r ++ ", not a " ++ g
       FunctionBinds x -> x ++ " is written as a binding form, and an application binds nothing"
@@ -2082,7 +2083,7 @@ nameIn :: Context -> Var -> String
 nameIn ctx x = nameOf x (envOf ctx)
 
 nameString :: GlobalName -> String
-nameString (GlobalName g) = g
+nameString = nameDotted
 
 identString :: Ident -> String
 identString (Ident i) = i
@@ -2285,8 +2286,8 @@ renderFitting
 renderFitting verb ty [] = ["nothing " ++ verb ++ " a " ++ renderTy ty]
 renderFitting _    _  fs = map one fs
   where
-    one (GlobalName n, k, isRule, sg) =
-      "  " ++ n ++ "/" ++ show k ++ " : " ++ renderSignature sg
+    one (gn, k, isRule, sg) =
+      "  " ++ nameString gn ++ "/" ++ show k ++ " : " ++ renderSignature sg
         ++ (if isRule then "   (rule)" else "")
 
 -- | A pattern, spelled the way it is written (MS5 phase 82).
@@ -2370,12 +2371,14 @@ blockAt k g = case k of
 
 -- | @an Int@, @a Ty@ — what an argument ranges over, with its article.
 sortPhrase :: Sort -> String
-sortPhrase s = article (nameString n)
+sortPhrase s = article word
   where
-    n = case s of
-      OfLanguage g -> g
-      OfClass _ t _ -> t
-      OfUniverse k -> GlobalName (universeSpelling k)
+    -- **Not a name**: a universe's spelling is a word, and wrapping it in a
+    -- 'GlobalName' only to unwrap it again is what this used to do.
+    word = case s of
+      OfLanguage g -> nameString g
+      OfClass _ t _ -> nameString t
+      OfUniverse k -> universeSpelling k
     article w = (if take 1 w `elem` map (: []) "AEIOU" then "an " else "a ") ++ w
 
 -- | A reading, as the production names applied to their slots (MS6 phase

@@ -22,7 +22,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..))
+import Thena.Core.Term (Core (..), rootName, nameDotted)
 import Thena.Driver
   ( Response (..)
   , RuleFileError (..)
@@ -351,20 +351,20 @@ meaning =
         (_, other) -> assertFailure (show other)
   , testCase "the arguments and roles of LC, production by production" $ do
       gs <- installed stlc
-      case [ g | g <- gs, grammarName g == GlobalName "LC" ] of
+      case [ g | g <- gs, grammarName g == rootName "LC" ] of
         [g] ->
           -- **The datatype's constructors, so `constructorProductions`** — since
           -- MS8 phase 159 the grammar also carries the generated @E[x -> N]@
           -- notation, which is a function production and asserted below.
           map (\p -> (gproductionName p, gproductionArguments p)) (constructorProductions g)
-            @?= [ (GlobalName "var", [Argument "x" str (Occurrence (GlobalName "x"))])
-                , (GlobalName "abs", [ Argument "x" str (Binder (GlobalName "x"))
+            @?= [ (rootName "var", [Argument "x" str (Occurrence (rootName "x"))])
+                , (rootName "abs", [ Argument "x" str (Binder (rootName "x"))
                                      , Argument "T" (lang "Ty") Plain
                                      , Argument "E" (lang "LC") (Scope [0]) ])
-                , (GlobalName "app", [Argument "M" (lang "LC") Plain, Argument "N" (lang "LC") Plain])
+                , (rootName "app", [Argument "M" (lang "LC") Plain, Argument "N" (lang "LC") Plain])
                   -- §4.3: a name written twice is one argument.
-                , (GlobalName "repeat", [Argument "M" (lang "LC") Plain])
-                , (GlobalName "vacuous", [ Argument "x" str (Binder (GlobalName "x"))
+                , (rootName "repeat", [Argument "M" (lang "LC") Plain])
+                , (rootName "vacuous", [ Argument "x" str (Binder (rootName "x"))
                                          , Argument "M" (lang "LC") Plain
                                          , Argument "N" (lang "LC") Plain ])
                 ]
@@ -384,11 +384,11 @@ meaning =
     -- what lets a rule write @x@ there.
   , testCase "generated substitution declares its own notation" $ do
       gs <- installed stlc
-      case [ g | g <- gs, grammarName g == GlobalName "LC" ] of
+      case [ g | g <- gs, grammarName g == rootName "LC" ] of
         [g] -> do
           [ (gproductionName p, gproductionItems p)
             | p <- grammarProductions g, gproductionKind p == Function ]
-            @?= [ ( GlobalName "LC-subst-x"
+            @?= [ ( rootName "LC-subst-x"
                   , [ Slot "e" (lang "LC") []
                     , Terminal "["
                     , Slot "x" str []
@@ -397,7 +397,7 @@ meaning =
                     , Terminal "]" ] ) ]
           -- Nothing of it reaches the datatype: §4.8's whole mechanism.
           map gproductionName (constructorProductions g)
-            @?= map GlobalName ["var", "abs", "app", "repeat", "vacuous"]
+            @?= map rootName ["var", "abs", "app", "repeat", "vacuous"]
         other -> assertFailure (show (length other) ++ " grammars called LC")
     -- **A context gets one too**, and `ContextTests` is where it is asserted:
     -- it needs a context that /reaches/ a class, which this fixture's @Ctx@ does
@@ -408,13 +408,13 @@ meaning =
     -- generator can tell them apart, which phase 155 is what needs it.
   , testCase "a binder at a second class is recorded at that class" $ do
       gs <- installed twoClasses
-      case [ g | g <- gs, grammarName g == GlobalName "L" ] of
+      case [ g | g <- gs, grammarName g == rootName "L" ] of
         [g] ->
           [ (gproductionName p, map argumentRole (gproductionArguments p))
           | p <- constructorProductions g ]
-            @?= [ (GlobalName "var", [Occurrence (GlobalName "x")])
-                , (GlobalName "abs", [Binder (GlobalName "x"), Scope [0]])
-                , (GlobalName "big", [Binder (GlobalName "X"), Scope [0]])
+            @?= [ (rootName "var", [Occurrence (rootName "x")])
+                , (rootName "abs", [Binder (rootName "x"), Scope [0]])
+                , (rootName "big", [Binder (rootName "X"), Scope [0]])
                 ]
         other -> assertFailure (show (length other) ++ " grammars called L")
     -- **It installs and says nothing** (MS8 phase 155). It used to warn: the
@@ -467,8 +467,8 @@ meaning =
         (_, other) -> assertFailure (show other)
   ]
   where
-    str = OfClass (GlobalName "x") (GlobalName "String") (regex "[a-z][a-zA-Z0-9']*")
-    lang = OfLanguage . GlobalName
+    str = OfClass (rootName "x") (rootName "String") (regex "[a-z][a-zA-Z0-9']*")
+    lang = OfLanguage . rootName
     installed src = do
       (s0, _) <- startingSession
       pure (grammars (machineOf (fst (loadProofSource s0 src))))
@@ -533,7 +533,7 @@ notating =
       -- ran. Here the sorts are what the checker recorded.
       let gs = grammars (machineOf s1)
       map argumentSort (concat [ gproductionArguments p
-                               | g <- gs, grammarName g == GlobalName "Imp"
+                               | g <- gs, grammarName g == rootName "Imp"
                                , p <- grammarProductions g ])
         @?= [OfUniverse 0, OfUniverse 0]
     -- **A universe slot is refused where the argument types are generated FROM
@@ -568,7 +568,7 @@ notating =
       -- And @same@ in the fixture is `refl`, so the load itself asserts that
       -- the notation builds exactly the hand-written constructor application.
       map gproductionKind (concat [ grammarProductions g | g <- grammars (machineOf byHand)
-                                                         , grammarName g == GlobalName "Lam" ])
+                                                         , grammarName g == rootName "Lam" ])
         -- Three constructors, and the 'Function' is the generated substitution's
         -- own notation block (phase 159) — so the equipment arrived with its
         -- spelling, exactly as a @language@ block's does.
@@ -631,14 +631,14 @@ notating =
         Left e -> assertFailure e
         Right s1 -> do
           let gs = grammars (machineOf s1)
-          v <- case [ g | g <- gs, grammarName g == GlobalName "Valid" ] of
+          v <- case [ g | g <- gs, grammarName g == rootName "Valid" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called Valid")
           -- One production, the type former's own spelling, named after it.
           map (\p -> (gproductionName p, gproductionKind p)) (grammarProductions v)
-            @?= [(GlobalName "Valid", TypeFormer)]
+            @?= [(rootName "Valid", TypeFormer)]
           map argumentSort (concatMap gproductionArguments (grammarProductions v))
-            @?= map (OfLanguage . GlobalName) ["Ctx", "LC", "Ty", "typing"]
+            @?= map (OfLanguage . rootName) ["Ctx", "LC", "Ty", "typing"]
           -- And the constructor's target prints in it: a judgment over a
           -- judgment, spelled.
           said s1 ":show Valid" !! 1
@@ -656,14 +656,14 @@ notating =
       case loadProofSource s0 (joiningWith "notation C where\n  join a b -> ⟦ a , b ⟧") of
         (s1, ProofLoaded {}) -> do
           let gs = grammars (machineOf s1)
-          c <- case [ g | g <- gs, grammarName g == GlobalName "C" ] of
+          c <- case [ g | g <- gs, grammarName g == rootName "C" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called C")
           -- Two parameters, both at @C@ because that is what @join@ takes.
           map gproductionArguments [ p | p <- grammarProductions c
-                                       , gproductionName p == GlobalName "join" ]
-            @?= [[ Argument "a" (OfLanguage (GlobalName "C")) Plain
-                 , Argument "b" (OfLanguage (GlobalName "C")) Plain ]]
+                                       , gproductionName p == rootName "join" ]
+            @?= [[ Argument "a" (OfLanguage (rootName "C")) Plain
+                 , Argument "b" (OfLanguage (rootName "C")) Plain ]]
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , -- **A refusal that quotes a type may not print a nameless argument.** The
     -- stand-in 'functionShape' peels a telescope with used to be a global with
@@ -677,7 +677,7 @@ notating =
       case loadProofSource s0 (joiningWith "notation C where\n  nil a b -> a \8746 b") of
         (_, Ran _ _ (Refused (GrammarRefused
              (GrammarError _ _ (InProduction "nil" (FunctionResult r)))))) -> case r of
-          Canonical _ _ [a] -> a @?= Global (GlobalName "\8249A\8250") []
+          Canonical _ _ [a] -> a @?= Global (rootName "\8249A\8250") []
           other             -> assertFailure (show other)
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , testCase "the block installs, declares nothing, and adds one production" $ do
@@ -687,22 +687,22 @@ notating =
           -- @join@ is the definition's own name; the block declares nothing.
           names @?= ["x", "Ty", "C", "join"]
           let gs = grammars (machineOf s1)
-          c <- case [ g | g <- gs, grammarName g == GlobalName "C" ] of
+          c <- case [ g | g <- gs, grammarName g == rootName "C" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called C")
           map gproductionName (grammarProductions c)
-            @?= map GlobalName ["e", "ext", "join"]
+            @?= map rootName ["e", "ext", "join"]
           map gproductionKind (grammarProductions c)
             @?= [Constructor, Constructor, Function]
           -- **The datatype is the one it was**, which is the whole reason this
           -- is not the refused joining constructor: @C@ stays a list.
-          map gproductionName (constructorProductions c) @?= map GlobalName ["e", "ext"]
+          map gproductionName (constructorProductions c) @?= map rootName ["e", "ext"]
           -- Plain arguments, in the parameter list's order, at the types the
           -- declaration gives them (MS8 phase 171).
           map gproductionArguments [ p | p <- grammarProductions c
-                                       , gproductionName p == GlobalName "join" ]
-            @?= [[ Argument "a" (OfLanguage (GlobalName "C")) Plain
-                 , Argument "b" (OfLanguage (GlobalName "C")) Plain ]]
+                                       , gproductionName p == rootName "join" ]
+            @?= [[ Argument "a" (OfLanguage (rootName "C")) Plain
+                 , Argument "b" (OfLanguage (rootName "C")) Plain ]]
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , testCase "and a term is written in it, and reduces to the constructors" $ do
       (s0, _) <- startingSession
@@ -771,7 +771,7 @@ reaching =
   [ testCase "a class a role of the grammar itself names" $ do
       gs <- installedIn twoClasses
       map (classesReached gs) [grammarCalled gs "L"]
-        @?= [[GlobalName "x", GlobalName "X"]]
+        @?= [[rootName "x", rootName "X"]]
   , testCase "and nothing for a grammar whose roles name none" $ do
       gs <- installedIn stlc
       classesReached gs (grammarCalled gs "Ty") @?= []
@@ -795,10 +795,10 @@ reaching =
         (s1, other) -> do
           _ <- assertFailure (unlines (renderResponse s1 other))
           pure []
-    grammarCalled gs n = case [ g | g <- gs, grammarName g == GlobalName n ] of
+    grammarCalled gs n = case [ g | g <- gs, grammarName g == rootName n ] of
       g : _ -> g
       [] -> error ("no grammar called " ++ n)
-    nameString (GlobalName n) = n
+    nameString = nameDotted
 
 -- | Two grammars, each with a slot of the other: @A@ reads @u@ and @B@ reads
 -- @v@, so each reaches both. Written out because no module can declare it.
@@ -806,13 +806,13 @@ cyclic :: [Grammar]
 cyclic = [one "A" "u" "B", one "B" "v" "A"]
   where
     one l cls other =
-      Grammar LanguageBlock (GlobalName l) [l, l ++ "'"]
-        [ GProduction (GlobalName (l ++ "var")) [Slot cls (klass cls) []]
-            [Argument cls (klass cls) (Occurrence (GlobalName cls))] Constructor
-        , GProduction (GlobalName (l ++ "in")) [Slot other (OfLanguage (GlobalName other)) []]
-            [Argument other (OfLanguage (GlobalName other)) Plain] Constructor
+      Grammar LanguageBlock (rootName l) [l, l ++ "'"]
+        [ GProduction (rootName (l ++ "var")) [Slot cls (klass cls) []]
+            [Argument cls (klass cls) (Occurrence (rootName cls))] Constructor
+        , GProduction (rootName (l ++ "in")) [Slot other (OfLanguage (rootName other)) []]
+            [Argument other (OfLanguage (rootName other)) Plain] Constructor
         ]
-    klass cls = OfClass (GlobalName cls) (GlobalName "String") (regex "[a-z]+")
+    klass cls = OfClass (rootName cls) (rootName "String") (regex "[a-z]+")
 
 -- ---------------------------------------------------------------------------
 
@@ -862,7 +862,7 @@ refused =
           ++ "  f : x as binder -> ( let x = M in R[x] )\n"
       )
     , GrammarError LanguageBlock "L"
-        (InProduction "f" (ScopeElsewhere "R" (GlobalName "P") (GlobalName "x")))
+        (InProduction "f" (ScopeElsewhere "R" (rootName "P") (rootName "x")))
     )
   , ( ( "a token class that would read it"
       , "module M where\n\nany : Token String\nany = /./\n\nlanguage L, M where\n  f -> any M\n"
@@ -899,7 +899,7 @@ refused =
            "notation C where\n  join a b -> a \8746 a" "join" (ParamUnspelled "b")
        , inNotation "a parameter naming an argument no notation reads"
            "lift : C -> String -> C\nlift = \\ a s -> a\n\nnotation C where\n  lift a s -> a \8853 s"
-           "lift" (ParamNotReadable "s" (Global (GlobalName "String") []))
+           "lift" (ParamNotReadable "s" (Global (rootName "String") []))
        , inNotation "a function that does not return the grammar's datatype"
            "dom : C -> C -> Ty\ndom = \\ a b -> base\n\nnotation C where\n  dom p q -> p \8746 q"
            "dom" (FunctionResult (datatype "Ty"))
@@ -914,7 +914,7 @@ refused =
          -- cannot be declared over it.
        , inNotation "a role in a block that only adds spellings"
            "notation C where\n  ext a b : a as occurrence -> a \8746 b" "ext"
-           (RolesAfterTheGrammar (GlobalName "C"))
+           (RolesAfterTheGrammar (rootName "C"))
        ]
     -- **A built-in tag may not name a language** (moved here from MS5's
     -- grammars at phase 106). A rule base reads an installed grammar's tag
@@ -924,7 +924,7 @@ refused =
                ("language " ++ t ++ ", M where\n  f -> a") BuiltInTag
        | t <- builtInTags ]
   where
-    int = OfClass (GlobalName "n") (GlobalName "Int") (regex "[0-9]+")
+    int = OfClass (rootName "n") (rootName "Int") (regex "[0-9]+")
     wrap body =
       "module M where\n\nx : Token String\nx = /[a-z]+/\n\nn : Token Int\nn = /[0-9]+/\n\n" ++ body ++ "\n"
     inProduction title body p why = ((title, wrap body), GrammarError LanguageBlock "L" (InProduction p why))
@@ -967,7 +967,7 @@ refusals =
 -- is what a §4.8 refusal carries so that its message can show the author the
 -- type their own signature says (MS8 phase 160).
 datatype :: String -> Core
-datatype n = Canonical (GlobalName n) [] []
+datatype n = Canonical (rootName n) [] []
 
 regex :: String -> Regex
 regex = either (error . show) id . parseRegex

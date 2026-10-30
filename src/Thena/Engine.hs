@@ -55,6 +55,8 @@ import Thena.Core.Term
   ( Core (..)
   , close
   , GlobalName (..)
+  , nameDotted
+  , rootName
   , Ident (..)
   , Var
   , fresh
@@ -474,9 +476,9 @@ newDevelopment' ty n =
    in (Development (enter (goalAt v ty)), n1)
 
 newDevelopmentNamed :: GlobalName -> Core -> Int -> (Development, Int)
-newDevelopmentNamed (GlobalName x) ty n =
+newDevelopmentNamed g ty n =
   let (v, n1) = fresh n
-   in (Development (enter (goalAtNamed (Ident x) v ty)), n1)
+   in (Development (enter (goalAtNamed (Ident (nameDotted g)) v ty)), n1)
 
 setGoal :: Core -> Machine -> Either MoveError Machine
 setGoal = goalNamed (Ident "goal")
@@ -1023,11 +1025,11 @@ perform instr rest m = case operation instr of
 
   DeclarePrimitive nm ty -> case (,) <$> text nm <*> term ty of
     Left r -> failure r m
-    Right (x, t) -> Primitively (GlobalName x) t (advance m)
+    Right (x, t) -> Primitively (rootName x) t (advance m)
 
   DefineGlobal ps nm ty tm -> case (,,) <$> text nm <*> term ty <*> term tm of
     Left r -> failure r m
-    Right (x, t, v) -> Defining (GlobalName x) ps t v (advance m)
+    Right (x, t, v) -> Defining (rootName x) ps t v (advance m)
 
   Certify stated -> case term stated of
     Left r   -> failure r m
@@ -1233,7 +1235,7 @@ perform instr rest m = case operation instr of
   Op.Call nm args -> case traverse (operandValue (env (exec m))) args of
     Left e   -> failure e m
     Right vs -> case next (it vs) of
-      Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) (GlobalName nm))) m
+      Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) (rootName nm))) m
       Just (r, it')
         | hasNext it' ->
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
@@ -1241,7 +1243,7 @@ perform instr rest m = case operation instr of
         | otherwise ->
             Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) wants False) m)
     where
-      it vs = clauses (rules m) (globals m) (cursor (development m)) (GlobalName nm) vs
+      it vs = clauses (rules m) (globals m) (cursor (development m)) (rootName nm) vs
 
       -- The callee's parameters, bound to the arguments. 'clauses' has already
       -- filtered on arity, so the two lists agree by construction — and the
@@ -1333,7 +1335,7 @@ perform instr rest m = case operation instr of
     Right (w, VList hs, VMethodShape shape) ->
       case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
-        case specialise (globals m) contextAt (names m) (GlobalName w)
+        case specialise (globals m) contextAt (names m) (rootName w)
                         [ Ident n | VText n <- hs ] shape s of
           (Left e,  n1) -> failure (CannotSpecialise e) m { names = n1 }
           (Right sp, n1) ->
@@ -1419,7 +1421,7 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right z -> case outerArgs (Zipper.focus z) of
       (Concrete.SurfaceElim d ps mot ms is tgt, extra) ->
-        case lookupInductive (GlobalName d) (globals m) of
+        case lookupInductive (rootName d) (globals m) of
           Nothing  -> failure (CannotRead (ResolveFailed (NotADatatype d))) m
           Just def
             | length ps /= wantP ->
@@ -1452,7 +1454,7 @@ perform instr rest m = case operation instr of
                          (explicit mot
                             NE.:| map explicit (ms ++ is ++ [tgt]) ++ extra)
                          (map explicit ps))
-              GlobalName e = eliminatorName (GlobalName d)
+              e = nameDotted (eliminatorName (rootName d))
               explicit = Concrete.SurfaceArg Concrete.Explicit
       _ -> failure (ExpectedSurfaceShape "an elimination") m
     where
@@ -1508,7 +1510,7 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right i ->
       let inUse = Cursor.identsIn (cursor (development m))
-                    ++ [ Ident g | GlobalName g <- declaredNames (globals m) ]
+                    ++ [ Ident g | g <- map nameDotted (declaredNames (globals m)) ]
           Ident n = Cursor.freshIdent inUse i
        in produce (VText n) m
 
@@ -1591,9 +1593,9 @@ perform instr rest m = case operation instr of
   Op.DatatypeOf a -> case term a of
     Left e  -> failure e m
     Right t -> case spineOf (whnf (globals m) contextAt t) of
-      Just (GlobalName w, _, _)
-        | isDatatype w -> produce (VText w) m
-        | otherwise    -> failure (NotDeclaredAs w "a datatype") m
+      Just (gn, _, _)
+        | isDatatype (nameDotted gn) -> produce (VText (nameDotted gn)) m
+        | otherwise    -> failure (NotDeclaredAs (nameDotted gn) "a datatype") m
       Nothing -> failure (NotDeclaredAs "that type" "a datatype") m
 
   Op.DatatypeParameters a -> datatypeCount a inductiveParameters
@@ -1604,13 +1606,13 @@ perform instr rest m = case operation instr of
   -- walking constructors agree without either being told.
   Op.ConstructorsOf a -> withDatatype a $ \d ->
     produce (VList [ VText c
-                   | GlobalName c <- map constructorName (inductiveConstructors d) ]) m
+                   | c <- map nameDotted (map constructorName (inductiveConstructors d)) ]) m
 
   -- **Failing here IS the answer "that name is not a constructor"**, which is
   -- how a splitting rule tells a constructor pattern from a variable one
   -- without a test of its own.
   Op.ConstructorDatatype a -> withConstructor a $ \d _ ->
-    case inductiveName d of GlobalName dn -> produce (VText dn) m
+    produce (VText (nameDotted (inductiveName d))) m
 
   -- Names, so a split can name its pattern variables after them — the courtesy
   -- 'Op.Eliminate' already does for its method holes. Their count is this
@@ -1642,13 +1644,13 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right w -> case inScopeAt w of
       Just v  -> produce (VTerm (Free v)) m
-      Nothing -> case lookupDefinition (GlobalName w) (globals m) of
+      Nothing -> case lookupDefinition (rootName w) (globals m) of
         Just d ->
           let (ls, n1) = levelArgsFor (length (definitionLevels d)) (names m)
-           in produce (VTerm (Global (GlobalName w) ls)) m { names = n1 }
+           in produce (VTerm (Global (rootName w) ls)) m { names = n1 }
         Nothing
-          | isDeclared (GlobalName w) (globals m) ->
-              produce (VTerm (Global (GlobalName w) [])) m
+          | isDeclared (rootName w) (globals m) ->
+              produce (VTerm (Global (rootName w) [])) m
           | otherwise ->
               failure (CannotRead (ResolveFailed (NotInScope w))) m
     where
@@ -1969,7 +1971,7 @@ perform instr rest m = case operation instr of
   Op.Play x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceDo body) ->
-      case resolveBlock (grammars m) (GlobalName "do") [] body of
+      case resolveBlock (grammars m) (rootName "do") [] body of
         Left errs -> failure (blockFailureOf errs) m
         Right is  -> Playing is (advance m)
     Right _ -> failure (ExpectedSurfaceShape "a do block") m
@@ -2122,19 +2124,19 @@ perform instr rest m = case operation instr of
     -- operand that names a declaration and hands the declaration to its
     -- caller, so the six cases above say what they read and nothing about how
     -- the name was got or how the failure is shaped.
-    isDatatype w = case lookupInductive (GlobalName w) (globals m) of
+    isDatatype w = case lookupInductive (rootName w) (globals m) of
       Just _  -> True
       Nothing -> False
 
     withDatatype a k = case text a of
       Left e  -> failure e m
-      Right w -> case lookupInductive (GlobalName w) (globals m) of
+      Right w -> case lookupInductive (rootName w) (globals m) of
         Just d  -> k d
         Nothing -> failure (NotDeclaredAs w "a datatype") m
 
     withConstructor a k = case text a of
       Left e  -> failure e m
-      Right w -> case lookupConstructor (GlobalName w) (globals m) of
+      Right w -> case lookupConstructor (rootName w) (globals m) of
         Just (d, c) -> k d c
         Nothing     -> failure (NotDeclaredAs w "a constructor") m
 
@@ -2251,7 +2253,7 @@ perform instr rest m = case operation instr of
     -- What the machine recorded about this name\'s argument positions, if it
     -- recorded anything. A name with no entry — every DC-declared global, and
     -- every local — takes what was written and nothing more.
-    plicitiesOf g = case lookup (GlobalName g) (signatures m) of
+    plicitiesOf g = case lookup (rootName g) (signatures m) of
       Just ps -> ps
       Nothing -> []
 
@@ -2746,7 +2748,7 @@ choicePoints m =
 -- | A rule's name as text. 'Thena.Repl' owns display, but a 'Message' is text
 -- by the time it leaves here — the same bargain 'unifyMessage' already struck.
 nameOfRule :: Rule -> String
-nameOfRule r = case ruleName r of GlobalName g -> g
+nameOfRule = nameDotted . ruleName
 
 drainIter :: RuleIter -> [Rule]
 drainIter it = case next it of
@@ -2819,8 +2821,8 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
           )
       _ -> go (popped + 1) stk
 
-    note i (GlobalName g) popped =
-      "retrying " ++ show i ++ ": " ++ g
+    note i gn popped =
+      "retrying " ++ show i ++ ": " ++ nameDotted gn
         ++ (if popped == 0 then "" else " (" ++ show popped ++ " frame(s) dropped)")
 
 -- | The variable a component binds. What @here@ answers.

@@ -38,7 +38,7 @@ import Data.List (elemIndex)
 
 import Thena.Core.Term
   ( Core (..)
-  , GlobalName (..)
+  , nameDotted
   , Ident (..)
   , Literal (..)
   , Var
@@ -281,8 +281,8 @@ displayCore grammars budget env binders counter here term =
       DNode p g children _ -> do
         args <- argsAt at t
         items <- objectItems b e bs n p args children
-        let GlobalName lang = g
-            GlobalName prod = gproductionName p
+        let lang = nameDotted (g)
+            prod = nameDotted (gproductionName p)
         Just (AnObjectTerm lang prod items)
       _ -> Nothing -- a fenced or foreign draft has no shape of its own here;
                    -- 'objectItem' below is what turns one into a slot.
@@ -356,7 +356,7 @@ displayCore grammars budget env binders counter here term =
     shapeOf b e bs n at t = case t of
       Bound i -> ADangling i
       Free v -> AVariable (nameOf v e) (lookup v bs)
-      Global (GlobalName g) ls -> AGlobal g (map renderLevelAtom ls)
+      Global g ls -> AGlobal (nameDotted g) (map renderLevelAtom ls)
       Universe l -> AUniverse (renderLevel l)
       Primitive l -> ALiteral (literal l)
       App f a -> AnApplication (go b e bs n (down at Fun) f) (go b e bs n (down at Arg) a)
@@ -371,7 +371,7 @@ displayCore grammars budget env binders counter here term =
               (Binding nm (go b e bs n (down at Type) ty))
               (go b e bs n (down at Val) val)
               (go b e' bs' n1 (down at Body) (open v sc))
-      Canonical (GlobalName g) ls as ->
+      Canonical gn ls as | let g = nameDotted gn ->
         AFormer g (map renderLevelAtom ls) (slots b e bs n at CanonArg as)
       Trusted cl ac bd ->
         ATrusted
@@ -380,7 +380,7 @@ displayCore grammars budget env binders counter here term =
           (go b e bs n (down at Body) bd)
       Eliminate d' ls ps m ms is tgt ->
         AnElimination
-          (let GlobalName g = d' in g)
+          (nameDotted d')
           (map renderLevelAtom ls)
           (slots b e bs n at Param ps)
           (go b e bs n (down at Motive) m)

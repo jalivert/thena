@@ -16,7 +16,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (entryIdent)
-import Thena.Core.Term (GlobalName (..), Ident (..))
+import Thena.Core.Term (Ident (..), rootName)
 import Thena.Driver
   ( Response (..)
   , Session
@@ -136,8 +136,8 @@ said s line = let (s', r) = command s line in renderResponse s' r
 -- argument nothing depends on as an arrow, so a premise's name is seen here.
 argumentNames :: Session -> String -> String -> [String]
 argumentNames s d c =
-  [ n | Just ind <- [lookupInductive (GlobalName d) (globals (machineOf s))]
-      , con <- inductiveConstructors ind, constructorName con == GlobalName c
+  [ n | Just ind <- [lookupInductive (rootName d) (globals (machineOf s))]
+      , con <- inductiveConstructors ind, constructorName con == rootName c
       , Ident n <- map entryIdent (constructorArguments con) ]
 
 refusal :: String -> [String] -> String -> TestTree

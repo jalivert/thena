@@ -13,7 +13,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, close, fresh)
+import Thena.Core.Term (Core (..), Ident (..), Var, close, fresh, rootName)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   (Cursor, Focus (..), along, context, enter, focus, identsIn, rebuild)
@@ -408,7 +408,7 @@ resolveTests =
     "resolve-name"
     [ testCase "a declared constructor is a global" $ do
         v <- expectBoundIn nat hole [Bind (Op.PVar "z") Nothing (ResolveName (Lit (VText "zero")))] "z"
-        v @?= VTerm (Global (GlobalName "zero") [])
+        v @?= VTerm (Global (rootName "zero") [])
 
       -- §3.6's one namespace: a binder shadows a global of the same name, and
       -- this is the order "Thena.Syntax.Resolve" uses for the same reason. The

@@ -93,7 +93,8 @@ import Thena.Core.Level (Level (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   ( Core (..)
-  , GlobalName (..)
+  , rootName
+  , nameDotted
   , Var
   , close
   , fresh
@@ -394,9 +395,9 @@ resolveRecursion env n0 tm = case tm of
     -- node, so this is the same report read off the other spelling and not a
     -- second mechanism. The name is generated for every datatype, so it is not
     -- one a user can have bound to something else.
-    analysedBy (GlobalName w) = do
-      rest <- stripPrefix "case" w
-      lookupInductive (GlobalName rest) env
+    analysedBy g = do
+      rest <- stripPrefix "case" (nameDotted g)
+      lookupInductive (rootName rest) env
 
     -- A pair's second half under a partial function.
     traverseSnd f (v, i) = fmap ((,) v) (f i)

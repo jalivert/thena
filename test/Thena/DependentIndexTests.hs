@@ -45,7 +45,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=), assertBool)
 
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (Canonical), GlobalName (..))
+import Thena.Core.Term (Core (Canonical), GlobalName (..), rootName)
 import Thena.Driver
   ( machineOf
   )
@@ -93,7 +93,7 @@ tests =
     , testCase "and the split's definition is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        case lookupDefinition (GlobalName "tied") (globals (machineOf s')) of
+        case lookupDefinition (rootName "tied") (globals (machineOf s')) of
           Nothing -> assertFailure "tied was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
@@ -109,7 +109,7 @@ tests =
     , testCase "and the split injectivity crosses is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        case lookupDefinition (GlobalName "tiedTwo") (globals (machineOf s')) of
+        case lookupDefinition (rootName "tiedTwo") (globals (machineOf s')) of
           Nothing -> assertFailure "tiedTwo was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
@@ -122,14 +122,14 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
         let m = machineOf s'
-        case lookupDefinition (GlobalName "twoFromArm") (globals m) of
+        case lookupDefinition (rootName "twoFromArm") (globals m) of
           Nothing -> assertFailure "twoFromArm was not admitted"
           Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName "s") _ [inner] ->
+            Canonical (GlobalName [] "s") _ [inner] ->
               case whnf (globals m) [] inner of
-                Canonical (GlobalName "s") _ [innermost] ->
+                Canonical (GlobalName [] "s") _ [innermost] ->
                   case whnf (globals m) [] innermost of
-                    Canonical (GlobalName "z") _ [] -> pure ()
+                    Canonical (GlobalName [] "z") _ [] -> pure ()
                     other -> assertFailure ("s (s " ++ show other ++ ")")
                 other -> assertFailure ("s applied to " ++ show other)
             other -> assertFailure ("not a successor: " ++ show other)
@@ -145,7 +145,7 @@ tests =
     , testCase "and a chain deletion matched first is crossed by injectivity" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        case lookupDefinition (GlobalName "pinned") (globals (machineOf s')) of
+        case lookupDefinition (rootName "pinned") (globals (machineOf s')) of
           Nothing -> assertFailure "pinned was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
@@ -158,12 +158,12 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
         let m = machineOf s'
-        case lookupDefinition (GlobalName "pinnedFromArm") (globals m) of
+        case lookupDefinition (rootName "pinnedFromArm") (globals m) of
           Nothing -> assertFailure "pinnedFromArm was not admitted"
           Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName "fz") _ [inner] ->
+            Canonical (GlobalName [] "fz") _ [inner] ->
               case whnf (globals m) [] inner of
-                Canonical (GlobalName "z") _ [] -> pure ()
+                Canonical (GlobalName [] "z") _ [] -> pure ()
                 other -> assertFailure ("fz applied to " ++ show other)
             other -> assertFailure ("not fz: " ++ show other)
 
@@ -185,7 +185,7 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s argumentTarget
         let m = machineOf s'
-        case lookupDefinition (GlobalName "depth") (globals m) of
+        case lookupDefinition (rootName "depth") (globals m) of
           Nothing -> assertFailure "depth was not admitted"
           Just d  ->
             renderCore (Rendering [] (names m)) [] (definitionType d)
@@ -213,12 +213,12 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
         let m = machineOf s'
-        case lookupDefinition (GlobalName "one") (globals m) of
+        case lookupDefinition (rootName "one") (globals m) of
           Nothing -> assertFailure "one was not admitted"
           Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName "s") _ [inner] ->
+            Canonical (GlobalName [] "s") _ [inner] ->
               case whnf (globals m) [] inner of
-                Canonical (GlobalName "z") _ [] -> pure ()
+                Canonical (GlobalName [] "z") _ [] -> pure ()
                 other -> assertFailure ("s applied to " ++ show other)
             other -> assertFailure ("not a successor: " ++ show other)
 
@@ -233,12 +233,12 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
         let m = machineOf s'
-        case lookupDefinition (GlobalName "two") (globals m) of
+        case lookupDefinition (rootName "two") (globals m) of
           Nothing -> assertFailure "two was not admitted"
           Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName "s") _ [inner] ->
+            Canonical (GlobalName [] "s") _ [inner] ->
               case whnf (globals m) [] inner of
-                Canonical (GlobalName "z") _ [] -> pure ()
+                Canonical (GlobalName [] "z") _ [] -> pure ()
                 other -> assertFailure ("s applied to " ++ show other)
             other -> assertFailure ("not a successor: " ++ show other)
 
@@ -253,7 +253,7 @@ tests =
     , testCase "and a projection at a pinned index is admitted" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
-        case lookupDefinition (GlobalName "headAll") (globals (machineOf s')) of
+        case lookupDefinition (rootName "headAll") (globals (machineOf s')) of
           Nothing -> assertFailure "headAll was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
@@ -267,14 +267,14 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
         let m = machineOf s'
-        case lookupDefinition (GlobalName "headTwo") (globals m) of
+        case lookupDefinition (rootName "headTwo") (globals m) of
           Nothing -> assertFailure "headTwo was not admitted"
           Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName "s") _ [inner] ->
+            Canonical (GlobalName [] "s") _ [inner] ->
               case whnf (globals m) [] inner of
-                Canonical (GlobalName "s") _ [innermost] ->
+                Canonical (GlobalName [] "s") _ [innermost] ->
                   case whnf (globals m) [] innermost of
-                    Canonical (GlobalName "z") _ [] -> pure ()
+                    Canonical (GlobalName [] "z") _ [] -> pure ()
                     other -> assertFailure ("s (s " ++ show other ++ ")")
                 other -> assertFailure ("s applied to " ++ show other)
             other -> assertFailure ("not a successor: " ++ show other)
@@ -293,7 +293,7 @@ tests =
     , testCase "and the chained split is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s chainedTarget
-        case lookupDefinition (GlobalName "chained") (globals (machineOf s')) of
+        case lookupDefinition (rootName "chained") (globals (machineOf s')) of
           Nothing -> assertFailure "chained was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
@@ -332,7 +332,7 @@ tests =
     , testCase "and the theorem is a global with the statement it should have" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadFile s target
-        case lookupDefinition (GlobalName "belowRefl") (globals (machineOf s')) of
+        case lookupDefinition (rootName "belowRefl") (globals (machineOf s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
@@ -346,15 +346,15 @@ tests =
 -- can be built from, so reducing to the right depth cannot happen by accident.
 numeral :: Machine -> String -> Int -> Assertion
 numeral m name expected =
-  case lookupDefinition (GlobalName name) (globals m) of
+  case lookupDefinition (rootName name) (globals m) of
     Nothing -> assertFailure (name ++ " was not admitted")
     Just d  -> go expected (whnf (globals m) [] (definitionBody d))
   where
     go 0 t = case t of
-      Canonical (GlobalName "z") _ [] -> pure ()
+      Canonical (GlobalName [] "z") _ [] -> pure ()
       other -> assertFailure (name ++ ": expected z, got " ++ show other)
     go k t = case t of
-      Canonical (GlobalName "s") _ [inner] ->
+      Canonical (GlobalName [] "s") _ [inner] ->
         go (k - 1) (whnf (globals m) [] inner)
       other ->
         assertFailure (name ++ ": expected a successor, got " ++ show other)

@@ -27,7 +27,7 @@ import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
+import Thena.Core.Term (Core, Ident (..), fresh, rootName)
 import Thena.Core.Typing (check)
 import Thena.Driver (Response (..), loadProofSource)
 import Thena.Files (startingSession)
@@ -141,7 +141,7 @@ caseTests =
 
 typeOfGlobal :: GlobalEnv -> Int -> String -> Maybe String
 typeOfGlobal env n g =
-  renderCore (Rendering [] n) [] . definitionType <$> lookupDefinition (GlobalName g) env
+  renderCore (Rendering [] n) [] . definitionType <$> lookupDefinition (rootName g) env
 
 -- --------------------------------------------------------------------------
 -- Using it
@@ -400,7 +400,7 @@ belowDecl =
   \where { bz : \8704 (m : Nat) -> Below (succ m) (fz m) }"
 
 certified :: GlobalEnv -> String -> Assertion
-certified env g = case lookupDefinition (GlobalName g) env of
+certified env g = case lookupDefinition (rootName g) env of
   Nothing -> assertFailure (g ++ " was not generated")
   Just d  -> case certify env (definitionBody d) (definitionType d) of
     Right _  -> pure ()
@@ -451,11 +451,11 @@ skipTests =
     testCase "no Eq in scope at all — skipped, and quietly" $
       generated [] natDecl @?= Right False
   , testCase "and then nothing was generated" $
-      lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [natDecl]))
-        `seq` (lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [natDecl])) == Nothing)
+      lookupDefinition (rootName "NoConfusionNat") (fst (declared [natDecl]))
+        `seq` (lookupDefinition (rootName "NoConfusionNat") (fst (declared [natDecl])) == Nothing)
         @?= True
   , testCase "but with Eq it was" $
-      (lookupDefinition (GlobalName "NoConfusionNat") eqNat == Nothing) @?= False
+      (lookupDefinition (rootName "NoConfusionNat") eqNat == Nothing) @?= False
   , -- Phase 20's precondition is asked **per datatype**, and these two cases
     -- are why it has to be. @Eq@'s own table mentions none of the products —
     -- one constructor, so no off-diagonal @Empty@; one argument, so neither
@@ -464,7 +464,7 @@ skipTests =
     -- silently loses @NoConfusionEq@ at that very line, which is what the
     -- first draft of the phase did.
     testCase "Eq alone: its own table needs no product, so it is generated" $
-      (lookupDefinition (GlobalName "NoConfusionEq") (fst (declared [eqDecl])) == Nothing)
+      (lookupDefinition (rootName "NoConfusionEq") (fst (declared [eqDecl])) == Nothing)
         @?= False
   , -- **A dependent index telescope wants @DPair@ — MS9 phase 222.** The chain
     -- is stated over @(indices; element)@, so where an index's type mentions an
@@ -475,12 +475,12 @@ skipTests =
     testCase "a dependent index telescope with no DPair — skipped" $
       generated [eqDecl, natDecl, finDecl] belowDecl @?= Right False
   , testCase "and then nothing was generated" $
-      (lookupDefinition (GlobalName "NoConfusionBelow") belowEnv == Nothing) @?= True
+      (lookupDefinition (rootName "NoConfusionBelow") belowEnv == Nothing) @?= True
   , -- Two constructors want an off-diagonal @Empty {0}@, and there is none.
     testCase "Nat with Eq but no Empty — skipped, and quietly" $
       generated [eqDecl] natDecl @?= Right False
   , testCase "and then nothing was generated" $
-      (lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [eqDecl, natDecl]))
+      (lookupDefinition (rootName "NoConfusionNat") (fst (declared [eqDecl, natDecl]))
         == Nothing) @?= True
   ]
 
@@ -495,8 +495,8 @@ clashTests :: [TestTree]
 clashTests =
   [ testCase "the family's name taken" $
       generated (preludeDecls ++ ["NoConfusionNat : Type\8320 where { }"]) natDecl
-        @?= Left (AlreadyDeclared (GlobalName "NoConfusionNat"))
+        @?= Left (AlreadyDeclared (rootName "NoConfusionNat"))
   , testCase "the lemma's name taken" $
       generated (preludeDecls ++ ["noConfusionNat : Type\8320 where { }"]) natDecl
-        @?= Left (AlreadyDeclared (GlobalName "noConfusionNat"))
+        @?= Left (AlreadyDeclared (rootName "noConfusionNat"))
   ]

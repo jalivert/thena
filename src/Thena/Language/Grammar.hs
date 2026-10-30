@@ -64,7 +64,7 @@ import Data.Maybe (isJust, listToMaybe)
 
 import Thena.Core.Level (Normal (..), normalise)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Literal (..), instantiate, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, rootName, Ident (..), Literal (..), instantiate, tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Regex (Regex, andThen, fromRanges, matches, oneOf, parseRegex, primingChar, singleChar, star)
@@ -404,7 +404,7 @@ checkGrammar installed env b = do
     [] -> Right ()
   prods <- traverse (\p -> either (refuse . InProduction (productionName p)) Right (production p))
              (blockProductions b)
-  let g = Grammar kind (GlobalName name) heads (map fst prods)
+  let g = Grammar kind (rootName name) heads (map fst prods)
   if kind == ContextBlock && not (contextShaped heads g) then refuse ContextShape else Right ()
   case [ (nameOf (gproductionName e), xs)
        | kind == ContextBlock, e <- extensionsOf g
@@ -443,7 +443,7 @@ checkGrammar installed env b = do
       , OfClass _ _ re <- [argumentSort a]
       , primingChar re == Nothing
       ]
-    nameOf (GlobalName x) = x
+    nameOf = nameDotted
     -- **A judgment's name is not a metavariable**: its header has none, and
     -- its notation's are the languages' (§6.1).
     heads
@@ -458,14 +458,14 @@ checkGrammar installed env b = do
 
     -- A global, or a name a grammar already installed will generate.
     taken x =
-      isDeclared (GlobalName x) env
-        || GlobalName x `elem` concat
+      isDeclared (rootName x) env
+        || rootName x `elem` concat
              [ grammarName g : map gproductionName (grammarProductions g) | g <- installed ]
 
     -- **This block's metavariables first, then every other grammar's**, which
     -- is only an order because @MetavariableTaken@ has already refused a name
     -- that is both.
-    sortOf = sortIn env ([ (m, GlobalName name) | m <- heads ] ++ metavarsElsewhere)
+    sortOf = sortIn env ([ (m, rootName name) | m <- heads ] ++ metavarsElsewhere)
 
     -- **The shape is shared with 'checkNotation' since MS8 phase 160**, where a
     -- production may name a constructor of a hand-written datatype and carries
@@ -478,7 +478,7 @@ checkGrammar installed env b = do
       let pkind | kind == JudgmentBlock = TypeFormer
                 | otherwise = Constructor
           vacuous = [ VacuousBinder kind name (productionName p) x | x <- vacuousNames ]
-      Right (GProduction (GlobalName (productionName p)) items arguments pkind, vacuous)
+      Right (GProduction (rootName (productionName p)) items arguments pkind, vacuous)
 
 -- | **A production's items, its arguments and their roles** (§4.2, §4.3, §4.7) —
 -- everything about a production's /shape/, which is the same question whether a
@@ -560,7 +560,7 @@ constructorShape sortOf binds universes p = do
     withClass wrong x = (,) x <$> stringClass wrong x
 
     stringClass wrong x = case sortOf x of
-      Just (OfClass cls (GlobalName "String") _) -> Right cls
+      Just (OfClass cls (GlobalName [] "String") _) -> Right cls
       Just s -> Left (wrong x s)
       Nothing -> Left (NotAMetavariable x)
 
@@ -578,7 +578,7 @@ sortIn env metavars x = case [ srt | b <- nameBases x, Just srt <- [exact b] ] o
     exact b
       | Just n <- universeWord b = Just (OfUniverse n)
       | Just g <- lookup b metavars = Just (OfLanguage g)
-      | Just (t, re) <- tokenClassOf env b = Just (OfClass (GlobalName b) t re)
+      | Just (t, re) <- tokenClassOf env b = Just (OfClass (rootName b) t re)
       | otherwise = Nothing
 
 -- | A level as subscript digits, for a refusal that names the universe a slot
@@ -645,9 +645,9 @@ typeReading n children = case (words n, children) of
 typeRules :: [Grammar] -> [Earley.Rule]
 typeRules gs =
   [ Earley.Rule "a type" typeNT [Earley.Nonterminal l] []
-  | g <- gs, not (null (typeFormerProductions g)), let GlobalName l = grammarName g ]
+  | g <- gs, not (null (typeFormerProductions g)), let l = nameDotted (grammarName g) ]
     ++ [ Earley.Rule ("the type " ++ l) typeNT [Earley.Literal l] []
-       | g <- gs, let GlobalName l = grammarName g ]
+       | g <- gs, let l = nameDotted (grammarName g) ]
     ++ [ Earley.Rule "a universe" typeNT [Earley.Scan "a universe" universeRegex] [] ]
 
 -- | A word, then the same word with its suffixes taken off, longest first
@@ -727,10 +727,10 @@ checkNotation installed env b = do
   -- generated from. Said here, where the author can act on it.
   case [ c | not editing
            , any (isJust . productionMetadata) (blockProductions b)
-           , GlobalName c <- constructorsOf g
-           , GlobalName c `notElem` map gproductionName prods ] of
+           , c <- constructorsOf g
+           , c `notElem` map gproductionName prods ] of
     [] -> Right ()
-    cs -> refuse (ConstructorsUnspelled cs)
+    cs -> refuse (ConstructorsUnspelled (map nameDotted cs))
   Right (Grammar NotationBlock (grammarName g) (grammarMetavars g) prods)
   where
     name = blockName b
@@ -740,13 +740,13 @@ checkNotation installed env b = do
     -- name is its metavariable** — which is what gives its slots their words,
     -- @Lam@ and @Lam₁@, since a type declared outside a block has none to
     -- declare (HIS ruling: subscripts are enough).
-    named = case [ g | g <- installed, grammarName g == GlobalName name ] of
+    named = case [ g | g <- installed, grammarName g == rootName name ] of
       g : _ -> Just g
       []    -> fresh
-    fresh = case lookupInductive (GlobalName name) env of
-      Just _  -> Just (Grammar NotationBlock (GlobalName name) [name] [])
+    fresh = case lookupInductive (rootName name) env of
+      Just _  -> Just (Grammar NotationBlock (rootName name) [name] [])
       Nothing -> Nothing
-    editing = any ((== GlobalName name) . grammarName) installed
+    editing = any ((== rootName name) . grammarName) installed
 
     refuse :: GrammarProblem -> Either GrammarError a
     refuse = Left . GrammarError NotationBlock name
@@ -781,7 +781,7 @@ checkNotation installed env b = do
       Nothing -> []
 
     production g p
-      | isHeader p || GlobalName (productionName p) `elem` constructorsOf g = declaring g p
+      | isHeader p || rootName (productionName p) `elem` constructorsOf g = declaring g p
       | otherwise = applying g p
 
     -- **A type former's or a constructor's spelling**: its shape is a
@@ -833,7 +833,7 @@ checkNotation installed env b = do
     paramSort g q dom = case paramClass q of
       Just cls -> case tokenClassOf env cls of
         Just (t, re)
-          | typeNamed env dom == Just t -> Right (OfClass (GlobalName cls) t re)
+          | typeNamed env dom == Just t -> Right (OfClass (rootName cls) t re)
           | otherwise -> Left (ParamNotReadable (paramName q) (whnf env [] dom))
         Nothing -> Left (NoSuchTokenClass cls)
       Nothing
@@ -856,7 +856,7 @@ checkNotation installed env b = do
       case (productionMetadata p, editing) of
         (Just _, True) -> Left (RolesAfterTheGrammar (grammarName g))
         _ -> Right ()
-      let f = GlobalName (productionName p)
+      let f = rootName (productionName p)
       if isHeader p then Right () else if taken f then Left FunctionHasNotation else Right ()
       (domains, kind') <-
         if isHeader p
@@ -875,7 +875,7 @@ checkNotation installed env b = do
       case productionMetadata p of
         Nothing -> Right ()
         Just _  -> Left FunctionMetadata
-      let f = GlobalName (productionName p)
+      let f = rootName (productionName p)
       if taken f then Left FunctionHasNotation else Right ()
       (domains, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
       if typeNamed env result == Just (grammarName g)
@@ -940,7 +940,7 @@ functionShape env f = peel . definitionType <$> lookupDefinition f env
     -- at all where that argument was: @nil@'s @List {\8467} A@ reached a refusal as
     -- @nil returns List {\8467} , not a Ctx@, trailing space and all. The brackets
     -- keep it unwritable, which is the whole point of the opacity.
-    opaque x = Global (GlobalName ("\8249" ++ x ++ "\8250")) []
+    opaque x = Global (rootName ("\8249" ++ x ++ "\8250")) []
 
 -- | **A @notation@ block's productions, in the grammar they are for** (MS8
 -- phase 158): the installed grammars with that one replaced.
@@ -1085,8 +1085,8 @@ substitutable gs g = do
       _ -> Nothing
     reachedBy l = concat [ classesReached gs h | h <- gs, grammarName h == l ]
     owners cls = [ grammarName h | h <- grammarsReached gs g, cls `elem` map fst (variableProductions h) ]
-    nameOf (GlobalName x) = x
-    inProduction p why = let GlobalName n = gproductionName p in Left (InProduction n why)
+    nameOf = nameDotted
+    inProduction p why = let n = nameDotted (gproductionName p) in Left (InProduction n why)
 
 -- | The functions generated substitution declares for a language (§4.7), in
 -- the order they are declared; none for a language that reaches no class with
@@ -1116,9 +1116,9 @@ substitutionNames gs g
         ++ [ n ++ "-subst-all" ]
         ++ [ n ++ "-subst-" ++ k | k <- reached ]
   where
-    GlobalName n = grammarName g
-    reached = [ k | GlobalName k <- classesSubstituted gs g ]
-    owned = [ k | GlobalName k <- map fst (variableProductions g) ]
+    n = nameDotted (grammarName g)
+    reached = map nameDotted (classesSubstituted gs g)
+    owned = map (nameDotted . fst) (variableProductions g)
 
 -- | **Every occurrence class the language reads, with the production that
 -- reads it** — one entry per class, in declaration order (MS8 phase 153).
@@ -1294,7 +1294,7 @@ extensionsOf g
 -- | An argument that is a name: a @Token String@ class's match.
 isName :: Argument -> Bool
 isName a = case argumentSort a of
-  OfClass _ (GlobalName "String") _ -> True
+  OfClass _ (GlobalName [] "String") _ -> True
   _ -> False
 
 -- | Everything a context's lookup relations declare (§5.3), in order — one
@@ -1318,7 +1318,7 @@ lookupNamesOf g e =
     ++ [ n ++ "-there-" ++ named k | k <- extensionsOf g ]
   where
     n = named e
-    named p = let GlobalName x = gproductionName p in x
+    named = nameDotted . gproductionName
 
 -- | §5.1: **one** production with no slot of the context's own sort — the empty
 -- context — and **at least one** with exactly one, each an extension. A
@@ -1339,7 +1339,7 @@ contextShaped own g =
 -- refused any other).
 tokenClassOf :: GlobalEnv -> String -> Maybe (GlobalName, Regex)
 tokenClassOf env x = do
-  d <- lookupDefinition (GlobalName x) env
+  d <- lookupDefinition (rootName x) env
   t <- case whnf env [] (definitionType d) of
     App (Global g []) t | g == tokenName -> case whnf env [] t of
       Global tn [] -> Just tn
@@ -1365,7 +1365,7 @@ earleyRules gs = typeRules gs ++
         same = [ (x, ps) | x <- nub slots, let ps = [ k | (y, k) <- zip slots [0 ..], y == x ], length ps > 1 ]
   ]
   where
-    nameOf (GlobalName n) = n
+    nameOf = nameDotted
     symbol i = case i of
       Terminal t -> Earley.Literal t
       -- **A class slot is labelled with its CLASS, not with the word that wrote

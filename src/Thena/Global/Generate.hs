@@ -89,6 +89,7 @@ import Thena.Core.Context (Context, Entry (..), entryType, entryVar, lamOver, pi
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , rootName
   , Ident (..)
   , Var
   , close
@@ -155,9 +156,9 @@ data Generated
 -- 'stations' would be a second reading of §3.3 to keep in step.
 
 eqAt :: Level -> Core -> Core -> Core -> Core
-eqAt dl a x y = foldl App (Global (GlobalName "Eq") [dl]) [a, x, y]
+eqAt dl a x y = foldl App (Global (rootName "Eq") [dl]) [a, x, y]
 reflAt :: Level -> Core -> Core -> Core
-reflAt dl a x = foldl App (Global (GlobalName "refl") [dl]) [a, x]
+reflAt dl a x = foldl App (Global (rootName "refl") [dl]) [a, x]
 
 -- **The conjunction is a dependent pair, one level per component.** Both
 -- are @dl@ here because every equation is stated at @dl@ — see the note
@@ -178,17 +179,17 @@ reflAt dl a x = foldl App (Global (GlobalName "refl") [dl]) [a, x]
 -- lifting above unnecessary. It is a change to what is generated, not to
 -- what this phase is about.
 andAt :: Level -> Core -> Core -> Core
-andAt dl p q        = foldl App (Global (GlobalName "And") [dl, dl]) [p, q]
+andAt dl p q        = foldl App (Global (rootName "And") [dl, dl]) [p, q]
 bothAt :: Level -> Core -> Core -> Core -> Core -> Core
-bothAt dl p q x y   = foldl App (Global (GlobalName "both") [dl, dl]) [p, q, x, y]
+bothAt dl p q x y   = foldl App (Global (rootName "both") [dl, dl]) [p, q, x, y]
 dpairAt :: Level -> Core -> Core -> Core
-dpairAt dl a b      = foldl App (Global (GlobalName "DPair") [dl, dl]) [a, b]
+dpairAt dl a b      = foldl App (Global (rootName "DPair") [dl, dl]) [a, b]
 dpairMk :: Level -> Core -> Core -> Core -> Core -> Core
-dpairMk dl a b x y  = foldl App (Global (GlobalName "dpair") [dl, dl]) [a, b, x, y]
+dpairMk dl a b x y  = foldl App (Global (rootName "dpair") [dl, dl]) [a, b, x, y]
 unitType :: Level -> Core
-unitType dl         = Global (GlobalName "Unit") [dl]
+unitType dl         = Global (rootName "Unit") [dl]
 unitProof :: Level -> Core
-unitProof dl        = Global (GlobalName "unit") [dl]
+unitProof dl        = Global (rootName "unit") [dl]
 
 
 -- The equality of the constructor's own arguments with the terms @rs@, as
@@ -563,7 +564,7 @@ simultaneously ss t n =
 -- whole thing is then one type, with one motive, that a single J can move.
 packType :: Level -> [(Var, Core)] -> Context -> Int -> (Core, Int)
 packType dl ss es n = case es of
-  []       -> (Global (GlobalName "Unit") [dl], n)
+  []       -> (Global (rootName "Unit") [dl], n)
   [e]      -> simultaneously ss (entryType e) n
   e : rest -> let ((a, b), n1) = packParts dl ss e rest n
                in (dpairAt dl a b, n1)
@@ -594,7 +595,7 @@ packParts dl ss e rest n =
 -- is why the components are the binders and not something carried.
 packValue :: Level -> [(Var, Core)] -> Context -> Int -> (Core, Int)
 packValue dl ss es n = case es of
-  []       -> (Global (GlobalName "unit") [dl], n)
+  []       -> (Global (rootName "unit") [dl], n)
   [e]      -> (Free (entryVar e), n)
   e : rest -> let ((a, b), n1) = packParts dl ss e rest n
                   (v,      n2) = packValue dl ss rest n1
@@ -614,7 +615,7 @@ firstBody dl a b p n =
   let (zv, n1) = fresh n
       (xv, n2) = fresh n1
       (yv, n3) = fresh n2
-   in ( Eliminate (GlobalName "DPair") [dl, dl] [a, b]
+   in ( Eliminate (rootName "DPair") [dl, dl] [a, b]
           (Lam (Ident "p") (dpairAt dl a b) (close zv a))
           [ Lam (Ident "x") a (close xv
               (Lam (Ident "y") (App b (Free xv)) (close yv (Free xv)))) ]
@@ -661,7 +662,7 @@ secondBody dl a b p n =
       (fp, n2)  = firstBody dl a b (Free zv) n1
       (xv, n3)  = fresh n2
       (yv, n4)  = fresh n3
-   in ( Eliminate (GlobalName "DPair") [dl, dl] [a, b]
+   in ( Eliminate (rootName "DPair") [dl, dl] [a, b]
           (Lam (Ident "p") (dpairAt dl a b) (close zv (App b fp)))
           [ Lam (Ident "x") a (close xv
               (Lam (Ident "y") (App b (Free xv)) (close yv (Free yv)))) ]
@@ -676,7 +677,7 @@ andFirst dl a b p n =
   let (zv, n1) = fresh n
       (xv, n2) = fresh n1
       (yv, n3) = fresh n2
-   in ( Eliminate (GlobalName "And") [dl, dl] [a, b]
+   in ( Eliminate (rootName "And") [dl, dl] [a, b]
           (Lam (Ident "c") (andAt dl a b) (close zv a))
           [ Lam (Ident "x") a (close xv
               (Lam (Ident "y") b (close yv (Free xv)))) ]
@@ -689,7 +690,7 @@ andSecond dl a b p n =
   let (zv, n1) = fresh n
       (xv, n2) = fresh n1
       (yv, n3) = fresh n2
-   in ( Eliminate (GlobalName "And") [dl, dl] [a, b]
+   in ( Eliminate (rootName "And") [dl, dl] [a, b]
           (Lam (Ident "c") (andAt dl a b) (close zv b))
           [ Lam (Ident "x") a (close xv
               (Lam (Ident "y") b (close yv (Free yv)))) ]
@@ -720,7 +721,7 @@ transportAt dl a m x y e p n =
                   (Pi (Ident "p") mu (close dv mv)))))))
       meth = Lam (Ident "a") a (close av
                (Lam (Ident "z") ma (close zv (Free zv))))
-   in (App (Eliminate (GlobalName "Eq") [dl] [a] mot [meth] [x, y] e) p, n9)
+   in (App (Eliminate (rootName "Eq") [dl] [a] mot [meth] [x, y] e) p, n9)
 
 -- | 'transportAt' with the motive written **once** and named.
 --
@@ -804,7 +805,7 @@ lamsOver dl hs body =
 -- | @Empty@ at the datatype's own level — the off-diagonal case, and what the
 -- acyclicity relations are negations into.
 emptyType :: Level -> Core
-emptyType dl = Global (GlobalName "Empty") [dl]
+emptyType dl = Global (rootName "Empty") [dl]
 
 -- | The curried telescopic equality between the telescope @tel@ and the terms
 -- @rs@, ending in @result@: one Π per entry, each closing over the binder that
@@ -941,7 +942,7 @@ proofFrom ch decided remaining n = case remaining of
         (mt, n6)    = stepMotive ch decided es a0 n5
         (mh, n7)    = stepMethod ch decided es a0 n6
         applied     = foldl App
-                        (Eliminate (GlobalName "Eq") [dl] [a0] mt [mh]
+                        (Eliminate (rootName "Eq") [dl] [a0] mt [mh]
                            [Free vl, Free vr] (Free q0))
                         (varsOf lsCtx' ++ varsOf rsCtx'
                            ++ map (Free . statedProof) rest)
@@ -1058,7 +1059,7 @@ unpackChain dl hs goal pkg body n = case hs of
                         (Lam (Ident "r") sndTy (close rv inner)))
         former      = if dependent then "DPair" else "And"
         args        = if dependent then [eq, binder] else [eq, restTy]
-     in (Eliminate (GlobalName former) [dl, dl] args mot [meth] [] pkg, n3)
+     in (Eliminate (rootName former) [dl, dl] args mot [meth] [] pkg, n3)
 
 -- --------------------------------------------------------------------------
 -- Preconditions
@@ -1071,7 +1072,7 @@ unpackChain dl hs goal pkg body n = case hs of
 -- looking would be that every subsequent @data@ is refused with a type error
 -- from a term the user never wrote.
 equalityInScope :: GlobalEnv -> Bool
-equalityInScope env = case lookupInductive (GlobalName "Eq") env of
+equalityInScope env = case lookupInductive (rootName "Eq") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     -- **@Eq@ is level-polymorphic in exactly one parameter** (MS3 phase 31d),
@@ -1085,7 +1086,7 @@ equalityInScope env = case lookupInductive (GlobalName "Eq") env of
         && entryType a == Universe (LVar lv)
         && entryType i == Free (entryVar a)
         && entryType j == Free (entryVar a)
-        && constructorName c == GlobalName "refl"
+        && constructorName c == rootName "refl"
         && case constructorArguments c of
              [x] -> entryType x == Free (entryVar a)
                       && constructorIndices c == [Free (entryVar x), Free (entryVar x)]
@@ -1104,14 +1105,14 @@ equalityInScope env = case lookupInductive (GlobalName "Eq") env of
 -- @Eq Level@ is: @Type (ℓ₀ ⊔ ℓ₁)@ is what generalisation produces and
 -- @normalise@ is what makes the comparison mean it.
 conjunctionInScope :: GlobalEnv -> Bool
-conjunctionInScope env = case lookupInductive (GlobalName "And") env of
+conjunctionInScope env = case lookupInductive (rootName "And") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     ([a, b], [], [c]) | [l0, l1] <- inductiveLevels e ->
       inductiveLevel e == LMax (LVar l0) (LVar l1)
         && entryType a == Universe (LVar l0)
         && entryType b == Universe (LVar l1)
-        && constructorName c == GlobalName "both"
+        && constructorName c == rootName "both"
         && case constructorArguments c of
              [x, y] -> entryType x == Free (entryVar a)
                          && entryType y == Free (entryVar b)
@@ -1133,14 +1134,14 @@ conjunctionInScope env = case lookupInductive (GlobalName "And") env of
 -- @Eq Level@ is: @Type (ℓ₀ ⊔ ℓ₁)@ is what generalisation produces and
 -- @normalise@ is what makes the comparison mean it.
 dependentPairInScope :: GlobalEnv -> Bool
-dependentPairInScope env = case lookupInductive (GlobalName "DPair") env of
+dependentPairInScope env = case lookupInductive (rootName "DPair") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     ([a, b], [], [c]) | [l0, l1] <- inductiveLevels e ->
       inductiveLevel e == LMax (LVar l0) (LVar l1)
         && entryType a == Universe (LVar l0)
         && secondIsAFamilyOver a l1 (entryType b)
-        && constructorName c == GlobalName "dpair"
+        && constructorName c == rootName "dpair"
         && case constructorArguments c of
              [x, y] -> entryType x == Free (entryVar a)
                          && entryType y == App (Free (entryVar b)) (Free (entryVar x))
@@ -1158,19 +1159,19 @@ dependentPairInScope env = case lookupInductive (GlobalName "DPair") env of
 -- | @Unit : Type₀ { unit : Unit }@ — @unit@ is checked because 'telescopic'
 -- writes it, not only the type.
 truthInScope :: GlobalEnv -> Bool
-truthInScope env = case lookupInductive (GlobalName "Unit") env of
+truthInScope env = case lookupInductive (rootName "Unit") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     ([], [], [c]) | [lv] <- inductiveLevels e ->
       inductiveLevel e == LVar lv
-        && constructorName c == GlobalName "unit"
+        && constructorName c == rootName "unit"
         && null (constructorArguments c)
         && null (constructorIndices c)
     _ -> False
 
 -- | @Empty : Type₀ { }@ — no constructor to check, which is the point of it.
 falsityInScope :: GlobalEnv -> Bool
-falsityInScope env = case lookupInductive (GlobalName "Empty") env of
+falsityInScope env = case lookupInductive (rootName "Empty") env of
   Nothing -> False
   Just e -> case inductiveLevels e of
     [lv] -> null (inductiveParameters e)

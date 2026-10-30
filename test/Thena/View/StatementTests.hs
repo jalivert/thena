@@ -27,7 +27,7 @@ import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Instral (instralRules, operandHead, statementHead)
 import qualified Thena.Language.Earley as E
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Render (renderResponse)
 import Thena.Rules (RuleBase, baseSignatures, opWords, ruleBase)
 import Thena.View (sessionGrammars, sessionRules, statementOfferView)
@@ -452,7 +452,7 @@ nameAnywhere = do
 fixture :: [(String, Signature)] -> [String] -> RuleBase
 fixture sigs names =
   ruleBase "fixture" Nothing "" sigs []
-    [ Rule (GlobalName nm) [PWild] [] [] | nm <- names ]
+    [ Rule (rootName nm) [PWild] [] [] | nm <- names ]
 
 askIn :: Session -> RuleBase -> String -> [SymbolView]
 askIn s b before =

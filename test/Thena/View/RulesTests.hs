@@ -22,7 +22,7 @@ import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (nameDotted)
 import Thena.Instral.Ops (Rule (ruleBody, ruleHead), ruleName)
 import Thena.View.Type (displaySignature)
 import Thena.View (rulesView)
@@ -80,7 +80,7 @@ declaredTypes = do
     []    -> pure ()
     e : _ -> assertFailure e
   where
-    nameOf r = case ruleName r of GlobalName g -> g
+    nameOf = nameDotted . ruleName
 
 -- | A green 'declaredTypes' over a base that declares nothing would prove nothing.
 declaredTypesNotVacuous :: IO ()

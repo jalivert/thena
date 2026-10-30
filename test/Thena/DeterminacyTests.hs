@@ -58,7 +58,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=), assertBool)
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Driver
   ( machineOf
   )
@@ -178,7 +178,7 @@ tests =
 
     statementOf s' =
       renderCore (Rendering [] (names (machineOf s'))) [] . definitionType
-        <$> lookupDefinition (GlobalName "determinacy") (globals (machineOf s'))
+        <$> lookupDefinition (rootName "determinacy") (globals (machineOf s'))
 
     theorem = "∀ (t : Term) (t1 : Term) -> Step t t1 \
               \-> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2"

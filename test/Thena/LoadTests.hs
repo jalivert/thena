@@ -20,7 +20,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Errors (FailReason (..))
 import Thena.Driver
   ( LoadError (..)
@@ -87,7 +87,7 @@ preludeTests =
       (s, _) <- startingSession
       let env = globals (machineOf s)
       sequence_
-        [ assertBool (n ++ " is not declared") (isDeclared (GlobalName n) env)
+        [ assertBool (n ++ " is not declared") (isDeclared (rootName n) env)
         | n <- ["Eq", "refl", "Unit", "unit", "Empty"]
         ]
 
@@ -97,7 +97,7 @@ preludeTests =
       (s, _) <- startingSession
       let env = globals (machineOf s)
           n0  = names (machineOf s)
-      case lookupInductive (GlobalName "Eq") env of
+      case lookupInductive (rootName "Eq") env of
         Nothing -> assertFailure "Eq is not declared"
         Just d  ->
           -- **The indices are @_@ and not @x@** (MS4 phase 54): the prelude is
@@ -110,7 +110,7 @@ preludeTests =
           -- eliminator is a scheme now, and what a use site sees is the
           -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
           -- which is a counter value and no business of this assertion.
-          renderEliminator (Rendering [] n0) (GlobalName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
+          renderEliminator (Rendering [] n0) (rootName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
             @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq {0} A _ _1 -> Type₀) \
                   \-> (∀ (a : A) -> P a a (refl {0} A a)) \
                   \-> ∀ (_ : A) (_1 : A) (target : Eq {0} A _ _1) -> P _ _1 target"
@@ -316,7 +316,7 @@ afterLines :: Session -> [String] -> (Loaded -> IO ()) -> IO ()
 afterLines s ls k = k (loadSource s (unlines ls))
 
 declared :: String -> Loaded -> Bool
-declared n l = isDeclared (GlobalName n) (globals (machineOf (loadedSession l)))
+declared n l = isDeclared (rootName n) (globals (machineOf (loadedSession l)))
 
 -- | The last line's rendered term, printed as the REPL would print it.
 --
@@ -423,7 +423,7 @@ moduleTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 dependentModule
           g = globals (machineOf s1)
-      map (\n -> isDeclared (GlobalName n) g)
+      map (\n -> isDeclared (rootName n) g)
           ["Chain", "NoConfusionChain", "noConfusionChain"]
         @?= [True, True, True]
 
@@ -437,7 +437,7 @@ moduleTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 natModule
           g = globals (machineOf s1)
-      map (\n -> isDeclared (GlobalName n) g) ["Nat", "zero", "succ", "one"]
+      map (\n -> isDeclared (rootName n) g) ["Nat", "zero", "succ", "one"]
         @?= [True, True, True, True]
 
   , -- **Quiet on success, loud on failure** — his call, 2026-09-02. The success
@@ -480,7 +480,7 @@ moduleTests =
   , testCase "and what it declared is really there" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 blockModule
-      isDeclared (GlobalName "one") (globals (machineOf s1)) @?= True
+      isDeclared (rootName "one") (globals (machineOf s1)) @?= True
 
   , -- **Resolution happens where the block runs** (MS6 phase 104b), so a block
     -- whose op is given the wrong operands stops the run rather than refusing
@@ -522,7 +522,7 @@ moduleTests =
     testCase "and the module it had already declared is rolled back" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 mistypedBlockModule
-      isDeclared (GlobalName "Nat") (globals (machineOf s1)) @?= False
+      isDeclared (rootName "Nat") (globals (machineOf s1)) @?= False
 
   , -- **Everything goes back except the fresh counter**, which must go forward
     -- or a name the user has seen would be reissued (MS2 closeout 4f) — and a
@@ -706,8 +706,8 @@ tierTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 bothSpellings
           m = machineOf s1
-      case ( lookupDefinition (GlobalName "oneExplicit") (globals m)
-           , lookupDefinition (GlobalName "oneImplicit") (globals m)
+      case ( lookupDefinition (rootName "oneExplicit") (globals m)
+           , lookupDefinition (rootName "oneImplicit") (globals m)
            ) of
         (Just a, Just b) ->
           case convert (globals m) [] 0 (definitionBody a) (definitionBody b) of
@@ -716,7 +716,7 @@ tierTests =
         _ -> assertFailure "one of the two was not admitted"
   ]
   where
-    renderResponse' s g = case lookupDefinition (GlobalName g) (globals (machineOf s)) of
+    renderResponse' s g = case lookupDefinition (rootName g) (globals (machineOf s)) of
       Just d  -> [g ++ " = " ++ renderCore (Rendering [] 0) [] (definitionBody d)]
       Nothing -> [g ++ " is missing"]
 

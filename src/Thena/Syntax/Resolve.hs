@@ -14,6 +14,7 @@ import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , rootName
   , Ident (..)
   , Scope
   , Var
@@ -198,7 +199,7 @@ core gr env gs sp ctx local n raw = case raw of
     Nothing -> case lookupEntry s ctx of
       Just v  -> Right (Free v, n)
       Nothing
-        | GlobalName s `elem` gs -> Right (Global (GlobalName s) [], n)
+        | rootName s `elem` gs -> Right (Global (rootName s) [], n)
         | otherwise              -> Left (NotInScope s)
 
   -- **A hole in the template, filled from the binding it names** (MS5 phase
@@ -235,9 +236,9 @@ core gr env gs sp ctx local n raw = case raw of
     Nothing -> case lookupEntry s ctx of
       Just _ -> Left (LevelArgumentsOnALocal s)
       Nothing
-        | GlobalName s `elem` gs -> do
+        | rootName s `elem` gs -> do
             let args = map levelOfNat rls
-            Right (Global (GlobalName s) args, n)
+            Right (Global (rootName s) args, n)
         | otherwise -> Left (NotInScope s)
 
   RawApp f a -> do
@@ -496,7 +497,7 @@ resolveData gr env n (RawData name ps ty cs) = do
   Right (InductiveDefinition dn [] params indices level cs', n4)
   where
     gs = globalsOf env
-    dn = GlobalName name
+    dn = rootName name
 
 constructors
   :: [Grammar] -> GlobalEnv -> Globals -> GlobalName -> Context -> Int -> Local
@@ -508,7 +509,7 @@ constructors gr env gs dn params want local n (RawConstructor cn ty : rest) = do
   (tgt', n2)              <- core gr env gs [] [] inside n1 tgt
   ixs                     <- targetIndices dn params want cn tgt'
   (rest', n3)             <- constructors gr env gs dn params want local n2 rest
-  Right (ConstructorDefinition (GlobalName cn) args ixs (map (const Plain) args) : rest', n3)
+  Right (ConstructorDefinition (rootName cn) args ixs (map (const Plain) args) : rest', n3)
 
 -- --------------------------------------------------------------------------
 -- Telescopes

@@ -19,7 +19,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
   (Gen, counterexample, elements, forAll, ioProperty, oneof, property, sized, testProperty, withNumTests, (===))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
+import Thena.Core.Term (Core (..), Literal (..), rootName)
 import Thena.Driver
   ( Response (..)
   , machineOf
@@ -100,7 +100,7 @@ loaded = do
 
 -- | A constructor applied, as the reader leaves it.
 con :: String -> [Core] -> Core
-con name = foldl App (Global (GlobalName name) [])
+con name = foldl App (Global (rootName name) [])
 
 str :: String -> Core
 str = Primitive . LString
@@ -128,7 +128,7 @@ notation =
     -- being unfolded into the term it is defined as.
   , testCase "what the notation cannot write goes in a splice" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "app" [Global (GlobalName "twice") [], con "var" [str "y"]])
+      t <- printed gs (con "app" [Global (rootName "twice") [], con "var" [str "y"]])
       t @?= "LC`( ${twice} y )`"
     -- A class prints its match only if the class would read it back.
     -- **A term whose own name is not object text nests a region inside a
@@ -137,7 +137,7 @@ notation =
     -- @nom@, and @nom@ is a 'String' where the grammar wants an @LC@.
   , testCase "a name that is not a literal makes a region inside a splice" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "app" [con "var" [Global (GlobalName "nom") []], con "var" [str "y"]])
+      t <- printed gs (con "app" [con "var" [Global (rootName "nom") []], con "var" [str "y"]])
       t @?= "LC`( ${LC`${nom}`} y )`"
   , testCase "a name the class would not read back is spliced" $ do
       (_, gs) <- loaded

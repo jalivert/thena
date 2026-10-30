@@ -15,7 +15,7 @@ module Thena.ContextTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
+import Thena.Core.Term (Core (..), Literal (..), rootName)
 import Thena.Driver
   ( Response (..)
   , Session
@@ -266,7 +266,7 @@ notation =
   ]
   where
     str = Primitive . LString
-    con n = Global (GlobalName n) []
+    con n = Global (rootName n) []
     apps f = foldl App (con f)
 
 proofs :: [TestTree]

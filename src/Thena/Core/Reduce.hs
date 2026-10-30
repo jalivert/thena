@@ -27,6 +27,7 @@ import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , rootName
   , Literal (..)
   , Var
   , beyond
@@ -225,8 +226,8 @@ whnf env ctx = go 0
 -- (@ms6\/SPEC.md@ §2.1).
 primitiveNames :: [(GlobalName, PrimitiveRule)]
 primitiveNames =
-  [ (GlobalName ("eq" ++ p), Comparing (GlobalName p)) | p <- ["String", "Char", "Int"] ]
-  ++ [ (GlobalName "appendString", Appending) ]
+  [ (rootName ("eq" ++ p), Comparing (rootName p)) | p <- ["String", "Char", "Int"] ]
+  ++ [ (rootName "appendString", Appending) ]
 
 -- | What a primitive computes, and so what type the driver will accept it at
 -- ('Thena.Driver.checkedPrimitive').

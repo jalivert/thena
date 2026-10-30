@@ -15,7 +15,7 @@ import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
   (counterexample, elements, forAll, listOf1, property, testProperty, withNumTests)
 
-import Thena.Core.Term (GlobalName (..), Ident (..))
+import Thena.Core.Term (Ident (..), rootName, nameDotted)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
 import Thena.Declared (natDecl)
@@ -255,12 +255,12 @@ theTheorem = testCase "a theorem proved by hand, start to ∎" $ do
   let l = run identityProof
   loadedError l @?= Nothing
   case reverse (loadedResponses l) of
-    Proved g _ _ _ _ : _ -> g @?= GlobalName "id"
+    Proved g _ _ _ _ : _ -> g @?= rootName "id"
     other -> assertFailure ("did not end in qed: " ++ show (take 1 other))
 
 theoremIsAGlobal :: TestTree
 theoremIsAGlobal = testCase "and it is a global definition afterwards (§3.3.1)" $
-  case lookupDefinition (GlobalName "id") (globalsAfter (run identityProof)) of
+  case lookupDefinition (rootName "id") (globalsAfter (run identityProof)) of
     Nothing -> assertFailure "id was not admitted"
     Just d  -> assertBool "admitted with no body" (definitionBody d /= definitionType d)
 
@@ -300,13 +300,13 @@ holeTests =
     -- 'Thena.Rules.UnboundInRule' at entry time.
   , refuses "a bare argument is a reference, not a term"
       (natGoal ++ ["attack", "into", "try-core zero"])
-      [UnboundInRule (GlobalName "entry") 0 "zero"]
+      [UnboundInRule (rootName "entry") 0 "zero"]
     -- And the vocabularies still do not mix: the surface fence makes a
     -- 'Thena.Instral.Ops.VSurface', which a core tactic will not take. **The refusal is
     -- the type system's now**, where it used to be the op's at run time.
   , mistyped "a core tactic will not take a surface argument"
       (natGoal ++ ["attack", "into", "try-core \10216 zero \10217"])
-      [Clash (InBody (GlobalName "entry") 0) TCore TSurface]
+      [Clash (InBody (rootName "entry") 0) TCore TSurface]
     -- The corners subsume phase 23b's parenthesisation rule: an argument that
     -- is not a single atom needed parentheses, and inside corners it does not.
   , ok "and inside them an argument needs no parentheses"
@@ -340,7 +340,7 @@ sessionTests :: [TestTree]
 sessionTests =
   [ ok "a theorem may be started" [":theorem t : Type₀"]
   , rejects "but not two at once" [":theorem t : Type₀", ":theorem u : Type₀"]
-      (AlreadyProving (GlobalName "t"))
+      (AlreadyProving (rootName "t"))
   , rejects "and not under a name the environment already has"
       ["data " ++ natDecl, ":theorem Nat : Type₀"] (AlreadyDeclaredHere "Nat")
   , testCase "a statement that is not a type is refused" $
@@ -370,7 +370,7 @@ sessionTests =
                 ]
       loadedError l @?= Nothing
       assertBool "t was not admitted"
-        (lookupDefinition (GlobalName "t") (globalsAfter l) /= Nothing)
+        (lookupDefinition (rootName "t") (globalsAfter l) /= Nothing)
 
   , testCase "abandoning drops it, suspending keeps it" $ do
       countsAre [":theorem t : Type₀", ":abandon"] Nothing 0
@@ -893,7 +893,7 @@ countsAre ls current suspended = do
   length (parked s) @?= suspended
   where
     s = loadedSession (run ls)
-    nameOf (GlobalName x) = x
+    nameOf = nameDotted
 
 -- | The reason names a 'Thena.Errors.Position', and the 'Var' inside it is
 -- minted by the run — so the constructor is what there is to assert on.

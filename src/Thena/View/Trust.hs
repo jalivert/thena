@@ -40,7 +40,7 @@ module Thena.View.Trust
   ) where
 
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (GlobalName (..), Ident (..), Var)
+import Thena.Core.Term (nameDotted, Ident (..), Var)
 import Thena.Core.Trust
   ( TrustClaim (..)
   , TrustClass (..)
@@ -123,7 +123,7 @@ displayTrust grammars budget binders counter here lvl claims =
       ClaimView
         { claimViewClass   = claimClass c
         , claimViewSite    = claimSite c
-        , claimViewRoute   = [ g | GlobalName g <- claimRoute c ]
+        , claimViewRoute   = [ g | g <- map nameDotted (claimRoute c) ]
         , claimViewClaimed = display c (claimClaimed c)
         , claimViewBody    = display c (claimActual c)
         }

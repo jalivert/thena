@@ -16,7 +16,7 @@ module Thena.View.CoreTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
+import Thena.Core.Term (Core (..), Literal (..), rootName)
 import Thena.Global.Env
   ( Constant (..)
   , Definition (..)
@@ -127,7 +127,7 @@ loaded = do
     (_, other) -> assertFailure (show other) >> pure []
 
 con :: String -> [Core] -> Core
-con name = foldl App (Global (GlobalName name) [])
+con name = foldl App (Global (rootName name) [])
 
 str :: String -> Core
 str = Primitive . LString
@@ -147,9 +147,9 @@ objectCases =
   , agree "bare juxtaposition, no brackets in the grammar"
       (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
   , agree "what the notation cannot write is a foreign splice"
-      (con "app" [Global (GlobalName "twice") [], con "var" [str "y"]])
+      (con "app" [Global (rootName "twice") [], con "var" [str "y"]])
   , agree "a foreign splice that is itself a region"
-      (con "app" [con "var" [Global (GlobalName "nom") []], con "var" [str "y"]])
+      (con "app" [con "var" [Global (rootName "nom") []], con "var" [str "y"]])
   , agree "a name the class would not read back is spliced"
       (con "var" [str "a b"])
   , agree "the left operand of a juxtaposition is fenced"
@@ -214,7 +214,7 @@ regionCases =
   , testCase "a splice holding a literal of its own opens a second one" $ do
       -- 'Thena.PrintTests' established this term's printed form: the splice's
       -- own argument is a region, so it is written @${LC`…`}@.
-      sh <- shapeOf (con "app" [con "var" [Global (GlobalName "nom") []], con "var" [str "y"]])
+      sh <- shapeOf (con "app" [con "var" [Global (rootName "nom") []], con "var" [str "y"]])
       case sh of
         ARegion inner -> case displayShape inner of
           AnObjectTerm _ _ items ->
@@ -224,7 +224,7 @@ regionCases =
         other -> assertFailure ("not a region: " <> show other)
 
   , testCase "a term with no notation opens none" $ do
-      sh <- shapeOf (Global (GlobalName "twice") [])
+      sh <- shapeOf (Global (rootName "twice") [])
       case sh of
         ARegion {} -> assertFailure "a plain global was taken for a literal"
         _          -> pure ()

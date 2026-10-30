@@ -73,7 +73,7 @@ module Thena.View
 import Data.Foldable (toList)
 
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (GlobalName (..), Ident (..), Var)
+import Thena.Core.Term (GlobalName (..), nameDotted, Ident (..), Var)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefix, rebuild)
 import Thena.Development.Partial (Partial (..))
@@ -351,7 +351,7 @@ ruleOf budget s =
 
 -- | A global name as the string a signature table is keyed by.
 globalString :: GlobalName -> String
-globalString (GlobalName g) = g
+globalString = nameDotted
 
 -- | Display names for the variables at the focus, freshened the way the chain
 -- printer freshens a component's — 'Thena.Render.envOf's own fold, here because

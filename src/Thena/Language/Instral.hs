@@ -36,7 +36,7 @@ module Thena.Language.Instral
 
 import Data.List (nub)
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (nameDotted)
 import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Thena.Language.Earley as E
@@ -182,7 +182,7 @@ ruleForms bs =
   nub
     [ Form nm (paramsFor nm arity) (resultFor nm arity)
     | r <- allCallable bs
-    , let GlobalName nm = Ops.ruleName r
+    , let nm = nameDotted (Ops.ruleName r)
     , let arity = length (Ops.ruleParams r)
     ]
   where

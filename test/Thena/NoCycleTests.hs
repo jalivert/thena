@@ -25,7 +25,7 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Declared
   ( andDecl
   , declared
@@ -368,7 +368,7 @@ kernelTests =
   ]
 
 certified :: GlobalEnv -> String -> Assertion
-certified env g = case lookupDefinition (GlobalName g) env of
+certified env g = case lookupDefinition (rootName g) env of
   Nothing -> assertFailure (g ++ " was not generated")
   Just d  -> case certify env (definitionBody d) (definitionType d) of
     Right _ -> pure ()
@@ -400,7 +400,7 @@ noUnitEnv :: GlobalEnv
 noUnitEnv = fst (declared [eqDecl, dpairDecl, emptyDecl, andDecl, natDecl, treeDecl])
 
 has :: GlobalEnv -> String -> Bool
-has env g = lookupDefinition (GlobalName g) env /= Nothing
+has env g = lookupDefinition (rootName g) env /= Nothing
 
 guardTests :: [TestTree]
 guardTests =
@@ -486,7 +486,7 @@ guardTests =
     -- pin a number, and the whole of what it measures is in
     -- @Thena.Global.Generate.sharing@ and @transportNaming@.
     testCase "and the lemma's type did not grow back" $
-      case lookupDefinition (GlobalName "noConfusionBoth") eqNatVecBoth of
+      case lookupDefinition (rootName "noConfusionBoth") eqNatVecBoth of
         Nothing -> assertFailure "noConfusionBoth was not generated"
         Just d  ->
           assertBool

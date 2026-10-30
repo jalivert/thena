@@ -18,6 +18,10 @@ module Thena.Core.Term
   , fresh
   , Ident (..)
   , GlobalName (..)
+  , rootName
+  , nameDotted
+  , declarationNamespace
+  , inDeclarationOf
 
     -- * Terms
   , Core (..)
@@ -68,13 +72,55 @@ fresh n = (Var n, n + 1)
 newtype Ident = Ident String
   deriving (Eq, Ord, Show)
 
--- | A name in the global environment (§3.6, decided 2026-08-11).
+-- | A name in the global environment (§3.6, decided 2026-08-11; given a path
+-- 2026-10-30, MS10's module system).
 --
--- Flat. No namespace tag — the node position already says which kind of thing is
+-- __The steps of a namespace path, then the base word.__ @Nat.elim@ is
+-- @GlobalName ["Nat"] "elim"@, and a name in no namespace has no steps — which
+-- is every name the system had before MS10, and what 'rootName' makes.
+--
+-- No namespace /tag/ — the node position already says which kind of thing is
 -- being named, so a tag would be data derivable from its own context and able to
--- disagree with it. One namespace, shared with generated names.
-newtype GlobalName = GlobalName String
+-- disagree with it. One namespace, shared with generated names. A path is not a
+-- tag: it says where a name lives, not what kind of thing it names, so the 2026-08-11
+-- ruling stands except for the word "flat" (his ruling of 2026-10-29).
+--
+-- __The word is unrestricted; only the path has structure.__ @‹x›@ and
+-- @", do block 2"@ are words containing brackets and spaces, so nothing may
+-- assume a name is lexable. 'nameDotted' is therefore a printed form and not
+-- always something that can be typed back.
+data GlobalName = GlobalName
+  { nameSteps :: [String]  -- ^ the namespace path, outermost first; empty at the root
+  , nameWord  :: String    -- ^ the base word, unrestricted
+  }
   deriving (Eq, Ord, Show)
+
+-- | A name in no namespace — what every global name was before MS10.
+rootName :: String -> GlobalName
+rootName = GlobalName []
+
+-- | The full path, dotted: @Nat.elim@, and @elim@ for a name at the root.
+--
+-- **This is the whole name and not what a user is shown.** The printer's policy
+-- (his ruling of 2026-10-30) is to print the shortest ending of the path that
+-- re-resolves to the same name in the scope being printed from, so this is what
+-- that policy falls back to and what a name with nothing open prints as.
+nameDotted :: GlobalName -> String
+nameDotted (GlobalName ps w) = concatMap (++ ".") ps ++ w
+
+-- | Place a word in the namespace a declaration of this name opens.
+--
+-- @declarationNamespace (rootName "Nat")@ is @["Nat"]@, so a datatype\'s generated
+-- equipment is @Nat.elim@, @Nat.Below@ and so on. **One function, because partition
+-- two moves the datatype itself inside its own namespace** — @Nat.Nat@ — and the
+-- equipment then stays exactly where it is; this is the line that changes, not the
+-- twelve sites that mint a name.
+declarationNamespace :: GlobalName -> [String]
+declarationNamespace (GlobalName ps w) = ps ++ [w]
+
+-- | A name for @word@ in the namespace @d@\'s declaration opens.
+inDeclarationOf :: GlobalName -> String -> GlobalName
+inDeclarationOf d word = GlobalName (declarationNamespace d) word
 
 -- | The body of a binder, with the bound variable replaced by a de Bruijn index.
 --
@@ -125,14 +171,14 @@ data Literal
 -- cannot be unsound because nothing eliminates a @Token@.
 primitiveType :: Literal -> Core
 primitiveType l = case l of
-  LString{} -> Global (GlobalName "String") []
-  LChar{}   -> Global (GlobalName "Char") []
-  LInt{}    -> Global (GlobalName "Int") []
+  LString{} -> Global (rootName "String") []
+  LChar{}   -> Global (rootName "Char") []
+  LInt{}    -> Global (rootName "Int") []
   LRegex{}  -> Pi (Ident "T") (Universe LZero) (MkScope (App (Global tokenName []) (Bound 0)))
 
 -- | @Token : Type₀ -> Type₀@, the type former of token classes (MS6 phase 100).
 tokenName :: GlobalName
-tokenName = GlobalName "Token"
+tokenName = rootName "Token"
 
 -- | 'tokenName'\'s type. Seeded by 'Thena.Global.Env.emptyGlobals'; written
 -- here because 'Scope' can only be built in this module.

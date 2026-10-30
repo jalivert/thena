@@ -31,6 +31,8 @@ import Thena.Core.Term
   , Literal (..)
   , close
   , fresh
+  , rootName
+  , nameDotted
   )
 import Thena.Core.Typing (check, infer)
 import Thena.Driver
@@ -86,7 +88,7 @@ tests =
 -- anything at all.
 seeded :: [TestTree]
 seeded =
-  [ testCase name $ case lookupConstant (GlobalName name) env of
+  [ testCase name $ case lookupConstant (rootName name) env of
       Nothing -> assertFailure (name ++ " is not in an empty environment")
       Just c  -> constantType c @?= Universe (levelOfNat 0)
   | name <- ["String", "Char", "Int"]
@@ -108,7 +110,7 @@ typed =
       ]
   ]
   where
-    named g = Global (GlobalName g) []
+    named g = Global (rootName g) []
 
 values :: [TestTree]
 values =
@@ -126,7 +128,7 @@ equality =
   , testCase "a Char is not the String of one character" $
       (Primitive (LChar 'a') == Primitive (LString "a")) @?= False
   , testCase "a literal is not a global of the same spelling" $
-      (Primitive (LString "Nat") == Global (GlobalName "Nat") []) @?= False
+      (Primitive (LString "Nat") == Global (rootName "Nat") []) @?= False
   ]
 
 -- --------------------------------------------------------------------------
@@ -160,9 +162,9 @@ conversion =
   where
     failureOf s t = let (why, _, _) = convert env ctx 0 s t in why
     failureInA s t = let (why, _, _) = convert withA ctx 0 s t in why
-    named = Global (GlobalName "a") []
-    withA = addDefinition (GlobalName "a")
-              (MkDefinition [] [] (Global (GlobalName "String") []) (Primitive (LString "a"))) env
+    named = Global (rootName "a") []
+    withA = addDefinition (rootName "a")
+              (MkDefinition [] [] (Global (rootName "String") []) (Primitive (LString "a"))) env
 
 -- --------------------------------------------------------------------------
 -- The round trip
@@ -208,15 +210,15 @@ awkward =
 -- a name written in the reducer. If the rule ever hard-codes one, these tests
 -- are what notices, because @yes@ and @no@ appear nowhere in @src/@.
 answering :: GlobalEnv
-answering = addPrimitive (GlobalName "eqString") eqTy withAnswer
+answering = addPrimitive (rootName "eqString") eqTy withAnswer
   where
     withAnswer = fst (declared ["Answer : Type₀ where { yes : Answer ; no : Answer }"])
-    eqTy = arrow str (arrow str (Global (GlobalName "Answer") []))
-    str = Global (GlobalName "String") []
+    eqTy = arrow str (arrow str (Global (rootName "Answer") []))
+    str = Global (rootName "String") []
     arrow a b = Pi (Ident "_") a (close (fst (fresh 900)) b)
 
 answer :: String -> Core
-answer c = Canonical (GlobalName c) [] []
+answer c = Canonical (rootName c) [] []
 
 computing :: [TestTree]
 computing =
@@ -249,12 +251,12 @@ computing =
   where
     v = fst (fresh 500)
     str s = Primitive (LString s)
-    named g = Global (GlobalName g) []
-    apply = foldl App (Global (GlobalName "eqString") [])
-    append = foldl App (Global (GlobalName "appendString") [])
+    named g = Global (rootName g) []
+    apply = foldl App (Global (rootName "eqString") [])
+    append = foldl App (Global (rootName "appendString") [])
     reduced = whnf withA ctx
-    withA = addDefinition (GlobalName "a") (MkDefinition [] [] stringTy (str "a")) answering
-    stringTy = Global (GlobalName "String") []
+    withA = addDefinition (rootName "a") (MkDefinition [] [] stringTy (str "a")) answering
+    stringTy = Global (rootName "String") []
     identity = Lam (Ident "x") stringTy (close x (Free x))
     x = fst (fresh 501)
 
@@ -264,20 +266,20 @@ computing =
 -- one way of trying to smuggle an axiom in.
 refusals :: [TestTree]
 refusals =
-  [ refusedCase "a name with no rule" (GlobalName "myAxiom") (twoOf "String")
-  , refusedCase "the wrong argument type" (GlobalName "eqString") (twoOf "Int")
-  , refusedCase "too few arguments" (GlobalName "eqString") oneArgument
-  , refusedCase "an answer that is not a datatype" (GlobalName "eqString") intoAUniverse
-  , refusedCase "an answer with the wrong constructors" (GlobalName "eqInt") intoAnswerOfOne
+  [ refusedCase "a name with no rule" (rootName "myAxiom") (twoOf "String")
+  , refusedCase "the wrong argument type" (rootName "eqString") (twoOf "Int")
+  , refusedCase "too few arguments" (rootName "eqString") oneArgument
+  , refusedCase "an answer that is not a datatype" (rootName "eqString") intoAUniverse
+  , refusedCase "an answer with the wrong constructors" (rootName "eqInt") intoAnswerOfOne
   , testCase "and the declaration this phase ships is accepted" $
-      isRight (checkedPrimitive answering (GlobalName "eqString") (twoOf "String")) @?= True
+      isRight (checkedPrimitive answering (rootName "eqString") (twoOf "String")) @?= True
   -- appendString's rule reads no declared type: it is String -> String ->
   -- String exactly, and a comparison's shape is not that.
-  , refusedCase "appendString answering with a datatype" (GlobalName "appendString") (twoOf "String")
-  , refusedCase "appendString over Int" (GlobalName "appendString")
+  , refusedCase "appendString answering with a datatype" (rootName "appendString") (twoOf "String")
+  , refusedCase "appendString over Int" (rootName "appendString")
       (arrow (named "Int") (arrow (named "Int") (named "Int")))
   , testCase "appendString at its own type is accepted" $
-      isRight (checkedPrimitive answering (GlobalName "appendString")
+      isRight (checkedPrimitive answering (rootName "appendString")
                  (arrow (named "String") (arrow (named "String") (named "String")))) @?= True
   ]
   where
@@ -287,7 +289,7 @@ refusals =
     oneArgument = arrow (named "String") (named "Answer")
     intoAUniverse = arrow (named "String") (arrow (named "String") (Universe (levelOfNat 0)))
     intoAnswerOfOne = arrow (named "Int") (arrow (named "Int") (named "One"))
-    named n = Global (GlobalName n) []
+    named n = Global (rootName n) []
     arrow a b = Pi (Ident "_") a (close (fst (fresh 900)) b)
     isRight = either (const False) (const True)
 
@@ -327,13 +329,13 @@ deciding =
       gs <- preludeGlobals
       convertibleIn gs
         (decide "String" [str "a", str "a"])
-        (Canonical (GlobalName "yes") [LZero, LZero]
+        (Canonical (rootName "yes") [LZero, LZero]
           [ eqOf "String" (str "a") (str "a")
-          , Canonical (GlobalName "refl") [LZero] [prim "String", str "a"] ])
+          , Canonical (rootName "refl") [LZero] [prim "String", str "a"] ])
   , testCase "two that differ decide no" $ do
       gs <- preludeGlobals
       case whnf gs ctx (decide "String" [str "a", str "b"]) of
-        Canonical (GlobalName "no") _ [_, _] -> pure ()
+        Canonical (GlobalName [] "no") _ [_, _] -> pure ()
         other -> assertFailure (show other)
     -- **The load-bearing one.** The refutation is no longer written by the
     -- reducer; it is derived in the prelude from @eqStringRefl@ and
@@ -345,7 +347,7 @@ deciding =
         Canonical _ _ [_, refutation] ->
           fst3 (check gs ctx 0 refutation
                   (Pi (Ident "_") (eqOf "String" (str "a") (str "b"))
-                      (close (fst (fresh 702)) (Global (GlobalName "Empty") [LZero]))))
+                      (close (fst (fresh 702)) (Global (rootName "Empty") [LZero]))))
             @?= Right ()
         other -> assertFailure (show other)
   , testCase "so is the whole answer, at the definition's own result type" $ do
@@ -359,8 +361,8 @@ deciding =
   , testCase "a name nobody knows is not decided" $ do
       gs <- preludeGlobals
       case whnf gs ctx (decide "String" [Free v, str "a"]) of
-        Canonical (GlobalName g) _ _ ->
-          assertFailure ("decided " ++ g ++ " about a variable")
+        Canonical g _ _ ->
+          assertFailure ("decided " ++ nameDotted g ++ " about a variable")
         _ -> pure ()
     -- **The retirement is complete, and this is what says so.** @primitive@
     -- accepts only the names 'Thena.Core.Reduce.primitiveNames' has a rule
@@ -368,19 +370,19 @@ deciding =
     -- refused outright at every type — nobody can put @decString@ back as a
     -- constant with no body.
   , testCase "declare-primitive no longer knows the name at all" $
-      mapM_ (\p -> isRight' (checkedPrimitive emptyGlobals (GlobalName ("dec" ++ p))
+      mapM_ (\p -> isRight' (checkedPrimitive emptyGlobals (rootName ("dec" ++ p))
                                (Universe LZero)) @?= False)
         ["String", "Char", "Int"]
   ]
   where
     v = fst (fresh 703)
     str s = Primitive (LString s)
-    decide p = foldl App (Global (GlobalName ("dec" ++ p)) [])
+    decide p = foldl App (Global (rootName ("dec" ++ p)) [])
     fst3 (a, _, _) = a
     isRight' = either (const False) (const True)
-    prim p = Global (GlobalName p) []
-    eqOf p x y = App (App (App (Global (GlobalName "Eq") [LZero]) (prim p)) x) y
-    decOf p x y = App (Global (GlobalName "Dec") [LZero, LZero]) (eqOf p x y)
+    prim p = Global (rootName p) []
+    eqOf p x y = App (App (App (Global (rootName "Eq") [LZero]) (prim p)) x) y
+    decOf p x y = App (Global (rootName "Dec") [LZero, LZero]) (eqOf p x y)
     convertibleIn gs a b = case convert gs ctx 0 a b of
       (Nothing, [], _) -> pure ()
       (why, obs, _)    -> assertFailure (show (why, length obs))

@@ -61,7 +61,7 @@ import qualified Data.List.NonEmpty as NE
 
 import Data.List (nub)
 import Data.Maybe (fromMaybe, listToMaybe)
-import Thena.Core.Term (GlobalName (..), Literal (..))
+import Thena.Core.Term (GlobalName (..), nameDotted, rootName, Literal (..))
 import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
   ( Argument (..)
@@ -92,14 +92,14 @@ substitutionDefinitions gs g =
     ++ [ (allOf lang, arrows (self : map mapType reached) self, allBody) | not (null reached) ]
     ++ [ (substOf lang k, arrows [self, string, ownerSelf k] self, oneBody k) | k <- reached ]
   where
-    GlobalName lang = grammarName g
-    reached = [ k | GlobalName k <- classesSubstituted gs g ]
-    owned = [ k | GlobalName k <- map fst (variableProductions g) ]
+    lang = nameDotted (grammarName g)
+    reached = map nameDotted (classesSubstituted gs g)
+    owned = map (nameDotted . fst) (variableProductions g)
     -- **Constructors only** (MS8 phase 158): these become the eliminator's
     -- methods, one per constructor of the datatype, and a @notation@ block's
     -- function production is not one of them.
     prods = constructorProductions g
-    conName p = let GlobalName n = gproductionName p in n
+    conName = nameDotted . gproductionName
 
     self = name lang
     string = name "String"
@@ -110,19 +110,19 @@ substitutionDefinitions gs g =
     -- ---------------------------------------------------------------------
     -- Which language owns a class, and what it generated. 'reached' has
     -- filtered out the classes with no owner, so these are total on it.
-    owner k = case classOwner gs g (GlobalName k) of
+    owner k = case classOwner gs g (rootName k) of
       Just h -> h
       Nothing -> g
-    ownerName k = let GlobalName n = grammarName (owner k) in n
+    ownerName k = nameDotted (grammarName (owner k))
     ownerSelf = name . ownerName
     -- The owning language's variable production for the class: what a renamed
     -- binder of that class becomes.
     ownerVar k y = app (name (varConOf (owner k) k)) [y]
     varConOf h k = fromMaybe "" (listToMaybe
-      [ let GlobalName c = gproductionName p in c | (c', p) <- variableProductions h, c' == GlobalName k ])
+      [ nameDotted (gproductionName p) | (c', p) <- variableProductions h, c' == rootName k ])
     -- The classes another language has substitution for — a subset of this
     -- one's, because reaching it reaches everything it reaches.
-    reachedBy l = [ k | GlobalName k <- classesSubstituted gs (grammarNamed l) ]
+    reachedBy l = map nameDotted (classesSubstituted gs (grammarNamed l))
     grammarNamed l = case [ h | h <- gs, grammarName h == l ] of
       h : _ -> h
       [] -> g
@@ -133,7 +133,7 @@ substitutionDefinitions gs g =
     -- **Every grammar's**, not only this one's, since a foreign slot is walked
     -- through its own language's functions.
     referenced =
-      concat [ let GlobalName h = grammarName k
+      concat [ let h = nameDotted (grammarName k)
                 in h : map conName (grammarProductions k) ++ substitutionNames gs k
              | k <- gs ]
         ++ [ "String", "List", "And", "Comparison", "nil", "cons", "both", "same", "different"
@@ -194,7 +194,7 @@ substitutionDefinitions gs g =
     -- and the name it mints then cannot be printed in the notation. That is not
     -- prevented — his second principle — and 'Thena.Language.Grammar.checkGrammar'
     -- warns at the block instead, so the author is told rather than refused.
-    primeChar k = fromMaybe '\'' (variableRegex g (GlobalName k) >>= primingChar)
+    primeChar k = fromMaybe '\'' (variableRegex g (rootName k) >>= primingChar)
 
     freshBody k =
       lamL ["y", "avoid"]
@@ -229,7 +229,7 @@ substitutionDefinitions gs g =
           rs = recNames args
           under bs = foldr (consOf string . v) (v "bound") [ as !! i | i <- bs, binderAt args i == Just k ]
           step (a, arg) acc = case (argumentRole arg, recOf args rs a, argumentSort arg) of
-            (Occurrence c, _, _) | c == GlobalName k ->
+            (Occurrence c, _, _) | c == rootName k ->
               decide (listOf string) (member (v a) (v "bound")) acc (consOf string (v a) acc)
             (Scope bs, Just r, _) -> app (v r) [under bs, acc]
             (Plain, Just r, _) -> app (v r) [v "bound", acc]
@@ -270,7 +270,7 @@ substitutionDefinitions gs g =
           -- A binder is renamed when its class has a map; one at a class no
           -- language owns keeps its name, because nothing can occur at it.
           binders = [ i | (i, arg) <- zip [0 :: Int ..] args
-                        , Binder (GlobalName c) <- [argumentRole arg], c `elem` reached ]
+                        , Binder cn <- [argumentRole arg], let c = nameDotted cn, c `elem` reached ]
           binderClasses = nub [ c | i <- binders, Just c <- [binderAt args i] ]
           bindersAt c = [ i | i <- binders, binderAt args i == Just c ]
           renamed i = "z" ++ show i
@@ -334,7 +334,7 @@ substitutionDefinitions gs g =
                   rebuilt binders
        in lamL (as ++ rs ++ map mapVar reached) $ case (map argumentRole args, as) of
             -- A variable production: the whole node is what its class's map says.
-            ([Occurrence (GlobalName c)], [y]) -> lookupIn c (v y) (v (mapVar c))
+            ([Occurrence cn], [y]) -> let c = nameDotted cn in lookupIn c (v y) (v (mapVar c))
             _ | null binders -> rebuilt
               | otherwise ->
                   foldr (\c body -> SurfaceLet (local (avoidName c)) (Just (listOf string)) (images c) body)
@@ -364,11 +364,11 @@ substitutionDefinitions gs g =
 -- rather than carried twice.
 binderAt :: [Argument] -> Int -> Maybe String
 binderAt args i = case drop i args of
-  a : _ | Binder (GlobalName c) <- argumentRole a -> Just c
+  a : _ | Binder cn <- argumentRole a -> Just (nameDotted cn)
   _ -> Nothing
 
 nameOf :: GlobalName -> String
-nameOf (GlobalName n) = n
+nameOf = nameDotted
 
 -- | The @notation@ block generated substitution declares — @E[x -> M]@, one
 -- production per class the grammar has substitution for (§6.3, §4.8; MS8 phase
@@ -409,7 +409,7 @@ substitutionNotations gs g
   | null prods = []
   | otherwise  = [Block NotationBlock lang [] prods []]
   where
-    GlobalName lang = grammarName g
+    lang = nameDotted (grammarName g)
     -- **The three names are the production's own, since MS8 phase 171.** They
     -- used to be metavariables hunted out of the grammars — the target from this
     -- one, the replacement from whichever language owns the class — and the hunt
@@ -421,7 +421,7 @@ substitutionNotations gs g
           [ Param (target k) Nothing, Param k (Just k), Param (replacement k) Nothing ]
           Nothing
           (map Word [target k, "[", k, "->", replacement k, "]"])
-      | GlobalName k <- classesSubstituted gs g
+      | k <- map nameDotted (classesSubstituted gs g)
       ]
 
     -- **Three parameters: the term, the name replaced, and what replaces it.**
