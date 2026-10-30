@@ -24,6 +24,7 @@ module Thena.View.Source
 
 import Data.List (intercalate)
 
+import Thena.Core.Term (GlobalName (..), nameDotted)
 import Thena.Driver (Item (..))
 import Thena.Surface.Concrete
   ( Surface (..)
@@ -35,9 +36,12 @@ import Thena.Syntax.Print (printBlock, renderSurface)
 -- | One top-level item.
 printItem :: Item -> [String]
 printItem i = case i of
+  -- **Dotted, which is a name's whole spelling** (MS10 phase 243). The
+  -- shortest ending that re-resolves is the printer's policy where a scope is
+  -- known, and with nothing open it is this.
   ItemTheorem n ty body ->
-    [ n ++ " : " ++ renderSurface ty
-    , n ++ " = " ++ renderSurface body
+    [ nameDotted n ++ " : " ++ renderSurface ty
+    , nameDotted n ++ " = " ++ renderSurface body
     ]
   ItemData d -> printData d
   -- A top-level block is a term's @do@ and prints as one, so there is one
@@ -53,11 +57,11 @@ printItem i = case i of
 printData :: SurfaceData -> [String]
 printData d =
   ("data " ++ nm ++ params ++ " : " ++ renderSurface (surfaceDataType d) ++ " where")
-    : [ "  " ++ c ++ " : " ++ renderSurface t
-      | SurfaceConstructor c t <- surfaceDataConstructors d
+    : [ "  " ++ nameDotted (GlobalName cps c) ++ " : " ++ renderSurface t
+      | SurfaceConstructor cps c t <- surfaceDataConstructors d
       ]
   where
-    nm = surfaceDataName d
+    nm = nameDotted (GlobalName (surfaceDataSteps d) (surfaceDataName d))
     params = concat [" (" ++ x ++ " : " ++ renderSurface t ++ ")" | (x, t) <- surfaceDataParameters d]
 
 -- | A surface module: its header, then its items, one blank line apart.

@@ -155,7 +155,7 @@ relationOf g e = do
       outerEntry = zip (map argumentName others) outer
       keyOf a entry = ref (lookupOr (argumentName a) entry)
 
-      here = SurfaceConstructor hereN $
+      here = SurfaceConstructor [] hereN $
         SurfacePi (NE.fromList (binder gamma ctxArg : zipWith binder outer others))
           (inRel outerEntry (extend e gamma outerEntry))
 
@@ -175,7 +175,7 @@ relationOf g e = do
                   (app (ref "Eq") [typeOf key, keyOf key outerEntry, keyOf a innerEntry]) (ref "Empty")))
               | a <- take 1 shadows ]
             iN = fresh (neN : used2) "i"
-         in ( SurfaceConstructor thereN $
+         in ( SurfaceConstructor [] thereN $
                 SurfacePi (NE.fromList
                   ( binder gamma ctxArg : zipWith binder outer others ++ zipWith binder inner kOthers
                     ++ premises
@@ -184,7 +184,7 @@ relationOf g e = do
             , replicate (2 + length others + length kOthers + length premises) Plain )
       theres = map stepping (zip thereNs (extensionsOf g))
       relType = foldr (SurfaceArrow . typeOf) (SurfaceUniverse 0) indices
-  Just ( SurfaceData inN [] relType (here : map fst theres)
+  Just ( SurfaceData [] inN [] relType (here : map fst theres)
        , replicate (1 + length others) Plain : map snd theres )
   where
     entryOf k = [ a | a <- gproductionArguments k, argumentSort a /= OfLanguage (grammarName g) ]

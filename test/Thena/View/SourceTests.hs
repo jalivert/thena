@@ -87,7 +87,7 @@ termsOf i = case i of
   ItemData d ->
     surfaceDataType d
       : map snd (surfaceDataParameters d)
-      <> map (\(SurfaceConstructor _ t) -> t) (surfaceDataConstructors d)
+      <> map (\(SurfaceConstructor _ _ t) -> t) (surfaceDataConstructors d)
   ItemBlock _ -> []
   ItemGrammar _ -> []
 

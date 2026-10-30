@@ -322,9 +322,15 @@ data SurfaceModule = SurfaceModule
 -- phase 39. The signature and the equation are separate items and 'paired'
 -- puts them together, which is what those languages do and why a signature
 -- with no equation is a diagnosable mistake rather than an unparseable one.
+-- **What a declaration names may be written with a path** (MS10 phase 243):
+-- the steps, then the base word, exactly as 'SurfaceName' carries a written
+-- name. @Ty.subst-X : …@ declares into @Ty@'s namespace, and a name with no
+-- steps is every declaration anything wrote before MS10. **It is the written
+-- pieces and not a resolved 'Thena.Core.Term.GlobalName'**, because a
+-- declaration inside an enclosing namespace will be relative to it.
 data SurfaceDecl
-  = SurfaceSignature String Surface   -- ^ @foo : T@
-  | SurfaceEquation  String Surface   -- ^ @foo = e@
+  = SurfaceSignature [String] String Surface   -- ^ @foo : T@, @Ns.foo : T@
+  | SurfaceEquation  [String] String Surface   -- ^ @foo = e@, @Ns.foo = e@
   | SurfaceDatatype  SurfaceData      -- ^ @data D … where { … }@ (phase 42b)
   | SurfaceGrammar   BlockKind Int String
     -- ^ a @language@ or @context@ block (MS6 phase 101): its kind, the line of
@@ -349,14 +355,15 @@ data SurfaceDecl
 -- type right of it. Keeping it syntactic is what lets the elaborated form be
 -- taken apart again by /counting/ — 'Thena.Global.Declare.buildInductive'.
 data SurfaceData = SurfaceData
-  { surfaceDataName         :: String
+  { surfaceDataSteps        :: [String]   -- ^ the path written before the name
+  , surfaceDataName         :: String
   , surfaceDataParameters   :: [(String, Surface)]
   , surfaceDataType         :: Surface   -- ^ the part right of the @:@
   , surfaceDataConstructors :: [SurfaceConstructor]
   }
   deriving (Eq, Show)
 
-data SurfaceConstructor = SurfaceConstructor String Surface
+data SurfaceConstructor = SurfaceConstructor [String] String Surface
   deriving (Eq, Show)
 
 -- | What went wrong pairing a signature with its equation

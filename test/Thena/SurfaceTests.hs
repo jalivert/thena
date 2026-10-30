@@ -20,6 +20,7 @@ import Test.Tasty.QuickCheck
   ( Gen, counterexample, elements, forAll, frequency, listOf, listOf1, oneof, property
   , resize, sized, testProperty, withNumTests, (===) )
 
+import Thena.Core.Term (GlobalName (..), rootName)
 import Thena.Core.TermTests (genLiteral)
 import Thena.Driver
   ( Item (..)
@@ -49,6 +50,8 @@ import Thena.Surface.Concrete
   , SurfaceArg (..)
   , SurfaceArm (..)
   , SurfaceBinder (..)
+  , SurfaceConstructor (..)
+  , SurfaceData (..)
   , SurfacePattern (..)
   )
 
@@ -716,7 +719,7 @@ splitTests =
              , "  bb -> aa"
              ]) of
         Right (_, items) -> items @?=
-          [ ItemTheorem "flip2"
+          [ ItemTheorem (rootName "flip2")
               (SurfaceArrow (SurfaceName [] "Two") (SurfaceName [] "Two"))
               (SurfaceLam [SurfaceBinder Explicit "t" Nothing]
                 (SurfaceSplit ByCases (SurfaceName [] "t")
@@ -799,6 +802,28 @@ moduleTests =
       case parseSurfaceModule "module M where { }" of
         Left _  -> pure ()
         Right r -> assertFailure ("admitted: " ++ show r)
+
+  , -- **A declaration may be named with a path** (MS10 phase 243): the steps
+    -- and the word, exactly as a written name in a term carries them.
+    testCase "a declaration is named with a path" $
+      fmap snd (parseSurfaceModule "module M where { Ty.subst-X : A ; Ty.subst-X = a }")
+        @?= Right [ ItemTheorem (GlobalName ["Ty"] "subst-X")
+                      (SurfaceName [] "A") (SurfaceName [] "a") ]
+
+  , -- **The path is part of the name being paired on**, so these are a
+    -- signature for one name and an equation for another.
+    testCase "an equation at a different path does not pair with it" $
+      case parseSurfaceModule "module M where { Ty.f : A ; f = a }" of
+        Left _  -> pure ()
+        Right r -> assertFailure ("admitted: " ++ show r)
+
+  , -- Where a datatype and its constructors may be written is the written
+    -- syntax's question; that the tree carries the path is this phase's.
+    testCase "a datatype's name and a constructor's carry theirs too" $
+      fmap snd (parseSurfaceModule
+                  "module M where { data N.D : Type\8320 where { N.c : D } }")
+        @?= Right [ ItemData (SurfaceData ["N"] "D" [] (SurfaceUniverse 0)
+                                [SurfaceConstructor ["N"] "c" (SurfaceName [] "D")]) ]
   ]
   where
     -- Compare the **items**, not the module name, so a test says only what it

@@ -1183,7 +1183,10 @@ blockProblem errs = case errs of
 -- already stopped saying what it meant.
 data Item
   = ItemData SurfaceData
-  | ItemTheorem String Surface Surface   -- ^ a signature and the equation after it
+  | ItemTheorem GlobalName Surface Surface
+    -- ^ a signature and the equation after it, under the name it declares —
+    -- **a path and a word** since MS10 phase 243, so a generated definition can
+    -- be admitted into its namespace by the ordinary declaration path
   | ItemBlock [RawInstr]
   | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
@@ -1212,12 +1215,15 @@ regroup = go
     -- a @language@ block above it is exactly such a declaration. It is
     -- resolved, checked and played where it stands, by @run-block@.
     go (SurfaceBlock b : rest) = (ItemBlock b :) <$> go rest
-    go (SurfaceSignature x ty : SurfaceEquation y body : rest)
-      | x == y = (ItemTheorem x ty body :) <$> go rest
-    go (SurfaceSignature x _ : _) =
-      Left (DeclarationsUnpaired (SignatureWithNoEquation x))
-    go (SurfaceEquation x _ : _) =
-      Left (DeclarationsUnpaired (EquationWithNoSignature x))
+    -- **Paired on the whole name, path included** (MS10 phase 243): @Ty.fv-X@
+    -- and @fv-X@ are two names, so a signature written with a path wants its
+    -- equation written with the same one.
+    go (SurfaceSignature ps x ty : SurfaceEquation qs y body : rest)
+      | (ps, x) == (qs, y) = (ItemTheorem (GlobalName ps x) ty body :) <$> go rest
+    go (SurfaceSignature ps x _ : _) =
+      Left (DeclarationsUnpaired (SignatureWithNoEquation (nameDotted (GlobalName ps x))))
+    go (SurfaceEquation ps x _ : _) =
+      Left (DeclarationsUnpaired (EquationWithNoSignature (nameDotted (GlobalName ps x))))
 
 -- --------------------------------------------------------------------------
 -- Surface declarations, as a program (MS4 phase 42; lifted here at 43)
@@ -1298,7 +1304,14 @@ surfaceProgram n0 items = foldl item ([], n0) items
               -- never mentions the name passes through untouched, so this is
               -- uniform rather than a mode — and @extract@ turns the
               -- assumption into the λ @tie-recursion@ expects either way.
-            , Do (Assume (Lit (VText x)) (Ref ("ty" ++ show n)))
+              --
+              -- **The assumption is the base word, because a local has no
+              -- path** (MS10 phase 243): the development's scope holds no
+              -- namespaces (§3.6), and a qualified name skips the context by
+              -- design (phase 241). So a generated body's self-recursive call
+              -- is written as the short word, which is what the namespace's
+              -- outward lookup gives it in any case.
+            , Do (Assume (Lit (VText (nameWord x))) (Ref ("ty" ++ show n)))
             , Do (Call "elaborate" [Lit (VSurface (rootedAt body))])
             , Bind (Ops.PVar ("abs" ++ show n)) Nothing PopDevelopment
             , Bind (Ops.PVar ("tm" ++ show n)) Nothing
@@ -1308,7 +1321,10 @@ surfaceProgram n0 items = foldl item ([], n0) items
               -- braces or not. That is the whole of the surface signature
               -- environment — where a binder was written, not what the type
               -- turned out to be.
-            , Do (DefineGlobal (plicitiesIn ty) (Lit (VText x))
+              -- **The name goes out whole, path and all** (MS10 phase 243):
+              -- @define-global@ takes a name and not the text of one, so a
+              -- declaration written @Ty.subst-X@ installs @Ty.subst-X@.
+            , Do (DefineGlobal (plicitiesIn ty) (Lit (VName x))
                     (Ref ("ty" ++ show n)) (Ref ("tm" ++ show n)))
             ]
         , n1 )
@@ -1355,7 +1371,7 @@ surfaceProgram n0 items = foldl item ([], n0) items
 datatypeProgram :: Int -> SurfaceData -> Maybe [[ArgRole]] -> ([Instr], Int)
 datatypeProgram n d roles =
   let nm      = surfaceDataName d
-      dn      = rootName nm
+      dn      = GlobalName (surfaceDataSteps d) nm
       ps      = surfaceDataParameters d
       cs      = surfaceDataConstructors d
       (l, n1) = freshLevelMeta n
@@ -1378,10 +1394,10 @@ datatypeProgram n d roles =
                      (ApplyTo (Ref (conName k ++ "raw")) selfName)
                  , Bind (Ops.PVar (conName k)) Nothing (Expose (Ref (conName k ++ "app")))
                  ]
-               | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
+               | (k, SurfaceConstructor _ _ cty) <- zip [0 ..] cs
                ]
           ++ [ Do (MakeData dn (length ps)
-                     [ rootName cn | SurfaceConstructor cn _ <- cs ] roles
+                     [ GlobalName cps cn | SurfaceConstructor cps cn _ <- cs ] roles
                      (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
              ]
       , n1 )
@@ -1401,7 +1417,7 @@ datatypeProgram n d roles =
 -- read the binder where the datatype is meant.
 grammarDatatype :: Grammar -> (SurfaceData, [[ArgRole]])
 grammarDatatype g =
-  ( SurfaceData (plainName (grammarName g)) [] (SurfaceUniverse 0) (map constructor prods)
+  ( SurfaceData [] (plainName (grammarName g)) [] (SurfaceUniverse 0) (map constructor prods)
   , map (map argumentRole . gproductionArguments) prods
   )
   where
@@ -1411,7 +1427,7 @@ grammarDatatype g =
     prods = constructorProductions g
     plainName = nameDotted
 
-    constructor p = SurfaceConstructor (plainName (gproductionName p)) (typeOf p)
+    constructor p = SurfaceConstructor [] (plainName (gproductionName p)) (typeOf p)
     typeOf p = case gproductionArguments p of
       [] -> self
       args -> SurfacePi (NE.fromList (map binder (renamed args))) self
@@ -1517,8 +1533,8 @@ rolledBack before after =
 -- | What an item adds to the environment, for the summary line.
 declaredName :: Item -> Maybe String
 declaredName i = case i of
-  ItemData d        -> Just (surfaceDataName d)
-  ItemTheorem x _ _ -> Just x
+  ItemData d        -> Just (nameDotted (GlobalName (surfaceDataSteps d) (surfaceDataName d)))
+  ItemTheorem x _ _ -> Just (nameDotted x)
   -- **A block declares nothing that can be read off the item.** What its
   -- instructions install is known only by running them, so it is counted rather
   -- than named — see 'ProofLoaded'.
@@ -3236,7 +3252,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
                      []    -> delta
               (fs, n1)
                 | installs = surfaceProgram (names m)
-                    ([ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions gs' g' ]
+                    ([ ItemTheorem (rootName x) ty body | (x, ty, body) <- substitutionDefinitions gs' g' ]
                        ++ map ItemGrammar (substitutionNotations gs' g'))
                 | otherwise = ([], names m)
               m' = (Engine.splicing fs m) { grammars = gs', names = n1 }
@@ -3278,7 +3294,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
           -- one notation the system used to privilege is now an instance of the
           -- one a user declares.
           (fs, n2) = surfaceProgram n1
-                       ([ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions (g : grammars m) g ]
+                       ([ ItemTheorem (rootName x) ty body | (x, ty, body) <- substitutionDefinitions (g : grammars m) g ]
                           ++ map ItemGrammar (substitutionNotations (g : grammars m) g))
           -- **A context's lookup relation, and its notation** (MS6 phase 107,
           -- §5.3): a datatype like any other, and a grammar installed beside the

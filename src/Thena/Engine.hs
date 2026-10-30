@@ -1023,13 +1023,19 @@ perform instr rest m = case operation instr of
   -- the name is one with a reduction rule and installs the constant.
   DeclareGrammar b -> DeclaringGrammar b (advance m)
 
-  DeclarePrimitive nm ty -> case (,) <$> text nm <*> term ty of
+  -- **Both read their name as a name, path and all** (MS10 phase 243). Each
+  -- operand is typed @TName@ and each used to be read as /text/ and rooted,
+  -- which put every declaration at the root however it was written — so nothing
+  -- could be declared into a namespace by the path that admits a written
+  -- module, a generated definition or a primitive. 'operandName' accepts a
+  -- string literal as a rooted name, so a rule that writes one is unaffected.
+  DeclarePrimitive nm ty -> case (,) <$> nameOf nm <*> term ty of
     Left r -> failure r m
-    Right (x, t) -> Primitively (rootName x) t (advance m)
+    Right (x, t) -> Primitively x t (advance m)
 
-  DefineGlobal ps nm ty tm -> case (,,) <$> text nm <*> term ty <*> term tm of
+  DefineGlobal ps nm ty tm -> case (,,) <$> nameOf nm <*> term ty <*> term tm of
     Left r -> failure r m
-    Right (x, t, v) -> Defining (rootName x) ps t v (advance m)
+    Right (x, t, v) -> Defining x ps t v (advance m)
 
   Certify stated -> case term stated of
     Left r   -> failure r m

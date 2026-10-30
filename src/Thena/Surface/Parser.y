@@ -271,9 +271,13 @@ Decls :: { [SurfaceDecl] }
 -- | **Agda\/Haskell-style: a declaration is two of these.**
 -- 'Thena.Surface.Concrete.paired' puts a signature together with the equation
 -- that follows it.
+--
+-- **What is declared may be written with a path** (MS10 phase 243), which is
+-- how a generated name is placed in its namespace: @Ty.subst-X : …@ is the
+-- shape 'Thena.Language.Substitution' emits.
 Decl :: { SurfaceDecl }
-  : ident ':' Term                         { SurfaceSignature $1 $3 }
-  | ident '=' Term                         { SurfaceEquation $1 $3 }
+  : QName ':' Term                         { SurfaceSignature (fst $1) (snd $1) $3 }
+  | QName '=' Term                         { SurfaceEquation (fst $1) (snd $1) $3 }
   | Datatype                               { SurfaceDatatype $1 }
   -- **A top-level block is an item, not an expression** — his, 2026-09-03.
   -- Same syntax, different role: at the top of a module it plays where the
@@ -289,8 +293,8 @@ Decl :: { SurfaceDecl }
 -- binder groups left of the @:@, the indices the arrow prefix of what is right
 -- of it.
 Datatype :: { SurfaceData }
-  : data ident DataParams ':' Term where '{' Constructors '}'
-      { SurfaceData $2 (reverse $3) $5 (reverse $8) }
+  : data QName DataParams ':' Term where '{' Constructors '}'
+      { SurfaceData (fst $2) (snd $2) (reverse $3) $5 (reverse $8) }
 
 DataParams :: { [(String, Surface)] }
   :                                        { [] }
@@ -306,7 +310,7 @@ SomeConstructors :: { [SurfaceConstructor] }
   | SomeConstructors ';' Constructor       { $3 : $1 }
 
 Constructor :: { SurfaceConstructor }
-  : ident ':' Term                         { SurfaceConstructor $1 $3 }
+  : QName ':' Term                         { SurfaceConstructor (fst $1) (snd $1) $3 }
 
 -- | A whole surface term.
 --

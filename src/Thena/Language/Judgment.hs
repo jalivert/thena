@@ -80,7 +80,7 @@ judgmentDatatype gs g rules = do
   ctors <- traverse (\r -> either (Left . GrammarError JudgmentBlock name . InRule (ruleName r)) Right
                                   (constructor gs g r))
                     rules
-  Right ( SurfaceData name [] (foldr (SurfaceArrow . typeOf) (SurfaceUniverse 0) indices) (map fst ctors)
+  Right ( SurfaceData [] name [] (foldr (SurfaceArrow . typeOf) (SurfaceUniverse 0) indices) (map fst ctors)
         , map snd ctors )
   where
     name = nameDotted (grammarName g)
@@ -170,7 +170,7 @@ constructor gs g r = do
       ty = case binders of
         [] -> result
         b : bs -> SurfacePi (b NE.:| bs) result
-  Right (SurfaceConstructor (ruleName r) ty, replicate (length binders) Plain)
+  Right (SurfaceConstructor [] (ruleName r) ty, replicate (length binders) Plain)
   where
     judgment = nameDotted (grammarName g)
     rules = ruleGrammar gs

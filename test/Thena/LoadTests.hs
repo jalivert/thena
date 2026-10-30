@@ -441,6 +441,23 @@ moduleTests =
       map (\n -> isDeclared (named n) g) ["Nat", "zero", "succ", "one"]
         @?= [True, True, True, True]
 
+  , -- **A declaration named with a path is admitted into that namespace**
+    -- (MS10 phase 243), which is what the generated substitution family needs:
+    -- it is written as surface source and goes through this very path.
+    testCase "a declaration written with a path declares into that namespace" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 qualifiedModule of
+        (_, ProofLoaded nm ds _ _) -> (nm, ds) @?= ("Q", ["Nat", "Nat.one", "two"])
+        (_, other) -> assertFailure (show other)
+
+  , -- **The base word is not also declared.** @define-global@ read its name as
+    -- text and rooted it until this phase, so a path was silently dropped.
+    testCase "and only the qualified name is in the environment" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 qualifiedModule
+          g = globals (machineOf s1)
+      map (\n -> isDeclared (named n) g) ["Nat.one", "one"] @?= [True, False]
+
   , -- **Quiet on success, loud on failure** — his call, 2026-09-02. The success
     -- case above carries no op messages at all; this one keeps them, because
     -- that is where the reason is.
@@ -587,6 +604,21 @@ moduleTests =
         (_, other)    -> assertFailure (show other)
   ]
   where
+    -- **@two@ names @Nat.one@ to reach it**, so this module says both halves:
+    -- a qualified declaration is installed, and a qualified name written in a
+    -- term afterwards finds it (phase 241).
+    qualifiedModule =
+      "module Q where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \  succ : Nat -> Nat\n\
+      \\n\
+      \Nat.one : Nat\n\
+      \Nat.one = succ zero\n\
+      \\n\
+      \two : Nat\n\
+      \two = succ Nat.one\n"
+
     natModule =
       "module M where\n\
       \data Nat : Type\8320 where\n\
