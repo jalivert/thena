@@ -27,7 +27,8 @@ one paragraph, not three; the full argument lives in the design notes.
 ### An identifier may contain almost anything
 
 *Decided 2026-08-25; consequences accepted 2026-08-29. The keyword list is
-reviewed whenever a word is reserved — most recently 2026-10-19.*
+reviewed whenever a word is reserved — most recently 2026-10-19. The dot was
+reserved on 2026-10-30, for namespaces.*
 
 Most languages reserve a generous set of punctuation and give you the rest.
 Thena does the opposite: it reserves as little as it can, so you can name things
@@ -37,13 +38,20 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 
 | | |
 |---|---|
-| brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` |
+| brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` `.` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
 | whitespace | |
 | keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
+
+**The dot is the one character reserved for a structural reason**, and it is the
+namespace separator: `List.map` is the name `map` in `List`, and a name may not
+contain a dot of its own. **A qualified name is glued, with no spaces** — which
+is what tells it from the two other things a dot does: `...` is a list pattern's
+tail marker, and a lone `.` marks an inaccessible pattern and stands *before* a
+name. So `k.n` is a name in `k`, and `k .n` is a name and then a dot on another.
 
 **A keyword is a whole token, so a word that merely *contains* one is a name.**
 `caseNat` and `datatype-of` are each one identifier; the lexer takes the longest
@@ -210,8 +218,10 @@ written `∀ {A : Type₀} -> A -> A`.
 
 ### A name is qualified, and a `data` declaration opens a namespace of its own
 
-*Decided 2026-10-30. **Not implemented yet** — this is the design MS10 is being
-built from, and the spellings below may still move.*
+*Decided 2026-10-30. **Being built.** A name carries its path, the dot is
+reserved, and a qualified name can be written and resolved in a core term.
+**Nothing is in a namespace yet**: no declaration places what it generates, so
+every name is still at the root, and the spellings below may still move.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something
