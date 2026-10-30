@@ -15,16 +15,18 @@ import Test.Tasty.QuickCheck
 import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
+  , GlobalName (..)
   , Ident (..)
   , close
   , fresh
+  , globalsIn
   )
 import Thena.Driver
   ( parseCore
   , parseDeclaration
   )
 import Thena.Global.Declare (declare)
-import Thena.Global.Env (GlobalEnv, emptyGlobals)
+import Thena.Global.Env (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
 import Thena.Render ( Rendering (..)
   ,renderCore)
 import Thena.Syntax.Concrete (Raw (..), RawBinder (..), RawIdent (..))
@@ -134,6 +136,7 @@ tests =
     , testGroup "rendering" renderTests
     , testGroup "input spellings" inputTests
     , testGroup "errors" errorTests
+    , testGroup "a qualified name" qualifiedTests
     , testGroup "shadowing" shadowTests
     , testGroup "resolution" resolveTests
     , testGroup "a bare Type mints a level meta" openUniverseTests
@@ -197,6 +200,48 @@ errorTests =
   , testCase "a stray character is a lex error" $
       isLeft (parseCore [] emptyGlobals [] 0 "x # y") @?= True
   ]
+
+-- | A qualified name reaches 'Core' as the path it was written with (MS10
+-- phase 240).
+--
+-- **The point is that no dotted string survives anywhere.** @Nat.elim@ is
+-- @GlobalName ["Nat"] "elim"@ and never @GlobalName [] "Nat.elim"@, so an
+-- environment holding the one does not answer for the other.
+qualifiedTests :: [TestTree]
+qualifiedTests =
+  [ testCase "a qualified name resolves to the global of that path" $
+      fmap fst (parseCore [] qualifiedGlobals [] 0 "Nat.elim")
+        @?= Right (Global (GlobalName ["Nat"] "elim") [])
+  , testCase "and a deeper path too" $
+      fmap fst (parseCore [] qualifiedGlobals [] 0 "A.B.c")
+        @?= Right (Global (GlobalName ["A", "B"] "c") [])
+  , -- **A binder cannot shadow it**: a binder has no path, so the two lookups a
+    -- bare name makes have nothing to find and are skipped. @map@ and not
+    -- @elim@ because @elim@ is a keyword and cannot be a binder at all.
+    testCase "a binder of the base word does not shadow it" $
+      fmap (globalsIn . fst)
+           (parseCore [] qualifiedGlobals [] 0 "λ (map : Type₀) -> Nat.map")
+        @?= Right [GlobalName ["Nat"] "map"]
+  , -- **The same word at the root is a different name**, which is the whole
+    -- reason the path is structure and not spelling.
+    testCase "the base word alone is not in scope" $
+      isLeft (parseCore [] qualifiedGlobals [] 0 "elim") @?= True
+  , -- A word may no longer contain a dot either, which is the other half of
+    -- reserving the character.
+    testCase "and the dot cannot be part of a word" $
+      isLeft (parseCore [] qualifiedGlobals [] 0 "elim.") @?= True
+  ]
+
+-- | An environment holding @Nat.elim@, @Nat.map@ and @A.B.c@ as definitions.
+--
+-- **Definitions and not constants**, because 'Thena.Syntax.Resolve.globalsOf'
+-- deliberately leaves 'Thena.Global.Env.constants' out — a name there would
+-- resolve in term position, which is the trap that table exists to avoid.
+qualifiedGlobals :: GlobalEnv
+qualifiedGlobals =
+  foldr one emptyGlobals
+    [GlobalName ["Nat"] "elim", GlobalName ["Nat"] "map", GlobalName ["A", "B"] "c"]
+  where one g = addDefinition g (MkDefinition [] [] (Universe LZero) (Universe LZero))
 
 -- | The case that cannot be written in concrete syntax and must still print
 -- correctly: two nested binders with the same identifier, where the body refers
