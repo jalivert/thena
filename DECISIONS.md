@@ -220,9 +220,12 @@ written `∀ {A : Type₀} -> A -> A`.
 
 *Decided 2026-10-30. **Being built.** A name carries its path, the dot is
 reserved, and a qualified name can be written and resolved in a core term, in a
-term you are elaborating, and in a rule. **Nothing is in a namespace yet**: no
-declaration places what it generates, so every name is still at the root, and
-the spellings below may still move.*
+term you are elaborating, and in a rule. **A `data` declaration's generated
+equipment is already in its namespace** — `Nat.elim`, `Nat.case`,
+`Nat.noConfusion`, `Nat.Below` and the rest — so `:show Nat.case` is how you ask
+for one. **Its constructors and the type itself are not yet**: those stay at the
+root until a written name can be resolved outward from the namespace it sits in,
+and the spellings below may still move.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something

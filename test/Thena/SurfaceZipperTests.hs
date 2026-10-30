@@ -80,8 +80,8 @@ annotTerm :: Surface
 annotTerm = SurfaceAnnot (nm "e") (nm "ty")
 
 -- | @elim D (p) mot (m1 m2) (i) tgt@
-elimTerm :: Surface
-elimTerm = SurfaceElim "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"] (nm "tgt")
+elimSurface :: Surface
+elimSurface = SurfaceElim "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"] (nm "tgt")
 
 -- | @induction tgt of { nil -> b1 ; cons n -> b2 }@ (MS9 phase 181)
 splitTerm :: Surface
@@ -145,7 +145,7 @@ descents =
     -- them.** The motive and the target sit either side of the two variable
     -- length groups, which is where an off-by-one in 'intoElimField' would
     -- live, so each is asked for by name.
-    ++ [ d ("into an elim's field " ++ show k) elimTerm f (elimAt k f)
+    ++ [ d ("into an elim's field " ++ show k) elimSurface f (elimAt k f)
        | (k, f) <- zip [0 ..] elimFields
        ]
   where
@@ -158,7 +158,7 @@ descents =
     elimFields = [nm "p", nm "mot", nm "m1", nm "m2", nm "i", nm "tgt"]
     elimAt k f =
       intoElimField "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"] (nm "tgt")
-        k f (rootedAt elimTerm)
+        k f (rootedAt elimSurface)
 
 -- | **A frame that writes nowhere passes the test above by coincidence**, and
 -- one did: 'intoElimField' started the indices a slot late, so descending to an
@@ -198,7 +198,7 @@ markers =
       ++ [ ( "an elim's field " ++ show k
            , elimWith k
            , intoElimField "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"]
-               (nm "tgt") k marker (rootedAt elimTerm)
+               (nm "tgt") k marker (rootedAt elimSurface)
            )
          | k <- [0 .. 5]
          ]
@@ -217,7 +217,7 @@ markers =
        in case fs of
             [p, mot, m1, m2, i, tgt] ->
               SurfaceElim "D" [p] mot [m1, m2] [i] tgt
-            _ -> elimTerm
+            _ -> elimSurface
     flat = [nm "p", nm "mot", nm "m1", nm "m2", nm "i", nm "tgt"]
 
 child :: Descent -> TestTree

@@ -17,8 +17,8 @@ import Thena.Core.TermTests (genTerm)
 import Thena.Core.Level (Level (..), LevelVar (..), Obligation (..), levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Convert (convert, subsumes)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), close, fresh, rootName)
-import Thena.Declared (natVec, natVecCounter)
+import Thena.Core.Term (Core (..), Ident (..), close, fresh)
+import Thena.Declared (named, natVec, natVecCounter)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Driver (parseCore)
 import Thena.Errors (Clash (..), ConversionFailure (..), Site (..))
@@ -130,8 +130,6 @@ yes ctx a b = same ctx a b @?= Nothing
 no :: Context -> String -> String -> IO ()
 no ctx a b = (same ctx a b == Nothing) @?= False
 
-named :: String -> GlobalName
-named = rootName
 
 -- | Convert two terms in a context built from @(name, type)@ pairs, with the
 -- counter threaded through the context, then both terms, in that order.

@@ -1,5 +1,5 @@
 -- | The generated acyclicity equipment — @Below@, @NotEq@, @NotBelow@ and
--- @NotBelowEq@ (MS9 phase 219, "Thena.Global.NoCycle").
+-- @Eq.NotBelow@ (MS9 phase 219, "Thena.Global.NoCycle").
 --
 -- Four groups, and each asks the question by different code from the code that
 -- built the answer — the standing lesson from phases 2–5:
@@ -25,9 +25,10 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (rootName)
+import Thena.Core.Term (inDeclarationOf, rootName)
 import Thena.Declared
-  ( andDecl
+  ( named
+  , andDecl
   , declared
   , dpairDecl
   , emptyDecl
@@ -81,7 +82,7 @@ reduceTests =
         , "  z : N"
         , "  s : N -> N"
         , ""
-        , "belowZ : \8704 (P : N -> Type\8320) (h : BelowN P z) -> Unit"
+        , "belowZ : \8704 (P : N -> Type\8320) (h : N.Below P z) -> Unit"
         , "belowZ = \\ P h -> h"
         ]
   , testCase "and one with a recursive argument — the sub-tuple and the motive" $
@@ -92,8 +93,8 @@ reduceTests =
         , "  z : N"
         , "  s : N -> N"
         , ""
-        , "belowS : \8704 (P : N -> Type\8320) (n : N) (h : BelowN P (s n))"
-        , "      -> And (BelowN P n) (P n)"
+        , "belowS : \8704 (P : N -> Type\8320) (n : N) (h : N.Below P (s n))"
+        , "      -> And (N.Below P n) (P n)"
         , "belowS = \\ P n h -> h"
         ]
   , -- **The motive is applied to the ARGUMENT's indices, not the target's** —
@@ -112,12 +113,12 @@ reduceTests =
         , "  evz : Ev z"
         , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
         , ""
-        , "evzBelow : \8704 (j : N) (y : Ev j) (h : NotBelowEv j y z evz) -> Unit"
+        , "evzBelow : \8704 (j : N) (y : Ev j) (h : Ev.NotBelow j y z evz) -> Unit"
         , "evzBelow = \\ j y h -> h"
         , ""
         , "evsBelow : \8704 (n : N) (e : Ev n) (j : N) (y : Ev j)"
-        , "             (h : NotBelowEv j y (s (s n)) (evs n e))"
-        , "        -> And (NotBelowEv j y n e) (NotEqEv j y n e)"
+        , "             (h : Ev.NotBelow j y (s (s n)) (evs n e))"
+        , "        -> And (Ev.NotBelow j y n e) (Ev.NotEq j y n e)"
         , "evsBelow = \\ n e j y h -> h"
         ]
   , -- @≢@ over a telescope is the curried chain of §3.3 negated: the index
@@ -135,7 +136,7 @@ reduceTests =
         , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
         , ""
         , "evApart : \8704 (n : N) (x : Ev n) (j : N) (y : Ev j)"
-        , "            (ne : NotEqEv n x j y)"
+        , "            (ne : Ev.NotEq n x j y)"
         , "            (q : (Eq N n j : Type\8320))"
         , "            (r : (Eq (Ev j) (transport N (\\ w -> Ev w) n j q x) y"
         , "                    : Type\8320))"
@@ -168,39 +169,39 @@ constructionTests =
         , ""
         , "-- (65): if the recursive argument is neither below nor equal to b,"
         , "-- neither is the whole application."
-        , "stepN : \8704 (m : N) (b : N) -> NotBelowN m b -> NotBelowEqN (s m) b"
+        , "stepN : \8704 (m : N) (b : N) -> N.NotBelow m b -> N.NotBelowEq (s m) b"
         , "stepN = \\ m b ->"
         , "  elim N ()"
-        , "    (\\ t -> NotBelowN m t -> NotBelowEqN (s m) t)"
-        , "    ( (\\ nb -> both (NotBelowN (s m) z) (NotEqN (s m) z)"
+        , "    (\\ t -> N.NotBelow m t -> N.NotBelowEq (s m) t)"
+        , "    ( (\\ nb -> both (N.NotBelow (s m) z) (N.NotEq (s m) z)"
         , "                 unit"
-        , "                 (\\ e -> noConfusionN (s m) z e))"
+        , "                 (\\ e -> N.noConfusion (s m) z e))"
         , "      (\\ k H nb ->"
-        , "         both (NotBelowN (s m) (s k)) (NotEqN (s m) (s k))"
-        , "           (H (andLeft (NotBelowN m k) (NotEqN m k) nb))"
-        , "           (\\ e -> andRight (NotBelowN m k) (NotEqN m k) nb"
-        , "                     (noConfusionN (s m) (s k) e))) )"
+        , "         both (N.NotBelow (s m) (s k)) (N.NotEq (s m) (s k))"
+        , "           (H (andLeft (N.NotBelow m k) (N.NotEq m k) nb))"
+        , "           (\\ e -> andRight (N.NotBelow m k) (N.NotEq m k) nb"
+        , "                     (N.noConfusion (s m) (s k) e))) )"
         , "    () b"
         , ""
         , "-- No term is structurally below itself."
-        , "noCycleDiagN : \8704 (a : N) -> NotBelowN a a"
+        , "noCycleDiagN : \8704 (a : N) -> N.NotBelow a a"
         , "noCycleDiagN = \\ a ->"
-        , "  elim N () (\\ t -> NotBelowN t t)"
+        , "  elim N () (\\ t -> N.NotBelow t t)"
         , "    ((unit) (\\ m h -> stepN m m h))"
         , "    () a"
         , ""
         , "noCycleN : \8704 (x : N) (y : N) (e : (Eq N x y : Type\8320))"
-        , "        -> NotBelowN x y"
+        , "        -> N.NotBelow x y"
         , "noCycleN = \\ x y e ->"
-        , "  transport N (\\ w -> NotBelowN x w) x y e (noCycleDiagN x)"
+        , "  transport N (\\ w -> N.NotBelow x w) x y e (noCycleDiagN x)"
         , ""
         , "noSelfN : \8704 (n : N) (e : (Eq N n (s n) : Type\8320)) -> Empty"
         , "noSelfN = \\ n e ->"
-        , "  andRight (NotBelowN n n) (NotEqN n n) (noCycleN n (s n) e) (refl N n)"
+        , "  andRight (N.NotBelow n n) (N.NotEq n n) (noCycleN n (s n) e) (refl N n)"
         ]
   ]
 
--- | @noCycleD@ itself, at four shapes: one recursive argument, the /second/ of
+-- | @D.noCycle@ itself, at four shapes: one recursive argument, the /second/ of
 -- two, an indexed family where the equation is a chain, and a family whose
 -- recursive argument sits at an index that is a term of an earlier argument.
 --
@@ -219,7 +220,7 @@ cycleTests =
         , ""
         , "noSelfN : \8704 (n : N) (e : (Eq N n (s n) : Type\8320)) -> Empty"
         , "noSelfN = \\ n e ->"
-        , "  andRight (NotBelowN n n) (NotEqN n n) (noCycleN n (s n) e) (refl N n)"
+        , "  andRight (N.NotBelow n n) (N.NotEq n n) (N.noCycle n (s n) e) (refl N n)"
         ]
   , -- The tuple has one component per recursive argument, so reaching the
     -- second is a projection past the first.
@@ -239,9 +240,9 @@ cycleTests =
         , "               (e : (Eq Tree r (node l r) : Type\8320))"
         , "          -> Empty"
         , "noSelfTree = \\ l r e ->"
-        , "  andRight (NotBelowTree r r) (NotEqTree r r)"
-        , "    (andRight (NotBelowEqTree r l) (NotBelowEqTree r r)"
-        , "       (noCycleTree r (node l r) e))"
+        , "  andRight (Tree.NotBelow r r) (Tree.NotEq r r)"
+        , "    (andRight (Tree.NotBelowEq r l) (Tree.NotBelowEq r r)"
+        , "       (Tree.noCycle r (node l r) e))"
         , "    (refl Tree r)"
         ]
   , -- **The equation is a chain here**, the index equation and then the element
@@ -266,8 +267,8 @@ cycleTests =
         , "                     (evs n x) : Type\8320))"
         , "        -> Empty"
         , "noSelfEv = \\ n x q r ->"
-        , "  andRight (NotBelowEv n x n x) (NotEqEv n x n x)"
-        , "    (noCycleEv n x (s (s n)) (evs n x) q r)"
+        , "  andRight (Ev.NotBelow n x n x) (Ev.NotEq n x n x)"
+        , "    (Ev.noCycle n x (s (s n)) (evs n x) q r)"
         , "    (refl N n) (refl (Ev n) x)"
         ]
   , -- **The shape the easy route cannot do.** @tw@'s recursive argument sits at
@@ -294,8 +295,8 @@ cycleTests =
         , "                    (tw n t) : Type\8320))"
         , "       -> Empty"
         , "noSelfT = \\ n t q r ->"
-        , "  andRight (NotBelowT (s n) t (s n) t) (NotEqT (s n) t (s n) t)"
-        , "    (noCycleT (s n) t n (tw n t) q r)"
+        , "  andRight (T.NotBelow (s n) t (s n) t) (T.NotEq (s n) t (s n) t)"
+        , "    (T.noCycle (s n) t n (tw n t) q r)"
         , "    (refl N (s n)) (refl (T (s n)) t)"
         ]
   ]
@@ -314,61 +315,61 @@ loads ls = do
 
 kernelTests :: [TestTree]
 kernelTests =
-  [ testCase "Nat's tuple" (certified eqNat "BelowNat")
+  [ testCase "Nat's tuple" (certified eqNat "Nat.Below")
   , testCase "Nat's three relations" $ do
-      certified eqNat "NotEqNat"
-      certified eqNat "NotBelowNat"
-      certified eqNat "NotBelowEqNat"
+      certified eqNat "Nat.NotEq"
+      certified eqNat "Nat.NotBelow"
+      certified eqNat "Nat.NotBelowEq"
     -- Four constructors, three of them recursive, and @ifthen@ has three
     -- recursive arguments — so its method conjoins three pairs, which no other
     -- fixture does.
   , testCase "Term's tuple, where a constructor has three recursive arguments" $
-      certified eqTapl "BelowTerm"
-  , testCase "and its relations" $ certified eqTapl "NotBelowEqTerm"
+      certified eqTapl "Term.Below"
+  , testCase "and its relations" $ certified eqTapl "Term.NotBelowEq"
     -- One index, and a dependent /constructor/ telescope.
-  , testCase "Fin's tuple" (certified eqNatFin "BelowFin")
+  , testCase "Fin's tuple" (certified eqNatFin "Fin.Below")
   , testCase "and its relations, whose chain is one index equation deep" $
-      certified eqNatFin "NotBelowEqFin"
+      certified eqNatFin "Fin.NotBelowEq"
     -- A parameter as well as an index.
-  , testCase "Vec's tuple, with a parameter" (certified eqNatVec "BelowVec")
-  , testCase "and its relations" (certified eqNatVec "NotBelowEqVec")
+  , testCase "Vec's tuple, with a parameter" (certified eqNatVec "Vec.Below")
+  , testCase "and its relations" (certified eqNatVec "Vec.NotBelowEq")
     -- **Two indices, and a recursive argument at indices of its own**: @eIf@'s
     -- premise is a @Step t1 t1'@ while the conclusion is at
     -- @ifthen t1 t2 t3@, so the motive in the method is applied to the
     -- premise's indices and not the conclusion's.
   , testCase "Step's tuple, two indices and a recursive premise" $
-      certified eqStep "BelowStep"
-  , testCase "and its relations" (certified eqStep "NotBelowEqStep")
+      certified eqStep "Step.Below"
+  , testCase "and its relations" (certified eqStep "Step.NotBelowEq")
     -- A dependent /index/ telescope, which is what makes the chain want a
     -- @DPair@: @Below@'s second index has the first in its type.
-  , testCase "a dependent index telescope" (certified preludeBelowEnv "BelowBelow")
+  , testCase "a dependent index telescope" (certified preludeBelowEnv "Below.Below")
   , testCase "and its relations, where the index travels with the element" $
-      certified preludeBelowEnv "NotBelowEqBelow"
+      certified preludeBelowEnv "Below.NotBelowEq"
 
     -- ------------------------------------------------------------------
     -- THE NESTED J (MS9 phase 220)
     -- ------------------------------------------------------------------
     --
-    -- @noCycleDiagD@ is the induction that says no term is below itself, with
+    -- @D.noCycleDiag@ is the induction that says no term is below itself, with
     -- the @Step@ lemma of (63)–(68) written inline at each recursive argument;
-    -- @noCycleD@ eliminates the chain between two elements down to it.
+    -- @D.noCycle@ eliminates the chain between two elements down to it.
   , testCase "Nat's diagonal, and the cycle lemma over it" $ do
-      certified eqNat "noCycleDiagNat"
-      certified eqNat "noCycleNat"
+      certified eqNat "Nat.noCycleDiag"
+      certified eqNat "Nat.noCycle"
   , testCase "Term's, where one constructor has three recursive arguments" $ do
-      certified eqTapl "noCycleDiagTerm"
-      certified eqTapl "noCycleTerm"
+      certified eqTapl "Term.noCycleDiag"
+      certified eqTapl "Term.noCycle"
   , testCase "Fin's, one index and a dependent argument telescope" $
-      certified eqNatFin "noCycleFin"
-  , testCase "Vec's, with a parameter" (certified eqNatVec "noCycleVec")
+      certified eqNatFin "Fin.noCycle"
+  , testCase "Vec's, with a parameter" (certified eqNatVec "Vec.noCycle")
   , testCase "Step's, two indices and a recursive premise at its own" $
-      certified eqStep "noCycleStep"
+      certified eqStep "Step.noCycle"
   , testCase "and a dependent index telescope" $
-      certified preludeBelowEnv "noCycleBelow"
+      certified preludeBelowEnv "Below.noCycle"
   ]
 
 certified :: GlobalEnv -> String -> Assertion
-certified env g = case lookupDefinition (rootName g) env of
+certified env g = case lookupDefinition (named g) env of
   Nothing -> assertFailure (g ++ " was not generated")
   Just d  -> case certify env (definitionBody d) (definitionType d) of
     Right _ -> pure ()
@@ -399,8 +400,14 @@ treeDecl =
 noUnitEnv :: GlobalEnv
 noUnitEnv = fst (declared [eqDecl, dpairDecl, emptyDecl, andDecl, natDecl, treeDecl])
 
-has :: GlobalEnv -> String -> Bool
-has env g = lookupDefinition (rootName g) env /= Nothing
+-- | Is the word @w@ generated in the namespace the declaration of @d@ opens?
+--
+-- **Two arguments since MS10**, where it took the flat spelling: @Tree.Below@ is
+-- @Tree.Below@ now, and a test that wrote the dotted form would be asserting
+-- about a name at the root with a dot in its word — the one shape §3.6 forbids,
+-- and the shape this milestone exists to remove.
+has :: GlobalEnv -> String -> String -> Bool
+has env d w = lookupDefinition (inDeclarationOf (rootName d) w) env /= Nothing
 
 guardTests :: [TestTree]
 guardTests =
@@ -408,19 +415,19 @@ guardTests =
     -- bundle declines and not a reason the no-confusion lemma does, and the two
     -- preconditions are separate so that it stays that way. Folding them
     -- together is what made a fixture without @DPair@ report
-    -- @NoConfusionBelow was not generated@ at MS9 phase 218.
+    -- @Below.NoConfusion was not generated@ at MS9 phase 218.
     testCase "no Unit: the tuple is declined" $
-      has noUnitEnv "BelowTree" @?= False
+      has noUnitEnv "Tree" "Below" @?= False
   , testCase "and the no-confusion lemma is still there" $
-      has noUnitEnv "noConfusionTree" @?= True
+      has noUnitEnv "Tree" "noConfusion" @?= True
   , testCase "with Unit, both are" $
-      has (fst (declared (preludeDecls ++ [natDecl, treeDecl]))) "BelowTree" @?= True
+      has (fst (declared (preludeDecls ++ [natDecl, treeDecl]))) "Tree" "Below" @?= True
   , -- @Eq@ stands first in the prelude, so nothing its tuple would be written
     -- out of is in scope yet. Silent, like every other missing-prelude case.
     testCase "Eq's own: declined, because nothing is declared before it" $
-      has eqNat "BelowEq" @?= False
+      has eqNat "Eq" "Below" @?= False
   , testCase "but its no-confusion lemma is generated" $
-      has eqNat "noConfusionEq" @?= True
+      has eqNat "Eq" "noConfusion" @?= True
   , -- **The shape the nested J used to be withheld for, and it is not any
     -- more** (MS9 phase 223). @span@'s @as@ reaches back to @n@ and @e@ reaches
     -- back to @as@, so the two travel packaged and each component is read back
@@ -430,21 +437,21 @@ guardTests =
     -- instead of as a projection out of a pair transported along its
     -- neighbour's proof.
     testCase "a chain that packages a dependent argument: the nested J is there" $
-      has eqNatVecSpan "noCycleSpan" @?= True
+      has eqNatVecSpan "Span" "noCycle" @?= True
   , testCase "and the four relations are there as they always were" $
-      has eqNatVecSpan "NotBelowEqSpan" @?= True
+      has eqNatVecSpan "Span" "NotBelowEq" @?= True
   , -- **The same gap over an indexed family with a recursive argument**, which
     -- @Span@ cannot show because acyclicity for a family with no recursive
     -- argument is trivial. This is @examples\/vector-families.thena@'s @All@,
     -- where the gap was found.
     testCase "and over an indexed family whose recursive argument is in the package" $
-      has eqNatVecAll "noCycleAll" @?= True
+      has eqNatVecAll "All" "noCycle" @?= True
   , -- **An index after a dependent one refused the declaration itself** until
     -- phase 223 — the package has to be moved along an equation stated after it
     -- was built — so the no-confusion lemma is what this pins, the acyclicity
     -- equipment coming after it.
     testCase "an index after a dependent one: the no-confusion lemma is there" $
-      has eqNatVecAfter "noConfusionAfter" @?= True
+      has eqNatVecAfter "After" "noConfusion" @?= True
   , -- **An index BEFORE the dependent one refused the declaration** until MS9
     -- phase 225. @as@ reaches back to @n@ with @m@ between them, so the chain's
     -- package has @as@ read out of it and is then transported again for the
@@ -452,11 +459,11 @@ guardTests =
     -- component already projected, leaving @as@ bare at its old index. This is
     -- the smallest telescope that shows it.
     testCase "an index before a dependent one: the no-confusion lemma is there" $
-      has eqNatVecBefore "noConfusionBefore" @?= True
+      has eqNatVecBefore "Before" "noConfusion" @?= True
   , testCase "and so is the nested J over it" $
-      has eqNatVecBefore "noCycleBefore" @?= True
+      has eqNatVecBefore "Before" "noCycle" @?= True
   , testCase "and so is the nested J over it" $
-      has eqNatVecAfter "noCycleAfter" @?= True
+      has eqNatVecAfter "After" "noCycle" @?= True
   , -- **Two indices reaching back to the SAME earlier one refused the
     -- declaration** until MS9 phase 226, and it is the shape a family indexed by
     -- two vectors of one length has. Two components come out of one package and
@@ -464,16 +471,16 @@ guardTests =
     -- substitutes them: the second rewrites inside the first's term. The chain's
     -- substitution is simultaneous now.
     testCase "two indices over one length: the no-confusion lemma is there" $
-      has eqNatVecBoth "noConfusionBoth" @?= True
+      has eqNatVecBoth "Both" "noConfusion" @?= True
   , testCase "and so is the nested J over it" $
-      has eqNatVecBoth "noCycleBoth" @?= True
+      has eqNatVecBoth "Both" "noCycle" @?= True
   , -- The same defect's other half: here the package is transported along the
     -- second length's equation while a projection that mentions the component
     -- still inside it is already in flight.
     testCase "two indices over one length each: the no-confusion lemma is there" $
-      has eqNatVecApart "noConfusionApart" @?= True
+      has eqNatVecApart "Apart" "noConfusion" @?= True
   , testCase "and so is the nested J over it" $
-      has eqNatVecApart "noCycleApart" @?= True
+      has eqNatVecApart "Apart" "noCycle" @?= True
   , -- **THE SIZE IS THE PROPERTY, AND IT IS WHY THIS SHAPE IS USABLE AT ALL** —
     -- MS9 phase 227. The chain over a package writes its projections out, each
     -- one holding the projections before it, so the lemma's type multiplied by
@@ -486,8 +493,8 @@ guardTests =
     -- pin a number, and the whole of what it measures is in
     -- @Thena.Global.Generate.sharing@ and @transportNaming@.
     testCase "and the lemma's type did not grow back" $
-      case lookupDefinition (rootName "noConfusionBoth") eqNatVecBoth of
-        Nothing -> assertFailure "noConfusionBoth was not generated"
+      case lookupDefinition (named "Both.noConfusion") eqNatVecBoth of
+        Nothing -> assertFailure "Both.noConfusion was not generated"
         Just d  ->
           assertBool
             ("the two-vector lemma's type is "
@@ -496,11 +503,11 @@ guardTests =
             (length (show (definitionType d)) < 250000)
   , -- One namespace, shared with generated names (§3.6).
     testCase "a user definition of the tuple's name refuses the declaration" $
-      refuses "BelowN"
+      refuses "N.Below"
         [ "module Clash where"
         , ""
-        , "BelowN : Unit"
-        , "BelowN = unit"
+        , "N.Below : Unit"
+        , "N.Below = unit"
         , ""
         , "data N : Type\8320 where"
         , "  z : N"

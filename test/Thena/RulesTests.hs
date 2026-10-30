@@ -297,7 +297,7 @@ validateTests =
       -- 'Thena.Rules.resolvePattern' reads @true@ in a parameter position as
       -- the boolean /pattern/, so the name never exists to be refused and the
       -- case that used to stand here would assert nothing. What replaces it is
-      -- in "Thena.PatternTests", where there is a parser to write the source
+      -- in "Thena" "PatternTests", where there is a parser to write the source
       -- line with — recorded here so the disappearance is deliberate rather
       -- than a check quietly lost.
     , testCase "nor a binding false" $

@@ -66,7 +66,7 @@ tests =
           @?= (False, False)
     ]
   where
-    -- The file without its prose, which says @elim Step@ and @noConfusionTerm@
+    -- The file without its prose, which says @elim Step@ and @Term.noConfusion@
     -- in describing what the splits replaced.
     code = filter (not . isPrefixOf "--" . dropWhile (== ' ')) . lines
 

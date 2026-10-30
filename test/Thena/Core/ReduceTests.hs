@@ -12,14 +12,15 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck (counterexample, forAll, property, testProperty, withNumTests)
 
-import Thena.Core.Term (freeVars, rootName)
+import Thena.Core.Term (freeVars)
 import Thena.Core.TermTests (genTerm, poolVars)
 
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, fresh)
+import Thena.Core.Term (Core (..), Ident (..), Var, fresh)
 import Thena.Declared
-  ( nat
+  ( named
+  , nat
   , natAnd
   , natAndCounter
   , natFin
@@ -100,8 +101,6 @@ laws =
 -- @Nat@ and @Vec@ come from "Thena.Declared", shared with the conversion and
 -- typing suites so that all three agree about what they are.
 
-named :: String -> GlobalName
-named = rootName
 
 -- | One 'Hypothesis' with a made-up type, and the counter after it. Reduction
 -- never looks at a hypothesis's type — only "Thena.Core.Typing" will, from
@@ -215,12 +214,12 @@ nuTests =
 iotaNatTests :: [TestTree]
 iotaNatTests =
   [ testCase "eliminating zero gives the zero method" $
-      elimNat "zero" @?= Free mz
+      elimNatAt "zero" @?= Free mz
   , testCase "eliminating (succ zero) gives the succ method, applied" $
       -- The recursive call's target is 'zero' AS WRITTEN, not reduced to a
       -- 'Canonical': whnf never reduces an argument position, only the head
       -- spine, and 'zero' sits inside 'succ'\'s one argument.
-      elimNat "(succ zero)"
+      elimNatAt "(succ zero)"
         @?= App (App (Free ms) (Global (named "zero") []))
                 (Eliminate (named "Nat") [] [] (Free p) [Free mz, Free ms] []
                   (Global (named "zero") []))
@@ -231,7 +230,7 @@ iotaNatTests =
     (ms, ems, _)  = hyp n1 "ms"
     ctx           = [ep, emz, ems]
 
-    elimNat target = whnf nat ctx (term ctx ("elim Nat () P (mz ms) () " ++ target))
+    elimNatAt target = whnf nat ctx (term ctx ("elim Nat () P (mz ms) () " ++ target))
 
 -- --------------------------------------------------------------------------
 -- iota — Vec, a dependent family
@@ -282,9 +281,9 @@ iotaVecTests =
 iotaFinTests :: [TestTree]
 iotaFinTests =
   [ testCase "fz: the base method, applied to its index and nothing else" $
-      elimFin "((succ n0))" "(fz n0)" @?= App (Free mfz) (Free n0)
+      elimFinAt "((succ n0))" "(fz n0)" @?= App (Free mfz) (Free n0)
   , testCase "fs: the step method recurses at the argument's own index" $
-      elimFin "((succ n0))" "(fs n0 i0)"
+      elimFinAt "((succ n0))" "(fs n0 i0)"
         @?= App
               (App (App (Free mfs) (Free n0)) (Free i0))
               (Eliminate (named "Fin") [] [] (Free pf) [Free mfz, Free mfs]
@@ -299,7 +298,7 @@ iotaFinTests =
 
     ctx = [en0, ei0, epf, emfz, emfs]
 
-    elimFin indices target =
+    elimFinAt indices target =
       whnf natFin ctx
         (term' natFin natFinCounter ctx ("elim Fin () Pf (mfz mfs) " ++ indices ++ " " ++ target))
 
@@ -325,9 +324,9 @@ iotaFinTests =
 iotaParameterTests :: [TestTree]
 iotaParameterTests =
   [ testCase "a flat pair: the method takes the two components and nothing else" $
-      elimAnd "(A B)" "(both A B x y)" @?= App (App (Free m) (Free x)) (Free y)
+      elimAndAt "(A B)" "(both A B x y)" @?= App (App (Free m) (Free x)) (Free y)
   , testCase "the datatype as its own second parameter: still no hypothesis" $
-      elimAnd "(A (And B C))" "(both A (And B C) x y)"
+      elimAndAt "(A (And B C))" "(both A (And B C) x y)"
         @?= App (App (Free m) (Free x)) (Free y)
   ]
   where
@@ -341,7 +340,7 @@ iotaParameterTests =
 
     ctx = [ea, eb, ec, ex, ey, ep, em]
 
-    elimAnd params target =
+    elimAndAt params target =
       whnf natAnd ctx
         (term' natAnd natAndCounter ctx
            ("elim And " ++ params ++ " P (m) () " ++ target))

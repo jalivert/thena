@@ -66,9 +66,9 @@ along
 along
 eliminate-core ⌜ i ⌝
 goto-named "extend-hereMethod"
-elaborate ⟨ \ G x T e -> noConfusionCtx (extend G x T) empty e ⟩
+elaborate ⟨ \ G x T e -> Ctx.noConfusion (extend G x T) empty e ⟩
 goto-named "extend-there-extendMethod"
-elaborate ⟨ \ G x T x1 T1 ne i1 ih e -> noConfusionCtx (extend G x1 T1) empty e ⟩
+elaborate ⟨ \ G x T x1 T1 ne i1 ih e -> Ctx.noConfusion (extend G x1 T1) empty e ⟩
 goto-named "ctxInvEmpty-general1"
 solve
 goto-named "ctxInvEmpty-general"
@@ -410,9 +410,9 @@ along
 along
 eliminate-core ⌜ d ⌝
 goto-named "T-varMethod"
-elaborate ⟨ \ x T0 G0 i M N e -> absurdly (AppInv G0 M N T0) (noConfusionLC (var x) (app M N) e) ⟩
+elaborate ⟨ \ x T0 G0 i M N e -> absurdly (AppInv G0 M N T0) (LC.noConfusion (var x) (app M N) e) ⟩
 goto-named "T-absMethod"
-elaborate ⟨ \ G0 x S E T0 d0 ih M N e -> absurdly (AppInv G0 M N (arrow S T0)) (noConfusionLC (abs x S E) (app M N) e) ⟩
+elaborate ⟨ \ G0 x S E T0 d0 ih M N e -> absurdly (AppInv G0 M N (arrow S T0)) (LC.noConfusion (abs x S E) (app M N) e) ⟩
 goto-named "T-appMethod"
 elaborate ⟨ \ G0 M0 S T0 N0 d1 d2 ih1 ih2 M N e -> pair Ty (\ S1 -> And (typing G0 M (arrow S1 T0)) (typing G0 N S1)) S (both (typing G0 M (arrow S T0)) (typing G0 N S) (subst LC (\ m -> typing G0 m (arrow S T0)) M0 M (andLeft (Eq LC M0 M) (Eq LC N0 N) (appInj M0 N0 M N e)) d1) (subst LC (\ n -> typing G0 n S) N0 N (andRight (Eq LC M0 M) (Eq LC N0 N) (appInj M0 N0 M N e)) d2)) ⟩
 goto-named "invApp-general1"
@@ -438,11 +438,11 @@ along
 along
 eliminate-core ⌜ d ⌝
 goto-named "T-varMethod"
-elaborate ⟨ \ y T0 G0 i x S E e -> absurdly (AbsInv G0 x S E T0) (noConfusionLC (var y) (abs x S E) e) ⟩
+elaborate ⟨ \ y T0 G0 i x S E e -> absurdly (AbsInv G0 x S E T0) (LC.noConfusion (var y) (abs x S E) e) ⟩
 goto-named "T-absMethod"
 elaborate ⟨ \ G0 x0 S0 E0 T0 d0 ih x S E e -> pair Ty (\ U -> And (Eq Ty (arrow S0 T0) (arrow S U)) (typing (extend G0 x S) E U)) T0 (both (Eq Ty (arrow S0 T0) (arrow S T0)) (typing (extend G0 x S) E T0) (subst Ty (\ V -> Eq Ty (arrow S0 T0) (arrow V T0)) S0 S (andLeft (Eq Ty S0 S) (Eq LC E0 E) (andRight (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e))) (refl Ty (arrow S0 T0))) (subst String (\ z -> typing (extend G0 z S) E T0) x0 x (andLeft (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e)) (subst Ty (\ V -> typing (extend G0 x0 V) E T0) S0 S (andLeft (Eq Ty S0 S) (Eq LC E0 E) (andRight (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e))) (subst LC (\ m -> typing (extend G0 x0 S0) m T0) E0 E (andRight (Eq Ty S0 S) (Eq LC E0 E) (andRight (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e))) d0)))) ⟩
 goto-named "T-appMethod"
-elaborate ⟨ \ G0 M S0 T0 N d1 d2 ih1 ih2 x S E e -> absurdly (AbsInv G0 x S E T0) (noConfusionLC (app M N) (abs x S E) e) ⟩
+elaborate ⟨ \ G0 M S0 T0 N d1 d2 ih1 ih2 x S E e -> absurdly (AbsInv G0 x S E T0) (LC.noConfusion (app M N) (abs x S E) e) ⟩
 goto-named "invAbs-general1"
 solve
 goto-named "invAbs-general"

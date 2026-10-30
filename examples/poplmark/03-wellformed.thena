@@ -19,7 +19,7 @@
 -- **The inversion lemmas carry the result.** Eight of the proofs here invert a
 -- lookup or a `#` against one shape of context, and each used to eliminate the
 -- derivation under a motive taking an `Eq Ctx` that pinned the index, then
--- apply `noConfusionCtx` in every arm to get the equations back out.
+-- apply `Ctx.noConfusion` in every arm to get the equations back out.
 -- `bindTyInBindTm` was eleven lines of that; it is now
 --
 --     case i of { bindTy-there-bindTm G0 W S0 w' S' p -> p }

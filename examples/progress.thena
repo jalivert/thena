@@ -25,7 +25,7 @@
 -- recursive function it is, and nothing names a hypothesis binder.
 --
 -- SO `progress` IS THE ONLY `induction` IN THIS FILE. Everything else is a
--- `case`, which elaborates to the generated `caseD` and whose methods carry no
+-- `case`, which elaborates to the generated `D.case` and whose methods carry no
 -- hypothesis at all — the three lemmas do not recurse, and neither does taking
 -- an `Or` or a `Sigma` apart. Writing `case` is what makes that a type rather
 -- than a reader's observation: a recursive call in one of these arms has no

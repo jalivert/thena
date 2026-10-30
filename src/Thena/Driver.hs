@@ -69,7 +69,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -1897,7 +1897,7 @@ dispatch s name arg = case name of
       | null arg  = (s, Rejected (MissingArgument name))
       | otherwise = k
 
-    showRules what = case lookupInductive (rootName what) (globals machine) of
+    showRules what = case lookupInductive (nameFromText what) (globals machine) of
       Just d  -> (s, ShownRules d)
       Nothing -> (s, Rejected (NoSuchGlobal what))
 
@@ -1911,7 +1911,10 @@ dispatch s name arg = case name of
           Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
           Nothing -> (s, Rejected (NoSuchGlobal what))
       where
-        g = rootName what
+        -- **A qualified name is what @:show@ is usually given now** (MS10) —
+        -- @Nat.case@, @Term.noConfusion@ — and a command's argument is raw text,
+        -- so it is split here. See 'nameFromText'.
+        g = nameFromText what
 
     -- | @:elim ‹datatype›@, or @:elim ‹datatype› ‹universe›@.
     --
@@ -1929,7 +1932,7 @@ dispatch s name arg = case name of
         Right l -> (s, ShownEliminator g (fst (eliminatorType d l (names machine))))
       where
         (name', rest) = break (== ' ') what
-        g             = rootName name'
+        g             = nameFromText name'
 
     -- The universe is read with the ordinary term parser, in the empty
     -- context, so @:elim Nat Typ₀@ reports a lex error where it happened

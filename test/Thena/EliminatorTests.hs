@@ -107,7 +107,7 @@ levelTests =
       \-> ∀ (x : Nat) (target : Vec A x) -> P x target"
   ]
 
--- | @caseD@, against the eliminator printed above it (MS9 phase 178).
+-- | @D.case@, against the eliminator printed above it (MS9 phase 178).
 --
 -- __Each case here is the one above it with exactly the inductive hypotheses
 -- removed__, so the two groups read as a pair: whatever else differs between a
@@ -142,13 +142,13 @@ caseTests =
       \-> (\8704 (n : Nat) (i : Fin n) -> P (succ n) (fs n i)) \
       \-> \8704 (x : Nat) (target : Fin x) -> P x target"
 
-    -- No constructors, so there was nothing to drop: @caseEmpty@ and
+    -- No constructors, so there was nothing to drop: @Empty.case@ and
     -- @elim Empty@ are the same rule.
   , analysis "Empty: nothing to drop" natFin natFinCounter "Empty" LZero
       "\8704 (P : Empty {0} -> Type\8320) (target : Empty {0}) -> P target"
   ]
 
--- | Build @caseD@'s type and render it as an ordinary type, which is what
+-- | Build @D.case@'s type and render it as an ordinary type, which is what
 -- @:show@ prints.
 analysis :: String -> GlobalEnv -> Int -> String -> Level -> String -> TestTree
 analysis name env n0 d l expect = testCase name $

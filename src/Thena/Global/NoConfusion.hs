@@ -108,8 +108,8 @@ import Thena.Core.Context (Entry (..), entryType, entryVar, lamOver, piOver)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
-  , nameDotted
   , rootName
+  , inDeclarationOf
   , Ident (..)
   , close
   , fresh
@@ -163,8 +163,7 @@ import Thena.Global.Generate
 -- generate it is refused.
 noConfusionNames :: GlobalName -> (GlobalName, GlobalName)
 noConfusionNames n =
-  (rootName ("NoConfusion" ++ d), rootName ("noConfusion" ++ d))
-  where d = nameDotted n
+  (inDeclarationOf n "NoConfusion", inDeclarationOf n "noConfusion")
 
 -- | The two names the backwards half generates: @noConfusionNatInv@ and
 -- @isLeftInvNat@ — §3.5's @noConfD⁻¹@ and @isLeftInvD@.
@@ -174,8 +173,7 @@ noConfusionNames n =
 -- that only wants the forward lemma should not have to know these exist.
 noConfusionInverseNames :: GlobalName -> (GlobalName, GlobalName)
 noConfusionInverseNames n =
-  (rootName ("noConfusion" ++ d ++ "Inv"), rootName ("isLeftInv" ++ d))
-  where d = nameDotted n
+  (inDeclarationOf n "noConfusionInv", inDeclarationOf n "isLeftInv")
 
 -- | Generate, check and admit all four definitions — or say why not.
 --

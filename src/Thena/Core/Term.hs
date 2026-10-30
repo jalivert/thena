@@ -22,6 +22,8 @@ module Thena.Core.Term
   , nameDotted
   , declarationNamespace
   , inDeclarationOf
+  , declarationOf
+  , nameFromText
 
     -- * Terms
   , Core (..)
@@ -121,6 +123,44 @@ declarationNamespace (GlobalName ps w) = ps ++ [w]
 -- | A name for @word@ in the namespace @d@\'s declaration opens.
 inDeclarationOf :: GlobalName -> String -> GlobalName
 inDeclarationOf d word = GlobalName (declarationNamespace d) word
+
+-- | A name as a user writes it, split on the reserved dot: @Nat.elim@ is
+-- @GlobalName ["Nat"] "elim"@, and a word with no dot comes back rooted.
+--
+-- __For text that has not been through the lexer, which is a REPL command's
+-- argument and nothing else.__ Every other name in the system arrives as the
+-- pieces the lexer made — @.@ is reserved, so @Nat.elim@ in a /term/ is three
+-- tokens before anything sees it. A command's argument is the one name taken
+-- from a raw line, and @:show Nat.elim@ has to work, so the split happens here
+-- rather than each command inventing it.
+--
+-- **It is not a check**: a word the lexer would refuse comes back as a word, and
+-- the lookup that follows is what reports it. @nameDotted@ is the inverse where
+-- the word holds no dot of its own, which a generated name's does not.
+nameFromText :: String -> GlobalName
+nameFromText t = case reverse (steps t) of
+  w : rs -> GlobalName (reverse rs) w
+  []     -> rootName t
+  where
+    steps u = case break (== '.') u of
+      (a, '.' : b) -> a : steps b
+      (a, _)       -> [a]
+
+-- | 'inDeclarationOf' backwards: whose declaration's namespace is this name in?
+--
+-- @declarationOf (GlobalName ["Nat"] "elim")@ is @Just (rootName "Nat")@, and a
+-- name at the root is in nobody's, so 'Nothing'.
+--
+-- __It is what replaces reading a generated name's spelling.__ Recovering the
+-- datatype from @elimNat@ meant stripping the four characters @elim@ off the
+-- front and hoping the rest named one, which is a test on how a name is spelled
+-- rather than on what it is; the path says it outright. The word is still
+-- compared — a name is @elim@ or it is not — but that is one equality against a
+-- fixed word, not arithmetic on a string the user may also have written.
+declarationOf :: GlobalName -> Maybe GlobalName
+declarationOf (GlobalName ps _) = case reverse ps of
+  []     -> Nothing
+  w : rs -> Just (GlobalName (reverse rs) w)
 
 -- | The body of a binder, with the bound variable replaced by a de Bruijn index.
 --

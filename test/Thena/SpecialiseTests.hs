@@ -7,9 +7,9 @@
 --
 -- @
 -- (elim Vec (A) (λ x t -> Eq Nat x (succ n) -> Vec A n)
---    ( (λ q -> absurdly (Vec A n) (noConfusionNat zero (succ n) q))
+--    ( (λ q -> absurdly (Vec A n) (Nat.noConfusion zero (succ n) q))
 --      (λ n1 a v1 ih q ->
---         transport Nat (λ k -> Vec A k) n1 n (noConfusionNat (succ n1) (succ n) q) v1) )
+--         transport Nat (λ k -> Vec A k) n1 n (Nat.noConfusion (succ n1) (succ n) q) v1) )
 --    ((succ n)) v) (refl Nat (succ n))
 -- @
 --
@@ -550,7 +550,7 @@ chainTests =
     -- the equation's two sides made applications of @succ@, so injectivity fires
     -- where solution did above. It replaces the proof with one about @succ@'s
     -- argument and drops its binder, the later equation is restated along
-    -- @noConfusionNatInv@ of the new proof, and @isLeftInvNat@ carries the method
+    -- @Nat.noConfusionInv@ of the new proof, and @Nat.isLeftInv@ carries the method
     -- back from the rebuilt proof to the one it was given. Both binders go, so
     -- the method is left with the induction hypothesis alone — the same answer
     -- solution reaches, by the other transition. This was refused by name until
@@ -562,7 +562,7 @@ chainTests =
       (Just "Nat -> Nat")
 
     -- __AND THE CHAIN A CONSTRUCTOR'S OWN TELESCOPE MAKES — MS9 phase 215.__
-    -- @pack@'s second argument is typed by its first, so @noConfusionPack@
+    -- @pack@'s second argument is typed by its first, so @Pack.noConfusion@
     -- answers with a @DPair@ whose second equation is stated about the first
     -- one's /proof/: it is @i@ transported along it, not @i@. Injectivity used
     -- to decline such a constructor outright and the equation was kept; it now
@@ -580,7 +580,7 @@ chainTests =
     -- equation — and there the proof is rebuilt from @unit@ alone, with the
     -- @Unit@ elimination standing in for the η it does not have. **No step is
     -- UIP**: nothing claims the proof is @refl@, it is carried along
-    -- @isLeftInvNat@.
+    -- @Nat.isLeftInv@.
     --
     -- Both equations go, and __both of the method's own binders stay__: the
     -- two sides here are closed, so nothing is solved and @m@ and @ih@ are
@@ -788,7 +788,7 @@ plainShape k = MethodShape [] k [] [] [] []
 -- **Every fixture here is an INDUCTIVE method**, so the count that
 -- "Thena.Tactics.Specialise" used to read off the declaration is read off it
 -- here instead. It stopped doing that at phase 188 because it was assuming the
--- caller's scheme, and @caseD@'s methods carry none.
+-- caller's scheme, and @D.case@'s methods carry none.
 hypsOf :: GlobalEnv -> String -> [Ident]
 hypsOf env c = case lookupConstructor (rootName c) env of
   Nothing     -> []

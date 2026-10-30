@@ -37,6 +37,7 @@ import Thena.Core.Term
 import Data.List (isPrefixOf)
 
 import Thena.Core.Typing (check, infer)
+import Thena.Declared (named)
 import Thena.Driver
   ( Response (..)
   , Session
@@ -339,9 +340,6 @@ natVec = fst (after [natDecl, vecDecl])
 natVecCounter :: Int
 natVecCounter = snd (after [natDecl, vecDecl])
 
-named :: String -> GlobalName
-named = rootName
-
 -- --------------------------------------------------------------------------
 -- What a declaration writes
 -- --------------------------------------------------------------------------
@@ -553,16 +551,27 @@ nameTests =
     -- 49e): §3.7 item 2 generates a global for it the way it does for a former
     -- and a constructor, which is what lets @elim D …@ elaborate as an
     -- ordinary application.
-    -- **And @caseD@ is another of them** (MS9 phase 178), generated the same
+    -- **And @D.case@ is another of them** (MS9 phase 178), generated the same
     -- way and so able to clash the same way.
-  , refused "a constructor named after the case analysis"
-      "T : Type\8320 where { caseT : T }"
-      (RepeatedName (named "caseT"))
+    --
+    -- **AND SINCE MS10 A CONSTRUCTOR CANNOT REACH EITHER NAME, so the clash is
+    -- gone rather than refused.** The equipment is @T.elim@ and @T.case@, in the
+    -- namespace @T@\'s declaration opens; a constructor written in that
+    -- declaration is a word at the root. So the two flat spellings a user could
+    -- once collide with are now ordinary free names, which is what this asserts.
+    -- **The refusal itself is not dead code** — "Thena.NoConfusionTests"
+    -- exercises it with the name seeded, and a @namespace T@ block is what will
+    -- let a user write into that namespace again.
+  , testCase "a constructor spelled like the old flat equipment is now free" $
+      sequence_
+        [ afterFixtures ("T : Type\8320 where { " ++ c ++ " : T }") @?= Right ()
+        | c <- ["elimT", "caseT"]
+        ]
   , testCase "everything a declaration introduces is declared afterwards" $
       sequence_
         [ isDeclared (named g) natVec @?= True
-        | g <- [ "Nat", "zero", "succ", "elimNat", "caseNat"
-               , "Vec", "nil", "cons", "elimVec", "caseVec"
+        | g <- [ "Nat", "zero", "succ", "Nat.elim", "Nat.case"
+               , "Vec", "nil", "cons", "Vec.elim", "Vec.case"
                ]
         ]
   , testCase "and nothing else is" $

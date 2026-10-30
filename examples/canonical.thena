@@ -12,7 +12,7 @@
 --
 -- EVERY SPLIT HERE IS A `case` AND NOT AN `induction`, and that is a claim the
 -- types carry rather than a convention: `case` elaborates to the generated
--- `caseD`, whose methods have no inductive hypothesis, so none of these proofs
+-- `D.case`, whose methods have no inductive hypothesis, so none of these proofs
 -- can recurse even by accident. Canonical forms is inversion, and inversion
 -- never recurses.
 --

@@ -29,7 +29,7 @@
 -- pattern matching** (MS9), written by hand — and it exists to be read beside
 -- the generated one, which is why it is in the suite rather than in a report.
 -- **Every one of its eight lemmas is a split**: no @elim@ anywhere, and the
--- generated proof's 148 appeals to @noConfusionTerm@ become none.
+-- generated proof's 148 appeals to @Term.noConfusion@ become none.
 --
 -- **EVERY ARM OF @determinacy@ IS INLINE, NOTHING TAKES AN INDUCTION HYPOTHESIS
 -- AS A PARAMETER, AND ALL TEN ARMS RECURSE THE SAME WAY.** A split that

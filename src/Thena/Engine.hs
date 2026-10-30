@@ -1449,12 +1449,16 @@ perform instr rest m = case operation instr of
               -- fact stated elsewhere.
               spine =
                 Concrete.SurfaceApp
-                  (Concrete.SurfaceName [] e)
+                  (Concrete.SurfaceName (nameSteps e) (nameWord e))
                   (foldr NE.cons
                          (explicit mot
                             NE.:| map explicit (ms ++ is ++ [tgt]) ++ extra)
                          (map explicit ps))
-              e = nameDotted (eliminatorName (rootName d))
+              -- **The path, not its dotted spelling** (MS10): the wrapper is
+              -- @Nat.elim@ now, and a root surface name whose word held the dots
+              -- is the one shape §3.6 forbids — it resolved only while a name
+              -- was a piece of text.
+              e = eliminatorName (rootName d)
               explicit = Concrete.SurfaceArg Concrete.Explicit
       _ -> failure (ExpectedSurfaceShape "an elimination") m
     where

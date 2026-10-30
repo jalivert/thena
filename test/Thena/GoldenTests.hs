@@ -75,8 +75,8 @@ tests =
           -- the type takes no @P x ->@ in its @succ@ method, and the body is an
           -- @elim Nat@ whose methods bind the hypothesis and drop it. Then it
           -- computes, which is the only thing a type cannot show.
-        , ":show caseNat"
-        , ":whnf caseNat (\\ (t : Nat) -> Nat) zero (\\ (m : Nat) -> m) (succ (succ zero))"
+        , ":show Nat.case"
+        , ":whnf Nat.case (\\ (t : Nat) -> Nat) zero (\\ (m : Nat) -> m) (succ (succ zero))"
         , ":elim Foo"
         , ":elim Nat Nat"
         , ":elim"
@@ -117,11 +117,11 @@ tests =
           \where { true : Term ; false : Term \
           \; ifthen : Term -> Term -> Term -> Term \
           \; zero : Term ; succ : Term -> Term }"
-        , ":show noConfusionTerm"
-        , ":whnf NoConfusionTerm true true"
-        , ":whnf NoConfusionTerm true (succ zero)"
-        , ":whnf NoConfusionTerm (succ true) (succ zero)"
-        , ":whnf NoConfusionTerm (ifthen true zero zero) (ifthen false zero zero)"
+        , ":show Term.noConfusion"
+        , ":whnf Term.NoConfusion true true"
+        , ":whnf Term.NoConfusion true (succ zero)"
+        , ":whnf Term.NoConfusion (succ true) (succ zero)"
+        , ":whnf Term.NoConfusion (ifthen true zero zero) (ifthen false zero zero)"
           -- And the deliverable's second half: a proof that goes /through/ the
           -- generated lemma, extracted and put to the kernel. This is
           -- injectivity of @succ@, which is what a matching branch of the
@@ -129,7 +129,7 @@ tests =
         , ":goal \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b"
         , "along"
         , "unify \8988 goal \8989 \8988 \\ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) \
-          \-> noConfusionTerm (succ a) (succ b) e \8989"
+          \-> Term.noConfusion (succ a) (succ b) e \8989"
         , ":extract"
         , "certify ⌜ \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b ⌝"
         , "back"
@@ -137,7 +137,7 @@ tests =
         , "data Vec (A : Type\8320) : Nat -> Type\8320 \
           \where { nil : Vec A zero' \
           \; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ' n) }"
-        , ":show noConfusionVec"
+        , ":show Vec.noConfusion"
         , ":quit"
         ])
       -- §9's phase-13 deliverable: a theorem proved by hand, and admitted.
@@ -660,7 +660,7 @@ tests =
       -- The other half of §3.7: eliminating an indexed family at a **specific**
       -- index. @Ev (succ zero)@ matches no constructor, and the scheme is what
       -- says so — each method carries an equation between its own index
-      -- expression and @succ zero@, and @noConfusionNat@ (phase 14) turns both
+      -- expression and @succ zero@, and @Nat.noConfusion@ (phase 14) turns both
       -- into @Empty@. Ruling out @E-IfTrue@ against @E-If@ in the determinacy
       -- proof is this, at a bigger relation (§9, phase 18).
     , script
@@ -668,8 +668,8 @@ tests =
         ( preludeLines ++
         [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
         , "data Ev : Nat -> Type₀ where { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
-        , ":whnf NoConfusionNat zero (succ zero)"
-        , ":whnf NoConfusionNat (succ (succ zero)) (succ zero)"
+        , ":whnf Nat.NoConfusion zero (succ zero)"
+        , ":whnf Nat.NoConfusion (succ (succ zero)) (succ zero)"
         , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty {0}"
         , "attack"
         , "intro"
@@ -679,10 +679,10 @@ tests =
         , ":where"
         , "back"
         , "back"
-        , "try-core ⌜ \\ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q ⌝"
+        , "try-core ⌜ \\ (q : Eq {0} Nat zero (succ zero)) -> Nat.noConfusion zero (succ zero) q ⌝"
         , "solve"
         , "along"
-        , "try-core ⌜ \\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q) ⌝"
+        , "try-core ⌜ \\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> Nat.noConfusion (succ n) zero (Nat.noConfusion (succ (succ n)) (succ zero) q) ⌝"
         , "solve"
         , "along"
         , "solve"
@@ -1586,7 +1586,7 @@ tests =
 -- scripts declare their own @Nat@ and @Empty@, which the real prelude would
 -- clash with). Phase 14 needed only @Eq@ for that; phase 20 writes the table
 -- out of @Empty@, @Unit@ and @And@ as well, so a script that wants
--- @noConfusionD@ must declare all four up front — **and in this order**, since
+-- @D.noConfusion@ must declare all four up front — **and in this order**, since
 -- @And@\'s own no-confusion states equations and so needs @Eq@ already there.
 --
 -- Only the two scripts that use no-confusion take it. A script that declares

@@ -342,7 +342,7 @@ surfaceBlockTyping =
 -- Before this phase it was reached by the FIRST clause failing, which is a
 -- rule\'s behaviour wearing a function\'s spelling.
 --
--- **Refusing the second clause is the whole change.** "Thena.Engine" decides
+-- **Refusing the second clause is the whole change.** "Thena" "Engine" decides
 -- @Choice@ against @Call@ by @hasNext@ alone and never asks what kind of
 -- callable it has, so with one clause it already builds a @Call@ frame — which
 -- is why the last two cases here pass without a line of engine code.

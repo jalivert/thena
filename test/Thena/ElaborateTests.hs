@@ -593,7 +593,7 @@ unsupportedTests =
 
 -- | @elim@ (MS4 phase 41i) — the unit fixture has no datatypes, so what can be
 -- checked here is the refusal; the working cases are driven through the REPL in
--- "Thena.SessionTests", which is where a datatype can be declared.
+-- "Thena" "SessionTests", which is where a datatype can be declared.
 elimTests :: TestTree
 elimTests =
   testGroup
@@ -864,7 +864,7 @@ baseTests =
 -- observe a move whose answer is a focused surface term. The suite's own word
 -- tables already check that each op parses, reads back and has a keyword; what
 -- they cannot check is that a frame reaches the child it names, and
--- "Thena.SurfaceZipperTests" checks that against @rebuild@ rather than against
+-- "Thena" "SurfaceZipperTests" checks that against @rebuild@ rather than against
 -- a running rule.
 --
 -- __The second arm is reached through @split-tail@__, so a tail that dropped
@@ -1025,13 +1025,13 @@ emptySplit =
     -- every other elimination.
     --
     -- **AND THE WORD IS WHAT DECIDES THE HEAD** (MS9 phase 188). @case@ applies
-    -- the generated @caseEmpty@, @induction@ builds an @elim Empty@ node. The
-    -- two are convertible — @caseD@ δ-unfolds to exactly that elimination — so
+    -- the generated @Empty.case@, @induction@ builds an @elim Empty@ node. The
+    -- two are convertible — @D.case@ δ-unfolds to exactly that elimination — so
     -- nothing downstream and nothing in the kernel can tell them apart; what
     -- changed is that the term now says which word was written.
-  , testCase "case: the term applies caseEmpty, at a solved type" $ do
+  , testCase "case: the term applies Empty.case, at a solved type" $ do
       shown <- extracted "case"
-      assertBool shown ("caseEmpty" `isInfixOf` shown)
+      assertBool shown ("Empty.case" `isInfixOf` shown)
       assertBool shown ("Tsplit = Empty" `isInfixOf` shown)
 
   , testCase "induction: the term is an elim node with no methods" $ do
@@ -2272,15 +2272,15 @@ splittingTree =
     -- @case … of@ WITH ARMS (MS9 phase 188)
     -- ----------------------------------------------------------------
 
-    -- __The same split, through @caseD@ instead of the eliminator.__ The term
-    -- is an application of the generated @caseNat@ global rather than an
+    -- __The same split, through @D.case@ instead of the eliminator.__ The term
+    -- is an application of the generated @Nat.case@ global rather than an
     -- @Eliminate@ node, so every method is the eliminator's minus its inductive
     -- hypotheses — and @pred@ wants none, which is why this is the honest
     -- spelling of it.
     --
     -- __Checked by reduction__, for the reason @induction@'s own case gives:
     -- only reduction says the methods went to the right constructors, and here
-    -- it also says @caseNat@ δ-unfolds to the elimination underneath.
+    -- it also says @Nat.case@ δ-unfolds to the elimination underneath.
   , testCase "case: a function defined by case analysis declares and computes" $ do
       (s0, _) <- startingSession
       let (s1, r) = loadProofSource s0 (unlines (natModule ++
@@ -2293,9 +2293,9 @@ splittingTree =
       let (s2, q) = command s1 ":whnf predC (succ (succ zero))"
       unwords (renderResponse s2 q) @?= "succ zero"
 
-    -- __And the term says which word was written.__ @caseNat@ applied, with a
+    -- __And the term says which word was written.__ @Nat.case@ applied, with a
     -- method per constructor and no hypothesis in either.
-  , testCase "and the term applies caseNat, not an elim node" $ do
+  , testCase "and the term applies Nat.case, not an elim node" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 (unlines (natModule ++
             [ "predC : Nat -> Nat"
@@ -2303,10 +2303,10 @@ splittingTree =
             ]))
           (s2, q) = command s1 ":show predC"
           shown   = unwords (renderResponse s2 q)
-      assertBool shown ("caseNat" `isInfixOf` shown)
+      assertBool shown ("Nat.case" `isInfixOf` shown)
 
     -- __A RECURSIVE CALL IN A @case@ ARM IS REFUSED, AND BY ITSELF.__ Nothing
-    -- checks for it: @caseD@'s methods carry no hypothesis, so there is none
+    -- checks for it: @D.case@'s methods carry no hypothesis, so there is none
     -- for @tie-recursion@ to tie the call to, and the refusal is the same one a
     -- call on the wrong index gets under @induction@. That is the whole of why
     -- @case@ against @induction@ is a /type/ here and not a convention.

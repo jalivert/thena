@@ -72,7 +72,7 @@ import Thena.Core.Term
   , Var
   , GlobalName (..)
   , rootName
-  , nameDotted
+  , inDeclarationOf
   , Ident (..)
   , close
   , fresh
@@ -669,7 +669,7 @@ data Scheme
 -- @elim@ is a keyword, but keywords are whole tokens, so @elimNat@ lexes as one
 -- name and there is nothing to reserve.
 eliminatorName :: GlobalName -> GlobalName
-eliminatorName d = rootName ("elim" ++ nameDotted d)
+eliminatorName d = inDeclarationOf d "elim"
 
 -- | The eliminator as an ordinary global definition — its type and its body
 -- (MS4 phase 49e).
@@ -711,7 +711,7 @@ eliminatorWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
 -- as one name and there is nothing to reserve. The same sentence
 -- 'eliminatorName' carries about @elim@.
 caseName :: GlobalName -> GlobalName
-caseName d = rootName ("case" ++ nameDotted d)
+caseName d = inDeclarationOf d "case"
 
 -- | __Case analysis: the eliminator minus its inductive hypotheses__ (MS9 phase
 -- 178), as an ordinary global definition — its type and its body.

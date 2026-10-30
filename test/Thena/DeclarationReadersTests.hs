@@ -5,7 +5,7 @@
 -- has and what each one's arguments are called; `~kq4kc` cannot start without
 -- a way to ask.
 --
--- **Driven at the machine, like "Thena.EngineTests", and not through the
+-- **Driven at the machine, like "Thena" "EngineTests", and not through the
 -- REPL.** Two of the six answer with an 'Ops.VInt', and @say@ takes text — so a
 -- rule base cannot observe a count at all today. Running the op and reading
 -- @env@ tests the op; running it through a rule would only test the plumbing,

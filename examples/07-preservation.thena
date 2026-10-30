@@ -215,7 +215,7 @@ ctxInvEmpty = \ y U i -> case i of { }
 extendInj : forall (G0 : Ctx) (x : String) (T : Ty) (G : Ctx) (a : String) (S : Ty)
               (e : Eq Ctx (extend G0 x T) (extend G a S))
               -> And (Eq Ctx G0 G) (And (Eq String x a) (Eq Ty T S))
-extendInj = \ G0 x T G a S e -> noConfusionCtx (extend G0 x T) (extend G a S) e
+extendInj = \ G0 x T G a S e -> Ctx.noConfusion (extend G0 x T) (extend G a S) e
 
 extendCtx : forall (G0 : Ctx) (x : String) (T : Ty) (G : Ctx) (a : String) (S : Ty)
               (e : Eq Ctx (extend G0 x T) (extend G a S)) -> Eq Ctx G0 G
@@ -562,14 +562,14 @@ substLemma = \ x S E T N d dn ->
 -- refused with *A and C cannot be made equal*. That is `~2d9xj`, and it is the
 -- one place in this file where the style does not reach.
 arrowInj : forall (A : Ty) (B : Ty) (C : Ty) (D : Ty) (e : Eq Ty (arrow A B) (arrow C D)) -> And (Eq Ty A C) (Eq Ty B D)
-arrowInj = \ A B C D e -> noConfusionTy (arrow A B) (arrow C D) e
+arrowInj = \ A B C D e -> Ty.noConfusion (arrow A B) (arrow C D) e
 
 appInj : forall (M0 : LC) (N0 : LC) (M : LC) (N : LC) (e : Eq LC (app M0 N0) (app M N)) -> And (Eq LC M0 M) (Eq LC N0 N)
-appInj = \ M0 N0 M N e -> noConfusionLC (app M0 N0) (app M N) e
+appInj = \ M0 N0 M N e -> LC.noConfusion (app M0 N0) (app M N) e
 
 absInj : forall (x0 : String) (S0 : Ty) (E0 : LC) (x : String) (S : Ty) (E : LC) (e : Eq LC (abs x0 S0 E0) (abs x S E))
            -> And (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E))
-absInj = \ x0 S0 E0 x S E e -> noConfusionLC (abs x0 S0 E0) (abs x S E) e
+absInj = \ x0 S0 E0 x S E e -> LC.noConfusion (abs x0 S0 E0) (abs x S E) e
 
 AppInv : Ctx -> LC -> LC -> Ty -> Type₀
 AppInv = \ G M N T -> Sigma Ty (\ S -> And (typing G M (arrow S T)) (typing G N S))

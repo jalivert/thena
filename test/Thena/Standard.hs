@@ -330,10 +330,10 @@ elaborateClauses =
       -- **Which eliminator the written word asks for** (MS9 phase 188), and
       -- the only place it is read before a method is in hand. @prim-eliminate@
       -- builds an 'Thena.Core.Term.Eliminate' whose methods carry their
-      -- inductive hypotheses; @prim-case@ applies the generated @caseD@, whose
+      -- inductive hypotheses; @prim-case@ applies the generated @D.case@, whose
       -- methods are the same ones without them. Both answer the same pair, so
       -- everything downstream is shared — an arm-less split included, which is
-      -- why @case e of { }@ really applies @caseD@.
+      -- why @case e of { }@ really applies @D.case@.
     ++ [ Rule (rootName "split-claim") [PVar "t", PVar "x"]
            [SplitIsInduction (Ref "t")]
            [ Bind (Op.PVar "r") Nothing (Op.Eliminate (Ref "x"))
@@ -810,7 +810,7 @@ splitClauses =
   [ Rule (rootName "no-nesting") [PList [] Nothing] [] []
     -- **Which hypotheses a method carries** (MS9 phase 188), and the one place
     -- the written word means anything once a method is in hand: @induction@ one
-    -- per recursive argument, @case@ none, @caseD@'s methods being the
+    -- per recursive argument, @case@ none, @D.case@'s methods being the
     -- eliminator's minus exactly these. Complementary tests, so no choice point.
   , Rule (rootName "ihs-for") [PVar "t", PVar "c"]
       [SplitIsInduction (Ref "t")]

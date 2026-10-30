@@ -22,6 +22,7 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (rootName)
 import Thena.Errors (FailReason (..))
+import Thena.Declared (named)
 import Thena.Driver
   ( LoadError (..)
   , Loaded (..)
@@ -423,8 +424,8 @@ moduleTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 dependentModule
           g = globals (machineOf s1)
-      map (\n -> isDeclared (rootName n) g)
-          ["Chain", "NoConfusionChain", "noConfusionChain"]
+      map (\n -> isDeclared (named n) g)
+          ["Chain", "Chain.NoConfusion", "Chain.noConfusion"]
         @?= [True, True, True]
 
   , testCase "a load with nothing to say warns about nothing" $ do
@@ -437,7 +438,7 @@ moduleTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 natModule
           g = globals (machineOf s1)
-      map (\n -> isDeclared (rootName n) g) ["Nat", "zero", "succ", "one"]
+      map (\n -> isDeclared (named n) g) ["Nat", "zero", "succ", "one"]
         @?= [True, True, True, True]
 
   , -- **Quiet on success, loud on failure** — his call, 2026-09-02. The success

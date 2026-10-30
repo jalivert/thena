@@ -17,7 +17,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=), assertBool)
 
-import Thena.Core.Term (rootName)
+import Thena.Declared (named)
 import Thena.Driver
   ( machineOf
   )
@@ -59,19 +59,19 @@ tests =
       -- now states the second equation after transporting along the first.
       -- @And@ is still a declaration of its own rather than @Sigma A (λ _ . B)@,
       -- and keeps its own lemma.
-    , declares "NoConfusionAnd" True
-    , declares "NoConfusionSigma" True
-    , declares "NoConfusionDPair" True
+    , declares "And.NoConfusion" True
+    , declares "Sigma.NoConfusion" True
+    , declares "DPair.NoConfusion" True
     ]
   where
     statementOf g ty = testCase ("the prelude's " ++ g ++ " has its dependent type") $ do
       (s, _) <- startingSession
-      case lookupDefinition (rootName g) (globals (machineOf s)) of
+      case lookupDefinition (named g) (globals (machineOf s)) of
         Nothing -> assertFailure (g ++ " is not in the prelude")
         Just d  -> renderCore (Rendering [] (names (machineOf s))) [] (definitionType d) @?= ty
 
     declares g want =
       testCase (g ++ (if want then " is generated" else " is not")) $ do
         (s, _) <- startingSession
-        let there = lookupDefinition (rootName g) (globals (machineOf s))
+        let there = lookupDefinition (named g) (globals (machineOf s))
         (there /= Nothing) @?= want

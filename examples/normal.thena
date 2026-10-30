@@ -14,7 +14,7 @@
 -- so against `true`, `false` or `zero` every method is closed by a conflicting
 -- equation and there is nothing left to answer. This file used to write out all
 -- ten methods of `elim Step` for each of those three, and discharge each one
--- with `absurd` and `noConfusionTerm`.
+-- with `absurd` and `Term.noConfusion`.
 --
 -- THE CASE THAT IS NOT IMMEDIATE IS `succ`, where the step must be a congruence
 -- and the induction hypothesis is what kills it — and the hypothesis IS the

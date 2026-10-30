@@ -14,7 +14,7 @@
 -- is the one the unit suite cannot make: @Thena.EliminateTests@ pins the
 -- motive as a string, which says it has the shape intended, while @qed@ runs
 -- 'Thena.Kernel.certify' and says the kernel accepts the term built from it.
--- Same pattern as "Thena.DeterminacyTests", and for the same reason.
+-- Same pattern as "Thena" "DeterminacyTests", and for the same reason.
 --
 -- __And the tied case, which is the one that states an equation — MS9 phase
 -- 214, @~7gmvr@ step three.__ @examples\/tied-index-chain.thena@ declares
@@ -29,7 +29,7 @@
 -- MS9 phase 215.__ @examples\/dependent-argument-chain.thena@ declares
 -- @Pack@, whose one constructor's /own/ arguments are dependent — @i : Fin n@
 -- after @n : N@ — over a datatype with no indices at all. So the chain is in
--- @noConfusionPack@ rather than in the motive, and the transition that meets it
+-- @Pack.noConfusion@ rather than in the motive, and the transition that meets it
 -- is injectivity rather than solution. Neither telescope is downstream of the
 -- other.
 --
@@ -104,7 +104,7 @@ tests =
       -- first equation is between two applications of @s@ where @mk@'s was a
       -- variable against a term. Injectivity drops that equation's binder, and
       -- the second equation — stated about it — is restated along the proof
-      -- rebuilt by @noConfusionNInv@, with @isLeftInvN@ carrying the method
+      -- rebuilt by @N.noConfusionInv@, with @N.isLeftInv@ carrying the method
       -- back. Refused by name until the backwards half was generated.
     , testCase "and the split injectivity crosses is admitted at its written type" $ do
         (s, _) <- startingSession

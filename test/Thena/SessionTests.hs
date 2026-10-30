@@ -617,7 +617,7 @@ sessionTests =
     -- declaration introduces** (MS4 phase 49e) — 'Thena.Global.Declare.checkNames'.
   , notOk "a datatype whose eliminator's name is taken is refused"
       [ "data " ++ natDecl
-      , "declare elimBool : Nat ; elimBool = zero"
+      , "declare Bool.elim : Nat ; Bool.elim = zero"
       , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
       ]
     -- The arity is checked against the declaration, so the message names the

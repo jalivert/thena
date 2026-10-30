@@ -80,8 +80,7 @@ import Thena.Core.Level (Level (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
-  , rootName
-  , nameDotted
+  , inDeclarationOf
   , Ident (..)
   , close
   , fresh
@@ -147,28 +146,28 @@ noCycleNames d =
 
 -- | @BelowNat@ — the tuple of a motive at everything structurally smaller.
 belowName :: GlobalName -> GlobalName
-belowName d = rootName ("Below" ++ nameDotted d)
+belowName d = inDeclarationOf d "Below"
 
 -- | @NotEqNat@ — the appendix's @≢@, over the telescope.
 notEqName :: GlobalName -> GlobalName
-notEqName d = rootName ("NotEq" ++ nameDotted d)
+notEqName d = inDeclarationOf d "NotEq"
 
 -- | @NotBelowNat@ — the appendix's @≮@.
 notBelowName :: GlobalName -> GlobalName
-notBelowName d = rootName ("NotBelow" ++ nameDotted d)
+notBelowName d = inDeclarationOf d "NotBelow"
 
 -- | @NotBelowEqNat@ — the appendix's @≰@.
 notBelowEqName :: GlobalName -> GlobalName
-notBelowEqName d = rootName ("NotBelowEq" ++ nameDotted d)
+notBelowEqName d = inDeclarationOf d "NotBelowEq"
 
 -- | @noCycleDiagNat@ — no term is structurally below itself.
 noCycleDiagName :: GlobalName -> GlobalName
-noCycleDiagName d = rootName ("noCycleDiag" ++ nameDotted d)
+noCycleDiagName d = inDeclarationOf d "noCycleDiag"
 
 -- | @noCycleNat@ — and so nothing equal to a term is below it either, which is
 -- what the cycle transition applies.
 noCycleName :: GlobalName -> GlobalName
-noCycleName d = rootName ("noCycle" ++ nameDotted d)
+noCycleName d = inDeclarationOf d "noCycle"
 
 -- | Generate, check and admit the four definitions — or say why not.
 --
