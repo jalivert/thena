@@ -206,6 +206,46 @@ written `∀ {A : Type₀} -> A -> A`.
 
 ---
 
+## Modules and namespaces
+
+### A name is qualified, and a `data` declaration opens a namespace of its own
+
+*Decided 2026-10-30. **Not implemented yet** — this is the design MS10 is being
+built from, and the spellings below may still move.*
+
+A global name carries its module path, and it carries it all the way down: the
+qualified name is what the core term holds, not a flat name that something
+resolved it to. So a term on its own always says what its names mean, and a
+stored proof read later still names what it named.
+
+**A `data` declaration opens a namespace named after the datatype.** Its
+constructors and everything the declaration generates live inside it, and the
+type itself lives inside too, with a short name bound in the surrounding scope:
+
+```
+data Nat where
+  z : Nat
+  s : Nat -> Nat
+```
+
+gives you `Nat.z`, `Nat.s`, `Nat.elim` and the rest of the generated equipment,
+the type as `Nat.Nat`, and `Nat` as a short name for it where you wrote the
+declaration. **So two object languages may both declare a production called
+`var`** — `LC.var` and `STLC.var` are different names — which is the collision
+this replaces. A grammar *is* a datatype here, so its productions are its
+constructors and they are scoped with it.
+
+A file is the unit of import and is **not** a namespace: you import a file by
+its path, and what things are called comes from the `namespace` blocks they sit
+in. A namespace is open-ended, so several files may add to one. The short name a
+declaration binds is a resolution fact and not a definition — nothing is added to
+the environment, so there is nothing for the kernel to unfold.
+
+**Coming from Agda, Coq or Lean:** the namespace behaviour is Lean's, including
+constructors being scoped under their type. The export list on a file's `module`
+clause is Haskell's, and it is provisional — per-declaration visibility, as Lean
+and Idris do it, is the likely successor.
+
 ## Universes and levels
 
 *Decided across MS3 (2026-08-27 to 2026-08-29); written up 2026-08-30.*
