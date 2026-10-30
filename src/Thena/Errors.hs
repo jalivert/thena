@@ -209,6 +209,9 @@ data FailReason
     -- ^ an answer to an @AName@ question that cannot be a name
   | ExpectedText
     -- ^ an operand was not a @VText@
+  | ExpectedName
+    -- ^ an operand was not a name (MS10) — neither a @VName@ nor the string
+    -- literal that reads as one at the root.
   | ExpectedRaw
     -- ^ an op wanting an unresolved core term — a @core@ region — got something
     -- else (MS5 phase 61b).

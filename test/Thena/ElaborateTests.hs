@@ -55,7 +55,8 @@ import Thena.Engine
   , splicing
   )
 import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..))
-import Thena.Global.Env (emptyGlobals)
+import Thena.Global.Env
+  (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
 import Thena.Instral.Ops
   ( Instr (..)
   , Operand (..)
@@ -362,9 +363,26 @@ elaboratingAt cur s =
 --
 -- **With the standard base installed**, because elaboration lives in it.
 machineAt :: Cursor -> [Instr] -> Machine
-machineAt cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] [] 1000 0
+machineAt cur is = machineIn emptyGlobals cur is
+
+-- | The same, with globals of your own (MS10).
+machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
+machineIn env' cur is =
+  load is (Machine (Exec [] [] []) (Development cur) [] env' expectedBase [] [] 1000 0
                    NoUndischargeableTrust)
+
+-- | Elaborate against globals of your own.
+elaboratingIn :: GlobalEnv -> Surface -> Either FailReason Machine
+elaboratingIn env' s =
+  snd (runOut (machineIn env' hole
+        [Do (Ops.Call "elaborate" [Lit (VSurface (rootedAt s))])]))
+
+-- | An environment holding @Ns.thing : Type₀@, and nothing at the root.
+qualifiedGlobals :: GlobalEnv
+qualifiedGlobals =
+  addDefinition (GlobalName ["Ns"] "thing")
+                (MkDefinition [] [] (Universe LZero) (Universe LZero))
+                emptyGlobals
 
 -- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
 -- would show.
@@ -460,6 +478,26 @@ leafTests =
     , testCase "a name that is not in scope says so" $
         case elaborating (SurfaceName [] "nope") of
           Left (CannotRead (ResolveFailed (NotInScope x))) -> x @?= "nope"
+          other -> assertFailure ("expected a scope error: " ++ show other)
+
+      -- **A QUALIFIED NAME ELABORATES, WHICH IT COULD NOT DO BEFORE MS10 — the
+      -- measured defect.** The variable clause carries the name through a rule
+      -- — @w = surface-name t ; x = resolve-name w@ — and a name was a piece of
+      -- text, so the path was flattened to @"Ns.thing"@ on the way in and the
+      -- environment was asked for a name at the root with a dot in its word.
+      -- The lexer and the parser were both already doing their part: a file
+      -- writing @String.append "a" "b"@ was refused /not in scope:
+      -- String.append/.
+    , testCase "a qualified name in scope elaborates" $
+        case elaboratingIn qualifiedGlobals (SurfaceName ["Ns"] "thing") of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> isGuess m @?= False
+
+      -- **And the base word on its own is still a different name**, so the
+      -- clause is finding the path and not merely ignoring it.
+    , testCase "and its base word alone is not in scope" $
+        case elaboratingIn qualifiedGlobals (SurfaceName [] "thing") of
+          Left (CannotRead (ResolveFailed (NotInScope x))) -> x @?= "thing"
           other -> assertFailure ("expected a scope error: " ++ show other)
 
       -- **A leaf goes through @FILL@, not through @try@** (MS4 phase 41e), and

@@ -13,7 +13,8 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
-import Thena.Core.Term (Core (..), Ident (..), Var, close, fresh, rootName)
+import Thena.Core.Term
+  (Core (..), GlobalName (..), Ident (..), Var, close, fresh, rootName)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   (Cursor, Focus (..), along, context, enter, focus, identsIn, rebuild)
@@ -31,7 +32,8 @@ import Thena.Engine
   , splicing
   )
 import Thena.Errors (FailReason (..), MoveError (..))
-import Thena.Global.Env (GlobalEnv, emptyGlobals)
+import Thena.Global.Env
+  (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
 import Thena.Declared (nat)
 import qualified Thena.Instral.Ops as Op
 import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Value (..))
@@ -319,7 +321,7 @@ gotoTests =
     , testCase "fresh-name avoids the globals too" $
         case go (machineIn nat hole [Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "Nat")))]) of
           Left r  -> assertFailure ("did not run: " ++ show r)
-          Right m -> bound "n" m @?= Just (VText "Nat1")
+          Right m -> bound "n" m @?= Just (VName (rootName "Nat1"))
 
     , testCase "and attack's inner hole is not its outer one" $
         case run hole [Do Attack, Do Into] of
@@ -344,8 +346,8 @@ gotoTests =
         case run hole [ Bind (Op.PVar "h") Nothing (Claim (Lit (VText "h")) (Lit (VTerm type0)))
                       , Do (Op.GotoNamed (Ref "h"))
                       ] of
-          Left ExpectedText -> pure ()
-          other -> assertFailure ("expected ExpectedText, got " ++ show (fmap (const ()) other))
+          Left ExpectedName -> pure ()
+          other -> assertFailure ("expected ExpectedName, got " ++ show (fmap (const ()) other))
     ]
 
 -- --------------------------------------------------------------------------
@@ -427,7 +429,63 @@ resolveTests =
         case runIn nat hole [Do (ResolveName (Lit (VText "nope")))] of
           Left (CannotRead _) -> pure ()
           other -> assertFailure ("expected CannotRead, got " ++ show (fmap (const ()) other))
+
+      -- **THE HALF THAT WAS MISSING UNTIL MS10**, and the measured defect: a
+      -- name arrived here as text, so @resolve-name@ built a name at the root
+      -- whose word was @"Ns.thing"@ and the environment — which holds
+      -- @GlobalName ["Ns"] "thing"@ — had nothing of that shape. A file
+      -- writing @String.append "a" "b"@ was refused /not in scope:
+      -- String.append/ with the lexer and the parser both working.
+    , testCase "a qualified name resolves to the global of that path" $ do
+        v <- expectBoundIn qualified hole
+               [ Bind (Op.PVar "v") Nothing
+                      (ResolveName (Lit (VName (GlobalName ["Ns"] "thing")))) ] "v"
+        v @?= VTerm (Global (GlobalName ["Ns"] "thing") [])
+
+      -- **A path is how the writer says they did not mean a local**, so Γ is
+      -- not consulted at all for a qualified name — only a root name can be
+      -- shadowed.
+    , testCase "an assumption of the base word does not shadow it" $ do
+        v <- expectBoundIn qualified hole
+               [ Do (Assume (Lit (VText "thing")) (Lit (VTerm type0)))
+               , Bind (Op.PVar "v") Nothing
+                      (ResolveName (Lit (VName (GlobalName ["Ns"] "thing")))) ] "v"
+        v @?= VTerm (Global (GlobalName ["Ns"] "thing") [])
+
+      -- **And the same word at the root is a different name**, which is why the
+      -- flattening was wrong and not merely untidy.
+    , testCase "the base word alone is not in scope" $
+        case runIn qualified hole [Do (ResolveName (Lit (VText "thing")))] of
+          Left (CannotRead _) -> pure ()
+          other -> assertFailure ("expected CannotRead, got " ++ show (fmap (const ()) other))
+
+      -- **Nor is the dotted spelling of it**, which is the shape §3.6 forbids
+      -- and the one the old code built.
+    , testCase "and neither is a root name whose word holds the dots" $
+        case runIn qualified hole [Do (ResolveName (Lit (VText "Ns.thing")))] of
+          Left (CannotRead _) -> pure ()
+          other -> assertFailure ("expected CannotRead, got " ++ show (fmap (const ()) other))
+
+      -- **A name in the development's own scope may not have a path** — there
+      -- are no namespaces there for one to name anything in, so @assume@
+      -- refuses rather than dropping it.
+    , testCase "a component may not be named with a path" $
+        case runIn qualified hole
+               [ Do (Assume (Lit (VName (GlobalName ["Ns"] "thing")))
+                            (Lit (VTerm type0))) ] of
+          Left (NotAnIdentifier w) -> w @?= "Ns.thing"
+          other -> assertFailure ("expected NotAnIdentifier, got " ++ show (fmap (const ()) other))
     ]
+
+-- | An environment holding @Ns.thing@, and nothing at the root.
+--
+-- **A definition rather than a constant**, as 'Thena.SyntaxTests' explains: a
+-- constant does not resolve in term position.
+qualified :: GlobalEnv
+qualified =
+  addDefinition (GlobalName ["Ns"] "thing")
+                (MkDefinition [] [] type0 type0)
+                emptyGlobals
 
 runIn :: GlobalEnv -> Cursor -> [Instr] -> Either FailReason Machine
 runIn env' cur is = go (machineIn env' cur is)

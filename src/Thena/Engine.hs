@@ -1313,7 +1313,7 @@ perform instr rest m = case operation instr of
   -- the impossible case vanishing — and then nothing is claimed and the guess
   -- mentions nothing.
   Op.Specialise c hyps gk ->
-    case (,,) <$> text c
+    case (,,) <$> nameOf c
               <*> operandValue (env (exec m)) hyps
               <*> operandValue (env (exec m)) gk of
     Left e -> failure e m
@@ -1335,8 +1335,8 @@ perform instr rest m = case operation instr of
     Right (w, VList hs, VMethodShape shape) ->
       case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
-        case specialise (globals m) contextAt (names m) (rootName w)
-                        [ Ident n | VText n <- hs ] shape s of
+        case specialise (globals m) contextAt (names m) w
+                        [ Ident (nameWord n) | VName n <- hs ] shape s of
           (Left e,  n1) -> failure (CannotSpecialise e) m { names = n1 }
           (Right sp, n1) ->
             let (holes, named) = claimSubgoals (cursor (development m)) (specialisedGoal sp)
@@ -1378,7 +1378,7 @@ perform instr rest m = case operation instr of
                                     -- with @define@ once its telescope is
                                     -- bound, which is what makes the name mean
                                     -- the refined thing (@~8v3pg@).
-                                    (VList [ VPair (VText nm) (VTerm t)
+                                    (VList [ VPair (VName (rootName nm)) (VTerm t)
                                            | (Ident nm, t) <- specialisedRebound sp ])))
                               m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
@@ -1485,12 +1485,14 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right v -> produce v m
 
-  -- **The identity at run time** (MS5 phase 66b). Both a 'Op.Name' and a
-  -- 'Op.VText' are text; this op exists so that the conversion is a thing the
-  -- type system sees and the author writes down. See 'Op.NameText'.
-  NameText a -> case text a of
+  -- **It stopped being the identity at MS10** — a name is a path and a word and
+  -- text is text, so this is where the dotted spelling is made. It existed from
+  -- MS5 phase 66b as a conversion with no run-time content, so that the type
+  -- system saw it and the author wrote it down; the content arrived with the
+  -- path. See 'Op.NameText'.
+  NameText a -> case nameOf a of
     Left e  -> failure e m
-    Right t -> produce (VText t) m
+    Right g -> produce (VText (nameDotted g)) m
 
   Assume name ty -> component Component.Assume name ty
   Claim  name ty -> component Component.Claim  name ty
@@ -1512,7 +1514,7 @@ perform instr rest m = case operation instr of
       let inUse = Cursor.identsIn (cursor (development m))
                     ++ [ Ident g | g <- map nameDotted (declaredNames (globals m)) ]
           Ident n = Cursor.freshIdent inUse i
-       in produce (VText n) m
+       in produce (VName (rootName n)) m
 
   -- **Which component am I standing on?** (MS4 phase 41c) — the companion to
   -- @goal@, which answers what it is claimed /at/. Yielded as a term so that
@@ -1594,8 +1596,8 @@ perform instr rest m = case operation instr of
     Left e  -> failure e m
     Right t -> case spineOf (whnf (globals m) contextAt t) of
       Just (gn, _, _)
-        | isDatatype (nameDotted gn) -> produce (VText (nameDotted gn)) m
-        | otherwise    -> failure (NotDeclaredAs (nameDotted gn) "a datatype") m
+        | isDatatype gn -> produce (VName gn) m
+        | otherwise     -> failure (NotDeclaredAs (nameDotted gn) "a datatype") m
       Nothing -> failure (NotDeclaredAs "that type" "a datatype") m
 
   Op.DatatypeParameters a -> datatypeCount a inductiveParameters
@@ -1605,20 +1607,20 @@ perform instr rest m = case operation instr of
   -- the eliminator's methods are in, so a rule walking methods and a rule
   -- walking constructors agree without either being told.
   Op.ConstructorsOf a -> withDatatype a $ \d ->
-    produce (VList [ VText c
-                   | c <- map nameDotted (map constructorName (inductiveConstructors d)) ]) m
+    produce (VList [ VName c
+                   | c <- map constructorName (inductiveConstructors d) ]) m
 
   -- **Failing here IS the answer "that name is not a constructor"**, which is
   -- how a splitting rule tells a constructor pattern from a variable one
   -- without a test of its own.
   Op.ConstructorDatatype a -> withConstructor a $ \d _ ->
-    produce (VText (nameDotted (inductiveName d))) m
+    produce (VName (inductiveName d)) m
 
   -- Names, so a split can name its pattern variables after them — the courtesy
   -- 'Op.Eliminate' already does for its method holes. Their count is this
   -- list's length, which is the pattern's arity.
   Op.ConstructorArguments a -> withConstructor a $ \_ k ->
-    produce (VList [ VText i
+    produce (VList [ VName (rootName i)
                    | Ident i <- map entryIdent (constructorArguments k) ]) m
 
   -- **The recursive ones, which is one induction hypothesis each** (MS9 phase
@@ -1627,7 +1629,7 @@ perform instr rest m = case operation instr of
   -- so a clause counting hypotheses and the generator making them cannot
   -- disagree.
   Op.ConstructorRecursiveArguments a -> withConstructor a $ \d k ->
-    produce (VList [ VText i
+    produce (VList [ VName (rootName i)
                    | e <- constructorArguments k
                    , let Ident i = entryIdent e
                    , Just _ <- [ recursiveArgument (inductiveName d)
@@ -1640,19 +1642,19 @@ perform instr rest m = case operation instr of
   --
   -- Deliberately the same order "Thena.Syntax.Resolve" uses — a binder shadows a global of the
   -- same name, which is what one namespace (§3.6) requires.
-  ResolveName x -> case operandText (env (exec m)) x of
+  ResolveName x -> case operandName (env (exec m)) x of
     Left r  -> failure r m
-    Right w -> case inScopeAt w of
+    Right g -> case inScopeAt g of
       Just v  -> produce (VTerm (Free v)) m
-      Nothing -> case lookupDefinition (rootName w) (globals m) of
+      Nothing -> case lookupDefinition g (globals m) of
         Just d ->
           let (ls, n1) = levelArgsFor (length (definitionLevels d)) (names m)
-           in produce (VTerm (Global (rootName w) ls)) m { names = n1 }
+           in produce (VTerm (Global g ls)) m { names = n1 }
         Nothing
-          | isDeclared (rootName w) (globals m) ->
-              produce (VTerm (Global (rootName w) [])) m
+          | isDeclared g (globals m) ->
+              produce (VTerm (Global g [])) m
           | otherwise ->
-              failure (CannotRead (ResolveFailed (NotInScope w))) m
+              failure (CannotRead (ResolveFailed (NotInScope (nameDotted g)))) m
     where
       -- **The INNERMOST binding of that name**, which is what shadowing means
       -- and what "Thena.Syntax.Resolve" gives. Γ runs outermost-first, so this
@@ -1662,9 +1664,18 @@ perform instr rest m = case operation instr of
       -- the binding it was shadowing. Nothing had asked: phase 48 shipped the
       -- op with a test that had only one binding of the name in scope, and no
       -- rule used it until the leaf clauses did.
-      inScopeAt w =
-        foldl (\acc e -> if entryIdent e == Ident w then Just (entryVar e) else acc)
-              Nothing contextAt
+      --
+      -- **A QUALIFIED NAME SKIPS Γ ENTIRELY** (MS10). The context's entries are
+      -- 'Ident's in the development's own scope, which has no namespaces, so
+      -- @Nat.zero@ cannot be a local — and a path is how the writer says they
+      -- did not mean one. Only a root name can be shadowed, which is what makes
+      -- a path a way out of a shadowing.
+      inScopeAt g = case nameSteps g of
+        _ : _ -> Nothing
+        []    ->
+          foldl (\acc e -> if entryIdent e == Ident (nameWord g)
+                             then Just (entryVar e) else acc)
+                Nothing contextAt
 
   -- **The two surface readers** (MS4 phase 49). Each is paired with the test
   -- that makes it total in the clause that uses it, and fails rather than
@@ -1672,7 +1683,12 @@ perform instr rest m = case operation instr of
   Op.SurfaceNameOf x -> case surfaceAt x of
     Left r  -> failure r m
     Right s -> case s of
-      Concrete.SurfaceName ps w -> produce (VText (nameDotted (GlobalName ps w))) m
+      -- **The path as it was written, not its dotted spelling** (MS10). This
+      -- line flattened the name until here, which is why @String.append "a" "b"@
+      -- was refused /not in scope: String.append/ with the lexer and the parser
+      -- both working: the pieces got as far as the tree and were glued back
+      -- together on the way into a rule.
+      Concrete.SurfaceName ps w -> produce (VName (GlobalName ps w)) m
       _                      -> failure (ExpectedSurfaceShape "a name") m
 
   -- The literal at the focus, as the term it elaborates to (MS6 phase 97c).
@@ -1776,17 +1792,23 @@ perform instr rest m = case operation instr of
     Right _ -> failure (ExpectedSurfaceShape "a split with at least one arm") m
   Op.PatternHead x -> case patternAt x of
     Left r -> failure r m
-    Right (Concrete.PatternName w _) -> produce (VText w) m
+    -- **A pattern's head is a name at the root** (MS10), because
+    -- 'Concrete.PatternName' holds a word and not a path: a constructor pattern
+    -- cannot be written qualified yet. The name value can carry one, so the day
+    -- the grammar gives a pattern a path this line is what changes.
+    Right (Concrete.PatternName w _) -> produce (VName (rootName w)) m
     Right _ -> failure (ExpectedSurfaceShape "a pattern written as a word") m
   -- **The one pattern op that builds** (MS9 phase 231). @pattern-for-name@ is
   -- 'Op.PatternHead'\'s inverse: the interactive spelling of a split has no
   -- written patterns, so it names each position after the method's own binder
   -- and hands that name over as a pattern, which is what lets it walk the same
   -- @intro-arm-binders@ the written arms walk.
-  Op.PatternForName x -> case operandValue (env (exec m)) x of
+  Op.PatternForName x -> case wordOf x of
     Left e -> failure e m
-    Right (VText w) -> produce (VPattern (Concrete.PatternName w [])) m
-    Right _ -> failure ExpectedText m
+    -- **A qualified name is refused, not truncated** — 'operandWord'. A pattern
+    -- holds a word, so a path given here has nowhere to go, and dropping it
+    -- would build a pattern for a different constructor.
+    Right w -> produce (VPattern (Concrete.PatternName w [])) m
   Op.PatternArguments x -> case patternAt x of
     Left r -> failure r m
     Right (Concrete.PatternName _ ps) -> produce (VList (map VPattern ps)) m
@@ -1811,8 +1833,8 @@ perform instr rest m = case operation instr of
   -- which is the whole of what the walk over the report does.
   Op.BinderName x -> case operandValue (env (exec m)) x of
     Left e -> failure e m
-    Right (VBinder (Binder _ (Ident w))) -> produce (VText w) m
-    Right _ -> failure ExpectedText m
+    Right (VBinder (Binder _ (Ident w))) -> produce (VName (rootName w)) m
+    Right _ -> failure ExpectedName m
 
   -- **A plain binder only** — no annotation and no braces. That is the whole of
   -- what the λ case cannot elaborate, and saying it here means the clause finds
@@ -1894,7 +1916,7 @@ perform instr rest m = case operation instr of
       -- (MS8): @lambda-annot-type@ reads it, and the plicity refusal below stays
       -- the one place a λ shape the elaborator cannot take is named.
       | Concrete.SurfaceBinder Concrete.Explicit w _ <- NE.head bs ->
-          produce (VText w) m
+          produce (VName (rootName w)) m
     Right _ -> failure (ExpectedSurfaceShape "a λ whose first binder is explicit") m
   -- **Answered only where a type was written**, so the bare clause and the
   -- annotated one cannot both apply: a λ with no written type on its first
@@ -1917,7 +1939,7 @@ perform instr rest m = case operation instr of
 
   Op.LetName x -> case surfaceAt x of
     Left r  -> failure r m
-    Right (Concrete.SurfaceLet w _ _ _) -> produce (VText w) m
+    Right (Concrete.SurfaceLet w _ _ _) -> produce (VName (rootName w)) m
     Right _ -> failure (ExpectedSurfaceShape "a let") m
   Op.LetType x -> surfaceMove x "an annotated let" $ \s -> case s of
     Concrete.SurfaceLet w (Just ty) v b -> Just (Zipper.intoLetType w v b ty)
@@ -1932,7 +1954,7 @@ perform instr rest m = case operation instr of
   Op.ForallName x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfacePi bs _)
-      | Concrete.SurfaceBinder _ w _ <- NE.head bs -> produce (VText w) m
+      | Concrete.SurfaceBinder _ w _ <- NE.head bs -> produce (VName (rootName w)) m
     Right _ -> failure (ExpectedSurfaceShape "a ∀") m
   Op.ForallDomain x -> surfaceMove x "a ∀ whose first binder has a type" $ \s ->
     case s of
@@ -2024,7 +2046,7 @@ perform instr rest m = case operation instr of
   -- hole is reachable from anywhere. The user's correction, phase 24b: *"This
   -- instruction is supposed to be useful always, not only when you already can
   -- see the hole right above you."* It is what a person types at the REPL.
-  GotoNamed v -> case operandText (env (exec m)) v of
+  GotoNamed v -> case operandWord (env (exec m)) v of
     Left r  -> failure r m
     Right n -> moveTo (Cursor.gotoNamed (Ident n))
 
@@ -2118,27 +2140,29 @@ perform instr rest m = case operation instr of
       Do     o -> o
 
     text    = operandText (env (exec m))
+    nameOf  = operandName (env (exec m))
+    wordOf  = operandWord (env (exec m))
     term    = operandTerm (env (exec m))
 
     -- **The three readers' shared plumbing** (MS9 phase 176). Each takes the
     -- operand that names a declaration and hands the declaration to its
     -- caller, so the six cases above say what they read and nothing about how
     -- the name was got or how the failure is shaped.
-    isDatatype w = case lookupInductive (rootName w) (globals m) of
+    isDatatype g = case lookupInductive g (globals m) of
       Just _  -> True
       Nothing -> False
 
-    withDatatype a k = case text a of
+    withDatatype a k = case nameOf a of
       Left e  -> failure e m
-      Right w -> case lookupInductive (rootName w) (globals m) of
+      Right g -> case lookupInductive g (globals m) of
         Just d  -> k d
-        Nothing -> failure (NotDeclaredAs w "a datatype") m
+        Nothing -> failure (NotDeclaredAs (nameDotted g) "a datatype") m
 
-    withConstructor a k = case text a of
+    withConstructor a k = case nameOf a of
       Left e  -> failure e m
-      Right w -> case lookupConstructor (rootName w) (globals m) of
+      Right g -> case lookupConstructor g (globals m) of
         Just (d, c) -> k d c
-        Nothing     -> failure (NotDeclaredAs w "a constructor") m
+        Nothing     -> failure (NotDeclaredAs (nameDotted g) "a constructor") m
 
     -- A count off a telescope, which is what both of the counting readers are.
     datatypeCount a f = withDatatype a (\d -> produce (VInt (length (f d))) m)
@@ -2515,6 +2539,33 @@ operandText e o = operandValue e o >>= \v -> case v of
   VText s -> Right s
   _       -> Left ExpectedText
 
+-- | Only a name is a name — a namespace path and a base word (MS10).
+--
+-- **A string literal reads as a name at the root**, which is his ruling of
+-- 2026-09-12 that a literal is accepted at either type, now that the two types
+-- have different values. Inference refuses a /variable/ of
+-- 'Thena.Instral.Type.TString' in a name position, so a 'VText' arrives here
+-- only from something written down — and nothing written down is dotted: the
+-- dot is reserved, so a path on a literal could not be lexed back anyway.
+operandName :: Env -> Operand -> Either FailReason GlobalName
+operandName e o = operandValue e o >>= \v -> case v of
+  VName g -> Right g
+  VText s -> Right (rootName s)
+  _       -> Left ExpectedName
+
+-- | …and the bare word of one, where only a name in the development can stand.
+--
+-- **A qualified name is refused rather than flattened or truncated.** A
+-- component of a development, a λ's binder and a hole all live in the
+-- development's own scope, which has no namespaces (§3.6) — so @assume
+-- String.append : S@ names nothing, and a path dropped silently here would make
+-- it name the wrong thing instead. @NotAnIdentifier@ is the refusal because
+-- that is what a dotted name is: the lexer reads it as three tokens.
+operandWord :: Env -> Operand -> Either FailReason String
+operandWord e o = operandName e o >>= \g -> case nameSteps g of
+  [] -> Right (nameWord g)
+  _  -> Left (NotAnIdentifier (nameDotted g))
+
 -- | Only a 'VTerm' is a term; every other 'Value' fails here (§7.2).
 operandTerm :: Env -> Operand -> Either FailReason Core
 operandTerm e o = operandValue e o >>= \v -> case v of
@@ -2531,8 +2582,12 @@ filling :: Env -> String -> Either FailReason (String, Filling)
 filling e x = (,) x . FillTerm <$> operandTerm e (Ref x)
 
 -- | …and one that stands in a name position (MS5 phase 88).
+--
+-- **A splice in a name position supplies a BINDER's name, so a path is refused**
+-- (MS10) — 'operandWord'. @core`λ ${x} : A -> ${x}`@ binds, and the development's
+-- scope has no namespaces for a path to name anything in.
 nameFilling :: Env -> String -> Either FailReason (String, Filling)
-nameFilling e x = (,) x . FillName . Ident <$> operandText e (Ref x)
+nameFilling e x = (,) x . FillName . Ident <$> operandWord e (Ref x)
 
 -- | An unelaborated tree and the place it sits at (§7.2). Shaped like
 -- 'operandText' and 'operandTerm', and phase 17b's reason for existing at all:
@@ -2570,7 +2625,7 @@ regionBits = map piece
 -- cannot print back (§2.6).
 operandIdent :: Env -> Operand -> Either FailReason Ident
 operandIdent e o = do
-  s <- operandText e o
+  s <- operandWord e o
   if isIdentifier s then Right (Ident s) else Left (NotAnIdentifier s)
 
 -- | Which component stopped 'extract'. Purely a translation from

@@ -49,7 +49,8 @@ import Data.Maybe (isJust)
 
 import Thena.Core.Level (Level)
 import Thena.Core.Term
-  (Core (App, Canonical, Global, Primitive), GlobalName (..), Literal (..))
+  (Core (App, Canonical, Global, Primitive), GlobalName (..), Literal (..),
+   nameDotted)
 import Thena.Instral.Pattern
   (Pattern (..), Skeleton (..), Slot (..), skeletonHoles, patternBinds, patternIrrefutable)
 import Thena.Instral.Type (Signature (..), Ty (..))
@@ -94,6 +95,30 @@ type Env = [(Name, Value)]
 -- — a body is @[Instr]@, so \"Thena.Rules\" would need this module anyway.
 data Value
   = VText    String    -- ^ what @Ask@ returns and @Say@ consumes
+  | VName    GlobalName
+    -- ^ **a name — a namespace path and a base word** (MS10), and it is the
+    -- introduction form 'Thena.Instral.Type.TName' did not have.
+    --
+    -- **A name was a 'VText' until here, and that is why a qualified name
+    -- written in a surface term could not resolve.** @surface-name@ flattened
+    -- @String.append@ to the nine characters of its dotted form and
+    -- @resolve-name@ built a root name out of whatever string arrived, so the
+    -- environment was asked for a name at the root whose /word/ was
+    -- @\"String.append\"@ — the one shape §3.6 forbids. The type said the two
+    -- were different from MS5 phase 66b; the values did not, so nothing could
+    -- carry a path through a rule.
+    --
+    -- **One name type, shared with the kernel's**
+    -- ('Thena.Core.Term.GlobalName'), rather than a second of @instral@'s own:
+    -- a name is a path and a word wherever it is, and a binder's name is one
+    -- with no path — which is what 'Thena.Core.Term.rootName' makes. A
+    -- position that can only take a binder's identifier refuses a path instead
+    -- of dropping it; see 'Thena.Engine.operandWord'.
+    --
+    -- **A string literal is still accepted where a name is wanted** — his
+    -- ruling of 2026-09-12 — and it reads as a name at the root. Inference
+    -- refuses a /variable/ of 'Thena.Instral.Type.TString' there, so nothing
+    -- but a literal reaches that reading.
   | VTerm    Core      -- ^ a core term; a variable is @Free x@
   | VSurface SurfaceZipper
     -- ^ **a focused surface term — elaboration's input** (MS4 phase 41,
@@ -1876,6 +1901,12 @@ matchPattern env pt v = case (pt, v) of
   (PChar c, VChar d) | c == d -> Just []
   (PBool b, VBool c) | b == c -> Just []
   (PText t, VText u) | t == u -> Just []
+  -- **A written @\"…\"@ matches a name by its dotted form** (MS10), which is
+  -- the pattern side of a literal being accepted where a name is wanted: a
+  -- pattern is the only place a rule can take a name apart, and refusing one
+  -- here would mean a clause could test a name's spelling in a @when@ and not
+  -- in a @case@.
+  (PText t, VName g) | t == nameDotted g -> Just []
   (PPair a b, VPair x y)   -> (++) <$> matchPattern' a x <*> matchPattern' b y
   (PSome a, VOption (Just x)) -> matchPattern' a x
   (PNone,   VOption Nothing)  -> Just []

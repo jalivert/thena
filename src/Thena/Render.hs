@@ -1210,6 +1210,12 @@ renderValue ren ctx v = case v of
   -- An 'Int' is unaffected; the booleans are lowercase because that is how
   -- @instral@ spells them.
   VText s            -> escapeString s
+  -- **A name prints bare, and a string prints quoted** (MS10). That is the
+  -- whole visible difference between the two, and it is the point: @w = "zero"@
+  -- in an @env@ pane is a piece of text, @w = Nat.zero@ is a name. The dotted
+  -- form is the fallback 'nameDotted' documents — the printer's shortest-ending
+  -- policy is over terms, and a bare name value has no scope to shorten in.
+  VName g            -> nameDotted g
   VInt k             -> show k
   VChar c            -> escapeChar c
   VBool True         -> "true"
@@ -1348,6 +1354,7 @@ renderFailReason ren r = case r of
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
+  ExpectedName      -> "expected a name"
   ExpectedTerm      -> "expected a term"
   ExpectedRaw       -> "expected a core region"
   CannotResolve e   -> renderSyntaxError (ResolveFailed e)

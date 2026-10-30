@@ -63,7 +63,7 @@ pc
   3  unify-into s g
   4  prim-try x
 env
-  n = "refined"
+  n = refined
   t = ⌜A⌝
 stack
   call, 1 instruction(s) to resume
@@ -76,7 +76,7 @@ pc
   3  prim-try x
 env
   x = ⌜A⌝
-  n = "refined"
+  n = refined
   t = ⌜A⌝
 stack
   call, 1 instruction(s) to resume
@@ -89,7 +89,7 @@ pc
 env
   s = ⌜Type₀⌝
   x = ⌜A⌝
-  n = "refined"
+  n = refined
   t = ⌜A⌝
 stack
   call, 1 instruction(s) to resume

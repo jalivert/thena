@@ -952,6 +952,10 @@ operandType ctx si o st = case o of
 valueType :: Site -> Value -> St -> (Ty, St)
 valueType si v st = case v of
   VText _    -> (TString, st)
+  -- **A name is a 'TName' and nothing decides it from the position** (MS10):
+  -- unlike a text literal, a name value has an introduction form of its own, so
+  -- there is nothing deferred about it.
+  VName _    -> (TName, st)
   VInt _     -> (TInt, st)
   VChar _    -> (TChar, st)
   VBool _    -> (TBool, st)

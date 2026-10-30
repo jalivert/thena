@@ -144,6 +144,11 @@ data SkeletonView a
 -- one place 'ValueView' quietly disagreed with what the terminal shows.
 data ValueView
   = ValText String
+  | ValName String
+    -- ^ **a name, dotted** (MS10) — @Nat.elim@, and a bare word for one at the
+    -- root. A case of its own rather than a 'ValText', because a frontend
+    -- showing a name as a quoted string says it is a piece of text, and the two
+    -- are different types in @instral@.
   | ValInt Int
   | ValChar String
     -- ^ escaped as the lexer reads it back, like 'ValText' — not a bare
@@ -236,6 +241,10 @@ displayOperand gs budget env bs n at o = case o of
 displayValue :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Value -> ValueView
 displayValue gs budget env bs n at v = case v of
   VText s -> ValText (escapeString s)
+  -- **Not escaped, because it is not a literal**: a name's word is
+  -- unrestricted and may hold brackets or spaces, so there is no spelling that
+  -- reads it back and quoting it would promise one.
+  VName g -> ValName (nameDotted g)
   VInt k -> ValInt k
   VChar c -> ValChar (escapeChar c)
   VBool b -> ValBool b

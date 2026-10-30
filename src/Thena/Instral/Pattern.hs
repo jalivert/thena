@@ -48,7 +48,9 @@ data Pattern
   | PInt  Int            -- ^ @3@
   | PChar Char           -- ^ @\'c\'@
   | PBool Bool           -- ^ @true@, @false@
-  | PText String         -- ^ @"…"@ — matches 'VText', so a name too
+  | PText String
+    -- ^ @"…"@ — matches a @VText@, and a name by its dotted form (MS10), so
+    -- @\"Nat.zero\"@ matches the name @Nat.zero@ and @\"zero\"@ does not.
   | PList [Pattern] (Maybe Pattern)
     -- ^ @[a, b]@ closed, @[a, ...rest]@ open.
     --

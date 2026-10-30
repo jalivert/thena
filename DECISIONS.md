@@ -219,9 +219,10 @@ written `∀ {A : Type₀} -> A -> A`.
 ### A name is qualified, and a `data` declaration opens a namespace of its own
 
 *Decided 2026-10-30. **Being built.** A name carries its path, the dot is
-reserved, and a qualified name can be written and resolved in a core term.
-**Nothing is in a namespace yet**: no declaration places what it generates, so
-every name is still at the root, and the spellings below may still move.*
+reserved, and a qualified name can be written and resolved in a core term, in a
+term you are elaborating, and in a rule. **Nothing is in a namespace yet**: no
+declaration places what it generates, so every name is still at the root, and
+the spellings below may still move.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something

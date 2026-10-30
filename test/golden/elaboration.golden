@@ -191,7 +191,7 @@ pc
   1  call fill x
   2  call solve
 env
-  w = "a"
+  w = a
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
@@ -204,7 +204,7 @@ pc
   1  call solve
 env
   x = ⌜a⌝
-  w = "a"
+  w = a
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
@@ -235,7 +235,7 @@ pc
   3  unify-into s g
   4  prim-try x
 env
-  n = "refined"
+  n = refined
   t = ⌜a⌝
 stack
   call, 1 instruction(s) to resume
@@ -251,7 +251,7 @@ pc
   3  prim-try x
 env
   x = ⌜a⌝
-  n = "refined"
+  n = refined
   t = ⌜a⌝
 stack
   call, 1 instruction(s) to resume

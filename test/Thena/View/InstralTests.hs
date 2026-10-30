@@ -114,6 +114,10 @@ redrawSkeleton at sk = case sk of
 redrawValue :: ValueView -> String
 redrawValue v = case v of
   ValText s -> s
+  -- **A name redraws bare, where text redraws as what was inside the quotes**
+  -- (MS10). 'Thena.Render.renderValue' quotes a string and prints a name as its
+  -- dotted path, and this walker is what checks the two agree.
+  ValName s -> s
   ValInt k -> show k
   ValChar t -> t
   ValBool True -> "true"

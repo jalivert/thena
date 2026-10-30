@@ -438,17 +438,25 @@ holds env cur args t = case t of
 
     -- **An unbound operand passes, as everywhere else here**; two names that
     -- are both bound are compared as written, which is what a 'Name' is.
-    sameName a b = case (Op.operandIn args a, Op.operandIn args b) of
-      (Right (VText x), Right (VText y)) -> x == y
-      (Left _, _)                        -> True
-      (_, Left _)                        -> True
-      _                                  -> False
+    --
+    -- **PATH AND WORD, not the dotted spelling** (MS10). @GlobalName [] "a.b"@
+    -- is not @GlobalName ["a"] "b"@, and comparing the two spellings would say
+    -- it is — so the comparison is on the name, which is what makes a path
+    -- structure rather than punctuation. A written @"…"@ still compares, as a
+    -- name at the root, which is what @name-or-stem n "_"@ asks.
+    sameName a b = withNames a b (==)
+    differentName a b = withNames a b (/=)
 
-    differentName a b = case (Op.operandIn args a, Op.operandIn args b) of
-      (Right (VText x), Right (VText y)) -> x /= y
-      (Left _, _)                        -> True
-      (_, Left _)                        -> True
-      _                                  -> False
+    withNames a b p = case (asName <$> Op.operandIn args a, asName <$> Op.operandIn args b) of
+      (Right (Just x), Right (Just y)) -> p x y
+      (Left _, _)                      -> True
+      (_, Left _)                      -> True
+      _                                -> False
+
+    asName v = case v of
+      VName g -> Just g
+      VText w -> Just (rootName w)
+      _       -> Nothing
 
     isPatName     pt = case pt of PatternName _ _ -> True; _ -> False
     isPatWild     pt = case pt of PatternWildcard -> True; _ -> False
