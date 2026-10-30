@@ -55,7 +55,9 @@ import Thena.Core.Term
   ( Core (..)
   , close
   , GlobalName (..)
+  , declarationNamed
   , nameDotted
+  , nameFromText
   , rootName
   , Ident (..)
   , Var
@@ -110,6 +112,7 @@ import Thena.Language.Build
   , objectInput
   , objectText
   , productionNames
+  , productionRule
   )
 import Thena.Language.Grammar
   (Grammar (..), earleyRules)
@@ -718,6 +721,52 @@ resumeAt a m = case pc (exec m) of
 --
 -- **A choice point THIS line made is reached exactly as before** — a rule
 -- driving its own search is what rules do, and nothing here changes it.
+-- | **Which global a written name means** (MS10 phases 247 and 248).
+--
+-- **The name as written wins outright.** An @open@ and a declaration's short
+-- name can only ever /add/ a way for a name to resolve, so a name that already
+-- denotes something cannot be changed by either — which is what makes @open@
+-- safe to write above code that was already working.
+--
+-- **Then each open namespace, and two hits is a refusal and not a choice.**
+-- @open Source@ and @open Target@ both holding an @Expr@ is the situation
+-- `~7x8rt` lists, and either would type-check; picking one would be the system
+-- deciding something the user did not write. The refusal names both, and
+-- writing the path repairs it.
+--
+-- __One function, because @resolve-name@ is not the only thing that reads a
+-- written name__ (phase 248): @elim-spine@ reads the datatype @elim@ names, and
+-- a @data@ declaration putting the type inside its own namespace is what forced
+-- the two together. Anything else that takes a word and wants a global belongs
+-- here too, and Γ is the caller's business — this is only about the globals.
+globalNamed :: Machine -> GlobalName -> Either FailReason GlobalName
+globalNamed m g
+  | known g = Right g
+  | otherwise = case filter known (candidates g) of
+      [g'] -> Right g'
+      []   -> Left (CannotRead (ResolveFailed (NotInScope (nameDotted g))))
+      gs   -> Left (AmbiguousName (nameDotted g) (map nameDotted gs))
+  where
+    -- **The whole written name under each prefix**, so @open A@ and a written
+    -- @B.c@ tries @A.B.c@. A path the writer wrote is kept, because it says
+    -- what they meant; the prefix only says where to look for it.
+    --
+    -- **And each of those as a declaration's short name** (phase 248): @Nat@ is
+    -- the datatype @Nat.Nat@, which is the resolver-level alias a @data@
+    -- declaration mints. It is applied under the open prefixes too, so @open A@
+    -- and a written @Nat@ reaches @A.Nat.Nat@ — the alias is a fact about a
+    -- name, not about the scope it was found in.
+    --
+    -- **Deduplicated, because the two can agree**: @open Nat@ makes @Nat.Nat@ a
+    -- candidate by the prefix and the alias both, and two routes to one name is
+    -- not an ambiguity — 'AmbiguousName' is for two /different/ names answering
+    -- one written word.
+    candidates h =
+      nub [ c | q <- h : [ GlobalName (ns ++ nameSteps h) (nameWord h) | ns <- opened m ]
+              , c <- [q, declarationNamed q] ]
+
+    known h = isJust (lookupDefinition h (globals m)) || isDeclared h (globals m)
+
 failure :: FailReason -> Machine -> Outcome
 failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
   where
@@ -1451,10 +1500,15 @@ perform instr rest m = case operation instr of
   ElimSpine x -> case operandSurface (env (exec m)) x of
     Left r  -> failure r m
     Right z -> case outerArgs (Zipper.focus z) of
+      -- **The datatype's written word goes through 'globalNamed'** (MS10 phase
+      -- 248), because @elim Nat@ names the type and the type is @Nat.Nat@. An
+      -- @open@ reaches it here too, which it has to: there is one rule for what
+      -- a written name means.
       (Concrete.SurfaceElim d ps mot ms is tgt, extra) ->
-        case lookupInductive (rootName d) (globals m) of
+        case either (const Nothing) Just (globalNamed m (nameFromText d))
+               >>= \dn -> (,) dn <$> lookupInductive dn (globals m) of
           Nothing  -> failure (CannotRead (ResolveFailed (NotADatatype d))) m
-          Just def
+          Just (dn, def)
             | length ps /= wantP ->
                 arity (WrongNumberOfEliminationParameters d wantP (length ps))
             | length ms /= wantM ->
@@ -1489,7 +1543,7 @@ perform instr rest m = case operation instr of
               -- @Nat.elim@ now, and a root surface name whose word held the dots
               -- is the one shape §3.6 forbids — it resolved only while a name
               -- was a piece of text.
-              e = eliminatorName (rootName d)
+              e = eliminatorName dn
               explicit = Concrete.SurfaceArg Concrete.Explicit
       _ -> failure (ExpectedSurfaceShape "an elimination") m
     where
@@ -1689,32 +1743,7 @@ perform instr rest m = case operation instr of
              in produce (VTerm (Global g' ls)) m { names = n1 }
           Nothing -> produce (VTerm (Global g' [])) m
     where
-      -- **Which global a written name means, once Γ has said it is not a
-      -- local** (MS10 phase 247).
-      --
-      -- **The name as written wins outright.** An @open@ can only ever /add/ a
-      -- way for a name to resolve, so a name that already denotes something
-      -- cannot be changed by one — which is what makes @open@ safe to write
-      -- above code that was already working.
-      --
-      -- **Then each open namespace, and two hits is a refusal and not a
-      -- choice.** @open Source@ and @open Target@ both holding an @Expr@ is the
-      -- situation `~7x8rt` lists, and either would type-check; picking one
-      -- would be the system deciding something the user did not write. The
-      -- refusal names both, and writing the path repairs it.
-      globally g
-        | known g = Right g
-        | otherwise = case filter known (candidates g) of
-            [g'] -> Right g'
-            []   -> Left (CannotRead (ResolveFailed (NotInScope (nameDotted g))))
-            gs   -> Left (AmbiguousName (nameDotted g) (map nameDotted gs))
-
-      -- **The whole written name under each prefix**, so @open A@ and a written
-      -- @B.c@ tries @A.B.c@. A path the writer wrote is kept, because it says
-      -- what they meant; the prefix only says where to look for it.
-      candidates g = [ GlobalName (ns ++ nameSteps g) (nameWord g) | ns <- opened m ]
-
-      known g = isJust (lookupDefinition g (globals m)) || isDeclared g (globals m)
+      globally = globalNamed m
 
       -- **The INNERMOST binding of that name**, which is what shadowing means
       -- and what "Thena.Syntax.Resolve" gives. Γ runs outermost-first, so this
@@ -1777,8 +1806,15 @@ perform instr rest m = case operation instr of
         | Just w <- prod, w `notElem` productionNames (grammars m) lang ->
             failure (ObjectFailed (NoSuchObjectProduction lang w)) m
         | otherwise ->
+            -- **The bracket is a word and the parser wants the rule's name**
+            -- (MS10 phase 248): @LC[app]@ starts at @LC.app@. The guard above
+            -- has already refused a word this language has no production for,
+            -- so the fallback cannot be reached.
             case Earley.parse (earleyRules (grammars m))
-                              (maybe (Earley.StartAt lang) Earley.StartRule prod)
+                              (maybe (Earley.StartAt lang)
+                                     (\w -> maybe (Earley.StartAt lang) Earley.StartRule
+                                              (productionRule (grammars m) lang w))
+                                     prod)
                               (objectInput (regionBits ps)) of
               Left why ->
                 failure (ObjectFailed (ObjectNotParsed lang (objectText (regionBits ps)) (atCharacters (regionBits ps) why))) m
@@ -1852,11 +1888,20 @@ perform instr rest m = case operation instr of
     Right _ -> failure (ExpectedSurfaceShape "a split with at least one arm") m
   Op.PatternHead x -> case patternAt x of
     Left r -> failure r m
-    -- **A pattern's head is a name at the root** (MS10), because
-    -- 'Concrete.PatternName' holds a word and not a path: a constructor pattern
-    -- cannot be written qualified yet. The name value can carry one, so the day
-    -- the grammar gives a pattern a path this line is what changes.
-    Right (Concrete.PatternName w _) -> produce (VName (rootName w)) m
+    -- **A pattern's head is a word, and what it denotes is the constructor it
+    -- names or nothing at all** (MS10 phase 248). 'Concrete.PatternName' holds
+    -- a word and not a path, so a constructor pattern cannot be written
+    -- qualified; but a constructor now /has/ a path, and an arm written @refl@
+    -- has to come back as @Eq.refl@ or no walk could pair it with the
+    -- constructor it is an arm for.
+    --
+    -- **Resolved only as far as a constructor**, which is what keeps this
+    -- total: a pattern head is a constructor of the family or a binder, and a
+    -- binder lives in the arm's own scope, which has no namespaces. So a word
+    -- that resolves to something that is not a constructor is left exactly as
+    -- written — it is a binder — and 'Op.ConstructorDatatype' failing on it
+    -- goes on being how a splitting rule tells the two apart.
+    Right (Concrete.PatternName w _) -> produce (VName (headName (rootName w))) m
     Right _ -> failure (ExpectedSurfaceShape "a pattern written as a word") m
   -- **The one pattern op that builds** (MS9 phase 231). @pattern-for-name@ is
   -- 'Op.PatternHead'\'s inverse: the interactive spelling of a split has no
@@ -2217,6 +2262,11 @@ perform instr rest m = case operation instr of
       Right g -> case lookupInductive g (globals m) of
         Just d  -> k d
         Nothing -> failure (NotDeclaredAs (nameDotted g) "a datatype") m
+
+    -- | The constructor a written pattern head names, or the word as written.
+    headName g = case globalNamed m g of
+      Right g' | isJust (lookupConstructor g' (globals m)) -> g'
+      _ -> g
 
     withConstructor a k = case nameOf a of
       Left e  -> failure e m

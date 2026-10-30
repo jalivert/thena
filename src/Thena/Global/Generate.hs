@@ -59,6 +59,17 @@ module Thena.Global.Generate
   , secondOf
   , rewriting
 
+    -- * The prelude's own names
+  , equalityName
+  , reflexivityName
+  , conjunctionName
+  , bothName
+  , dependentPairName
+  , dpairName
+  , truthName
+  , unitName
+  , falsityName
+
     -- * Is a prelude type in scope, and of the prelude's shape?
   , equalityInScope
   , conjunctionInScope
@@ -89,6 +100,8 @@ import Thena.Core.Context (Context, Entry (..), entryType, entryVar, lamOver, pi
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , declarationNamed
+  , inDeclarationOf
   , rootName
   , Ident (..)
   , Var
@@ -155,10 +168,30 @@ data Generated
 -- and that is the property the module was already written for: a second copy of
 -- 'stations' would be a second reading of §3.3 to keep in step.
 
+-- | **The prelude's own names, said once** (MS10 phase 248).
+--
+-- A @data@ declaration opens a namespace and puts everything it produces
+-- inside, the type among them, so the prelude's @Eq@ is @Eq.Eq@ and its @refl@
+-- is @Eq.refl@. **The generators name them in 'Core' and not in the surface**,
+-- so no @open@ stands between them and the environment — the real name is what
+-- they must write, and writing it in one place is what stops twenty sites
+-- having to be found again the next time something moves.
+equalityName, reflexivityName, conjunctionName, bothName :: GlobalName
+dependentPairName, dpairName, truthName, unitName, falsityName :: GlobalName
+equalityName      = declarationNamed (rootName "Eq")
+reflexivityName   = inDeclarationOf equalityName "refl"
+conjunctionName   = declarationNamed (rootName "And")
+bothName          = inDeclarationOf conjunctionName "both"
+dependentPairName = declarationNamed (rootName "DPair")
+dpairName         = inDeclarationOf dependentPairName "dpair"
+truthName         = declarationNamed (rootName "Unit")
+unitName          = inDeclarationOf truthName "unit"
+falsityName       = declarationNamed (rootName "Empty")
+
 eqAt :: Level -> Core -> Core -> Core -> Core
-eqAt dl a x y = foldl App (Global (rootName "Eq") [dl]) [a, x, y]
+eqAt dl a x y = foldl App (Global equalityName [dl]) [a, x, y]
 reflAt :: Level -> Core -> Core -> Core
-reflAt dl a x = foldl App (Global (rootName "refl") [dl]) [a, x]
+reflAt dl a x = foldl App (Global reflexivityName [dl]) [a, x]
 
 -- **The conjunction is a dependent pair, one level per component.** Both
 -- are @dl@ here because every equation is stated at @dl@ — see the note
@@ -179,17 +212,17 @@ reflAt dl a x = foldl App (Global (rootName "refl") [dl]) [a, x]
 -- lifting above unnecessary. It is a change to what is generated, not to
 -- what this phase is about.
 andAt :: Level -> Core -> Core -> Core
-andAt dl p q        = foldl App (Global (rootName "And") [dl, dl]) [p, q]
+andAt dl p q        = foldl App (Global conjunctionName [dl, dl]) [p, q]
 bothAt :: Level -> Core -> Core -> Core -> Core -> Core
-bothAt dl p q x y   = foldl App (Global (rootName "both") [dl, dl]) [p, q, x, y]
+bothAt dl p q x y   = foldl App (Global bothName [dl, dl]) [p, q, x, y]
 dpairAt :: Level -> Core -> Core -> Core
-dpairAt dl a b      = foldl App (Global (rootName "DPair") [dl, dl]) [a, b]
+dpairAt dl a b      = foldl App (Global dependentPairName [dl, dl]) [a, b]
 dpairMk :: Level -> Core -> Core -> Core -> Core -> Core
-dpairMk dl a b x y  = foldl App (Global (rootName "dpair") [dl, dl]) [a, b, x, y]
+dpairMk dl a b x y  = foldl App (Global dpairName [dl, dl]) [a, b, x, y]
 unitType :: Level -> Core
-unitType dl         = Global (rootName "Unit") [dl]
+unitType dl         = Global truthName [dl]
 unitProof :: Level -> Core
-unitProof dl        = Global (rootName "unit") [dl]
+unitProof dl        = Global unitName [dl]
 
 
 -- The equality of the constructor's own arguments with the terms @rs@, as
@@ -595,7 +628,7 @@ packParts dl ss e rest n =
 -- is why the components are the binders and not something carried.
 packValue :: Level -> [(Var, Core)] -> Context -> Int -> (Core, Int)
 packValue dl ss es n = case es of
-  []       -> (Global (rootName "unit") [dl], n)
+  []       -> (Global unitName [dl], n)
   [e]      -> (Free (entryVar e), n)
   e : rest -> let ((a, b), n1) = packParts dl ss e rest n
                   (v,      n2) = packValue dl ss rest n1
@@ -615,7 +648,7 @@ firstBody dl a b p n =
   let (zv, n1) = fresh n
       (xv, n2) = fresh n1
       (yv, n3) = fresh n2
-   in ( Eliminate (rootName "DPair") [dl, dl] [a, b]
+   in ( Eliminate dependentPairName [dl, dl] [a, b]
           (Lam (Ident "p") (dpairAt dl a b) (close zv a))
           [ Lam (Ident "x") a (close xv
               (Lam (Ident "y") (App b (Free xv)) (close yv (Free xv)))) ]
@@ -662,7 +695,7 @@ secondBody dl a b p n =
       (fp, n2)  = firstBody dl a b (Free zv) n1
       (xv, n3)  = fresh n2
       (yv, n4)  = fresh n3
-   in ( Eliminate (rootName "DPair") [dl, dl] [a, b]
+   in ( Eliminate dependentPairName [dl, dl] [a, b]
           (Lam (Ident "p") (dpairAt dl a b) (close zv (App b fp)))
           [ Lam (Ident "x") a (close xv
               (Lam (Ident "y") (App b (Free xv)) (close yv (Free yv)))) ]
@@ -677,7 +710,7 @@ andFirst dl a b p n =
   let (zv, n1) = fresh n
       (xv, n2) = fresh n1
       (yv, n3) = fresh n2
-   in ( Eliminate (rootName "And") [dl, dl] [a, b]
+   in ( Eliminate conjunctionName [dl, dl] [a, b]
           (Lam (Ident "c") (andAt dl a b) (close zv a))
           [ Lam (Ident "x") a (close xv
               (Lam (Ident "y") b (close yv (Free xv)))) ]
@@ -690,7 +723,7 @@ andSecond dl a b p n =
   let (zv, n1) = fresh n
       (xv, n2) = fresh n1
       (yv, n3) = fresh n2
-   in ( Eliminate (rootName "And") [dl, dl] [a, b]
+   in ( Eliminate conjunctionName [dl, dl] [a, b]
           (Lam (Ident "c") (andAt dl a b) (close zv b))
           [ Lam (Ident "x") a (close xv
               (Lam (Ident "y") b (close yv (Free yv)))) ]
@@ -721,7 +754,7 @@ transportAt dl a m x y e p n =
                   (Pi (Ident "p") mu (close dv mv)))))))
       meth = Lam (Ident "a") a (close av
                (Lam (Ident "z") ma (close zv (Free zv))))
-   in (App (Eliminate (rootName "Eq") [dl] [a] mot [meth] [x, y] e) p, n9)
+   in (App (Eliminate equalityName [dl] [a] mot [meth] [x, y] e) p, n9)
 
 -- | 'transportAt' with the motive written **once** and named.
 --
@@ -805,7 +838,7 @@ lamsOver dl hs body =
 -- | @Empty@ at the datatype's own level — the off-diagonal case, and what the
 -- acyclicity relations are negations into.
 emptyType :: Level -> Core
-emptyType dl = Global (rootName "Empty") [dl]
+emptyType dl = Global falsityName [dl]
 
 -- | The curried telescopic equality between the telescope @tel@ and the terms
 -- @rs@, ending in @result@: one Π per entry, each closing over the binder that
@@ -942,7 +975,7 @@ proofFrom ch decided remaining n = case remaining of
         (mt, n6)    = stepMotive ch decided es a0 n5
         (mh, n7)    = stepMethod ch decided es a0 n6
         applied     = foldl App
-                        (Eliminate (rootName "Eq") [dl] [a0] mt [mh]
+                        (Eliminate equalityName [dl] [a0] mt [mh]
                            [Free vl, Free vr] (Free q0))
                         (varsOf lsCtx' ++ varsOf rsCtx'
                            ++ map (Free . statedProof) rest)
@@ -1072,7 +1105,7 @@ unpackChain dl hs goal pkg body n = case hs of
 -- looking would be that every subsequent @data@ is refused with a type error
 -- from a term the user never wrote.
 equalityInScope :: GlobalEnv -> Bool
-equalityInScope env = case lookupInductive (rootName "Eq") env of
+equalityInScope env = case lookupInductive equalityName env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     -- **@Eq@ is level-polymorphic in exactly one parameter** (MS3 phase 31d),
@@ -1086,7 +1119,7 @@ equalityInScope env = case lookupInductive (rootName "Eq") env of
         && entryType a == Universe (LVar lv)
         && entryType i == Free (entryVar a)
         && entryType j == Free (entryVar a)
-        && constructorName c == rootName "refl"
+        && constructorName c == reflexivityName
         && case constructorArguments c of
              [x] -> entryType x == Free (entryVar a)
                       && constructorIndices c == [Free (entryVar x), Free (entryVar x)]
@@ -1105,7 +1138,7 @@ equalityInScope env = case lookupInductive (rootName "Eq") env of
 -- @Eq Level@ is: @Type (ℓ₀ ⊔ ℓ₁)@ is what generalisation produces and
 -- @normalise@ is what makes the comparison mean it.
 conjunctionInScope :: GlobalEnv -> Bool
-conjunctionInScope env = case lookupInductive (rootName "And") env of
+conjunctionInScope env = case lookupInductive conjunctionName env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     ([a, b], [], [c]) | [l0, l1] <- inductiveLevels e ->
@@ -1134,7 +1167,7 @@ conjunctionInScope env = case lookupInductive (rootName "And") env of
 -- @Eq Level@ is: @Type (ℓ₀ ⊔ ℓ₁)@ is what generalisation produces and
 -- @normalise@ is what makes the comparison mean it.
 dependentPairInScope :: GlobalEnv -> Bool
-dependentPairInScope env = case lookupInductive (rootName "DPair") env of
+dependentPairInScope env = case lookupInductive dependentPairName env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     ([a, b], [], [c]) | [l0, l1] <- inductiveLevels e ->
@@ -1159,7 +1192,7 @@ dependentPairInScope env = case lookupInductive (rootName "DPair") env of
 -- | @Unit : Type₀ { unit : Unit }@ — @unit@ is checked because 'telescopic'
 -- writes it, not only the type.
 truthInScope :: GlobalEnv -> Bool
-truthInScope env = case lookupInductive (rootName "Unit") env of
+truthInScope env = case lookupInductive truthName env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     ([], [], [c]) | [lv] <- inductiveLevels e ->
@@ -1171,7 +1204,7 @@ truthInScope env = case lookupInductive (rootName "Unit") env of
 
 -- | @Empty : Type₀ { }@ — no constructor to check, which is the point of it.
 falsityInScope :: GlobalEnv -> Bool
-falsityInScope env = case lookupInductive (rootName "Empty") env of
+falsityInScope env = case lookupInductive falsityName env of
   Nothing -> False
   Just e -> case inductiveLevels e of
     [lv] -> null (inductiveParameters e)

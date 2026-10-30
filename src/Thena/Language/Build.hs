@@ -26,6 +26,7 @@ module Thena.Language.Build
   , production
   , languageNames
   , productionNames
+  , productionRule
   , objectInput
   , objectText
   , atCharacters
@@ -502,15 +503,33 @@ spineOf t = case t of
 languageNames :: [Grammar] -> [String]
 languageNames gs = map (nameDotted . grammarName) gs
 
--- | The productions of one installed language, by name.
+-- | The productions of one installed language, **by the word a user writes**.
 --
--- **Of that language and not of any**, which is what @LC[app]@ asks: a
--- production name is unique across grammars (phase 101), so the filter changes
--- no accepted literal and it is what lets the refusal name the language.
+-- **Of that language and not of any**, which is what @LC[app]@ asks: the fence
+-- pins the language, so the bracket is a lookup inside it.
+--
+-- __Words since MS10 phase 248__, where a production's own name is @LC.app@.
+-- The fence already said @LC@, so repeating it in the bracket would be the one
+-- place the user had to write a path they had just written; 'productionRule'
+-- is what turns the word back into the name the parser knows.
 productionNames :: [Grammar] -> String -> [String]
 productionNames gs lang =
   [ n | g <- gs, rootName lang == grammarName g
-      , p <- grammarProductions g, let n = nameDotted (gproductionName p) ]
+      , p <- grammarProductions g, let n = nameWord (gproductionName p) ]
+
+-- | The parser's name for one of them \u2014 @LC[app]@ is the rule @LC.app@.
+--
+-- **The Earley rule name has to stay the full name** (MS10 phase 248): it is
+-- also the 'Thena.Language.Earley.Node' name that 'production' looks a reading
+-- up by, and that lookup runs across every installed grammar, so two languages
+-- spelling a production the same way would be one nonterminal.
+productionRule :: [Grammar] -> String -> String -> Maybe String
+productionRule gs lang w =
+  case [ nameDotted (gproductionName p)
+       | g <- gs, rootName lang == grammarName g
+       , p <- grammarProductions g, nameWord (gproductionName p) == w ] of
+    n : _ -> Just n
+    []    -> Nothing
 
 -- | The pieces the object parser reads. A region is text and splices, and
 -- both readers have it that way — @Left@ text, @Right@ what fills a slot — so

@@ -72,6 +72,7 @@ import Thena.Surface.Concrete
   , SurfaceBinder (..)
   , SurfaceConstructor (..)
   , SurfaceData (..)
+  , surfaceName
   )
 import Thena.Syntax.Lexer (BlockKind (..))
 
@@ -144,7 +145,10 @@ relationOf g e = do
       ref = SurfaceName []
       binder x a = SurfaceBinder Explicit x (Just (typeOf a))
       -- An extension applied, with the context and the entry's own names.
-      extend k ctx entry = app (ref (nm (gproductionName k)))
+      -- **The production's own name, path and all** (MS10 phase 248): a
+      -- context's extensions are constructors of its datatype and live in its
+      -- namespace, so @ref@ on the dotted spelling would root them.
+      extend k ctx entry = app (surfaceName (gproductionName k))
         [ if argumentSort a == OfLanguage (grammarName g) then ref ctx
           else ref (lookupOr (argumentName a) entry)
         | a <- gproductionArguments k ]

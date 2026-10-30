@@ -29,6 +29,8 @@ judgment typing = Γ ⊢ M : T where
           --------------------------------
           Γ ⊢ ( M N ) : T
 
+open typing
+
 -- Each rule is a constructor, and `:show typing` prints them:
 --
 --   T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in x T Γ -> typing Γ (var x) T
@@ -41,6 +43,8 @@ judgment value = M value where
 
   V-abs:  ------------------------
           ( λ x : T . E ) value
+
+open value
 
 -- Call by value. `E[x->N]` is the generated substitution, LC.subst-x E x N, so
 -- a step computes its own right-hand side. A premise may be named, as `v` and
@@ -58,6 +62,8 @@ judgment step = M --> N where
   E-app2:  v : M value    s : N --> N'
            ----------------------------
            ( M N ) --> ( M N' )
+
+open step
 
 
 -- ---------------------------------------------------------------------------

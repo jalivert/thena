@@ -108,7 +108,6 @@ import Thena.Core.Context (Entry (..), entryType, entryVar, lamOver, piOver)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
-  , rootName
   , inDeclarationOf
   , Ident (..)
   , close
@@ -127,6 +126,8 @@ import Thena.Global.Env
   )
 import Thena.Global.Generate
   ( Chain (..)
+  , equalityName
+  , falsityName
   , Generated (..)
   , chainGoalType
   , chainProof
@@ -591,7 +592,7 @@ generateNoConfusion env n0 d
     -- @elim Empty ⟨λ _ . goal⟩ h@ — an impossible branch, discharged by name.
     absurdAt goal h n =
       let (tv, n1) = fresh n
-       in ( Eliminate (rootName "Empty") [dl] []
+       in ( Eliminate falsityName [dl] []
               (Lam (Ident "impossible") (emptyType dl) (close tv goal)) [] [] h
           , n1
           )
@@ -674,7 +675,7 @@ generateNoConfusion env n0 d
           dty       = familyAt (varsOf is)
           (mot, n5) = lawMotive is dty n4
           (mh,  n6) = lawMethod is dty n5
-          body      = Eliminate (rootName "Eq") [dl] [dty] mot [mh]
+          body      = Eliminate equalityName [dl] [dty] mot [mh]
                         [Free vx, Free vy] (Free vq)
        in ( lamOver ps (lamOver is
               (Lam (Ident "x") dty (close vx

@@ -21,20 +21,30 @@ data N : Type₀ where
   z : N
   s : N -> N
 
+open N
+
 data Fin : N -> Type₀ where
   fz : forall (m : N) -> Fin (s m)
   fs : forall (m : N) (j : Fin m) -> Fin (s m)
+
+open Fin
 
 data Below : forall (n : N) (i : Fin n) -> Type₀ where
   bz : forall (m : N) -> Below (s m) (fz m)
   bs : forall (m : N) (j : Fin m) (b : Below m j) -> Below (s m) (fs m j)
 
+open Below
+
 data Over : forall (n : N) (i : Fin n) (b : Below n i) -> Type₀ where
   ov : forall (m : N) -> Over (s m) (fz m) (bz m)
+
+open Over
 
 data Deep : forall (n : N) (i : Fin n) (b : Below n i) (c : Over n i b) -> Type₀ where
   d0 : forall (n : N) (i : Fin n) (b : Below n i) (c : Over n i b) (w : N)
        -> Deep n i b c
+
+open Deep
 
 deep : forall (m : N) (x : Deep (s m) (fz m) (bz m) (ov m)) -> N
 deep = \ m x -> case x of { d0 n i b c w -> w }

@@ -108,7 +108,6 @@ import Thena.Core.Term
   ( Core (..)
   , substLevelsIn
   , GlobalName (..)
-  , rootName
   , Ident (..)
   , Var
   , close
@@ -119,6 +118,7 @@ import Thena.Core.Term
   )
 import Thena.Core.Typing (check, infer, sortOf)
 import Thena.Errors (ElimError (..))
+import Thena.Global.Generate (equalityName, reflexivityName)
 import Thena.Global.Env
   ( GlobalEnv
   , ConstructorDefinition (..)
@@ -1556,10 +1556,10 @@ eliminate env ctx sch prem n0 goal tgt =
       Definition _ _ s t -> freeVars s ++ freeVars t
 
 equality :: GlobalName
-equality = rootName "Eq"
+equality = equalityName
 
 reflexivity :: GlobalName
-reflexivity = rootName "refl"
+reflexivity = reflexivityName
 
 -- | The head and arguments of a type former application.
 --

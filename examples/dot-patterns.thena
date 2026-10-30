@@ -32,9 +32,13 @@ data N : Type₀ where
   z : N
   s : N -> N
 
+open N
+
 data Vec (A : Type) : N -> Type where
   vnil : Vec A z
   vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n)
+
+open Vec
 
 -- The forced position written as a dot. `vcons`'s `n` is determined to be `m`,
 -- because the target's index is `s m` and `vcons`'s conclusion is `s n`.

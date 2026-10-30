@@ -57,6 +57,8 @@ data Or (A : Type₀) (B : Type₀) : Type₀ where
   orLeft  : forall (a : A) -> Or A B
   orRight : forall (b : B) -> Or A B
 
+open Or
+
 
 
 -- A type variable is not declared in Γ. Written by hand rather than as a
@@ -74,6 +76,8 @@ data notIn : String -> Ctx -> Type₀ where
   NI-bindTy : forall (X : String) (G : Ctx) (Y : String) (T : Ty)
                 (ne : Eq String X Y -> Empty) (p : notIn X G)
                 -> notIn X (bindTy G Y T)
+
+open notIn
 
 notation notIn (v : X) G -> v # G where
 
@@ -99,6 +103,8 @@ judgment ty = Γ ⊢ T ty where
              -------------------------------------------------------
              Γ ⊢ ( ∀ X <: T1 . T2 ) ty
 
+open ty
+
 -- A well-formed context: each entry's type is well-formed in what comes before
 -- it, and a type binding declares a name not already declared. No forward
 -- reference falls out of the first clause with no negation anywhere, because a
@@ -115,6 +121,8 @@ judgment ok = ⊢ Γ ok where
   ok-bindTy: ⊢ Γ ok      X # Γ      Γ ⊢ T ty
              -------------------------------------
              ⊢ Γ , X <: T ok
+
+open ok
 
 
 -- ---------------------------------------------------------------------------

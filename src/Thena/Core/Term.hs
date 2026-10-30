@@ -23,6 +23,7 @@ module Thena.Core.Term
   , declarationNamespace
   , inDeclarationOf
   , declarationOf
+  , declarationNamed
   , nameFromText
 
     -- * Terms
@@ -110,15 +111,17 @@ rootName = GlobalName []
 nameDotted :: GlobalName -> String
 nameDotted (GlobalName ps w) = concatMap (++ ".") ps ++ w
 
--- | Place a word in the namespace a declaration of this name opens.
+-- | The namespace a declaration of this name opens.
 --
--- @declarationNamespace (rootName "Nat")@ is @["Nat"]@, so a datatype\'s generated
--- equipment is @Nat.elim@, @Nat.Below@ and so on. **One function, because partition
--- two moves the datatype itself inside its own namespace** — @Nat.Nat@ — and the
--- equipment then stays exactly where it is; this is the line that changes, not the
--- twelve sites that mint a name.
+-- __The declaration's own steps, because the declaration lives inside its own
+-- namespace__ (MS10 phase 248): a datatype is @Nat.Nat@, so the namespace it
+-- opens is @["Nat"]@ and its equipment is @Nat.elim@, @Nat.Below@ and so on.
+-- **This is the line that moved the constructors in** — not the twelve sites
+-- that mint a name, which all go through 'inDeclarationOf' and said nothing
+-- about placement. Before phase 248 a datatype was @Nat@ at the root and this
+-- appended its word.
 declarationNamespace :: GlobalName -> [String]
-declarationNamespace (GlobalName ps w) = ps ++ [w]
+declarationNamespace = nameSteps
 
 -- | A name for @word@ in the namespace @d@\'s declaration opens.
 inDeclarationOf :: GlobalName -> String -> GlobalName
@@ -148,8 +151,10 @@ nameFromText t = case reverse (steps t) of
 
 -- | 'inDeclarationOf' backwards: whose declaration's namespace is this name in?
 --
--- @declarationOf (GlobalName ["Nat"] "elim")@ is @Just (rootName "Nat")@, and a
--- name at the root is in nobody's, so 'Nothing'.
+-- @declarationOf (GlobalName ["Nat"] "elim")@ is @Just (GlobalName ["Nat"] "Nat")@,
+-- and a name at the root is in nobody's, so 'Nothing'. **The last step names the
+-- declaration** (MS10 phase 248), because a declaration's word is the step it
+-- contributed.
 --
 -- __It is what replaces reading a generated name's spelling.__ Recovering the
 -- datatype from @elimNat@ meant stripping the four characters @elim@ off the
@@ -159,8 +164,30 @@ nameFromText t = case reverse (steps t) of
 -- fixed word, not arithmetic on a string the user may also have written.
 declarationOf :: GlobalName -> Maybe GlobalName
 declarationOf (GlobalName ps _) = case reverse ps of
-  []     -> Nothing
-  w : rs -> Just (GlobalName (reverse rs) w)
+  []    -> Nothing
+  w : _ -> Just (GlobalName ps w)
+
+-- | The declaration a written short name denotes: @Nat@ is @Nat.Nat@.
+--
+-- __The resolver-level short name a declaration mints__ (HIS ruling,
+-- 2026-10-29; MS10 phase 248). A @data Nat@ declaration puts everything it
+-- produces inside the namespace @Nat@, **the type among them**, so the one name
+-- it adds to the enclosing scope is the namespace — and @Nat@ written in a
+-- signature is this.
+--
+-- **It is a resolution fact and not a definition.** Nothing enters the
+-- environment, so δ has nothing to unfold and no stored term can carry the
+-- short name instead of the real one: a 'Core' term says @Nat.Nat@ and always
+-- did say the real name.
+--
+-- **And it is derived rather than recorded**, which is the same argument that
+-- kept a namespace table out of 'Thena.Global.Env' (HIS ruling, 2026-10-30): a
+-- table of aliases would hold a second copy of what the environment's keys
+-- already say and could disagree with them. The two sites that need it are
+-- resolution, which probes it, and 'Thena.Driver.datatypeProgram', which mints
+-- the name it points at — one function, so they cannot drift apart.
+declarationNamed :: GlobalName -> GlobalName
+declarationNamed (GlobalName ps w) = GlobalName (ps ++ [w]) w
 
 -- | The body of a binder, with the bound variable replaced by a de Bruijn index.
 --

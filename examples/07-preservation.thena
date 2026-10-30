@@ -72,6 +72,8 @@ data Or (A : Type₀) (B : Type₀) : Type₀ where
   orLeft : forall (a : A) -> Or A B
   orRight : forall (b : B) -> Or A B
 
+open Or
+
 -- ---------------------------------------------------------------------------
 -- Lists of names, and the pieces of generated substitution, named
 

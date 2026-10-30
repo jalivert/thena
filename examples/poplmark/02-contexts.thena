@@ -23,6 +23,10 @@ context Ctx, Γ, Δ where
   bindTm -> Γ , x : T
   bindTy -> Γ , X <: T
 
+open Ctx
+open bindTm-in
+open bindTy-in
+
 -- A context is written in its own notation.
 twoKinds : Ctx
 twoKinds = Ctx`· , X <: ⊤ , y : X`

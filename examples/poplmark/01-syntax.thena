@@ -35,6 +35,8 @@ language Ty, T, S, U, Q where
   arrow                   -> ( T -> S )
   all   : X as binder     -> ( ∀ X <: T . S[X] )
 
+open Ty
+
 -- Terms.      t ::= x | λx:T. t | t t | ΛX<:T. t | t [T]
 --
 -- BINDING AT BOTH LEVELS, in one grammar: `abs` binds a term variable and
@@ -46,6 +48,8 @@ language Tm, t, s where
   app                     -> ( t s )
   tabs  : X as binder     -> ( Λ X <: T . t[X] )
   tapp                    -> ( t [ T ] )
+
+open Tm
 
 
 -- ---------------------------------------------------------------------------

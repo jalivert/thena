@@ -1,5 +1,7 @@
 data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+open Nat
 data Even : Nat -> Type₀ where { evenZero : Even zero ; evenSS : ∀ (n : Nat) (p : Even n) -> Even (succ (succ n)) }
+open Even
 :whnf Nat.NoConfusion zero zero
 :whnf Nat.NoConfusion zero (succ zero)
 :whnf Nat.NoConfusion (succ zero) (succ (succ zero))

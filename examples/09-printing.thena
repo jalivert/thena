@@ -60,6 +60,8 @@ judgment written = U ! where
   W:  -----
       U !
 
+open written
+
 --   thena spine> :infer leftWritten
 --   leftWritten : written`${Ex`f a`} b !`
 leftWritten : written (juxt (juxt (ref "f") (ref "a")) (ref "b"))
@@ -91,10 +93,14 @@ language Coll, P, Q where
   cjux                      -> P Q
   clet  : one as binder     -> l one = P i Q[one]
 
+open Coll
+
 judgment fine = P ! where
 
   F:  -----
       P !
+
+open fine
 
 -- Nothing is ambiguous here, so nothing is fenced:
 --

@@ -42,18 +42,26 @@ data Term : Type₀ where
   pred : Term -> Term
   iszero : Term -> Term
 
+open Term
+
 data Ty : Type₀ where
   bool : Ty
   nat : Ty
+
+open Ty
 
 data NV : Term -> Type₀ where
   nvZero : NV zero
   nvSucc : forall (t : Term) (n : NV t) -> NV (succ t)
 
+open NV
+
 data Value : Term -> Type₀ where
   vTrue : Value true
   vFalse : Value false
   vNat : forall (t : Term) (n : NV t) -> Value t
+
+open Value
 
 data HasType : Term -> Ty -> Type₀ where
   tTrue : HasType true bool
@@ -64,9 +72,13 @@ data HasType : Term -> Ty -> Type₀ where
   tPred : forall (t : Term) (d : HasType t nat) -> HasType (pred t) nat
   tIsZero : forall (t : Term) (d : HasType t nat) -> HasType (iszero t) bool
 
+open HasType
+
 data Or (A : Type₀) (B : Type₀) : Type₀ where
   inl : forall (a : A) -> Or A B
   inr : forall (b : B) -> Or A B
+
+open Or
 
 absurd : forall (C : Type₀) (e : Empty) -> C
 absurd = \ C e -> case e of { }

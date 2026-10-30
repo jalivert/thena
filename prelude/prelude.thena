@@ -3,6 +3,13 @@ module Prelude where
 data Eq (A : Type) : A -> A -> Type where
   refl : forall (a : A) -> Eq A a a
 
+-- **Every datatype here is opened right where it is declared** (MS10 phase
+-- 248). A `data` declaration puts the type and its constructors inside a
+-- namespace of its own, so `refl` is `Eq.refl`; the prelude's namespace is
+-- every modelled language's, and these are the short names that namespace is
+-- expected to supply.
+open Eq
+
 -- A dependent pair whose two levels are its own, `Sigma` with every `Type₀`
 -- written `Type` — so inference generalises it the way it generalises `And`
 -- (MS3 phase 33c), one level per component and the result at their join.
@@ -19,13 +26,19 @@ data Eq (A : Type) : A -> A -> Type where
 data DPair (A : Type) (B : A -> Type) : Type where
   dpair : forall (a : A) (b : B a) -> DPair A B
 
+open DPair
+
 data Unit : Type where
   unit : Unit
+
+open Unit
 
 data Empty : Type where
 
 data And (A : Type) (B : Type) : Type where
   both : forall (a : A) (b : B) -> And A B
+
+open And
 
 -- What generated substitution works over (MS6 phase 105): a language's free
 -- variables are a list of names, and a simultaneous substitution is a list of
@@ -37,6 +50,8 @@ data And (A : Type) (B : Type) : Type where
 data List (A : Type) : Type where
   nil : List A
   cons : forall (a : A) (rest : List A) -> List A
+
+open List
 
 -- What a primitive comparison answers with (MS6 phase 97b).
 --
@@ -50,6 +65,8 @@ data List (A : Type) : Type where
 data Comparison : Type₀ where
   same : Comparison
   different : Comparison
+
+open Comparison
 
 -- The three primitive types compare, and this is where the system is told so
 -- (MS6 phase 97b). @declare-primitive@ takes the name and the type; it accepts
@@ -76,6 +93,8 @@ do declare-primitive String.eq (resolve-core core`String -> String -> Comparison
 data Dec (A : Type) : Type where
   yes : forall (p : A) -> Dec A
   no : forall (n : A -> Empty) -> Dec A
+
+open Dec
 
 -- **Comparison with evidence** (MS6 phase 109a, his choice on
 -- `ms6/CLOSEOUT.md` 32; a definition rather than a primitive since MS8 phase
@@ -218,6 +237,8 @@ decInt = λ (a : Int) (b : Int) -> (elim Comparison () (λ (c : Comparison) -> E
 
 data Sigma (A : Type₀) (B : A -> Type₀) : Type₀ where
   pair : forall (a : A) (b : B a) -> Sigma A B
+
+open Sigma
 
 fst : forall (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> A
 fst = \ A B s -> elim Sigma (A B) (\ z -> A) ((\ a b -> a)) () s

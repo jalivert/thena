@@ -14,6 +14,7 @@ import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , declarationNamed
   , nameDotted
   , rootName
   , Ident (..)
@@ -327,9 +328,25 @@ core gr env gs sp ctx local n raw = case raw of
     -- | A global at level arguments. **The refusal prints the whole path**,
     -- because that is what was written: @Nat.elim is not in scope@ and
     -- @elim is not in scope@ are different reports (MS10 phase 240).
+    --
+    -- **A written word is also tried as a declaration's short name** (MS10
+    -- phase 248), so @Nat@ reaches the datatype @Nat.Nat@ — the alias a @data@
+    -- declaration mints. Nothing is in the environment under @Nat@, which is
+    -- what makes it an alias rather than a definition, so the probe is the only
+    -- way to find it. **The written name still wins**, as it does under an
+    -- @open@: an alias can add a way to resolve and never change one.
+    --
+    -- __The open prefixes are not here, and that is a seam and not an
+    -- oversight.__ This resolver is the raw tree's — a REPL command's argument,
+    -- a tagged term literal, @:parse@ — and it is handed an environment and a
+    -- context with no machine behind them, so there is nothing to read
+    -- 'Thena.Engine.opened' from. A surface term being elaborated goes through
+    -- @resolve-name@ in the engine, which has both.
     plainAt g args
       | g `elem` gs = Right (Global g args, n)
+      | d `elem` gs = Right (Global d args, n)
       | otherwise   = Left (NotInScope (nameDotted g))
+      where d = declarationNamed g
 
 -- | Resolve @elim@\'s head through the ordinary scope chain, and insist it
 -- named a global.

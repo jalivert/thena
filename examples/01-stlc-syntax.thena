@@ -15,6 +15,8 @@ language Ty, T, S where
   base  -> ι
   arrow -> ( T -> S )
 
+open Ty
+
 -- Terms. `var` is where an identifier is used, `abs` binds one, and `E[x]`
 -- says the body is where it is bound. Each production becomes a constructor:
 --
@@ -26,6 +28,8 @@ language LC, M, N, E where
   var : x as occurrence -> x
   abs : x as binder     -> ( λ x : T . E[x] )
   app                   -> ( M N )
+
+open LC
 
 
 -- ---------------------------------------------------------------------------

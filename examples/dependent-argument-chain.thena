@@ -29,15 +29,23 @@ data N : Type₀ where
   z : N
   s : N -> N
 
+open N
+
 data Fin : N -> Type₀ where
   fz : forall (n : N) -> Fin (s n)
   fs : forall (n : N) (i : Fin n) -> Fin (s n)
 
+open Fin
+
 data Pack : Type₀ where
   pack : forall (n : N) (i : Fin n) -> Pack
 
+open Pack
+
 data Holds : Pack -> Type₀ where
   holds : forall (n : N) (i : Fin n) -> Holds (pack n i)
+
+open Holds
 
 -- The split's one equation is `Eq Pack (pack n i) (pack m j)`, and injectivity
 -- takes it apart into the two the chain holds. Both are discharged, so the arm

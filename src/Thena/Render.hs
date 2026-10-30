@@ -493,6 +493,7 @@ devForm f = case f of
 describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
+  TOpen       -> "open"
   TLanguage   -> "language"
   TContext    -> "context"
   TJudgment   -> "judgment"

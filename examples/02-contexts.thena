@@ -27,6 +27,9 @@ context Ctx, Γ where
   empty  -> ·
   extend -> Γ , x : T
 
+open Ctx
+open extend-in
+
 -- A context is written in its own notation too.
 twoVars : Ctx
 twoVars = Ctx`·, x : ι, f : ( ι -> ι )`

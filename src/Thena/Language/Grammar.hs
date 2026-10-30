@@ -69,7 +69,7 @@ import Data.Maybe (isJust, listToMaybe)
 
 import Thena.Core.Level (Normal (..), normalise)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), inDeclarationOf, nameDotted, nameFromText, rootName, Ident (..), Literal (..), instantiate, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), declarationNamed, inDeclarationOf, nameDotted, nameFromText, rootName, Ident (..), Literal (..), instantiate, tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Regex (Regex, andThen, fromRanges, matches, oneOf, parseRegex, primingChar, singleChar, star)
@@ -433,6 +433,17 @@ checkGrammar installed env b = do
     kind = blockKind b
     name = blockName b
 
+    -- **The datatype this block declares, and the namespace its productions
+    -- live in** (MS10 phase 248). A @language LC@ block declares @LC.LC@ and
+    -- its productions are @LC.var@ and @LC.app@, which is what makes two
+    -- languages free to spell a production the same way — §1's collision, gone
+    -- with no mechanism of its own.
+    --
+    -- **A judgment's one production spells the datatype rather than a
+    -- constructor of it**, and the same placement gives it: its written word is
+    -- the block's own name, so it lands on @J.J@.
+    datatype = declarationNamed (rootName name)
+
     -- **A language whose identifier class no character extends** (MS6 closeout
     -- 23, phase 146). 'Thena.Language.Regex.primingChar' decides it on the
     -- automaton; when it answers 'Nothing' the generated @L.fresh@ falls back to
@@ -488,7 +499,7 @@ checkGrammar installed env b = do
       let pkind | kind == JudgmentBlock = TypeFormer
                 | otherwise = Constructor
           vacuous = [ VacuousBinder kind name (productionName p) x | x <- vacuousNames ]
-      Right (GProduction (productionGlobal p) items arguments pkind, vacuous)
+      Right (GProduction (inDeclarationOf datatype (productionName p)) items arguments pkind, vacuous)
 
 -- | **A production's items, its arguments and their roles** (§4.2, §4.3, §4.7) —
 -- everything about a production's /shape/, which is the same question whether a
@@ -753,7 +764,11 @@ checkNotation installed env b = do
     named = case [ g | g <- installed, grammarName g == rootName name ] of
       g : _ -> Just g
       []    -> fresh
-    fresh = case lookupInductive (rootName name) env of
+    -- **The datatype is looked up by its real name** (MS10 phase 248) — a
+    -- written @notation Nat@ is about @Nat.Nat@ — while the grammar keeps the
+    -- written @Nat@, which is what every sort, tag and metavariable compares
+    -- against.
+    fresh = case lookupInductive (declarationNamed (rootName name)) env of
       Just _  -> Just (Grammar NotationBlock (rootName name) [name] [])
       Nothing -> Nothing
     editing = any ((== rootName name) . grammarName) installed
@@ -786,13 +801,21 @@ checkNotation installed env b = do
     -- scope — §4.8's refused inference was about choosing the production's /form/
     -- when the name might be a clash, and here the name must already be declared
     -- for the block to mean anything at all.
-    constructorsOf gr = case lookupInductive (grammarName gr) env of
+    constructorsOf gr = case lookupInductive (declarationNamed (grammarName gr)) env of
       Just d  -> map constructorName (inductiveConstructors d)
       Nothing -> []
 
+    -- **What the production's word spells, as a global** (MS10 phase 248).
+    -- The header spells the datatype and a constructor lives in its namespace,
+    -- so both are placed; anything else names a function, which is an ordinary
+    -- global and may have been written with a path of its own.
     production g p
-      | isHeader p || productionGlobal p `elem` constructorsOf g = declaring g p
-      | otherwise = applying g p
+      | isHeader p = declaring g p (datatypeOf g)
+      | placed g p `elem` constructorsOf g = declaring g p (placed g p)
+      | otherwise = applying g p (productionGlobal p)
+
+    datatypeOf g = declarationNamed (grammarName g)
+    placed g p = inDeclarationOf (datatypeOf g) (productionName p)
 
     -- **A type former's or a constructor's spelling**: its shape is a
     -- @language@ block's — roles, binding forms and all, since there is a real
@@ -852,13 +875,18 @@ checkNotation installed env b = do
         -- for the slot words 'checkNotation' used to resolve: a block giving a
         -- datatype its first spelling is not in @installed@ yet, and @lmAbs@'s
         -- own @Lam@ argument has to be a slot in the very block that spells it.
+        -- **The head is the datatype's real name and the sort is the written
+        -- one** (MS10 phase 248): @typeHead@ answers @Lam.Lam@, and a 'Sort'
+        -- names a language the way every tag and metavariable does.
         | Just h <- typeHead env dom
-        , h `elem` (grammarName g : map grammarName installed) -> Right (OfLanguage h)
+        , l : _ <- [ grammarName k
+                   | k <- g : installed, declarationNamed (grammarName k) == h ]
+            -> Right (OfLanguage l)
         | otherwise -> Left (ParamNotReadable (paramName q) (whnf env [] dom))
 
     counted xs = [ (x, length [ () | y <- xs, y == x ]) | x <- nub xs ]
 
-    declaring g p = do
+    declaring g p f = do
       -- **Roles belong to the block that installs the grammar** — HIS ruling,
       -- 2026-10-11. A block editing a grammar whose substitution family is
       -- already declared cannot add to it, so saying so here is better than
@@ -866,7 +894,6 @@ checkNotation installed env b = do
       case (productionMetadata p, editing) of
         (Just _, True) -> Left (RolesAfterTheGrammar (grammarName g))
         _ -> Right ()
-      let f = productionGlobal p
       if isHeader p then Right () else if taken f then Left FunctionHasNotation else Right ()
       (domains, kind') <-
         if isHeader p
@@ -875,20 +902,19 @@ checkNotation installed env b = do
                  Nothing -> Left NotADeclaredFunction
           else do
             (ds, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
-            if typeHead env result == Just (grammarName g)
+            if typeHead env result == Just (datatypeOf g)
               then Right ()
               else Left (FunctionResult (whnf env [] result))
             Right (ds, Constructor)
       withParams g p domains kind' f
 
-    applying g p = do
+    applying g p f = do
       case productionMetadata p of
         Nothing -> Right ()
         Just _  -> Left FunctionMetadata
-      let f = productionGlobal p
       if taken f then Left FunctionHasNotation else Right ()
       (domains, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
-      if typeNamed env result == Just (grammarName g)
+      if typeNamed env result == Just (datatypeOf g)
         then Right ()
         else Left (FunctionResult (whnf env [] result))
       withParams g p domains Function f
@@ -1151,13 +1177,18 @@ productionGlobal = nameFromText . productionName
 -- | Where each of the four lives. **The language's declaration opens the
 -- namespace** (his ruling, 2026-10-30), so the word is what is left of the old
 -- name once the language's own prefix has become a step.
+--
+-- __Each takes the language as it was written and asks for its declaration__
+-- (MS10 phase 248): @grammarName@ is the written @LC@ and the datatype it
+-- declares is @LC.LC@, whose namespace is what these belong in. Said here, in
+-- the four, rather than at the dozen call sites that have a grammar in hand.
 freshOf, fvOf, substOf :: GlobalName -> String -> GlobalName
-freshOf l k = inDeclarationOf l ("fresh-" ++ k)
-fvOf l k = inDeclarationOf l ("fv-" ++ k)
-substOf l k = inDeclarationOf l ("subst-" ++ k)
+freshOf l k = inDeclarationOf (declarationNamed l) ("fresh-" ++ k)
+fvOf l k = inDeclarationOf (declarationNamed l) ("fv-" ++ k)
+substOf l k = inDeclarationOf (declarationNamed l) ("subst-" ++ k)
 
 allOf :: GlobalName -> GlobalName
-allOf l = inDeclarationOf l "subst-all"
+allOf l = inDeclarationOf (declarationNamed l) "subst-all"
 
 -- | **Every occurrence class the language reads, with the production that
 -- reads it** — one entry per class, in declaration order (MS8 phase 153).
@@ -1351,13 +1382,20 @@ lookupNames g = concatMap (lookupNamesOf g) (extensionsOf g)
 -- special case in the naming rule, and he took the renaming instead when both
 -- were put to him. A production name is unique across every installed grammar
 -- (@ConstructorTaken@), so this cannot clash either.
+--
+-- __The production's WORD, not its full name__ (MS10 phase 248). A production
+-- is @Ctx.bind@ now, and a word with dots in it is the one shape his ruling of
+-- 2026-10-30 forbids — so the three are @bind-in@, @bind-here@ and
+-- @bind-there-bind@, **at the root**, which is where partition two left them.
+-- That is a wart: two contexts whose extension productions share a word now
+-- collide here, where their namespaces would have told them apart.
 lookupNamesOf :: Grammar -> GProduction -> [String]
 lookupNamesOf g e =
   [ n ++ "-in", n ++ "-here" ]
     ++ [ n ++ "-there-" ++ named k | k <- extensionsOf g ]
   where
     n = named e
-    named = nameDotted . gproductionName
+    named = nameWord . gproductionName
 
 -- | §5.1: **one** production with no slot of the context's own sort — the empty
 -- context — and **at least one** with exactly one, each an extension. A

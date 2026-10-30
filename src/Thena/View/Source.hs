@@ -48,6 +48,10 @@ printItem i = case i of
   -- printer for it rather than a second that has to agree with the first.
   ItemBlock is -> [renderSurface (SurfaceDo is)]
   ItemGrammar b -> lines (printBlock b)
+  -- **One line, and the name as written** (MS10 phase 248). An @open@ is a
+  -- declaration like any other and the printed module has to carry it: a file
+  -- printed without its opens would not re-read.
+  ItemOpen g -> ["open " ++ nameDotted g]
 
 -- | A datatype declaration.
 --

@@ -61,7 +61,7 @@ import qualified Data.List.NonEmpty as NE
 
 import Data.List (nub)
 import Data.Maybe (fromMaybe, listToMaybe)
-import Thena.Core.Term (GlobalName (..), nameDotted, rootName, Literal (..))
+import Thena.Core.Term (GlobalName (..), declarationNamed, inDeclarationOf, nameDotted, rootName, Literal (..))
 import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
   ( Argument (..)
@@ -75,7 +75,6 @@ import Thena.Language.Grammar
   , freshOf
   , fvOf
   , substOf
-  , substitutionNames
   , variableProductions
   , variableRegex
   )
@@ -107,7 +106,13 @@ substitutionDefinitions gs g =
     -- methods, one per constructor of the datatype, and a @notation@ block's
     -- function production is not one of them.
     prods = constructorProductions g
-    conName = nameDotted . gproductionName
+
+    -- **A prelude constructor, written with its path** (MS10 phase 248):
+    -- @nil@ is @List.nil@ and @both@ is @And.both@, because a @data@
+    -- declaration puts its constructors in its own namespace. **Generated code
+    -- may not rely on an @open@** — the file it is spliced into need not have
+    -- written one, and a name with a path resolves by the path alone.
+    con d w = global (inDeclarationOf (declarationNamed (rootName d)) w)
 
     self = name lang
     string = name "String"
@@ -125,9 +130,9 @@ substitutionDefinitions gs g =
     ownerSelf = name . ownerName
     -- The owning language's variable production for the class: what a renamed
     -- binder of that class becomes.
-    ownerVar k y = app (name (varConOf (owner k) k)) [y]
-    varConOf h k = fromMaybe "" (listToMaybe
-      [ nameDotted (gproductionName p) | (c', p) <- variableProductions h, c' == rootName k ])
+    ownerVar k y = app (global (varConOf (owner k) k)) [y]
+    varConOf h k = fromMaybe (rootName "") (listToMaybe
+      [ gproductionName p | (c', p) <- variableProductions h, c' == rootName k ])
     -- The classes another language has substitution for — a subset of this
     -- one's, because reaching it reaches everything it reaches.
     reachedBy l = map nameDotted (classesSubstituted gs (grammarNamed l))
@@ -140,26 +145,29 @@ substitutionDefinitions gs g =
     -- as 'Thena.Driver.grammarDatatype' primes a constructor's binders.
     -- **Every grammar's**, not only this one's, since a foreign slot is walked
     -- through its own language's functions.
+    -- **Only the ROOT-LEVEL words are here since MS10 phase 248.** A
+    -- constructor, a production and every generated function now carry a path,
+    -- and a qualified name skips Γ altogether, so no binder can shadow one.
+    -- What is left is a language's own short name — which is the alias
+    -- 'Thena.Core.Term.declarationNamed' supplies and so /is/ shadowable — and
+    -- the prelude names this code writes short.
     referenced =
-      concat [ let h = nameDotted (grammarName k)
-                in h : map conName (grammarProductions k) ++ substitutionNames gs k
-             | k <- gs ]
-        ++ [ "String", "List", "And", "Comparison", "nil", "cons", "both", "same", "different"
-           , "Dec", "yes", "no", "Eq", "decString" ]
+      map (nameDotted . grammarName) gs
+        ++ [ "String", "List", "And", "Comparison", "Dec", "Eq", "decString" ]
     local x | x `elem` referenced = local (x ++ "'")
             | otherwise = x
     v = name . local
     lamL = lam . map local
 
-    nilOf t = app (name "nil") [t]
-    consOf t h rest = app (name "cons") [t, h, rest]
+    nilOf t = app (con "List" "nil") [t]
+    consOf t h rest = app (con "List" "cons") [t, h, rest]
 
     -- @y ∈ xs@, as a 'Comparison': @same@ when it is there.
     member y xs =
       elimOn "List" [string] (lamL ["l"] (name "Comparison"))
-        [ name "different"
+        [ con "Comparison" "different"
         , lamL ["b", "bs", "rb"]
-            (compareNames (name "Comparison") y (v "b") (name "same") (v "rb"))
+            (compareNames (name "Comparison") y (v "b") (con "Comparison" "same") (v "rb"))
         ]
         xs
 
@@ -297,7 +305,7 @@ substitutionDefinitions gs g =
           -- found, as the later shadows on paper.
           mapsOf ks bs =
             [ foldl (\rest i -> consOf (pairType c)
-                                  (app (name "both")
+                                  (app (con "And" "both")
                                      [string, ownerSelf c, v (as !! i), ownerVar c (v (renamed i))])
                                   rest)
                     (v (mapVar c))
@@ -311,7 +319,7 @@ substitutionDefinitions gs g =
             (Nothing, OfLanguage l) | not (null (reachedBy l)) ->
               app (global (allOf l)) (v a : mapsOf (reachedBy l) bs)
             _ -> v a
-          rebuilt = app (name (conName p))
+          rebuilt = app (global (gproductionName p))
             [ case argumentRole arg of
                 Binder _ | i `elem` binders -> v (renamed i)
                 Scope bs -> descend a arg bs
@@ -331,7 +339,7 @@ substitutionDefinitions gs g =
                               [ v "ry", lamL ["h", "hs", "rh"] (consOf string (v "h") (v "rh")) ]
                               (app (global (fvOf (grammarName (owner k)) c)) [lookupIn k (v "y") (v (mapVar k))]))
                        ]
-                       (app (global (fvOf langName k)) [app (name (conName p)) (map v as)]))
+                       (app (global (fvOf langName k)) [app (global (gproductionName p)) (map v as)]))
                   (nilOf string)
                   [ k | k <- reached, c `elem` reachedBy (grammarName (owner k)) ]
           withRenamings =
@@ -354,7 +362,7 @@ substitutionDefinitions gs g =
         (app (global (allOf langName))
            (v "e" : [ if c == k
                         then consOf (pairType c)
-                               (app (name "both") [string, ownerSelf c, v "y", v "n"])
+                               (app (con "And" "both") [string, ownerSelf c, v "y", v "n"])
                                (nilOf (pairType c))
                         else nilOf (pairType c)
                     | c <- reached ]))

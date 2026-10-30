@@ -80,7 +80,6 @@ import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , nameDotted
-  , rootName
   , Ident (..)
   , Var
   , close
@@ -102,7 +101,18 @@ import Thena.Global.Env
   , lookupInductive
   , recursiveArgument
   )
-import Thena.Global.Generate (dependentPairInScope, unitProof, unitType)
+import Thena.Global.Generate
+  ( conjunctionName
+  , dependentPairInScope
+  , dependentPairName
+  , dpairName
+  , equalityName
+  , falsityName
+  , reflexivityName
+  , truthName
+  , unitProof
+  , unitType
+  )
 import Thena.Global.NoConfusion (noConfusionInverseNames, noConfusionNames)
 import Thena.Global.NoCycle (noCycleName)
 import Thena.Tactics.Eliminate (MethodShape (..), spineOf)
@@ -426,13 +436,12 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- wrong proof term is caught, so only the caller's /choice/ of what to
     -- specialise is unguarded.
     verify hv want tm bs fs n =
-      let hole = [ (hv, Ident (nameOf cn ++ "Case"), w) | Just w <- [want] ]
+      let hole = [ (hv, Ident (nameWord cn ++ "Case"), w) | Just w <- [want] ]
           with = ctx ++ [ Hypothesis v i t | (v, i, t) <- hole ]
        in case check env with n tm mty of
             (Left e, _, n1)   -> (Left (SpecialisedIllTyped e), n1)
             (Right (), _, n1) -> (Right (Specialisation hole tm bs fs), n1)
 
-    nameOf = nameDotted
 
     -- @j@ Π binders as a telescope, each opened at a fresh variable so that it
     -- is an ordinary 'Context' entry. The binder's 'Ident' is kept, which is
@@ -455,7 +464,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- residual equation is still a hypothesis the method takes, and a
     -- transition that fires needs the variable to name its proof with.
     equationOf e = case spineOf (whnf env ctx (entryType e)) of
-      Just (GlobalName [] "Eq", [l], [i, u, v]) ->
+      Just (g, [l], [i, u, v]) | g == equalityName ->
         Just (Eqn (entryVar e) (entryIdent e) (entryType e) l i u v)
       _ -> Nothing
 
@@ -1280,7 +1289,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           (lTy, lTm) <- applied lawTy (Global lawN ls)
                           (prm ++ sides ++ [Free (eqnVar e)])
           case spineOf (whnf env ctx lTy) of
-            Just (GlobalName [] "Eq", [lv], [i, a, b]) ->
+            Just (g, [lv], [i, a, b]) | g == equalityName ->
               Just ( \chain -> foldl App (Global invN ls) (prm ++ sides ++ [chain])
                    , (lv, i, a, b, lTm) )
             _ -> Nothing
@@ -1379,7 +1388,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- contracts the transports in the arguments, once a solution has supplied
     -- @refl@ for the proof they are along.
     eqnAt v ty = case spineOf (whnf env ctx ty) of
-      Just (GlobalName [] "Eq", [l], [i, a, b]) ->
+      Just (g, [l], [i, a, b]) | g == equalityName ->
         Just (Eqn v (Ident "q") (equation l i a b) l i a b)
       _ -> Nothing
 
@@ -1468,7 +1477,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
       (neTy, ne, n2)    <- search path tupleTy tuple n1
       (emptyTy, absurd) <- overChain small big q neTy ne
       case spineOf (whnf env ctx emptyTy) of
-        Just (GlobalName [] "Empty", [lv], []) -> Just (lv, absurd, n2)
+        Just (g, [lv], []) | g == falsityName -> Just (lv, absurd, n2)
         _                                   -> Nothing
 
     -- The paper's search. @NotBelow‹D› x y@ is the tuple; each step takes its
@@ -1528,9 +1537,9 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
       where
         go unused ty tm = case whnf env ctx ty of
           Pi _ dom sc -> case spineOf (whnf env ctx dom) of
-            Just (GlobalName [] "Eq", [l], [i, a, b])
-              | unused, alike a small, alike b big -> step False q sc tm
-              | alike a b                 -> step unused (reflAt l i a) sc tm
+            Just (g, [l], [i, a, b])
+              | g == equalityName, unused, alike a small, alike b big -> step False q sc tm
+              | g == equalityName, alike a b -> step unused (reflAt l i a) sc tm
             _ -> Nothing
           _ -> Just (ty, tm)
         step unused arg sc tm = go unused (instantiate arg sc) (App tm arg)
@@ -1849,13 +1858,13 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- of these ι-contracts the moment 'solution' supplies it.
     reflAt l i a = Canonical reflexivity [l] [i, a]
 
-    emptiness        = rootName "Empty"
-    truth            = rootName "Unit"
-    equality         = rootName "Eq"
-    reflexivity      = rootName "refl"
-    conjunction      = rootName "And"
-    dependentPair    = rootName "DPair"
-    dependentPairMk  = rootName "dpair"
+    emptiness        = falsityName
+    truth            = truthName
+    equality         = equalityName
+    reflexivity      = reflexivityName
+    conjunction      = conjunctionName
+    dependentPair    = dependentPairName
+    dependentPairMk  = dpairName
 
 -- | One equation of a method, read apart.
 --
@@ -1910,7 +1919,7 @@ survivingEquations env ctx = go []
       _ -> ([], ctx ++ seen, n)
 
     isEquation here t = case spineOf (whnf env here t) of
-      Just (GlobalName [] "Eq", [_], [_, _, _]) -> Just t
+      Just (g, [_], [_, _, _]) | g == equalityName -> Just t
       _                                      -> Nothing
 
 -- | One link of the chain @noConfusion‹D›@ answers with, as
@@ -1934,9 +1943,9 @@ data Link
 -- equations inside are left spelled as the generator wrote them.
 linkOf :: GlobalEnv -> Context -> Core -> Link
 linkOf env ctx t = case spineOf (whnf env ctx t) of
-  Just (GlobalName [] "Unit",  ls, [])     -> LinkUnit ls
-  Just (GlobalName [] "And",   ls, [a, b]) -> LinkAnd ls a b
-  Just (GlobalName [] "DPair", ls, [a, b]) -> LinkPair ls a b
+  Just (g, ls, [])     | g == truthName           -> LinkUnit ls
+  Just (g, ls, [a, b]) | g == conjunctionName     -> LinkAnd ls a b
+  Just (g, ls, [a, b]) | g == dependentPairName   -> LinkPair ls a b
   _                                     -> LinkLast
 
 -- | Which transition applies to an equation.
@@ -2006,7 +2015,7 @@ namedLater e after = any ((eqnVar e `elem`) . freeVars . eqnType) after
 -- wrote. A session without the prelude has none, and then the solution
 -- transition declines a transported chain and the equation is kept.
 singletonInScope :: GlobalEnv -> Bool
-singletonInScope env = dependentPairInScope env && isDeclared (rootName "dpair") env
+singletonInScope env = dependentPairInScope env && isDeclared dpairName env
 
 -- | Three fresh variables, and two — @coerceChained@ mints eleven and a
 -- run of @let@ pairs for them is unreadable.

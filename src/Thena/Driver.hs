@@ -69,7 +69,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), declarationNamed, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -1377,10 +1377,20 @@ surfaceProgram n0 items = foldl item ([], n0) items
 -- **Lifted out of 'surfaceProgram' at MS6 phase 103**, because a @language@
 -- block generates a datatype too — with its grammar's roles (§4.7), where a
 -- written @data@ has none.
+--
+-- __THE DECLARATION OPENS A NAMESPACE AND EVERYTHING IT PRODUCES GOES INSIDE,
+-- THE TYPE AMONG THEM__ (MS10 phase 248, HIS ruling of 2026-10-29). @data Nat@
+-- declares @Nat.Nat@ and @Nat.zero@, so the one name it adds to the enclosing
+-- scope is the namespace @Nat@ — and a written @Nat@ reaches the type by
+-- 'Thena.Core.Term.declarationNamed', a resolution fact with nothing in the
+-- environment to unfold. **This function is where both halves are minted**, so
+-- the equipment generated later needs nothing of its own: everything that mints
+-- a name from the datatype's goes through 'Thena.Core.Term.inDeclarationOf' and
+-- lands beside the constructors.
 datatypeProgram :: Int -> SurfaceData -> Maybe [[ArgRole]] -> ([Instr], Int)
 datatypeProgram n d roles =
   let nm      = surfaceDataName d
-      dn      = GlobalName (surfaceDataSteps d) nm
+      dn      = declarationNamed (GlobalName (surfaceDataSteps d) nm)
       ps      = surfaceDataParameters d
       cs      = surfaceDataConstructors d
       (l, n1) = freshLevelMeta n
@@ -1406,7 +1416,12 @@ datatypeProgram n d roles =
                | (k, SurfaceConstructor _ _ cty) <- zip [0 ..] cs
                ]
           ++ [ Do (MakeData dn (length ps)
-                     [ GlobalName cps cn | SurfaceConstructor cps cn _ <- cs ] roles
+                     -- **A constructor goes in the datatype's namespace** (MS10
+                     -- phase 248), and steps it was written with nest inside
+                     -- that: @data Nat where { Pos.one : Nat }@ is @Nat.Pos.one@.
+                     -- Nothing in the corpus writes one, and nesting is what a
+                     -- namespace already does, so no refusal had to be invented.
+                     [ GlobalName (nameSteps dn ++ cps) cn | SurfaceConstructor cps cn _ <- cs ] roles
                      (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
              ]
       , n1 )
@@ -1436,7 +1451,13 @@ grammarDatatype g =
     prods = constructorProductions g
     plainName = nameDotted
 
-    constructor p = SurfaceConstructor [] (plainName (gproductionName p)) (typeOf p)
+    -- **The production's WORD, because placing it is 'datatypeProgram''s job**
+    -- (MS10 phase 248). A production already carries its full name — @LC.var@ —
+    -- and writing that as a surface constructor would mint a root-level name
+    -- whose word held the dots, the one shape his ruling of 2026-10-30 forbids.
+    -- The declaration is what decides where a constructor goes, here as for a
+    -- written @data@.
+    constructor p = SurfaceConstructor [] (nameWord (gproductionName p)) (typeOf p)
     typeOf p = case gproductionArguments p of
       [] -> self
       args -> SurfacePi (NE.fromList (map binder (renamed args))) self

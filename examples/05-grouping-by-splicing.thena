@@ -20,6 +20,8 @@ language Ex, U, V where
   ref : x as occurrence -> x
   juxt -> U V
 
+open Ex
+
 
 -- ---------------------------------------------------------------------------
 -- What the notation alone cannot say.

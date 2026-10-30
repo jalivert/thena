@@ -20,6 +20,8 @@ judgment steps = M -->* N where
            ---------------------
            M -->* N
 
+open steps
+
 -- The terms of a two-step run, named so the derivations below can say them.
 twice : LC
 twice = LC`( ( ( λ x : ( ( ι -> ι ) -> ( ι -> ι ) ) . x ) ( λ y : ( ι -> ι ) . y ) ) ( λ z : ι . z ) )`
@@ -67,6 +69,8 @@ judgment halts = M ⇓ where
       ----
       M ⇓
 
+open halts
+
 onceHalts : halts`${once} ⇓`
 onceHalts = H-step once done secondStep (H-value done (V-abs "z" base LC`z`))
 
@@ -84,6 +88,8 @@ judgment swap = M ⇄ N where
   Swap:  ------------------------------------------
          ( x_1 x_2 ) ⇄ ( x_1 x_2 )[x_1->x_2, x_2->x_1]
 
+open swap
+
 -- The kernel runs LC.subst-all to check the right-hand side.
 swapped : swap`( a b ) ⇄ ( b a )`
 swapped = Swap "a" "b"
@@ -94,6 +100,8 @@ judgment swapInTurn = M ⇉ N where
 
   InTurn:  ----------------------------------------
            ( x_1 x_2 ) ⇉ ( x_1 x_2 )[x_1->x_2][x_2->x_1]
+
+open swapInTurn
 
 inTurn : swapInTurn`( a b ) ⇉ ( a a )`
 inTurn = InTurn "a" "b"
@@ -111,6 +119,8 @@ judgment keepsType = Γ ⊢ M ⇒ N : T where
               T
           -------------------------
           Γ ⊢ M ⇒ N : T
+
+open keepsType
 
 -- A value runs to itself and keeps its type.
 doneTyped : typing`· ⊢ ${done} : ( ι -> ι )`

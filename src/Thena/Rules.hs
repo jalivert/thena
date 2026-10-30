@@ -1286,7 +1286,7 @@ resolvePattern gs g = go
         Nothing -> Left (NoSuchTag g 0 tag)
         Just gr -> case prod of
           Just w | w `notElem` productionsOf gr -> Left (NoObjectProduction g 0 tag w)
-          _ -> case Earley.parse (earleyRules gs) (startAt tag prod) pieces of
+          _ -> case Earley.parse (earleyRules gs) (startAt gr tag prod) pieces of
             Left why -> Left (ObjectRegionUnparsed g 0 tag src why)
             Right tree -> case skeletonOf gs (map PVar names) tree of
               Left e   -> Left (ObjectRegionNotATerm g 0 tag e)
@@ -1424,7 +1424,7 @@ operandOf gs g i w o = case o of
   RawRegion tag prod src | Just gr <- objectGrammar gs tag ->
     case prod of
       Just prod' | prod' `notElem` productionsOf gr -> Left (NoObjectProduction g i tag prod')
-      _ -> case Earley.parse (earleyRules gs) (startAt tag prod) pieces of
+      _ -> case Earley.parse (earleyRules gs) (startAt gr tag prod) pieces of
         Left why -> Left (ObjectRegionUnparsed g i tag src why)
         Right tree -> case skeletonOf gs (map Ref names) tree of
           Left e -> Left (ObjectRegionNotATerm g i tag e)
@@ -1463,11 +1463,21 @@ objectGrammar gs tag =
     gr : _ -> Just gr
     []     -> Nothing
 
+-- | **By the word a user writes** (MS10 phase 248): the fence already said
+-- @LC@, so the bracket is a lookup inside it. 'startAt' turns the word back
+-- into the rule the parser knows, which is the production's whole name.
 productionsOf :: Grammar -> [String]
-productionsOf gr = [ n | p <- grammarProductions gr, let n = nameDotted (gproductionName p) ]
+productionsOf gr = [ nameWord (gproductionName p) | p <- grammarProductions gr ]
 
-startAt :: String -> Maybe String -> Earley.Start
-startAt tag = maybe (Earley.StartAt tag) Earley.StartRule
+startAt :: Grammar -> String -> Maybe String -> Earley.Start
+startAt gr tag = maybe (Earley.StartAt tag) rule
+  where
+    rule w = case [ nameDotted (gproductionName p)
+                  | p <- grammarProductions gr, nameWord (gproductionName p) == w ] of
+      n : _ -> Earley.StartRule n
+      -- Cannot arise: the caller has already refused a word this grammar has
+      -- no production for.
+      []    -> Earley.StartAt tag
 
 -- | A region's text as parser pieces, and the names its splices bind or read.
 --

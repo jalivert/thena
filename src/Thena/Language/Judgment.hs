@@ -36,7 +36,7 @@ import Data.List (nub)
 import Data.Maybe (listToMaybe)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (GlobalName (..), nameFromText, rootName, nameDotted)
+import Thena.Core.Term (GlobalName (..), declarationNamed, inDeclarationOf, nameFromText, rootName, nameDotted)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (Piece (..), Start (..), Tree (..))
 import Thena.Language.Grammar
@@ -111,7 +111,7 @@ constructor gs g r = do
   -- the names in it are not known until that parse is done. Premises are written
   -- one per line in every paper and every example here.
   (premises, bound') <- premiseLines [] [] (rulePremises r)
-  conclusion <- parseWith bound' Conclusion judgment (StartRule judgment) (ruleConclusion r)
+  conclusion <- parseWith bound' Conclusion judgment (StartRule judgmentRule) (ruleConclusion r)
   mentioned <- either (Left . RuleUnbuilt) (Right . nub . concat)
                  (traverse (mentions gs) (map snd premises ++ [conclusion]))
   -- A premise's name is the user's, and must not be taken for anything else.
@@ -162,8 +162,8 @@ constructor gs g r = do
       premiseName k = \case
         Just n -> n
         Nothing -> let go x = if x `elem` taken then go (x ++ "'") else x in go ("d" ++ show k)
-  premiseTypes <- either (Left . RuleUnbuilt) Right (traverse (term gs renaming . snd) premises)
-  result <- either (Left . RuleUnbuilt) Right (term gs renaming conclusion)
+  premiseTypes <- either (Left . RuleUnbuilt) Right (traverse (term gs beingDeclared renaming . snd) premises)
+  result <- either (Left . RuleUnbuilt) Right (term gs beingDeclared renaming conclusion)
   let premiseBinders =
         [ SurfaceBinder Explicit (premiseName k n) (Just ty')
         | (k, ((n, _), ty')) <- zip [1 :: Int ..] (zip premises premiseTypes) ]
@@ -174,6 +174,21 @@ constructor gs g r = do
   Right (SurfaceConstructor [] (ruleName r) ty, replicate (length binders) Plain)
   where
     judgment = nameDotted (grammarName g)
+    -- **The parser knows the production by its own name** (MS10 phase 248),
+    -- which is @typing.typing@ now that a block's productions live in the
+    -- namespace its datatype opens. @judgment@ stays the written word, because
+    -- that is what a refusal names.
+    judgmentRule = case typeFormerProductions g of
+      p : _ -> nameDotted (gproductionName p)
+      []    -> judgment
+    -- **What the judgment's own name is while its own declaration is being
+    -- elaborated** (MS10 phase 248). @data@ puts the type inside its namespace,
+    -- so the family is @typing.typing@ — but a constructor's type is elaborated
+    -- under @assume typing : ‹its type›@, exactly as a hand-written @data@'s is,
+    -- and an assumption is a local with no path. So a rule's conclusion, and a
+    -- premise of the judgment being declared, write the short word; every other
+    -- production writes its full name, because it is already declared.
+    beingDeclared = (judgmentRule, judgment)
     rules = ruleGrammar gs
 
     -- **Left to right, each named premise extending what the rest may write.**
@@ -258,7 +273,7 @@ constructor gs g r = do
         Just (AtUniverse _) -> Nothing
         Just (TypeInside (Node p' _)) ->
           case [ l | h <- gs, q <- grammarProductions h
-                   , gproductionName q == rootName p'
+                   , gproductionName q == nameFromText p'
                    , let l = nameDotted (grammarName h) ] of
             l : _ -> Just l
             []    -> Nothing
@@ -357,13 +372,13 @@ mentions gs t = case t of
   _ -> Right []
 
 -- | A reading as a surface term, its metavariables named through @rename@.
-term :: [Grammar] -> (String -> String) -> Tree -> Either BuildError Surface
-term gs rename t = case t of
+term :: [Grammar] -> (String, String) -> (String -> String) -> Tree -> Either BuildError Surface
+term gs self@(selfRule, selfWord) rename t = case t of
   Node n [Token x] | [MetavariableOf _] <- special n -> Right (SurfaceName [] (rename x))
   -- **A reading at a universe** (phase 160). A grammar's own name is the type
   -- that grammar's datatype is; @𝕌₀@ is @Type₀@. Neither is renamed — a type
   -- is not a metavariable.
-  Node n [child] | [TypeWrapper] <- special n -> term gs rename child
+  Node n [child] | [TypeWrapper] <- special n -> term gs self rename child
   Node n _ | [TypeNamed l] <- special n -> Right (SurfaceName [] l)
   Node n [Token u] | [UniverseRead] <- special n -> Right (SurfaceUniverse (maybe 0 id (universeWord u)))
   -- **Not renamed** (MS8 phase 172): the premise binder carries the user's own
@@ -384,11 +399,15 @@ term gs rename t = case t of
     Nothing -> Left (NoSuchProduction n)
     Just p -> do
       slots <- arguments p children
-      -- **The production's own name, path and all** (MS10 phase 244).
-      app (surfaceName (gproductionName p)) <$> traverse slot slots
+      -- **The production's own name, path and all** (MS10 phase 244) — except
+      -- the judgment this rule belongs to, which is an assumption and not yet a
+      -- global (phase 248).
+      let hd | n == selfRule = SurfaceName [] selfWord
+             | otherwise     = surfaceName (gproductionName p)
+      app hd <$> traverse slot slots
   _ -> Left (NotForSlot "" (show t))
   where
-    go = term gs rename
+    go = term gs self rename
     slot (a, child) = case (argumentSort a, child) of
       (OfClass {}, Token x) -> Right (SurfaceName [] (rename x))
       _ -> go child
@@ -397,13 +416,18 @@ term gs rename t = case t of
       Node n [Token x, m] | [PairIn _ cls] <- special n ->
         (\m' -> [(cls, SurfaceName [] (rename x), m')]) <$> go m
       _ -> Left (NotForSlot "" (show s))
+    -- **A prelude constructor is written with its path** (MS10 phase 248):
+    -- @cons@ is @List.cons@ now, and generated code may not rely on the file it
+    -- is spliced into having written an @open@. The /types/ stay short, because
+    -- a @data@ declaration's short name reaches them.
+    con d w = surfaceName (inDeclarationOf (declarationNamed (rootName d)) w)
     pairType l c = app (SurfaceName [] "And") [SurfaceName [] (classType gs c), SurfaceName [] (ownerOf gs l c)]
     cons l c (x, m) rest =
-      app (SurfaceName [] "cons")
+      app (con "List" "cons")
         [ pairType l c
-        , app (SurfaceName [] "both") [SurfaceName [] (classType gs c), SurfaceName [] (ownerOf gs l c), x, m]
+        , app (con "And" "both") [SurfaceName [] (classType gs c), SurfaceName [] (ownerOf gs l c), x, m]
         , rest ]
-    nil l c = app (SurfaceName [] "nil") [pairType l c]
+    nil l c = app (con "List" "nil") [pairType l c]
 
 app :: Surface -> [Surface] -> Surface
 app f [] = f

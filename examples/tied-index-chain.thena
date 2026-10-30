@@ -26,12 +26,18 @@ data N : Type₀ where
   z : N
   s : N -> N
 
+open N
+
 data Fin : N -> Type₀ where
   fz : forall (n : N) -> Fin (s n)
   fs : forall (n : N) (i : Fin n) -> Fin (s n)
 
+open Fin
+
 data Q : forall (n : N) -> Fin n -> Type₀ where
   mk : forall (n : N) (i : Fin n) -> Q n i
+
+open Q
 
 -- Both of the split's equations are discharged: the first solves `n`, which
 -- supplies `refl` for its own proof, and the second then reads `Eq (Fin (s m)) i
@@ -48,6 +54,8 @@ tied = \ m x -> case x of { mk n i -> m }
 -- Both equations are then discharged and the arm binds `n` alone.
 data Small : forall (n : N) -> Fin n -> Type₀ where
   isFz : forall (n : N) -> Small (s n) (fz n)
+
+open Small
 
 -- The arm answers with the constructor's own `n`, not with the ambient `m`, so
 -- reducing it at a known index is what tells the two apart.
@@ -71,6 +79,8 @@ twoFromArm = tiedTwo (s (s z)) (isFz (s (s z)))
 -- alone. `N.isLeftInv` carries the method back at each step, and no step is K.
 data T : Fin (s (s z)) -> Type₀ where
   mkT : forall (i : Fin (s z)) -> T (fs (s z) i)
+
+open T
 
 pinned : forall (x : T (fs (s z) (fz z))) -> Fin (s z)
 pinned = \ x -> case x of { mkT i -> i }

@@ -4,6 +4,8 @@ data Bool : Type₀ where
   True : Bool
   False : Bool
 
+open Bool
+
 test : Type₀
 test = Bool
 
