@@ -368,7 +368,7 @@ machineAt cur is = machineIn emptyGlobals cur is
 -- | The same, with globals of your own (MS10).
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env' expectedBase [] [] 1000 0
+  load is (Machine (Exec [] [] []) (Development cur) [] env' expectedBase [] [] [] 1000 0
                    NoUndischargeableTrust)
 
 -- | Elaborate against globals of your own.

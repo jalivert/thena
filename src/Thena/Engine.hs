@@ -46,7 +46,7 @@ module Thena.Engine
   ) where
 
 import Data.List (intercalate, nub)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
@@ -130,6 +130,7 @@ import Thena.Global.Env
   , InductiveDefinition
   , Scheme (..)
   , declaredNames
+  , namespaceInhabited
   , recursiveArgument
   , definitionLevels
   , isDeclared
@@ -237,6 +238,17 @@ data Machine = Machine
     -- not in 'GlobalEnv' — his ruling, 2026-09-19**, for 'signatures'\' reason:
     -- a grammar is notation for a declared name, which the surface and
     -- elaboration read and the kernel never does.
+  , opened      :: [[String]]
+    -- ^ **the namespaces @open@ has brought into view, latest first** (MS10
+    -- phase 247). NOT backtrackable, like 'signatures' and 'grammars', and here
+    -- for their reason: it is a fact about what a written name may mean, which
+    -- the surface and elaboration read and the kernel never does.
+    --
+    -- **A list of prefixes and not a table of contents — his ruling,
+    -- 2026-10-30.** @GlobalEnv@ gains no namespace table, because what a
+    -- namespace holds is whatever keys sit under its prefix, and a second copy
+    -- of that could disagree with it. So @open@ costs one path here and the
+    -- work happens at the lookup.
   , names       :: Int        -- ^ NOT backtrackable (§7.4)
   , lineFloor   :: Int
     -- ^ **how many frames were already on the stack when this line's program
@@ -1029,6 +1041,19 @@ perform instr rest m = case operation instr of
   -- could be declared into a namespace by the path that admits a written
   -- module, a generated definition or a primitive. 'operandName' accepts a
   -- string literal as a rooted name, so a rule that writes one is unaffected.
+  -- **Nothing is installed and nothing is checked against the environment
+  -- here** (MS10 phase 247): the namespace is a prefix, and whether anything
+  -- sits under it is 'namespaceInhabited'\'s question, asked right here so that
+  -- @open Foo@ with no @Foo.…@ anywhere is refused where it is written rather
+  -- than becoming a silent no-op that makes every later name fail on its own.
+  Open nm -> case nameOf nm of
+    Left r  -> failure r m
+    Right g ->
+      let ns = nameSteps g ++ [nameWord g]
+       in if namespaceInhabited ns (globals m)
+            then Continue (advance m { opened = ns : opened m })
+            else failure (NoSuchNamespace (nameDotted g)) m
+
   DeclarePrimitive nm ty -> case (,) <$> nameOf nm <*> term ty of
     Left r -> failure r m
     Right (x, t) -> Primitively x t (advance m)
@@ -1656,16 +1681,41 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right g -> case inScopeAt g of
       Just v  -> produce (VTerm (Free v)) m
-      Nothing -> case lookupDefinition g (globals m) of
-        Just d ->
-          let (ls, n1) = levelArgsFor (length (definitionLevels d)) (names m)
-           in produce (VTerm (Global g ls)) m { names = n1 }
-        Nothing
-          | isDeclared g (globals m) ->
-              produce (VTerm (Global g [])) m
-          | otherwise ->
-              failure (CannotRead (ResolveFailed (NotInScope (nameDotted g)))) m
+      Nothing -> case globally g of
+        Left r   -> failure r m
+        Right g' -> case lookupDefinition g' (globals m) of
+          Just d ->
+            let (ls, n1) = levelArgsFor (length (definitionLevels d)) (names m)
+             in produce (VTerm (Global g' ls)) m { names = n1 }
+          Nothing -> produce (VTerm (Global g' [])) m
     where
+      -- **Which global a written name means, once Γ has said it is not a
+      -- local** (MS10 phase 247).
+      --
+      -- **The name as written wins outright.** An @open@ can only ever /add/ a
+      -- way for a name to resolve, so a name that already denotes something
+      -- cannot be changed by one — which is what makes @open@ safe to write
+      -- above code that was already working.
+      --
+      -- **Then each open namespace, and two hits is a refusal and not a
+      -- choice.** @open Source@ and @open Target@ both holding an @Expr@ is the
+      -- situation `~7x8rt` lists, and either would type-check; picking one
+      -- would be the system deciding something the user did not write. The
+      -- refusal names both, and writing the path repairs it.
+      globally g
+        | known g = Right g
+        | otherwise = case filter known (candidates g) of
+            [g'] -> Right g'
+            []   -> Left (CannotRead (ResolveFailed (NotInScope (nameDotted g))))
+            gs   -> Left (AmbiguousName (nameDotted g) (map nameDotted gs))
+
+      -- **The whole written name under each prefix**, so @open A@ and a written
+      -- @B.c@ tries @A.B.c@. A path the writer wrote is kept, because it says
+      -- what they meant; the prefix only says where to look for it.
+      candidates g = [ GlobalName (ns ++ nameSteps g) (nameWord g) | ns <- opened m ]
+
+      known g = isJust (lookupDefinition g (globals m)) || isDeclared g (globals m)
+
       -- **The INNERMOST binding of that name**, which is what shadowing means
       -- and what "Thena.Syntax.Resolve" gives. Γ runs outermost-first, so this
       -- folds rather than taking the head.

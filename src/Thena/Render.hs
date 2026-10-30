@@ -1354,6 +1354,10 @@ renderFailReason ren r = case r of
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
+  NoSuchNamespace n -> "nothing is named " ++ n ++ ".…, so there is no namespace " ++ n ++ " to open"
+  AmbiguousName n gs ->
+    n ++ " is ambiguous here: it could be " ++ intercalate " or " gs
+      ++ "\n  write the one you mean"
   ExpectedName      -> "expected a name"
   DottedTextName s  ->
     show s

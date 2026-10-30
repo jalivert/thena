@@ -212,6 +212,20 @@ data FailReason
   | ExpectedName
     -- ^ an operand was not a name (MS10) — neither a @VName@ nor the string
     -- literal that reads as one at the root.
+  | NoSuchNamespace String
+    -- ^ @open X@ where nothing at all is named @X.…@ (MS10 phase 247).
+    --
+    -- **A namespace is never declared**, so this is the only check @open@ can
+    -- make: a prefix nothing sits under is a typo or a file that was not
+    -- imported, and saying so once where it is written beats every later name
+    -- failing on its own.
+  | AmbiguousName String [String]
+    -- ^ a written name that two or more open namespaces answer (MS10 phase
+    -- 247): the name as written, then every qualified name it could mean.
+    --
+    -- **Refused rather than chosen.** Either would type-check, so picking one
+    -- would be the system deciding what the user did not write; the repair is
+    -- to write the path.
   | DottedTextName String
     -- ^ a string literal in a name position holds a dot (MS10 phase 245).
     --

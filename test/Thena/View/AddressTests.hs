@@ -225,7 +225,7 @@ runTo m = case step m of
 -- | A machine at the root of @p@.
 machineAt :: Partial -> Machine
 machineAt p =
-  Machine (Exec [] [] []) (Development (enter p)) [] emptyGlobals expectedBase [] [] startCounter 0
+  Machine (Exec [] [] []) (Development (enter p)) [] emptyGlobals expectedBase [] [] [] startCounter 0
           NoUndischargeableTrust
 
 clickTests :: [TestTree]

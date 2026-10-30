@@ -333,6 +333,17 @@ data SurfaceDecl
   = SurfaceSignature [String] String Surface   -- ^ @foo : T@, @Ns.foo : T@
   | SurfaceEquation  [String] String Surface   -- ^ @foo = e@, @Ns.foo = e@
   | SurfaceDatatype  SurfaceData      -- ^ @data D … where { … }@ (phase 42b)
+  | SurfaceOpen      [String] String
+    -- ^ @open ‹namespace›@ — **bring a namespace into view** (MS10 phase 247).
+    --
+    -- The steps and the last word of the namespace's own path, so @open A.B@ is
+    -- @SurfaceOpen ["A"] "B"@ and the namespace is @A.B@. **A namespace is a
+    -- prefix and not a thing that is declared**, so there is nothing here but
+    -- the path: what it contains is whatever keys the environment has under it.
+    --
+    -- **Its effect runs from where it is written to the end of the enclosing
+    -- namespace**, which for a file with no @namespace@ block is the rest of
+    -- the file — so a declaration above it does not see it.
   | SurfaceGrammar   BlockKind Int String
     -- ^ a @language@ or @context@ block (MS6 phase 101): its kind, the line of
     -- its keyword, and its text, raw. "Thena.Driver.regroup" reads it.

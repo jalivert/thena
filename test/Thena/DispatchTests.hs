@@ -98,7 +98,7 @@ only r = bases [r]
 
 machine :: [RuleBase] -> Cursor -> [Instr] -> Machine
 machine base cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] [] 1000 0
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] [] [] 1000 0
                    NoUndischargeableTrust)
 
 -- | Run as the driver does, following every channel, and keep the messages.

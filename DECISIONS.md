@@ -41,7 +41,7 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` `.` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -270,6 +270,31 @@ A string literal is still read as a name where one is wanted, and still means a
 name at the root — but **a string with a dot in it is now refused** rather than
 becoming a name whose single word contains dots. A path is structure, and
 nothing may hold it as spelling.
+
+**`open ‹namespace›` brings a namespace into view**, from where it is written to
+the end of the enclosing one. It is a declaration and not a block, so it sits
+beside your other declarations and the ones above it do not see it:
+
+```
+data Nat : Type where
+  zero : Nat
+  succ : Nat -> Nat
+
+open Nat
+
+two : Nat
+two = succ (succ zero)
+```
+
+**An `open` can only add a way for a name to resolve, never change one.** A name
+that already denotes something is taken as written, so an `open` is safe to put
+above code that was already working. If two open namespaces both answer a word
+you wrote, that is **refused and not chosen** — either would type-check, so
+picking one would be the system deciding what you did not write, and the message
+names both so you can write the one you meant. And `open X` where nothing at all
+is named `X.…` is refused where you wrote it, rather than left to make every
+later name fail on its own; a namespace is never declared, so that is the only
+check there is.
 
 A file is the unit of import and is **not** a namespace: you import a file by
 its path, and what things are called comes from the `namespace` blocks they sit

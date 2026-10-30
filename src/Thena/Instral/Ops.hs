@@ -1115,6 +1115,20 @@ data Op
     -- the driver checks and installs, as 'DeclarePrimitive' does — so the check
     -- runs at the block's own place in the module, after the token classes
     -- above it.
+  | Open Operand
+    -- ^ @open ‹namespace›@ — **bring a namespace into view for the rest of the
+    -- enclosing one** (MS10 phase 247).
+    --
+    -- **It installs nothing.** A namespace is a prefix over the keys the
+    -- environment already has, so this adds the prefix to the machine's list of
+    -- open namespaces and a written name that does not resolve on its own is
+    -- tried under each of them. @GlobalEnv@ gains no table — his ruling of
+    -- 2026-10-30 — because a table would hold a second copy of what the keys
+    -- say and could disagree with them.
+    --
+    -- **A declaration and not a rule-body operation** (§3.7), exactly as @data@
+    -- is: the word exists so that 'opKeyword' stays total, and
+    -- "Thena.Rules" refuses it in a body one step before @validate@ would.
   | DeclarePrimitive Operand Operand
     -- ^ name, type — **install a primitive constant** (MS6 phase 97b), the way
     -- 'DefineGlobal' installs a definition and for the same reason: no
@@ -1522,6 +1536,7 @@ resultOf o = case o of
   Say _        -> Nothing
   DefineData _ -> Nothing
   Certify _    -> Nothing
+  Open {} -> Nothing
   DeclarePrimitive {} -> Nothing
   DeclareGrammar {} -> Nothing
   DefineGlobal {} -> Nothing
@@ -1752,6 +1767,7 @@ operandTypes o = case o of
   UnifyInto a b -> [(a, TCore), (b, TCore)]
   Try    a     -> [(a, TCore)]
   Certify a    -> [(a, TCore)]
+  Open a -> [(a, TName)]
   DeclarePrimitive a b -> [(a, TName), (b, TCore)]
   DeclareGrammar _ -> []
   DefineGlobal _ a b c -> [(a, TName), (b, TCore), (c, TCore)]
@@ -2340,6 +2356,7 @@ opKeyword o = case o of
   Typing _     -> "typeof"
   Define _ _   -> "define"
   Certify _    -> "certify"
+  Open {} -> "open"
   DeclarePrimitive {} -> "declare-primitive"
   DeclareGrammar {} -> "declare-grammar"
   DefineGlobal {} -> "define-global"

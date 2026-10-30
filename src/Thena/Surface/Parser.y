@@ -81,6 +81,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   block   { Located _ (TBlock _ _) }
   '...'   { Located _ TSpread }
   '.'     { Located _ TDot }
+  open    { Located _ TOpen }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
   ','     { Located _ TComma }
@@ -281,6 +282,9 @@ Decl :: { SurfaceDecl }
   : QName ':' Term                         { SurfaceSignature (fst $1) (snd $1) $3 }
   | QName '=' Term                         { SurfaceEquation (fst $1) (snd $1) $3 }
   | Datatype                               { SurfaceDatatype $1 }
+  -- **A declaration, not a layout block** (MS10 phase 247, his ruling): it
+  -- names a namespace and its effect runs to the end of the enclosing one.
+  | open QName                             { SurfaceOpen (fst $2) (snd $2) }
   -- **A top-level block is an item, not an expression** — his, 2026-09-03.
   -- Same syntax, different role: at the top of a module it plays where the
   -- other items declare.

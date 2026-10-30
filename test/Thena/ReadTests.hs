@@ -35,6 +35,7 @@ import Thena.Errors (FailReason (..), MoveError (..))
 import Thena.Global.Env
   (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
 import Thena.Declared (nat)
+import Data.List (sort)
 import qualified Thena.Instral.Ops as Op
 import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Value (..))
 
@@ -59,7 +60,7 @@ machine = machineIn emptyGlobals
 
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env' [] [] [] 1000 0
+  load is (Machine (Exec [] [] []) (Development cur) [] env' [] [] [] [] 1000 0
                    NoUndischargeableTrust)
 
 -- | Run to a stop, and hand back the environment or the reason.
@@ -459,6 +460,43 @@ resolveTests =
           Left (CannotRead _) -> pure ()
           other -> assertFailure ("expected CannotRead, got " ++ show (fmap (const ()) other))
 
+      -- **…until the namespace is opened** (MS10 phase 247), which is the whole
+      -- of what @open@ does: the written name is tried under each open prefix.
+    , testCase "an open namespace is what makes the base word resolve" $ do
+        v <- expectBoundIn qualified hole
+               [ Do (Open (Lit (VName (rootName "Ns"))))
+               , Bind (Op.PVar "v") Nothing (ResolveName (Lit (VText "thing"))) ] "v"
+        v @?= VTerm (Global (GlobalName ["Ns"] "thing") [])
+
+      -- **A namespace nothing sits under is refused where it is written**, not
+      -- left to make every later name fail on its own.
+    , testCase "opening a namespace that holds nothing is refused" $
+        case runIn qualified hole [Do (Open (Lit (VName (rootName "Nope"))))] of
+          Left (NoSuchNamespace n) -> n @?= "Nope"
+          other -> assertFailure ("expected NoSuchNamespace, got " ++ show (fmap (const ()) other))
+
+      -- **Two namespaces answering one word is a refusal, not a choice**
+      -- (`~7x8rt`'s third situation): either would type-check, so choosing would
+      -- be the system deciding what the user did not write.
+    , testCase "two open namespaces answering one word is ambiguous" $
+        case runIn twoNamespaces hole
+               [ Do (Open (Lit (VName (rootName "Ns"))))
+               , Do (Open (Lit (VName (rootName "Other"))))
+               , Do (ResolveName (Lit (VText "thing"))) ] of
+          Left (AmbiguousName n gs) -> do
+            n @?= "thing"
+            sort gs @?= ["Ns.thing", "Other.thing"]
+          other -> assertFailure ("expected AmbiguousName, got " ++ show (fmap (const ()) other))
+
+      -- **The name as written wins outright**, so an @open@ can only ever add a
+      -- way to resolve and never change one that already worked.
+    , testCase "a name that already resolves is not reconsidered under an open" $ do
+        v <- expectBoundIn twoNamespaces hole
+               [ Do (Open (Lit (VName (rootName "Ns"))))
+               , Bind (Op.PVar "v") Nothing
+                      (ResolveName (Lit (VName (GlobalName ["Other"] "thing")))) ] "v"
+        v @?= VTerm (Global (GlobalName ["Other"] "thing") [])
+
       -- **A dotted string literal is refused where it is read, not left to
       -- fail to resolve** (MS10 phase 245). It used to be rooted and then not
       -- found, which is the right answer by luck: @define-global@ took the same
@@ -499,6 +537,14 @@ qualified =
   addDefinition (GlobalName ["Ns"] "thing")
                 (MkDefinition [] [] type0 type0)
                 emptyGlobals
+
+-- | Two namespaces holding the same base word (MS10 phase 247), for the
+-- ambiguity an @open@ of both creates.
+twoNamespaces :: GlobalEnv
+twoNamespaces =
+  addDefinition (GlobalName ["Other"] "thing")
+                (MkDefinition [] [] type0 type0)
+                qualified
 
 runIn :: GlobalEnv -> Cursor -> [Instr] -> Either FailReason Machine
 runIn env' cur is = go (machineIn env' cur is)

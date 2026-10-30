@@ -567,7 +567,7 @@ newSession = Session
   -- can never be met is refused and one merely unmet is not. It is deliberately
   -- not 'NoTrust', which is the guarantee a user steps /up/ to, and deliberately
   -- not 'AnyTrust', which reports and enforces nothing.
-  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] n 0 NoUndischargeableTrust
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] [] n 0 NoUndischargeableTrust
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
@@ -1188,6 +1188,10 @@ data Item
     -- **a path and a word** since MS10 phase 243, so a generated definition can
     -- be admitted into its namespace by the ordinary declaration path
   | ItemBlock [RawInstr]
+  | ItemOpen GlobalName
+    -- ^ @open ‹namespace›@ (MS10 phase 247) — the namespace's whole path, as a
+    -- name. It declares nothing; it changes what the declarations after it can
+    -- see.
   | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
     -- resolves it while the file is being read, so a block with bad operands is
@@ -1204,6 +1208,7 @@ regroup = go
   where
     go [] = Right []
     go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
+    go (SurfaceOpen ps x : rest) = (ItemOpen (GlobalName ps x) :) <$> go rest
     -- **Read here, so an unreadable block is a syntax error** and the module
     -- stops before anything in it elaborates (MS6 phase 101). What its names
     -- mean is asked later, at its place in the load ('DeclaringGrammar').
@@ -1264,6 +1269,10 @@ surfaceProgram n0 items = foldl item ([], n0) items
   -- One instruction that yields the block to the driver, which checks it
   -- against what the module has declared so far (MS6 phase 101).
   item (acc, n) (ItemGrammar b) = (acc ++ [Do (DeclareGrammar b)], n)
+  -- **One instruction, where it is written** (MS10 phase 247): the program is
+  -- played in order, so an @open@'s effect reaching only the declarations after
+  -- it falls out of the sequencing and needs nothing of its own.
+  item (acc, n) (ItemOpen g) = (acc ++ [Do (Open (Lit (VName g)))], n)
 
   -- | The plicity of each argument position a signature writes.
   --
@@ -1539,6 +1548,9 @@ declaredName i = case i of
   -- instructions install is known only by running them, so it is counted rather
   -- than named — see 'ProofLoaded'.
   ItemBlock _       -> Nothing
+  -- **An @open@ declares nothing** — it changes what is in view and adds no key
+  -- to the environment (MS10 phase 247).
+  ItemOpen _        -> Nothing
   -- The language's name. Until phase 103 generates its datatype, what it
   -- declares is the grammar alone — the metavariables and the notation.
   -- **A @notation@ block declares nothing at all** (MS8 phase 158, §4.8): the

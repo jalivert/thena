@@ -1686,6 +1686,9 @@ operation gs g i (RawOp w as)
       -- exists ('Thena.Instral.Ops.opKeyword' is total) and resolving it is refused
       -- here, one step before 'validate' would have.
       ("data", _)                 -> Left (DeclarationInBody g i)
+      -- §3.7 again, and for @data@'s reason (MS10 phase 247): @open@ is a
+      -- declaration, so the word exists and resolving it in a body is refused.
+      ("open", _)                 -> Left (DeclarationInBody g i)
 
       _ -> case (lookup w nullaryOps, lookup w unaryOps, lookup w binaryOps, as) of
         (Just o,  _, _, [])       -> Right o

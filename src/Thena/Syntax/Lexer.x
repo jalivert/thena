@@ -188,9 +188,14 @@ tokens :-
   "module"      { keyword TModule }
   -- **Reserved at MS4 phase 45**, for a block of the instruction language
   -- inside a surface term or at the top of a module. The third word to narrow
-  -- identifiers project-wide, after @data@ and @module@, and the last the
-  -- surface language is expected to need.
+  -- identifiers project-wide, after @data@ and @module@.
   "do"          { keyword TDo }
+  -- **Reserved at MS10 phase 247**, for @open ‹namespace›@ — the fourth word to
+  -- narrow identifiers project-wide, and MS4's note that @do@ would be the last
+  -- did not survive the module system. It is a declaration keyword like @data@
+  -- and @module@ and is reserved for their reason: the header is real syntax
+  -- rather than a textual pre-pass.
+  "open"        { keyword TOpen }
   -- **The escape opener is an ordinary token too** (MS5 phase 81). The region
   -- scanner emits one when it meets @${@ inside a tagged region; this is what
   -- lets the same spelling be read again when the region's text is lexed for
@@ -301,6 +306,7 @@ data Token
     -- (MS4 phase 43). No grammar uses it; it exists so that the lexer can say
     -- what it saw rather than failing, and so a later operator may claim it.
   | TData
+  | TOpen        -- ^ @open@, the declaration that brings a namespace into view (MS10 phase 247)
   | TModule
   | TDo
   | TRule

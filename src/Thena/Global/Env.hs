@@ -29,6 +29,7 @@ module Thena.Global.Env
   , lookupConstructor
   , isDeclared
   , declaredNames
+  , namespaceInhabited
   , addConstant
   , addPrimitive
   , generalised
@@ -52,7 +53,7 @@ module Thena.Global.Env
   , varsInEnv
   ) where
 
-import Data.List (nub)
+import Data.List (isPrefixOf, nub)
 
 import Thena.Core.Level
   ( Level (..)
@@ -463,6 +464,20 @@ declaredNames e =
     ++ map fst (primitives e)
     ++ map fst (definitions e)
     ++ map fst (inductives e)
+
+-- | Is anything declared under this namespace path? (MS10 phase 247)
+--
+-- **A prefix scan over the keys, and that is the whole of it — his ruling of
+-- 2026-10-30**: @GlobalEnv@ gains no namespace table, so what a namespace holds
+-- is read off the names that are there. The scan stops at the first hit.
+--
+-- **A namespace is not declared, so this is the only thing @open@ can check.**
+-- A path nothing sits under is a mistake worth refusing — a typo, or a file not
+-- imported — and refusing it here says so once, where it is written, instead of
+-- letting every name that depended on it fail separately.
+namespaceInhabited :: [String] -> GlobalEnv -> Bool
+namespaceInhabited ns e = any under (declaredNames e)
+  where under g = ns `isPrefixOf` nameSteps g
 
 addConstant :: GlobalName -> [LevelVar] -> Core -> GlobalEnv -> GlobalEnv
 addConstant g ls t e = e { constants = (g, MkConstant ls t) : constants e }
