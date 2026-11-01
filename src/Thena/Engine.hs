@@ -1580,11 +1580,24 @@ perform instr rest m = case operation instr of
   -- A name nothing has taken (phase 24c). Avoids the development's own
   -- identifiers **and** the globals, so a generated hole never shadows a
   -- datatype or a theorem.
+  --
+  -- **A global contributes both of its spellings** (MS10): the dotted one, and
+  -- the base word on its own. The hole is a local, and a local beats the
+  -- outward walk, so a hole called @A@ is exactly what stops @A@ from reaching
+  -- @A.A@ for the rest of the elaboration — and a datatype called @A@ used to
+  -- make every rule that mints @fresh-name \"A\"@ fail.
+  --
+  -- **The base word is avoided whether or not it resolves today**, which is
+  -- stronger than the resolution question and is the point: @open@ is a session
+  -- command, so a word that reaches nothing when the hole is minted can start
+  -- reaching a datatype one line later, and a name already written down cannot
+  -- be re-chosen then.
   FreshName hint -> case operandIdent (env (exec m)) hint of
     Left r  -> failure r m
     Right i ->
       let inUse = Cursor.identsIn (cursor (development m))
-                    ++ [ Ident g | g <- map nameDotted (declaredNames (globals m)) ]
+                    ++ concat [ [Ident (nameDotted g), Ident (nameWord g)]
+                              | g <- declaredNames (globals m) ]
           Ident n = Cursor.freshIdent inUse i
        in produce (VName (rootName n)) m
 
