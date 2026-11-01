@@ -451,6 +451,12 @@ renderSyntaxError e = case e of
   SurfaceParseFailed (SurfaceUnexpectedToken p t) -> at p ++ "unexpected " ++ describe t
   SurfaceParseFailed SurfaceUnexpectedEndOfInput  -> "unexpected end of input"
   ResolveFailed (NotInScope n)      -> "not in scope: " ++ n
+  -- **The same words as 'AmbiguousName'** (MS10 phase 249): the two are one
+  -- refusal reached by two doors, and a user who met it in a term should not have
+  -- to learn a second sentence for meeting it in a command.
+  ResolveFailed (NameIsAmbiguous n gs) ->
+    n ++ " is ambiguous here: it could be " ++ intercalate " or " gs
+      ++ "\n  write the one you mean"
   ResolveFailed (NotACoreTerm f)    ->
     devForm f ++ " is part of a development, not a term"
   ResolveFailed (SpliceNotFilled x) ->

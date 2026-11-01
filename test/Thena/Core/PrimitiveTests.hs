@@ -56,7 +56,8 @@ import Thena.Driver (machineOf)
 import Thena.Files (startingSession)
 
 import Thena.Core.TermTests (genLiteral)
-import Thena.Declared (declared)
+import Thena.Declared ( opensIn
+  ,declared)
 
 env :: GlobalEnv
 env = emptyGlobals
@@ -295,7 +296,7 @@ refusals =
 
 printsAndReadsBack :: Core -> Bool
 printsAndReadsBack t =
-  case parseCore [] env ctx 0 (renderCore (Rendering [] 0) ctx t) of
+  case parseCore [] env (opensIn env) ctx 0 (renderCore (Rendering [] 0) ctx t) of
     Right (t', _) -> t' == t
     Left _        -> False
 

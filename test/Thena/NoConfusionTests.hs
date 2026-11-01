@@ -35,7 +35,8 @@ import Thena.Driver (Response (..), loadProofSource)
 import Thena.Files (startingSession)
 import Thena.Render (renderResponse)
 import Thena.Declared
-  ( named
+  ( opensIn
+  , named
   , declared
   , eqDecl
   , eqNat
@@ -86,7 +87,7 @@ tests =
 -- --------------------------------------------------------------------------
 
 termIn :: GlobalEnv -> Int -> Context -> String -> Core
-termIn env n ctx src = case parseCore [] env ctx n src of
+termIn env n ctx src = case parseCore [] env (opensIn env) ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 
@@ -398,10 +399,22 @@ belowEnv = fst (declared [eqDecl, natDecl, finDecl, belowDecl])
 preludeBelowEnv :: GlobalEnv
 preludeBelowEnv = fst (declared (preludeDecls ++ [natDecl, finDecl, belowDecl]))
 
+-- | __This fixture cannot be declared, and the defect is `~cnwc5`__ — a datatype
+-- may not be named after any of its own generated names. @Below@ is @Below.Below@
+-- since phase 248, and the generated @Below@ relation is placed by the same rule,
+-- so @declare@ answers @AlreadyDeclared Below.Below@. **It is on the closeout list
+-- and it is a naming decision**, so the fixture is left as it stands rather than
+-- renamed: a rename would hide a live defect behind a green test.
+--
+-- Its own name is written in full here because a bare @Below@ is /also/ ambiguous
+-- now — the prelude, @Nat@ and @Fin@ are open as they are in a session, and each
+-- generates a @Below@, so the word answers four names and is refused rather than
+-- chosen. Writing the path is what a user would have to do, and it is what makes
+-- the failure name the real cause instead of the ambiguity on top of it.
 belowDecl :: String
 belowDecl =
   "Below : \8704 (n : Nat) (i : Fin n) -> Type\8320 \
-  \where { bz : \8704 (m : Nat) -> Below (succ m) (fz m) }"
+  \where { bz : \8704 (m : Nat) -> Below.Below (succ m) (fz m) }"
 
 certified :: GlobalEnv -> String -> Assertion
 certified env g = case lookupDefinition (named g) env of
@@ -422,7 +435,7 @@ certified env g = case lookupDefinition (named g) env of
 -- declaration itself. Asking the environment is the stronger question anyway:
 -- what a caller can observe is whether the lemma is there.
 generated :: [String] -> String -> Either DeclareError Bool
-generated before src = case parseDeclaration [] env n src of
+generated before src = case parseDeclaration [] env (opensIn env) n src of
   Left e        -> error ("fixture does not parse: " ++ show e)
   Right (d, n1) ->
     (\(env', _) -> isDeclared (snd (noConfusionNames (inductiveName d))) env')
@@ -515,7 +528,7 @@ clashTests =
 
 -- | Declare @Nat@ into a prelude that already holds @g@, and say what happened.
 afterSeeding :: GlobalName -> Either DeclareError Bool
-afterSeeding g = case parseDeclaration [] seeded n natDecl of
+afterSeeding g = case parseDeclaration [] seeded (opensIn seeded) n natDecl of
   Left e        -> error ("fixture does not parse: " ++ show e)
   Right (d, n1) ->
     (\(env', _) -> isDeclared (snd (noConfusionNames (inductiveName d))) env')

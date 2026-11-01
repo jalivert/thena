@@ -387,7 +387,7 @@ preludeBelowEnv = fst (declared (preludeDecls ++ [natDecl, finDecl, belowDecl]))
 belowDecl :: String
 belowDecl =
   "Below : \8704 (n : Nat) (i : Fin n) -> Type\8320 \
-  \where { bz : \8704 (m : Nat) -> Below (succ m) (fz m) }"
+  \where { bz : \8704 (m : Nat) -> Below.Below (succ m) (fz m) }"
 
 -- | Every constructor has an argument, so no-confusion wants no @Unit@; @leaf@
 -- has no /recursive/ argument, so the tuple does.

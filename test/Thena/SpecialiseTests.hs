@@ -34,7 +34,8 @@ import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar)
 import Thena.Core.Term (Core, Ident (..), fresh, freeVars, rootName)
 import Thena.Declared
-  ( eqNat
+  ( opensIn
+  , eqNat
   , eqNatCounter
   , eqNatFinPack
   , eqNatFinPackCounter
@@ -831,22 +832,22 @@ shown ctx = unwords . words . renderCore (Rendering [] 0) ctx
 contextOf :: GlobalEnv -> Int -> [(String, String)] -> (Context, Int)
 contextOf env n0 = foldl one ([], n0)
   where
-    one (ctx, n) (name, src) = case parseCore [] env ctx n src of
+    one (ctx, n) (name, src) = case parseCore [] env (opensIn env) ctx n src of
       Left e -> error ("fixture does not parse: " ++ show e)
       Right (ty, n1) ->
         let (v, n2) = fresh n1
          in (ctx ++ [Hypothesis v (Ident name) ty], n2)
 
 term :: GlobalEnv -> Context -> Int -> String -> Core
-term env ctx n src = case parseCore [] env ctx n src of
+term env ctx n src = case parseCore [] env (opensIn env) ctx n src of
   Left e       -> error ("fixture does not parse: " ++ show e)
   Right (t, _) -> t
 
 -- | Run the elimination tactic and insist it worked.
 run :: String -> GlobalEnv -> Context -> Int -> String -> String -> Elimination
-run label env ctx n goal tgt = case parseCore [] env ctx n goal of
+run label env ctx n goal tgt = case parseCore [] env (opensIn env) ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
-  Right (g, n1) -> case parseCore [] env ctx n1 tgt of
+  Right (g, n1) -> case parseCore [] env (opensIn env) ctx n1 tgt of
     Left e -> error ("fixture does not parse: " ++ show e)
     Right (t, n2) -> case fst (eliminate env ctx Inductive Generalised n2 g t) of
       Right el -> el

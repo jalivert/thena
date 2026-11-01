@@ -889,6 +889,16 @@ data ObjectError
 
 data ResolveError
   = NotInScope String
+  | NameIsAmbiguous String [String]
+    -- ^ **two open namespaces answer one written word** (MS10 phase 249) — the
+    -- word as written, then every name that answers it. Refused and not chosen
+    -- (2026-10-30): either would type-check, so picking one would be the system
+    -- deciding what the user did not write.
+    --
+    -- It is 'Thena.Engine.AmbiguousName's twin at the other door, and both
+    -- are produced by the one walk in 'Thena.Core.Term.globalUnder' — a
+    -- command's argument and a surface term being elaborated refuse the same
+    -- word for the same reason and in the same words.
   | NotACoreTerm DevForm
     -- ^ a development-only form written where a term goes
   | NotAUniverse String

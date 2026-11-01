@@ -24,6 +24,7 @@ module Thena.Core.Term
   , inDeclarationOf
   , declarationOf
   , declarationNamed
+  , globalUnder
   , nameFromText
 
     -- * Terms
@@ -188,6 +189,56 @@ declarationOf (GlobalName ps _) = case reverse ps of
 -- the name it points at — one function, so they cannot drift apart.
 declarationNamed :: GlobalName -> GlobalName
 declarationNamed (GlobalName ps w) = GlobalName (ps ++ [w]) w
+
+-- | __Which global a written name means, under a set of open namespaces.__
+--
+-- **The one walk, and every door calls it** (MS10 phase 249, repairing
+-- `~7zn7k`). It lives here, at the bottom of the import graph, because the two
+-- doors cannot both reach either of their own modules:
+-- 'Thena.Engine.globalNamed' had the only copy and 'Thena.Syntax.Resolve' — a
+-- REPL command's argument, a core term, a tagged term literal — could not call
+-- it, since 'Thena.Engine' imports 'Thena.Syntax.Resolve'. **A name meaning two
+-- things depending on which door the text came in by is exactly what the first
+-- design principle forbids**, and it was a live defect: after @open Ctx@,
+-- @:infer empty@ answered @empty : Ctx.Ctx@ while @:theorem foo : … empty …@
+-- answered @not in scope: empty@.
+--
+-- The caller supplies @known@, because what counts as in scope differs
+-- legitimately: the engine asks its environment, and a declaration resolving
+-- its own constructors adds the datatype being declared, which is not in the
+-- environment and cannot be.
+--
+-- * @Right g@ — this is the name.
+-- * @Left []@ — nothing answers it.
+-- * @Left gs@, two or more — **refused and not chosen** (2026-10-30): either
+--   would type-check, so picking one would be the system deciding what the user
+--   did not write. The caller names them all.
+--
+-- **The written name wins outright.** A path the writer wrote says what they
+-- meant; an open prefix only says where else to look, and an @open@ may add a
+-- way to resolve and never change one.
+globalUnder :: (GlobalName -> Bool) -> [[String]] -> GlobalName -> Either [GlobalName] GlobalName
+globalUnder known opens g
+  | known g = Right g
+  | otherwise = case filter known (candidates g) of
+      [g'] -> Right g'
+      gs   -> Left gs
+  where
+    -- **The whole written name under each prefix**, so @open A@ and a written
+    -- @B.c@ tries @A.B.c@.
+    --
+    -- **And each of those as a declaration's short name**: @Nat@ is the
+    -- datatype @Nat.Nat@, the alias 'declarationNamed' derives. It is applied
+    -- under the prefixes too, so @open A@ and a written @Nat@ reaches
+    -- @A.Nat.Nat@ — the alias is a fact about a name, not about the scope it
+    -- was found in.
+    --
+    -- **Deduplicated, because the two can agree**: @open Nat@ makes @Nat.Nat@ a
+    -- candidate by the prefix and by the alias both, and two routes to one name
+    -- is not an ambiguity.
+    candidates h =
+      nub [ c | q <- h : [ GlobalName (ns ++ nameSteps h) (nameWord h) | ns <- opens ]
+              , c <- [q, declarationNamed q] ]
 
 -- | The body of a binder, with the bound variable replaced by a de Bruijn index.
 --

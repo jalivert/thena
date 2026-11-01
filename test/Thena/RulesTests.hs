@@ -23,7 +23,8 @@ import Thena.Core.Term
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, crossType, enter)
 import Thena.Development.Partial (Partial (..))
-import Thena.Declared (nat, natDecl)
+import Thena.Declared ( opensIn
+  ,nat, natDecl)
 import Thena.Standard (expectedBase)
 import Thena.Driver (parseDeclaration)
 import Thena.Core.Trust (TrustLevel (..))
@@ -712,7 +713,7 @@ twoHoles =
     g = fst (fresh 9)
 
 someData :: InductiveDefinition
-someData = case parseDeclaration [] emptyGlobals 200 natDecl of
+someData = case parseDeclaration [] emptyGlobals (opensIn emptyGlobals) 200 natDecl of
   Right (d, _) -> d
   Left err     -> error ("fixture does not parse: " ++ show err)
 

@@ -13,6 +13,7 @@
 -- makes two suites pass about two different datatypes.
 module Thena.Declared
   ( natDecl
+  , opensIn
   , vecDecl
   , finDecl
   , packDecl
@@ -60,10 +61,12 @@ module Thena.Declared
   , named
   ) where
 
-import Thena.Core.Term (GlobalName, nameFromText)
+import Data.List (nub)
+
+import Thena.Core.Term (GlobalName, nameFromText, nameSteps)
 import Thena.Driver (parseDeclaration)
 import Thena.Global.Declare (declare)
-import Thena.Global.Env (GlobalEnv, emptyGlobals)
+import Thena.Global.Env (GlobalEnv, emptyGlobals, inductives)
 
 natDecl, vecDecl, finDecl, packDecl, spanDecl, emptyDecl :: String
 allDecl, afterDecl, beforeDecl, bothDecl, apartDecl :: String
@@ -253,14 +256,34 @@ stepDecl =
 -- | Declare a list of datatypes in order, threading the environment and the
 -- name counter. A refusal is a fixture bug, not a test result, so it errors
 -- loudly rather than quietly becoming an unrelated assertion failure.
+--
+-- __Each declaration is read with the ones before it OPEN__ (MS10 phase 249),
+-- which is what a surface module does: phase 248 put a datatype's constructors
+-- inside its own namespace, so @Nat.zero@ is the name, and 'stepDecl' writing
+-- @Term@ and @true@ short is a fixture that reads exactly like a @.thena@ file
+-- with @open Term@ after the block. Without it a fixture cannot even declare a
+-- relation over an earlier datatype. **The opens are derived from what has been
+-- declared and not listed**, so a fixture cannot drift from them, and
+-- 'opensIn' is the same walk for a test that resolves a term afterwards.
 declared :: [String] -> (GlobalEnv, Int)
-declared = foldl one (emptyGlobals, 0)
+declared srcs = let (env, n, _) = foldl one (emptyGlobals, 0, []) srcs in (env, n)
   where
-    one (env, n) src = case parseDeclaration [] env n src of
+    one (env, n, opens) src = case parseDeclaration [] env opens n src of
       Left e -> error ("fixture does not parse: " ++ show e)
       Right (d, n1) -> case declare env n1 d of
-        Left e              -> error ("fixture refused: " ++ show e)
-        Right (env', n2)    -> (env', n2)
+        Left e           -> error ("fixture refused: " ++ show e)
+        Right (env', n2) -> (env', n2, opensIn env')
+
+-- | The namespaces every datatype in an environment opens, latest first.
+--
+-- __Derived, never listed__ — the same argument that kept a namespace table out
+-- of 'Thena.Global.Env' (his ruling, 2026-10-30): a list a fixture maintained by
+-- hand would be a second copy of what the environment's keys already say. A test
+-- that declares with 'declared' and then resolves a term written in short names
+-- passes @opensIn env@ where a REPL session passes @opened machine@ and a module
+-- passes the @open@s it has read.
+opensIn :: GlobalEnv -> [[String]]
+opensIn e = reverse (nub [ nameSteps g | (g, _) <- inductives e ])
 
 nat, natVec, natFin :: GlobalEnv
 nat    = fst (declared [natDecl])

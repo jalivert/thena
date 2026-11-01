@@ -69,7 +69,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), declarationNamed, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -880,14 +880,17 @@ data CommandError
 -- --------------------------------------------------------------------------
 
 -- | Lex, parse, resolve as a core term, in the given environment and context.
-parseCore :: [Grammar] -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Core, Int)
-parseCore gr = parseWith gr resolve
+parseCore
+  :: [Grammar] -> GlobalEnv -> [[String]] -> Context -> Int -> String
+  -> Either SyntaxError (Core, Int)
+parseCore gr env opens = parseWith gr (\g e -> resolve g e opens) env
 
 
 -- | Lex, parse, resolve as a development (§2.7's longest-prefix convention).
 parseDevelopment
-  :: [Grammar] -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Partial, Int)
-parseDevelopment gr = parseWith gr resolvePartial
+  :: [Grammar] -> GlobalEnv -> [[String]] -> Context -> Int -> String
+  -> Either SyntaxError (Partial, Int)
+parseDevelopment gr env opens = parseWith gr (\g e -> resolvePartial g e opens) env
 
 -- | The arguments of a rule called by name at the REPL (phase 23b): a run of
 -- atoms, each resolved as a core term in the context at the focus.
@@ -1100,11 +1103,12 @@ parseWith gr res env ctx n src = do
 -- is not a term: it has its own start symbol in the grammar and it is read in
 -- the empty context, never in the development's.
 parseDeclaration
-  :: [Grammar] -> GlobalEnv -> Int -> String -> Either SyntaxError (InductiveDefinition, Int)
-parseDeclaration gr env n src = do
+  :: [Grammar] -> GlobalEnv -> [[String]] -> Int -> String
+  -> Either SyntaxError (InductiveDefinition, Int)
+parseDeclaration gr env opens n src = do
   ts  <- tokensOf src
   raw <- mapLeft ParseFailed (parseData ts)
-  mapLeft ResolveFailed (resolveData gr env n raw)
+  mapLeft ResolveFailed (resolveData gr env opens n raw)
 
 -- | Lex, parse and resolve the two sides of @:convert t ≟ u@.
 --
@@ -1113,13 +1117,13 @@ parseDeclaration gr env n src = do
 -- the two are resolved in one continuous supply of names rather than two that
 -- overlap.
 parseEquated
-  :: [Grammar] -> GlobalEnv -> Context -> Int -> String
+  :: [Grammar] -> GlobalEnv -> [[String]] -> Context -> Int -> String
   -> Either SyntaxError ((Core, Core), Int)
-parseEquated gr env ctx n src = do
+parseEquated gr env opens ctx n src = do
   ts       <- tokensOf src
   (r1, r2) <- mapLeft ParseFailed (parseEquation ts)
-  (a, n1)  <- mapLeft ResolveFailed (resolve gr env ctx n r1)
-  (b, n2)  <- mapLeft ResolveFailed (resolve gr env ctx n1 r2)
+  (a, n1)  <- mapLeft ResolveFailed (resolve gr env opens ctx n r1)
+  (b, n2)  <- mapLeft ResolveFailed (resolve gr env opens ctx n1 r2)
   Right ((a, b), n2)
 
 -- | Lex, parse and resolve @‹name› : ‹type›@ for @:theorem@.
@@ -1128,12 +1132,12 @@ parseEquated gr env ctx n src = do
 -- (§5.3), and resolving it where a scratch @assume@ happens to be in scope
 -- would let one in.
 parseStatement
-  :: [Grammar] -> GlobalEnv -> Int -> String
+  :: [Grammar] -> GlobalEnv -> [[String]] -> Int -> String
   -> Either SyntaxError (Maybe String, (Core, Int))
-parseStatement gr env n src = do
+parseStatement gr env opens n src = do
   ts        <- tokensOf src
   (mx, raw) <- mapLeft ParseFailed (parseNameAndType ts)
-  r         <- mapLeft ResolveFailed (resolve gr env [] n raw)
+  r         <- mapLeft ResolveFailed (resolve gr env opens [] n raw)
   Right (mx, r)
 
 tokensOf :: String -> Either SyntaxError [Located Token]
@@ -1626,7 +1630,7 @@ dispatch s name arg = case name of
   -- the rule base a second time.
   ":help"  -> noArgument (s, Helped commandSummary)
   ":quit"  -> noArgument (s, Quit)
-  ":core"  -> withArgument (view s (parseCore (grammars machine)) Rendered arg)
+  ":core"  -> withArgument (view s (\e -> parseCore (grammars machine) e (opened machine)) Rendered arg)
   -- | @:surface ‹term›@ — parse a **surface** term and print it back (phase
   -- 39). The analogue of @:core@, and for the same reason: it is the only way
   -- to see what the parser made of what you wrote, and until phase 41 it is the
@@ -1637,7 +1641,7 @@ dispatch s name arg = case name of
   ":surface" -> withArgument $ case parseSurfaceTerm arg of
     Left e  -> (s, Failed e)
     Right t -> (s, RenderedSurface t)
-  ":dev"   -> withArgument (view s (parseDevelopment (grammars machine)) RenderedDev arg)
+  ":dev"   -> withArgument (view s (\e -> parseDevelopment (grammars machine) e (opened machine)) RenderedDev arg)
   -- In @:parse@'s mode 'command' takes @:done@ before it gets here.
   ":done"  -> noArgument (s, Rejected NotParsing)
   -- | @:parse ‹Language› ‹text›@ — parse an object term with an installed
@@ -1696,7 +1700,7 @@ dispatch s name arg = case name of
     "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> (s, Rendered (whnf (globals machine) ctx t))
       _            -> (s, Rejected (NotThere NotInCore))
-    _  -> view s (parseCore (grammars machine)) (Rendered . whnf (globals machine) ctx) arg
+    _  -> view s (\e -> parseCore (grammars machine) e (opened machine)) (Rendered . whnf (globals machine) ctx) arg
   -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
   -- argument it is the core focus, with one it is a term the user writes.
   -- **A bare argument is a surface term; corners are a core one** (MS4 phase
@@ -1707,7 +1711,7 @@ dispatch s name arg = case name of
       OnTerm _ _ t -> inferred t (names machine)
       _            -> (s, Rejected (NotThere NotInCore))
     _ | Just inner <- cornered arg ->
-          case parseCore (grammars machine) (globals machine) ctx (names machine) inner of
+          case parseCore (grammars machine) (globals machine) (opened machine) ctx (names machine) inner of
             Left e        -> (s, Failed e)
             Right (t, n1) -> inferred t n1
       | otherwise -> case parseSurfaceTerm arg of
@@ -1946,24 +1950,49 @@ dispatch s name arg = case name of
       | null arg  = (s, Rejected (MissingArgument name))
       | otherwise = k
 
-    showRules what = case lookupInductive (nameFromText what) (globals machine) of
-      Just d  -> (s, ShownRules d)
-      Nothing -> (s, Rejected (NoSuchGlobal what))
+    -- | __What a command's argument names, under the session's @open@s__ (MS10
+    -- phase 249, repairing @~7zn7k@). It is
+    -- 'Thena.Core.Term.globalUnder' — the same walk a term goes through, so
+    -- @:show empty@ and @empty@ written in a type agree about what @empty@ is
+    -- after @open Ctx@. They did not: the commands looked the written text up
+    -- directly and found nothing.
+    --
+    -- The predicate is the caller's, because what counts as found differs:
+    -- @:show@ will take anything in any of the three tables, @:elim@ and
+    -- @:judgment@ want a datatype.
+    argumentNamed :: (GlobalName -> Bool) -> String -> Either [GlobalName] GlobalName
+    argumentNamed known what = globalUnder known (opened machine) (nameFromText what)
 
-    showGlobal what = case lookupInductive g (globals machine) of
-      Just d  -> (s, ShownData d)
-      Nothing -> case lookupDefinition g (globals machine) of
-        Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
-                         (fromMaybe [] (lookup g (signatures machine)))
-                                    (definitionType d) (Just (definitionBody d)))
-        Nothing -> case lookupConstant g (globals machine) of
-          Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
-          Nothing -> (s, Rejected (NoSuchGlobal what))
+    -- | A refusal for a command's argument, in the words a term would use.
+    noGlobal what amb
+      | null amb  = (s, Rejected (NoSuchGlobal what))
+      | otherwise = (s, Failed (ResolveFailed (NameIsAmbiguous what (map nameDotted amb))))
+
+    isInductive g = isJust (lookupInductive g (globals machine))
+
+    showRules what = case argumentNamed isInductive what of
+      Left amb -> noGlobal what amb
+      Right g  -> case lookupInductive g (globals machine) of
+        Just d  -> (s, ShownRules d)
+        Nothing -> (s, Rejected (NoSuchGlobal what))
+
+    showGlobal what = case argumentNamed anywhere what of
+      Left amb -> noGlobal what amb
+      Right g  -> case lookupInductive g (globals machine) of
+        Just d  -> (s, ShownData d)
+        Nothing -> case lookupDefinition g (globals machine) of
+          Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
+                           (fromMaybe [] (lookup g (signatures machine)))
+                                      (definitionType d) (Just (definitionBody d)))
+          Nothing -> case lookupConstant g (globals machine) of
+            Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
+            Nothing -> (s, Rejected (NoSuchGlobal what))
       where
-        -- **A qualified name is what @:show@ is usually given now** (MS10) —
-        -- @Nat.case@, @Term.noConfusion@ — and a command's argument is raw text,
-        -- so it is split here. See 'nameFromText'.
-        g = nameFromText what
+        -- **Any of the three tables**, because @:show@ shows whatever it finds —
+        -- a datatype, a definition with a body, or a constant without one.
+        anywhere g = isInductive g
+          || isJust (lookupDefinition g (globals machine))
+          || isJust (lookupConstant g (globals machine))
 
     -- | @:elim ‹datatype›@, or @:elim ‹datatype› ‹universe›@.
     --
@@ -1974,14 +2003,17 @@ dispatch s name arg = case name of
     -- The level defaults to the datatype\'s own, which is the common case and
     -- nothing more — @Nat@\'s eliminator into @Type₀@. Writing @Type₁@ is how
     -- §3.7\'s universe trick is seen: the same datatype, a second rule.
-    eliminator what = case lookupInductive g (globals machine) of
-      Nothing -> (s, Failed (ResolveFailed (NotADatatype name')))
-      Just d  -> case level d (dropWhile (== ' ') rest) of
-        Left e  -> e
-        Right l -> (s, ShownEliminator g (fst (eliminatorType d l (names machine))))
+    eliminator what = case argumentNamed isInductive name' of
+      Left amb
+        | null amb  -> (s, Failed (ResolveFailed (NotADatatype name')))
+        | otherwise -> (s, Failed (ResolveFailed (NameIsAmbiguous name' (map nameDotted amb))))
+      Right g -> case lookupInductive g (globals machine) of
+        Nothing -> (s, Failed (ResolveFailed (NotADatatype name')))
+        Just d  -> case level d (dropWhile (== ' ') rest) of
+          Left e  -> e
+          Right l -> (s, ShownEliminator g (fst (eliminatorType d l (names machine))))
       where
         (name', rest) = break (== ' ') what
-        g             = nameFromText name'
 
     -- The universe is read with the ordinary term parser, in the empty
     -- context, so @:elim Nat Typ₀@ reports a lex error where it happened
@@ -1989,7 +2021,7 @@ dispatch s name arg = case name of
     level :: InductiveDefinition -> String -> Either (Session, Response) Level
     level d u
       | null u    = Right (inductiveLevel d)
-      | otherwise = case parseCore (grammars machine) (globals machine) [] (names machine) u of
+      | otherwise = case parseCore (grammars machine) (globals machine) (opened machine) [] (names machine) u of
           Left e                -> Left (s, Failed e)
           Right (Universe l, _) -> Right l
           Right _               -> Left (s, Rejected (LevelExpected u))
@@ -2000,7 +2032,7 @@ dispatch s name arg = case name of
     -- @:revalidate@: a proof of a non-type is not worth entering.
     theorem = case sessionWork s of
       Attempting att -> (s, Rejected (AlreadyProving (attemptName att)))
-      Scratch -> case parseStatement (grammars machine) (globals machine) (names machine) arg of
+      Scratch -> case parseStatement (grammars machine) (globals machine) (opened machine) (names machine) arg of
         Left e             -> (s, Failed e)
         Right (Nothing, _) -> (s, Rejected (MissingArgument ":theorem"))
         Right (Just x, (ty, n1))
@@ -2156,7 +2188,7 @@ dispatch s name arg = case name of
         )
 
     declaration = withArgument $
-      case parseDeclaration (grammars machine) (globals machine) (names machine) arg of
+      case parseDeclaration (grammars machine) (globals machine) (opened machine) (names machine) arg of
         Left e -> (s, Failed e)
         Right (d, n1) ->
           let is = [ Do (DefineData d)
@@ -2168,7 +2200,7 @@ dispatch s name arg = case name of
                 []
                 []
 
-    goal = withArgument $ case parseCore (grammars machine) (globals machine) ctx (names machine) arg of
+    goal = withArgument $ case parseCore (grammars machine) (globals machine) (opened machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (t, n1) -> case setGoal t machine { names = n1 } of
         Left e   -> (s, Rejected (NotThere e))
@@ -2241,7 +2273,7 @@ dispatch s name arg = case name of
             (s', other) -> (s' { sessionMachine = restore before (sessionMachine s') }, other)
 
     conversion = withArgument $
-      case parseEquated (grammars machine) (globals machine) ctx (names machine) arg of
+      case parseEquated (grammars machine) (globals machine) (opened machine) ctx (names machine) arg of
         Left e -> (s, Failed e)
         Right ((a, b), n1) -> case convert (globals machine) ctx n1 a b of
           (why, owed, n2) -> (bump n2, Converted a b why owed)

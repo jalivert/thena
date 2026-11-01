@@ -57,7 +57,8 @@ import Thena.Global.Env
   )
 import Thena.Render (Rendering (..), renderCore)
 
-import Thena.Declared (eqNat, eqNatCounter)
+import Thena.Declared ( opensIn
+  ,eqNat, eqNatCounter)
 
 -- --------------------------------------------------------------------------
 -- Fixtures
@@ -84,7 +85,7 @@ ctx = []
 -- in the fixture, so it stops the suite rather than failing a test about
 -- something else.
 core :: GlobalEnv -> String -> Core
-core e src = case parseCore [] e ctx eqNatCounter src of
+core e src = case parseCore [] e (opensIn e) ctx eqNatCounter src of
   Left err     -> error ("fixture does not parse: " ++ show err)
   Right (t, _) -> t
 

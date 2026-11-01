@@ -1426,7 +1426,7 @@ annotations =
       \rule usesName :- do n = fresh-name \"h\" ; ignore n\n\
       \rule usesTerm :- do h = here ; ignore h\n"
 
--- | A signature that does not resolve [] is refused when the FILE is read, before
+-- | A signature that does not resolve is refused when the FILE is read, before
 -- anything is inferred — it is a question one file can answer.
 badSignatures :: TestTree
 badSignatures =

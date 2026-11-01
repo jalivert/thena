@@ -35,7 +35,8 @@ import Thena.Core.Convert (convert)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), Ident (..), Var, close, fresh, open)
 import Thena.Core.Typing (check, infer)
-import Thena.Declared (named, natFin, natFinCounter, natVec, natVecCounter)
+import Thena.Declared ( opensIn
+  ,named, natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Errors (TypeError (..))
 import Thena.Core.Context (piOver)
@@ -102,7 +103,7 @@ recursiveFunctionTests =
 -- --------------------------------------------------------------------------
 
 termAt :: Int -> Context -> String -> Core
-termAt n ctx src = case parseCore [] natVec ctx n src of
+termAt n ctx src = case parseCore [] natVec (opensIn natVec) ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 

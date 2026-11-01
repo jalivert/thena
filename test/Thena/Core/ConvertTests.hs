@@ -18,7 +18,8 @@ import Thena.Core.Level (Level (..), LevelVar (..), Obligation (..), levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Convert (convert, subsumes)
 import Thena.Core.Term (Core (..), Ident (..), close, fresh)
-import Thena.Declared (named, natVec, natVecCounter)
+import Thena.Declared ( opensIn
+  ,named, natVec, natVecCounter)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Driver (parseCore)
 import Thena.Errors (Clash (..), ConversionFailure (..), Site (..))
@@ -107,7 +108,7 @@ term = termAt natVecCounter
 -- hypothetical — the first draft of the eta tests below did it, and conversion
 -- correctly reported two different variables where the test meant one.
 termAt :: Int -> Context -> String -> Core
-termAt n ctx src = case parseCore [] natVec ctx n src of
+termAt n ctx src = case parseCore [] natVec (opensIn natVec) ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 

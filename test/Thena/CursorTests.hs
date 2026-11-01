@@ -62,7 +62,8 @@ import Thena.Fixtures
   , withConstraint
   )
 import Thena.Render ( Rendering (..)
-  ,renderCursor, renderWhere)
+  , renderCursor, renderWhere)
+import Thena.Declared (opensIn)
 
 tests :: TestTree
 tests =
@@ -148,7 +149,7 @@ walkedLaws =
   where
     overWalk k =
       withNumTests 300 $ forAll (genDevelopment [] 4) $ \src ->
-        case parseDevelopment [] emptyGlobals [] 500 src of
+        case parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 500 src of
           Left _       -> property True
           Right (p, _) ->
             let bad = k p (walk 200 [enter p] [])

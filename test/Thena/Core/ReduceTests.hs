@@ -19,7 +19,8 @@ import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), Ident (..), Var, fresh)
 import Thena.Declared
-  ( named
+  ( opensIn
+  , named
   , nat
   , natAnd
   , natAndCounter
@@ -47,7 +48,7 @@ tests =
     , testGroup "iota — a parameter instantiated with the datatype itself" iotaParameterTests
     , testGroup "iota refuses an unsaturated target" iotaSaturationTests
     , testGroup "whnf leaves neutral terms alone" neutralTests
-    , testGroup "elim's arity is checked at resolve [] time" elimShapeTests
+    , testGroup "elim's arity is checked at resolve time" elimShapeTests
     , laws
     ]
 
@@ -130,7 +131,7 @@ term = term' natVec natVecCounter
 -- | 'term' against an environment other than 'natVec'. The counter must be
 -- that environment\'s own, for the reason 'hyp' gives.
 term' :: GlobalEnv -> Int -> Context -> String -> Core
-term' env n ctx src = case parseCore [] env ctx n src of
+term' env n ctx src = case parseCore [] env (opensIn env) ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 
@@ -400,7 +401,7 @@ neutralTests =
   ]
 
 -- --------------------------------------------------------------------------
--- elim's arity is checked at resolve [] time
+-- elim's arity is checked at resolve time
 -- --------------------------------------------------------------------------
 
 elimShapeTests :: [TestTree]
@@ -427,6 +428,6 @@ elimShapeTests =
 
     refused :: String -> String -> TestTree
     refused label src = testCase label $
-      case parseCore [] natVec ctx natVecCounter src of
+      case parseCore [] natVec (opensIn natVec) ctx natVecCounter src of
         Left (_ :: SyntaxError) -> pure ()
         Right (r, _)            -> assertFailure ("resolved when it should not have: " ++ show r)

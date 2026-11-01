@@ -21,7 +21,8 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (Core, nameDotted, rootName)
 import Thena.Core.Trust (TrustLevel (..))
-import Thena.Declared (natVec, natVecCounter)
+import Thena.Declared ( opensIn
+  ,natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Engine
   ( Exec (..)
@@ -63,7 +64,7 @@ ran o = go (machine [Bind (PVar "it") Nothing o])
 
 -- | A core term, parsed in @natVec@ exactly as a user would write it.
 term :: String -> Core
-term src = case parseCore [] natVec [] natVecCounter src of
+term src = case parseCore [] natVec (opensIn natVec) [] natVecCounter src of
   Left e        -> error ("fixture does not parse: " ++ show e)
   Right (t, _)  -> t
 

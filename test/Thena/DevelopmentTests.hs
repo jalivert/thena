@@ -25,7 +25,8 @@ import Thena.Fixtures
   , withConstraint
   )
 import Thena.Render ( Rendering (..)
-  ,renderPartial)
+  , renderPartial)
+import Thena.Declared (opensIn)
 
 tests :: TestTree
 tests =
@@ -68,7 +69,7 @@ generatedRoundTrip =
     "any development the grammar admits"
     [ testProperty "parses, and printing it is idempotent" $
         withNumTests 1000 $ forAll (genDevelopment [] 5) $ \src ->
-          case parseDevelopment [] emptyGlobals [] 500 src of
+          case parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 500 src of
             Left e -> counterexample (src ++ "\n  did not parse: " ++ show e) False
             -- **Rendered with the counter the parse handed back**, not with
             -- the one it started from: the vars in @p@ were minted from 500
@@ -77,7 +78,7 @@ generatedRoundTrip =
             -- safe from it only because its fixtures mint from zero.
             Right (p, n) ->
               let once = renderPartial (Rendering [] n) [] p
-                  twice = case parseDevelopment [] emptyGlobals [] n once of
+                  twice = case parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] n once of
                     Left e            -> "PARSE FAILED: " ++ show e
                     Right (p', n')    -> renderPartial (Rendering [] n') [] p'
                in counterexample
@@ -281,21 +282,21 @@ unlines' = foldr1 (\a b -> a ++ "\n" ++ b)
 prefixTests :: [TestTree]
 prefixTests =
   [ testCase "a leading λ becomes a chain link, not a trailing Lam" $
-      fmap fst (parseDevelopment [] emptyGlobals [] 0 "λ (A : Type₀) -> A")
+      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "λ (A : Type₀) -> A")
         @?= Right (Under (Assume vA (Ident "A") type0) (Trailing (Free vA)))
   , testCase "corners stop the spine" $
-      fmap fst (parseDevelopment [] emptyGlobals [] 0 "[| λ (A : Type₀) -> A |]")
+      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "[| λ (A : Type₀) -> A |]")
         @?= Right (Trailing (Lam (Ident "A") type0 (close vA (Free vA))))
   , testCase "and those two are genuinely different developments" $
       assertBool "chain link and trailing Lam must differ" $
-        fmap fst (parseDevelopment [] emptyGlobals [] 0 "λ (A : Type₀) -> A")
-          /= fmap fst (parseDevelopment [] emptyGlobals [] 0 "[| λ (A : Type₀) -> A |]")
+        fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "λ (A : Type₀) -> A")
+          /= fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "[| λ (A : Type₀) -> A |]")
   , testCase "a leading let becomes a Define link" $
-      fmap fst (parseDevelopment [] emptyGlobals [] 0 "let d = Type₀ : Type₁ in d")
+      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "let d = Type₀ : Type₁ in d")
         @?= Right (Under (Define vA (Ident "d") type0 (Universe (levelOfNat 1)))
                      (Trailing (Free vA)))
   , testCase "several binder groups become several links" $
-      fmap fst (parseDevelopment [] emptyGlobals [] 0 "λ (A : Type₀) (B : Type₀) -> B")
+      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "λ (A : Type₀) (B : Type₀) -> B")
         @?= Right
               (Under (Assume vA (Ident "A") type0)
                 (Under (Assume vB (Ident "B") type0)
@@ -304,12 +305,12 @@ prefixTests =
     -- phase 41f). This asserted the opposite until then, when the development
     -- calculus had no ∀-binder to read one as.
   , testCase "a leading ∀ becomes a Quantify link" $
-      fmap fst (parseDevelopment [] emptyGlobals [] 0 "∀ (A : Type₀) -> A")
+      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "∀ (A : Type₀) -> A")
         @?= Right (Under (Quantify vA (Ident "A") type0) (Trailing (Free vA)))
     -- And the same escape the λ case has: corners stop the spine, so a
     -- trailing Π is still writable.
   , testCase "corners keep a ∀ in the trailing term" $
-      fmap fst (parseDevelopment [] emptyGlobals [] 0 "[| ∀ (A : Type₀) -> A |]")
+      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "[| ∀ (A : Type₀) -> A |]")
         @?= Right (Trailing (Pi (Ident "A") type0 (close vA (Free vA))))
   ]
   where
@@ -324,7 +325,7 @@ prefixTests =
 scopeTests :: [TestTree]
 scopeTests =
   [ testCase "a guess body does not see the hole it fills" $
-      fmap fst (parseDevelopment [] emptyGlobals [] 0 "λ (h : Type₀) -> let ? h : Type₀ ≐ (h) in h")
+      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "λ (h : Type₀) -> let ? h : Type₀ ≐ (h) in h")
         @?= Right
               (Under (Assume vOuter (Ident "h") type0)
                 (Under (Guess vHole (Ident "h")
@@ -332,16 +333,16 @@ scopeTests =
                           type0)
                   (Trailing (Free vHole))))
   , testCase "so a guess naming only its own hole is a scope error" $
-      isLeft (parseDevelopment [] emptyGlobals [] 0 "let ? h : Type₀ ≐ (h) in h") @?= True
+      isLeft (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "let ? h : Type₀ ≐ (h) in h") @?= True
   , testCase "a definition's value does not see its own name" $
-      isLeft (parseDevelopment [] emptyGlobals [] 0 "let d = d : Type₀ in d") @?= True
+      isLeft (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "let d = d : Type₀ in d") @?= True
   , testCase "a hole's type does not see its own name" $
-      isLeft (parseDevelopment [] emptyGlobals [] 0 "let ? h : h in h") @?= True
+      isLeft (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "let ? h : h in h") @?= True
   , testCase "Ξ's binders scope over the equation" $
-      isLeft (parseDevelopment [] emptyGlobals [] 0
+      isLeft (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0
                 "let ? h : Type₀ in (x : Type₀) |- h ?= x : Type₀ |> h") @?= False
   , testCase "but not over the rest of the chain" $
-      isLeft (parseDevelopment [] emptyGlobals [] 0
+      isLeft (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0
                 "let ? h : Type₀ in (x : Type₀) |- h ?= x : Type₀ |> x") @?= True
   ]
   where
@@ -377,7 +378,7 @@ roundTripTests =
 -- hypothetical: it silently turned @A -> A@ into @∀ (_ : A) -> _@ while this
 -- suite was being written (§13e).
 reprint :: Partial -> String
-reprint p = case parseDevelopment [] emptyGlobals [] 500 (renderPartial (Rendering [] 500) [] p) of
+reprint p = case parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 500 (renderPartial (Rendering [] 500) [] p) of
   Right (p', n) -> renderPartial (Rendering [] n) [] p'
   Left e        -> "PARSE FAILED: " ++ show e
 

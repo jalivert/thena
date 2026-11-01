@@ -36,7 +36,8 @@ import Thena.Core.Term
   , rootName
   )
 import Thena.Declared
-  ( eqNat
+  ( opensIn
+  , eqNat
   , eqNatCounter
   , eqStep
   , eqStepCounter
@@ -473,7 +474,7 @@ friendlyTests =
   , testCase "a tied dependent index states its equation transported" $
       let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl]
           (ctx, n1) = contextOf env n0
-            [("m", "Nat"), ("b", "Below (succ m) (fz m)")]
+            [("m", "Nat"), ("b", "Below.Below (succ m) (fz m)")]
        in map (rendered ctx . thirdOf') (elimMethods (run "tiedDep" env ctx n1 "Nat" "b"))
             @?= [ "∀ (m1 : Nat) (q : Eq {0} Nat (succ m1) (succ m)) \
                   \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
@@ -530,7 +531,7 @@ belowProbe :: Elimination
 (belowContext, belowProbe) =
   let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl]
       (ctx, n1) = contextOf env n0
-        [("n", "Nat"), ("i", "Fin n"), ("b", "Below n i")]
+        [("n", "Nat"), ("i", "Fin n"), ("b", "Below.Below n i")]
    in (ctx, run "below" env ctx n1 "Nat" "b")
 
 -- | @m n : Nat@, @p : Le m n@ — the state @weaken@ reaches after three
@@ -640,8 +641,8 @@ vecDecl' =
 belowDecl :: String
 belowDecl =
   "Below : \8704 (n : Nat) (i : Fin n) -> Type\8320 \
-  \where { bz : \8704 (m : Nat) -> Below (succ m) (fz m) \
-  \; bs : \8704 (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
+  \where { bz : \8704 (m : Nat) -> Below.Below (succ m) (fz m) \
+  \; bs : \8704 (m : Nat) (j : Fin m) (b : Below.Below m j) -> Below.Below (succ m) (fs m j) }"
 
 -- | Three indices, the third typed by the first /two/ — the shape MS9 phase
 -- 213's transport chain cannot state, because @Fin n@ makes index 2 depend on
@@ -661,14 +662,14 @@ contextOf env = contextOf' env []
 contextOf' :: GlobalEnv -> Context -> Int -> [(String, String)] -> (Context, Int)
 contextOf' env ctx0 n0 = foldl one (ctx0, n0)
   where
-    one (ctx, n) (name, src) = case parseCore [] env ctx n src of
+    one (ctx, n) (name, src) = case parseCore [] env (opensIn env) ctx n src of
       Left e -> error ("fixture does not parse: " ++ show e)
       Right (ty, n1) ->
         let (v, n2) = fresh n1
          in (ctx ++ [Hypothesis v (Ident name) ty], n2)
 
 parsed :: GlobalEnv -> Context -> Int -> String -> (Core, Int)
-parsed env ctx n src = case parseCore [] env ctx n src of
+parsed env ctx n src = case parseCore [] env (opensIn env) ctx n src of
   Left e        -> error ("fixture does not parse: " ++ show e)
   Right (t, n1) -> (t, n1)
 
@@ -696,9 +697,9 @@ attemptFixed = attemptWith Fixed
 attemptWith
   :: Premises -> GlobalEnv -> Context -> Int -> String -> String
   -> (Either ElimError Elimination, Int)
-attemptWith prem env ctx n goal tgt = case parseCore [] env ctx n goal of
+attemptWith prem env ctx n goal tgt = case parseCore [] env (opensIn env) ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
-  Right (g, n1) -> case parseCore [] env ctx n1 tgt of
+  Right (g, n1) -> case parseCore [] env (opensIn env) ctx n1 tgt of
     Left e        -> error ("fixture does not parse: " ++ show e)
     Right (t, n2) -> eliminate env ctx Inductive prem n2 g t
 

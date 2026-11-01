@@ -16,6 +16,7 @@
 -- in the positional parts cannot hide behind a self-consistent walk.
 module Thena.View.AddressTests (tests) where
 
+import Thena.Declared (opensIn)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck (counterexample, forAll, property, testProperty)
@@ -143,7 +144,7 @@ roundTripTests =
   ]
     <> [ testProperty "a generated development, every position" $
            forAll (genDevelopment [] 4) $ \src ->
-             case parseDevelopment [] emptyGlobals [] 500 src of
+             case parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 500 src of
                Left _       -> property True
                Right (p, _) -> case failures 3 p of
                  []    -> property True

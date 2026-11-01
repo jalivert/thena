@@ -33,7 +33,8 @@ import Thena.Language.Build (printTerm)
 import Thena.Language.Grammar (Grammar)
 import Thena.Files (startingSession)
 import Thena.Render ( Rendering (..)
-  ,renderCore)
+  , renderCore)
+import Thena.Declared (opensIn)
 
 tests :: TestTree
 tests =
@@ -189,28 +190,28 @@ reading =
       (env, gs) <- loaded
       let t = con "juxt" [con "ref" [str "f"], con "juxt" [con "ref" [str "a"], con "ref" [str "b"]]]
       src <- printed gs t
-      fmap fst (parseCore gs env [] 0 src) @?= Right t
+      fmap fst (parseCore gs env (opensIn env) [] 0 src) @?= Right t
   , testCase "including the fenced one, whose splices are regions again" $ do
       (env, gs) <- loaded
       let t = con "clet" [str "f", con "cjux" [con "cref" [str "a"], con "cref" [str "i"]], con "cref" [str "b"]]
       src <- printed gs t
-      fmap fst (parseCore gs env [] 0 src) @?= Right t
+      fmap fst (parseCore gs env (opensIn env) [] 0 src) @?= Right t
   , testCase "a splice may hold any term, not only a region" $ do
       (env, gs) <- loaded
-      fmap fst (parseCore gs env [] 0 "LC`( ${app LC`x` LC`y`} z )`")
+      fmap fst (parseCore gs env (opensIn env) [] 0 "LC`( ${app LC`x` LC`y`} z )`")
         @?= Right (con "app" [ con "app" [con "var" [str "x"], con "var" [str "y"]]
                              , con "var" [str "z"] ])
   , testCase "a tag naming no language is refused, as it is in the surface" $ do
       (env, gs) <- loaded
-      parseCore gs env [] 0 "Nope`x`"
+      parseCore gs env (opensIn env) [] 0 "Nope`x`"
         @?= Left (ResolveFailed (NotAnObjectTerm (NoSuchObjectLanguage "Nope")))
   , testCase "and a production the language does not have" $ do
       (env, gs) <- loaded
-      parseCore gs env [] 0 "LC[nope]`x`"
+      parseCore gs env (opensIn env) [] 0 "LC[nope]`x`"
         @?= Left (ResolveFailed (NotAnObjectTerm (NoSuchObjectProduction "LC" "nope")))
   , testCase "text that is not one term of the language says where it stuck" $ do
       (env, gs) <- loaded
-      case parseCore gs env [] 0 "LC`( )`" of
+      case parseCore gs env (opensIn env) [] 0 "LC`( )`" of
         Left (ResolveFailed (NotAnObjectTerm (ObjectNotParsed "LC" "( )" _))) -> pure ()
         other -> assertFailure (show (fmap fst other))
   ]
@@ -242,4 +243,4 @@ roundTrip =
         (env, gs) <- io
         pure $ case printTerm gs host t of
           Nothing -> counterexample "it did not print" (property False)
-          Just src -> counterexample src (fmap fst (parseCore gs env [] 0 src) === Right t)
+          Just src -> counterexample src (fmap fst (parseCore gs env (opensIn env) [] 0 src) === Right t)

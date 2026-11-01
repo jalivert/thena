@@ -11,6 +11,7 @@
 -- corpus (2026-09-13). A second copy of a generator drifts.
 module Thena.SurfaceTests (tests, genSurface) where
 
+import Thena.Declared (opensIn)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List (intercalate)
 import Data.List.NonEmpty (nonEmpty)
@@ -551,8 +552,8 @@ layoutTests =
     -- that the development calculus never meets this pass — a line break means
     -- nothing there, and no brace is inserted.
   , testCase "the development calculus is not laid out" $
-      case ( parseCore [] emptyGlobals [] 0 "let x = Type\8320 : Type\8321 in x"
-           , parseCore [] emptyGlobals [] 0 "let x = Type\8320 : Type\8321\n  in x"
+      case ( parseCore [] emptyGlobals (opensIn emptyGlobals) [] 0 "let x = Type\8320 : Type\8321 in x"
+           , parseCore [] emptyGlobals (opensIn emptyGlobals) [] 0 "let x = Type\8320 : Type\8321\n  in x"
            ) of
         (Right (a, _), Right (b, _)) -> b @?= a
         (other, _)                   -> assertFailure (show other)

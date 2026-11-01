@@ -33,7 +33,8 @@ import Thena.Core.Convert (convert)
 import Thena.Core.Term (Core (..), Ident (..), Var, fresh)
 import Thena.Core.Typing (check)
 import Thena.Core.Unify (UnifyResult (..), blockers, constraintsOf, unify, unifyInto)
-import Thena.Declared (natVec, natVecCounter)
+import Thena.Declared ( opensIn
+  ,natVec, natVecCounter)
 import Thena.Development.Component (Component (..), forget)
 import Thena.Development.Cursor (Cursor, enter, rebuild)
 import Thena.Development.Partial (Partial (..))
@@ -288,7 +289,7 @@ devOf ds = Dev
                in (cs ++ [Guess v (Ident nm) (Trailing g) t], vs ++ [(nm, v)], k3)
 
 readIn :: Context -> Int -> String -> (Core, Int)
-readIn ctx n src = case parseCore [] natVec ctx n src of
+readIn ctx n src = case parseCore [] natVec (opensIn natVec) ctx n src of
   Left e  -> error ("fixture term does not resolve: " ++ show e)
   Right r -> r
 

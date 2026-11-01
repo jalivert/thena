@@ -46,7 +46,8 @@ import Thena.Core.Trust
 import Thena.Driver (parseCore)
 import Thena.Global.Env (Definition (..), GlobalEnv, addDefinition, restingOnTrust)
 
-import Thena.Declared (eqNat, eqNatCounter)
+import Thena.Declared ( opensIn
+  ,eqNat, eqNatCounter)
 
 -- --------------------------------------------------------------------------
 -- Fixtures
@@ -93,7 +94,7 @@ env =
 -- | Read a core term. A fixture that will not parse is a bug in the fixture, so
 -- it stops the suite rather than failing a test about something else.
 core :: GlobalEnv -> String -> Core
-core e src = case parseCore [] e [] eqNatCounter src of
+core e src = case parseCore [] e (opensIn e) [] eqNatCounter src of
   Left err     -> error ("fixture does not parse: " ++ show err)
   Right (t, _) -> t
 
@@ -111,7 +112,7 @@ b = fst (fresh (eqNatCounter + 1))
 
 -- | A term read where @a@ and @b@ are in scope.
 open2 :: String -> Core
-open2 src = case parseCore [] env ctx eqNatCounter src of
+open2 src = case parseCore [] env (opensIn env) ctx eqNatCounter src of
   Left err     -> error ("fixture does not parse: " ++ show err)
   Right (t, _) -> t
 

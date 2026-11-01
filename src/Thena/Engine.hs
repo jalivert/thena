@@ -55,7 +55,7 @@ import Thena.Core.Term
   ( Core (..)
   , close
   , GlobalName (..)
-  , declarationNamed
+  , globalUnder
   , nameDotted
   , nameFromText
   , rootName
@@ -740,32 +740,15 @@ resumeAt a m = case pc (exec m) of
 -- the two together. Anything else that takes a word and wants a global belongs
 -- here too, and Γ is the caller's business — this is only about the globals.
 globalNamed :: Machine -> GlobalName -> Either FailReason GlobalName
-globalNamed m g
-  | known g = Right g
-  | otherwise = case filter known (candidates g) of
-      [g'] -> Right g'
-      []   -> Left (CannotRead (ResolveFailed (NotInScope (nameDotted g))))
-      gs   -> Left (AmbiguousName (nameDotted g) (map nameDotted gs))
-  where
-    -- **The whole written name under each prefix**, so @open A@ and a written
-    -- @B.c@ tries @A.B.c@. A path the writer wrote is kept, because it says
-    -- what they meant; the prefix only says where to look for it.
-    --
-    -- **And each of those as a declaration's short name** (phase 248): @Nat@ is
-    -- the datatype @Nat.Nat@, which is the resolver-level alias a @data@
-    -- declaration mints. It is applied under the open prefixes too, so @open A@
-    -- and a written @Nat@ reaches @A.Nat.Nat@ — the alias is a fact about a
-    -- name, not about the scope it was found in.
-    --
-    -- **Deduplicated, because the two can agree**: @open Nat@ makes @Nat.Nat@ a
-    -- candidate by the prefix and the alias both, and two routes to one name is
-    -- not an ambiguity — 'AmbiguousName' is for two /different/ names answering
-    -- one written word.
-    candidates h =
-      nub [ c | q <- h : [ GlobalName (ns ++ nameSteps h) (nameWord h) | ns <- opened m ]
-              , c <- [q, declarationNamed q] ]
+globalNamed m g = case globalUnder (knownTo m) (opened m) g of
+  Right g' -> Right g'
+  Left []  -> Left (CannotRead (ResolveFailed (NotInScope (nameDotted g))))
+  Left gs  -> Left (AmbiguousName (nameDotted g) (map nameDotted gs))
 
-    known h = isJust (lookupDefinition h (globals m)) || isDeclared h (globals m)
+-- | What this machine's environment answers to, which is what
+-- 'Thena.Core.Term.globalUnder' asks.
+knownTo :: Machine -> GlobalName -> Bool
+knownTo m h = isJust (lookupDefinition h (globals m)) || isDeclared h (globals m)
 
 failure :: FailReason -> Machine -> Outcome
 failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
@@ -1010,7 +993,7 @@ perform instr rest m = case operation instr of
     Right (VRaw raw) -> case (,) <$> traverse (filling (env (exec m))) (termSplicesIn raw)
                                  <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw) of
       Left r   -> failure r m
-      Right (ts, ns) -> case resolveWith (grammars m) (ts ++ ns) (globals m) contextAt (names m) raw of
+      Right (ts, ns) -> case resolveWith (grammars m) (ts ++ ns) (globals m) (opened m) contextAt (names m) raw of
         Left e        -> failure (CannotResolve e) m
         Right (t, n1) -> produce (VTerm t) m { names = n1 }
     Right _          -> failure ExpectedRaw m
