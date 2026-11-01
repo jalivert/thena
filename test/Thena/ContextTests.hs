@@ -310,10 +310,10 @@ refused :: [TestTree]
 refused =
   [ refusal "an extension with no name"
       ["context C, G where", "  e -> \183", "  f -> G , T"]
-      "refused: in the context C: its extension f needs exactly one name to look up, and it has none"
+      "refused: in the context C: its extension C.f needs exactly one name to look up, and it has none"
   , refusal "an extension with two"
       ["y : Token String", "y = /[a-z]+/", "", "context C, G where", "  e -> \183", "  f -> G , x = y : T"]
-      "refused: in the context C: its extension f needs exactly one name to look up, and it has x, y"
+      "refused: in the context C: its extension C.f needs exactly one name to look up, and it has x, y"
   , refusal "a lookup name already declared"
       ["f-here : Ty", "f-here = base", "", "context C, G where", "  e -> \183", "  f -> G , x : T"]
       "refused: C's lookup f-here is already declared"

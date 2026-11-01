@@ -97,7 +97,7 @@ tests =
           Nothing -> assertFailure "tied was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (m : N) -> Q (s m) (fz m) -> N"
+              @?= "\8704 (m : N.N) -> Q.Q (N.s m) (Fin.fz m) -> N.N"
 
       -- __AND THE SAME CHAIN CROSSED BY INJECTIVITY RATHER THAN BY SOLUTION —
       -- MS9, @~rqs39@.__ @isFz@'s target pins the first index to @s n@, so the
@@ -113,7 +113,7 @@ tests =
           Nothing -> assertFailure "tiedTwo was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (m : N) -> Small (s m) (fz m) -> N"
+              @?= "\8704 (m : N.N) -> Small.Small (N.s m) (Fin.fz m) -> N.N"
 
       -- __And the arm answers with its own binder.__ The ambient @m@ and the
       -- constructor's @n@ are the same number here, so the type says nothing
@@ -149,7 +149,7 @@ tests =
           Nothing -> assertFailure "pinned was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "T (fs (s z) (fz z)) -> Fin (s z)"
+              @?= "T.T (Fin.fs (N.s N.z) (Fin.fz N.z)) -> Fin.Fin (N.s N.z)"
 
       -- __And that arm binds the constructor's argument too.__ The type says
       -- nothing about it — @Fin (s z)@ has more than one inhabitant here — so
@@ -189,7 +189,7 @@ tests =
           Nothing -> assertFailure "depth was not admitted"
           Just d  ->
             renderCore (Rendering [] (names m)) [] (definitionType d)
-              @?= "\8704 (m : N) (j : Fin m) -> Holds (pack m j) -> N"
+              @?= "\8704 (m : N.N) (j : Fin.Fin m) -> Holds.Holds (Pack.pack m j) -> N.N"
 
       -- __The @Vec@-style families, which the corpus had never had — MS9 phase
       -- 216.__ @examples\/vector-families.thena@ declares @Vec@ at a level
@@ -257,7 +257,7 @@ tests =
           Nothing -> assertFailure "headAll was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (A : Type\8320) (P : A -> Type\8320) (m : N) (a : A) (as : Vec {0} A m) -> All A P (s m) (vcons {0} A m a as) -> P a"
+              @?= "\8704 (A : Type\8320) (P : A -> Type\8320) (m : N.N) (a : A) (as : Vec.Vec {0} A m) -> All.All A P (N.s m) (Vec.vcons {0} A m a as) -> P a"
 
       -- __And the arm answers with the argument it bound__, which the type
       -- cannot say: @headTwo@ is the projection at a one-element @All@, and
@@ -297,7 +297,7 @@ tests =
           Nothing -> assertFailure "chained was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (m : N) -> Chain (s m) (fz m) (bz m) -> N"
+              @?= "\8704 (m : N.N) -> Chain.Chain (N.s m) (Fin.fz m) (Below.bz m) -> N.N"
 
       -- __And the arm answers with the constructor's own payload__, which the
       -- type cannot say. A split that typechecked and refined nothing would

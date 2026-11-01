@@ -78,7 +78,7 @@ tests =
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (n : Nat) (i : Fin n) -> Below n i -> Eq {0} (Fin n) i i"
+              @?= "\8704 (n : Nat.Nat) (i : Fin.Fin n) -> Below.Below n i -> Eq.Eq {0} (Fin.Fin n) i i"
 
       -- __And the arm really bound the constructor's own argument__: `vhead` of
       -- a one-element vector is that element. An arm handed something ambient

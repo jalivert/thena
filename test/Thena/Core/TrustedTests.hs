@@ -226,7 +226,7 @@ printing =
     -- claim alone would hide it.
     testCase "all three operands, in the node's own order" $
       renderCore (Rendering [] eqNatCounter) ctx (trustedRefl eqZeroOne eqZeroZero)
-        @?= "trusted (Eq {0} Nat zero (succ zero)) (Eq {0} Nat zero zero) (refl {0} Nat zero)"
+        @?= "trusted (Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)) (Eq.Eq {0} Nat.Nat Nat.zero Nat.zero) (Eq.refl {0} Nat.Nat Nat.zero)"
   ]
 
 -- --------------------------------------------------------------------------

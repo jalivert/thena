@@ -117,9 +117,9 @@ taplReduces = reduces eqTapl eqTaplCounter
 caseTests :: [TestTree]
 caseTests =
   [ testCase "same nullary former — no equations to give" $
-      natReduces "Nat.lemmata.NoConfusion zero zero" "Unit {0}"
+      natReduces "Nat.lemmata.NoConfusion zero zero" "Unit.Unit {0}"
   , testCase "different formers — the empty type" $
-      natReduces "Nat.lemmata.NoConfusion zero (succ zero)" "Empty {0}"
+      natReduces "Nat.lemmata.NoConfusion zero (succ zero)" "Empty.Empty.Empty {0}"
   , testCase "and the other way round" $
       natReduces "Nat.lemmata.NoConfusion (succ zero) zero" "Empty {0}"
   , -- One argument conjoins nothing, so the case /is/ the equation and a use
@@ -128,14 +128,13 @@ caseTests =
     testCase "same former, one argument — injectivity" $
       natReduces
         "Nat.lemmata.NoConfusion (succ zero) (succ (succ zero))"
-        "Eq {0} Nat zero (succ zero)"
+        "Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)"
   , -- The case §3.7 is written around, and the only one in any fixture with
     -- more than one equation to conjoin.
     testCase "three arguments — three equations, in argument order" $
       taplReduces
         "Term.lemmata.NoConfusion (ifthen true zero (succ zero)) (ifthen false zero zero)"
-        "And {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term zero zero) \
-        \(Eq {0} Term (succ zero) zero))"
+        "And.And {0 0} (Eq.Eq {0} Term.Term Term.true Term.false) (And.And {0 0} (Eq.Eq {0} Term.Term Term.zero Term.zero) (Eq.Eq {0} Term.Term (Term.succ Term.zero) Term.zero))"
   , testCase "the family's own type" $
       typeOfGlobal eqTapl eqTaplCounter "Term.lemmata.NoConfusion"
         @?= Just "Term -> Term -> Type₀"

@@ -115,13 +115,11 @@ vtailTests =
     -- The methods as the user is handed them, so that what the two cases below
     -- change is visible here rather than taken on trust.
   , testCase "nil's method, before: an equation that cannot hold" $
-      shown vecContext (methodOf 0) @?= "Eq {0} Nat zero (succ n) -> Vec A n"
+      shown vecContext (methodOf 0) @?= "Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ n) -> Vec.Vec A n"
 
   , testCase "cons's, before: a binder, a vector at it, and an equation" $
       shown vecContext (methodOf 1)
-        @?= "\8704 (n1 : Nat) -> A -> Vec A n1 -> \
-            \(Eq {0} Nat n1 (succ n) -> Vec A n) \
-            \-> Eq {0} Nat (succ n1) (succ n) -> Vec A n"
+        @?= "\8704 (n1 : Nat.Nat) -> A -> Vec.Vec A n1 -> (Eq.Eq {0} Nat.Nat n1 (Nat.succ n) -> Vec.Vec A n) -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n) -> Vec.Vec A n"
 
     -- **AND IT GENERALISES NOTHING, WHICH IS WHY THE TWO ABOVE READ AS THEY
     -- DID BEFORE MS9 PHASE 191.** A copy is demanded only where a rule's own

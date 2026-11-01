@@ -637,7 +637,7 @@ refused =
     -- point of the phase, and the install case below is the pair of this one.
   [ refusal "two variable productions at one class"
       ["language L, M where", "  v1 : x as occurrence -> x", "  v2 : x as occurrence -> $ x"]
-      "refused: in the grammar of L: v1, v2 all declare an occurrence at x, and a language has one variable production per class"
+      "refused: in the grammar of L: L.v1, L.v2 all declare an occurrence at x, and a language has one variable production per class"
     -- **A class a grammar reaches belongs to one of the languages it reaches**
     -- (MS8 phase 155): what a renamed name of the class becomes is that
     -- language's variable production, and the map substituting for it is a map
@@ -650,7 +650,7 @@ refused =
       "refused: in the grammar of L: L and K both read an occurrence at x, and this grammar reaches both, so a substitution for x has no one language to replace a name with"
   , refusal "an occurrence beside something else"
       ["language L, M where", "  v : x as occurrence -> x ^ M"]
-      "refused: in the grammar of L, production v: the occurrence x must be the production's only argument, because substitution replaces the whole of it"
+      "refused: in the grammar of L, production L.v: the occurrence x must be the production's only argument, because substitution replaces the whole of it"
     -- **Narrowed at MS8 phase 154** (`~5k3mg`): a binder free in another
     -- language's argument is refused only where that language reaches no
     -- occurrence at the binder's class, as @K@ does not here — so there is
@@ -660,7 +660,7 @@ refused =
   , refusal "a binder free in a language that reaches no such class"
       [ "language K, A where", "  k -> k", ""
       , "language L, M where", "  v : x as occurrence -> x", "  bind : x as binder -> ( \955 x . A[x] )" ]
-      "refused: in the grammar of L, production bind: a binder is free in A, which is of K, and nothing K reaches occurs at x, so there is nothing there to rename"
+      "refused: in the grammar of L, production L.bind: a binder is free in A, which is of K, and nothing K reaches occurs at x, so there is nothing there to rename"
   , refusal "a generated name already declared"
       ["L.fv-x : String", "L.fv-x = \"taken\"", "", "language L, M where", "  v : x as occurrence -> x"]
       "refused: L's substitution function L.fv-x is already declared"

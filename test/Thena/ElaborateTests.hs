@@ -227,6 +227,7 @@ endToEnd =
     declaring ty tm =
       loadSource withRules $ unlines
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "declare it : " ++ ty ++ " ; it = " ++ tm
         ]
 
@@ -1073,7 +1074,7 @@ emptySplit =
 --
 -- __The first case is the milestone's point__: a function defined by pattern
 -- matching, which declares — so @qed@ certified it — and then /computes/.
--- @pred (succ (succ zero))@ reducing to @succ zero@ is the whole claim, and it
+-- @pred (succ (Nat.succ Nat.zero))@ reducing to @Nat.succ Nat.zero@ is the whole claim, and it
 -- is checked by reduction rather than by reading the term, because the term is
 -- an @elim@ either way and only reduction says the methods went to the right
 -- constructors.
@@ -1094,8 +1095,8 @@ splittingTree =
       case r of
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
-      let (s2, q) = command s1 ":whnf pred (succ (succ zero))"
-      unwords (renderResponse s2 q) @?= "succ zero"
+      let (s2, q) = command s1 ":whnf pred (succ (Nat.succ Nat.zero))"
+      unwords (renderResponse s2 q) @?= "Nat.succ Nat.zero"
 
     -- __A RECURSIVE CALL IS THE INDUCTION HYPOTHESIS__ (MS9 phase 186, his
     -- ruling of 2026-10-19). The name being defined is assumed while the body
@@ -1104,7 +1105,7 @@ splittingTree =
     --
     -- __Checked by reduction and not by reading the term__, for the reason the
     -- case above gives: only reduction says the hypothesis went to the right
-    -- place. @double (succ (succ zero))@ is four, and it is four because the
+    -- place. @double (succ (Nat.succ Nat.zero))@ is four, and it is four because the
     -- call became the hypothesis about @m@ and not anything else of type
     -- @Nat@ in scope.
   , testCase "a recursive call becomes the induction hypothesis, and computes" $ do
@@ -1120,7 +1121,7 @@ splittingTree =
       let (s2, q) = command s1
             ":convert double (succ (succ zero)) \8799 succ (succ (succ (succ zero)))"
       unwords (words (unwords (renderResponse s2 q))) @?=
-        "double (succ (succ zero)) \8799 succ (succ (succ (succ zero))) yes"
+        "double (Nat.succ (Nat.succ Nat.zero)) \8799 Nat.succ (Nat.succ (Nat.succ (Nat.succ Nat.zero))) yes"
 
     -- __The structural guard, and it is the whole of it.__ An eliminator makes
     -- the hypothesis available only at the smaller index, so a call on
@@ -1131,8 +1132,7 @@ splittingTree =
       [ "loop : Nat -> Nat"
       , "loop = \\ n -> induction n of { zero -> zero ; succ m -> loop zero }"
       ]
-      "stuck: no induction hypothesis is about this call, so it is not \
-      \structurally smaller: loop zero"
+      "stuck: no induction hypothesis is about this call, so it is not structurally smaller: loop Nat.zero"
 
     -- The name used as a value rather than called. There is no hypothesis for
     -- that, and leaving it would make the body open.
@@ -1176,10 +1176,7 @@ splittingTree =
       [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
       , "pick = \\ x y p -> case p of { mk a b -> a }"
       ]
-      "stuck: String and Eq {0} String (String.append a b) (String.append x y) \
-      \-> String cannot be made equal they differ by one argument, which the \
-      \shorter side has to take first: Eq {0} String (String.append a b) \
-      \(String.append x y)"
+      "stuck: String and Eq.Eq {0} String (String.append a b) (String.append x y) -> String cannot be made equal they differ by one argument, which the shorter side has to take first: Eq.Eq {0} String (String.append a b) (String.append x y)"
 
     -- __AND THE SPLIT IS NOT WRONG, WHICH IS WHY IT IS NOT REFUSED OUTRIGHT.__
     -- One @\\ q ->@ in the arm and the proof goes through — the equation is a
@@ -1197,17 +1194,13 @@ splittingTree =
       [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
       , "pick = \\ x y p -> case p of { }"
       ]
-      "stuck: this case did not vanish: it keeps Eq {0} String \
-      \(String.append a b) (String.append x y), which no transition can \
-      \discharge, so there is something to prove here"
+      "stuck: this case did not vanish: it keeps Eq.Eq {0} String (String.append a b) (String.append x y), which no transition can discharge, so there is something to prove here"
   , refusesIn catModule
       "and an arm with no body names it the same way"
       [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
       , "pick = \\ x y p -> case p of { mk a b -> }"
       ]
-      "stuck: this case did not vanish: it keeps Eq {0} String \
-      \(String.append a b) (String.append x y), which no transition can \
-      \discharge, so there is something to prove here"
+      "stuck: this case did not vanish: it keeps Eq.Eq {0} String (String.append a b) (String.append x y), which no transition can discharge, so there is something to prove here"
 
   , testCase "and the same split declares when the arm takes the equation" $ do
       (s0, _) <- startingSession
@@ -1275,7 +1268,7 @@ splittingTree =
     --
     -- **It computes, which is the part a declaration alone would not say**: the
     -- definition the arm binds @m@ to is the term the split forced, reduced, so
-    -- @namesOuter (s z) (evs z evz)@ is @isucc (s z)@ and not @isucc@ of a
+    -- @namesOuter (s z) (evs z evz)@ is @IsSucc.isucc (N.s N.z)@ and not @isucc@ of a
     -- β-redex.
   , testCase "a name bound outside a split means what the split refined it to" $ do
       (s0, _) <- startingSession
@@ -1287,7 +1280,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf namesOuter (s z) (evs z evz)"
-      unwords (renderResponse s2 q) @?= "isucc (s z)"
+      unwords (renderResponse s2 q) @?= "IsSucc.isucc (N.s N.z)"
 
     -- __AND THE THREE SHAPES PHASE 191 WAS BUILT FOR__, which had been a
     -- fixture nothing loaded: the copy that is refined and read under its own
@@ -1335,6 +1328,7 @@ splittingTree =
       let (s1, r) = loadProofSource s0 (unlines (evModule ++
             [ "data D : N -> Type\8320 where"
             , "  mk : \8704 (k : N) -> D k"
+            , "open D"
             , ""
             , "indexIsRefined : \8704 (m : N) (e : Ev m) -> Eq N m m"
             , "indexIsRefined = \\ m e -> case e of \
@@ -1347,8 +1341,8 @@ splittingTree =
       case r of
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
-      let (s2, q) = command s1 ":whnf sameIndex (s z) (mk (s z))"
-      unwords (renderResponse s2 q) @?= "mk (s z)"
+      let (s2, q) = command s1 ":whnf sameIndex (s z) (D.mk (N.s N.z))"
+      unwords (renderResponse s2 q) @?= "D.mk (N.s N.z)"
 
     -- __AND SO DOES THE SCRUTINEE ITSELF__ (MS9 phase 202, @~hc4ps@), which is
     -- the last name a split refines that is not a binder of the method. Inside
@@ -1371,6 +1365,7 @@ splittingTree =
       let (s1, r) = loadProofSource s0 (unlines (evModule ++
             [ "data D : N -> Type\8320 where"
             , "  mk : \8704 (k : N) -> D k"
+            , "open D"
             , ""
             , "onFriendly : \8704 (U : N) (d : D U) -> D U"
             , "onFriendly = \\ U d -> case d of { mk V -> d }"
@@ -1660,10 +1655,12 @@ splittingTree =
             , "data M : Type\8320 where"
             , "  leaf : M"
             , "  node : M -> M -> M"
+            , "open M"
             , ""
             , "data R : M -> Type\8320 where"
             , "  rl : R leaf"
             , "  rn : \8704 (p : M) (q : M) (a : R p) (b : R q) -> R (node p q)"
+            , "open R"
             , ""
             , "allR : \8704 (m : M) -> R m"
             , "allR = \\ m -> induction m of { leaf -> rl \
@@ -1672,6 +1669,7 @@ splittingTree =
             , "data U : M -> Type\8320 where"
             , "  ul : U leaf"
             , "  un : \8704 (p : M) (q : M) (r : U p) (t : U q) -> U (node p q)"
+            , "open U"
             , ""
             , "conv : \8704 (m : M) (k : R m) (u : U m) -> R m"
             , "conv = \\ m k u -> induction u of { ul -> rl \
@@ -1842,9 +1840,7 @@ splittingTree =
         \; pr a b rp -> case e of \
         \{ c1 -> s (wrongArm a b (allQ a) rp c2) ; c2 -> z } }"
       ]
-      "stuck: the split fixed e and this call passes c2, so it is not the \
-      \induction hypothesis \8212 a premise the induction varies is bound \
-      \inside the arm and not before the split: wrongArm a b (allQ a) rp c2"
+      "stuck: the split fixed e and this call passes C.c2, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: wrongArm a b (allQ a) rp C.c2"
 
     -- __AND PHASE 208'S OWN CASE IS UNTOUCHED__: with no split on @e@ at all,
     -- the premise is in scope and a call naming anything else for it still
@@ -1854,9 +1850,7 @@ splittingTree =
       , "noSplit = \\ x y hx p e -> induction p of { pz c -> z \
         \; pr a b rp -> s (noSplit a b (allQ a) rp c1) }"
       ]
-      "stuck: the split fixed e and this call passes c1, so it is not the \
-      \induction hypothesis \8212 a premise the induction varies is bound \
-      \inside the arm and not before the split: noSplit a b (allQ a) rp c1"
+      "stuck: the split fixed e and this call passes C.c1, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: noSplit a b (allQ a) rp C.c1"
 
     -- __AND THE RECURSION DEMANDS A COPY THE ARMS DO NOT__ (MS9 phase 205,
     -- @~wk9qh@). Every shape above has its premises introduced where the split
@@ -1934,6 +1928,7 @@ splittingTree =
       let (s1, r) = loadProofSource s0 (unlines (atTopModule ++
             [ "data Q : N -> Type\8320 where"
             , "  qq : \8704 (n : N) -> Q n"
+            , "open Q"
             , ""
             , "fixed : \8704 (n : N) (d : Q n) (e : Eq N n n) -> N"
             , "fixed = \\ n d e -> case d of { qq n0 -> n0 }"
@@ -1965,7 +1960,7 @@ splittingTree =
       -- Saturated, because @:whnf@ reads a CORE term and nothing is inserted
       -- there: @vcons@'s parameter is an argument like any other, and an
       -- under-applied former is not a 'Canonical' for ι to fire on.
-      let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
+      let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (Vec.Vec.Vec.Vec.Vec.Vec.vnil Nat.Nat.Nat.Nat.Nat.Nat.Nat))"
       unwords (renderResponse s2 q) @?= "vnil Nat"
 
     -- __AN EMPTY ARM IS HOW THE VANISHED CASE IS WRITTEN__ (MS9 phase 189, his
@@ -2054,7 +2049,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1
-            ":whnf left leaf leaf (okNode leaf leaf okLeaf okLeaf)"
+            ":whnf left leaf leaf (okNode leaf leaf Ok.Ok.Ok.Ok.okLeaf okLeaf)"
       unwords (renderResponse s2 q) @?= "okLeaf"
 
     -- __TWO HYPOTHESES, AND THE CALL SAYS WHICH__ (MS9 phase 186). @okNode@
@@ -2077,7 +2072,7 @@ splittingTree =
             ":convert count (node leaf leaf) (okNode leaf leaf okLeaf okLeaf) \
             \\8799 succ zero"
       unwords (words (unwords (renderResponse s2 q))) @?=
-        "count (node leaf leaf) (okNode leaf leaf okLeaf okLeaf) \8799 succ zero yes"
+        "count (Tr.node Tr.leaf Tr.leaf) (Ok.okNode Tr.leaf Tr.leaf Ok.okLeaf Ok.okLeaf) \8799 Nat.succ Nat.zero yes"
 
     -- __And a call naming both is refused rather than guessed at.__ Which
     -- argument it recurses on is simply not written down, and there is no
@@ -2117,9 +2112,7 @@ splittingTree =
       , "size2 = \\ t d u -> induction d of"
       , "  { okLeaf -> zero ; okNode a b da db -> succ (size2 a da (node u u)) }"
       ]
-      "stuck: the split fixed u and this call passes node u u, so it is not \
-      \the induction hypothesis \8212 a premise the induction varies is bound \
-      \inside the arm and not before the split: size2 a da (node u u)"
+      "stuck: the split fixed u and this call passes Tr.node u u, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: size2 a da (Tr.node u u)"
 
     -- __AND BOUND INSIDE THE ARM IT VARIES FREELY__, which is the whole of the
     -- remedy: the motive then quantifies it and the hypothesis takes it. Same
@@ -2244,11 +2237,13 @@ splittingTree =
       let (s1, r) = loadProofSource s0 (unlines (okModule ++
             [ "data Ty : Type\8320 where"
             , "  base : Ty"
+            , "open Ty"
             , ""
             , "data Has : Tr -> Ty -> Type\8320 where"
             , "  hLeaf : Has leaf base"
             , "  hNode : \8704 (a b : Tr) -> Has a base -> Has b base"
             , "    -> Has (node a b) base"
+            , "open Has"
             , ""
             , "fine : \8704 (t : Tr) (T : Ty) -> Has t T -> Ty"
             , "fine = \\ t T d -> induction d of"
@@ -2346,6 +2341,7 @@ splittingTree =
       , "data Nat : Type\8320 where"
       , "  zero : Nat"
       , "  succ : Nat -> Nat"
+      , "open Nat"
       , ""
       ]
     -- Phase 191's own shapes: a family whose constructor's index wraps the
@@ -2357,13 +2353,16 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data Ev : N -> Type\8320 where"
       , "  evz : Ev z"
       , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+      , "open Ev"
       , ""
       , "data IsSucc : N -> Type\8320 where"
       , "  isucc : \8704 (n : N) -> IsSucc (s n)"
+      , "open IsSucc"
       , ""
       ]
     -- Phase 197's shape (@~k54hh@): a two-index family whose constructor's
@@ -2378,14 +2377,17 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data F : N -> N -> Type\8320 where"
       , "  fz : F z z"
       , "  fs : \8704 (k : N) (m : N) (r : F k m) -> F (s k) (s m)"
+      , "open F"
       , ""
       , "data A : N -> Type\8320 where"
       , "  az : A z"
       , "  as : \8704 (k : N) (p : A k) -> A (s k)"
+      , "open A"
       , ""
       ]
     -- Phase 217's shapes (@~5kcb4@), which are the hunt's own rather than any
@@ -2400,10 +2402,12 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data Q : N -> Type\8320 where"
       , "  qz : Q z"
       , "  qs : \8704 (n : N) (q : Q n) -> Q (s n)"
+      , "open Q"
       , ""
       , "allQ : \8704 (n : N) -> Q n"
       , "allQ = \\ n -> induction n of { z -> qz ; s m -> qs m (allQ m) }"
@@ -2411,14 +2415,17 @@ splittingTree =
       , "data P : N -> N -> Type\8320 where"
       , "  pz : \8704 (c : N) -> P z c"
       , "  pr : \8704 (a : N) (b : N) (r : P a b) -> P (s a) (s b)"
+      , "open P"
       , ""
       , "data T : N -> N -> N -> Type\8320 where"
       , "  tz : T z z z"
       , "  tr : \8704 (a : N) (b : N) (c : N) (r : T a b c) -> T (s a) (s b) (s c)"
+      , "open T"
       , ""
       , "data Ev : N -> Type\8320 where"
       , "  evz : Ev z"
       , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+      , "open Ev"
       , ""
       ]
     -- Phase 238's shapes (@~5kcb4@): @C@ for a premise an inner split refines
@@ -2432,14 +2439,17 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data C : Type\8320 where"
       , "  c1 : C"
       , "  c2 : C"
+      , "open C"
       , ""
       , "data Q : N -> Type\8320 where"
       , "  qz : Q z"
       , "  qs : \8704 (n : N) (q : Q n) -> Q (s n)"
+      , "open Q"
       , ""
       , "allQ : \8704 (n : N) -> Q n"
       , "allQ = \\ n -> induction n of { z -> qz ; s m -> qs m (allQ m) }"
@@ -2447,10 +2457,12 @@ splittingTree =
       , "data P : N -> N -> Type\8320 where"
       , "  pz : \8704 (c : N) -> P z c"
       , "  pr : \8704 (a : N) (b : N) (r : P a b) -> P (s a) (s b)"
+      , "open P"
       , ""
       , "data D : N -> Type\8320 where"
       , "  dz : D z"
       , "  ds : \8704 (k : N) (d : D k) -> D (s k)"
+      , "open D"
       , ""
       ]
     -- Phase 238's other shape: a family indexed by two /different/ types, whose
@@ -2463,14 +2475,17 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data B : Type\8320 where"
       , "  bz : B"
       , "  bw : B -> B"
+      , "open B"
       , ""
       , "data Q : N -> Type\8320 where"
       , "  qz : Q z"
       , "  qs : \8704 (n : N) (q : Q n) -> Q (s n)"
+      , "open Q"
       , ""
       , "allQ : \8704 (n : N) -> Q n"
       , "allQ = \\ n -> induction n of { z -> qz ; s m -> qs m (allQ m) }"
@@ -2478,6 +2493,7 @@ splittingTree =
       , "data Qb : B -> Type\8320 where"
       , "  qbz : Qb bz"
       , "  qbs : \8704 (c : B) (q : Qb c) -> Qb (bw c)"
+      , "open Qb"
       , ""
       , "allQb : \8704 (c : B) -> Qb c"
       , "allQb = \\ c -> induction c of { bz -> qbz ; bw d -> qbs d (allQb d) }"
@@ -2485,10 +2501,12 @@ splittingTree =
       , "data M : N -> B -> Type\8320 where"
       , "  mz : M z bz"
       , "  mr : \8704 (n : N) (c : B) (r : M n c) -> M (s n) (bw c)"
+      , "open M"
       , ""
       , "data K : B -> Type\8320 where"
       , "  kz : K bz"
       , "  kr : \8704 (c : B) (r : K c) -> K (bw c)"
+      , "open K"
       , ""
       ]
     -- Phase 201's shape (@~zv8kf@): a family whose constructor wraps /both/ its
@@ -2501,13 +2519,16 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data P : N -> N -> Type\8320 where"
       , "  pz : \8704 (c : N) -> P z c"
       , "  pr : \8704 (a : N) (b : N) (r : P a b) -> P (s a) (s b)"
+      , "open P"
       , ""
       , "data Q : N -> Type\8320 where"
       , "  qq : \8704 (n : N) -> Q n"
+      , "open Q"
       , ""
       ]
     -- Phase 205's shape (@~wk9qh@): a family that recurses at a /different/
@@ -2520,13 +2541,16 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data Inc : N -> N -> Type\8320 where"
       , "  mkInc : \8704 (a : N) (b : N) -> Inc a b"
+      , "open Inc"
       , ""
       , "data T : N -> Type\8320 where"
       , "  tv : \8704 (g : N) -> T g"
       , "  tl : \8704 (g : N) (p : T (s g)) -> T g"
+      , "open T"
       , ""
       ]
     -- Phase 206's shape (@~pmpqg@): a family with NO indices, and a second
@@ -2545,12 +2569,14 @@ splittingTree =
       [ "data Ty2 : Type\8320 where"
       , "  tv : String -> Ty2"
       , "  tp : Ty2"
+      , "open Ty2"
       , ""
       , "data Sb : Nat -> Ty2 -> Ty2 -> Type\8320 where"
       , "  SbTop : \8704 (g : Nat) (s : Ty2) -> Sb g s tp"
       , "  SbRefl : \8704 (g : Nat) (x : String) -> Sb g (tv x) (tv x)"
       , "  SbTrans : \8704 (x : String) (u : Ty2) (g : Nat) (t : Ty2)"
       , "              -> Sb g u t -> Sb g (tv x) t"
+      , "open Sb"
       , ""
       ]
     twoModule =
@@ -2558,6 +2584,7 @@ splittingTree =
       , ""
       , "data R : String -> String -> Type\8320 where"
       , "  mkR : \8704 (s : String) (t : String) -> R s t"
+      , "open R"
       , ""
       , "idT : \8704 (A : Type\8320) (x : A) -> A"
       , "idT = \\ A x -> x"
@@ -2569,13 +2596,16 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data L : Type\8320 where"
       , "  ln : L"
       , "  lc : N -> L -> L"
+      , "open L"
       , ""
       , "data P : L -> Type\8320 where"
       , "  mkP : \8704 (l : L) -> P l"
+      , "open P"
       , ""
       ]
     -- A family whose index is a PRIMITIVE application, stuck on its arguments:
@@ -2585,6 +2615,7 @@ splittingTree =
       [ "module Cat where", ""
       , "data Cat : String -> Type\8320 where"
       , "  mk : \8704 (a : String) (b : String) -> Cat (String.append a b)"
+      , "open Cat"
       , ""
       ]
     vecModule =
@@ -2592,6 +2623,7 @@ splittingTree =
       [ "data Vec (A : Type\8320) : Nat -> Type\8320 where"
       , "  vnil : Vec A zero"
       , "  vcons : \8704 (k : Nat) (a : A) (as : Vec A k) -> Vec A (succ k)"
+      , "open Vec"
       , ""
       ]
     okModule =
@@ -2599,10 +2631,12 @@ splittingTree =
       [ "data Tr : Type\8320 where"
       , "  leaf : Tr"
       , "  node : Tr -> Tr -> Tr"
+      , "open Tr"
       , ""
       , "data Ok : Tr -> Type\8320 where"
       , "  okLeaf : Ok leaf"
       , "  okNode : \8704 (a b : Tr) -> Ok a -> Ok b -> Ok (node a b)"
+      , "open Ok"
       , ""
       ]
     vtailDef =
