@@ -219,9 +219,16 @@ dependentMotives =
     -- prelude type the goals need is declared here.
     eqDecl = "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (x : A) -> Eq A x x }"
 
+    -- **Each declaration is followed by an @open@ of what it declares** (MS10
+    -- phase 250): a constructor lives in its datatype's namespace, so a goal or
+    -- a later declaration writing @zero@ short needs the namespace in view. The
+    -- word is read off the line rather than listed, so a fixture cannot drift
+    -- from it.
+    opening d = [d, "open " ++ takeWhile (`notElem` " (:") (drop 5 d)]
+
     eliminates what decls goal intros = testCase what $
       let script =
-            eqDecl : decls
+            concatMap opening (eqDecl : decls)
               ++ [":theorem t : " ++ goal, "attack"]
               ++ replicate intros "intro"
               ++ ["into"]
@@ -356,7 +363,7 @@ simpleTests =
 
   , testCase "a goal not mentioning the target gets a constant motive" $
       map (rendered natContext . thirdOf) (elimMethods natConst)
-        @?= [ "Eq {0} Nat m m"
+        @?= [ "Eq.Eq {0} Nat.Nat m m"
             , "Nat.Nat -> Eq.Eq {0} Nat.Nat m m -> Eq.Eq {0} Nat.Nat m m"
             ]
 
@@ -398,17 +405,17 @@ friendlyTests :: [TestTree]
 friendlyTests =
   [ testCase "the induction hypothesis arrives unguarded" $
       map (rendered leContext . thirdOf') (elimMethods leWeaken)
-        @?= [ "∀ (n1 : Nat) -> Le zero (succ n1)"
-            , "∀ (m1 : Nat) (n1 : Nat) -> Le m1 n1 -> Le m1 (succ n1) \
-              \-> Le (succ m1) (succ (succ n1))"
+        @?= [ "∀ (n1 : Nat.Nat) -> Le.Le Nat.zero (Nat.succ n1)"
+            , "∀ (m1 : Nat.Nat) (n1 : Nat.Nat) -> Le.Le m1 n1 -> Le.Le m1 (Nat.succ n1) \
+              \-> Le.Le (Nat.succ m1) (Nat.succ (Nat.succ n1))"
             ]
 
     -- Nothing is applied to the elimination: both indices were abstracted, so
     -- there is no equation left to discharge reflexively.
   , testCase "and no refl {0} spine is needed at all" $
       rendered (withMethods leContext leWeaken) (elimTerm leWeaken)
-        @?= "elim Le () (λ (x : Nat) (x1 : Nat) (target : Le x x1) \
-            \-> Le x (succ x1)) (leZeroMethod leSuccMethod) (m n) p"
+        @?= "elim Le.Le () (λ (x : Nat.Nat) (x1 : Nat.Nat) (target : Le.Le x x1) \
+            \-> Le.Le x (Nat.succ x1)) (leZeroMethod leSuccMethod) (m n) p"
 
     -- Two abstractions would race for the same occurrences, and the second
     -- would find none left. @Eq {0} Nat a a@ is the case; it keeps both equations
@@ -417,7 +424,7 @@ friendlyTests =
       let (env, n0) = declared [eqDecl', natDecl]
           (ctx, n1) = contextOf env n0 [("a", "Nat"), ("e", "Eq {0} Nat a a")]
        in map (rendered ctx . thirdOf') (elimMethods (run "repeated" env ctx n1 "Eq {0} Nat a a" "e"))
-            @?= [ "∀ (a1 : Nat) -> Eq {0} Nat a1 a -> Eq {0} Nat a1 a -> Eq {0} Nat a1 a1" ]
+            @?= [ "∀ (a1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat a1 a -> Eq.Eq {0} Nat.Nat a1 a -> Eq.Eq {0} Nat.Nat a1 a1" ]
 
     -- Every premise of the goal stays fixed (§3.7), so a premise that still
     -- mentions the index is precisely the specificity the equation exists to
@@ -429,17 +436,17 @@ friendlyTests =
           (without, n2) = contextOf env n0 [("n", "Nat"), ("i", "Fin n")]
        in do
             map (rendered with . thirdOf') (elimMethods (run "tied" env with n1 "Eq {0} Nat n n" "i"))
-              @?= [ "∀ (n1 : Nat) (n2 : Nat) -> Eq {0} Nat n2 n2 \
-                    \-> Eq {0} Nat (succ n1) n2 -> Eq {0} Nat (succ n1) (succ n1)"
-                  , "∀ (n1 : Nat) -> Fin n1 \
-                    \-> (∀ (n2 : Nat) -> Eq {0} Nat n2 n2 \
-                    \-> Eq {0} Nat n1 n2 -> Eq {0} Nat n1 n1) \
-                    \-> ∀ (n2 : Nat) -> Eq {0} Nat n2 n2 \
-                    \-> Eq {0} Nat (succ n1) n2 -> Eq {0} Nat (succ n1) (succ n1)"
+              @?= [ "∀ (n1 : Nat.Nat) (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n2 n2 \
+                    \-> Eq.Eq {0} Nat.Nat (Nat.succ n1) n2 -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
+                  , "∀ (n1 : Nat.Nat) -> Fin.Fin n1 \
+                    \-> (∀ (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n2 n2 \
+                    \-> Eq.Eq {0} Nat.Nat n1 n2 -> Eq.Eq {0} Nat.Nat n1 n1) \
+                    \-> ∀ (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n2 n2 \
+                    \-> Eq.Eq {0} Nat.Nat (Nat.succ n1) n2 -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
                   ]
             map (rendered without . thirdOf') (elimMethods (run "free" env without n2 "Eq {0} Nat n n" "i"))
-              @?= [ "∀ (n1 : Nat) -> Eq {0} Nat (succ n1) (succ n1)"
-                  , "∀ (n1 : Nat) -> Fin n1 -> Eq {0} Nat n1 n1 -> Eq {0} Nat (succ n1) (succ n1)"
+              @?= [ "∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
+                  , "∀ (n1 : Nat.Nat) -> Fin.Fin n1 -> Eq.Eq {0} Nat.Nat n1 n1 -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
                   ]
 
     -- Phase 19. Both of @Below@'s indices are plain variables, so the second
@@ -447,10 +454,10 @@ friendlyTests =
     -- the first freely. Before phase 19 this whole family was refused.
   , testCase "a dependent index telescope is fine when the dependent index is friendly" $
       map (rendered belowContext . thirdOf') (elimMethods belowProbe)
-        @?= [ "∀ (m : Nat) (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat"
-            , "∀ (m : Nat) (j : Fin m) -> Below m j \
-              \-> (∀ (n1 : Nat) -> Eq {0} Nat m n1 -> Nat) \
-              \-> ∀ (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat"
+        @?= [ "∀ (m : Nat.Nat) (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ m) n1 -> Nat.Nat"
+            , "∀ (m : Nat.Nat) (j : Fin.Fin m) -> Below.Below m j \
+              \-> (∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat m n1 -> Nat.Nat) \
+              \-> ∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ m) n1 -> Nat.Nat"
             ]
 
     -- __MS9 phase 213, @~7gmvr@ step two, and this is the phase.__ Index 2 is
@@ -516,9 +523,9 @@ friendlyTests =
           defCtx      = [Definition dv (Ident "n") zeroV zeroT]
           (ctx,   n4) = contextOf' env defCtx n3 [("i", "Fin n")]
        in map (rendered ctx . thirdOf') (elimMethods (run "defined" env ctx n4 "Eq {0} Nat n n" "i"))
-            @?= [ "∀ (n1 : Nat) -> Eq {0} Nat (succ n1) n -> Eq {0} Nat (succ n1) (succ n1)"
-                , "∀ (n1 : Nat) -> Fin n1 -> (Eq {0} Nat n1 n -> Eq {0} Nat n1 n1) \
-                  \-> Eq {0} Nat (succ n1) n -> Eq {0} Nat (succ n1) (succ n1)"
+            @?= [ "∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ n1) n -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
+                , "∀ (n1 : Nat.Nat) -> Fin.Fin n1 -> (Eq.Eq {0} Nat.Nat n1 n -> Eq.Eq {0} Nat.Nat n1 n1) \
+                  \-> Eq.Eq {0} Nat.Nat (Nat.succ n1) n -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
                 ]
   ]
   where
