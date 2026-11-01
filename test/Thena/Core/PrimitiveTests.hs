@@ -291,8 +291,12 @@ refusals =
   where
     refusedCase what nm ty =
       testCase what (isRight (checkedPrimitive answering nm ty) @?= False)
-    twoOf p = arrow (named p) (arrow (named p) (named "Answer"))
-    oneArgument = arrow (named "String") (named "Answer")
+    -- **@Answer@ is @Answer.Answer@** (MS10 phase 243) — the same name
+    -- 'answering' built the primitive's type out of, so a type written here at
+    -- the root is a different type and the shipped declaration is refused.
+    twoOf p = arrow (named p) (arrow (named p) answerTy)
+    oneArgument = arrow (named "String") answerTy
+    answerTy = Global (declaredAs "Answer") []
     intoAUniverse = arrow (named "String") (arrow (named "String") (Universe (levelOfNat 0)))
     intoAnswerOfOne = arrow (named "Int") (arrow (named "Int") (named "One"))
     named n = Global (rootName n) []

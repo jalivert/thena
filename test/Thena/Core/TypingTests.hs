@@ -341,12 +341,13 @@ errorTests =
         Left (NotAType _ _ _) -> pure ()
         other                 -> assertFailure (show other)
   , testCase "an unsaturated Canonical, which only a hand-built term can be" $
-      case verdict (infer natVec [] natVecCounter (Canonical (named "succ") [] [])) of
+      case verdict (infer natVec [] natVecCounter
+                  (Canonical (named "Nat.succ") [] [])) of
         Left (Unsaturated _ _) -> pure ()
         other                  -> assertFailure (show other)
   , testCase "an over-applied Canonical" $
       case verdict (infer natVec [] natVecCounter
-                  (Canonical (named "zero") [] [Canonical (named "zero") [] []])) of
+                  (Canonical (named "Nat.zero") [] [Canonical (named "Nat.zero") [] []])) of
         Left (OverApplied _) -> pure ()
         other                -> assertFailure (show other)
   , testCase "a loose de Bruijn index reaching the checker" $
@@ -391,7 +392,7 @@ schemeTests =
         @?= [AtMost (levelOfNat 0) (levelOfNat 1)]
 
   , testCase "a definition with no constraints owes nothing" $
-      owed (infer natVec [] natVecCounter (Global (named "succ") [])) @?= []
+      owed (infer natVec [] natVecCounter (Global (named "Nat.succ") [])) @?= []
   ]
   where
     owed (_, o, _) = o

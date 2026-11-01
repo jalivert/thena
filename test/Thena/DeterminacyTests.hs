@@ -180,5 +180,6 @@ tests =
       renderCore (Rendering [] (names (machineOf s'))) [] . definitionType
         <$> lookupDefinition (rootName "determinacy") (globals (machineOf s'))
 
-    theorem = "∀ (t : Term) (t1 : Term) -> Step t t1 \
-              \-> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2"
+    theorem = "∀ (t : Term.Term) (t1 : Term.Term) -> Step.Step t t1 \
+              \-> ∀ (t2 : Term.Term) -> Step.Step t t2 \
+              \-> Eq.Eq {0} Term.Term t1 t2"

@@ -12,19 +12,18 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
-  
   , Ident (..)
   , Var
   , close
   , fresh
-  , rootName
   , nameDotted
+  , nameFromText
+  , rootName
   )
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, crossType, enter)
 import Thena.Development.Partial (Partial (..))
-import Thena.Declared ( opensIn
-  ,nat, natDecl)
+import Thena.Declared (nat, natDecl, opensIn)
 import Thena.Standard (expectedBase)
 import Thena.Driver (parseDeclaration)
 import Thena.Core.Trust (TrustLevel (..))
@@ -587,7 +586,7 @@ producesTests =
       -- against this table; @Thena.PatternTests@ crosses it against the matcher
       -- instead.
       , ("apply-next",       nat, holeAt natType, [],
-           Ops.ApplyNext (term (Global (rootName "succ") [])) (text "a"))
+           Ops.ApplyNext (term (Global (nameFromText "Nat.succ") [])) (text "a"))
       ]
 
     -- @succ zero@, as a focused surface term.

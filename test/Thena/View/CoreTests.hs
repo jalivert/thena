@@ -195,7 +195,7 @@ regionCases =
       sh <- shapeOf (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
       case sh of
         ARegion inner -> case displayShape inner of
-          AnObjectTerm lang prod _ -> (lang, prod) @?= ("Ex", "juxt")
+          AnObjectTerm lang prod _ -> (lang, prod) @?= ("Ex", "Ex.juxt")
           other -> assertFailure ("ARegion wrapped " <> show other)
         other -> assertFailure ("not a region: " <> show other)
 
