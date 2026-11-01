@@ -168,6 +168,8 @@ kindOf t = case t of
   TWhere        -> AKeyword
   TData         -> AKeyword
   TModule       -> AKeyword
+  -- MS10 phase 247: @open@ is a declaration, and a keyword like the rest.
+  TOpen         -> AKeyword
   TDo           -> AKeyword
   TRule         -> AKeyword
   TLanguage     -> AKeyword
