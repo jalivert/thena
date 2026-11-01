@@ -144,8 +144,9 @@ vtailTests =
   , testCase "cons's method, after: n1 is solved and the vector is at n" $
       vecGoal "Vec.cons" (methodOf 1)
         @?= Just ( "consCase"
-                 , "A -> Vec A n -> \
-                   \(Eq {0} Nat n (succ n) -> Vec A n) -> Vec A n" )
+                 , "A -> Vec.Vec A n -> \
+                   \(Eq.Eq {0} Nat.Nat n (Nat.succ n) -> Vec.Vec A n) \
+                   \-> Vec.Vec A n" )
 
     -- __Which argument went, and what it went to__ (MS9 phase 185). @cons@
     -- takes three and the subgoal binds two, and this is the only thing that
@@ -235,60 +236,60 @@ transitionTests :: [TestTree]
 transitionTests =
   [ -- __deletion.__ The equation holds by @refl@ and constrains nothing, so its
     -- binder is dropped and nothing else moves.
-    specialises "deletion: an equation of a term with itself" "succ" 1
+    specialises "deletion: an equation of a term with itself" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat zero zero -> Eq {0} Nat m k"
-      (Just "\8704 (m : Nat) -> Nat -> Eq {0} Nat m k")
+      (Just "\8704 (m : Nat.Nat) -> Nat.Nat -> Eq.Eq {0} Nat.Nat m k")
 
     -- __conflict.__ Nothing is claimed; the method is closed outright.
-  , specialises "conflict: two different constructors" "succ" 1
+  , specialises "conflict: two different constructors" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat zero (succ k) -> Eq {0} Nat m k"
       Nothing
 
     -- __injectivity.__ The equation is replaced by the one its arguments imply.
     -- No further transition applies to that one: @j@ and @k@ are both ambient,
     -- so both are rigid.
-  , specialises "injectivity: the same constructor over two rigid arguments" "succ" 1
+  , specialises "injectivity: the same constructor over two rigid arguments" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat (succ j) (succ k) -> Eq {0} Nat m k"
-      (Just "\8704 (m : Nat) -> Nat -> Eq {0} Nat j k -> Eq {0} Nat m k")
+      (Just "\8704 (m : Nat.Nat) -> Nat.Nat -> Eq.Eq {0} Nat.Nat j k -> Eq.Eq {0} Nat.Nat m k")
 
     -- __solution, with the binder on the left__, which is the orientation
     -- @vtail@ meets. Everything to the right of @m@ is substituted, the goal
     -- included, and the binder goes.
-  , specialises "solution: the binder on the left of the equation" "succ" 1
+  , specialises "solution: the binder on the left of the equation" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat m k -> Eq {0} Nat m k"
-      (Just "Nat -> Eq {0} Nat k k")
+      (Just "Nat.Nat -> Eq.Eq {0} Nat.Nat k k")
 
     -- __and on the right__, which is the orientation the paper writes. The same
     -- answer, by the other branch of the coercion's motive.
-  , specialises "solution: and on the right" "succ" 1
+  , specialises "solution: and on the right" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat k m -> Eq {0} Nat m k"
-      (Just "Nat -> Eq {0} Nat k k")
+      (Just "Nat.Nat -> Eq.Eq {0} Nat.Nat k k")
 
     -- __Two transitions, cascading__: injectivity exposes an equation solution
     -- then fires on. This is the composition @vtail@ needs, and the only case
     -- that tests the recursion threading a coercion through another
     -- transition's term.
-  , specialises "injectivity then solution" "succ" 1
+  , specialises "injectivity then solution" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat (succ m) (succ k) -> Eq {0} Nat m k"
-      (Just "Nat -> Eq {0} Nat k k")
+      (Just "Nat.Nat -> Eq.Eq {0} Nat.Nat k k")
 
     -- __cycle.__ @m@ is inside @succ m@, so nothing inhabits the equation and
     -- the method is closed outright, exactly as a conflict closes one. __This
     -- is the case the user correctly omitted__, and it is the last of
     -- @eliminating.pdf@'s five (MS9 phase 221).
-  , specialises "cycle: a term against its own successor" "succ" 1
+  , specialises "cycle: a term against its own successor" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat m (succ m) -> Eq {0} Nat m k"
       Nothing
 
     -- __and the other way round__, which the chain states through the
     -- symmetric equation rather than through a second construction.
-  , specialises "cycle: and with the successor on the left" "succ" 1
+  , specialises "cycle: and with the successor on the left" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat (succ m) m -> Eq {0} Nat m k"
       Nothing
 
     -- __Two constructors down.__ The tuple nests, so the search goes into a
     -- sub-tuple before it crosses to the @≢@ half.
-  , specialises "cycle: two constructors deep" "succ" 1
+  , specialises "cycle: two constructors deep" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat m (succ (succ m)) -> Eq {0} Nat m k"
       Nothing
 
@@ -296,7 +297,7 @@ transitionTests =
     -- may not move a rigid binding (§6.2), but @j ≃ succ j@ is unsatisfiable
     -- whoever bound @j@ — @noCycle‹D›@ quantifies the side that occurs, so
     -- nothing in the construction asks whether it is a pattern variable.
-  , specialises "cycle: on a rigid variable" "succ" 1
+  , specialises "cycle: on a rigid variable" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat j (succ j) -> Eq {0} Nat m k"
       Nothing
   ]
@@ -459,15 +460,15 @@ residualTests =
   [ -- Two ambient variables: neither is a binder of this method, so neither may
     -- be solved. §6.2's note is the reason — moving a declaration leftwards is
     -- @raise@, and @raise@ is deliberately not in the op vocabulary at all.
-    specialises "two ambient variables are both rigid" "succ" 1
+    specialises "two ambient variables are both rigid" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat j k -> Eq {0} Nat m k"
-      (Just "\8704 (m : Nat) -> Nat -> Eq {0} Nat j k -> Eq {0} Nat m k")
+      (Just "\8704 (m : Nat.Nat) -> Nat.Nat -> Eq.Eq {0} Nat.Nat j k -> Eq.Eq {0} Nat.Nat m k")
 
     -- No equations at all, which is every method of a family with no indices:
     -- the method comes back as it went in and nothing is built.
-  , specialises "no equations: the method is handed straight back" "succ" 0
+  , specialises "no equations: the method is handed straight back" "Nat.succ" 0
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat m k"
-      (Just "\8704 (m : Nat) -> Nat -> Eq {0} Nat m k")
+      (Just "\8704 (m : Nat.Nat) -> Nat.Nat -> Eq.Eq {0} Nat.Nat m k")
   ]
 
 -- --------------------------------------------------------------------------
@@ -551,10 +552,10 @@ refusalTests =
 chainTests :: [TestTree]
 chainTests =
   [ specialises "solving an equation a later one names carries the chain"
-      "succ" 2
+      "Nat.succ" 2
       "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat m k) \
       \-> Eq {0} (Eq {0} Nat m k) q q -> Nat"
-      (Just "Nat -> Nat")
+      (Just "Nat.Nat -> Nat.Nat")
 
     -- __AND INJECTIVITY CARRIES ONE TOO — MS9, `~rqs39`.__ The same fixture with
     -- the equation's two sides made applications of @succ@, so injectivity fires
@@ -566,10 +567,10 @@ chainTests =
     -- solution reaches, by the other transition. This was refused by name until
     -- the backwards half was generated.
   , specialises "injectivity over an equation a later one names carries it too"
-      "succ" 2
+      "Nat.succ" 2
       "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat (succ m) (succ k)) \
       \-> Eq {0} (Eq {0} Nat (succ m) (succ k)) q q -> Nat"
-      (Just "Nat -> Nat")
+      (Just "Nat.Nat -> Nat.Nat")
 
     -- __AND THE CHAIN A CONSTRUCTOR'S OWN TELESCOPE MAKES — MS9 phase 215.__
     -- @pack@'s second argument is typed by its first, so @Pack.lemmata.noConfusion@
@@ -597,16 +598,16 @@ chainTests =
     -- still the method's to bind. That is the one difference from the two
     -- fixtures above, where solving @m := k@ removed one.
   , specialises "a deletion a later equation names is crossed by injectivity"
-      "succ" 2
+      "Nat.succ" 2
       "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat (succ zero) (succ zero)) \
       \-> Eq {0} (Eq {0} Nat (succ zero) (succ zero)) q q -> Nat"
-      (Just "Nat -> Nat -> Nat")
+      (Just "Nat.Nat -> Nat.Nat -> Nat.Nat")
 
   , specialisesIn eqNatFinPack packContext packCounter
       "injectivity over a dependent argument telescope reads the chain apart"
-      "pack" 1
+      "Pack.pack" 1
       "\8704 (n1 : Nat) (i1 : Fin n1) -> Eq {0} Pack (pack n1 i1) (pack j jj) -> Nat"
-      (Just "Nat")
+      (Just "Nat.Nat")
   ]
 
 -- | @j : Nat@, @jj : Fin j@ — the ambient, rigid pair the equation above is
@@ -639,13 +640,13 @@ engineTests =
     -- one run says both things — and the walk reached each hole by the
     -- /variable/ @prim-eliminate@ handed back.
     testCase "the rule walks the constructors and specialises every method" $
-      splits "split-all core`v` \"Vec\"" ["no subgoals", "subgoals: consCase"]
+      splits "split-all core`v` Vec.Vec" ["no subgoals", "subgoals: consCase"]
 
     -- __Pins the ORDER__, which the walk above cannot: the shape phase
     -- 177 had. Kept because it is the one case that pins the /order/: the
     -- second method's hole is the second element of the list.
   , testCase "and the second hole in the list is the second constructor's" $
-      splits "split-second core`v` \"cons\"" ["subgoals: consCase"]
+      splits "split-second core`v` Vec.cons" ["subgoals: consCase"]
   ]
   where
     splits call wants = case loadedError loaded of
@@ -674,11 +675,17 @@ engineTests =
 declarations :: [String]
 declarations =
   [ "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (x : A) -> Eq A x x }"
+  , "open Eq"
   , "data Unit : Type where { unit : Unit }"
+  , "open Unit"
   , "data Empty : Type where { }"
+  , "open Empty"
   , "data And (A : Type) (B : Type) : Type where { both : \8704 (a : A) (b : B) -> And A B }"
+  , "open And"
   , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+  , "open Nat"
   , "data Vec (A : Type\8320) : Nat -> Type\8320 where { nil : Vec A zero ; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
+  , "open Vec"
   ]
 
 -- | An elimination and a specialisation of /every/ method, as a rule.
