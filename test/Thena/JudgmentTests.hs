@@ -57,15 +57,18 @@ header =
   , "language Ty, T, S where"
   , "  base  -> ι"
   , "  arrow -> ( T -> S )"
+  , "open Ty"
   , ""
   , "language LC, M, N, E where"
   , "  var : x as occurrence -> x"
   , "  abs : x as binder     -> ( λ x : T . E[x] )"
   , "  app                   -> ( M N )"
+  , "open LC"
   , ""
   , "context Ctx, Γ where"
   , "  empty  -> ·"
   , "  extend -> Γ , x : T"
+  , "open Ctx"
   , ""
   ]
 

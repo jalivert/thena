@@ -56,10 +56,12 @@ header =
   , "language Ty, T, S where"
   , "  base  -> \953"
   , "  arrow -> ( T -> S )"
+  , "open Ty"
   , ""
   , "context Ctx, \915 where"
   , "  empty  -> \183"
   , "  extend -> \915 , x : T"
+  , "open Ctx"
   , ""
   ]
 
@@ -82,11 +84,13 @@ fsubHeader =
   , "  tvar : X as occurrence -> X"
   , "  top                    -> \8868"
   , "  fun                    -> ( T -> S )"
+  , "open Ty"
   , ""
   , "context Ctx, \915 where"
   , "  empty  -> \183"
   , "  bindTm -> \915 , x : T"
   , "  bindTy -> \915 , X <: T"
+  , "open Ctx"
   , ""
   ]
 

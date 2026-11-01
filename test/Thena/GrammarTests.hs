@@ -106,8 +106,10 @@ universeSlots =
     , "language Ty, T, S where"
     , "  base  -> ι"
     , "  arrow -> ( T -> S )", ""
+    , "open Ty"
     , "data Imp : Type₀ -> Type₀ -> Type₁ where"
     , "  { impIntro : ∀ (A : Type₀) (B : Type₀) -> (A -> B) -> Imp A B }", ""
+    , "open Imp"
     , "notation Imp A B -> A ⊃ B where", ""
     , "k : Type₀ -> Ty -> Ty"
     , "k = \\ A -> \\ t -> t", ""
@@ -130,10 +132,12 @@ lamByHand =
     , "language Tw, P, Q where"
     , "  twBase  -> ο"
     , "  twArrow -> ( P ⇒ Q )", ""
+    , "open Tw"
     , "data Lam : Type₀ where"
     , "  { lmVar : String -> Lam"
     , "  ; lmAbs : String -> Tw -> Lam -> Lam"
     , "  ; lmApp : Lam -> Lam -> Lam }", ""
+    , "open Lam"
     , "notation Lam where"
     , "  lmVar (v : w) : v as occurrence -> v"
     , "  lmAbs (v : w) p b : v as binder -> ( ƛ v : p . b[v] )"
@@ -153,10 +157,12 @@ lamByBlock =
     , "language Tw, P, Q where"
     , "  twBase  -> ο"
     , "  twArrow -> ( P ⇒ Q )", ""
+    , "open Tw"
     , "language Lam, M, N, E where"
     , "  lmVar : w as occurrence -> w"
     , "  lmAbs : w as binder     -> ( ƛ w : P . E[w] )"
     , "  lmApp                   -> ( M N )", ""
+    , "open Lam"
     ]
 
 loadOrSay :: Session -> String -> Either String Session
@@ -175,18 +181,22 @@ validSource =
     , "language Ty, T, S where"
     , "  base  -> ι"
     , "  arrow -> ( T -> S )", ""
+    , "open Ty"
     , "language LC, M, N, E where"
     , "  var : x as occurrence -> x"
     , "  app                   -> ( M N )", ""
+    , "open LC"
     , "context Ctx, Γ where"
     , "  empty  -> ·"
     , "  extend -> Γ , x : T", ""
+    , "open Ctx"
     , "judgment typing = Γ ⊢ M : T where", ""
     , "  T-var:  x : T ∈ Γ"
     , "          -----------"
     , "          Γ ⊢ x : T", ""
     , "data Valid : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Type₀ where"
     , "  { validAny : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Valid G M T d }", ""
+    , "open Valid"
     , "notation Valid G M T d -> ⊢ G , M , T by d valid where", ""
     ]
 
@@ -264,6 +274,7 @@ twoClasses =
     , "  var : x as occurrence -> x"
     , "  abs : x as binder     -> ( lam x . M[x] )"
     , "  big : X as binder     -> ( all X . M[X] )"
+    , "open L"
     ]
 
 -- | **A binder of one language free in a slot of another** (MS8 phase 154).
@@ -284,10 +295,12 @@ foreignScope =
     , ""
     , "language P, R where"
     , "  pvar : X as occurrence -> X"
+    , "open P"
     , ""
     , "language L, M where"
     , "  var : x as occurrence -> x"
     , "  f : X as binder       -> ( pack X = M in R[X] )"
+    , "open L"
     ]
 
 -- | **Three languages in a chain** (MS8 phase 154). @P@ reads an occurrence at
@@ -303,12 +316,15 @@ chained =
     , ""
     , "language P, R where"
     , "  pvar : x as occurrence -> x"
+    , "open P"
     , ""
     , "language Q, S where"
     , "  pwrap -> ( R )"
+    , "open Q"
     , ""
     , "language L, M where"
     , "  lpair -> ( S M )"
+    , "open L"
     ]
 
 stlc :: String
@@ -322,6 +338,7 @@ stlc =
     , "language Ty, T, S where"
     , "  base  -> \953"
     , "  arrow -> T -> S"
+    , "open Ty"
     , ""
     , "language LC, M, N, E where"
     , "  var : x as occurrence -> x"
@@ -329,10 +346,12 @@ stlc =
     , "  app                   -> ( M N )"
     , "  repeat                -> { M M }"
     , "  vacuous : { x } as binders -> let x = M in N"
+    , "open LC"
     , ""
     , "context Ctx, \915 where"
     , "  empty  -> \183"
     , "  extend -> \915 , x : T"
+    , "open Ctx"
     ]
 
 meaning :: [TestTree]
@@ -492,10 +511,12 @@ joining =
     , ""
     , "language Ty, T, S where"
     , "  base -> o"
+    , "open Ty"
     , ""
     , "context C, G, D where"
     , "  e   -> \183"
     , "  ext -> G , x : T"
+    , "open C"
     , ""
     , "join : C -> C -> C"
     , "join = \\ a b -> a"
@@ -587,9 +608,11 @@ notating =
         , "language Ty, T, S where"
         , "  base  -> ι"
         , "  arrow -> ( T -> S )", ""
+        , "open Ty"
         , "context Ctx, Γ where"
         , "  empty  -> ·"
         , "  extend -> Γ , x : T", ""
+        , "open Ctx"
         , "notation Ctx where"
         , "  extend : x as occurrence -> ⟪ Γ , x , T ⟫", "" ])
         @?= Left ("refused: in the notation for Ctx, production extend: a role belongs to the "
@@ -609,6 +632,7 @@ notating =
         , "data D : Type₀ where"
         , "  { dOne : String -> D"
         , "  ; dTwo : String -> D }", ""
+        , "open D"
         , "notation D where"
         , "  dOne (v : x) : v as occurrence -> ⟨ v ⟩", "" ])
         @?= Left ("refused: in the notation for D: it declares a role, so it generates D's "

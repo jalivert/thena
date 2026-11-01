@@ -178,7 +178,7 @@ refusedTests =
     -- type the position has rather than anywhere: @.A@ where an @N@ was
     -- determined never reaches the unification.
     testCase "a dot at the wrong type" $
-      refusedWith "Type\8320 and N cannot be made equal"
+      refusedWith "Type\8320 and N.N cannot be made equal"
         (vecPreamble ++ vtail "vcons .A a as")
   , -- __A dot heads no arm.__ The grammar lets one stand anywhere an atom may,
     -- and @arm-for@ wants a constructor's name — an arm is for a case, and
@@ -208,13 +208,13 @@ refusedTests =
 namingTests :: [TestTree]
 namingTests =
   [ testCase "a dot on a compound term that is not the one" $
-      refusedWith "s q and p cannot be made equal"
+      refusedWith "N.s q and p cannot be made equal"
         (vecPreamble
            ++ [ "vq : forall (A : Type\8320) (p : N) (q : N) (xs : Vec A (s p)) -> Vec A p"
               , "vq = \\ A p q xs -> case xs of { vnil -> ; vcons .(s q) hd tl -> tl }"
               ])
   , testCase "an ordinary application, with no dot anywhere" $
-      refusedWith "kk and s kk cannot be made equal"
+      refusedWith "kk and N.s kk cannot be made equal"
         (vecPreamble
            ++ [ "vp : forall (A : Type\8320) (kk : N) (a : A) (xs : Vec A kk) -> Vec A kk"
               , "vp = \\ A kk a xs -> vcons A (s kk) a xs"
@@ -233,9 +233,14 @@ vecPreamble =
   , "data N : Type\8320 where"
   , "  z : N"
   , "  s : N -> N"
+    -- **A declaration's own short name resolves without an @open@; its
+    -- constructors do not** (MS10 phase 251). @Vec@'s own header may say @N@,
+    -- but @Vec A z@ needs @z@ in scope, and that is what the @open@ is for.
+  , "open N"
   , "data Vec (A : Type) : N -> Type where"
   , "  vnil : Vec A z"
   , "  vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n)"
+  , "open Vec"
   ]
 
 -- | @vtail@ over a @Vec A (s m)@, with the @vcons@ arm written as given. The

@@ -71,15 +71,18 @@ source =
     , "language Ty, T, S where"
     , "  base  -> \953"
     , "  arrow -> ( T -> S )"
+    , "open Ty"
     , ""
     , "language LC, M, N, E where"
     , "  var : w as occurrence -> w"
     , "  abs : w as binder     -> ( \955 w : T . E[w] )"
     , "  app                   -> ( M N )"
+    , "open LC"
     , ""
     , "language Ex, U, V where"
     , "  ref  : w as occurrence -> w"
     , "  juxt                   -> U V"
+    , "open Ex"
     , ""
     , "judgment written = U ! where"
     , ""
@@ -90,6 +93,7 @@ source =
     , "  cref  : c as occurrence -> c"
     , "  cjux                    -> P Q"
     , "  clet  : c as binder     -> l c = P i Q[c]"
+    , "open Coll"
     ]
 
 loaded :: IO (GlobalEnv, [Grammar])

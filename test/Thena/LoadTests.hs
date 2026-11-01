@@ -396,6 +396,7 @@ dependentModule =
     , ""
     , "data Chain (A : Type\8320) : A -> A -> Type\8320 where"
     , "  link : forall (x : A) (y : A) (z : A) (p : Chain A x y) (q : Chain A y z) -> Chain A x z"
+    , "open Chain"
     ]
 
 moduleTests :: [TestTree]

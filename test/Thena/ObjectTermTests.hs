@@ -65,6 +65,7 @@ languageModule =
     , "language LC, M, N, E where"
     , "  var : x as occurrence -> x"
     , "  app                   -> ( M N )"
+    , "open LC"
     , ""
     , "fg : LC"
     , "fg = LC`( f g )`"

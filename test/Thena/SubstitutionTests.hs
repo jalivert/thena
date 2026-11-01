@@ -89,6 +89,7 @@ primedSource =
     , "  pvar : n as occurrence -> n"
     , "  pabs : n as binder     -> ( lam n . E[n] )"
     , "  papp                   -> ( M N )"
+    , "open PL"
     , ""
     , "mintsALetter : Eq String (PL.fresh-n \"y\" (cons String \"y\" (nil String))) \"ya\""
     , "mintsALetter = refl String \"ya\""
@@ -110,6 +111,7 @@ unprimeableSource =
     , "language K, P, Q, R where"
     , "  kvar : f as occurrence -> f"
     , "  kabs : f as binder     -> ( lam f . R[f] )"
+    , "open K"
     ]
 
 primed :: [TestTree]
@@ -157,6 +159,7 @@ twoOwnSource =
     , "  dlab : i as occurrence -> ' i"
     , "  dabs : x as binder     -> ( lam x . M[x] )"
     , "  dlev : i as binder     -> ( lev i . M[i] )"
+    , "open D"
     ]
 
 -- | **F-sub in miniature** — `~5k3mg`'s half, and the reason the milestone has
@@ -185,12 +188,14 @@ fsubSource =
     , "  top                    -> Top"
     , "  fun                    -> ( T -> S )"
     , "  poly : X as binder     -> ( forall X <: T . S[X] )"
+    , "open Ty"
     , ""
     , "language Tm, M, N where"
     , "  var  : x as occurrence -> x"
     , "  abs  : x as binder     -> ( lam x : T . M[x] )"
     , "  tabs : X as binder     -> ( Lam X <: T . M[X] )"
     , "  tapp                   -> ( M @ T )"
+    , "open Tm"
     , ""
     , "captured : Eq Tm (Tm.subst-x (tabs \"X\" top (var \"z\")) \"z\" (abs \"y\" (tvar \"X\") (var \"y\")))"
     , "                 (tabs \"X'\" top (abs \"y\" (tvar \"X\") (var \"y\")))"
@@ -281,17 +286,20 @@ source =
     , "language Ty, T, S where"
     , "  base  -> \953"
     , "  arrow -> ( T -> S )"
+    , "open Ty"
     , ""
     , "language LC, M, N, E where"
     , "  var : x as occurrence -> x"
     , "  abs : x as binder     -> ( \955 x : T . E[x] )"
     , "  app                   -> ( M N )"
+    , "open LC"
     , ""
     , "language LB, P, Q where"
     , "  bvar : x as occurrence     -> x"
     , "  lam2 : { x, y } as binders -> ( \955\955 x y . P[x, y] )"
     , "  half : { x, y } as binders -> ( \956 x y . P[x] Q[y] )"
     , "  bapp                       -> ( P Q )"
+    , "open LB"
     ]
 
 loaded :: IO GlobalEnv
