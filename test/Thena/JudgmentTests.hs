@@ -16,7 +16,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (entryIdent)
-import Thena.Core.Term (GlobalName (..), Ident (..), rootName)
+import Thena.Core.Term (GlobalName (..), Ident (..))
 import Thena.Driver
   ( Response (..)
   , Session

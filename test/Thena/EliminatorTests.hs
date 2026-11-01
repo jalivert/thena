@@ -23,7 +23,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels, levelOfNat)
-import Thena.Core.Term (Core, substLevelsIn, rootName)
+import Thena.Core.Term (Core, substLevelsIn)
 import Thena.Declared (declaredAs, natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Global.Env
   ( GlobalEnv

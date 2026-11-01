@@ -136,14 +136,14 @@ accepted =
           value g = whnf env [] . definitionBody <$> lookupDefinition (rootName g) env
       map value ["ident", "digit", "numeral", "again"]
         @?= map Just
-          [ App (Primitive (LRegex "[a-z][a-zA-Z0-9']*")) (named "String")
-          , App (Primitive (LRegex "[0-9]")) (named "Char")
-          , App (Primitive (LRegex "-?[1-9][0-9]*|0")) (named "Int")
-          , App (Primitive (LRegex "[a-z][a-zA-Z0-9']*")) (named "String")
+          [ App (Primitive (LRegex "[a-z][a-zA-Z0-9']*")) (rooted "String")
+          , App (Primitive (LRegex "[0-9]")) (rooted "Char")
+          , App (Primitive (LRegex "-?[1-9][0-9]*|0")) (rooted "Int")
+          , App (Primitive (LRegex "[a-z][a-zA-Z0-9']*")) (rooted "String")
           ]
   ]
   where
-    named g = Global (rootName g) []
+    rooted g = Global (rootName g) []
 
 -- ---------------------------------------------------------------------------
 

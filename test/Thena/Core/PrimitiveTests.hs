@@ -107,13 +107,13 @@ typed =
       (Right ty, _, _) -> ty @?= expected
       (Left e, _, _)   -> assertFailure (show e)
   | (l, expected) <-
-      [ (LString "ab", named "String")
-      , (LChar 'c', named "Char")
-      , (LInt 7, named "Int")
+      [ (LString "ab", rooted "String")
+      , (LChar 'c', rooted "Char")
+      , (LInt 7, rooted "Int")
       ]
   ]
   where
-    named g = Global (rootName g) []
+    rooted g = Global (rootName g) []
 
 values :: [TestTree]
 values =
@@ -158,14 +158,14 @@ conversion =
   -- to two literals and fell through to a clash. @refl String "a"@ was refused
   -- at @Eq String "a" "a"@ because of it.
   , testCase "a literal and a definition of that literal convert" $
-      failureInA (Primitive (LString "a")) named @?= Nothing
+      failureInA (Primitive (LString "a")) rooted @?= Nothing
   , testCase "and of a different one do not" $
-      isJust (failureInA (Primitive (LString "b")) named) @?= True
+      isJust (failureInA (Primitive (LString "b")) rooted) @?= True
   ]
   where
     failureOf s t = let (why, _, _) = convert env ctx 0 s t in why
     failureInA s t = let (why, _, _) = convert withA ctx 0 s t in why
-    named = Global (rootName "a") []
+    rooted = Global (rootName "a") []
     withA = addDefinition (rootName "a")
               (MkDefinition [] [] (Global (rootName "String") []) (Primitive (LString "a"))) env
 
@@ -242,7 +242,7 @@ computing =
   -- These were stuck: the rule matched a literal as the argument stood, so a
   -- closed comparison of something that /is/ a literal did not compute.
   , testCase "a definition of a literal is compared, in either place" $
-      map reduced [apply [named "a", str "a"], apply [str "b", named "a"]]
+      map reduced [apply [rooted "a", str "a"], apply [str "b", rooted "a"]]
         @?= [answer "yes", answer "no"]
   , testCase "so is a redex that reduces to one" $
       reduced (apply [App identity (str "a"), str "a"]) @?= answer "yes"
@@ -250,14 +250,14 @@ computing =
   , testCase "String.append puts two literals together" $
       reduced (append [str "x", str "'"]) @?= str "x'"
   , testCase "and reads a definition of one, as a comparison does" $
-      reduced (append [named "a", str "b"]) @?= str "ab"
+      reduced (append [rooted "a", str "b"]) @?= str "ab"
   , testCase "and leaves a variable where it is" $
       reduced (append [Free v, str "'"]) @?= append [Free v, str "'"]
   ]
   where
     v = fst (fresh 500)
     str s = Primitive (LString s)
-    named g = Global (rootName g) []
+    rooted g = Global (rootName g) []
     apply = foldl App (Global (GlobalName ["String"] "eq") [])
     append = foldl App (Global (GlobalName ["String"] "append") [])
     reduced = whnf withA ctx
@@ -283,10 +283,10 @@ refusals =
   -- String exactly, and a comparison's shape is not that.
   , refusedCase "String.append answering with a datatype" (GlobalName ["String"] "append") (twoOf "String")
   , refusedCase "String.append over Int" (GlobalName ["String"] "append")
-      (arrow (named "Int") (arrow (named "Int") (named "Int")))
+      (arrow (rooted "Int") (arrow (rooted "Int") (rooted "Int")))
   , testCase "String.append at its own type is accepted" $
       isRight (checkedPrimitive answering (GlobalName ["String"] "append")
-                 (arrow (named "String") (arrow (named "String") (named "String")))) @?= True
+                 (arrow (rooted "String") (arrow (rooted "String") (rooted "String")))) @?= True
   ]
   where
     refusedCase what nm ty =
@@ -294,12 +294,12 @@ refusals =
     -- **@Answer@ is @Answer.Answer@** (MS10 phase 243) — the same name
     -- 'answering' built the primitive's type out of, so a type written here at
     -- the root is a different type and the shipped declaration is refused.
-    twoOf p = arrow (named p) (arrow (named p) answerTy)
-    oneArgument = arrow (named "String") answerTy
+    twoOf p = arrow (rooted p) (arrow (rooted p) answerTy)
+    oneArgument = arrow (rooted "String") answerTy
     answerTy = Global (declaredAs "Answer") []
-    intoAUniverse = arrow (named "String") (arrow (named "String") (Universe (levelOfNat 0)))
-    intoAnswerOfOne = arrow (named "Int") (arrow (named "Int") (named "One"))
-    named n = Global (rootName n) []
+    intoAUniverse = arrow (rooted "String") (arrow (rooted "String") (Universe (levelOfNat 0)))
+    intoAnswerOfOne = arrow (rooted "Int") (arrow (rooted "Int") (rooted "One"))
+    rooted n = Global (rootName n) []
     arrow a b = Pi (Ident "_") a (close (fst (fresh 900)) b)
     isRight = either (const False) (const True)
 
