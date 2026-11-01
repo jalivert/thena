@@ -509,7 +509,7 @@ tests =
     , testGroup
         "declarations"
         [ testCase "data says what it declared" $
-            snd (say [natCommand]) @?= Ran ["declared Nat"] [] Completed
+            snd (say [natCommand]) @?= Ran ["declared Nat.Nat"] [] Completed
         , testCase "and the globals hold it afterwards" $
             declaredIn (fst (say [natCommand])) "Nat" @?= True
         , testCase "so do the names it generated" $

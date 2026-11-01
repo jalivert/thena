@@ -112,9 +112,9 @@ preludeTests =
           -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
           -- which is a counter value and no business of this assertion.
           renderEliminator (Rendering [] n0) (rootName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
-            @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq {0} A _ _1 -> Type₀) \
-                  \-> (∀ (a : A) -> P a a (refl {0} A a)) \
-                  \-> ∀ (_ : A) (_1 : A) (target : Eq {0} A _ _1) -> P _ _1 target"
+            @?= [ "elim Eq.Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq.Eq {0} A _ _1 -> Type₀) \
+                  \-> (∀ (a : A) -> P a a (Eq.refl {0} A a)) \
+                  \-> ∀ (_ : A) (_1 : A) (target : Eq.Eq {0} A _ _1) -> P _ _1 target"
                 ]
 
     -- "and can be used": eliminating a 'refl' must actually fire. The motive is
@@ -128,7 +128,7 @@ preludeTests =
         ]
         (\l -> do
             loadedError l @?= Nothing
-            renderedLast l @?= Just "unit {0}")
+            renderedLast l @?= Just "Unit.unit {0}")
 
     -- The real @repl@ has the prelude in scope and 'transcript' does not; this
     -- is the difference, made visible.

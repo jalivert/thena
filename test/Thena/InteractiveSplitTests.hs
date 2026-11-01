@@ -87,7 +87,7 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadFile s target
         let (_, out) = step s' ":whnf vhead N z (vcons N z z (vnil N))"
-        out @?= ["z"]
+        out @?= ["N.z"]
 
       -- __A CASE THE SPECIALISER CLOSED IS NOT SHOWN TO THE AUTHOR__, which is
       -- the one place the interactive walk decides something the written one

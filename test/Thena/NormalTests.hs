@@ -42,14 +42,14 @@ tests =
       -- to assert. @CanonicalTests@ has the same pair for the same reason.
       testCase "a value takes no step" $ do
         st <- statementOf "valueNoStep"
-        st @?= Just (1, "∀ (v : Term) -> Value v -> ∀ (u : Term) -> Step v u -> Empty {0}")
+        st @?= Just (1, "∀ (v : Term.Term) -> Value.Value v -> ∀ (u : Term.Term) -> Step.Step v u -> Empty.Empty {0}")
 
       -- **It holds of any value, not only a well-typed one** — the statement
       -- mentions no typing at all, which is what makes it the exclusivity half
       -- of progress rather than a corollary of it.
     , testCase "and it says nothing about typing" $ do
         st <- statementOf "nvNoStep"
-        st @?= Just (1, "∀ (t : Term) -> NV t -> ∀ (u : Term) -> Step t u -> Empty {0}")
+        st @?= Just (1, "∀ (t : Term.Term) -> NV.NV t -> ∀ (u : Term.Term) -> Step.Step t u -> Empty.Empty {0}")
 
     , testCase "the three inversions underneath are there" $ do
         s <- loaded

@@ -142,7 +142,7 @@ substituted =
     -- name belongs to the language whose notation can write one.
     testCase "a context reaching a class gets a substitution into its owner" $ do
       s <- loaded fsubHeader
-      said s ":infer Ctx.subst-X" @?= ["Ctx.subst-X : Ctx -> String -> Ty -> Ctx"]
+      said s ":infer Ctx.subst-X" @?= ["Ctx.subst-X : Ctx.Ctx -> String -> Ty.Ty -> Ctx.Ctx"]
       said s ":infer Ctx.fresh-X" @?= ["stuck: not in scope: Ctx.fresh-X"]
     -- **The load is the assertion.** @through@ does not type-check unless the
     -- fold recurses through the context and substitutes in each entry's type,

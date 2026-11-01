@@ -211,13 +211,13 @@ classes =
       env <- loadedFrom twoOwnSource
       [ typeOf env f | f <- [ "D.fresh-x", "D.fresh-i", "D.fv-x", "D.fv-i"
                             , "D.subst-all", "D.subst-x", "D.subst-i" ] ]
-        @?= [ Just "String -> List String -> String"
-            , Just "String -> List String -> String"
-            , Just "D -> List String"
-            , Just "D -> List String"
-            , Just "D -> List (And String D) -> List (And String D) -> D"
-            , Just "D -> String -> D -> D"
-            , Just "D -> String -> D -> D"
+        @?= [ Just "String -> List.List String -> String"
+            , Just "String -> List.List String -> String"
+            , Just "D.D -> List.List String"
+            , Just "D.D -> List.List String"
+            , Just "D.D -> List.List (And.And String D.D) -> List.List (And.And String D.D) -> D.D"
+            , Just "D.D -> String -> D.D -> D.D"
+            , Just "D.D -> String -> D.D -> D.D"
             ]
     -- **The headline of the phase**: a map per class, and the class's map is a
     -- map into the language that OWNS it, so substituting @X@ into a term takes
@@ -232,19 +232,19 @@ classes =
         , "language K, A where", "  kvar : x as occurrence -> x", ""
         , "language L, M where", "  lvar : x as occurrence -> x" ])
       [ typeOf env f | f <- ["K.subst-x", "L.subst-x"] ]
-        @?= [Just "K -> String -> K -> K", Just "L -> String -> L -> L"]
+        @?= [Just "K.K -> String -> K.K -> K.K", Just "L.L -> String -> L.L -> L.L"]
   , testCase "a class another language owns gives a substitution into that language" $ do
       env <- loadedFrom fsubSource
       [ typeOf env f | f <- [ "Tm.subst-all", "Tm.subst-x", "Tm.subst-X", "Tm.fv-X"
                             , "Tm.fresh-X", "Ty.fresh-X", "Ty.subst-all" ] ]
-        @?= [ Just "Tm -> List (And String Tm) -> List (And String Ty) -> Tm"
-            , Just "Tm -> String -> Tm -> Tm"
-            , Just "Tm -> String -> Ty -> Tm"
-            , Just "Tm -> List String"
+        @?= [ Just "Tm.Tm -> List.List (And.And String Tm.Tm) -> List.List (And.And String Ty.Ty) -> Tm.Tm"
+            , Just "Tm.Tm -> String -> Tm.Tm -> Tm.Tm"
+            , Just "Tm.Tm -> String -> Ty.Ty -> Tm.Tm"
+            , Just "Tm.Tm -> List.List String"
               -- Minting a name of a class belongs to the language that owns it.
             , Nothing
-            , Just "String -> List String -> String"
-            , Just "Ty -> List (And String Ty) -> Ty"
+            , Just "String -> List.List String -> String"
+            , Just "Ty.Ty -> List.List (And.And String Ty.Ty) -> Ty.Ty"
             ]
   ]
   where
@@ -487,11 +487,11 @@ declared io =
   -- that mention them are too. Nothing is defaulted (his ruling), so this is
   -- what the type is, and it is asserted rather than printed away.
   | (f, ty, levels) <-
-      [ ("LC.fresh-x", "String -> List String -> String", 1)
-      , ("LC.fv-x", "LC -> List String", 1)
-      , ("LC.subst-all", "LC -> List (And String LC) -> LC", 3)
-      , ("LC.subst-x", "LC -> String -> LC -> LC", 0)
-      , ("LB.subst-x", "LB -> String -> LB -> LB", 0)
+      [ ("LC.fresh-x", "String -> List.List String -> String", 1)
+      , ("LC.fv-x", "LC.LC -> List.List String", 1)
+      , ("LC.subst-all", "LC.LC -> List.List (And.And String LC.LC) -> LC.LC", 3)
+      , ("LC.subst-x", "LC.LC -> String -> LC.LC -> LC.LC", 0)
+      , ("LB.subst-x", "LB.LB -> String -> LB.LB -> LB.LB", 0)
       ]
   ]
     ++ [ testCase "a language that reaches no class gets none" $ do

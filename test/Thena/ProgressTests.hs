@@ -42,12 +42,12 @@ tests =
       -- stuck.
     , testCase "a well-typed term is a value or it steps" $ do
         st <- statementOf "progress"
-        st @?= Just "∀ (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)"
+        st @?= Just "∀ (t : Term.Term) (T : Ty.Ty) -> HasType.HasType t T -> Or.Or (Value.Value t) (Steps t)"
 
       -- …and what @Steps@ means, so the conclusion cannot be hollowed out.
     , testCase "and stepping really is the existential" $ do
         st <- statementOf "Steps"
-        st @?= Just "Term -> Type₀"
+        st @?= Just "Term.Term -> Type₀"
 
       -- **The three lemmas that produce a step**, asserted as present rather
       -- than by their rendered types. Each concludes with a @Sigma@ whose second

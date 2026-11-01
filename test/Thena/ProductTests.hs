@@ -51,7 +51,7 @@ tests =
       -- the method's @b : B a@ is accepted only because
       -- @fst A B (pair A B a b)@ δ-then-ι-reduces to @a@.
     , statementOf "snd"
-        "∀ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> B (fst A B s)"
+        "∀ (A : Type₀) (B : A -> Type₀) (s : Sigma.Sigma A B) -> B (fst A B s)"
 
       -- **@Sigma@ gets its lemma since MS9 phase 212**, and it asserted the
       -- opposite until then: @b@'s type mentions @a@, which is the shape the

@@ -1960,7 +1960,7 @@ splittingTree =
       -- Saturated, because @:whnf@ reads a CORE term and nothing is inserted
       -- there: @vcons@'s parameter is an argument like any other, and an
       -- under-applied former is not a 'Canonical' for ι to fire on.
-      let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (Vec.Vec.Vec.Vec.Vec.Vec.vnil Nat.Nat.Nat.Nat.Nat.Nat.Nat))"
+      let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
       unwords (renderResponse s2 q) @?= "vnil Nat"
 
     -- __AN EMPTY ARM IS HOW THE VANISHED CASE IS WRITTEN__ (MS9 phase 189, his
@@ -2049,7 +2049,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1
-            ":whnf left leaf leaf (okNode leaf leaf Ok.Ok.Ok.Ok.okLeaf okLeaf)"
+            ":whnf left leaf leaf (okNode leaf leaf okLeaf okLeaf)"
       unwords (renderResponse s2 q) @?= "okLeaf"
 
     -- __TWO HYPOTHESES, AND THE CALL SAYS WHICH__ (MS9 phase 186). @okNode@
@@ -2286,7 +2286,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf predC (succ (succ zero))"
-      unwords (renderResponse s2 q) @?= "succ zero"
+      unwords (renderResponse s2 q) @?= "Nat.succ Nat.zero"
 
     -- __And the term says which word was written.__ @Nat.case@ applied, with a
     -- method per constructor and no hypothesis in either.

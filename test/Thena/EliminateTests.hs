@@ -276,12 +276,12 @@ dependentMotives =
 workedTests :: [TestTree]
 workedTests =
   [ method "eIfTrue — §3.7's own displayed method" 0
-      "∀ (t21 : Term) (t31 : Term) -> Eq {0} Term (ifthen true t21 t31) (ifthen true t2 t3) \
-      \-> Eq {0} Term t2 t21"
+      "∀ (t21 : Term.Term) (t31 : Term.Term) -> Eq.Eq {0} Term.Term (Term.ifthen Term.true t21 t31) (Term.ifthen Term.true t2 t3) \
+      \-> Eq.Eq {0} Term.Term t2 t21"
 
   , method "eIfFalse — the branch ruled out by conflict on true/false" 1
-      "∀ (t21 : Term) (t31 : Term) -> Eq {0} Term (ifthen false t21 t31) (ifthen true t2 t3) \
-      \-> Eq {0} Term t2 t31"
+      "∀ (t21 : Term.Term) (t31 : Term.Term) -> Eq.Eq {0} Term.Term (Term.ifthen Term.false t21 t31) (Term.ifthen Term.true t2 t3) \
+      \-> Eq.Eq {0} Term.Term t2 t31"
 
     -- The inductive hypothesis is the motive at the recursive argument's own
     -- indices, so it carries its own copy of whatever the motive constrains.
@@ -290,10 +290,10 @@ workedTests =
     -- telling you anything. An inversion does not want the hypothesis, so this
     -- one is harmless; 'friendlyTests' is where it would not have been.
   , method "eIf — and its induction hypothesis is constrained too" 2
-      "∀ (t1 : Term) (t1' : Term) (t21 : Term) (t31 : Term) -> Step t1 t1' \
-      \-> (Eq {0} Term t1 (ifthen true t2 t3) -> Eq {0} Term t2 t1') \
-      \-> Eq {0} Term (ifthen t1 t21 t31) (ifthen true t2 t3) \
-      \-> Eq {0} Term t2 (ifthen t1' t21 t31)"
+      "∀ (t1 : Term.Term) (t1' : Term.Term) (t21 : Term.Term) (t31 : Term.Term) -> Step.Step t1 t1' \
+      \-> (Eq.Eq {0} Term.Term t1 (Term.ifthen Term.true t2 t3) -> Eq.Eq {0} Term.Term t2 t1') \
+      \-> Eq.Eq {0} Term.Term (Term.ifthen t1 t21 t31) (Term.ifthen Term.true t2 t3) \
+      \-> Eq.Eq {0} Term.Term t2 (Term.ifthen t1' t21 t31)"
 
   , testCase "one subgoal per constructor, in declaration order" $
       names worked
@@ -306,10 +306,10 @@ workedTests =
     -- the equations it states and the spine that discharges them.
   , testCase "the equations are discharged with refl {0} at the use site" $
       rendered (withMethods stepContext worked) (elimTerm worked)
-        @?= "(elim Step () (λ (x : Term) (x1 : Term) (target : Step x x1) \
-            \-> Eq {0} Term x (ifthen true t2 t3) -> Eq {0} Term t2 x1) \
-            \(eIfTrueMethod eIfFalseMethod eIfMethod) ((ifthen true t2 t3) u) d) \
-            \(refl {0} Term (ifthen true t2 t3))"
+        @?= "(elim Step.Step () (λ (x : Term.Term) (x1 : Term.Term) (target : Step.Step x x1) \
+            \-> Eq.Eq {0} Term.Term x (Term.ifthen Term.true t2 t3) -> Eq.Eq {0} Term.Term t2 x1) \
+            \(eIfTrueMethod eIfFalseMethod eIfMethod) ((Term.ifthen Term.true t2 t3) u) d) \
+            \(Eq.refl {0} Term.Term (Term.ifthen Term.true t2 t3))"
   ]
   where
     method label k want = testCase label $
@@ -350,19 +350,19 @@ simpleTests :: [TestTree]
 simpleTests =
   [ testCase "the target is abstracted in the goal" $
       map (rendered natContext . thirdOf) (elimMethods natEq)
-        @?= [ "Eq {0} Nat zero zero"
-            , "∀ (x : Nat) -> Eq {0} Nat x x -> Eq {0} Nat (succ x) (succ x)"
+        @?= [ "Eq.Eq {0} Nat.Nat Nat.zero Nat.zero"
+            , "∀ (x : Nat.Nat) -> Eq.Eq {0} Nat.Nat x x -> Eq.Eq {0} Nat.Nat (Nat.succ x) (Nat.succ x)"
             ]
 
   , testCase "a goal not mentioning the target gets a constant motive" $
       map (rendered natContext . thirdOf) (elimMethods natConst)
         @?= [ "Eq {0} Nat m m"
-            , "Nat -> Eq {0} Nat m m -> Eq {0} Nat m m"
+            , "Nat.Nat -> Eq.Eq {0} Nat.Nat m m -> Eq.Eq {0} Nat.Nat m m"
             ]
 
   , testCase "no indices, so nothing is applied to the elimination" $
       rendered (withMethods natContext natEq) (elimTerm natEq)
-        @?= "elim Nat () (λ (target : Nat) -> Eq {0} Nat target target) \
+        @?= "elim Nat.Nat () (λ (target : Nat.Nat) -> Eq.Eq {0} Nat.Nat target target) \
             \(zeroMethod succMethod) () n"
   ]
   where
@@ -477,22 +477,22 @@ friendlyTests =
           (ctx, n1) = contextOf env n0
             [("m", "Nat"), ("b", "Below.Below (succ m) (fz m)")]
        in map (rendered ctx . thirdOf') (elimMethods (run "tiedDep" env ctx n1 "Nat" "b"))
-            @?= [ "∀ (m1 : Nat) (q : Eq {0} Nat (succ m1) (succ m)) \
-                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
-                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
-                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
-                  \((succ m1) (succ m)) q) (fz m1)) (fz m) -> Nat"
-                , "∀ (m1 : Nat) (j : Fin m1) -> Below m1 j \
-                  \-> (∀ (q : Eq {0} Nat m1 (succ m)) \
-                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
-                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
-                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
-                  \(m1 (succ m)) q) j) (fz m) -> Nat) \
-                  \-> ∀ (q : Eq {0} Nat (succ m1) (succ m)) \
-                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
-                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
-                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
-                  \((succ m1) (succ m)) q) (fs m1 j)) (fz m) -> Nat"
+            @?= [ "∀ (m1 : Nat.Nat) (q : Eq.Eq {0} Nat.Nat (Nat.succ m1) (Nat.succ m)) \
+                  \-> Eq.Eq {0} (Fin.Fin (Nat.succ m)) ((elim Eq.Eq {0} (Nat.Nat) \
+                  \(λ (left : Nat.Nat) (right : Nat.Nat) (q1 : Eq.Eq {0} Nat.Nat left right) \
+                  \-> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) \
+                  \((Nat.succ m1) (Nat.succ m)) q) (Fin.fz m1)) (Fin.fz m) -> Nat.Nat"
+                , "∀ (m1 : Nat.Nat) (j : Fin.Fin m1) -> Below.Below m1 j \
+                  \-> (∀ (q : Eq.Eq {0} Nat.Nat m1 (Nat.succ m)) \
+                  \-> Eq.Eq {0} (Fin.Fin (Nat.succ m)) ((elim Eq.Eq {0} (Nat.Nat) \
+                  \(λ (left : Nat.Nat) (right : Nat.Nat) (q1 : Eq.Eq {0} Nat.Nat left right) \
+                  \-> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) \
+                  \(m1 (Nat.succ m)) q) j) (Fin.fz m) -> Nat.Nat) \
+                  \-> ∀ (q : Eq.Eq {0} Nat.Nat (Nat.succ m1) (Nat.succ m)) \
+                  \-> Eq.Eq {0} (Fin.Fin (Nat.succ m)) ((elim Eq.Eq {0} (Nat.Nat) \
+                  \(λ (left : Nat.Nat) (right : Nat.Nat) (q1 : Eq.Eq {0} Nat.Nat left right) \
+                  \-> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) \
+                  \((Nat.succ m1) (Nat.succ m)) q) (Fin.fs m1 j)) (Fin.fz m) -> Nat.Nat"
                 ]
 
     -- The load-bearing artifact of phase 19, and the thing @check@ alone would
@@ -501,9 +501,9 @@ friendlyTests =
     -- declaration, which is not in scope here at all.
   , testCase "and the motive's telescope carries the dependency" $
       rendered (withMethods belowContext belowProbe) (elimTerm belowProbe)
-        @?= "(elim Below () (λ (n1 : Nat) (i1 : Fin n1) (target : Below n1 i1) \
-            \-> ∀ (n2 : Nat) -> Eq {0} Nat n1 n2 -> Nat) (bzMethod bsMethod) (n i) b) \
-            \n (refl {0} Nat n)"
+        @?= "(elim Below.Below () (λ (n1 : Nat.Nat) (i1 : Fin.Fin n1) (target : Below.Below n1 i1) \
+            \-> ∀ (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n1 n2 -> Nat.Nat) (bzMethod bsMethod) (n i) b) \
+            \n (Eq.refl {0} Nat.Nat n)"
 
     -- A 'Definition' has a value as well as a type, and abstracting the
     -- variable would leave the value behind. Conservative on purpose: tying it

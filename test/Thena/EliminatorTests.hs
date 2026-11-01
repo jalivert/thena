@@ -54,18 +54,18 @@ ruleTests :: [TestTree]
 ruleTests =
   [ -- §4.1.1's @NatElim@, its worked simple datatype.
     rule "Nat, a simple datatype (§4.1.1)" natVec natVecCounter "Nat" (LZero)
-      "elim Nat : ∀ (P : Nat -> Type₀) -> P zero \
-      \-> (∀ (x : Nat) -> P x -> P (succ x)) \
-      \-> ∀ (target : Nat) -> P target"
+      "elim Nat.Nat : ∀ (P : Nat.Nat -> Type₀) -> P Nat.zero \
+      \-> (∀ (x : Nat.Nat) -> P x -> P (Nat.succ x)) \
+      \-> ∀ (target : Nat.Nat) -> P target"
 
     -- §4.1.2's @ListElim@ shape: the parameter is bound first and the motive
     -- mentions it without binding it. That is the whole content of "parameters
     -- are not abstracted in the scheme".
   , rule "Vec, a parameterised family (§4.1.2)" natVec natVecCounter "Vec" (LZero)
-      "elim Vec : ∀ (A : Type₀) (P : ∀ (x : Nat) -> Vec A x -> Type₀) \
-      \-> P zero (nil A) \
-      \-> (∀ (n : Nat) (a : A) (as : Vec A n) -> P n as -> P (succ n) (cons A n a as)) \
-      \-> ∀ (x : Nat) (target : Vec A x) -> P x target"
+      "elim Vec.Vec : ∀ (A : Type₀) (P : ∀ (x : Nat.Nat) -> Vec.Vec A x -> Type₀) \
+      \-> P Nat.zero (Vec.nil A) \
+      \-> (∀ (n : Nat.Nat) (a : A) (as : Vec.Vec A n) -> P n as -> P (Nat.succ n) (Vec.cons A n a as)) \
+      \-> ∀ (x : Nat.Nat) (target : Vec.Vec A x) -> P x target"
 
     -- §4.1.4's @FinElim@, printed there as
     --
@@ -79,16 +79,16 @@ ruleTests =
     -- @succ n@. An eliminator that reused the target's indices would print
     -- @P (succ n) i@ here and pass every @Nat@ test in the suite.
   , rule "Fin, an indexed family (§4.1.4)" natFin natFinCounter "Fin" (LZero)
-      "elim Fin : ∀ (P : ∀ (x : Nat) -> Fin x -> Type₀) \
-      \-> (∀ (n : Nat) -> P (succ n) (fz n)) \
-      \-> (∀ (n : Nat) (i : Fin n) -> P n i -> P (succ n) (fs n i)) \
-      \-> ∀ (x : Nat) (target : Fin x) -> P x target"
+      "elim Fin.Fin : ∀ (P : ∀ (x : Nat.Nat) -> Fin.Fin x -> Type₀) \
+      \-> (∀ (n : Nat.Nat) -> P (Nat.succ n) (Fin.fz n)) \
+      \-> (∀ (n : Nat.Nat) (i : Fin.Fin n) -> P n i -> P (Nat.succ n) (Fin.fs n i)) \
+      \-> ∀ (x : Nat.Nat) (target : Fin.Fin x) -> P x target"
 
     -- No constructors, so no methods: the motive and the target and nothing
     -- between them. Every other fixture has at least one method, so this is
     -- the only case that shows the methods are a list and not a non-empty one.
   , rule "Empty, with no constructors" natFin natFinCounter "Empty" (LZero)
-      "elim Empty : ∀ (P : Empty {0} -> Type₀) (target : Empty {0}) -> P target"
+      "elim Empty.Empty : ∀ (P : Empty.Empty {0} -> Type₀) (target : Empty.Empty {0}) -> P target"
   ]
 
 -- | §3.7's "universe polymorphism of the eliminator, without universe
@@ -97,14 +97,14 @@ ruleTests =
 levelTests :: [TestTree]
 levelTests =
   [ rule "Nat at Type₁" natVec natVecCounter "Nat" (levelOfNat 1)
-      "elim Nat : ∀ (P : Nat -> Type₁) -> P zero \
-      \-> (∀ (x : Nat) -> P x -> P (succ x)) \
-      \-> ∀ (target : Nat) -> P target"
+      "elim Nat.Nat : ∀ (P : Nat.Nat -> Type₁) -> P Nat.zero \
+      \-> (∀ (x : Nat.Nat) -> P x -> P (Nat.succ x)) \
+      \-> ∀ (target : Nat.Nat) -> P target"
   , rule "Vec at Type₂, and its parameter stays at Type₀" natVec natVecCounter "Vec" (levelOfNat 2)
-      "elim Vec : ∀ (A : Type₀) (P : ∀ (x : Nat) -> Vec A x -> Type₂) \
-      \-> P zero (nil A) \
-      \-> (∀ (n : Nat) (a : A) (as : Vec A n) -> P n as -> P (succ n) (cons A n a as)) \
-      \-> ∀ (x : Nat) (target : Vec A x) -> P x target"
+      "elim Vec.Vec : ∀ (A : Type₀) (P : ∀ (x : Nat.Nat) -> Vec.Vec A x -> Type₂) \
+      \-> P Nat.zero (Vec.nil A) \
+      \-> (∀ (n : Nat.Nat) (a : A) (as : Vec.Vec A n) -> P n as -> P (Nat.succ n) (Vec.cons A n a as)) \
+      \-> ∀ (x : Nat.Nat) (target : Vec.Vec A x) -> P x target"
   ]
 
 -- | @D.case@, against the eliminator printed above it (MS9 phase 178).
@@ -121,31 +121,31 @@ caseTests :: [TestTree]
 caseTests =
   [ -- @succ@'s method loses @P x ->@ and keeps its conclusion.
     analysis "Nat: the succ method takes no hypothesis" natVec natVecCounter "Nat" LZero
-      "\8704 (P : Nat -> Type\8320) -> P zero \
-      \-> (\8704 (x : Nat) -> P (succ x)) \
-      \-> \8704 (target : Nat) -> P target"
+      "\8704 (P : Nat.Nat -> Type\8320) -> P Nat.zero \
+      \-> (\8704 (x : Nat.Nat) -> P (Nat.succ x)) \
+      \-> \8704 (target : Nat.Nat) -> P target"
 
     -- The parameter is still bound first and the motive still mentions it.
   , analysis "Vec: the parameter and the indices are untouched" natVec natVecCounter "Vec" LZero
-      "\8704 (A : Type\8320) (P : \8704 (x : Nat) -> Vec A x -> Type\8320) \
-      \-> P zero (nil A) \
-      \-> (\8704 (n : Nat) (a : A) (as : Vec A n) -> P (succ n) (cons A n a as)) \
-      \-> \8704 (x : Nat) (target : Vec A x) -> P x target"
+      "\8704 (A : Type\8320) (P : \8704 (x : Nat.Nat) -> Vec.Vec A x -> Type\8320) \
+      \-> P Nat.zero (Vec.nil A) \
+      \-> (\8704 (n : Nat.Nat) (a : A) (as : Vec.Vec A n) -> P (Nat.succ n) (Vec.cons A n a as)) \
+      \-> \8704 (x : Nat.Nat) (target : Vec.Vec A x) -> P x target"
 
     -- **The case @Nat@ cannot catch, again.** @fs@'s hypothesis is at the
     -- recursive argument's own index and its conclusion is at @succ n@, so a
     -- generator that dropped the wrong binder — or dropped the conclusion's
     -- indices with it — would still pass every @Nat@ case above.
   , analysis "Fin: the hypothesis goes and the conclusion's indices stay" natFin natFinCounter "Fin" LZero
-      "\8704 (P : \8704 (x : Nat) -> Fin x -> Type\8320) \
-      \-> (\8704 (n : Nat) -> P (succ n) (fz n)) \
-      \-> (\8704 (n : Nat) (i : Fin n) -> P (succ n) (fs n i)) \
-      \-> \8704 (x : Nat) (target : Fin x) -> P x target"
+      "\8704 (P : \8704 (x : Nat.Nat) -> Fin.Fin x -> Type\8320) \
+      \-> (\8704 (n : Nat.Nat) -> P (Nat.succ n) (Fin.fz n)) \
+      \-> (\8704 (n : Nat.Nat) (i : Fin.Fin n) -> P (Nat.succ n) (Fin.fs n i)) \
+      \-> \8704 (x : Nat.Nat) (target : Fin.Fin x) -> P x target"
 
     -- No constructors, so there was nothing to drop: @Empty.case@ and
     -- @elim Empty@ are the same rule.
   , analysis "Empty: nothing to drop" natFin natFinCounter "Empty" LZero
-      "\8704 (P : Empty {0} -> Type\8320) (target : Empty {0}) -> P target"
+      "\8704 (P : Empty.Empty {0} -> Type\8320) (target : Empty.Empty {0}) -> P target"
   ]
 
 -- | Build @D.case@'s type and render it as an ordinary type, which is what

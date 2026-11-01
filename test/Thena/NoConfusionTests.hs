@@ -119,9 +119,9 @@ caseTests =
   [ testCase "same nullary former — no equations to give" $
       natReduces "Nat.lemmata.NoConfusion zero zero" "Unit.Unit {0}"
   , testCase "different formers — the empty type" $
-      natReduces "Nat.lemmata.NoConfusion zero (succ zero)" "Empty.Empty.Empty {0}"
+      natReduces "Nat.lemmata.NoConfusion zero (succ zero)" "Empty.Empty {0}"
   , testCase "and the other way round" $
-      natReduces "Nat.lemmata.NoConfusion (succ zero) zero" "Empty {0}"
+      natReduces "Nat.lemmata.NoConfusion (succ zero) zero" "Empty.Empty {0}"
   , -- One argument conjoins nothing, so the case /is/ the equation and a use
     -- site applies the lemma and stops. That is the common case by a wide
     -- margin — six of MS1's seven target constructors.
@@ -137,10 +137,10 @@ caseTests =
         "And.And {0 0} (Eq.Eq {0} Term.Term Term.true Term.false) (And.And {0 0} (Eq.Eq {0} Term.Term Term.zero Term.zero) (Eq.Eq {0} Term.Term (Term.succ Term.zero) Term.zero))"
   , testCase "the family's own type" $
       typeOfGlobal eqTapl eqTaplCounter "Term.lemmata.NoConfusion"
-        @?= Just "Term -> Term -> Type₀"
+        @?= Just "Term.Term -> Term.Term -> Type₀"
   , testCase "the lemma's own type" $
       typeOfGlobal eqTapl eqTaplCounter "Term.lemmata.noConfusion"
-        @?= Just "∀ (x : Term) (x' : Term) -> Eq {0} Term x x' -> Term.lemmata.NoConfusion x x'"
+        @?= Just "∀ (x : Term.Term) (x' : Term.Term) -> Eq.Eq {0} Term.Term x x' -> Term.lemmata.NoConfusion x x'"
   ]
 
 typeOfGlobal :: GlobalEnv -> Int -> String -> Maybe String

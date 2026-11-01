@@ -39,14 +39,14 @@ tests =
     [ -- **The theorem.** Evaluation does not change a term's type.
       testCase "a step preserves the type" $ do
         st <- statementOf "preservation"
-        st @?= Just "∀ (t : Term) (t' : Term) -> Step t t' \
-                    \-> ∀ (U : Ty) -> HasType t U -> HasType t' U"
+        st @?= Just "∀ (t : Term.Term) (t' : Term.Term) -> Step.Step t t' \
+                    \-> ∀ (U : Ty.Ty) -> HasType.HasType t U -> HasType.HasType t' U"
 
       -- **Type safety is the pair**, and this asserts the other half is still
       -- the theorem it was two modules ago.
     , testCase "and progress is still there beside it" $ do
         st <- statementOf "progress"
-        st @?= Just "∀ (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)"
+        st @?= Just "∀ (t : Term.Term) (T : Ty.Ty) -> HasType.HasType t T -> Or.Or (Value.Value t) (Steps t)"
 
       -- **The nine lemmas the proof used to need.** Six took the derivation
       -- apart at a term shape; three more — @succAtNat@, @predAtNat@,

@@ -374,15 +374,15 @@ regionCases =
       -- two halves as one; nothing about that is checkable there, and here it
       -- is.
       displayParse gs "LC" Nothing [WrittenText "( ", WrittenSplice, WrittenText " ", WrittenSplice, WrittenText " )"]
-        @?= Right (ANode "app" [ASpliceOf 0, ASpliceOf 1])
+        @?= Right (ANode "LC.app" [ASpliceOf 0, ASpliceOf 1])
   , testCase "and a written term beside a splice does not take a number" $ do
       gs <- loaded
       displayParse gs "LC" Nothing [WrittenText "( x ", WrittenSplice, WrittenText " )"]
-        @?= Right (ANode "app" [ANode "var" [ATokenView "x"], ASpliceOf 0])
+        @?= Right (ANode "LC.app" [ANode "LC.var" [ATokenView "x"], ASpliceOf 0])
   , testCase "an explicit production reads at that production" $ do
       gs <- loaded
       -- @T@ is @Ty@'s own nonterminal, so @\953@ reads there and not at @LC@.
-      displayParse gs "Ty" (Just "base") [WrittenText "\953"] @?= Right (ANode "base" [])
+      displayParse gs "Ty" (Just "Ty.base") [WrittenText "\953"] @?= Right (ANode "Ty.base" [])
   ]
 
 replacesAt :: [Grammar] -> [Written] -> [Written] -> IO Bool
@@ -418,16 +418,16 @@ productionCases =
       -- chart offers it: an @LC@ really can begin an @LC.subst-w@ reading, and
       -- the chart says what the grammar says. It comes last because a notation
       -- block's productions are appended.
-      named gs [] [] >>= (@?= ["var", "abs", "app", "LC.subst-w"])
+      named gs [] [] >>= (@?= ["LC.var", "LC.abs", "LC.app", "LC.subst-w"])
   , testCase "with their shapes, which is what a list shows" $ do
       gs <- loaded
-      shapeOf gs [] [] "app" >>= (@?= Just ["(", "LC", "LC", ")"])
+      shapeOf gs [] [] "LC.app" >>= (@?= Just ["(", "LC", "LC", ")"])
   , -- **His own example, exactly.** @app: ( LC LC )@ in the list, @( █ █ )@ in
     -- the buffer — and the boxes arrive as runs, so the editor knows where they
     -- are without scanning the text it just inserted.
     testCase "and inserting one writes its terminals and leaves boxes" $ do
       gs <- loaded
-      insertOf gs [] [] "app"
+      insertOf gs [] [] "LC.app"
         >>= (@?= Just
               [ WrittenText "( "
               , WrittenPlaceholder
@@ -438,7 +438,7 @@ productionCases =
   , testCase "a binding form's binder is a box too, being a slot" $ do
       gs <- loaded
       -- @abs@ is @( λ x : T . E[x] )@: three slots, one of them a token class.
-      insertOf gs [] [] "abs"
+      insertOf gs [] [] "LC.abs"
         >>= (@?= Just
               [ WrittenText "( λ "
               , WrittenPlaceholder
@@ -455,7 +455,7 @@ productionCases =
     -- own can.
     testCase "a production that could not be finished here is not offered" $ do
       gs <- loaded
-      named gs [WrittenText "( "] [WrittenText " )"] >>= (@?= ["abs", "app"])
+      named gs [WrittenText "( "] [WrittenText " )"] >>= (@?= ["LC.abs", "LC.app"])
   , -- **The crossing, and it is the assertion worth having here.** A production
     -- may begin at the cursor only if its opening symbol may be written there,
     -- so every offered production's first symbol has to be among the options the
@@ -480,7 +480,7 @@ productionCases =
       bad @?= []
   , testCase "and inside a Ty slot it is Ty's productions, not LC's" $ do
       gs <- loaded
-      named gs [WrittenText "( λ x : "] [WrittenText " . x )"] >>= (@?= ["base", "arrow"])
+      named gs [WrittenText "( λ x : "] [WrittenText " . x )"] >>= (@?= ["Ty.base", "Ty.arrow"])
   ]
   where
     offered gs before after = case displayOffer gs "LC" Nothing before after of
