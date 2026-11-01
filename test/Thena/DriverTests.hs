@@ -57,8 +57,12 @@ devOf = flatten . development . machineOf
 natCommand :: String
 natCommand = "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 
+-- | Is this name declared — **written in full**, because since MS10 a
+-- datatype is @Nat.Nat@ and its constructors are @Nat.zero@ and @Nat.succ@.
+-- Asking at the root answers 'False' for a datatype that was declared
+-- perfectly well, which reads as a command that did nothing.
 declaredIn :: Session -> String -> Bool
-declaredIn s g = isDeclared (rootName g) (globals (machineOf s))
+declaredIn s g = isDeclared (named g) (globals (machineOf s))
 
 -- | The words of every spelling @:help@ shows, and those of them that are
 -- colon words.
@@ -116,11 +120,14 @@ notCommands =
   -- bare because §2.4 says a bare word acts, and there is no @:ops@ because
   -- @:rules@ shows the base instead. 'notReallyCommands' below checks the
   -- driver agrees, so this list cannot be used to hide one.
-  [ ":yield", ":ops" ]
+  -- **@:open@ appears only in the comment that refuses it** (MS10 phase 249,
+  -- his ruling): @open@ is a bare word because it acts, so the colon spelling
+  -- was considered and not built.
+  [ ":yield", ":ops", ":open" ]
 
 everyBareCommand :: [String]
 everyBareCommand =
-  [ "assume", "claim", "quantify", "data", "declare"
+  [ "assume", "claim", "quantify", "data", "declare", "open"
   , "along", "into", "back", "reduce", "unify"
   , "do", "yield"
   , "retry", "goto-named", "goto-root", "cross", "certify", "qed"
@@ -497,8 +504,8 @@ tests =
           -- see past the hole\'s own variable and comes back as the saturated
           -- former where the core path stops at the wrapper. Both print @Nat@.
         , testCase "a bare argument is surface, corners are core" $
-            case ( snd (say [natCommand, ":infer succ zero"])
-                 , snd (say [natCommand, ":infer ⌜ succ zero ⌝"])
+            case ( snd (say [natCommand, "open Nat", ":infer succ zero"])
+                 , snd (say [natCommand, "open Nat", ":infer ⌜ succ zero ⌝"])
                  ) of
               (InferredSurface _ a, Inferred _ b) ->
                 case convert (globals (machineOf (fst (say [natCommand])))) [] 0 a b of
@@ -511,9 +518,10 @@ tests =
         [ testCase "data says what it declared" $
             snd (say [natCommand]) @?= Ran ["declared Nat.Nat"] [] Completed
         , testCase "and the globals hold it afterwards" $
-            declaredIn (fst (say [natCommand])) "Nat" @?= True
+            declaredIn (fst (say [natCommand])) "Nat.Nat" @?= True
         , testCase "so do the names it generated" $
-            map (declaredIn (fst (say [natCommand]))) ["zero", "succ"] @?= [True, True]
+            map (declaredIn (fst (say [natCommand]))) ["Nat.zero", "Nat.succ"]
+              @?= [True, True]
         , testCase "the development is untouched: globals are not Development (§7.4)" $
             devOf (fst (say [natCommand])) @?= devOf newSession
         , testCase "data needs an argument" $
@@ -526,10 +534,10 @@ tests =
             snd (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])
               @?= Ran [] [] (Refused (NotStrictlyPositive (named "T.c") (Ident "x")))
         , testCase "and writes nothing" $
-            declaredIn (fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])) "T"
+            declaredIn (fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])) "T.T"
               @?= False
         , testCase "while what was already declared survives it" $
-            declaredIn (fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])) "Nat"
+            declaredIn (fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])) "Nat.Nat"
               @?= True
         , testCase "a refused declaration abandons the rest of the program" $
             case fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }", ":run"]) of
@@ -539,18 +547,18 @@ tests =
               ShownData _ -> pure ()
               other       -> assertFailure ("expected ShownData, got " ++ show other)
         , testCase ":show ‹former› is the generated wrapper, type and body" $
-            case snd (say [natCommand, ":show succ"]) of
-              ShownGlobal (GlobalName [] "succ") _ _ _ _ (Just _) -> pure ()
+            case snd (say [natCommand, "open Nat", ":show succ"]) of
+              ShownGlobal (GlobalName ["Nat"] "succ") _ _ _ _ (Just _) -> pure ()
               other -> assertFailure ("expected ShownGlobal, got " ++ show other)
         , testCase "a global is in scope for an ordinary term" $
-            case snd (say [natCommand, ":core succ zero"]) of
+            case snd (say [natCommand, "open Nat", ":core succ zero"]) of
               Rendered _ -> pure ()
               other      -> assertFailure ("expected Rendered, got " ++ show other)
         , testCase "and can be assumed at" $
             snd (say [natCommand, "assume \"n\" ⌜ Nat ⌝"]) @?= Ran [] [] Completed
         , testCase "stepping installs the declaration before it pauses" $
             let s' = fst (say [":step on", natCommand])
-             in declaredIn s' "Nat" @?= True
+             in declaredIn s' "Nat.Nat" @?= True
         , testCase "and the message is still to come" $
             snd (say [":step on", natCommand]) @?= Ran [] [] (Paused 1)
         ]
