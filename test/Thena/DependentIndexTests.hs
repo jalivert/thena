@@ -121,18 +121,7 @@ tests =
     , testCase "and the arm injectivity crossed computes from its own binder" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        let m = machineOf s'
-        case lookupDefinition (rootName "twoFromArm") (globals m) of
-          Nothing -> assertFailure "twoFromArm was not admitted"
-          Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName [] "s") _ [inner] ->
-              case whnf (globals m) [] inner of
-                Canonical (GlobalName [] "s") _ [innermost] ->
-                  case whnf (globals m) [] innermost of
-                    Canonical (GlobalName [] "z") _ [] -> pure ()
-                    other -> assertFailure ("s (s " ++ show other ++ ")")
-                other -> assertFailure ("s applied to " ++ show other)
-            other -> assertFailure ("not a successor: " ++ show other)
+        numeral (machineOf s') "twoFromArm" 2
 
       -- __AND THE SHAPE DELETION MATCHES FIRST — MS9 phase 234, @~pxgxw@.__
       -- @T@'s index pins @fs@'s first argument on both sides, so the chain's
@@ -161,9 +150,9 @@ tests =
         case lookupDefinition (rootName "pinnedFromArm") (globals m) of
           Nothing -> assertFailure "pinnedFromArm was not admitted"
           Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName [] "fz") _ [inner] ->
+            Canonical (GlobalName ["Fin"] "fz") _ [inner] ->
               case whnf (globals m) [] inner of
-                Canonical (GlobalName [] "z") _ [] -> pure ()
+                Canonical (GlobalName ["N"] "z") _ [] -> pure ()
                 other -> assertFailure ("fz applied to " ++ show other)
             other -> assertFailure ("not fz: " ++ show other)
 
@@ -212,15 +201,7 @@ tests =
     , testCase "and the recursion over it computes" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
-        let m = machineOf s'
-        case lookupDefinition (rootName "one") (globals m) of
-          Nothing -> assertFailure "one was not admitted"
-          Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName [] "s") _ [inner] ->
-              case whnf (globals m) [] inner of
-                Canonical (GlobalName [] "z") _ [] -> pure ()
-                other -> assertFailure ("s applied to " ++ show other)
-            other -> assertFailure ("not a successor: " ++ show other)
+        numeral (machineOf s') "one" 1
 
       -- __Two indices reaching back to the same earlier one__ — both of
       -- @Pairwise@\'s vectors are @Vec A n@, which is the shape MS9 phase 226
@@ -232,15 +213,7 @@ tests =
     , testCase "and so does the recursion over two vectors of one length" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
-        let m = machineOf s'
-        case lookupDefinition (rootName "two") (globals m) of
-          Nothing -> assertFailure "two was not admitted"
-          Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName [] "s") _ [inner] ->
-              case whnf (globals m) [] inner of
-                Canonical (GlobalName [] "z") _ [] -> pure ()
-                other -> assertFailure ("s applied to " ++ show other)
-            other -> assertFailure ("not a successor: " ++ show other)
+        numeral (machineOf s') "two" 1
 
       -- __A PROJECTION AT A PINNED INDEX — MS9 phase 235, @~5hshj@.__ Not a
       -- recursion and not a variable index: @vcons A m a as@ pins @vcons@'s
@@ -266,18 +239,7 @@ tests =
     , testCase "and the arm of that projection computes" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
-        let m = machineOf s'
-        case lookupDefinition (rootName "headTwo") (globals m) of
-          Nothing -> assertFailure "headTwo was not admitted"
-          Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName [] "s") _ [inner] ->
-              case whnf (globals m) [] inner of
-                Canonical (GlobalName [] "s") _ [innermost] ->
-                  case whnf (globals m) [] innermost of
-                    Canonical (GlobalName [] "z") _ [] -> pure ()
-                    other -> assertFailure ("s (s " ++ show other ++ ")")
-                other -> assertFailure ("s applied to " ++ show other)
-            other -> assertFailure ("not a successor: " ++ show other)
+        numeral (machineOf s') "headTwo" 2
 
       -- __AND THE CHAINED TELESCOPE — MS9 phase 237, @~fq5gp@.__ @Chain@'s
       -- third index is tied and its type mentions BOTH earlier ones, while the
@@ -342,8 +304,13 @@ tests =
 -- | A global that must reduce to a specific @N@ numeral.
 --
 -- The payload assertions want /the arm bound this argument and not another/,
--- and a numeral is how a term says so: @z@ and @s@ are the only two things it
--- can be built from, so reducing to the right depth cannot happen by accident.
+-- and a numeral is how a term says so: @N.z@ and @N.s@ are the only two things
+-- it can be built from, so reducing to the right depth cannot happen by
+-- accident.
+--
+-- **Every payload assertion in this file goes through it** (MS10 phase 253):
+-- four wrote the same walk out and each one named the constructors at the root,
+-- so the namespace move broke them one at a time.
 numeral :: Machine -> String -> Int -> Assertion
 numeral m name expected =
   case lookupDefinition (rootName name) (globals m) of
@@ -351,10 +318,10 @@ numeral m name expected =
     Just d  -> go expected (whnf (globals m) [] (definitionBody d))
   where
     go 0 t = case t of
-      Canonical (GlobalName [] "z") _ [] -> pure ()
+      Canonical (GlobalName ["N"] "z") _ [] -> pure ()
       other -> assertFailure (name ++ ": expected z, got " ++ show other)
     go k t = case t of
-      Canonical (GlobalName [] "s") _ [inner] ->
+      Canonical (GlobalName ["N"] "s") _ [inner] ->
         go (k - 1) (whnf (globals m) [] inner)
       other ->
         assertFailure (name ++ ": expected a successor, got " ++ show other)

@@ -1422,8 +1422,8 @@ splittingTree =
       let two = "(s (s z)) (as (s z) (as z az)) (s (s z)) (fs (s z) (s z) (fs z z fz))"
           (s2, q) = command s1 (":whnf inside " ++ two)
           (s3, q') = command s2 (":whnf outside " ++ two)
-      unwords (renderResponse s2 q) @?= "s z"
-      unwords (renderResponse s3 q') @?= "s z"
+      unwords (renderResponse s2 q) @?= "N.s N.z"
+      unwords (renderResponse s3 q') @?= "N.s N.z"
 
     -- __AND A RECURSION MAY SUPPLY A GENERALISED PREMISE__ (MS9 phase 198,
     -- @~krvdx@). Where the statement's own premises include one the split has to
@@ -1470,7 +1470,7 @@ splittingTree =
       , "wrongPremise = \\ n x e -> induction x of \
         \{ az -> z ; as k p -> s (wrongPremise k p e) }"
       ]
-      "stuck: s k and k cannot be made equal"
+      "stuck: N.s k and k cannot be made equal"
 
     -- __AND A RECURSION MAY VARY A PREMISE THE SPLIT DID NOT SPLIT ON__ (MS9
     -- phase 199, @~754m3@), which is the last of the four and the one the two
@@ -1961,7 +1961,7 @@ splittingTree =
       -- there: @vcons@'s parameter is an argument like any other, and an
       -- under-applied former is not a 'Canonical' for ι to fire on.
       let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
-      unwords (renderResponse s2 q) @?= "vnil Nat.Nat"
+      unwords (renderResponse s2 q) @?= "Vec.vnil Nat.Nat"
 
     -- __AN EMPTY ARM IS HOW THE VANISHED CASE IS WRITTEN__ (MS9 phase 189, his
     -- ruling of 2026-10-20). @vnil@'s method is closed by a conflicting
@@ -1979,7 +1979,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
-      unwords (renderResponse s2 q) @?= "vnil Nat.Nat"
+      unwords (renderResponse s2 q) @?= "Vec.vnil Nat.Nat"
 
     -- __A BODY WHERE THE CASE VANISHED IS THE REFUSAL THE LAW ADDS__ (MS9 phase
     -- 190). @vnil@'s method is closed by a conflicting equation, so a term
@@ -2050,7 +2050,7 @@ splittingTree =
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1
             ":whnf left leaf leaf (okNode leaf leaf okLeaf okLeaf)"
-      unwords (renderResponse s2 q) @?= "okLeaf"
+      unwords (renderResponse s2 q) @?= "Ok.okLeaf"
 
     -- __TWO HYPOTHESES, AND THE CALL SAYS WHICH__ (MS9 phase 186). @okNode@
     -- has two recursive arguments, so the arm has a hypothesis about each; the
@@ -2227,7 +2227,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf idOk leaf okLeaf"
-      unwords (renderResponse s2 q) @?= "okLeaf"
+      unwords (renderResponse s2 q) @?= "Ok.okLeaf"
 
     -- __And two indices, which is `progress`'s own shape__: a derivation
     -- indexed by both the term and its type, with the target bound as a λ
@@ -2326,7 +2326,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf vtailC Nat zero (vcons Nat zero zero (vnil Nat))"
-      unwords (renderResponse s2 q) @?= "vnil Nat.Nat"
+      unwords (renderResponse s2 q) @?= "Vec.vnil Nat.Nat"
 
     -- Coverage fails the same way under @case@, and says the same thing.
   , refuses "a case that survived with no arm is refused under case too"
