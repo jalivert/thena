@@ -51,7 +51,7 @@ module Thena.Language.Lookup
 
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (nameDotted, rootName)
+import Thena.Core.Term (declarationNamed, nameDotted, rootName)
 import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
   ( Argument (..)
@@ -103,7 +103,15 @@ notationOf g e = do
   -- production carries is the relation's datatype, so @x : T ∈ Γ@ is a /type/.
   -- That kind is what admits it above a rule's bar, replacing the label this
   -- record used to be admitted by.
-  Just (Grammar JudgmentBlock (rootName inN) [inN] [GProduction (rootName inN) items args TypeFormer])
+  -- **The production is named after the DATATYPE the relation becomes**, which
+  -- is @extend-in.extend-in@ and not the root word (MS10 phase 252): a
+  -- declaration lives in the namespace it opens, so the type former's own
+  -- spelling has to carry that step or the printer cannot find the production
+  -- for a term whose head is the declared relation — and a constructor's type
+  -- then prints as an application where the notation should stand. The grammar
+  -- keeps the written word as its name, exactly as @Ctx@ does for @Ctx.Ctx@.
+  Just (Grammar JudgmentBlock (rootName inN) [inN]
+          [GProduction (declarationNamed (rootName inN)) items args TypeFormer])
   where
     own i = case i of
       Slot _ srt _ -> srt == OfLanguage (grammarName g)

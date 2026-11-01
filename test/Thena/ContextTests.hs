@@ -63,6 +63,7 @@ header =
   , "  empty  -> \183"
   , "  extend -> \915 , x : T"
   , "open Ctx"
+  , "open extend-in"
   , ""
   ]
 
@@ -92,6 +93,8 @@ fsubHeader =
   , "  bindTm -> \915 , x : T"
   , "  bindTy -> \915 , X <: T"
   , "open Ctx"
+  , "open bindTm-in"
+  , "open bindTy-in"
   , ""
   ]
 
@@ -100,8 +103,8 @@ twoKinds =
   [ testCase "a context with two extensions gets a lookup relation for each" $ do
       s <- loaded fsubHeader
       map (take 1 . said s) [":show bindTm-in", ":show bindTy-in"] @?=
-        [ ["data bindTm-in : String -> Ty -> Ctx -> Type\8320 where"]
-        , ["data bindTy-in : String -> Ty -> Ctx -> Type\8320 where"]
+        [ ["data bindTm-in.bindTm-in : String -> Ty.Ty -> Ctx.Ctx -> Type\8320 where"]
+        , ["data bindTy-in.bindTy-in : String -> Ty.Ty -> Ctx.Ctx -> Type\8320 where"]
         ]
     -- **Each notation is its own extension's**, by the recipe §5.3 already had:
     -- the entry with the context slot and its separator taken out, then @\8712@.
@@ -179,9 +182,11 @@ substituted =
         , "          \915 \8866 T <: T", ""
         , "  S-narrow: \915[X -> T] \8866 S <: S'"
         , "            --------------------"
-        , "            \915 \8866 S <: S'" ])
+        , "            \915 \8866 S <: S'"
+        , "open sub" ])
       said s ":infer S-narrow" @?=
-        [ "S-narrow : \8704 (\915 : Ctx) (X : String) (T : Ty) (S : Ty) (S' : Ty)"
+        [ "S-narrow : \8704 (\915 : Ctx.Ctx) (X : String) (T : Ty.Ty) (S : Ty.Ty)"
+            ++ " (S' : Ty.Ty)"
             ++ " -> sub`${\915} [ ${X} -> ${T} ] \8866 ${S} <: ${S'}`"
             ++ " -> sub`${\915} \8866 ${S} <: ${S'}`" ]
     -- **A context whose entries can hold no name gets nothing**, which is
@@ -230,10 +235,12 @@ declared =
   [ testCase ":show prints the relation and both constructors" $ do
       s <- loaded header
       said s ":show extend-in" @?=
-        [ "data extend-in : String -> Ty -> Ctx -> Type₀ where"
-        , "  { extend-here : ∀ (Γ : Ctx) (x : String) (T : Ty) -> extend-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
-        , "  ; extend-there-extend : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)"
-            ++ " -> (Eq {0} String x x' -> Empty {0})"
+        [ "data extend-in.extend-in : String -> Ty.Ty -> Ctx.Ctx -> Type₀ where"
+        , "  { extend-in.extend-here : ∀ (Γ : Ctx.Ctx) (x : String) (T : Ty.Ty)"
+            ++ " -> extend-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
+        , "  ; extend-in.extend-there-extend : ∀ (Γ : Ctx.Ctx) (x : String) (T : Ty.Ty)"
+            ++ " (x' : String) (T' : Ty.Ty)"
+            ++ " -> (Eq.Eq {0} String x x' -> Empty.Empty {0})"
             ++ " -> extend-in`${x} : ${T} ∈ ${Γ}` -> extend-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }"
         ]
   ]
@@ -246,12 +253,16 @@ notation =
       case parse (earleyRules gs) (Earley.StartAt "extend-in") (pieces "x : \953 \8712 \183 , y : \953") of
         Left why -> assertFailure (show why)
         Right tree -> buildTerm gs tree @?= Right
-          (apps "extend-in" [str "x", con "Ty.base", apps "extend" [con "Ctx.empty", str "y", con "Ty.base"]])
+          (apps "extend-in.extend-in"
+            [ str "x", con "Ty.base"
+            , apps "Ctx.extend" [con "Ctx.empty", str "y", con "Ty.base"] ])
   , testCase "and prints back as the text it was read from" $ do
       s <- loaded header
       let m = machineOf s
       printRegion (grammars m) (renderCore (Rendering [] 0) [])
-          (apps "extend-in" [str "x", con "Ty.base", apps "extend" [con "Ctx.empty", str "x", con "Ty.base"]])
+          (apps "extend-in.extend-in"
+            [ str "x", con "Ty.base"
+            , apps "Ctx.extend" [con "Ctx.empty", str "x", con "Ty.base"] ])
         @?= Just "x : \953 \8712 \183 , x : \953"
   , testCase "a lookup literal is a type" $ do
       s <- loaded header
@@ -263,7 +274,8 @@ notation =
         [ "module Last where", "", "x : Token String", "x = /[a-z]+/", ""
         , "language Ty, T where", "  base -> \953", ""
         , "context D, \916 where", "  none -> \949", "  push -> x : T ; \916", "" ]
-      said s ":show push-in" !! 0 @?= "data push-in : String -> Ty -> D -> Type\8320 where"
+      said s ":show push-in" !! 0
+        @?= "data push-in.push-in : String -> Ty.Ty -> D.D -> Type\8320 where"
       case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "push-in")
                  (pieces "x : \953 \8712 x : \953 ; \949") of
         Left why -> assertFailure (show why)
