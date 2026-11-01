@@ -81,7 +81,8 @@ tests =
         , testCase "no nonterminal this module invented reaches the frontend" noSynthetic
         , testCase "instral's own head cannot collide with a language's" headIsNamespaced
         , testCase "recovery keeps the cases the grammar cannot reach" recoveryRemains
-        , testCase "a production name is unique across every loaded grammar" productionNamesAreUnique
+        , testCase "two languages may share a production's word, and the tag says which"
+            productionsMayShareAWord
         , testCase "a recovered literal's span covers its tag and both fences" literalSpan
         , testCase "including a production-named tag" namedTagSpan
         , testCase "and the span counts from the start of the whole entry" spanShifts
@@ -662,26 +663,30 @@ recoveryRemains = do
   if ALiteralSymbol "\953" `elem` offeredOptions o then pure ()
     else assertFailure ("expected Ty's base type: " <> show (offeredOptions o))
 
--- | **The invariant @literalProductions@ rests on, pinned here because it is not
--- this module's to enforce.** A named production's body is found by searching every
--- loaded grammar for a rule of that name, with no language filter — which is right
--- only while a production name is unique across all of them. It is: each production
--- becomes a datatype constructor, and a second language declaring one of the same
--- name is refused as it loads.
+-- | **Two languages may both declare a production called @same@, and
+-- @A[same]\`@ still means @A@'s** (MS10 phase 253).
 --
--- If that ever relaxed, @LC[var]\`@ could be handed another language's @var@, and
--- silently — so the fixture is a pair of languages that both declare @same@, and
--- this asserts the load refuses it.
-productionNamesAreUnique :: IO ()
-productionNamesAreUnique = do
+-- This asserted the opposite until MS10: a named production's body was found by
+-- searching every loaded grammar for a rule of that word, with no language
+-- filter, so it was right only while the word was unique — and the load refused
+-- a second language that took one. **The milestone's whole point is that the
+-- refusal is gone**, so the invariant is kept by construction instead:
+-- 'Thena.Language.Build.productionRule' resolves the word inside the language
+-- written before the bracket, and the rule it names is @A.same@ or @B.same@.
+--
+-- The fixture's two @same@ productions have different bodies — @( a a )@ and
+-- @( b b b )@ — so the offer after each opening tag says which one was found.
+productionsMayShareAWord :: IO ()
+productionsMayShareAWord = do
   (s0, _) <- startingSession
   let (s1, r) = oneLine s0 ":load test/fixtures/two-languages-one-production.thena"
-  said <- case following s1 r of
-    Just io -> do (s2, rs, _) <- io; pure (unwords (concatMap (renderResponse s2) rs))
-    Nothing -> pure (unwords (renderResponse s1 r))
-  if "already declared" `isInfixOf` said then pure ()
-    else assertFailure
-      ("two languages declaring one production must be refused, got " <> show said)
+  s <- case following s1 r of
+    Just io -> do (s2, _, _) <- io; pure s2
+    Nothing -> pure s1
+  let opened l = [ w | ALiteralSymbol w <- offeredOptions (offerIn s ("fill " <> l)) ]
+  opened "A[same]`" @?= ["("]
+  opened "A[same]`( " @?= ["a"]
+  opened "B[same]`( " @?= ["b"]
 
 -- | Typing the colon alone already offers every command, because the unit is the
 -- colon and whatever follows it.

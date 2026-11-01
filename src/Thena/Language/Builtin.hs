@@ -76,7 +76,7 @@ module Thena.Language.Builtin
   ) where
 
 import Thena.Language.Grammar (Grammar, productionBody)
-import Thena.Language.Build (languageNames, productionNames)
+import Thena.Language.Build (languageNames, productionNames, productionRule)
 import qualified Thena.Language.Earley as E
 import Thena.Language.Lexemes
   ( charRegex
@@ -375,13 +375,17 @@ coreRules gs = concat
 -- reason: a wrapper nonterminal would be a name this module invented, and
 -- reaching the whole language through it would accept terms the running parser
 -- refuses.
+--
+-- **The body is looked up by the production's full name** (MS10 phase 253) — see
+-- 'Thena.Language.Instral.literalProductions', which had the same stale lookup.
 literals :: String -> [Grammar] -> [E.Rule]
 literals head' gs = concat
   [ [ E.Rule (head' ++ " " ++ l) head' [E.Literal (l ++ "`"), E.Nonterminal l, fence] []
     , E.Rule (head' ++ " empty " ++ l) head' [E.Literal (l ++ "`"), fence] []
     ] ++
     [ E.Rule (head' ++ " " ++ l ++ " " ++ p) head'
-        (E.Literal (l ++ "[" ++ p ++ "]`") : productionBody gs p ++ [fence]) []
+        ( E.Literal (l ++ "[" ++ p ++ "]`")
+            : maybe [] (productionBody gs) (productionRule gs l p) ++ [fence] ) []
     | p <- productionNames gs l
     ]
   | l <- languageNames gs

@@ -41,7 +41,7 @@ import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Thena.Language.Earley as E
 import Thena.Instral.Commands (Argument (..), Command (..), commands)
-import Thena.Language.Build (languageNames, productionNames)
+import Thena.Language.Build (languageNames, productionNames, productionRule)
 import qualified Thena.Language.Builtin as Builtin
 import Thena.Language.Grammar (Grammar, earleyRules, productionBody)
 import Thena.Language.Lexemes (charRegex, identRegex, numberRegex, stringRegex)
@@ -361,9 +361,18 @@ literalProductions gs types =
     -- @fill LC[var]\`@ answered with @At:LC:var@ — a name this module invented,
     -- handed to a frontend to draw. Inlined, the answer is the production's own
     -- first symbols, which is what the user is being asked for.
+    --
+    -- **The body is looked up by the production's FULL name** (MS10 phase 253).
+    -- @p@ is the word the user writes between the brackets and the Earley rule is
+    -- @LC.var@, so searching for @var@ found nothing and @LC[abs]\`@ offered the
+    -- empty set. 'productionRule' resolves it inside the language, which is also
+    -- what makes two languages both declaring @var@ harmless — the search used to
+    -- have no language filter and rested on a refusal MS10 removed.
     atRule t l p =
       E.Rule (renderTy t ++ "/`" ++ l ++ "[" ++ p ++ "]") (operandHead t)
-        ( E.Literal (l ++ "[" ++ p ++ "]`") : productionBody gs p ++ [E.Literal "`"] ) []
+        ( E.Literal (l ++ "[" ++ p ++ "]`")
+            : maybe [] (productionBody gs) (productionRule gs l p)
+            ++ [E.Literal "`"] ) []
 
 
 -- | **The @:@-command productions, as a rule set of their own** (MS7 phase 142).
