@@ -228,9 +228,14 @@ for one. **A language's generated substitution is too**, as `LC.fv-x`,
 may be written with a path**: `Ty.lemma : …` declares `lemma` in `Ty`. **The four
 primitive functions have moved in too** — `String.eq`, `Char.eq`, `Int.eq` and
 `String.append`, where they were `eqString`, `eqChar`, `eqInt` and
-`appendString`. **A datatype's constructors and the type itself are not yet**:
-those stay at the root until a written name can be resolved outward from the
-namespace it sits in, and the spellings below may still move.*
+`appendString`. **A datatype's constructors and the type itself have moved in
+too**, so `data Nat` declares `Nat.Nat`, `Nat.zero` and `Nat.suc`, and a written
+`Nat` reaches the type because a declaration's short name is derived from the
+environment rather than recorded anywhere. **What is not built yet**: `namespace`
+blocks and resolution outward through them, the forms of `open` other than
+`open ‹namespace›`, printing a name as the shortest ending that still resolves
+(so a name prints with its whole path today), and `open` as a line at the prompt,
+which means a command's argument is written with its path.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something
