@@ -71,6 +71,7 @@ import Thena.Core.Term
   ( Core (..)
   , Literal (..)
   , GlobalName (..)
+  , declarationNamed
   , nameDotted
   , Ident (..)
   , Scope
@@ -1635,10 +1636,17 @@ renderRules ren d = case inductiveConstructors d of
     -- still be standing as @App@s, which is phase 110's "both spellings", and
     -- matching only the reduced one found @T-var@'s premise and missed
     -- @T-abs@'s.
+    --
+    -- **The head is the DATATYPE the grammar declares, not the written word**
+    -- (MS10 phase 252): a judgment @typing@ is a grammar called @typing@ whose
+    -- relation is @typing.typing@, so a premise's head carries the step and a
+    -- comparison against the grammar's own name matches nothing — which left
+    -- every rule here printed with no premises at all.
     isStatement t = case Build.spineOf t of
       Just (g, _) ->
         or [ not (null (typeFormerProductions h))
-           | h <- renderingGrammars ren, grammarName h == g ]
+           | h <- renderingGrammars ren
+           , declarationNamed (grammarName h) == g ]
       Nothing -> False
 
 

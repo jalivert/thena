@@ -15,7 +15,7 @@ module Thena.ContextTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), Literal (..), rootName)
+import Thena.Core.Term (Core (..), Literal (..))
 import Thena.Declared (named)
 import Thena.Driver
   ( Response (..)
