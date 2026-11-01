@@ -263,32 +263,42 @@ corpus = do
     -- A skipped no-confusion table is a stated limitation, not a failure to
     -- declare: three of the corpus's datatypes have a dependent telescope on
     -- purpose, which is what @Skipped@ is for.
-    expected o = "no noConfusion" `isPrefixOf` o || "declared " `isPrefixOf` o
+    expected o =
+      "no noConfusion" `isPrefixOf` o
+        || "declared " `isPrefixOf` o
+        || "opened " `isPrefixOf` o
 
 corpusLines :: [String]
 corpusLines =
   [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+  , "open Nat"
     -- Parameters AND two indices AND recursion AND a level parameter, in one
     -- datatype, with a constructor of five arguments. Nothing in the fixtures
     -- combines more than two of those.
   , "data Chain (A : Type) : A -> A -> Type where \
     \{ link : \8704 (x : A) -> Chain A x x \
     \; hop : \8704 (x : A) (y : A) (z : A) -> Chain A x y -> Chain A y z -> Chain A x z }"
+  , "open Chain"
     -- A parameterised datatype with NO constructors: the eliminator's method
     -- telescope is empty and the motive still has to be abstracted correctly.
   , "data Void2 (A : Type) : Type where { }"
+  , "open Void2"
     -- An index whose type is another datatype, applied to its level argument.
   , "data Wrap (A : Type) : Type where { wrap : A -> Wrap A }"
+  , "open Wrap"
   , "data Uses : Wrap {0} Nat -> Type\8320 where \
     \{ uses : \8704 (w : Wrap {0} Nat) -> Uses w }"
+  , "open Uses"
     -- A family whose index telescope is dependent, which is where the
     -- eliminator's index generalisation is hardest.
   , "data Fin : Nat -> Type\8320 where \
     \{ fz : \8704 (n : Nat) -> Fin (succ n) \
     \; fs : \8704 (n : Nat) (i : Fin n) -> Fin (succ n) }"
+  , "open Fin"
     -- A datatype above Type\8320, whose constructor argument lives below it —
     -- cumulativity is what makes its equations conjoinable (MS3 §2 item 2).
   , "data Box1 : Type\8321 where { box1 : \8704 (A : Type\8320) -> A -> Box1 }"
+  , "open Box1"
   ]
 
 -- --------------------------------------------------------------------------
@@ -356,15 +366,17 @@ tablesTests =
       sequence_
         [ fmap constantType (lookupConstant (named g) natVec)
             @?= fmap definitionType (lookupDefinition (named g) natVec)
-        | g <- ["Nat", "zero", "succ", "Vec", "nil", "cons"]
+        | g <- [ "Nat.Nat", "Nat.zero", "Nat.succ"
+               , "Vec.Vec", "Vec.nil", "Vec.cons"
+               ]
         ]
   , testCase "a datatype with no constructors is a datatype" $
       fmap (length . inductiveConstructors)
-           (lookupInductive (named "Empty") (fst (after [emptyDecl])))
+           (lookupInductive (declaredAs "Empty") (fst (after [emptyDecl])))
         @?= Just 0
   , testCase "the parameters and the indices are told apart" $
       fmap (\d -> (length (inductiveParameters d), length (inductiveIndices d)))
-           (lookupInductive (named "Vec") natVec)
+           (lookupInductive (declaredAs "Vec") natVec)
         @?= Just (1, 1)
   , testCase "an index is not a parameter of the record it is declared with" $
       fmap (\d -> (length (inductiveParameters d), length (inductiveIndices d)))
@@ -441,13 +453,13 @@ agreesWithTheResolver =
       Left e  -> assertFailure (show e)
       Right (t, _) -> fmap constantType (lookupConstant (named name) natVec) @?= Just t
   | (name, written) <-
-      [ ("Nat",  "Type\8320")
-      , ("zero", "Nat")
-      , ("succ", "Nat -> Nat")
-      , ("Vec",  "Type\8320 -> Nat -> Type\8320")
-      , ("nil",  "forall (A : Type\8320) -> Vec A zero")
-      , ("cons", "forall (A : Type\8320) (n : Nat) (a : A) (as : Vec A n) \
-                 \-> Vec A (succ n)")
+      [ ("Nat.Nat",  "Type\8320")
+      , ("Nat.zero", "Nat")
+      , ("Nat.succ", "Nat -> Nat")
+      , ("Vec.Vec",  "Type\8320 -> Nat -> Type\8320")
+      , ("Vec.nil",  "forall (A : Type\8320) -> Vec A zero")
+      , ("Vec.cons", "forall (A : Type\8320) (n : Nat) (a : A) (as : Vec A n) \
+                     \-> Vec A (succ n)")
       ]
   ]
 
@@ -522,7 +534,7 @@ universeTests =
       case declareAll [natDecl, eqDecl, "E : Type where { k : Eq {1} Type Nat Nat -> E }"] of
         Left e         -> assertFailure e
         Right (env, _) ->
-          fmap inductiveLevels (lookupInductive (named "E") env) @?= Just []
+          fmap inductiveLevels (lookupInductive (declaredAs "E") env) @?= Just []
   , -- **And one the bounds only constrain is defaulted** (phase 51). @suc ?ℓ ≤ 2@
     -- leaves @?ℓ@ free below 1; phase 50 refused it, because a datatype has
     -- nowhere to carry a conditional constraint, and minimisation is what gives
@@ -531,7 +543,7 @@ universeTests =
       case declareAll [natDecl, eqDecl, "E : Type where { k : Eq {2} Type Nat Nat -> E }"] of
         Left e         -> assertFailure e
         Right (env, _) ->
-          fmap inductiveLevels (lookupInductive (named "E") env) @?= Just []
+          fmap inductiveLevels (lookupInductive (declaredAs "E") env) @?= Just []
   ]
 
 -- --------------------------------------------------------------------------
@@ -543,9 +555,13 @@ nameTests =
   [ refused "a datatype that is already declared"
       "Nat : Type\8320 where { z : Nat }"
       (AlreadyDeclared (named "Nat.Nat"))
-  , refused "a constructor whose name is taken"
-      "T : Type\8320 where { zero : T }"
-      (AlreadyDeclared (named "Nat.zero"))
+    -- **A CONSTRUCTOR WORD ANOTHER DATATYPE ALREADY HAS IS FREE SINCE MS10**,
+    -- where it was refused before: @zero@ is @Nat.zero@ and a @T@ declaring
+    -- @zero@ installs @T.zero@, so the clash this was pinned on cannot be
+    -- reached through a declaration at all. The refusal itself is still live
+    -- where a name is seeded ("Thena.NoConfusionTests"), as below.
+  , testCase "a constructor word another datatype has is free" $
+      afterFixtures "T : Type\8320 where { zero : T }" @?= Right ()
   , refused "a declaration that uses one name twice"
       "T : Type\8320 where { c : T ; c : T }"
       (RepeatedName (named "T.c"))
@@ -572,8 +588,8 @@ nameTests =
   , testCase "everything a declaration introduces is declared afterwards" $
       sequence_
         [ isDeclared (named g) natVec @?= True
-        | g <- [ "Nat", "zero", "succ", "Nat.elim", "Nat.case"
-               , "Vec", "nil", "cons", "Vec.elim", "Vec.case"
+        | g <- [ "Nat.Nat", "Nat.zero", "Nat.succ", "Nat.elim", "Nat.case"
+               , "Vec.Vec", "Vec.nil", "Vec.cons", "Vec.elim", "Vec.case"
                ]
         ]
   , testCase "and nothing else is" $
@@ -812,7 +828,7 @@ driveTo ls = foldl one (setUp, Blank) ls
     -- **The rule base comes from "Thena.Standard", not from IO.** @declare@
     -- runs the @elaborate@ rule, so a bare 'newSession' halts with
     -- @NoClauseMatched@ before it ever reaches the trust check.
-    setUp = foldl step withRules [natLine, eqLine]
+    setUp = foldl step withRules [natLine, "open Nat", eqLine, "open Eq"]
     step s l = case command s l of
       (s', Ran _ _ Completed) -> s'
       (_, r) -> error ("fixture line failed: " ++ l ++ " => " ++ show r)
