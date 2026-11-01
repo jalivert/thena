@@ -1961,7 +1961,7 @@ splittingTree =
       -- there: @vcons@'s parameter is an argument like any other, and an
       -- under-applied former is not a 'Canonical' for ι to fire on.
       let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
-      unwords (renderResponse s2 q) @?= "vnil Nat"
+      unwords (renderResponse s2 q) @?= "vnil Nat.Nat"
 
     -- __AN EMPTY ARM IS HOW THE VANISHED CASE IS WRITTEN__ (MS9 phase 189, his
     -- ruling of 2026-10-20). @vnil@'s method is closed by a conflicting
@@ -1979,7 +1979,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
-      unwords (renderResponse s2 q) @?= "vnil Nat"
+      unwords (renderResponse s2 q) @?= "vnil Nat.Nat"
 
     -- __A BODY WHERE THE CASE VANISHED IS THE REFUSAL THE LAW ADDS__ (MS9 phase
     -- 190). @vnil@'s method is closed by a conflicting equation, so a term
@@ -2326,7 +2326,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf vtailC Nat zero (vcons Nat zero zero (vnil Nat))"
-      unwords (renderResponse s2 q) @?= "vnil Nat"
+      unwords (renderResponse s2 q) @?= "vnil Nat.Nat"
 
     -- Coverage fails the same way under @case@, and says the same thing.
   , refuses "a case that survived with no arm is refused under case too"

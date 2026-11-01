@@ -336,7 +336,7 @@ tests =
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d  ->
             renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "∀ (n : Nat) (i : Fin n) -> Below n i -> Eq {0} (Fin n) i i"
+              @?= "∀ (n : Nat.Nat) (i : Fin.Fin n) -> Below.Below n i -> Eq.Eq {0} (Fin.Fin n) i i"
     ]
 
 -- | A global that must reduce to a specific @N@ numeral.
