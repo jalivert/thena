@@ -54,16 +54,16 @@ tests =
         -- **MS6's done-when** (phase 109b): preservation for STLC, in the
         -- surface language, for closed terms (his choice, ms6/CLOSEOUT.md 32).
         pin ":infer preservation"
-          [ "preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
+          [ "preservation : ∀ (M : LC.LC) (M1 : LC.LC) (T : Ty.Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
         -- **And by tactics** (his ruling, 2026-09-21: both ways). `08` proves
         -- every lemma again with attack, intro, eliminate-core and elaborate
         -- and ends at the same statement; the walk runs that script, so this
         -- only has to check where it ended.
         pin ":infer preservation-tactics"
-          [ "preservation-tactics : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
+          [ "preservation-tactics : ∀ (M : LC.LC) (M1 : LC.LC) (T : Ty.Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
         -- **MS8 phase 162**: the same theorem for ANY context, on one trusted law.
         pin ":infer preservationAny"
-          [ "preservationAny : ∀ (G : Ctx) (M : LC) (M1 : LC) (T : Ty) -> typing`${G} ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`${G} ⊢ ${M1} : ${T}`" ]
+          [ "preservationAny : ∀ (G : Ctx.Ctx) (M : LC.LC) (M1 : LC.LC) (T : Ty.Ty) -> typing`${G} ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`${G} ⊢ ${M1} : ${T}`" ]
     -- **MS8's done-when** (phase 161): POPLMark problem 1A over F-sub.
     -- @examples/poplmark/@ is its OWN set and is deliberately unnumbered: the
     -- numbered series above loads into one session and declares its own @Ty@,
@@ -85,10 +85,10 @@ tests =
                , "examples/poplmark/05-typing.thena", "examples/poplmark/06-transitivity.thena" ]
         let (s', r) = command s ":infer transitivity"
         renderResponse s' r @?=
-          [ "transitivity : (∀ (Q : Ty) (G : Ctx) (Xn : String) (D : Ctx) (P : Ty) -> ok`⊢ ${G} , ${Xn} <: ${P} , ${D} ok` -> sub`${G} ⊢ ${P} <: ${Q}` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: ${Q}`) -> ∀ (G : Ctx) (S : Ty) (Q : Ty) (T : Ty) -> sub`${G} ⊢ ${S} <: ${Q}` -> sub`${G} ⊢ ${Q} <: ${T}` -> sub`${G} ⊢ ${S} <: ${T}`" ]
+          [ "transitivity : (∀ (Q : Ty.Ty) (G : Ctx.Ctx) (Xn : String) (D : Ctx.Ctx) (P : Ty.Ty) -> ok`⊢ ${G} , ${Xn} <: ${P} , ${D} ok` -> sub`${G} ⊢ ${P} <: ${Q}` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: ${Q}`) -> ∀ (G : Ctx.Ctx) (S : Ty.Ty) (Q : Ty.Ty) (T : Ty.Ty) -> sub`${G} ⊢ ${S} <: ${Q}` -> sub`${G} ⊢ ${Q} <: ${T}` -> sub`${G} ⊢ ${S} <: ${T}`" ]
         let (s'', r') = command s ":infer wkIsFalse"
         renderResponse s'' r' @?=
-          [ "wkIsFalse : (∀ (G : Ctx) (Xn : String) (D : Ctx) (P : Ty) -> ok`⊢ ${G} , ${Xn} <: ${P} , ${D} ok` -> sub`${G} ⊢ ${P} <: ( ∀ Z <: ⊤ . ⊤ )` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: ( ∀ Z <: ⊤ . ⊤ )`) -> Empty {0}" ]
+          [ "wkIsFalse : (∀ (G : Ctx.Ctx) (Xn : String) (D : Ctx.Ctx) (P : Ty.Ty) -> ok`⊢ ${G} , ${Xn} <: ${P} , ${D} ok` -> sub`${G} ⊢ ${P} <: ( ∀ Z <: ⊤ . ⊤ )` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: ( ∀ Z <: ⊤ . ⊤ )`) -> Empty.Empty {0}" ]
     ]
   where
     numbered f = case f of
