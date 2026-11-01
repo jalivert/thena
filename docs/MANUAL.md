@@ -346,9 +346,9 @@ elim Nat : ∀ (P : Nat -> Type₁) -> P zero -> (∀ (x : Nat) -> P x -> P (suc
 equal" and "constructors are injective" usable in a proof:
 
 ```
-thena spine> :show Nat.noConfusion
-Nat.noConfusion : ∀ (x : Nat) (x' : Nat) -> Eq {0} Nat x x' -> Nat.NoConfusion x x'
-Nat.noConfusion = λ (u : Nat) (v : Nat) (q : Eq {0} Nat u v) -> elim Eq {0} …
+thena spine> :show Nat.lemmata.noConfusion
+Nat.lemmata.noConfusion : ∀ (x : Nat) (x' : Nat) -> Eq {0} Nat x x' -> Nat.lemmata.NoConfusion x x'
+Nat.lemmata.noConfusion = λ (u : Nat) (v : Nat) (q : Eq {0} Nat u v) -> elim Eq {0} …
 ```
 
 (`:show` prints the body too; it is one long line and is elided here.)
@@ -359,7 +359,7 @@ indices**: a `Ladder x` and a `Ladder x'` are compared by a *chain* of equations
 transported along it — rather than by a single `Eq`. That is what lets the lemma
 be applied where the two sides are not visibly at the same index, which is what
 acyclicity needs. Where a family has no indices the chain is the one equation it
-always was, and the lemma reads exactly as `Nat.noConfusion` does above.
+always was, and the lemma reads exactly as `Nat.lemmata.noConfusion` does above.
 
 The same chain is how an argument whose *type* mentions an earlier argument is
 handled: the later equation is stated after transporting along the earlier one,
@@ -368,8 +368,8 @@ so every equation is still between two terms of one type.
 ```
 thena spine> data Ladder : Nat -> Type₀ where { base : Ladder zero ; step : ∀ (n : Nat) (r : Ladder n) -> Ladder (succ n) }
 declared Ladder
-thena spine> :infer Ladder.noConfusion
-Ladder.noConfusion : ∀ (x : Nat) (x1 : Ladder x) (x' : Nat) (x'1 : Ladder x') (q : Eq {0} Nat x x') -> Eq {0} (Ladder x') ((elim Eq {0} (Nat) (λ (u : Nat) (v : Nat) (w : Eq {0} Nat u v) -> Ladder u -> Ladder v) ((λ (a : Nat) (z : Ladder a) -> z)) (x x') q) x1) x'1 -> Ladder.NoConfusion x x1 x' x'1
+thena spine> :infer Ladder.lemmata.noConfusion
+Ladder.lemmata.noConfusion : ∀ (x : Nat) (x1 : Ladder x) (x' : Nat) (x'1 : Ladder x') (q : Eq {0} Nat x x') -> Eq {0} (Ladder x') ((elim Eq {0} (Nat) (λ (u : Nat) (v : Nat) (w : Eq {0} Nat u v) -> Ladder u -> Ladder v) ((λ (a : Nat) (z : Ladder a) -> z)) (x x') q) x1) x'1 -> Ladder.lemmata.NoConfusion x x1 x' x'1
 ```
 
 `DECISIONS.md`, *Thena does not assume K*, says what that buys and what it does
@@ -1464,8 +1464,8 @@ language and elaborated on load.
   type mentions the value's own arguments and one of those is a local variable:
 
   ```
-  let nc = Term.noConfusion x y q in …                          -- refused
-  let nc : Term.NoConfusion x y = Term.noConfusion x y q in …     -- fine
+  let nc = Term.lemmata.noConfusion x y q in …                                  -- refused
+  let nc : Term.lemmata.NoConfusion x y = Term.lemmata.noConfusion x y q in …     -- fine
   ```
 
   This is the same requirement Agda and Idris make. **The message you get is

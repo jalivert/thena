@@ -22,6 +22,8 @@ module Thena.Core.Term
   , nameDotted
   , declarationNamespace
   , inDeclarationOf
+  , inLemmataOf
+  , lemmataStep
   , declarationOf
   , declarationNamed
   , globalUnder
@@ -127,6 +129,26 @@ declarationNamespace = nameSteps
 -- | A name for @word@ in the namespace @d@\'s declaration opens.
 inDeclarationOf :: GlobalName -> String -> GlobalName
 inDeclarationOf d word = GlobalName (declarationNamespace d) word
+
+-- | The step a datatype\'s generated relations and proofs live under.
+--
+-- __His ruling of 2026-11-01.__ A datatype\'s namespace holds what the user
+-- wrote plus the eliminator pair; everything the system /derives/ sits one step
+-- deeper, so the two levels can never answer the same word. Before this,
+-- @data Below@ was refused — the datatype wanted @Below.Below@ and so did its
+-- own generated structural order — and the word @Below@ was ambiguous six ways
+-- in a bare session, the prelude\'s datatypes having each put one in scope.
+lemmataStep :: String
+lemmataStep = "lemmata"
+
+-- | A name for @word@ among @d@\'s generated lemmata: @Nat.lemmata.Below@.
+--
+-- **Not 'inDeclarationOf'** — that is for what the declaration itself names,
+-- which is the datatype, its constructors, @elim@ and @case@. A word minted
+-- here is one no user wrote, so it is reached by @open Nat.lemmata@ rather than
+-- competing with their own names.
+inLemmataOf :: GlobalName -> String -> GlobalName
+inLemmataOf d word = GlobalName (declarationNamespace d ++ [lemmataStep]) word
 
 -- | A name as a user writes it, split on the reserved dot: @Nat.elim@ is
 -- @GlobalName ["Nat"] "elim"@, and a word with no dot comes back rooted.

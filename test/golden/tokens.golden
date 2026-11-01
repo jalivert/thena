@@ -13,7 +13,7 @@ solved: ?ℓ4685
 already equal
 solved: ?ℓ4686
 solved: T
-refused: in the token class t: Bool is not String, Char or Int
+refused: in the token class t: Bool.Bool is not String, Char or Int
 -- the regex does not parse: a stray metacharacter
 already equal
 solved: ?ℓ4685
@@ -70,7 +70,7 @@ thena spine> :show e
 e : Token Char
 e = let refined = /[a-z]/ Char : Token Char in let e = refined : Token Char in e
 thena spine> :core /a\/b/ Comparison
-/a\/b/ Comparison
+/a\/b/ Comparison.Comparison
 thena spine> :infer (/[a-z]/ : Token Char)
 /[a-z]/ : Token Char : Token Char
 thena spine> :infer /[a-z]/

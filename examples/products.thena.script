@@ -2,9 +2,9 @@ data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 open Nat
 data Even : Nat -> Type₀ where { evenZero : Even zero ; evenSS : ∀ (n : Nat) (p : Even n) -> Even (succ (succ n)) }
 open Even
-:whnf Nat.NoConfusion zero zero
-:whnf Nat.NoConfusion zero (succ zero)
-:whnf Nat.NoConfusion (succ zero) (succ (succ zero))
+:whnf Nat.lemmata.NoConfusion zero zero
+:whnf Nat.lemmata.NoConfusion zero (succ zero)
+:whnf Nat.lemmata.NoConfusion (succ zero) (succ (succ zero))
 :theorem twoIsEven : Even (succ (succ zero))
 try-core ⌜ evenSS zero evenZero ⌝
 solve
@@ -23,10 +23,10 @@ try-core ⌜ \ (A : Type₀) (B : Type₀) (c : And {0 0} A B) -> both {0 0} B A
 solve
 qed
 :theorem succInjective : ∀ (a : Nat) (b : Nat) (q : Eq {0} Nat (succ a) (succ b)) -> Eq {0} Nat a b
-try-core ⌜ \ (a : Nat) (b : Nat) (q : Eq {0} Nat (succ a) (succ b)) -> Nat.noConfusion (succ a) (succ b) q ⌝
+try-core ⌜ \ (a : Nat) (b : Nat) (q : Eq {0} Nat (succ a) (succ b)) -> Nat.lemmata.noConfusion (succ a) (succ b) q ⌝
 solve
 qed
 :theorem zeroIsNotSuccessor : ∀ (a : Nat) (q : Eq {0} Nat zero (succ a)) -> Empty {0}
-try-core ⌜ \ (a : Nat) (q : Eq {0} Nat zero (succ a)) -> Nat.noConfusion zero (succ a) q ⌝
+try-core ⌜ \ (a : Nat) (q : Eq {0} Nat zero (succ a)) -> Nat.lemmata.noConfusion zero (succ a) q ⌝
 solve
 qed

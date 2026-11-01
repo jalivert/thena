@@ -883,7 +883,7 @@ refused =
          -- The check spans every installed grammar, not this one: a production
          -- name is unique across all of them, which 'productionBody' relies on.
        , inNotation "a production naming another grammar's constructor"
-           "notation C where\n  base a b -> a \8746 b" "base" FunctionHasNotation
+           "notation C where\n  Ty.base a b -> a \8746 b" "Ty.base" FunctionHasNotation
        , inNotation "a production naming one the grammar already has"
            "notation C where\n  ext a b -> a \8746 b" "ext" FunctionHasNotation
        , inNotation "more slots than the function takes"
@@ -901,7 +901,7 @@ refused =
            "lift : C -> String -> C\nlift = \\ a s -> a\n\nnotation C where\n  lift a s -> a \8853 s"
            "lift" (ParamNotReadable "s" (Global (rootName "String") []))
        , inNotation "a function that does not return the grammar's datatype"
-           "dom : C -> C -> Ty\ndom = \\ a b -> base\n\nnotation C where\n  dom p q -> p \8746 q"
+           "dom : C -> C -> Ty\ndom = \\ a b -> Ty.base\n\nnotation C where\n  dom p q -> p \8746 q"
            "dom" (FunctionResult (datatype "Ty"))
        , inNotation "a production writing a binding form"
            "notation C where\n  join a b -> a \8746 b[x]" "join" (FunctionBinds "b")

@@ -221,9 +221,11 @@ written `∀ {A : Type₀} -> A -> A`.
 *Decided 2026-10-30. **Being built.** A name carries its path, the dot is
 reserved, and a qualified name can be written and resolved in a core term, in a
 term you are elaborating, and in a rule. **A `data` declaration's generated
-equipment is already in its namespace** — `Nat.elim`, `Nat.case`,
-`Nat.noConfusion`, `Nat.Below` and the rest — so `:show Nat.case` is how you ask
-for one. **A language's generated substitution is too**, as `LC.fv-x`,
+equipment is already in its namespace** — `Nat.elim` and `Nat.case` — so
+`:show Nat.case` is how you ask for one, and **the relations and proofs a
+declaration derives are one step deeper, in `Nat.lemmata`**:
+`Nat.lemmata.noConfusion`, `Nat.lemmata.Below` and the rest, reached short with
+`open Nat.lemmata`. **A language's generated substitution is too**, as `LC.fv-x`,
 `LC.subst-x`, `LC.subst-all` and `LC.fresh-x`, and **a declaration of your own
 may be written with a path**: `Ty.lemma : …` declares `lemma` in `Ty`. **The four
 primitive functions have moved in too** — `String.eq`, `Char.eq`, `Int.eq` and
@@ -252,9 +254,13 @@ data Nat where
   s : Nat -> Nat
 ```
 
-gives you `Nat.z`, `Nat.s`, `Nat.elim` and the rest of the generated equipment,
-the type as `Nat.Nat`, and `Nat` as a short name for it where you wrote the
-declaration. **So two object languages may both declare a production called
+gives you `Nat.z`, `Nat.s`, `Nat.elim`, `Nat.case`, the type as `Nat.Nat`, and
+`Nat` as a short name for it where you wrote the declaration. **The relations and
+proofs that come with a datatype sit under `Nat.lemmata`** — `Nat.lemmata.Below`,
+`Nat.lemmata.noConfusion` and the rest — so that **a datatype keeps every ordinary
+word available to it.** `data Below` and `data NoConfusion` declare like anything
+else: the derived name is `Below.lemmata.Below`, not a second `Below.Below`
+competing with the type. Write `open Nat.lemmata` to use them short. **So two object languages may both declare a production called
 `var`** — `LC.var` and `STLC.var` are different names — which is the collision
 this replaces. A grammar *is* a datatype here, so its productions are its
 constructors and they are scoped with it.

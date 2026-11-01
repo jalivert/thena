@@ -8,8 +8,8 @@
 -- it structurally — `n ≃ s n` — has no solution, so the case it belongs to
 -- cannot arise, so the arm for it is not merely unnecessary but unwritable.
 --
--- The proof is generated with the datatype. `N.NotBelow x y` is the tuple of
--- everything structurally below `y` that `x` is not equal to, `N.noCycle` says
+-- The proof is generated with the datatype. `N.lemmata.NotBelow x y` is the tuple of
+-- everything structurally below `y` that `x` is not equal to, `N.lemmata.noCycle` says
 -- the equation puts `x` below `y`, and the contradiction is the component of
 -- that tuple reading `x ≢ x`. None of it is written here; see `DECISIONS.md`,
 -- "`specialise` discharges the equations an elimination hands you".

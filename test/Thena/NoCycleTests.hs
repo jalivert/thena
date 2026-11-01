@@ -1,5 +1,5 @@
 -- | The generated acyclicity equipment — @Below@, @NotEq@, @NotBelow@ and
--- @Eq.NotBelow@ (MS9 phase 219, "Thena.Global.NoCycle").
+-- @Eq.lemmata.NotBelow@ (MS9 phase 219, "Thena.Global.NoCycle").
 --
 -- Four groups, and each asks the question by different code from the code that
 -- built the answer — the standing lesson from phases 2–5:
@@ -25,7 +25,7 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (inDeclarationOf, rootName)
+import Thena.Core.Term (declarationNamed, inLemmataOf, rootName)
 import Thena.Declared
   ( named
   , andDecl
@@ -82,7 +82,7 @@ reduceTests =
         , "  z : N"
         , "  s : N -> N"
         , ""
-        , "belowZ : \8704 (P : N -> Type\8320) (h : N.Below P z) -> Unit"
+        , "belowZ : \8704 (P : N -> Type\8320) (h : N.lemmata.Below P z) -> Unit"
         , "belowZ = \\ P h -> h"
         ]
   , testCase "and one with a recursive argument — the sub-tuple and the motive" $
@@ -93,8 +93,8 @@ reduceTests =
         , "  z : N"
         , "  s : N -> N"
         , ""
-        , "belowS : \8704 (P : N -> Type\8320) (n : N) (h : N.Below P (s n))"
-        , "      -> And (N.Below P n) (P n)"
+        , "belowS : \8704 (P : N -> Type\8320) (n : N) (h : N.lemmata.Below P (s n))"
+        , "      -> And (N.lemmata.Below P n) (P n)"
         , "belowS = \\ P n h -> h"
         ]
   , -- **The motive is applied to the ARGUMENT's indices, not the target's** —
@@ -113,12 +113,12 @@ reduceTests =
         , "  evz : Ev z"
         , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
         , ""
-        , "evzBelow : \8704 (j : N) (y : Ev j) (h : Ev.NotBelow j y z evz) -> Unit"
+        , "evzBelow : \8704 (j : N) (y : Ev j) (h : Ev.lemmata.NotBelow j y z evz) -> Unit"
         , "evzBelow = \\ j y h -> h"
         , ""
         , "evsBelow : \8704 (n : N) (e : Ev n) (j : N) (y : Ev j)"
-        , "             (h : Ev.NotBelow j y (s (s n)) (evs n e))"
-        , "        -> And (Ev.NotBelow j y n e) (Ev.NotEq j y n e)"
+        , "             (h : Ev.lemmata.NotBelow j y (s (s n)) (evs n e))"
+        , "        -> And (Ev.lemmata.NotBelow j y n e) (Ev.lemmata.NotEq j y n e)"
         , "evsBelow = \\ n e j y h -> h"
         ]
   , -- @≢@ over a telescope is the curried chain of §3.3 negated: the index
@@ -136,7 +136,7 @@ reduceTests =
         , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
         , ""
         , "evApart : \8704 (n : N) (x : Ev n) (j : N) (y : Ev j)"
-        , "            (ne : Ev.NotEq n x j y)"
+        , "            (ne : Ev.lemmata.NotEq n x j y)"
         , "            (q : (Eq N n j : Type\8320))"
         , "            (r : (Eq (Ev j) (transport N (\\ w -> Ev w) n j q x) y"
         , "                    : Type\8320))"
@@ -169,39 +169,39 @@ constructionTests =
         , ""
         , "-- (65): if the recursive argument is neither below nor equal to b,"
         , "-- neither is the whole application."
-        , "stepN : \8704 (m : N) (b : N) -> N.NotBelow m b -> N.NotBelowEq (s m) b"
+        , "stepN : \8704 (m : N) (b : N) -> N.lemmata.NotBelow m b -> N.lemmata.NotBelowEq (s m) b"
         , "stepN = \\ m b ->"
         , "  elim N ()"
-        , "    (\\ t -> N.NotBelow m t -> N.NotBelowEq (s m) t)"
-        , "    ( (\\ nb -> both (N.NotBelow (s m) z) (N.NotEq (s m) z)"
+        , "    (\\ t -> N.lemmata.NotBelow m t -> N.lemmata.NotBelowEq (s m) t)"
+        , "    ( (\\ nb -> both (N.lemmata.NotBelow (s m) z) (N.lemmata.NotEq (s m) z)"
         , "                 unit"
-        , "                 (\\ e -> N.noConfusion (s m) z e))"
+        , "                 (\\ e -> N.lemmata.noConfusion (s m) z e))"
         , "      (\\ k H nb ->"
-        , "         both (N.NotBelow (s m) (s k)) (N.NotEq (s m) (s k))"
-        , "           (H (andLeft (N.NotBelow m k) (N.NotEq m k) nb))"
-        , "           (\\ e -> andRight (N.NotBelow m k) (N.NotEq m k) nb"
-        , "                     (N.noConfusion (s m) (s k) e))) )"
+        , "         both (N.lemmata.NotBelow (s m) (s k)) (N.lemmata.NotEq (s m) (s k))"
+        , "           (H (andLeft (N.lemmata.NotBelow m k) (N.lemmata.NotEq m k) nb))"
+        , "           (\\ e -> andRight (N.lemmata.NotBelow m k) (N.lemmata.NotEq m k) nb"
+        , "                     (N.lemmata.noConfusion (s m) (s k) e))) )"
         , "    () b"
         , ""
         , "-- No term is structurally below itself."
-        , "noCycleDiagN : \8704 (a : N) -> N.NotBelow a a"
+        , "noCycleDiagN : \8704 (a : N) -> N.lemmata.NotBelow a a"
         , "noCycleDiagN = \\ a ->"
-        , "  elim N () (\\ t -> N.NotBelow t t)"
+        , "  elim N () (\\ t -> N.lemmata.NotBelow t t)"
         , "    ((unit) (\\ m h -> stepN m m h))"
         , "    () a"
         , ""
         , "noCycleN : \8704 (x : N) (y : N) (e : (Eq N x y : Type\8320))"
-        , "        -> N.NotBelow x y"
+        , "        -> N.lemmata.NotBelow x y"
         , "noCycleN = \\ x y e ->"
-        , "  transport N (\\ w -> N.NotBelow x w) x y e (noCycleDiagN x)"
+        , "  transport N (\\ w -> N.lemmata.NotBelow x w) x y e (noCycleDiagN x)"
         , ""
         , "noSelfN : \8704 (n : N) (e : (Eq N n (s n) : Type\8320)) -> Empty"
         , "noSelfN = \\ n e ->"
-        , "  andRight (N.NotBelow n n) (N.NotEq n n) (noCycleN n (s n) e) (refl N n)"
+        , "  andRight (N.lemmata.NotBelow n n) (N.lemmata.NotEq n n) (noCycleN n (s n) e) (refl N n)"
         ]
   ]
 
--- | @D.noCycle@ itself, at four shapes: one recursive argument, the /second/ of
+-- | @D.lemmata.noCycle@ itself, at four shapes: one recursive argument, the /second/ of
 -- two, an indexed family where the equation is a chain, and a family whose
 -- recursive argument sits at an index that is a term of an earlier argument.
 --
@@ -220,7 +220,7 @@ cycleTests =
         , ""
         , "noSelfN : \8704 (n : N) (e : (Eq N n (s n) : Type\8320)) -> Empty"
         , "noSelfN = \\ n e ->"
-        , "  andRight (N.NotBelow n n) (N.NotEq n n) (N.noCycle n (s n) e) (refl N n)"
+        , "  andRight (N.lemmata.NotBelow n n) (N.lemmata.NotEq n n) (N.lemmata.noCycle n (s n) e) (refl N n)"
         ]
   , -- The tuple has one component per recursive argument, so reaching the
     -- second is a projection past the first.
@@ -240,9 +240,9 @@ cycleTests =
         , "               (e : (Eq Tree r (node l r) : Type\8320))"
         , "          -> Empty"
         , "noSelfTree = \\ l r e ->"
-        , "  andRight (Tree.NotBelow r r) (Tree.NotEq r r)"
-        , "    (andRight (Tree.NotBelowEq r l) (Tree.NotBelowEq r r)"
-        , "       (Tree.noCycle r (node l r) e))"
+        , "  andRight (Tree.lemmata.NotBelow r r) (Tree.lemmata.NotEq r r)"
+        , "    (andRight (Tree.lemmata.NotBelowEq r l) (Tree.lemmata.NotBelowEq r r)"
+        , "       (Tree.lemmata.noCycle r (node l r) e))"
         , "    (refl Tree r)"
         ]
   , -- **The equation is a chain here**, the index equation and then the element
@@ -267,8 +267,8 @@ cycleTests =
         , "                     (evs n x) : Type\8320))"
         , "        -> Empty"
         , "noSelfEv = \\ n x q r ->"
-        , "  andRight (Ev.NotBelow n x n x) (Ev.NotEq n x n x)"
-        , "    (Ev.noCycle n x (s (s n)) (evs n x) q r)"
+        , "  andRight (Ev.lemmata.NotBelow n x n x) (Ev.lemmata.NotEq n x n x)"
+        , "    (Ev.lemmata.noCycle n x (s (s n)) (evs n x) q r)"
         , "    (refl N n) (refl (Ev n) x)"
         ]
   , -- **The shape the easy route cannot do.** @tw@'s recursive argument sits at
@@ -295,8 +295,8 @@ cycleTests =
         , "                    (tw n t) : Type\8320))"
         , "       -> Empty"
         , "noSelfT = \\ n t q r ->"
-        , "  andRight (T.NotBelow (s n) t (s n) t) (T.NotEq (s n) t (s n) t)"
-        , "    (T.noCycle (s n) t n (tw n t) q r)"
+        , "  andRight (T.lemmata.NotBelow (s n) t (s n) t) (T.lemmata.NotEq (s n) t (s n) t)"
+        , "    (T.lemmata.noCycle (s n) t n (tw n t) q r)"
         , "    (refl N (s n)) (refl (T (s n)) t)"
         ]
   ]
@@ -315,57 +315,57 @@ loads ls = do
 
 kernelTests :: [TestTree]
 kernelTests =
-  [ testCase "Nat's tuple" (certified eqNat "Nat.Below")
+  [ testCase "Nat's tuple" (certified eqNat "Nat.lemmata.Below")
   , testCase "Nat's three relations" $ do
-      certified eqNat "Nat.NotEq"
-      certified eqNat "Nat.NotBelow"
-      certified eqNat "Nat.NotBelowEq"
+      certified eqNat "Nat.lemmata.NotEq"
+      certified eqNat "Nat.lemmata.NotBelow"
+      certified eqNat "Nat.lemmata.NotBelowEq"
     -- Four constructors, three of them recursive, and @ifthen@ has three
     -- recursive arguments — so its method conjoins three pairs, which no other
     -- fixture does.
   , testCase "Term's tuple, where a constructor has three recursive arguments" $
-      certified eqTapl "Term.Below"
-  , testCase "and its relations" $ certified eqTapl "Term.NotBelowEq"
+      certified eqTapl "Term.lemmata.Below"
+  , testCase "and its relations" $ certified eqTapl "Term.lemmata.NotBelowEq"
     -- One index, and a dependent /constructor/ telescope.
-  , testCase "Fin's tuple" (certified eqNatFin "Fin.Below")
+  , testCase "Fin's tuple" (certified eqNatFin "Fin.lemmata.Below")
   , testCase "and its relations, whose chain is one index equation deep" $
-      certified eqNatFin "Fin.NotBelowEq"
+      certified eqNatFin "Fin.lemmata.NotBelowEq"
     -- A parameter as well as an index.
-  , testCase "Vec's tuple, with a parameter" (certified eqNatVec "Vec.Below")
-  , testCase "and its relations" (certified eqNatVec "Vec.NotBelowEq")
+  , testCase "Vec's tuple, with a parameter" (certified eqNatVec "Vec.lemmata.Below")
+  , testCase "and its relations" (certified eqNatVec "Vec.lemmata.NotBelowEq")
     -- **Two indices, and a recursive argument at indices of its own**: @eIf@'s
     -- premise is a @Step t1 t1'@ while the conclusion is at
     -- @ifthen t1 t2 t3@, so the motive in the method is applied to the
     -- premise's indices and not the conclusion's.
   , testCase "Step's tuple, two indices and a recursive premise" $
-      certified eqStep "Step.Below"
-  , testCase "and its relations" (certified eqStep "Step.NotBelowEq")
+      certified eqStep "Step.lemmata.Below"
+  , testCase "and its relations" (certified eqStep "Step.lemmata.NotBelowEq")
     -- A dependent /index/ telescope, which is what makes the chain want a
     -- @DPair@: @Below@'s second index has the first in its type.
   , testCase "a dependent index telescope" (certified preludeBelowEnv "Below.Below")
   , testCase "and its relations, where the index travels with the element" $
-      certified preludeBelowEnv "Below.NotBelowEq"
+      certified preludeBelowEnv "Below.lemmata.NotBelowEq"
 
     -- ------------------------------------------------------------------
     -- THE NESTED J (MS9 phase 220)
     -- ------------------------------------------------------------------
     --
-    -- @D.noCycleDiag@ is the induction that says no term is below itself, with
+    -- @D.lemmata.noCycleDiag@ is the induction that says no term is below itself, with
     -- the @Step@ lemma of (63)–(68) written inline at each recursive argument;
-    -- @D.noCycle@ eliminates the chain between two elements down to it.
+    -- @D.lemmata.noCycle@ eliminates the chain between two elements down to it.
   , testCase "Nat's diagonal, and the cycle lemma over it" $ do
-      certified eqNat "Nat.noCycleDiag"
-      certified eqNat "Nat.noCycle"
+      certified eqNat "Nat.lemmata.noCycleDiag"
+      certified eqNat "Nat.lemmata.noCycle"
   , testCase "Term's, where one constructor has three recursive arguments" $ do
-      certified eqTapl "Term.noCycleDiag"
-      certified eqTapl "Term.noCycle"
+      certified eqTapl "Term.lemmata.noCycleDiag"
+      certified eqTapl "Term.lemmata.noCycle"
   , testCase "Fin's, one index and a dependent argument telescope" $
-      certified eqNatFin "Fin.noCycle"
-  , testCase "Vec's, with a parameter" (certified eqNatVec "Vec.noCycle")
+      certified eqNatFin "Fin.lemmata.noCycle"
+  , testCase "Vec's, with a parameter" (certified eqNatVec "Vec.lemmata.noCycle")
   , testCase "Step's, two indices and a recursive premise at its own" $
-      certified eqStep "Step.noCycle"
+      certified eqStep "Step.lemmata.noCycle"
   , testCase "and a dependent index telescope" $
-      certified preludeBelowEnv "Below.noCycle"
+      certified preludeBelowEnv "Below.lemmata.noCycle"
   ]
 
 certified :: GlobalEnv -> String -> Assertion
@@ -402,12 +402,12 @@ noUnitEnv = fst (declared [eqDecl, dpairDecl, emptyDecl, andDecl, natDecl, treeD
 
 -- | Is the word @w@ generated in the namespace the declaration of @d@ opens?
 --
--- **Two arguments since MS10**, where it took the flat spelling: @Tree.Below@ is
--- @Tree.Below@ now, and a test that wrote the dotted form would be asserting
+-- **Two arguments since MS10**, where it took the flat spelling: @Tree.lemmata.Below@ is
+-- @Tree.lemmata.Below@ now, and a test that wrote the dotted form would be asserting
 -- about a name at the root with a dot in its word — the one shape §3.6 forbids,
 -- and the shape this milestone exists to remove.
 has :: GlobalEnv -> String -> String -> Bool
-has env d w = lookupDefinition (inDeclarationOf (rootName d) w) env /= Nothing
+has env d w = lookupDefinition (inLemmataOf (declarationNamed (rootName d)) w) env /= Nothing
 
 guardTests :: [TestTree]
 guardTests =
@@ -415,7 +415,7 @@ guardTests =
     -- bundle declines and not a reason the no-confusion lemma does, and the two
     -- preconditions are separate so that it stays that way. Folding them
     -- together is what made a fixture without @DPair@ report
-    -- @Below.NoConfusion was not generated@ at MS9 phase 218.
+    -- @Below.lemmata.NoConfusion was not generated@ at MS9 phase 218.
     testCase "no Unit: the tuple is declined" $
       has noUnitEnv "Tree" "Below" @?= False
   , testCase "and the no-confusion lemma is still there" $
@@ -493,8 +493,8 @@ guardTests =
     -- pin a number, and the whole of what it measures is in
     -- @Thena.Global.Generate.sharing@ and @transportNaming@.
     testCase "and the lemma's type did not grow back" $
-      case lookupDefinition (named "Both.noConfusion") eqNatVecBoth of
-        Nothing -> assertFailure "Both.noConfusion was not generated"
+      case lookupDefinition (named "Both.lemmata.noConfusion") eqNatVecBoth of
+        Nothing -> assertFailure "Both.lemmata.noConfusion was not generated"
         Just d  ->
           assertBool
             ("the two-vector lemma's type is "
@@ -503,11 +503,11 @@ guardTests =
             (length (show (definitionType d)) < 250000)
   , -- One namespace, shared with generated names (§3.6).
     testCase "a user definition of the tuple's name refuses the declaration" $
-      refuses "N.Below"
+      refuses "N.lemmata.Below"
         [ "module Clash where"
         , ""
-        , "N.Below : Unit"
-        , "N.Below = unit"
+        , "N.lemmata.Below : Unit"
+        , "N.lemmata.Below = unit"
         , ""
         , "data N : Type\8320 where"
         , "  z : N"

@@ -80,7 +80,7 @@ import Thena.Core.Level (Level (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
-  , inDeclarationOf
+  , inLemmataOf
   , Ident (..)
   , close
   , fresh
@@ -144,30 +144,30 @@ noCycleNames d =
 
 
 
--- | @BelowNat@ — the tuple of a motive at everything structurally smaller.
+-- | @Nat.lemmata.Below@ — the tuple of a motive at everything structurally smaller.
 belowName :: GlobalName -> GlobalName
-belowName d = inDeclarationOf d "Below"
+belowName d = inLemmataOf d "Below"
 
--- | @NotEqNat@ — the appendix's @≢@, over the telescope.
+-- | @Nat.lemmata.NotEq@ — the appendix's @≢@, over the telescope.
 notEqName :: GlobalName -> GlobalName
-notEqName d = inDeclarationOf d "NotEq"
+notEqName d = inLemmataOf d "NotEq"
 
--- | @NotBelowNat@ — the appendix's @≮@.
+-- | @Nat.lemmata.NotBelow@ — the appendix's @≮@.
 notBelowName :: GlobalName -> GlobalName
-notBelowName d = inDeclarationOf d "NotBelow"
+notBelowName d = inLemmataOf d "NotBelow"
 
--- | @NotBelowEqNat@ — the appendix's @≰@.
+-- | @Nat.lemmata.NotBelowEq@ — the appendix's @≰@.
 notBelowEqName :: GlobalName -> GlobalName
-notBelowEqName d = inDeclarationOf d "NotBelowEq"
+notBelowEqName d = inLemmataOf d "NotBelowEq"
 
--- | @noCycleDiagNat@ — no term is structurally below itself.
+-- | @Nat.lemmata.noCycleDiag@ — no term is structurally below itself.
 noCycleDiagName :: GlobalName -> GlobalName
-noCycleDiagName d = inDeclarationOf d "noCycleDiag"
+noCycleDiagName d = inLemmataOf d "noCycleDiag"
 
--- | @noCycleNat@ — and so nothing equal to a term is below it either, which is
+-- | @Nat.lemmata.noCycle@ — and so nothing equal to a term is below it either, which is
 -- what the cycle transition applies.
 noCycleName :: GlobalName -> GlobalName
-noCycleName d = inDeclarationOf d "noCycle"
+noCycleName d = inLemmataOf d "noCycle"
 
 -- | Generate, check and admit the four definitions — or say why not.
 --

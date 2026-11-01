@@ -18,25 +18,25 @@ thena spine> data Term : Type₀ where { true : Term ; false : Term ; ifthen : T
 declared Term.Term
 thena spine> open Term
 opened Term
-thena spine> :show Term.noConfusion
-Term.noConfusion : ∀ (x : Term.Term) (x' : Term.Term) -> Eq.Eq {0} Term.Term x x' -> Term.NoConfusion x x'
-Term.noConfusion = λ (u : Term.Term) (v : Term.Term) (q : Eq.Eq {0} Term.Term u v) -> elim Eq.Eq {0} (Term.Term) (λ (u1 : Term.Term) (v1 : Term.Term) (w : Eq.Eq {0} Term.Term u1 v1) -> Term.NoConfusion u1 v1) ((λ (c : Term.Term) -> elim Term.Term () (λ (z : Term.Term) -> Term.NoConfusion z z) (Unit.unit {0} Unit.unit {0} (λ (x : Term.Term) (x1 : Term.Term) (x2 : Term.Term) (ih : (λ (z : Term.Term) -> Term.NoConfusion z z) x) (ih1 : (λ (z : Term.Term) -> Term.NoConfusion z z) x1) (ih2 : (λ (z : Term.Term) -> Term.NoConfusion z z) x2) -> And.both {0 0} (Eq.Eq {0} Term.Term x x) (And.And {0 0} (Eq.Eq {0} Term.Term x1 x1) (Eq.Eq {0} Term.Term x2 x2)) (Eq.refl {0} Term.Term x) (And.both {0 0} (Eq.Eq {0} Term.Term x1 x1) (Eq.Eq {0} Term.Term x2 x2) (Eq.refl {0} Term.Term x1) (Eq.refl {0} Term.Term x2))) Unit.unit {0} (λ (x : Term.Term) (ih : (λ (z : Term.Term) -> Term.NoConfusion z z) x) -> Eq.refl {0} Term.Term x)) () c)) (u v) q
-thena spine> :whnf Term.NoConfusion true true
+thena spine> :show Term.lemmata.noConfusion
+Term.lemmata.noConfusion : ∀ (x : Term.Term) (x' : Term.Term) -> Eq.Eq {0} Term.Term x x' -> Term.lemmata.NoConfusion x x'
+Term.lemmata.noConfusion = λ (u : Term.Term) (v : Term.Term) (q : Eq.Eq {0} Term.Term u v) -> elim Eq.Eq {0} (Term.Term) (λ (u1 : Term.Term) (v1 : Term.Term) (w : Eq.Eq {0} Term.Term u1 v1) -> Term.lemmata.NoConfusion u1 v1) ((λ (c : Term.Term) -> elim Term.Term () (λ (z : Term.Term) -> Term.lemmata.NoConfusion z z) (Unit.unit {0} Unit.unit {0} (λ (x : Term.Term) (x1 : Term.Term) (x2 : Term.Term) (ih : (λ (z : Term.Term) -> Term.lemmata.NoConfusion z z) x) (ih1 : (λ (z : Term.Term) -> Term.lemmata.NoConfusion z z) x1) (ih2 : (λ (z : Term.Term) -> Term.lemmata.NoConfusion z z) x2) -> And.both {0 0} (Eq.Eq {0} Term.Term x x) (And.And {0 0} (Eq.Eq {0} Term.Term x1 x1) (Eq.Eq {0} Term.Term x2 x2)) (Eq.refl {0} Term.Term x) (And.both {0 0} (Eq.Eq {0} Term.Term x1 x1) (Eq.Eq {0} Term.Term x2 x2) (Eq.refl {0} Term.Term x1) (Eq.refl {0} Term.Term x2))) Unit.unit {0} (λ (x : Term.Term) (ih : (λ (z : Term.Term) -> Term.lemmata.NoConfusion z z) x) -> Eq.refl {0} Term.Term x)) () c)) (u v) q
+thena spine> :whnf Term.lemmata.NoConfusion true true
 Unit.Unit {0}
-thena spine> :whnf Term.NoConfusion true (succ zero)
+thena spine> :whnf Term.lemmata.NoConfusion true (succ zero)
 Empty.Empty {0}
-thena spine> :whnf Term.NoConfusion (succ true) (succ zero)
+thena spine> :whnf Term.lemmata.NoConfusion (succ true) (succ zero)
 Eq.Eq {0} Term.Term Term.true Term.zero
-thena spine> :whnf Term.NoConfusion (ifthen true zero zero) (ifthen false zero zero)
+thena spine> :whnf Term.lemmata.NoConfusion (ifthen true zero zero) (ifthen false zero zero)
 And.And {0 0} (Eq.Eq {0} Term.Term Term.true Term.false) (And.And {0 0} (Eq.Eq {0} Term.Term Term.zero Term.zero) (Eq.Eq {0} Term.Term Term.zero Term.zero))
 thena spine> :goal ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b
 ▶ let ? goal : ∀ (a : Term.Term) (b : Term.Term) -> Eq.Eq {0} Term.Term (Term.succ a) (Term.succ b) -> Eq.Eq {0} Term.Term a b in
   goal
 thena spine> along
-thena core> unify ⌜ goal ⌝ ⌜ \ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) -> Term.noConfusion (succ a) (succ b) e ⌝
+thena core> unify ⌜ goal ⌝ ⌜ \ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) -> Term.lemmata.noConfusion (succ a) (succ b) e ⌝
 solved: goal
 thena core> :extract
-let goal = λ (a : Term.Term) (b : Term.Term) (e : Eq.Eq {0} Term.Term (Term.succ a) (Term.succ b)) -> Term.noConfusion (Term.succ a) (Term.succ b) e : ∀ (a : Term.Term) (b : Term.Term) -> Eq.Eq {0} Term.Term (Term.succ a) (Term.succ b) -> Eq.Eq {0} Term.Term a b in goal
+let goal = λ (a : Term.Term) (b : Term.Term) (e : Eq.Eq {0} Term.Term (Term.succ a) (Term.succ b)) -> Term.lemmata.noConfusion (Term.succ a) (Term.succ b) e : ∀ (a : Term.Term) (b : Term.Term) -> Eq.Eq {0} Term.Term (Term.succ a) (Term.succ b) -> Eq.Eq {0} Term.Term a b in goal
 thena core> certify ⌜ ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b ⌝
 certified
 thena core> back
@@ -48,6 +48,6 @@ thena spine> data Vec (A : Type₀) : Nat -> Type₀ where { nil : Vec A zero' ;
 declared Vec.Vec
 thena spine> open Vec
 opened Vec
-thena spine> :show Vec.noConfusion
-nothing named Vec.noConfusion has been declared
+thena spine> :show Vec.lemmata.noConfusion
+nothing named Vec.lemmata.noConfusion has been declared
 thena spine> :quit

@@ -108,7 +108,7 @@ import Thena.Core.Context (Entry (..), entryType, entryVar, lamOver, piOver)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
-  , inDeclarationOf
+  , inLemmataOf
   , Ident (..)
   , close
   , fresh
@@ -157,24 +157,25 @@ import Thena.Global.Generate
   )
 
 
--- | The two names a datatype generates: @NoConfusionNat@ and @noConfusionNat@.
+-- | The two names a datatype generates: @Nat.lemmata.NoConfusion@ and
+-- @Nat.lemmata.noConfusion@.
 --
 -- Concatenation, per §3.6's own example of the rule — @noConfusionTerm@ is a
 -- name the user could have written, and if they do, the declaration that would
 -- generate it is refused.
 noConfusionNames :: GlobalName -> (GlobalName, GlobalName)
 noConfusionNames n =
-  (inDeclarationOf n "NoConfusion", inDeclarationOf n "noConfusion")
+  (inLemmataOf n "NoConfusion", inLemmataOf n "noConfusion")
 
--- | The two names the backwards half generates: @noConfusionNatInv@ and
--- @isLeftInvNat@ — §3.5's @noConfD⁻¹@ and @isLeftInvD@.
+-- | The two names the backwards half generates: @Nat.lemmata.noConfusionInv@
+-- and @Nat.lemmata.isLeftInv@ — §3.5's @noConfD⁻¹@ and @isLeftInvD@.
 --
 -- **Named apart from 'noConfusionNames' because they are generated apart.** A
 -- datatype whose forward pair is declined has no inverse either, and a caller
 -- that only wants the forward lemma should not have to know these exist.
 noConfusionInverseNames :: GlobalName -> (GlobalName, GlobalName)
 noConfusionInverseNames n =
-  (inDeclarationOf n "noConfusionInv", inDeclarationOf n "isLeftInv")
+  (inLemmataOf n "noConfusionInv", inLemmataOf n "isLeftInv")
 
 -- | Generate, check and admit all four definitions — or say why not.
 --

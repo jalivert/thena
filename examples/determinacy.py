@@ -353,7 +353,7 @@ STEP = [
        lhs=C("iszero", V("c1")), rhs=C("iszero", V("c2")), rec=True),
 ]
 
-# The conjunction Term.NoConfusion builds for a constructor with several
+# The conjunction Term.lemmata.NoConfusion builds for a constructor with several
 # arguments: right-nested And, and Unit when there is nothing to conjoin.
 # Must agree with Thena.Global.NoConfusion.conjoin exactly.
 #
@@ -389,9 +389,9 @@ def decompose(a, b, q, goal, ctr):
         x, y, qq = work.pop(0)
         if x[0] == 'c' and y[0] == 'c':
             if x[1] != y[1]:
-                # Term.NoConfusion at two different formers computes to Empty {0},
+                # Term.lemmata.NoConfusion at two different formers computes to Empty {0},
                 # so discrimination is absurd rather than a continuation.
-                return (compose(ps, "absurd (%s) (Term.noConfusion %s %s %s)"
+                return (compose(ps, "absurd (%s) (Term.lemmata.noConfusion %s %s %s)"
                                     % (goal, pp(x,0), pp(y,0), qq)), None)
             if not x[2]: continue
             eqs, binders, sub = [], [], []
@@ -418,12 +418,12 @@ def decompose(a, b, q, goal, ctr):
             # unified into it — `a6 is not bound before X`. The types are
             # right here, so writing them costs nothing and reads better.
             if TARGET == 'script':
-                ps.append("(\\ (%s : %s) -> (\\ %s -> %%s) %s) (Term.noConfusion %s %s %s)"
+                ps.append("(\\ (%s : %s) -> (\\ %s -> %%s) %s) (Term.lemmata.noConfusion %s %s %s)"
                           % (nc, conj(eqs), " ".join(binders),
                              " ".join(projections(nc, eqs)),
                              pp(x,0), pp(y,0), qq))
             else:
-                binds = ["let %s : %s = Term.noConfusion %s %s %s in"
+                binds = ["let %s : %s = Term.lemmata.noConfusion %s %s %s in"
                          % (nc, conj(eqs), pp(x,0), pp(y,0), qq)]
                 binds += ["let %s : %s = %s in" % (b, ty, pr)
                           for b, ty, pr in zip(binders, eqs, projections(nc, eqs))]

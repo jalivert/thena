@@ -128,7 +128,7 @@ spanDecl =
 -- for it is trivial and the nested J has nothing to cross; @acons@ has one, and
 -- its own argument @ps@ is what the acyclicity equipment is about. The package
 -- is @as; ps@ with @a@ interior to it, and before phase 223 that withheld
--- @All.noCycle@ and with it the cycle transition for every family of the shape.
+-- @All.lemmata.noCycle@ and with it the cycle transition for every family of the shape.
 allDecl =
   "All (A : Type\8320) : forall (n : Nat) -> Vec A n -> Type\8320 \
   \where { anil : All A zero (nil A) \
@@ -142,7 +142,7 @@ allDecl =
 -- to @as@, so the two travel packaged; @m@ is quantified after them and the
 -- element mentions it, so the package must be transported along @m@\'s equation
 -- when the element is read out of it and not before. Every family of this shape
--- had its declaration refused — @After.noConfusion does not typecheck@ — until
+-- had its declaration refused — @After.lemmata.noConfusion does not typecheck@ — until
 -- the package was moved lazily, one component at a time.
 afterDecl =
   "After (A : Type\8320) : forall (n : Nat) -> Vec A n -> Nat -> Type\8320 \
@@ -219,7 +219,7 @@ dpairDecl =
 -- **@Eq@ first, then @DPair@, and @And@ after both**, because each one's own
 -- no-confusion needs what precedes it: @And@ states equations, so it needs the
 -- equality, and @both@ takes two arguments, so it needs the pair. The reverse
--- order costs @And.NoConfusion@ silently.
+-- order costs @And.lemmata.NoConfusion@ silently.
 preludeDecls :: [String]
 preludeDecls = [eqDecl, dpairDecl, unitDecl, emptyDecl, andDecl]
 
@@ -319,15 +319,15 @@ natAnd = fst (declared [natDecl, andDecl])
 natAndCounter :: Int
 natAndCounter = snd (declared [natDecl, andDecl])
 
--- | The prelude and then @Nat@ — so @Nat@ arrives with @Nat.NoConfusion@ and
--- @Nat.noConfusion@ beside it (phase 14).
+-- | The prelude and then @Nat@ — so @Nat@ arrives with @Nat.lemmata.NoConfusion@ and
+-- @Nat.lemmata.noConfusion@ beside it (phase 14).
 eqNat :: GlobalEnv
 eqNat = fst (declared (preludeDecls ++ [natDecl]))
 
 eqNatCounter :: Int
 eqNatCounter = snd (declared (preludeDecls ++ [natDecl]))
 
--- | The prelude, @Nat@ and @Vec@ — @Nat.noConfusion@ beside an indexed family
+-- | The prelude, @Nat@ and @Vec@ — @Nat.lemmata.noConfusion@ beside an indexed family
 -- whose index is a @Nat@, which is what specialisation by unification is worked
 -- on (MS9 phase 177).
 eqNatVec :: GlobalEnv

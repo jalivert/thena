@@ -59,9 +59,9 @@ tests =
       -- now states the second equation after transporting along the first.
       -- @And@ is still a declaration of its own rather than @Sigma A (λ _ . B)@,
       -- and keeps its own lemma.
-    , declares "And.NoConfusion" True
-    , declares "Sigma.NoConfusion" True
-    , declares "DPair.NoConfusion" True
+    , declares "And.lemmata.NoConfusion" True
+    , declares "Sigma.lemmata.NoConfusion" True
+    , declares "DPair.lemmata.NoConfusion" True
     ]
   where
     statementOf g ty = testCase ("the prelude's " ++ g ++ " has its dependent type") $ do

@@ -425,7 +425,7 @@ moduleTests =
       let (s1, _) = loadProofSource s0 dependentModule
           g = globals (machineOf s1)
       map (\n -> isDeclared (named n) g)
-          ["Chain", "Chain.NoConfusion", "Chain.noConfusion"]
+          ["Chain", "Chain.lemmata.NoConfusion", "Chain.lemmata.noConfusion"]
         @?= [True, True, True]
 
   , testCase "a load with nothing to say warns about nothing" $ do

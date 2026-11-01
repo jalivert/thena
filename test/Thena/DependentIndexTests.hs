@@ -29,7 +29,7 @@
 -- MS9 phase 215.__ @examples\/dependent-argument-chain.thena@ declares
 -- @Pack@, whose one constructor's /own/ arguments are dependent — @i : Fin n@
 -- after @n : N@ — over a datatype with no indices at all. So the chain is in
--- @Pack.noConfusion@ rather than in the motive, and the transition that meets it
+-- @Pack.lemmata.noConfusion@ rather than in the motive, and the transition that meets it
 -- is injectivity rather than solution. Neither telescope is downstream of the
 -- other.
 --
@@ -104,7 +104,7 @@ tests =
       -- first equation is between two applications of @s@ where @mk@'s was a
       -- variable against a term. Injectivity drops that equation's binder, and
       -- the second equation — stated about it — is restated along the proof
-      -- rebuilt by @N.noConfusionInv@, with @N.isLeftInv@ carrying the method
+      -- rebuilt by @N.lemmata.noConfusionInv@, with @N.lemmata.isLeftInv@ carrying the method
       -- back. Refused by name until the backwards half was generated.
     , testCase "and the split injectivity crosses is admitted at its written type" $ do
         (s, _) <- startingSession
