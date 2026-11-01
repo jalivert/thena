@@ -54,8 +54,10 @@ atAHole :: Session -> (Session, [String])
 atAHole s =
   run s
     [ "data N : Type\8320 where { z : N ; s : N -> N }"
+    , "open N"
     , "data Vec (A : Type\8320) : forall (n : N) -> Type\8320 where \
       \{ vnil : Vec A z ; vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n) }"
+    , "open Vec"
     , ":theorem vfirst : \8704 (A : Type\8320) (m : N) (xs : Vec A (s m)) -> A"
     , "attack", "intro", "intro", "intro", "into", "along", "along", "along"
     ]

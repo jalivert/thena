@@ -34,7 +34,7 @@ import Thena.Engine
 import Thena.Errors (FailReason (..), MoveError (..))
 import Thena.Global.Env
   (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
-import Thena.Declared (nat)
+import Thena.Declared (nat, named)
 import Data.List (sort)
 import qualified Thena.Instral.Ops as Op
 import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Value (..))
@@ -305,8 +305,8 @@ gotoTests =
                       ] of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m ->
-            let named = [ i | Ident i <- identsIn (cursor (development m)), i == "h" ]
-             in length named @?= 2
+            let hs = [ i | Ident i <- identsIn (cursor (development m)), i == "h" ]
+             in length hs @?= 2
 
     , testCase "and fresh-name is how a rule gets one that is not" $
         case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm type0)))
@@ -409,9 +409,14 @@ resolveTests :: TestTree
 resolveTests =
   testGroup
     "resolve-name"
+      -- Written in full, because @nat@ opens nothing: the constructor is
+      -- @Nat.zero@ and the bare word reaches it only under an @open@, which the
+      -- case four below is about. A dotted /name/ and not dotted text —
+      -- 'operandName' refuses the latter.
     [ testCase "a declared constructor is a global" $ do
-        v <- expectBoundIn nat hole [Bind (Op.PVar "z") Nothing (ResolveName (Lit (VText "zero")))] "z"
-        v @?= VTerm (Global (rootName "zero") [])
+        v <- expectBoundIn nat hole
+               [Bind (Op.PVar "z") Nothing (ResolveName (Lit (VName (named "Nat.zero"))))] "z"
+        v @?= VTerm (Global (named "Nat.zero") [])
 
       -- §3.6's one namespace: a binder shadows a global of the same name, and
       -- this is the order "Thena.Syntax.Resolve" uses for the same reason. The

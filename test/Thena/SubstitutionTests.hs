@@ -348,7 +348,11 @@ fromCore env t = case whnf env [] t of
   where
     field a = case whnf env [] a of
       Primitive (LString s) -> Just (Name s)
-      Canonical (GlobalName [] "base") _ _ -> Just (Other base)
+      -- **@Ty.base@, by its full name** (MS10 phase 253): the guard asked for a
+      -- root @base@, and once a production lived in its language's namespace it
+      -- never matched — so a @Ty@ argument was read as a subterm of @LC@ and
+      -- every worked case compared against the wrong shape.
+      Canonical cn _ _ | cn == named "Ty.base" -> Just (Other base)
       a' -> Sub <$> fromCore env a'
 
 listOfStrings :: GlobalEnv -> Core -> Maybe [String]
@@ -614,7 +618,7 @@ crossing io =
               want = until (`notElem` avoid) (++ "'") x
           -- Only the binder is read: the body is the crossing's business.
           pure $ case whnf env [] (call env "LC.subst-all" [toCore "LC" t, substMap env "LC" sigma]) of
-            Canonical (GlobalName [] "abs") _ (z : _) -> whnf env [] z === Primitive (LString want)
+            Canonical (GlobalName ["LC"] "abs") _ (z : _) -> whnf env [] z === Primitive (LString want)
             other -> counterexample (show other) False
   , testProperty "LC: the free variables are the free variables" $
       withNumTests 300 $ forAll genLC $ \t -> ioProperty $ do
