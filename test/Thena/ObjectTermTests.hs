@@ -169,21 +169,21 @@ matching io =
 
   , testCase "and it matches the same term written out" $ do
       (env, p) <- setup "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
-      let t = con "app" [con "var" [Primitive (LString "f")], con "var" [Primitive (LString "g")]]
+      let t = con "LC.app" [con "LC.var" [Primitive (LString "f")], con "LC.var" [Primitive (LString "g")]]
       case matchPattern env p (VTerm t) of
-        Just bs -> map snd bs @?= [VTerm (con "var" [Primitive (LString "f")])
-                                  , VTerm (con "var" [Primitive (LString "g")])]
+        Just bs -> map snd bs @?= [VTerm (con "LC.var" [Primitive (LString "f")])
+                                  , VTerm (con "LC.var" [Primitive (LString "g")])]
         Nothing -> assertFailure "it did not match"
 
   , testCase "a hole at a token class binds the literal as a String" $ do
       (env, p) <- setup "rule v LC[var]`${s}` :- do say s"
-      matchPattern env p (VTerm (con "var" [Primitive (LString "f")]))
+      matchPattern env p (VTerm (con "LC.var" [Primitive (LString "f")]))
         @?= Just [("s", VText "f")]
 
   , testCase "a written token matches only itself" $ do
       (env, p) <- setup "rule v LC[var]`x` :- do say \"x\""
-      ( matchPattern env p (VTerm (con "var" [Primitive (LString "x")]))
-        , matchPattern env p (VTerm (con "var" [Primitive (LString "y")])) )
+      ( matchPattern env p (VTerm (con "LC.var" [Primitive (LString "x")]))
+        , matchPattern env p (VTerm (con "LC.var" [Primitive (LString "y")])) )
         @?= (Just [], Nothing)
 
     -- **An arity is part of the shape.** The wrapper on its own is a term of
@@ -192,13 +192,13 @@ matching io =
   , testCase "a constructor applied to too few arguments does not match" $ do
       (env, p) <- setup "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
       ( matchPattern env p (VTerm (Global (named "LC.app") []))
-        , matchPattern env p (VTerm (con "app" [con "var" [Primitive (LString "f")]])) )
+        , matchPattern env p (VTerm (con "LC.app" [con "LC.var" [Primitive (LString "f")]])) )
         @?= (Nothing, Nothing)
 
     -- **The brackets restrict here too**, as they do in a surface literal.
   , testCase "a production's pattern does not match another production" $ do
       (env, p) <- setup "rule v LC[var]`${s}` :- do say s"
-      let t = con "app" [con "var" [Primitive (LString "f")], con "var" [Primitive (LString "g")]]
+      let t = con "LC.app" [con "LC.var" [Primitive (LString "f")], con "LC.var" [Primitive (LString "g")]]
       matchPattern env p (VTerm t) @?= Nothing
   ]
   where
@@ -219,13 +219,13 @@ building io =
       o <- operandOfRule "rule lit x :- do t = LC`( f g )` ; say \"x\""
       case o of
         Lit (VTerm t) ->
-          t @?= con "app" [con "var" [Primitive (LString "f")], con "var" [Primitive (LString "g")]]
+          t @?= con "LC.app" [con "LC.var" [Primitive (LString "f")], con "LC.var" [Primitive (LString "g")]]
         other -> assertFailure (show other)
 
   , testCase "and one with splices is assembled when it is read" $ do
       o <- operandOfRule "rule lit x :- do t = LC[var]`${x}` ; say \"x\""
       operandIn [("x", VText "zzz")] o
-        @?= Right (VTerm (con "var" [Primitive (LString "zzz")]))
+        @?= Right (VTerm (con "LC.var" [Primitive (LString "zzz")]))
 
     -- **What keeps a hole honest is the check at load, not the assembly.** The
     -- fold writes whichever literal the value is, and a body that puts the
@@ -244,4 +244,4 @@ building io =
         []    -> assertFailure "the rule binds nothing"
 
 con :: String -> [Core] -> Core
-con name = foldl App (Global (rootName name) [])
+con name = foldl App (Global (named name) [])

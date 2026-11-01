@@ -16,6 +16,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (Core (..), Literal (..), rootName)
+import Thena.Declared (named)
 import Thena.Driver
   ( Response (..)
   , Session
@@ -245,12 +246,12 @@ notation =
       case parse (earleyRules gs) (Earley.StartAt "extend-in") (pieces "x : \953 \8712 \183 , y : \953") of
         Left why -> assertFailure (show why)
         Right tree -> buildTerm gs tree @?= Right
-          (apps "extend-in" [str "x", con "base", apps "extend" [con "empty", str "y", con "base"]])
+          (apps "extend-in" [str "x", con "Ty.base", apps "extend" [con "Ctx.empty", str "y", con "Ty.base"]])
   , testCase "and prints back as the text it was read from" $ do
       s <- loaded header
       let m = machineOf s
       printRegion (grammars m) (renderCore (Rendering [] 0) [])
-          (apps "extend-in" [str "x", con "base", apps "extend" [con "empty", str "x", con "base"]])
+          (apps "extend-in" [str "x", con "Ty.base", apps "extend" [con "Ctx.empty", str "x", con "Ty.base"]])
         @?= Just "x : \953 \8712 \183 , x : \953"
   , testCase "a lookup literal is a type" $ do
       s <- loaded header
@@ -270,7 +271,7 @@ notation =
   ]
   where
     str = Primitive . LString
-    con n = Global (rootName n) []
+    con n = Global (named n) []
     apps f = foldl App (con f)
 
 proofs :: [TestTree]

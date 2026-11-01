@@ -32,9 +32,10 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar)
-import Thena.Core.Term (Core, Ident (..), fresh, freeVars, rootName)
+import Thena.Core.Term (Core, Ident (..), fresh, freeVars)
 import Thena.Declared
   ( opensIn
+  , named
   , eqNat
   , eqNatCounter
   , eqNatFinPack
@@ -134,14 +135,14 @@ vtailTests =
     -- __The impossible case vanishes.__ @zero@ against @succ n@ is a conflict,
     -- so there is no subgoal at all and nothing is left for the user to close.
   , testCase "nil's method, after: no subgoal at all" $
-      vecGoal "nil" (methodOf 0) @?= Nothing
+      vecGoal "Vec.nil" (methodOf 0) @?= Nothing
 
     -- __And the determined binder goes.__ @succ n1 ≃ succ n@ is injectivity and
     -- then solution, so @n1@ is gone, @as@ is a @Vec A n@ rather than a
     -- @Vec A n1@ — which is exactly the transport the user writes today — and
     -- the induction hypothesis follows it.
   , testCase "cons's method, after: n1 is solved and the vector is at n" $
-      vecGoal "cons" (methodOf 1)
+      vecGoal "Vec.cons" (methodOf 1)
         @?= Just ( "consCase"
                  , "A -> Vec A n -> \
                    \(Eq {0} Nat n (succ n) -> Vec A n) -> Vec A n" )
@@ -150,7 +151,7 @@ vtailTests =
     -- takes three and the subgoal binds two, and this is the only thing that
     -- says which two: @n1@ is the first and it was solved to @n@.
   , testCase "cons's method, after: the first argument is forced to n" $
-      vecForced "cons" (methodOf 1) @?= [Just "n", Nothing, Nothing]
+      vecForced "Vec.cons" (methodOf 1) @?= [Just "n", Nothing, Nothing]
 
     -- __And it is written in the AMBIENT context__, which is the one thing the
     -- design left unmeasured: @n@ is a variable of the context the elimination
@@ -158,13 +159,13 @@ vtailTests =
     -- caller may bind it with @define@ there. A term mentioning a binder of the
     -- method would not be.
   , testCase "and the term it was forced to is ambient, not a method binder" $
-      forcedVarsIn vecContext "cons" (methodOf 1) @?= [["n"]]
+      forcedVarsIn vecContext "Vec.cons" (methodOf 1) @?= [["n"]]
 
     -- A method that vanished still answers. Nothing claims a subgoal, so
     -- nothing reads this, but a conflict after a solution has one and the shape
     -- does not depend on which case it is.
   , testCase "nil's method, after: nothing was forced before the conflict" $
-      vecForced "nil" (methodOf 0) @?= []
+      vecForced "Vec.nil" (methodOf 0) @?= []
 
     -- __AND THIS IS THE WHOLE REPORT__ (MS9 phase 192), which is what the three
     -- lists above are three views of. One entry per binder of the method, in
@@ -182,7 +183,7 @@ vtailTests =
     -- does that, and this is here so that @binder-name@ is total.
   , testCase "cons's method: the report says what each binder is" $
       reportOf vecContext (run' eqNatVec vecContext vecCounter
-                                "cons" vecShape (methodOf 1))
+                                "Vec.cons" vecShape (methodOf 1))
         @?= [ ("argument n", Just "n")
             , ("argument a",  Nothing)
             , ("argument as", Nothing)
@@ -478,18 +479,18 @@ residualTests =
 refusalTests :: [TestTree]
 refusalTests =
   [ testCase "a name that is not a constructor" $
-      refused "Nat" 1 "\8704 (m : Nat) -> Eq {0} Nat m k"
-        @?= Just (NotThatConstructor (rootName "Nat"))
+      refused "Nat.Nat" 1 "\8704 (m : Nat) -> Eq {0} Nat m k"
+        @?= Just (NotThatConstructor (named "Nat.Nat"))
 
     -- @succ@'s method binds its argument and its induction hypothesis, so two
     -- binders and an equation is three — and a type with one Π is not it.
   , testCase "fewer binders than the constructor's telescope needs" $
-      case refused "succ" 1 "\8704 (m : Nat) -> Nat" of
+      case refused "Nat.succ" 1 "\8704 (m : Nat) -> Nat" of
         Just (MethodNotShaped 2 1 _) -> pure ()
         other -> assertFailure ("expected a mis-shaped method, got " ++ show other)
 
   , testCase "a binder in the equation block that is not an equation" $
-      case refused "succ" 1 "\8704 (m : Nat) -> Nat -> Nat -> Nat" of
+      case refused "Nat.succ" 1 "\8704 (m : Nat) -> Nat -> Nat -> Nat" of
         Just (NotAnEquation [_]) -> pure ()
         other -> assertFailure ("expected one non-equation, got " ++ show other)
 
@@ -505,7 +506,7 @@ refusalTests =
     -- Each equation below mentions @q@ in its /carrier/, which is the cheapest
     -- shape with the dependency; a generated one mentions it inside a J.
   , testCase "a deletion whose proof a later equation names" $
-      case refused "succ" 2
+      case refused "Nat.succ" 2
              "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat k k) \
              \-> Eq {0} (Eq {0} Nat k k) q q -> Nat" of
         Just (TransportedEquation ByDeletion 1 _) -> pure ()
@@ -518,7 +519,7 @@ refusalTests =
     -- variable to rebuild from. The equation is kept, which is the same answer
     -- as before the transition existed.
   , testCase "an injectivity over a constructor of two arguments" $
-      case refused "succ" 2
+      case refused "Nat.succ" 2
              "\8704 (m : Nat) (ih : Nat) \
              \(q : Eq {0} (And {0 0} Nat Nat) (both {0 0} Nat Nat m k) (both {0 0} Nat Nat k m)) \
              \-> Eq {0} (Eq {0} (And {0 0} Nat Nat) (both {0 0} Nat Nat m k) (both {0 0} Nat Nat k m)) q q \
@@ -770,7 +771,7 @@ specialisesIn env ctx n what c k src want = testCase what $
 -- | The refusal, for a fixture that is meant to be refused.
 refused :: String -> Int -> String -> Maybe SpecialiseError
 refused c k src =
-  case fst (specialise eqNat natContext natCounter (rootName c)
+  case fst (specialise eqNat natContext natCounter (named c)
               (hypsOf eqNat c) (plainShape k)
               (term eqNat natContext natCounter src)) of
     Left e  -> Just e
@@ -780,7 +781,7 @@ refused c k src =
 -- fixture, not a test result.
 run' :: GlobalEnv -> Context -> Int -> String -> MethodShape -> Core -> Specialisation
 run' env ctx n c shape mty =
-  case fst (specialise env ctx n (rootName c) (hypsOf env c) shape mty) of
+  case fst (specialise env ctx n (named c) (hypsOf env c) shape mty) of
   Right s -> s
   Left e  -> error (c ++ ": " ++ show e)
 
@@ -799,7 +800,7 @@ plainShape k = MethodShape [] k [] [] [] []
 -- here instead. It stopped doing that at phase 188 because it was assuming the
 -- caller's scheme, and @D.case@'s methods carry none.
 hypsOf :: GlobalEnv -> String -> [Ident]
-hypsOf env c = case lookupConstructor (rootName c) env of
+hypsOf env c = case lookupConstructor (named c) env of
   Nothing     -> []
   Just (d, k) ->
     [ entryIdent e

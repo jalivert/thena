@@ -17,6 +17,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (Core (..), Literal (..), rootName)
+import Thena.Declared (named)
 import Thena.Global.Env
   ( Constant (..)
   , Definition (..)
@@ -131,7 +132,9 @@ loaded = do
     (_, other) -> assertFailure (show other) >> pure []
 
 con :: String -> [Core] -> Core
-con name = foldl App (Global (rootName name) [])
+-- | **Named with its language's path** (MS10 phase 251): a production lives in
+-- the namespace its block opens.
+con name = foldl App (Global (named name) [])
 
 str :: String -> Core
 str = Primitive . LString
@@ -147,23 +150,23 @@ str = Primitive . LString
 objectCases :: [TestTree]
 objectCases =
   [ agree "a bracketed production needs no fence"
-      (con "abs" [str "x", con "base" [], con "var" [str "x"]])
+      (con "LC.abs" [str "x", con "Ty.base" [], con "LC.var" [str "x"]])
   , agree "bare juxtaposition, no brackets in the grammar"
-      (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
   , agree "what the notation cannot write is a foreign splice"
-      (con "app" [Global (rootName "twice") [], con "var" [str "y"]])
+      (con "LC.app" [Global (rootName "twice") [], con "LC.var" [str "y"]])
   , agree "a foreign splice that is itself a region"
-      (con "app" [con "var" [Global (rootName "nom") []], con "var" [str "y"]])
+      (con "LC.app" [con "LC.var" [Global (rootName "nom") []], con "LC.var" [str "y"]])
   , agree "a name the class would not read back is spliced"
-      (con "var" [str "a b"])
+      (con "LC.var" [str "a b"])
   , agree "the left operand of a juxtaposition is fenced"
-      (con "juxt" [con "juxt" [con "ref" [str "f"], con "ref" [str "a"]], con "ref" [str "b"]])
+      (con "Ex.juxt" [con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]], con "Ex.ref" [str "b"]])
   , agree "and the right operand, rather than both"
-      (con "juxt" [con "ref" [str "f"], con "juxt" [con "ref" [str "a"], con "ref" [str "b"]]])
+      (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.juxt" [con "Ex.ref" [str "a"], con "Ex.ref" [str "b"]]])
   , agree "a term the grammar reads one way is written flat"
-      (con "clet" [str "f", con "cjux" [con "cref" [str "a"], con "cref" [str "b"]], con "cref" [str "c"]])
+      (con "Coll.clet" [str "f", con "Coll.cjux" [con "Coll.cref" [str "a"], con "Coll.cref" [str "b"]], con "Coll.cref" [str "c"]])
   , agree "the same term with a variable spelled like a terminal is fenced"
-      (con "clet" [str "f", con "cjux" [con "cref" [str "a"], con "cref" [str "i"]], con "cref" [str "b"]])
+      (con "Coll.clet" [str "f", con "Coll.cjux" [con "Coll.cref" [str "a"], con "Coll.cref" [str "i"]], con "Coll.cref" [str "b"]])
   ]
   where
     agree name t = testCase name $ do
@@ -189,7 +192,7 @@ objectCases =
 regionCases :: [TestTree]
 regionCases =
   [ testCase "an object term reached from Core opens a literal" $ do
-      sh <- shapeOf (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      sh <- shapeOf (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
       case sh of
         ARegion inner -> case displayShape inner of
           AnObjectTerm lang prod _ -> (lang, prod) @?= ("Ex", "juxt")
@@ -197,7 +200,7 @@ regionCases =
         other -> assertFailure ("not a region: " <> show other)
 
   , testCase "and an inline slot continues it rather than opening another" $ do
-      sh <- shapeOf (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      sh <- shapeOf (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
       case sh of
         ARegion inner -> case displayShape inner of
           AnObjectTerm _ _ items ->
@@ -206,7 +209,7 @@ regionCases =
         other -> assertFailure ("not a region: " <> show other)
 
   , testCase "and a nested one really is inline, so the check is not vacuous" $ do
-      sh <- shapeOf (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      sh <- shapeOf (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
       case sh of
         ARegion inner -> case displayShape inner of
           AnObjectTerm _ _ items ->
@@ -218,7 +221,7 @@ regionCases =
   , testCase "a splice holding a literal of its own opens a second one" $ do
       -- 'Thena.PrintTests' established this term's printed form: the splice's
       -- own argument is a region, so it is written @${LC`…`}@.
-      sh <- shapeOf (con "app" [con "var" [Global (rootName "nom") []], con "var" [str "y"]])
+      sh <- shapeOf (con "LC.app" [con "LC.var" [Global (rootName "nom") []], con "LC.var" [str "y"]])
       case sh of
         ARegion inner -> case displayShape inner of
           AnObjectTerm _ _ items ->
@@ -235,7 +238,7 @@ regionCases =
 
   , testCase "the seamless form is the expanded one without tag or fences" $ do
       gs <- loaded
-      let t = con "juxt" [con "ref" [str "f"], con "ref" [str "a"]]
+      let t = con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]]
           d = displayCore gs (Budget 200) [] [] 0 (Address []) t
       expanded <- pure (redraw d)
       case displayShape d of
