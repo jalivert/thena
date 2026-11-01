@@ -23,6 +23,7 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (Core (..), GlobalName (..), rootName, nameDotted)
+import Thena.Declared (declaredAs, named)
 import Thena.Driver
   ( Response (..)
   , RuleFileError (..)
@@ -361,10 +362,10 @@ meaning =
                 , (rootName "abs", [ Argument "x" str (Binder (rootName "x"))
                                      , Argument "T" (lang "Ty") Plain
                                      , Argument "E" (lang "LC") (Scope [0]) ])
-                , (rootName "app", [Argument "M" (lang "LC") Plain, Argument "N" (lang "LC") Plain])
+                , (named "LC.app", [Argument "M" (lang "LC") Plain, Argument "N" (lang "LC") Plain])
                   -- §4.3: a name written twice is one argument.
-                , (rootName "repeat", [Argument "M" (lang "LC") Plain])
-                , (rootName "vacuous", [ Argument "x" str (Binder (rootName "x"))
+                , (named "LC.repeat", [Argument "M" (lang "LC") Plain])
+                , (named "LC.vacuous", [ Argument "x" str (Binder (rootName "x"))
                                          , Argument "M" (lang "LC") Plain
                                          , Argument "N" (lang "LC") Plain ])
                 ]
@@ -414,7 +415,7 @@ meaning =
           | p <- constructorProductions g ]
             @?= [ (rootName "var", [Occurrence (rootName "x")])
                 , (rootName "abs", [Binder (rootName "x"), Scope [0]])
-                , (rootName "big", [Binder (rootName "X"), Scope [0]])
+                , (named "L.big", [Binder (rootName "X"), Scope [0]])
                 ]
         other -> assertFailure (show (length other) ++ " grammars called L")
     -- **It installs and says nothing** (MS8 phase 155). It used to warn: the
@@ -631,12 +632,12 @@ notating =
         Left e -> assertFailure e
         Right s1 -> do
           let gs = grammars (machineOf s1)
-          v <- case [ g | g <- gs, grammarName g == rootName "Valid" ] of
+          v <- case [ g | g <- gs, grammarName g == named "Valid.Valid" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called Valid")
           -- One production, the type former's own spelling, named after it.
           map (\p -> (gproductionName p, gproductionKind p)) (grammarProductions v)
-            @?= [(rootName "Valid", TypeFormer)]
+            @?= [(named "Valid.Valid", TypeFormer)]
           map argumentSort (concatMap gproductionArguments (grammarProductions v))
             @?= map (OfLanguage . rootName) ["Ctx", "LC", "Ty", "typing"]
           -- And the constructor's target prints in it: a judgment over a
@@ -967,7 +968,7 @@ refusals =
 -- is what a §4.8 refusal carries so that its message can show the author the
 -- type their own signature says (MS8 phase 160).
 datatype :: String -> Core
-datatype n = Canonical (rootName n) [] []
+datatype n = Canonical (declaredAs n) [] []
 
 regex :: String -> Regex
 regex = either (error . show) id . parseRegex

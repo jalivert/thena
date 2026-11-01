@@ -36,6 +36,7 @@ import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), Ident (..), Var, close, fresh, open)
 import Thena.Core.Typing (check, infer)
 import Thena.Declared ( opensIn
+  , declaredAs
   ,named, natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Errors (TypeError (..))
@@ -265,7 +266,7 @@ eliminatorTypeTests =
   , testCase "Empty's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Empty" (LZero)
   ]
   where
-    wellFormed env n0 d l = case lookupInductive (named d) env of
+    wellFormed env n0 d l = case lookupInductive (declaredAs d) env of
       Nothing  -> assertFailure (d ++ " is not declared")
       Just def ->
         let (ty, n) = eliminatorType def l n0

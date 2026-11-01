@@ -37,6 +37,7 @@ import Thena.Core.Term
   )
 import Thena.Declared
   ( opensIn
+  , named
   , eqNat
   , eqNatCounter
   , eqStep
@@ -587,7 +588,7 @@ refusalTests =
       let (env, n0) = declared [natDecl, finDecl]
           (ctx, n1) = contextOf env n0 [("n", "Nat"), ("i", "Fin n")]
        in case fst (attempt env ctx n1 "Nat" "i") of
-            Left e  -> e @?= NoEquality (rootName "Eq")
+            Left e  -> e @?= NoEquality (named "Eq.Eq")
             Right _ -> assertFailure "expected a refusal"
 
     -- Thesis §3.5.2, \"what to fix, what to abstract\", arriving as a refusal.

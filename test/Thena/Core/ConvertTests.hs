@@ -237,17 +237,17 @@ siteTests =
         @?= Just (ConversionFailure [] (LevelsDiffer (LZero) (levelOfNat 1)))
   , testCase "two formers, at the top" $
       same [] "zero" "nil Nat"
-        @?= Just (ConversionFailure [] (NamesDiffer (named "zero") (named "nil")))
+        @?= Just (ConversionFailure [] (NamesDiffer (named "Nat.zero") (named "Vec.nil")))
   , testCase "inside a former's argument" $
       same [] "succ zero" "succ (succ zero)"
         @?= Just
               (ConversionFailure
-                 [TheArgumentOf (named "succ") 0]
-                 (NamesDiffer (named "zero") (named "succ")))
+                 [TheArgumentOf (named "Nat.succ") 0]
+                 (NamesDiffer (named "Nat.zero") (named "Nat.succ")))
   , testCase "under a binder, then in the domain" $
       routeOf (same [] "\\ (x : Nat) -> Vec Nat zero -> Nat"
                      "\\ (x : Nat) -> Vec Nat (succ zero) -> Nat")
-        @?= [TheBody (Ident "x"), TheDomain (Ident "_"), TheArgumentOf (named "Vec") 1]
+        @?= [TheBody (Ident "x"), TheDomain (Ident "_"), TheArgumentOf (named "Vec.Vec") 1]
   , testCase "in an elimination's motive — with a target that keeps it stuck" $
       -- The target must be a variable. With a value there, iota fires on both
       -- sides before the motives are ever compared and the two are convertible

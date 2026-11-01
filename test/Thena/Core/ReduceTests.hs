@@ -120,7 +120,7 @@ laws =
 hyp :: Int -> String -> (Var, Entry, Int)
 hyp n name =
   let (v, n1) = fresh n
-   in (v, Hypothesis v (Ident name) (Global (named "Nat") []), n1)
+   in (v, Hypothesis v (Ident name) (Global (named "Nat.Nat") []), n1)
 
 -- | Read a term against 'natVec' and its counter, in the given context.
 -- Failing to parse is a fixture bug, not a test result: it errors loudly
@@ -143,13 +143,13 @@ betaDeltaTests :: [TestTree]
 betaDeltaTests =
   [ testCase "beta then delta: applying identity to zero gives zero" $
       whnf nat [] (term [] "(\\ (x : Nat) -> x) zero")
-        @?= Canonical (named "zero") [] []
+        @?= Canonical (named "Nat.zero") [] []
   , testCase "delta on a Global former with no arguments" $
-      whnf nat [] (term [] "Nat") @?= Canonical (named "Nat") [] []
+      whnf nat [] (term [] "Nat") @?= Canonical (named "Nat.Nat") [] []
   , testCase "delta on a Free variable bound to a Definition" $
       let (v, _) = fresh 0
-          ctx    = [Definition v (Ident "x") (term [] "zero") (Global (named "Nat") [])]
-       in whnf nat ctx (Free v) @?= Canonical (named "zero") [] []
+          ctx    = [Definition v (Ident "x") (term [] "zero") (Global (named "Nat.Nat") [])]
+       in whnf nat ctx (Free v) @?= Canonical (named "Nat.zero") [] []
   , testCase "a Free variable bound to a Hypothesis is already neutral" $
       let (v, e, _) = hyp natVecCounter "h"
        in whnf nat [e] (Free v) @?= Free v
@@ -170,19 +170,19 @@ betaDeltaTests =
 delayedDeltaTests :: [TestTree]
 delayedDeltaTests =
   [ testCase "a constructor given none of its arguments is already whnf" $
-      whnf natVec [] (term [] "cons") @?= Global (named "cons") []
+      whnf natVec [] (term [] "cons") @?= Global (named "Vec.cons") []
   , testCase "given some but not all, still whnf, and the spine is untouched" $
       whnf natVec [] (term [] "cons Nat")
-        @?= App (Global (named "cons") []) (Global (named "Nat") [])
+        @?= App (Global (named "Vec.cons") []) (Global (named "Nat.Nat") [])
   , testCase "a type former is counted over parameters AND indices" $
       -- Vec has one of each, so `Vec Nat` is one short.
       whnf natVec [] (term [] "Vec Nat")
-        @?= App (Global (named "Vec") []) (Global (named "Nat") [])
+        @?= App (Global (named "Vec.Vec") []) (Global (named "Nat.Nat") [])
   , testCase "a nullary former is saturated at once and does unfold" $
-      whnf natVec [] (term [] "Nat") @?= Canonical (named "Nat") [] []
+      whnf natVec [] (term [] "Nat") @?= Canonical (named "Nat.Nat") [] []
   , testCase "saturated, it unfolds and the Canonical appears" $
       whnf natVec [] (term [] "succ zero")
-        @?= Canonical (named "succ") [] [Global (named "zero") []]
+        @?= Canonical (named "Nat.succ") [] [Global (named "Nat.zero") []]
   , testCase "an ordinary definition is not a former and unfolds regardless" $
       -- The `Nothing` branch of 'formerArity'. Nothing in MS1 builds one of
       -- these yet — proved theorems arrive at phase 13, the prelude at 11 —
@@ -200,7 +200,7 @@ delayedDeltaTests =
 nuTests :: [TestTree]
 nuTests =
   [ testCase "a let whose bound name is used substitutes it" $
-      whnf nat [] (term [] "let y = zero : Nat in y") @?= Canonical (named "zero") [] []
+      whnf nat [] (term [] "let y = zero : Nat in y") @?= Canonical (named "Nat.zero") [] []
   , testCase "a let whose bound name is unused leaves no residue" $
       -- Same result with or without the (unused) let: nothing about @y@
       -- survives, so there is no leftover binding for ν to dispose of on its
@@ -221,9 +221,9 @@ iotaNatTests =
       -- 'Canonical': whnf never reduces an argument position, only the head
       -- spine, and 'zero' sits inside 'succ'\'s one argument.
       elimNatAt "(succ zero)"
-        @?= App (App (Free ms) (Global (named "zero") []))
-                (Eliminate (named "Nat") [] [] (Free p) [Free mz, Free ms] []
-                  (Global (named "zero") []))
+        @?= App (App (Free ms) (Global (named "Nat.zero") []))
+                (Eliminate (named "Nat.Nat") [] [] (Free p) [Free mz, Free ms] []
+                  (Global (named "Nat.zero") []))
   ]
   where
     (p, ep, n0)   = hyp natVecCounter "P"
@@ -248,7 +248,7 @@ iotaVecTests =
       whnf natVec ctx (term ctx elimCons)
         @?= App
               (App (App (App (Free ccons) (Free n0)) (Free a0)) (Free as0))
-              (Eliminate (named "Vec") [] [Free vA] (Free pm) [Free cnil, Free ccons]
+              (Eliminate (named "Vec.Vec") [] [Free vA] (Free pm) [Free cnil, Free ccons]
                 [Free n0] (Free as0))
   ]
   where
@@ -287,7 +287,7 @@ iotaFinTests =
       elimFinAt "((succ n0))" "(fs n0 i0)"
         @?= App
               (App (App (Free mfs) (Free n0)) (Free i0))
-              (Eliminate (named "Fin") [] [] (Free pf) [Free mfz, Free mfs]
+              (Eliminate (named "Fin.Fin") [] [] (Free pf) [Free mfz, Free mfs]
                 [Free n0] (Free i0))
   ]
   where
@@ -362,12 +362,12 @@ iotaParameterTests =
 iotaSaturationTests :: [TestTree]
 iotaSaturationTests =
   [ testCase "too few arguments: stuck, not the method on its own" $
-      whnf nat ctx (elimAt (Canonical (named "succ") [] [])) @?= elimAt (Canonical (named "succ") [] [])
+      whnf nat ctx (elimAt (Canonical (named "Nat.succ") [] [])) @?= elimAt (Canonical (named "Nat.succ") [] [])
   , testCase "too many arguments: stuck, not the method over-applied" $
-      whnf nat ctx (elimAt (Canonical (named "zero") [] [Free mz, Free mz]))
-        @?= elimAt (Canonical (named "zero") [] [Free mz, Free mz])
+      whnf nat ctx (elimAt (Canonical (named "Nat.zero") [] [Free mz, Free mz]))
+        @?= elimAt (Canonical (named "Nat.zero") [] [Free mz, Free mz])
   , testCase "and the correctly saturated target still fires" $
-      whnf nat ctx (elimAt (Canonical (named "zero") [] [])) @?= Free mz
+      whnf nat ctx (elimAt (Canonical (named "Nat.zero") [] [])) @?= Free mz
   ]
   where
     (p, ep, n0)   = hyp natVecCounter "P"
@@ -375,7 +375,7 @@ iotaSaturationTests =
     (ms, ems, _)  = hyp n1 "ms"
     ctx           = [ep, emz, ems]
 
-    elimAt = Eliminate (named "Nat") [] [] (Free p) [Free mz, Free ms] []
+    elimAt = Eliminate (named "Nat.Nat") [] [] (Free p) [Free mz, Free ms] []
 
 -- --------------------------------------------------------------------------
 -- Neutral terms
@@ -397,7 +397,7 @@ neutralTests =
           (ms, ems, _)     = hyp n2 "ms"
           ctx              = [eh, ep, emz, ems]
        in whnf nat ctx (term ctx "elim Nat () P (mz ms) () h")
-            @?= Eliminate (named "Nat") [] [] (Free p) [Free mz, Free ms] [] (Free h)
+            @?= Eliminate (named "Nat.Nat") [] [] (Free p) [Free mz, Free ms] [] (Free h)
   ]
 
 -- --------------------------------------------------------------------------

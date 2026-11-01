@@ -18,6 +18,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), Literal (..), rootName)
+import Thena.Declared (named)
 import Thena.Driver
   ( Response (..)
   , machineOf
@@ -160,7 +161,7 @@ refused =
       , "t : Token Bool"
       , "t = /x/"
       ]
-      (TokenClassRefused (rootName "t") (TokenTypeUnsupported (Canonical (rootName "Bool") [] [])))
+      (TokenClassRefused (rootName "t") (TokenTypeUnsupported (Canonical (named "Bool.Bool") [] [])))
   , klass "the regex does not parse: a stray metacharacter"
       ["f : Token String", "f = /a{3}/"]
       (refusedRegex "f" "a{3}" (RegexUnexpected 1 '{'))

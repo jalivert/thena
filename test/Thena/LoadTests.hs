@@ -22,7 +22,7 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (rootName)
 import Thena.Errors (FailReason (..))
-import Thena.Declared (named)
+import Thena.Declared (declaredAs, named)
 import Thena.Driver
   ( LoadError (..)
   , Loaded (..)
@@ -88,8 +88,8 @@ preludeTests =
       (s, _) <- startingSession
       let env = globals (machineOf s)
       sequence_
-        [ assertBool (n ++ " is not declared") (isDeclared (rootName n) env)
-        | n <- ["Eq", "refl", "Unit", "unit", "Empty"]
+        [ assertBool (n ++ " is not declared") (isDeclared (named n) env)
+        | n <- ["Eq.Eq", "Eq.refl", "Unit.Unit", "Unit.unit", "Empty.Empty"]
         ]
 
     -- §9's phase-11 deliverable, in full: "Eq's generated eliminator is J and
@@ -98,7 +98,7 @@ preludeTests =
       (s, _) <- startingSession
       let env = globals (machineOf s)
           n0  = names (machineOf s)
-      case lookupInductive (rootName "Eq") env of
+      case lookupInductive (declaredAs "Eq") env of
         Nothing -> assertFailure "Eq is not declared"
         Just d  ->
           -- **The indices are @_@ and not @x@** (MS4 phase 54): the prelude is

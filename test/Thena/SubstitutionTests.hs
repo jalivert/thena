@@ -26,8 +26,8 @@ import Test.Tasty.QuickCheck
 
 import Thena.Core.Level (Level (..))
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), rootName, nameDotted)
-import Thena.Declared (named)
+import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), rootName)
+import Thena.Declared (declaredAs, named)
 import Thena.Driver
   ( Response (..)
   , machineOf
@@ -318,21 +318,24 @@ instance Eq Field where
   _ == _ = False
 
 base :: Core
-base = Canonical (rootName "base") [] []
+base = Canonical (named "Ty.base") [] []
 
-toCore :: Tm -> Core
-toCore (Tm c fs) = Canonical (rootName c) [] (map field fs)
+-- | **The language is threaded, not recovered from the word** (MS10 phase 251):
+-- a production lives in its language's namespace, so @app@ in @LC@ is @LC.app@,
+-- and a 'Tm' keeps the short word because that is what the roles are keyed by.
+toCore :: String -> Tm -> Core
+toCore l (Tm c fs) = Canonical (GlobalName [l] c) [] (map field fs)
   where
     field f = case f of
       Name s -> Primitive (LString s)
-      Sub t -> toCore t
+      Sub t -> toCore l t
       Other t -> t
 
 -- | A closed value of a language, read back: whnf, and again under each
 -- constructor. There is no normaliser, and a data value needs none.
 fromCore :: GlobalEnv -> Core -> Maybe Tm
 fromCore env t = case whnf env [] t of
-  Canonical cn _ as -> Tm (nameDotted cn) <$> traverse field as
+  Canonical cn _ as -> Tm (nameWord cn) <$> traverse field as
   _ -> Nothing
   where
     field a = case whnf env [] a of
@@ -342,8 +345,8 @@ fromCore env t = case whnf env [] t of
 
 listOfStrings :: GlobalEnv -> Core -> Maybe [String]
 listOfStrings env t = case whnf env [] t of
-  Canonical (GlobalName [] "nil") _ _ -> Just []
-  Canonical (GlobalName [] "cons") _ as | [h, r] <- lastTwo as -> case whnf env [] h of
+  Canonical (GlobalName ["List"] "nil") _ _ -> Just []
+  Canonical (GlobalName ["List"] "cons") _ as | [h, r] <- lastTwo as -> case whnf env [] h of
     Primitive (LString s) -> (s :) <$> listOfStrings env r
     _ -> Nothing
   _ -> Nothing
@@ -358,21 +361,21 @@ call env f = foldl App (Global (named f) (replicate levels LZero))
   where levels = maybe 0 (length . definitionLevels) (lookupDefinition (named f) env)
 
 stringList :: GlobalEnv -> [String] -> Core
-stringList env = foldr (\s r -> call env "cons" [str, Primitive (LString s), r]) (call env "nil" [str])
+stringList env = foldr (\s r -> call env "List.cons" [str, Primitive (LString s), r]) (call env "List.nil" [str])
   where str = Global (rootName "String") []
 
 -- | A simultaneous map, as @List (And String L)@.
 substMap :: GlobalEnv -> String -> [(String, Tm)] -> Core
-substMap env lang = foldr (\(k, t) r -> call env "cons" [pair, both k t, r]) (call env "nil" [pair])
+substMap env lang = foldr (\(k, t) r -> call env "List.cons" [pair, both k t, r]) (call env "List.nil" [pair])
   where
-    pair = call env "And" [str, Global (rootName lang) []]
-    both k t = call env "both" [str, Global (rootName lang) [], Primitive (LString k), toCore t]
+    pair = call env "And.And" [str, Global (declaredAs lang) []]
+    both k t = call env "And.both" [str, Global (declaredAs lang) [], Primitive (LString k), toCore lang t]
     str = Global (rootName "String") []
 
 -- | The roles of a language's constructors, as the environment records them.
 rolesOf :: GlobalEnv -> String -> [(String, [ArgRole])]
-rolesOf env lang = case lookupInductive (rootName lang) env of
-  Just d -> [ (nameDotted (constructorName c), constructorRoles c) | c <- inductiveConstructors d ]
+rolesOf env lang = case lookupInductive (declaredAs lang) env of
+  Just d -> [ (nameWord (constructorName c), constructorRoles c) | c <- inductiveConstructors d ]
   Nothing -> []
 
 -- ---------------------------------------------------------------------------
@@ -528,12 +531,12 @@ worked io =
   , testCase "a list is simultaneous: x and y swap" $ do
       env <- io
       fromCore env (call env "LC.subst-all"
-                      [toCore (app' (var "x") (var "y")), substMap env "LC" [("x", var "y"), ("y", var "x")]])
+                      [toCore "LC" (app' (var "x") (var "y")), substMap env "LC" [("x", var "y"), ("y", var "x")]])
         @?= Just (app' (var "y") (var "x"))
   , testCase "of two pairs for one name, the first is the one taken" $ do
       env <- io
       fromCore env (call env "LC.subst-all"
-                      [toCore (var "x"), substMap env "LC" [("x", var "y"), ("x", var "z")]])
+                      [toCore "LC" (var "x"), substMap env "LC" [("x", var "y"), ("x", var "z")]])
         @?= Just (var "y")
   -- Two binders in one production: x must be primed, and its first priming is
   -- the second binder's own name. Taking it would put two x' round a body
@@ -541,11 +544,11 @@ worked io =
   , testCase "a primed binder does not take a later binder's name" $ do
       env <- io
       let t = Tm "lam2" [Name "x", Name "x'", Sub (bapp (bvar "x") (bapp (bvar "x'") (bvar "z")))]
-      fromCore env (call env "LB.subst-x" [toCore t, Primitive (LString "z"), toCore (bvar "x")])
+      fromCore env (call env "LB.subst-x" [toCore "LB" t, Primitive (LString "z"), toCore "LB" (bvar "x")])
         @?= Just (Tm "lam2" [Name "x''", Name "x'", Sub (bapp (bvar "x''") (bapp (bvar "x'") (bvar "x")))])
   , testCase "free variables, each once here, bound ones not at all" $ do
       env <- io
-      listOfStrings env (call env "LC.fv-x" [toCore (abs' "y" (app' (var "x") (var "y")))]) @?= Just ["x"]
+      listOfStrings env (call env "LC.fv-x" [toCore "LC" (abs' "y" (app' (var "x") (var "y")))]) @?= Just ["x"]
   , testCase "a fresh name is the first priming not taken" $ do
       env <- io
       map (\avoid -> whnf env [] (call env "LC.fresh-x" [Primitive (LString "x"), stringList env avoid]))
@@ -581,7 +584,7 @@ worked io =
   where
     subst what t x n want = testCase what $ do
       env <- io
-      fromCore env (call env "LC.subst-x" [toCore t, Primitive (LString x), toCore n]) @?= Just want
+      fromCore env (call env "LC.subst-x" [toCore "LC" t, Primitive (LString x), toCore "LC" n]) @?= Just want
     var x = Tm "var" [Name x]
     abs' x e = Tm "abs" [Name x, Other base, Sub e]
     app' a b = Tm "app" [Sub a, Sub b]
@@ -602,13 +605,13 @@ crossing io =
               avoid = concatMap image (freeVars roles (rootName "x") t)
               want = until (`notElem` avoid) (++ "'") x
           -- Only the binder is read: the body is the crossing's business.
-          pure $ case whnf env [] (call env "LC.subst-all" [toCore t, substMap env "LC" sigma]) of
+          pure $ case whnf env [] (call env "LC.subst-all" [toCore "LC" t, substMap env "LC" sigma]) of
             Canonical (GlobalName [] "abs") _ (z : _) -> whnf env [] z === Primitive (LString want)
             other -> counterexample (show other) False
   , testProperty "LC: the free variables are the free variables" $
       withNumTests 300 $ forAll genLC $ \t -> ioProperty $ do
         env <- io
-        pure $ fmap (sort . nub) (listOfStrings env (call env "LC.fv-x" [toCore t]))
+        pure $ fmap (sort . nub) (listOfStrings env (call env "LC.fv-x" [toCore "LC" t]))
           === Just (sort (freeVars (rolesOf env "LC") (rootName "x") t))
   ]
   where
@@ -621,7 +624,7 @@ crossing io =
         withNumTests n $ forAll (resize 8 ((,) <$> gen <*> genMap gen)) $ \(t, sigma) -> ioProperty $ do
           env <- io
           let roles = rolesOf env lang
-              got = fromCore env (call env (lang ++ ".subst-all") [toCore t, substMap env lang sigma])
+              got = fromCore env (call env (lang ++ ".subst-all") [toCore lang t, substMap env lang sigma])
           pure $ counterexample (show got) $
             fmap (nameless roles []) got
               === Just (namelessSubst roles (rootName cls) sigma (nameless roles [] t))

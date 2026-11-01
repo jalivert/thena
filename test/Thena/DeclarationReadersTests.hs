@@ -22,6 +22,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Term (Core, nameDotted, rootName)
 import Thena.Core.Trust (TrustLevel (..))
 import Thena.Declared ( opensIn
+  , named
   ,natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Engine
@@ -101,7 +102,7 @@ datatypeOf =
   testGroup
     "datatype-of"
     [ testCase "a bare datatype is its own head" $
-        ran (DatatypeOf (ty "Nat")) @?= Right (VName (rootName "Nat"))
+        ran (DatatypeOf (ty "Nat")) @?= Right (VName (named "Nat.Nat"))
 
       -- **§12 invariant 6, and the case that makes this op non-trivial.** A
       -- user writes @Vec Nat zero@, which resolves to nested applications over
@@ -110,10 +111,10 @@ datatypeOf =
       -- datatype's name. Reading the written form alone answers /"that type is
       -- not a datatype"/ about a datatype.
     , testCase "a saturated family application reduces to its head" $
-        ran (DatatypeOf (ty "Vec Nat zero")) @?= Right (VName (rootName "Vec"))
+        ran (DatatypeOf (ty "Vec Nat zero")) @?= Right (VName (named "Vec.Vec"))
 
     , testCase "and so does a partially applied one" $
-        ran (DatatypeOf (ty "Vec Nat")) @?= Right (VName (rootName "Vec"))
+        ran (DatatypeOf (ty "Vec Nat")) @?= Right (VName (named "Vec.Vec"))
 
       -- A universe has a head and it is not a declared family.
     , testCase "a universe is refused, and named" $
@@ -160,10 +161,10 @@ constructors =
         cs @?= ["nil", "cons"]
 
     , testCase "a constructor knows its datatype" $
-        ran (ConstructorDatatype (name "succ")) @?= Right (VName (rootName "Nat"))
+        ran (ConstructorDatatype (name "succ")) @?= Right (VName (named "Nat.Nat"))
 
     , testCase "including one of a parameterised family" $
-        ran (ConstructorDatatype (name "cons")) @?= Right (VName (rootName "Vec"))
+        ran (ConstructorDatatype (name "cons")) @?= Right (VName (named "Vec.Vec"))
 
       -- The argument names, which is what a split names its pattern variables
       -- after. **The parameter is not among them** — @A@ is @Vec@'s and not

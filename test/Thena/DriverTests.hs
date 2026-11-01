@@ -10,6 +10,7 @@ import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 import Thena.Core.Convert (convert)
 import Thena.Core.Level (levelOfNat)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), rootName, nameDotted)
+import Thena.Declared (named)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
 import Thena.Standard (withRules)
@@ -523,7 +524,7 @@ tests =
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase "a declaration the checker refuses stops the run" $
             snd (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])
-              @?= Ran [] [] (Refused (NotStrictlyPositive (rootName "c") (Ident "x")))
+              @?= Ran [] [] (Refused (NotStrictlyPositive (named "T.c") (Ident "x")))
         , testCase "and writes nothing" $
             declaredIn (fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])) "T"
               @?= False

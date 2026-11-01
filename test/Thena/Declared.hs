@@ -58,12 +58,13 @@ module Thena.Declared
   , eqStep
   , eqStepCounter
   , declared
+  , declaredAs
   , named
   ) where
 
 import Data.List (nub)
 
-import Thena.Core.Term (GlobalName, nameFromText, nameSteps)
+import Thena.Core.Term (GlobalName (..), nameFromText, nameSteps)
 import Thena.Driver (parseDeclaration)
 import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals, inductives)
@@ -407,3 +408,14 @@ eqStepCounter = snd (declared (preludeDecls ++ [taplDecl, stepDecl]))
 -- holds a dot, which is the one shape §3.6 forbids.
 named :: String -> GlobalName
 named = nameFromText
+
+-- | The global a @data D@ declaration installs: @declaredAs "Nat"@ is @Nat.Nat@.
+--
+-- **A declaration lives in the namespace it opens** (MS10 phase 243), so a
+-- datatype's own name is its word twice over, and the short name a fixture
+-- writes is derived at resolution rather than recorded. A fixture that looks
+-- the datatype up by @rootName "Nat"@ asks for a name nothing declares and
+-- gets @Nothing@ — which reads as "not declared" and says nothing about the
+-- namespace, so the fact is spelled once here instead of at each lookup.
+declaredAs :: String -> GlobalName
+declaredAs d = GlobalName [d] d

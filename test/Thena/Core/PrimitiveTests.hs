@@ -57,6 +57,8 @@ import Thena.Files (startingSession)
 
 import Thena.Core.TermTests (genLiteral)
 import Thena.Declared ( opensIn
+  , declaredAs
+  , named
   ,declared)
 
 env :: GlobalEnv
@@ -214,12 +216,15 @@ answering :: GlobalEnv
 answering = addPrimitive (GlobalName ["String"] "eq") eqTy withAnswer
   where
     withAnswer = fst (declared ["Answer : Type₀ where { yes : Answer ; no : Answer }"])
-    eqTy = arrow str (arrow str (Global (rootName "Answer") []))
+    eqTy = arrow str (arrow str (Global (declaredAs "Answer") []))
     str = Global (rootName "String") []
     arrow a b = Pi (Ident "_") a (close (fst (fresh 900)) b)
 
+-- | A constructor of the answer type above, in that datatype's own namespace
+-- (MS10 phase 251). **The reducer still never writes @yes@ or @no@** — it
+-- reads them off the declaration, which is what these cases are for.
 answer :: String -> Core
-answer c = Canonical (rootName c) [] []
+answer c = Canonical (GlobalName ["Answer"] c) [] []
 
 computing :: [TestTree]
 computing =
@@ -330,13 +335,13 @@ deciding =
       gs <- preludeGlobals
       convertibleIn gs
         (decide "String" [str "a", str "a"])
-        (Canonical (rootName "yes") [LZero, LZero]
+        (Canonical (named "Dec.yes") [LZero, LZero]
           [ eqOf "String" (str "a") (str "a")
-          , Canonical (rootName "refl") [LZero] [prim "String", str "a"] ])
+          , Canonical (named "Eq.refl") [LZero] [prim "String", str "a"] ])
   , testCase "two that differ decide no" $ do
       gs <- preludeGlobals
       case whnf gs ctx (decide "String" [str "a", str "b"]) of
-        Canonical (GlobalName [] "no") _ [_, _] -> pure ()
+        Canonical (GlobalName ["Dec"] "no") _ [_, _] -> pure ()
         other -> assertFailure (show other)
     -- **The load-bearing one.** The refutation is no longer written by the
     -- reducer; it is derived in the prelude from @eqStringRefl@ and
@@ -348,7 +353,7 @@ deciding =
         Canonical _ _ [_, refutation] ->
           fst3 (check gs ctx 0 refutation
                   (Pi (Ident "_") (eqOf "String" (str "a") (str "b"))
-                      (close (fst (fresh 702)) (Global (rootName "Empty") [LZero]))))
+                      (close (fst (fresh 702)) (Global (declaredAs "Empty") [LZero]))))
             @?= Right ()
         other -> assertFailure (show other)
   , testCase "so is the whole answer, at the definition's own result type" $ do
@@ -382,8 +387,8 @@ deciding =
     fst3 (a, _, _) = a
     isRight' = either (const False) (const True)
     prim p = Global (rootName p) []
-    eqOf p x y = App (App (App (Global (rootName "Eq") [LZero]) (prim p)) x) y
-    decOf p x y = App (Global (rootName "Dec") [LZero, LZero]) (eqOf p x y)
+    eqOf p x y = App (App (App (Global (declaredAs "Eq") [LZero]) (prim p)) x) y
+    decOf p x y = App (Global (declaredAs "Dec") [LZero, LZero]) (eqOf p x y)
     convertibleIn gs a b = case convert gs ctx 0 a b of
       (Nothing, [], _) -> pure ()
       (why, obs, _)    -> assertFailure (show (why, length obs))

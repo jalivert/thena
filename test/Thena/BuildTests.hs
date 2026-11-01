@@ -18,6 +18,7 @@ import Test.Tasty.QuickCheck
   (Gen, counterexample, elements, forAll, ioProperty, oneof, property, sized, testProperty, withNumTests, (===))
 
 import Thena.Core.Context (entryType)
+import Thena.Declared (declaredAs, named)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), Literal (..), rootName, nameDotted)
 import Thena.Core.Typing (infer)
@@ -94,7 +95,7 @@ loaded = do
 datatypeOf :: String -> IO InductiveDefinition
 datatypeOf name = do
   (env, _) <- loaded
-  maybe (assertFailure (name ++ " was not declared")) pure (lookupInductive (rootName name) env)
+  maybe (assertFailure (name ++ " was not declared")) pure (lookupInductive (declaredAs name) env)
 
 -- ---------------------------------------------------------------------------
 
@@ -103,21 +104,23 @@ generated =
   [ testCase "LC's constructors are §4.6's, arguments in order of first appearance" $ do
       d <- datatypeOf "LC"
       map shape (inductiveConstructors d)
-        @?= [ ("var", ["String"])
-            , ("abs", ["String", "Ty", "LC"])
-            , ("app", ["LC", "LC"])
+        @?= [ ("LC.var", ["String"])
+            , ("LC.abs", ["String", "Ty.Ty", "LC.LC"])
+            , ("LC.app", ["LC.LC", "LC.LC"])
               -- A slot named like its own language: the binder is renamed, the
               -- argument's type is the datatype.
-            , ("paren", ["LC"])
+            , ("LC.paren", ["LC.LC"])
               -- §4.3: a name written twice is one argument.
-            , ("twice", ["LC"])
+            , ("LC.twice", ["LC.LC"])
             ]
   , testCase "a context's datatype is generated too" $ do
       d <- datatypeOf "Ctx"
-      map shape (inductiveConstructors d) @?= [("empty", []), ("extend", ["Ctx", "String", "Ty"])]
+      map shape (inductiveConstructors d)
+        @?= [("Ctx.empty", []), ("Ctx.extend", ["Ctx.Ctx", "String", "Ty.Ty"])]
   , testCase "the language it refers to is generated as well" $ do
       d <- datatypeOf "Ty"
-      map shape (inductiveConstructors d) @?= [("base", []), ("arrow", ["Ty", "Ty"])]
+      map shape (inductiveConstructors d)
+        @?= [("Ty.base", []), ("Ty.arrow", ["Ty.Ty", "Ty.Ty"])]
   ]
   where
     shape c =
@@ -146,8 +149,8 @@ roles =
                , let n = nameDotted (constructorName c)
                , r <- constructorRoles c
                , case r of Occurrence _ -> True; Binder _ -> True; _ -> False ]
-        @?= [ ("var", Occurrence (rootName "x"))
-            , ("abs", Binder (rootName "x")) ]
+        @?= [ ("LC.var", Occurrence (rootName "x"))
+            , ("LC.abs", Binder (rootName "x")) ]
     -- **One role per argument, which nothing checked** (MS8 phase 153).
     -- `~5k3mg` makes 'constructorRoles' the table a class lives on, so anything
     -- reading it by position has to be reading the right positions.
@@ -156,13 +159,13 @@ roles =
       [ (n, length (constructorArguments c), length (constructorRoles c))
         | c <- inductiveConstructors d
         , let n = nameDotted (constructorName c) ]
-        @?= [ ("var", 1, 1), ("abs", 3, 3), ("app", 2, 2)
-            , ("paren", 1, 1), ("twice", 1, 1) ]
+        @?= [ ("LC.var", 1, 1), ("LC.abs", 3, 3), ("LC.app", 2, 2)
+            , ("LC.paren", 1, 1), ("LC.twice", 1, 1) ]
   , testCase "a datatype written by hand has none of it" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 "module W where\n\ndata Pair : Type\8320 where\n  mk : String -> String -> Pair\n" of
         (s1, ProofLoaded {}) ->
-          case lookupInductive (rootName "Pair") (globals (machineOf s1)) of
+          case lookupInductive (declaredAs "Pair") (globals (machineOf s1)) of
             Just d -> map constructorRoles (inductiveConstructors d) @?= [[Plain, Plain]]
             Nothing -> assertFailure "Pair was not declared"
         (_, other) -> assertFailure (show other)
@@ -175,10 +178,12 @@ roles =
 
 -- | @abs "x" base (var "x")@, as elaboration would build it.
 identity :: Core
-identity = con "abs" [Primitive (LString "x"), con "base" [], con "var" [Primitive (LString "x")]]
+identity = con "LC.abs" [Primitive (LString "x"), con "Ty.base" [], con "LC.var" [Primitive (LString "x")]]
 
+-- | **Named with its language's path** (MS10 phase 251): a production lives in
+-- the namespace its @language@ block opens, so @abs@ in @LC@ is @LC.abs@.
 con :: String -> [Core] -> Core
-con name = foldl App (Global (rootName name) [])
+con name = foldl App (Global (named name) [])
 
 terms :: [TestTree]
 terms =
@@ -188,21 +193,21 @@ terms =
   , testCase "and the term type checks as an LC" $ do
       (env, _) <- loaded
       case infer env [] 0 identity of
-        (Right t, _, _) -> t @?= Global (rootName "LC") []
+        (Right t, _, _) -> t @?= Global (declaredAs "LC") []
         (Left e, _, _) -> assertFailure (show e)
   , testCase "the term prints as the text" $ do
       (_, gs) <- loaded
       printRegion gs host identity @?= Just "( \955 x : \953 . x )"
   , testCase "a name written twice is one argument, and prints twice" $ do
       (_, gs) <- loaded
-      let t = con "twice" [con "var" [Primitive (LString "a")]]
+      let t = con "LC.twice" [con "LC.var" [Primitive (LString "a")]]
       (readTerm gs "{ a a }", printRegion gs host t) @?= (Right t, Just "{ a a }")
   , testCase "a placeholder is not a term" $ do
       (_, gs) <- loaded
       readTerm gs "( \955 \9608 : \953 . x )" @?= Left (Incomplete "x")
   , testCase "a name the class would not read back is spliced instead" $ do
       (_, gs) <- loaded
-      printRegion gs host (con "var" [Primitive (LString "a b")])
+      printRegion gs host (con "LC.var" [Primitive (LString "a b")])
         @?= Just "${\"a b\"}"
   , testCase "nor does a term that is not a constructor of a grammar" $ do
       (_, gs) <- loaded
@@ -246,7 +251,7 @@ literals =
     -- 'printTerm' takes either.
     testCase "the text is parsed with the language's grammar" $
       elaboratedTerm ("LC" ++ region "( \955 x : \953 . x )")
-        >>= (@?= Right (canon "abs" [Primitive (LString "x"), con "base" [], con "var" [Primitive (LString "x")]]))
+        >>= (@?= Right (canon "LC.abs" [Primitive (LString "x"), con "Ty.base" [], con "LC.var" [Primitive (LString "x")]]))
     -- **Elaboration against the printer**, which is MS6's done-when 3: the
     -- term a literal elaborates to writes back as the text it was written as.
   , testCase "and it prints back as the text it was written as" $ do
@@ -279,19 +284,19 @@ literals =
       r <- elaborated
              ("u : LC\nu = LC[var]" ++ region "q"
                 ++ "\n\nt : LC\nt = LC" ++ region "( ${u} ${u} )")
-      r @?= Right (canon "app" [Global (rootName "u") [], Global (rootName "u") []])
+      r @?= Right (canon "LC.app" [Global (rootName "u") [], Global (rootName "u") []])
     -- **A class slot takes one too**, and what it supplies is the literal: the
     -- constructor's argument there is a @String@, so the splice elaborates at
     -- that type like any other term.
   , testCase "including a slot that is a token class" $ do
       r <- elaboratedTerm ("LC[var]" ++ region "${\"hi\"}")
-      r @?= Right (canon "var" [Primitive (LString "hi")])
+      r @?= Right (canon "LC.var" [Primitive (LString "hi")])
     -- The region scanner stacks its modes, so a literal inside a splice inside
     -- a literal reads — which is what makes a splice a term and not a name.
   , testCase "and a splice may hold another literal" $ do
       r <- elaboratedTerm
              ("LC" ++ region ("( ${LC[var]" ++ region "a" ++ "} ${LC[var]" ++ region "b" ++ "} )"))
-      r @?= Right (canon "app" [con "var" [Primitive (LString "a")], con "var" [Primitive (LString "b")]])
+      r @?= Right (canon "LC.app" [con "LC.var" [Primitive (LString "a")], con "LC.var" [Primitive (LString "b")]])
     -- **The brackets really do restrict**, which is the whole of what
     -- @LC[var]@ is for: text that reads as a term does not read as a variable.
   , testCase "a production in brackets starts the parse there, and only there" $ do
@@ -328,7 +333,7 @@ literals =
 -- **Only the head**, which is why the arguments below are written with 'con':
 -- weak head normal form reduces the wrapper it is given and nothing under it.
 canon :: String -> [Core] -> Core
-canon name = Canonical (rootName name) []
+canon name = Canonical (named name) []
 
 readTerm :: [Grammar] -> String -> Either BuildError Core
 readTerm gs src = case parse (earleyRules gs) (Earley.StartAt "LC") (pieces src) of
@@ -341,20 +346,20 @@ readTerm gs src = case parse (earleyRules gs) (Earley.StartAt "LC") (pieces src)
 genTerm :: Gen Core
 genTerm = sized (go (0 :: Int))
   where
-    go _ 0 = (\x -> con "var" [Primitive (LString x)]) <$> name
+    go _ 0 = (\x -> con "LC.var" [Primitive (LString x)]) <$> name
     go d k = oneof
-      [ (\x -> con "var" [Primitive (LString x)]) <$> name
-      , (\x ty e -> con "abs" [Primitive (LString x), ty, e]) <$> name <*> genTy <*> go d (k `div` 2)
-      , (\a b -> con "app" [a, b]) <$> go d (k `div` 2) <*> go d (k `div` 2)
-      , (\a -> con "paren" [a]) <$> go d (k `div` 2)
+      [ (\x -> con "LC.var" [Primitive (LString x)]) <$> name
+      , (\x ty e -> con "LC.abs" [Primitive (LString x), ty, e]) <$> name <*> genTy <*> go d (k `div` 2)
+      , (\a b -> con "LC.app" [a, b]) <$> go d (k `div` 2) <*> go d (k `div` 2)
+      , (\a -> con "LC.paren" [a]) <$> go d (k `div` 2)
       ]
     name = elements ["x", "y", "foo", "a1"]
 
 genTy :: Gen Core
 genTy = sized go
   where
-    go 0 = pure (con "base" [])
-    go k = oneof [pure (con "base" []), (\a b -> con "arrow" [a, b]) <$> go (k `div` 2) <*> go (k `div` 2)]
+    go 0 = pure (con "Ty.base" [])
+    go k = oneof [pure (con "Ty.base" []), (\a b -> con "Ty.arrow" [a, b]) <$> go (k `div` 2) <*> go (k `div` 2)]
 
 -- | **Loaded once for the property**, not per case: 'startingSession' reads
 -- the prelude and the rule base, and two hundred of those is a minute.

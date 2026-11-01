@@ -38,6 +38,7 @@ import Data.List (isPrefixOf)
 
 import Thena.Core.Typing (check, infer)
 import Thena.Declared ( opensIn
+  , declaredAs
   ,named)
 import Thena.Driver
   ( Response (..)
@@ -127,14 +128,14 @@ computedLevels =
     , atLevel "two constructors, the join is over both" ["Nat"] 0
     , testCase "nothing contributes, so the level stays a parameter" $ do
         env <- declaredWith []
-        case lookupInductive (rootName "D") env of
+        case lookupInductive (declaredAs "D") env of
           Just d | not (null (inductiveLevels d)) -> pure ()
           other -> assertFailure ("expected a level parameter, got " ++ show other)
     ]
   where
     atLevel what args want = testCase what $ do
       env <- declaredWith args
-      case lookupInductive (rootName "D") env of
+      case lookupInductive (declaredAs "D") env of
         Nothing -> assertFailure "D was not declared"
         Just d  -> inductiveLevel d @?= levelOfNat want
 
@@ -348,9 +349,9 @@ natVecCounter = snd (after [natDecl, vecDecl])
 tablesTests :: [TestTree]
 tablesTests =
   [ testCase "the datatype has a record" $
-      fmap inductiveName (lookupInductive (named "Nat") nat) @?= Just (named "Nat")
+      fmap inductiveName (lookupInductive (named "Nat.Nat") nat) @?= Just (named "Nat.Nat")
   , testCase "the type former is a constant at its declared universe" $
-      fmap constantType (lookupConstant (named "Nat") nat) @?= Just (Universe LZero)
+      fmap constantType (lookupConstant (named "Nat.Nat") nat) @?= Just (Universe LZero)
   , testCase "a former is in two tables under one name (§3.3.1)" $
       sequence_
         [ fmap constantType (lookupConstant (named g) natVec)
@@ -367,7 +368,7 @@ tablesTests =
         @?= Just (1, 1)
   , testCase "an index is not a parameter of the record it is declared with" $
       fmap (\d -> (length (inductiveParameters d), length (inductiveIndices d)))
-           (lookupInductive (named "Nat") natVec)
+           (lookupInductive (named "Nat.Nat") natVec)
         @?= Just (0, 0)
   ]
 
@@ -378,19 +379,19 @@ tablesTests =
 wrapperTests :: [TestTree]
 wrapperTests =
   [ testCase "a nullary former's wrapper is the bare Canonical" $
-      fmap definitionBody (lookupDefinition (named "zero") nat)
-        @?= Just (Canonical (named "zero") [] [])
+      fmap definitionBody (lookupDefinition (named "Nat.zero") nat)
+        @?= Just (Canonical (named "Nat.zero") [] [])
   , testCase "a unary former's wrapper abstracts and applies" $
-      fmap definitionBody (lookupDefinition (named "succ") nat)
-        @?= Just (Lam (Ident "n") natTy (close v (Canonical (named "succ") [] [Free v])))
+      fmap definitionBody (lookupDefinition (named "Nat.succ") nat)
+        @?= Just (Lam (Ident "n") natTy (close v (Canonical (named "Nat.succ") [] [Free v])))
   , testCase "the type former gets a wrapper too" $
-      fmap definitionBody (lookupDefinition (named "Nat") nat)
-        @?= Just (Canonical (named "Nat") [] [])
+      fmap definitionBody (lookupDefinition (named "Nat.Nat") nat)
+        @?= Just (Canonical (named "Nat.Nat") [] [])
   , testCase "every wrapper body is a saturated Canonical (§12 invariant 6)" $
       sequence_ (map saturated (formerNames natVec))
   ]
   where
-    natTy   = Global (named "Nat") []
+    natTy   = Global (named "Nat.Nat") []
     (v, _)  = fresh 0
 
     -- Peel the wrapper's λs, counting them, and check the body applies the
@@ -463,16 +464,16 @@ positivityTests =
   , accepted "several recursive arguments" "T : Type\8320 where { c : T -> T -> T }"
   , refused "the datatype left of an arrow"
       "T : Type\8320 where { c : (T -> T) -> T }"
-      (NotStrictlyPositive (named "c") (Ident "x"))
+      (NotStrictlyPositive (named "T.c") (Ident "x"))
   , refused "a higher-order recursive argument (thesis §4.1.3)"
       "T : Type\8320 where { c : (Nat -> T) -> T }"
-      (HigherOrderRecursion (named "c") (Ident "x"))
+      (HigherOrderRecursion (named "T.c") (Ident "x"))
   , refused "the datatype under another former"
       "T : Type\8320 where { c : Vec T zero -> T }"
-      (NestedRecursion (named "c") (Ident "x"))
+      (NestedRecursion (named "T.c") (Ident "x"))
   , refused "the argument is named in the message when it has a name"
       "T : Type\8320 where { c : forall (f : T -> T) -> T }"
-      (NotStrictlyPositive (named "c") (Ident "f"))
+      (NotStrictlyPositive (named "T.c") (Ident "f"))
   ]
 
 -- --------------------------------------------------------------------------
@@ -492,20 +493,20 @@ universeTests =
       "T : Type\8321 where { c : Type\8320 -> T }"
   , refused "a large argument in a small datatype"
       "T : Type\8320 where { c : Type\8320 -> T }"
-      (ArgumentTooLarge (named "c") (Ident "x") (levelOfNat 1) (LZero))
+      (ArgumentTooLarge (named "T.c") (Ident "x") (levelOfNat 1) (LZero))
   , accepted "a recursive argument, which needs the former in scope already"
       "T : Type\8320 where { c : T -> T }"
   , accepted "a parameter used as an argument's type"
       "Box (A : Type\8320) : Type\8320 where { box : A -> Box A }"
   , refused "a parameter from a larger universe than the datatype"
       "Box (A : Type\8321) : Type\8320 where { box : A -> Box A }"
-      (ArgumentTooLarge (named "box") (Ident "x") (levelOfNat 1) (LZero))
+      (ArgumentTooLarge (named "Box.box") (Ident "x") (levelOfNat 1) (LZero))
   , accepted "an argument whose type mentions an earlier argument"
       "T : Type\8320 where { c : forall (n : Nat) (v : Vec Nat n) -> T }"
   , refused "an argument whose type is not a type at all"
       "T : Type\8320 where { c : zero -> T }"
-      (ArgumentNotAType (named "c") (Ident "x")
-         (NotAType [] (Global (named "zero") []) (Canonical (named "Nat") [] [])))
+      (ArgumentNotAType (named "T.c") (Ident "x")
+         (NotAType [] (Global (named "Nat.zero") []) (Canonical (named "Nat.Nat") [] [])))
 
   -- **A level a constructor argument's own typing determines** (phase 50).
   -- 'Thena.Global.Declare.argumentLevels' used to drop these obligations and
@@ -541,13 +542,13 @@ nameTests :: [TestTree]
 nameTests =
   [ refused "a datatype that is already declared"
       "Nat : Type\8320 where { z : Nat }"
-      (AlreadyDeclared (named "Nat"))
+      (AlreadyDeclared (named "Nat.Nat"))
   , refused "a constructor whose name is taken"
       "T : Type\8320 where { zero : T }"
-      (AlreadyDeclared (named "zero"))
+      (AlreadyDeclared (named "Nat.zero"))
   , refused "a declaration that uses one name twice"
       "T : Type\8320 where { c : T ; c : T }"
-      (RepeatedName (named "c"))
+      (RepeatedName (named "T.c"))
     -- **The eliminator\'s wrapper is one of the names introduced** (MS4 phase
     -- 49e): §3.7 item 2 generates a global for it the way it does for a former
     -- and a constructor, which is what lets @elim D …@ elaborate as an
@@ -588,7 +589,7 @@ nameTests =
 -- not, and would slip past a string comparison of the header alone.
 roundTripTests :: [TestTree]
 roundTripTests =
-  [ testCase name $ case lookupInductive (named name) natVec of
+  [ testCase name $ case lookupInductive (declaredAs name) natVec of
       Nothing -> assertFailure (name ++ " was not declared")
       Just d  -> case reread (renderInductive (Rendering [] natVecCounter) d) of
         Left e   -> assertFailure e
