@@ -53,7 +53,7 @@ tests =
 
 -- | **A green test over an empty corpus is the failure @CLAUDE.md@ records three
 -- goldens once having**, and this one collects its terms through a function that
--- returns @[]@ for two of the four item kinds — so the count is asserted rather
+-- returns @[]@ for three of the five item kinds — so the count is asserted rather
 -- than assumed. The number is a floor, not a fact about today.
 notVacuous :: IO ()
 notVacuous = do
@@ -90,6 +90,7 @@ termsOf i = case i of
       <> map (\(SurfaceConstructor _ _ t) -> t) (surfaceDataConstructors d)
   ItemBlock _ -> []
   ItemGrammar _ -> []
+  ItemOpen _ -> []
 
 -- | Every surface file the project ships.
 paths :: IO [FilePath]
