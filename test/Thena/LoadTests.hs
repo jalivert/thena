@@ -111,7 +111,7 @@ preludeTests =
           -- eliminator is a scheme now, and what a use site sees is the
           -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
           -- which is a counter value and no business of this assertion.
-          renderEliminator (Rendering [] n0) (rootName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
+          renderEliminator (Rendering [] n0) (declaredAs "Eq") (atZero d (fst (eliminatorType d LZero n0)))
             @?= [ "elim Eq.Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq.Eq {0} A _ _1 -> Type₀) \
                   \-> (∀ (a : A) -> P a a (Eq.refl {0} A a)) \
                   \-> ∀ (_ : A) (_1 : A) (target : Eq.Eq {0} A _ _1) -> P _ _1 target"
@@ -316,8 +316,12 @@ sourceWithRules = loadSource withRules . unlines
 afterLines :: Session -> [String] -> (Loaded -> IO ()) -> IO ()
 afterLines s ls k = k (loadSource s (unlines ls))
 
+-- | Is this DATATYPE declared — every caller below asks about one, and a
+-- datatype is @D.D@ since MS10 phase 243, so the lookup is 'declaredAs' and not
+-- the root word. Asking at the root answers 'False' for a datatype that is
+-- perfectly well declared, which reads as a load that did nothing.
 declared :: String -> Loaded -> Bool
-declared n l = isDeclared (rootName n) (globals (machineOf (loadedSession l)))
+declared n l = isDeclared (declaredAs n) (globals (machineOf (loadedSession l)))
 
 -- | The last line's rendered term, printed as the REPL would print it.
 --
@@ -426,7 +430,7 @@ moduleTests =
       let (s1, _) = loadProofSource s0 dependentModule
           g = globals (machineOf s1)
       map (\n -> isDeclared (named n) g)
-          ["Chain", "Chain.lemmata.NoConfusion", "Chain.lemmata.noConfusion"]
+          ["Chain.Chain", "Chain.lemmata.NoConfusion", "Chain.lemmata.noConfusion"]
         @?= [True, True, True]
 
   , testCase "a load with nothing to say warns about nothing" $ do
@@ -439,7 +443,8 @@ moduleTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 natModule
           g = globals (machineOf s1)
-      map (\n -> isDeclared (named n) g) ["Nat", "zero", "succ", "one"]
+      map (\n -> isDeclared (named n) g)
+          ["Nat.Nat", "Nat.zero", "Nat.succ", "one"]
         @?= [True, True, True, True]
 
   , -- **A declaration named with a path is admitted into that namespace**
@@ -613,6 +618,7 @@ moduleTests =
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \  succ : Nat -> Nat\n\
+      \open Nat\n\
       \\n\
       \Nat.one : Nat\n\
       \Nat.one = succ zero\n\
@@ -625,6 +631,7 @@ moduleTests =
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \  succ : Nat -> Nat\n\
+      \open Nat\n\
       \\n\
       \one : Nat\n\
       \one = succ zero\n"
@@ -637,6 +644,7 @@ moduleTests =
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \  succ : Nat -> Nat      -- successor\n\
+      \open Nat\n\
       \\n\
       \one : Nat\n\
       \one = succ zero\n"
@@ -646,6 +654,7 @@ moduleTests =
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \  succ : Nat -> Nat\n\
+      \open Nat\n\
       \\n\
       \do\n\
       \  say \"here\"\n\
@@ -759,6 +768,7 @@ tierTests =
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \  succ : Nat -> Nat\n\
+      \open Nat\n\
       \\n\
       \idE : forall (A : Type\8320) -> A -> A\n\
       \idE = \\ A x -> x\n\
