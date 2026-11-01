@@ -330,7 +330,7 @@ holeTests =
   where
     goal      = [":theorem t : Type₀"]
     arrowGoal = [":theorem t : ∀ (A : Type₀) -> A -> A"]
-    natGoal   = ["data " ++ natDecl, ":theorem t : Nat"]
+    natGoal   = ["data " ++ natDecl, "open Nat", ":theorem t : Nat"]
 
 -- --------------------------------------------------------------------------
 -- The session
@@ -341,8 +341,17 @@ sessionTests =
   [ ok "a theorem may be started" [":theorem t : Type₀"]
   , rejects "but not two at once" [":theorem t : Type₀", ":theorem u : Type₀"]
       (AlreadyProving (rootName "t"))
-  , rejects "and not under a name the environment already has"
-      ["data " ++ natDecl, ":theorem Nat : Type₀"] (AlreadyDeclaredHere "Nat")
+    -- **A THEOREM MAY NOW TAKE THE WORD A DATATYPE'S NAMESPACE USES, AND IT
+    -- SHADOWS IT** — @~s89ch@, his to rule, written out in
+    -- @.jalivert/agenda/languages-module-system.md@. The guard in
+    -- 'Thena.Driver' is @isDeclared (rootName x)@ and a datatype is @Nat.Nat@
+    -- since MS10, so nothing at the root is taken; after the @qed@ a written
+    -- @Nat@ is the theorem, because 'Thena.Core.Term.globalUnder' answers the
+    -- name as written before it tries a declaration's short name. **Pinned as
+    -- measured, not as wanted**: the refusal this asserted is unreachable
+    -- through a declaration, and what replaces it is his.
+  , ok "a theorem may take the word a datatype's namespace uses"
+      ["data " ++ natDecl, "open Nat", ":theorem Nat : Type₀"]
   , testCase "a statement that is not a type is refused" $
       case reverse (loadedResponses (run [":theorem t : zero"])) of
         Failed _   : _ -> pure ()
@@ -366,6 +375,7 @@ sessionTests =
       let l = run
                 [ ":theorem t : Type₀", ":suspend"
                 , "data " ++ natDecl
+                , "open Nat"
                 , ":resume t", "try-core ⌜ Nat ⌝", "solve", "qed"
                 ]
       loadedError l @?= Nothing
@@ -392,13 +402,16 @@ sessionTests =
     -- declared, which is the only way to reach the application case at all.
   , ok "an application elaborates and proves"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem t : Nat"
       , "elaborate ⟨ succ zero ⟩"
       , "qed"
       ]
   , ok "a two-argument spine folds"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Pair : Type\8320 where { mk : Nat -> Nat -> Pair }"
+      , "open Pair"
       , ":theorem p : Pair"
       , "elaborate ⟨ mk zero (succ zero) ⟩"
       , "qed"
@@ -433,6 +446,7 @@ sessionTests =
       ]
   , ok "a let elaborates and proves"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem l : Nat"
       , "elaborate ⟨ let y = zero in y ⟩"
       , "qed"
@@ -442,6 +456,7 @@ sessionTests =
     -- see @ms4/CLOSEOUT.md@ 11.
   , ok "an annotated let takes an application value"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem l : Nat"
       , "elaborate ⟨ let y : Nat = succ zero in succ y ⟩"
       , "qed"
@@ -450,18 +465,21 @@ sessionTests =
     -- 24c's taken-name check untenable: @y@ is a component name already.
   , ok "a let may shadow"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem l : Nat"
       , "elaborate ⟨ let y : Nat = zero in let y : Nat = succ y in y ⟩"
       , "qed"
       ]
   , ok "an ascription elaborates and proves"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem s : Nat"
       , "elaborate ⟨ zero : Nat ⟩"
       , "qed"
       ]
   , notOk "and an ascription that disagrees with the goal is refused"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem s : Nat"
       , "elaborate ⟨ zero : Type\8320 ⟩"
       ]
@@ -472,19 +490,23 @@ sessionTests =
     -- live at @Type₁@, which is what cumulativity is for.
   , ok "a term fits a universe above its own"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem u : Type\8321"
       , "elaborate ⟨ Nat ⟩"
       , "qed"
       ]
   , ok "including as an argument to a parameter pinned above it"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Box (A : Type\8321) : Type\8321 where { box : A -> Box A }"
+      , "open Box"
       , ":theorem u : Type\8321"
       , "elaborate ⟨ Box Nat ⟩"
       , "qed"
       ]
   , ok "and in a lambda's body"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem u : Nat -> Type\8321"
       , "elaborate ⟨ \\ n -> Nat ⟩"
       , "qed"
@@ -495,12 +517,14 @@ sessionTests =
     -- hole with the application's result hole, and both are bare.
   , ok "an un-annotated let takes an application value"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem l : Nat"
       , "elaborate ⟨ let y = succ zero in y ⟩"
       , "qed"
       ]
   , ok "and may still shadow"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem l : Nat"
       , "elaborate ⟨ let y = zero in let y = succ y in y ⟩"
       , "qed"
@@ -520,7 +544,9 @@ sessionTests =
     -- its contents were a @Type₁ -> Empty2@.
   , notOk "nor is a datatype's parameter"
       [ "data Empty2 : Type\8320 where { }"
+      , "open Empty2"
       , "data Fn (A : Type\8322) : Type\8322 where { fn : (A -> Empty2) -> Fn A }"
+      , "open Fn"
       , "assume \"g\" ⌜ Type\8320 -> Empty2 ⌝"
       , ":goal Fn Type\8321"
       , "try-core \8988 fn Type\8320 g \8989"
@@ -531,6 +557,7 @@ sessionTests =
     -- meaning.
   , ok "an elim elaborates and proves"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem e : Nat"
       , "elaborate ⟨ elim Nat () (\\ x -> Nat) (zero (\\ k ih -> succ ih)) () (succ zero) ⟩"
       , "qed"
@@ -539,8 +566,10 @@ sessionTests =
     -- telescope walk has to place them.
   , ok "including one with indices"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Ev : Nat -> Type\8320 where { evZero : Ev zero "
           ++ "; evSS : \8704 (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
+      , "open Ev"
       , ":theorem e : Nat"
       , "elaborate ⟨ elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero ⟩"
       , "qed"
@@ -559,6 +588,7 @@ sessionTests =
     -- @examples/choice-points.thena.rules@, six lines of rule language.
   , notOk "a failure after a nested call returned is not swallowed"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare bad : Nat -> Nat ; bad = \\ n -> "
           ++ "elim Nat () (\\ k -> Nat) ((zero) (\\ k ih -> succ ih)) () _"
       ]
@@ -575,6 +605,7 @@ sessionTests =
     -- elimination is what makes the choice point that used to swallow it.
   , notOk "a declaration left unfinished is refused, not silently dropped"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare bad : Nat ; bad = "
           ++ "elim Nat () (\\ k -> Nat) ((zero) (\\ k ih -> succ ih)) () _"
       ]
@@ -586,8 +617,10 @@ sessionTests =
     -- caught it.
   , ok "an elim with a dependent motive"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare data Id (A : Type\8320) : A -> A -> Type\8320 where "
           ++ "{ rfl : forall (a : A) -> Id A a a }"
+      , "open Id"
       , "declare eqr : forall (n : Nat) -> Id Nat n n ; eqr = "
           ++ "\\ n -> elim Nat () (\\ k -> Id Nat k k) "
           ++ "((rfl Nat zero) (\\ k ih -> rfl Nat (succ k))) () n"
@@ -598,6 +631,7 @@ sessionTests =
   , ok "a datatype with parameters and indices"
       [ "declare data Id (A : Type\8320) : A -> A -> Type\8320 where "
           ++ "{ rfl : forall (a : A) -> Id A a a }"
+      , "open Id"
       , ":show Id"
       ]
     -- **A level-polymorphic datatype eliminates** (MS4 phase 49e), and until
@@ -608,7 +642,9 @@ sessionTests =
     -- wrapper does, so the question does not arise.
   , ok "a level-polymorphic datatype eliminates"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Empty : Type where { }"
+      , "open Empty"
       , ":theorem t : \8704 (e : Empty {0}) -> Nat"
       , "elaborate ⟨ \\ e -> elim Empty () (\\ x -> Nat) () () e ⟩"
       , "qed"
@@ -617,13 +653,16 @@ sessionTests =
     -- declaration introduces** (MS4 phase 49e) — 'Thena.Global.Declare.checkNames'.
   , notOk "a datatype whose eliminator's name is taken is refused"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare Bool.elim : Nat ; Bool.elim = zero"
       , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+      , "open Bool"
       ]
     -- The arity is checked against the declaration, so the message names the
     -- field group rather than a total.
   , notOk "and a method count that does not match the datatype is refused"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem e : Nat"
       , "elaborate ⟨ elim Nat () (\\ x -> Nat) (zero) () (succ zero) ⟩"
       ]
@@ -633,6 +672,7 @@ sessionTests =
     -- driver reads one line; a file supplies them by layout at phase 43.
   , ok "a surface declaration elaborates and installs"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare one : Nat ; one = succ zero"
       , ":show one"
       ]
@@ -644,21 +684,25 @@ sessionTests =
     -- declaration fails with @Type₀ and n -> Nat cannot be made equal@.
   , ok "and a function declaration, whose body has a binder to open"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare idn : Nat -> Nat ; idn = \\ n -> n"
       , ":show idn"
       ]
   , ok "several declarations in one run"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare a : Nat ; a = zero ; b : Nat ; b = succ zero"
       , ":show b"
       ]
     -- Agda's and Haskell's rule: the equation follows its signature.
   , notOk "a signature with no equation is refused"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare lonely : Nat"
       ]
   , notOk "and so is a body that does not have the declared type"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare bad : Nat -> Nat ; bad = zero"
       ]
     -- **Datatypes in the surface** (MS4 phase 42b) — Brady's data rule: the
@@ -667,26 +711,31 @@ sessionTests =
     -- plus a β-step.
   , ok "a surface datatype declares"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , ":show Nat"
       ]
     -- And it is a real datatype: a theorem elaborates against it.
   , ok "and a theorem over it elaborates"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare one : Nat ; one = succ zero"
       ]
     -- The parameters are shared between the datatype and its constructors,
     -- which is what the rename in @buildInductive@ is for.
   , ok "a parameterised one"
       [ "declare data Box (A : Type\8320) : Type\8320 where { box : A -> Box A }"
+      , "open Box"
       , ":show Box"
       ]
     -- An indexed family, so the parameter/index split is exercised in both
     -- halves rather than only the empty one.
   , ok "and an indexed family"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare data Ev : Nat -> Type\8320 where "
           ++ "{ evZero : Ev zero "
           ++ "; evSS : forall (n : Nat) -> Ev n -> Ev (succ (succ n)) }"
+      , "open Ev"
       , ":show Ev"
       ]
     -- The finished record goes through the same 'Thena.Global.Declare.declare'
@@ -698,7 +747,9 @@ sessionTests =
     -- so the whole prelude was out of its range.
   , ok "a polymorphic global is usable now"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Box (A : Type) : Type where { box : A -> Box A }"
+      , "open Box"
       , ":theorem e : Type\8320"
       , "elaborate ⟨ Box Nat ⟩"
       , "qed"
@@ -708,7 +759,9 @@ sessionTests =
     -- with a scope violation, /"A3 is not bound before A1"/.
   , ok "and its constructor, whose domain is an earlier argument"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Box (A : Type) : Type where { box : A -> Box A }"
+      , "open Box"
       , ":theorem e : Box {0} Nat"
       , "elaborate ⟨ box Nat zero ⟩"
       , "qed"
@@ -723,8 +776,10 @@ sessionTests =
     -- shape, which is why they were written in the development calculus.
   , ok "a trusted claim elaborates under a \955"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Eq (A : Type) : A -> A -> Type \
         \where { refl : \8704 (a : A) -> Eq A a a }"
+      , "open Eq"
       , "declare law : \8704 (a : Nat) -> Eq Nat a a \
         \; law = \\ a -> trusted (Eq Nat a a) (refl Nat a)"
       ]
@@ -732,6 +787,7 @@ sessionTests =
     -- is for and what this phase was ordered before 43 to make possible.
   , ok "a declaration may use an earlier one"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare one : Nat ; one = succ zero"
       , "declare two : Nat ; two = succ one"
       ]
@@ -739,6 +795,7 @@ sessionTests =
     -- caught by the walk rather than by a later type error.
   , notOk "and too many arguments for the head is refused"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem e : Nat"
       , "elaborate ⟨ zero zero ⟩"
       ]
@@ -754,6 +811,7 @@ sessionTests =
     -- **Implicit arguments, inserted at a use site** — Brady's @EXPAND@.
   , ok "an implicit argument is inserted"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare idty : forall {A : Type\8320} -> A -> A ; idty = \\ A x -> x"
       , "declare z : Nat ; z = idty zero"
       ]
@@ -761,6 +819,7 @@ sessionTests =
     -- be written explicitly too."/
   , ok "and may be written in braces instead"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare idty : forall {A : Type\8320} -> A -> A ; idty = \\ A x -> x"
       , "declare z : Nat ; z = idty {Nat} zero"
       ]
@@ -768,6 +827,7 @@ sessionTests =
     -- through to a type error about a term the user did not mean to write.
   , notOk "but a brace the head has no position for is refused"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare z : Nat ; z = succ {Nat} zero"
       ]
   , ok "so a hole left in the scratch cannot block qed"
