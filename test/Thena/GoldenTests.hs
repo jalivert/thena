@@ -36,6 +36,7 @@ tests =
     , script
         "typing"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":infer \8988 succ zero \8989"
         , ":infer \8988 \\ (x : Nat) -> x \8989"
         , ":infer \8988 \8704 (A : Type\8320) -> A \8989"
@@ -59,10 +60,13 @@ tests =
     , script
         "eliminators"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data Fin : Nat -> Type\8320 \
           \where { fz : \8704 (n : Nat) -> Fin (succ n) \
           \; fs : \8704 (n : Nat) (i : Fin n) -> Fin (succ n) }"
+        , "open Fin"
         , "data Empty : Type where { }"
+        , "open Empty"
         , ":elim Nat"
         , ":elim Nat Type\8321"
         , ":elim Fin"
@@ -88,6 +92,7 @@ tests =
     , script
         "kernel"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":revalidate"
         , ":goal Nat"
         , ":revalidate"
@@ -117,6 +122,7 @@ tests =
           \where { true : Term ; false : Term \
           \; ifthen : Term -> Term -> Term -> Term \
           \; zero : Term ; succ : Term -> Term }"
+        , "open Term"
         , ":show Term.noConfusion"
         , ":whnf Term.NoConfusion true true"
         , ":whnf Term.NoConfusion true (succ zero)"
@@ -134,9 +140,11 @@ tests =
         , "certify ⌜ \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b ⌝"
         , "back"
         , "data Nat : Type\8320 where { zero' : Nat ; succ' : Nat -> Nat }"
+        , "open Nat"
         , "data Vec (A : Type\8320) : Nat -> Type\8320 \
           \where { nil : Vec A zero' \
           \; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ' n) }"
+        , "open Vec"
         , ":show Vec.noConfusion"
         , ":quit"
         ])
@@ -279,6 +287,7 @@ tests =
     , script
         "declarations"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "declare one : Nat ; one = succ zero"
           -- The declared TYPE is clean; the body is not, and that is
           -- @ms4/CLOSEOUT.md@ 8 rather than this phase's.
@@ -361,6 +370,7 @@ tests =
         , "elaborate ⟨ Type\8320 -> Type\8320 ⟩"
         , "qed"
         , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem lt : Nat"
         , "elaborate ⟨ let y : Nat = zero in succ y ⟩"
         , ":show"
@@ -439,6 +449,7 @@ tests =
     , script
         "session"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem two : Nat"
         , "attack"
         , ":show"
@@ -447,6 +458,7 @@ tests =
         , ":suspend"
         , ":proofs"
         , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "open Bool"
         , ":theorem one : Nat"
         , "try-core ⌜ zero ⌝"
         , "solve"
@@ -463,6 +475,7 @@ tests =
     , script
         "unification"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "claim \"h\" ⌜ Nat ⌝"
         , "unify ⌜ succ h ⌝ ⌜ succ (succ zero) ⌝"
         , ":show"
@@ -542,16 +555,20 @@ tests =
     , script
         "declaring"
         [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":show Nat"
         , ":show succ"
         , ":show zero"
         , ":core succ (succ zero)"
         , "data Vec (A : Type₀) : Nat -> Type₀ where { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
+        , "open Vec"
         , ":show Vec"
         , ":show cons"
         , "data Empty : Type where { }"
+        , "open Empty"
         , ":show Empty"
         , "data Nat : Type₀ where { z : Nat }"
+        , "open Nat"
         , "data Ordinal : Type₀ where { sup : (Nat -> Ordinal) -> Ordinal }"
         , "data Bad : Type₀ where { bad : (Bad -> Bad) -> Bad }"
         , ":show nowhere"
@@ -562,6 +579,7 @@ tests =
     , script
         "reduction"
         [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":whnf succ zero"
         -- committing reduction, and the orphaning case (§4.7): claim two
         -- holes, put a redex mentioning the first in the second's type, then
@@ -603,7 +621,9 @@ tests =
     , script
         "induction"
         [ "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }"
+        , "open Eq"
         , "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem plus : Nat -> Nat -> Nat"
         , "try-core ⌜ \\ (n : Nat) (m : Nat) -> elim Nat () (\\ (t : Nat) -> Nat) (m (\\ (k : Nat) (ih : Nat) -> succ ih)) () n ⌝"
         , "solve"
@@ -667,7 +687,9 @@ tests =
         "inversion"
         ( preludeLines ++
         [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data Ev : Nat -> Type₀ where { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
+        , "open Ev"
         , ":whnf Nat.NoConfusion zero (succ zero)"
         , ":whnf Nat.NoConfusion (succ (succ zero)) (succ zero)"
         , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty {0}"
@@ -708,7 +730,9 @@ tests =
     , script
         "elimination"
         [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data Fin : Nat -> Type₀ where { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }"
+        , "open Fin"
         , ":theorem noEq : ∀ (n : Nat) (i : Fin n) -> Nat"
         , "attack"
         , "intro"
@@ -720,10 +744,18 @@ tests =
         , "eliminate-core ⌜ n ⌝"
         , ":abandon"
         , "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }"
+        , "open Eq"
         , "data Unit : Type where { unit : Unit }"
+        , "open Unit"
         , "data Empty : Type where { }"
+        , "open Empty"
         , "data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }"
+        , "open And"
         , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
+          -- **No open: the declaration above it is refused today.** A datatype
+          -- may not be named after one of its own generated relations, and this one
+          -- is — so there is no namespace to open. The refusal is on the milestone
+          -- closeout list; when it is ruled, this script wants an open here.
         , ":theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat"
         , "attack"
         , "intro"
@@ -779,6 +811,10 @@ tests =
         -- @examples/chained-index-telescope.thena@ is where the term is judged,
         -- by the kernel, with the arm's own payload reduced out of it.
         , "data Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀ where { c0 : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Chain n i b }"
+          -- **No open: the declaration above it is refused today.** A datatype
+          -- may not be named after one of its own generated relations, and this one
+          -- is — so there is no namespace to open. The refusal is on the milestone
+          -- closeout list; when it is ruled, this script wants an open here.
         , ":theorem chained : ∀ (m : Nat) (c : Chain (succ m) (fz m) (bz m)) -> Nat"
         , "attack"
         , "intro"
@@ -797,6 +833,7 @@ tests =
       script
         "refining"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
           -- **The level arguments go on the /uses/, never on the constructor's
           -- name.** Written @refl {0} :@ this line was a syntax error, so @Eq@
           -- was never declared and every step below recorded @not in scope@ as
@@ -804,6 +841,7 @@ tests =
           -- (@ms3/CLOSEOUT.md@ item 14). Repaired reviewing MS3.
         , "data Eq (A : Type) : A -> A -> Type \
           \where { refl : \8704 (a : A) -> Eq A a a }"
+        , "open Eq"
           -- Already the goal's type: unification has nothing to do, and the
           -- binding is filled straight in.
         , ":theorem id0 : \8704 (A : Type\8320) -> A -> A"
@@ -882,6 +920,7 @@ tests =
       script
         "surface-inference"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem t : Nat"
         , ":show"
         , ":infer succ zero"
@@ -904,6 +943,7 @@ tests =
           -- A block is an atom, so an argument run takes it unparenthesised.
         , ":surface f (do { attack })"
         , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem t : Nat"
         , "elaborate ⟨ do { attack ; prove } ⟩"
           -- The block did what was written rather than what was tidy, and the
@@ -965,6 +1005,7 @@ tests =
     , script
         "yielding"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem t : Nat"
         , "elaborate ⟨ do { h = here ; yield \"look at this\" ; goto h ; prove } ⟩"
           -- The development is what the rule has built so far, not what it
@@ -1001,8 +1042,10 @@ tests =
     , script
         "inferring"
         [ "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "open Bool"
         , "data Maybe (A : Type\8320) : Type\8320 \
           \where { Nothing : Maybe A ; Just : \8704 (a : A) -> Maybe A }"
+        , "open Maybe"
         , ":theorem g : Maybe Bool"
           -- One hole per argument of Just, including the type parameter.
         , "claim \"T\" ⌜ Type\8320 ⌝"
@@ -1031,8 +1074,10 @@ tests =
       script
         "applying"
         [ "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "open Bool"
         , "data Maybe (A : Type\8320) : Type\8320 \
           \where { Nothing : Maybe A ; Just : \8704 (a : A) -> Maybe A }"
+        , "open Maybe"
         , ":theorem g : Maybe Bool"
           -- One line for the whole of `inferring`'s three.
         , ":matches"
@@ -1154,7 +1199,9 @@ tests =
       script
         "fitting"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data P : Type\8320 where { mk : Nat -> Nat -> P }"
+        , "open P"
           -- **Arity 0: it fits as it stands, so there is no @backtracking to@
           -- line at all** — clause 1 succeeded first time.
           --
@@ -1191,8 +1238,10 @@ tests =
           -- goal, and unification then solves @?A@ to @Bool@. Saturating past
           -- it, as @apply-core@ must, lands on @Maybe ?A@ and fails.
         , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "open Bool"
         , "data Maybe (A : Type\8320) : Type\8320 \
           \where { Nothing : Maybe A ; Just : \8704 (a : A) -> Maybe A }"
+        , "open Maybe"
         , ":goal \8704 (b : Bool) -> Maybe Bool"
         , "fit-core ⌜ Just ⌝"
         , ":show"
@@ -1208,7 +1257,9 @@ tests =
       script
         "guessing"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : \8704 (n : Nat) -> Nat }"
+        , "open Nat"
         , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "open Bool"
         , ":theorem n : Nat"
           -- Refused, and it says which type against which. Before this phase
           -- the guess went in and @qed@ found it, arbitrarily far away.
@@ -1239,6 +1290,7 @@ tests =
           -- theorem's were dropped at 31e and a datatype's here, so the schema
           -- below is entirely inferred from the two written @Type@s.
           "data Id (A : Type) : A -> A -> Type where { rfl : \8704 (a : A) -> Id A a a }"
+        , "open Id"
         , ":show Id"
         , ":infer \8988 Id {0} \8989"
         , ":infer \8988 rfl {0} \8989"
@@ -1301,7 +1353,9 @@ tests =
         ( preludeLines ++
         [ "data Box1 : Type\8320 -> Type\8321 \
           \where { box1 : \8704 (A : Type\8320) -> A -> Box1 A }"
+        , "open Box1"
         , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem probe : \8704 (b : Box1 Nat) -> Nat"
         , "attack"
         , "intro"
@@ -1310,6 +1364,7 @@ tests =
         , "eliminate-core ⌜ b ⌝"
         , ":abandon"
         , "data N : Type where { z : N ; s : N -> N }"
+        , "open N"
         , ":show N"
         , ":infer \8988 s {0} \8989"
         , ":infer \8988 s {1} (z {1}) \8989"
@@ -1318,12 +1373,14 @@ tests =
           -- level argument. Before phase 50 the bound was dropped, @?\8467@ became a
           -- rigid, and the generated no-confusion family was refused as a bug.
         , "data E : Type where { k : Eq {1} Type Nat Nat -> E }"
+        , "open E"
         , ":show E"
           -- And one the bounds merely /constrain/: @suc ?\8467 \8804 2@ leaves @?\8467@ free
           -- below 1. Phase 50 refused it, because a datatype has nowhere to
           -- carry a conditional constraint; **phase 51 defaults it** to its
           -- least value instead, so @F@ takes no level argument either.
         , "data F : Type where { k2 : Eq {2} Type Nat Nat -> F }"
+        , "open F"
         , ":show F"
           -- **Real polymorphism is untouched**, which is the whole point of the
           -- partition: @\8467@ occurs in @Eq@'s own type, so a use determines it
@@ -1376,6 +1433,7 @@ tests =
           -- because a declaration's levels are stored and instantiated at every
           -- use and nothing generalised one.
         , "data Box : Type where { }"
+        , "open Box"
         , ":show Box"
 
         , ":quit"
@@ -1466,7 +1524,9 @@ tests =
       script
         "trusted"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
+        , "open Eq"
           -- Honestly true, so the claim is met and the node goes.
         , "declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)"
         , ":whnf honest {0}"
@@ -1517,7 +1577,9 @@ tests =
         [ -- **A golden runs prelude-free**, so @Eq@ is declared here rather
           -- than assumed (@HAZARDS.md@).
           "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
+        , "open Eq"
         , "declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)"
           -- **THE DECLARE DOOR** (MS8 phase 167, his ruling on MS8 closeout
           -- 13). The same line is refused at the strictest rung and accepted at
@@ -1596,8 +1658,12 @@ preludeLines :: [String]
 preludeLines =
   [ "data Eq (A : Type) : A -> A -> Type \
     \where { refl : \8704 (a : A) -> Eq A a a }"
+  , "open Eq"
   , "data Unit : Type where { unit : Unit }"
+  , "open Unit"
   , "data Empty : Type where { }"
+  , "open Empty"
   , "data And (A : Type) (B : Type) : Type \
     \where { both : \8704 (a : A) (b : B) -> And A B }"
+  , "open And"
   ]

@@ -1,19 +1,21 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
-declared Nat
+declared Nat.Nat
+thena spine> open Nat
+opened Nat
 thena spine> :theorem t : Nat
-proving t : Nat
+proving t : Nat.Nat
 thena spine> elaborate ⟨ do { h = here ; yield "look at this" ; goto h ; prove } ⟩
 look at this
 (yield to hand control back)
 thena spine> :show
-▶ let ? t : Nat in
+▶ let ? t : Nat.Nat in
   t
 thena spine> assume "w" ⌜ Nat ⌝
 look at this
 (yield to hand control back)
 thena spine> :show
-  λ (w : Nat) ->
-▶ let ? t : Nat in
+  λ (w : Nat.Nat) ->
+▶ let ? t : Nat.Nat in
   t
 thena spine> :infer succ zero
 already equal

@@ -1,9 +1,13 @@
 thena spine> data Bool : Type₀ where { true : Bool ; false : Bool }
-declared Bool
+declared Bool.Bool
+thena spine> open Bool
+opened Bool
 thena spine> data Maybe (A : Type₀) : Type₀ where { Nothing : Maybe A ; Just : ∀ (a : A) -> Maybe A }
-declared Maybe
+declared Maybe.Maybe
+thena spine> open Maybe
+opened Maybe
 thena spine> :theorem g : Maybe Bool
-proving g : Maybe Bool
+proving g : Maybe.Maybe Bool.Bool
 thena spine> :matches
 attack
 try-core ‹t›
@@ -119,26 +123,26 @@ spine-arguments ‹h› ‹f› ‹t›
 thena spine> apply-core ⌜ Just ⌝
 solved: A
 thena spine> :show
-  let A = Bool : Type₀ in
+  let A = Bool.Bool : Type₀ in
   let ? a : A in
-  let refined = Just A a : Maybe A in
-▶ let g = refined : Maybe Bool in
+  let refined = Maybe.Just A a : Maybe.Maybe A in
+▶ let g = refined : Maybe.Maybe Bool.Bool in
   g
 thena spine> goto-named "a"
 thena spine> apply-core ⌜ true ⌝
 already equal
 thena spine> :show
-  let A = Bool : Type₀ in
-  let refined1 = true : Bool in
+  let A = Bool.Bool : Type₀ in
+  let refined1 = Bool.true : Bool.Bool in
 ▶ let a = refined1 : A in
-  let refined = Just A a : Maybe A in
-  let g = refined : Maybe Bool in
+  let refined = Maybe.Just A a : Maybe.Maybe A in
+  let g = refined : Maybe.Maybe Bool.Bool in
   g
 thena spine> qed
-g : Maybe Bool   ∎
+g : Maybe.Maybe Bool.Bool   ∎
 thena spine> :show g
-g : Maybe Bool
-g = let A = Bool : Type₀ in let refined1 = true : Bool in let a = refined1 : A in let refined = Just A a : Maybe A in let g = refined : Maybe Bool in g
+g : Maybe.Maybe Bool.Bool
+g = let A = Bool.Bool : Type₀ in let refined1 = Bool.true : Bool.Bool in let a = refined1 : A in let refined = Maybe.Just A a : Maybe.Maybe A in let g = refined : Maybe.Maybe Bool.Bool in g
 thena spine> :theorem ap2 : ∀ (A : Type₀) (f : A -> A -> A) (x : A) -> A
 proving ap2 : ∀ (A : Type₀) -> (A -> A -> A) -> A -> A
 thena spine> attack
@@ -178,81 +182,81 @@ type
 thena spine> :abandon
 abandoned ap2
 thena spine> :theorem bad : Bool
-proving bad : Bool
+proving bad : Bool.Bool
 thena spine> apply-core ⌜ Just ⌝
-stuck: Maybe A and Bool cannot be made equal
+stuck: Maybe.Maybe A and Bool.Bool cannot be made equal
 thena spine> :show
-▶ let ? bad : Bool in
+▶ let ? bad : Bool.Bool in
   bad
 thena spine> :undo
 nothing to undo
 thena spine> apply-core ⌜ true ⌝
 already equal
 thena spine> qed
-bad : Bool   ∎
+bad : Bool.Bool   ∎
 thena spine> :goal Maybe Bool
-▶ let ? goal : Maybe Bool in
+▶ let ? goal : Maybe.Maybe Bool.Bool in
   goal
 thena spine> apply-core ⌜ Just ⌝
 solved: A
 thena spine> :show
-  let A = Bool : Type₀ in
+  let A = Bool.Bool : Type₀ in
   let ? a : A in
-  let refined = Just A a : Maybe A in
-▶ let goal = refined : Maybe Bool in
+  let refined = Maybe.Just A a : Maybe.Maybe A in
+▶ let goal = refined : Maybe.Maybe Bool.Bool in
   goal
 thena spine> apply-core ⌜ Nothing ⌝
 stuck: no clause of apply-core applies here
 thena spine> :show
-  let A = Bool : Type₀ in
+  let A = Bool.Bool : Type₀ in
   let ? a : A in
-  let refined = Just A a : Maybe A in
-▶ let goal = refined : Maybe Bool in
+  let refined = Maybe.Just A a : Maybe.Maybe A in
+▶ let goal = refined : Maybe.Maybe Bool.Bool in
   goal
 thena spine> :undo
-▶ let ? goal : Maybe Bool in
+▶ let ? goal : Maybe.Maybe Bool.Bool in
   goal
 thena spine> :show
-▶ let ? goal : Maybe Bool in
+▶ let ? goal : Maybe.Maybe Bool.Bool in
   goal
 thena spine> :undo
 ▶ let ? goal : Type₀ in
   goal
 thena spine> :goal ∀ (b : Bool) -> Maybe Bool
-▶ let ? goal : Bool -> Maybe Bool in
+▶ let ? goal : Bool.Bool -> Maybe.Maybe Bool.Bool in
   goal
 thena spine> apply-core ⌜ Just ⌝
-stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
-  they differ by one argument, which the shorter side has to take first: Bool
+stuck: Maybe.Maybe A and Bool.Bool -> Maybe.Maybe Bool.Bool cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Bool.Bool
 thena spine> :show
-▶ let ? goal : Bool -> Maybe Bool in
+▶ let ? goal : Bool.Bool -> Maybe.Maybe Bool.Bool in
   goal
 thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
-proving h : Bool -> Maybe Bool
+proving h : Bool.Bool -> Maybe.Maybe Bool.Bool
 thena spine> apply-core ⌜ Just ⌝
-stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
-  they differ by one argument, which the shorter side has to take first: Bool
+stuck: Maybe.Maybe A and Bool.Bool -> Maybe.Maybe Bool.Bool cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Bool.Bool
 thena spine> assume "q" ⌜ Bool ⌝
 thena spine> apply-core ⌜ Just ⌝
-stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
-  they differ by one argument, which the shorter side has to take first: Bool
+stuck: Maybe.Maybe A and Bool.Bool -> Maybe.Maybe Bool.Bool cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Bool.Bool
 thena spine> :abandon
 abandoned h
 thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
-proving h : Bool -> Maybe Bool
+proving h : Bool.Bool -> Maybe.Maybe Bool.Bool
 thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
 thena spine> :where
 focus
-  let ? h1 : Maybe Bool in
+  let ? h1 : Maybe.Maybe Bool.Bool in
 path
   root ▸ ≐ h ▸ b
 context
-  b : Bool
+  b : Bool.Bool
 type
-  Maybe Bool
+  Maybe.Maybe Bool.Bool
 thena spine> apply-core ⌜ Just ⌝
 solved: A
 thena spine> goto-named "a"
@@ -261,12 +265,12 @@ already equal
 thena spine> goto-named "h"
 thena spine> solve
 thena spine> qed
-h : Bool -> Maybe Bool   ∎
+h : Bool.Bool -> Maybe.Maybe Bool.Bool   ∎
 thena spine> :show h
-h : Bool -> Maybe Bool
-h = let h = λ (b : Bool) -> let A = Bool : Type₀ in let refined1 = b : Bool in let a = refined1 : A in let refined = Just A a : Maybe A in let h1 = refined : Maybe Bool in h1 : Bool -> Maybe Bool in h
+h : Bool.Bool -> Maybe.Maybe Bool.Bool
+h = let h = λ (b : Bool.Bool) -> let A = Bool.Bool : Type₀ in let refined1 = b : Bool.Bool in let a = refined1 : A in let refined = Maybe.Just A a : Maybe.Maybe A in let h1 = refined : Maybe.Maybe Bool.Bool in h1 : Bool.Bool -> Maybe.Maybe Bool.Bool in h
 thena spine> :theorem guessed : Bool
-proving guessed : Bool
+proving guessed : Bool.Bool
 thena spine> attack
 thena spine> apply-core ⌜ true ⌝
 stuck: no clause of apply-core applies here

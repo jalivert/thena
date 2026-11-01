@@ -18,6 +18,7 @@ a bare word acts, a word with a colon looks.
   reduce                        reduce the focused term in place
   quantify "‹x›" ⌜‹S›⌝          add a ∀-binder above the focus
   data ‹D› … where { … }        declare an inductive family
+  open ‹namespace›              bring a namespace into view for the rest of the session
   declare ‹sig› ; ‹equation›    elaborate a surface declaration
   certify ⌜‹type›⌝              ask the kernel about the development
   qed                           certify and admit the finished proof

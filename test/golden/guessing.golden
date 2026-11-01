@@ -1,29 +1,33 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : ∀ (n : Nat) -> Nat }
-declared Nat
+declared Nat.Nat
+thena spine> open Nat
+opened Nat
 thena spine> data Bool : Type₀ where { true : Bool ; false : Bool }
-declared Bool
+declared Bool.Bool
+thena spine> open Bool
+opened Bool
 thena spine> :theorem n : Nat
-proving n : Nat
+proving n : Nat.Nat
 thena spine> try-core ⌜ true ⌝
 stuck: that term does not have the hole's type
-  true has type Bool
-    but Nat was expected
-    Nat and Bool are different names
+  Bool.true has type Bool.Bool
+    but Nat.Nat was expected
+    Nat.Nat and Bool.Bool are different names
 thena spine> :show
-▶ let ? n : Nat in
+▶ let ? n : Nat.Nat in
   n
 thena spine> try-core ⌜ zero ⌝
 thena spine> solve
 thena spine> qed
-n : Nat   ∎
+n : Nat.Nat   ∎
 thena spine> :theorem m : Nat
-proving m : Nat
+proving m : Nat.Nat
 thena spine> claim "h" ⌜ Nat ⌝
 thena spine> try-core ⌜ succ h ⌝
 thena spine> :show
-  let ? h : Nat in
-▶ let ? m : Nat ≐ (
-    succ h
+  let ? h : Nat.Nat in
+▶ let ? m : Nat.Nat ≐ (
+    Nat.succ h
   ) in
   m
 thena spine> :abandon

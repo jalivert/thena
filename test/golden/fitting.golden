@@ -1,42 +1,46 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
-declared Nat
+declared Nat.Nat
+thena spine> open Nat
+opened Nat
 thena spine> data P : Type₀ where { mk : Nat -> Nat -> P }
-declared P
+declared P.P
+thena spine> open P
+opened P
 thena spine> :theorem t0 : Nat -> Nat
-proving t0 : Nat -> Nat
+proving t0 : Nat.Nat -> Nat.Nat
 thena spine> fit-core ⌜ succ ⌝
 chose 31: fit-core
 already equal
 thena spine> :show
-  let refined = succ : Nat -> Nat in
-▶ let t0 = refined : Nat -> Nat in
+  let refined = Nat.succ : Nat.Nat -> Nat.Nat in
+▶ let t0 = refined : Nat.Nat -> Nat.Nat in
   t0
 thena spine> :choices
 31  fit-core   untried: fit-core
 thena spine> :undo
-▶ let ? t0 : Nat -> Nat in
+▶ let ? t0 : Nat.Nat -> Nat.Nat in
   t0
 thena spine> apply-core ⌜ succ ⌝
-stuck: Nat and Nat -> Nat cannot be made equal
-  they differ by one argument, which the shorter side has to take first: Nat
+stuck: Nat.Nat and Nat.Nat -> Nat.Nat cannot be made equal
+  they differ by one argument, which the shorter side has to take first: Nat.Nat
 thena spine> :abandon
 abandoned t0
 thena spine> :theorem t1 : Nat
-proving t1 : Nat
+proving t1 : Nat.Nat
 thena spine> fit-core ⌜ succ ⌝
 chose 38: fit-core
 backtracking to 38: fit-core
 chose 42: fit-core
 already equal
 thena spine> :show
-  let ? a : Nat in
-  let refined = succ a : Nat in
-▶ let t1 = refined : Nat in
+  let ? a : Nat.Nat in
+  let refined = Nat.succ a : Nat.Nat in
+▶ let t1 = refined : Nat.Nat in
   t1
 thena spine> :abandon
 abandoned t1
 thena spine> :theorem t2 : P
-proving t2 : P
+proving t2 : P.P
 thena spine> fit-core ⌜ mk ⌝
 chose 46: fit-core
 backtracking to 46: fit-core
@@ -45,19 +49,23 @@ backtracking to 51: fit-core
 chose 55: fit-core
 already equal
 thena spine> :show
-  let ? a : Nat in
-  let ? a1 : Nat in
-  let refined = mk a a1 : P in
-▶ let t2 = refined : P in
+  let ? a : Nat.Nat in
+  let ? a1 : Nat.Nat in
+  let refined = P.mk a a1 : P.P in
+▶ let t2 = refined : P.P in
   t2
 thena spine> :abandon
 abandoned t2
 thena spine> data Bool : Type₀ where { true : Bool ; false : Bool }
-declared Bool
+declared Bool.Bool
+thena spine> open Bool
+opened Bool
 thena spine> data Maybe (A : Type₀) : Type₀ where { Nothing : Maybe A ; Just : ∀ (a : A) -> Maybe A }
-declared Maybe
+declared Maybe.Maybe
+thena spine> open Maybe
+opened Maybe
 thena spine> :goal ∀ (b : Bool) -> Maybe Bool
-▶ let ? goal : Bool -> Maybe Bool in
+▶ let ? goal : Bool.Bool -> Maybe.Maybe Bool.Bool in
   goal
 thena spine> fit-core ⌜ Just ⌝
 chose 86: fit-core
@@ -65,9 +73,9 @@ backtracking to 86: fit-core
 chose 91: fit-core
 solved: a
 thena spine> :show
-  let a = Bool : Type₀ in
-  let refined = Just a : a -> Maybe a in
-▶ let goal = refined : Bool -> Maybe Bool in
+  let a = Bool.Bool : Type₀ in
+  let refined = Maybe.Just a : a -> Maybe.Maybe a in
+▶ let goal = refined : Bool.Bool -> Maybe.Maybe Bool.Bool in
   goal
 thena spine> :choices
 91  fit-core   untried: fit-core

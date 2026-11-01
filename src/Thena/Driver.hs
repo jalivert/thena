@@ -1778,6 +1778,14 @@ dispatch s name arg = case name of
   ":step"  -> stepping
   ":run"   -> running
   "data"   -> declaration
+  -- **@open@ is a bare word, HIS RULING of 2026-11-01** (MS10 phase 249). It is a
+  -- declaration and it acts, which is 'Thena.Syntax.Lexer''s @TOpen@ and §2.4's
+  -- rule — @spec/interface.md@, /bare word acts, colon looks/, whose test is that
+  -- the bare words are the ones reading identically inside a rule body. @open@
+  -- already does: a file's @open@ compiles to @Do (Open …)@ and the machine runs
+  -- it, so this case plays the same instruction rather than inventing a second
+  -- mechanism. @:open@ was considered and refused, for that reason.
+  "open"   -> opening
   -- **A surface declaration** (MS4 phase 42) — a bare word, because it acts
   -- (§2.4). It compiles to instructions rather than being run here, so
   -- @:step@ can watch it and phase 49 can move the program into a rule body.
@@ -2200,6 +2208,32 @@ dispatch s name arg = case name of
                 []
                 []
 
+    -- | @open ‹namespace›@ at the prompt (MS10 phase 249, his ruling the same
+    -- day; it closes the half of @~7zn7k@ that was not the resolver).
+    --
+    -- **The same instruction a file's @open@ compiles to**, so the refusal when
+    -- nothing is named @‹namespace›.…@ is the machine's and not a second copy, and
+    -- @:step@ can watch it as it watches @data@. The argument is raw text taken
+    -- from a line, which is 'Thena.Core.Term.nameFromText''s one job.
+    --
+    -- **Its effect runs to the end of the session** (phase 247) — @opened@ is not
+    -- backtrackable — so a prompt @open@ behaves as the last @open@ in a loaded
+    -- file does, and nothing distinguishes the two.
+    opening = withArgument $
+      let g  = nameFromText (dropWhile (== ' ') arg)
+          -- **It says so, as @data@ does.** A file's @open@ is silent because the
+          -- load reports per declaration; a line typed at the prompt that answered
+          -- nothing at all would leave the user unable to tell it took, and the
+          -- refusal path already speaks. The wording follows @declared ‹name›@.
+          is = [ Do (Open (Lit (VName g)))
+               , Do (Say (Lit (VText ("opened " ++ nameDotted g))))
+               ]
+       in progress
+            (sessionFuel s)
+            s { sessionMachine = load is machine }
+            []
+            []
+
     goal = withArgument $ case parseCore (grammars machine) (globals machine) (opened machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (t, n1) -> case setGoal t machine { names = n1 } of
@@ -2436,6 +2470,7 @@ commandSummary =
   , ("reduce",                   "reduce the focused term in place")
   , ("quantify \"‹x›\" ⌜‹S›⌝",     "add a ∀-binder above the focus")
   , ("data ‹D› … where { … }",   "declare an inductive family")
+  , ("open ‹namespace›",         "bring a namespace into view for the rest of the session")
   , ("declare ‹sig› ; ‹equation›", "elaborate a surface declaration")
   , ("certify ⌜‹type›⌝",         "ask the kernel about the development")
   , ("qed",                      "certify and admit the finished proof")

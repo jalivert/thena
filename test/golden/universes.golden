@@ -1,17 +1,29 @@
 thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
-declared Eq
+declared Eq.Eq
+thena spine> open Eq
+opened Eq
 thena spine> data Unit : Type where { unit : Unit }
-declared Unit
+declared Unit.Unit
+thena spine> open Unit
+opened Unit
 thena spine> data Empty : Type where { }
-declared Empty
+declared Empty.Empty
+thena spine> open Empty
+opened Empty
 thena spine> data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }
-declared And
+declared And.And
+thena spine> open And
+opened And
 thena spine> data Box1 : Type₀ -> Type₁ where { box1 : ∀ (A : Type₀) -> A -> Box1 A }
-declared Box1
+declared Box1.Box1
+thena spine> open Box1
+opened Box1
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
-declared Nat
+declared Nat.Nat
+thena spine> open Nat
+opened Nat
 thena spine> :theorem probe : ∀ (b : Box1 Nat) -> Nat
-proving probe : Box1 Nat -> Nat
+proving probe : Box1.Box1 Nat.Nat -> Nat.Nat
 thena spine> attack
 thena spine> intro
 thena spine> into
@@ -21,26 +33,32 @@ subgoals: box1Method
 thena spine> :abandon
 abandoned probe
 thena spine> data N : Type where { z : N ; s : N -> N }
-declared N
+declared N.N
+thena spine> open N
+opened N
 thena spine> :show N
-data N {ℓ₅₁₆} : Type (ℓ₅₁₆) where
-  { z : N {ℓ₅₁₆}
-  ; s : N {ℓ₅₁₆} -> N {ℓ₅₁₆} }
+data N.N {ℓ₅₁₆} : Type (ℓ₅₁₆) where
+  { N.z : N.N {ℓ₅₁₆}
+  ; N.s : N.N {ℓ₅₁₆} -> N.N {ℓ₅₁₆} }
 thena spine> :infer ⌜ s {0} ⌝
-s {0} : N {0} -> N {0}
+N.s {0} : N.N {0} -> N.N {0}
 thena spine> :infer ⌜ s {1} (z {1}) ⌝
-s {1} z {1} : N {1}
+N.s {1} N.z {1} : N.N {1}
 thena spine> data E : Type where { k : Eq {1} Type Nat Nat -> E }
-declared E
+declared E.E
+thena spine> open E
+opened E
 thena spine> :show E
-data E : Type₁ where
-  { k : Eq {1} Type₀ Nat Nat -> E }
+data E.E : Type₁ where
+  { E.k : Eq.Eq {1} Type₀ Nat.Nat Nat.Nat -> E.E }
 thena spine> data F : Type where { k2 : Eq {2} Type Nat Nat -> F }
-declared F
+declared F.F
+thena spine> open F
+opened F
 thena spine> :show F
-data F : Type₂ where
-  { k2 : Eq {2} Type₀ Nat Nat -> F }
+data F.F : Type₂ where
+  { F.k2 : Eq.Eq {2} Type₀ Nat.Nat Nat.Nat -> F.F }
 thena spine> :show Eq
-data Eq {ℓ₇} (A : Type (ℓ₇)) : A -> A -> Type (ℓ₇) where
-  { refl : ∀ (a : A) -> Eq {ℓ₇} A a a }
+data Eq.Eq {ℓ₇} (A : Type (ℓ₇)) : A -> A -> Type (ℓ₇) where
+  { Eq.refl : ∀ (a : A) -> Eq.Eq {ℓ₇} A a a }
 thena spine> :quit

@@ -1,18 +1,22 @@
 thena spine> data Bool : Type₀ where { true : Bool ; false : Bool }
-declared Bool
+declared Bool.Bool
+thena spine> open Bool
+opened Bool
 thena spine> data Maybe (A : Type₀) : Type₀ where { Nothing : Maybe A ; Just : ∀ (a : A) -> Maybe A }
-declared Maybe
+declared Maybe.Maybe
+thena spine> open Maybe
+opened Maybe
 thena spine> :theorem g : Maybe Bool
-proving g : Maybe Bool
+proving g : Maybe.Maybe Bool.Bool
 thena spine> claim "T" ⌜ Type₀ ⌝
 thena spine> claim "b" ⌜ T ⌝
 thena spine> unify-refine-core ⌜ Just T b ⌝
 solved: T
 thena spine> :show
-  let T = Bool : Type₀ in
+  let T = Bool.Bool : Type₀ in
   let ? b : T in
-  let refined = Just T b : Maybe T in
-▶ let g = refined : Maybe Bool in
+  let refined = Maybe.Just T b : Maybe.Maybe T in
+▶ let g = refined : Maybe.Maybe Bool.Bool in
   g
 thena spine> goto-named "b"
 thena spine> :where
@@ -21,20 +25,20 @@ focus
 path
   root ▸ T
 context
-  T = Bool : Type₀
+  T = Bool.Bool : Type₀
 type
   T
 thena spine> unify-refine-core ⌜ true ⌝
 already equal
 thena spine> :show
-  let T = Bool : Type₀ in
-  let refined1 = true : Bool in
+  let T = Bool.Bool : Type₀ in
+  let refined1 = Bool.true : Bool.Bool in
 ▶ let b = refined1 : T in
-  let refined = Just T b : Maybe T in
-  let g = refined : Maybe Bool in
+  let refined = Maybe.Just T b : Maybe.Maybe T in
+  let g = refined : Maybe.Maybe Bool.Bool in
   g
 thena spine> qed
-g : Maybe Bool   ∎
+g : Maybe.Maybe Bool.Bool   ∎
 thena spine> :show g
-g : Maybe Bool
-g = let T = Bool : Type₀ in let refined1 = true : Bool in let b = refined1 : T in let refined = Just T b : Maybe T in let g = refined : Maybe Bool in g
+g : Maybe.Maybe Bool.Bool
+g = let T = Bool.Bool : Type₀ in let refined1 = Bool.true : Bool.Bool in let b = refined1 : T in let refined = Maybe.Just T b : Maybe.Maybe T in let g = refined : Maybe.Maybe Bool.Bool in g

@@ -1,7 +1,11 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
-declared Nat
+declared Nat.Nat
+thena spine> open Nat
+opened Nat
 thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
-declared Eq
+declared Eq.Eq
+thena spine> open Eq
+opened Eq
 thena spine> declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)
 solved: ?ℓ233
 already equal
@@ -36,8 +40,8 @@ solved: ?ℓ296
 the trust level refused it
 trust: no trust
   undischargeable, written here
-    claims Eq {ℓ₃₃₈} Nat zero (succ zero)
-    body   Eq {0} Nat zero zero
+    claims Eq.Eq {ℓ₃₃₈} Nat.Nat Nat.zero (Nat.succ Nat.zero)
+    body   Eq.Eq {0} Nat.Nat Nat.zero Nat.zero
 thena spine> :trust any
 trust: any trust
   resting on nothing
@@ -60,7 +64,7 @@ thena spine> :trust none
 trust: no trust
   resting on nothing
 thena spine> :theorem viaHonest : Eq {0} Nat zero zero
-proving viaHonest : Eq {0} Nat zero zero
+proving viaHonest : Eq.Eq {0} Nat.Nat Nat.zero Nat.zero
 thena spine> attack
 thena spine> into
 thena spine> try-core ⌜ honest {0} ⌝
@@ -70,15 +74,15 @@ thena spine> solve
 thena spine> :trust
 trust: no trust
   discharged, at the use of honest
-    claims Eq {0} Nat zero zero
-    body   Eq {0} Nat zero zero
+    claims Eq.Eq {0} Nat.Nat Nat.zero Nat.zero
+    body   Eq.Eq {0} Nat.Nat Nat.zero Nat.zero
 thena spine> qed
-viaHonest : Eq {0} Nat zero zero   ∎
+viaHonest : Eq.Eq {0} Nat.Nat Nat.zero Nat.zero   ∎
   discharged, at the use of honest
-    claims Eq {0} Nat zero zero
-    body   Eq {0} Nat zero zero
+    claims Eq.Eq {0} Nat.Nat Nat.zero Nat.zero
+    body   Eq.Eq {0} Nat.Nat Nat.zero Nat.zero
 thena spine> :theorem viaLiar : Eq {0} Nat zero (succ zero)
-proving viaLiar : Eq {0} Nat zero (succ zero)
+proving viaLiar : Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)
 thena spine> attack
 thena spine> into
 thena spine> try-core ⌜ liar {0} ⌝
@@ -88,23 +92,23 @@ thena spine> solve
 thena spine> :trust
 trust: no trust
   undischargeable, at the use of liar
-    claims Eq {0} Nat zero (succ zero)
-    body   Eq {0} Nat zero zero
+    claims Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)
+    body   Eq.Eq {0} Nat.Nat Nat.zero Nat.zero
 thena spine> qed
 certified
 the trust level refused it
 trust: no trust
   undischargeable, at the use of liar
-    claims Eq {0} Nat zero (succ zero)
-    body   Eq {0} Nat zero zero
+    claims Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)
+    body   Eq.Eq {0} Nat.Nat Nat.zero Nat.zero
 thena spine> :trust any
 trust: any trust
   undischargeable, at the use of liar
-    claims Eq {0} Nat zero (succ zero)
-    body   Eq {0} Nat zero zero
+    claims Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)
+    body   Eq.Eq {0} Nat.Nat Nat.zero Nat.zero
 thena spine> qed
-viaLiar : Eq {0} Nat zero (succ zero)   ∎
+viaLiar : Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)   ∎
   undischargeable, at the use of liar
-    claims Eq {0} Nat zero (succ zero)
-    body   Eq {0} Nat zero zero
+    claims Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)
+    body   Eq.Eq {0} Nat.Nat Nat.zero Nat.zero
 thena spine> :quit
