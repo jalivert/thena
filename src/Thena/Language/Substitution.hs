@@ -77,6 +77,8 @@ import Thena.Language.Grammar
   , substOf
   , variableProductions
   , variableRegex
+  , grammarWord
+  , grammarWritten
   )
 import Thena.Language.Reader (Param (..), Block (..), Production (..), RawItem (..))
 import Thena.Language.Regex (primingChar)
@@ -98,8 +100,12 @@ substitutionDefinitions gs g =
     ++ [ (allOf langName, arrows (self : map mapType reached) self, allBody) | not (null reached) ]
     ++ [ (substOf langName k, arrows [self, string, ownerSelf k] self, oneBody k) | k <- reached ]
   where
-    langName = grammarName g
-    lang = nameDotted (grammarName g)
+    -- **MINTED RELATIVE, WRITTEN AS A WORD** (MS10 phase 258). @langName@ is
+    -- what the generated names hang off and it must carry no namespace, because
+    -- 'Thena.Engine.declaredIn' places what the declaring op admits; @lang@ is
+    -- written into the types, so it is the word the author would have written.
+    langName = grammarWritten g
+    lang = grammarWord g
     reached = map nameDotted (classesSubstituted gs g)
     owned = map (nameDotted . fst) (variableProductions g)
     -- **Constructors only** (MS8 phase 158): these become the eliminator's
@@ -126,7 +132,7 @@ substitutionDefinitions gs g =
     owner k = case classOwner gs g (rootName k) of
       Just h -> h
       Nothing -> g
-    ownerName k = nameDotted (grammarName (owner k))
+    ownerName k = grammarWord (owner k)
     ownerSelf = name . ownerName
     -- The owning language's variable production for the class: what a renamed
     -- binder of that class becomes.
@@ -346,7 +352,7 @@ substitutionDefinitions gs g =
             foldr (\i body ->
                      let c = fromMaybe "" (binderAt args i)
                       in SurfaceLet (local (renamed i)) (Just string)
-                           (app (global (freshOf (grammarName (owner c)) c)) [v (as !! i), avoidTerm i c]) body)
+                           (app (global (freshOf (grammarWritten (owner c)) c)) [v (as !! i), avoidTerm i c]) body)
                   rebuilt binders
        in lamL (as ++ rs ++ map mapVar reached) $ case (map argumentRole args, as) of
             -- A variable production: the whole node is what its class's map says.
@@ -422,7 +428,10 @@ substitutionNotations gs g
   | null prods = []
   | otherwise  = [Block NotationBlock lang [] prods []]
   where
-    lang = nameDotted (grammarName g)
+    -- **The header is the word a user would write** (MS10 phase 258), and
+    -- 'Thena.Language.Grammar.checkNotation' resolves it in the scope the block
+    -- sits in — the same door a written @notation Ty where@ goes through.
+    lang = grammarWord g
     -- **The three names are the production's own, since MS8 phase 171.** They
     -- used to be metavariables hunted out of the grammars — the target from this
     -- one, the replacement from whichever language owns the class — and the hunt
@@ -430,7 +439,7 @@ substitutionNotations gs g
     -- @notation@ production names its arguments now, so the generator says what
     -- it means and no grammar has to carry a word for it.
     prods =
-      [ Production 0 (nameDotted (substOf (grammarName g) k))
+      [ Production 0 (nameDotted (substOf (grammarWritten g) k))
           [ Param (target k) Nothing, Param k (Just k), Param (replacement k) Nothing ]
           Nothing
           (map Word [target k, "[", k, "->", replacement k, "]"])

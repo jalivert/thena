@@ -98,7 +98,9 @@ buildCore gs splices = build
       -- an exception to it.
       (OfUniverse _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfUniverse _, Node n kids) | Just r <- typeReading n kids -> case r of
-        TypeCalled l  -> Right (Global (rootName l) [])
+        -- **A KEY, SO IT IS SPLIT ON ITS DOTS** (MS10 phase 258): the node
+        -- carries @A.Ty@ and the term wants the name @Ty@ in @A@.
+        TypeCalled l  -> Right (Global (nameFromText l) [])
         AtUniverse k  -> Right (Universe (levelOfNat k))
         TypeInside t  -> build t
       (OfUniverse _, _) -> Left (NotForSlot (argumentName a) (shapeOf child))
@@ -514,7 +516,7 @@ languageNames gs = map (nameDotted . grammarName) gs
 -- is what turns the word back into the name the parser knows.
 productionNames :: [Grammar] -> String -> [String]
 productionNames gs lang =
-  [ n | g <- gs, rootName lang == grammarName g
+  [ n | g <- gs, nameFromText lang == grammarName g
       , p <- grammarProductions g, let n = nameWord (gproductionName p) ]
 
 -- | The parser's name for one of them \u2014 @LC[app]@ is the rule @LC.app@.
@@ -526,7 +528,7 @@ productionNames gs lang =
 productionRule :: [Grammar] -> String -> String -> Maybe String
 productionRule gs lang w =
   case [ nameDotted (gproductionName p)
-       | g <- gs, rootName lang == grammarName g
+       | g <- gs, nameFromText lang == grammarName g
        , p <- grammarProductions g, nameWord (gproductionName p) == w ] of
     n : _ -> Just n
     []    -> Nothing

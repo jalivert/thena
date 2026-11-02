@@ -69,7 +69,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, shortestEnding, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, shortestEnding, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -217,13 +217,13 @@ import Thena.Language.Grammar
   ( Argument (..)
   , GProduction (..)
   , Grammar (..)
-  , Sort (..)
   , checkGrammar
   , checkNotation
   , constructorProductions
-  , universeSpelling
   , earleyRules
   , notationInto
+  , grammarWord
+  , sortType
   )
 import qualified Thena.Language.Earley as Earley
 import Thena.Syntax.Parser
@@ -1518,7 +1518,7 @@ datatypeProgram ns n d roles =
 -- read the binder where the datatype is meant.
 grammarDatatype :: Grammar -> (SurfaceData, [[ArgRole]])
 grammarDatatype g =
-  ( SurfaceData [] (plainName (grammarName g)) [] (SurfaceUniverse 0) (map constructor prods)
+  ( SurfaceData [] (grammarWord g) [] (SurfaceUniverse 0) (map constructor prods)
   , map (map argumentRole . gproductionArguments) prods
   )
   where
@@ -1526,7 +1526,6 @@ grammarDatatype g =
     -- production names a function that is already declared, so the datatype
     -- this generates is the one it would have generated without it.
     prods = constructorProductions g
-    plainName = nameDotted
 
     -- **The production's WORD, because placing it is 'datatypeProgram''s job**
     -- (MS10 phase 248). A production already carries its full name — @LC.var@ —
@@ -1538,16 +1537,12 @@ grammarDatatype g =
     typeOf p = case gproductionArguments p of
       [] -> self
       args -> SurfacePi (NE.fromList (map binder (renamed args))) self
-    self = SurfaceName [] (plainName (grammarName g))
+    self = SurfaceName [] (grammarWord g)
 
     binder (x, srt) = SurfaceBinder Explicit x (Just (SurfaceName [] (typeName srt)))
-    typeName srt = case srt of
-      OfLanguage l -> plainName l
-      OfClass _ t _ -> plainName t
-      -- Only a @notation@ block may have a universe slot, and it generates no
-      -- datatype; a @language@ block's production carrying one is refused by
-      -- @UniverseSlot@ (MS8 phase 160).
-      OfUniverse n -> universeSpelling n
+    -- **'Thena.Language.Grammar.sortType' is the one definition** (MS10 phase
+    -- 258); this was one of three copies of it.
+    typeName = sortType
 
     -- Primed until it shadows nothing the types name.
     renamed args = go [] args
@@ -3433,7 +3428,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- it is a separate block**: the function's type names the datatype the
   -- @language@ or @context@ block declares, so it cannot be written above it.
   Engine.DeclaringGrammar b m
-    | blockKind b == NotationBlock -> case checkNotation (grammars m) (globals m) b of
+    | blockKind b == NotationBlock -> case checkNotation (Engine.scope m) (grammars m) (globals m) b of
         Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
         Right delta ->
           -- **A @notation@ block that INSTALLS a grammar generates its
@@ -3472,7 +3467,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
       case judgmentDatatype (g : grammars m) g (blockRules b) of
         Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
         Right (sd, roles) ->
-          let (is, n1) = datatypeProgram [] (names m) sd (Just roles)
+          let (is, n1) = datatypeProgram (innermostOf (Engine.scope m)) (names m) sd (Just roles)
               m' = (Engine.splicing is m) { grammars = g : grammars m, names = n1 }
            in if exhausted
                 then stop m' msgs (reverse ws ++ warns) (Paused spent)
@@ -3483,7 +3478,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
       -- that could only happen once the load reached it. So the instructions go
       -- in front of what is left of the program, and the datatype is elaborated
       -- and declared exactly as a written one is.
-      let (is, n1) = datatypeProgram [] (names m) sd (Just roles)
+      let (is, n1) = datatypeProgram (innermostOf (Engine.scope m)) (names m) sd (Just roles)
           (sd, roles) = grammarDatatype g
           -- **Then its substitution** (MS6 phase 105, §4.7): four ordinary
           -- definitions, elaborated by the same instructions a written one is,
@@ -3506,7 +3501,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
           -- two kinds of binding gets a lookup relation for each, and their
           -- instructions run in declaration order.
           (ls, n3) = foldl (\(is0, n) (ld, lroles) ->
-                              let (is1, n') = datatypeProgram [] n ld (Just lroles)
+                              let (is1, n') = datatypeProgram (innermostOf (Engine.scope m)) n ld (Just lroles)
                                in (is0 ++ is1, n'))
                            ([], n2) (lookupDatatypes g)
           installed = reverse (lookupGrammars g) ++ [g]

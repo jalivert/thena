@@ -497,14 +497,17 @@ loop blocks modes inp@(pos, _, _, str) = case modes of
             -- the layout pass then reports as closing a block nobody opened.
             -- NB: no literal braces in this comment — Alex counts them.
             -- **An object-language block is taken whole** (MS6 phase 101): its
-            -- keyword at column 1 of a module, outside every region. Its
+            -- keyword at any column, outside every region. **At any column
+            -- since MS10 phase 258**, so a block may be written inside a
+            -- @namespace@ block; the keyword's own column is what ends it, and
+            -- column 1 was the same rule with the margin as the only option. Its
             -- contents are an object language's notation, which Thena's
             -- lexer must not tokenise — @[@, @λ@ and a regex's characters are
             -- reserved here — so they are handed over as text, exactly as a
             -- tagged region's are.
             ([], _)
-              | blocks, Pos _ 1 <- lp, Just k <- blockKindOf tk ->
-                  let (body, inp'') = blockText inp'
+              | blocks, Just k <- blockKindOf tk, Pos _ col <- lp ->
+                  let (body, inp'') = blockText col inp'
                    in (Spanned lp (TBlock k body) body :) <$> loop blocks modes inp''
             (_, TEscapeOpen) -> (t :) <$> loop blocks (Esc 0 : modes) inp'
             -- The brace that closes the escape, rather than one its code wrote.
@@ -592,19 +595,30 @@ blockKindOf t = case t of
 -- | The rest of a block, from just after its keyword (@ms6\/SPEC.md@ §7.0):
 -- the rest of the keyword's line, then every line that is blank or indented.
 -- **The block ends at the first line indented no further than the keyword**,
--- and the keyword is at column 1, so that is the next line with anything in
--- column 1 — the next top-level item, or a comment at the margin.
-blockText :: AlexInput -> (String, AlexInput)
-blockText (p0, c0, _, s0) = go p0 c0 (takeLine s0)
+-- which is what the column is passed in for. Until MS10 phase 258 a keyword
+-- could only be at column 1, so this was written as /the next line with
+-- anything in column 1/ and needed no argument; **the general rule is the same
+-- rule**. Inside @namespace A where@ a @language@ at column 3 ends at the next
+-- line whose first character is at column 3 or before it — the namespace's next
+-- item, or anything back at the margin.
+blockText :: Int -> AlexInput -> (String, AlexInput)
+blockText col (p0, c0, _, s0) = go p0 c0 (takeLine s0)
   where
     go p c (line, rest) =
       let p' = foldl alexMove p line
           c' = if null line then c else last line
        in case rest of
-            (x : _) | x `notElem` " \t\n" -> (line, (p', c', [], rest))
             [] -> (line, (p', c', [], rest))
+            _ | dedented rest -> (line, (p', c', [], rest))
             _ -> let (more, inp) = go p' c' (takeLine rest)
                   in (line ++ more, inp)
+
+    -- **Is the next line's first character at the keyword's column or before
+    -- it?** That is what ends the block. A blank line has no first character,
+    -- so it never ends one — at any column, as it always was.
+    dedented s = case break (== '\n') s of
+      (l, _) | null (dropWhile (`elem` " \t") l) -> False
+             | otherwise -> length (takeWhile (`elem` " \t") l) + 1 <= col
     -- One line with its newline, if it has one.
     takeLine s = case break (== '\n') s of
       (l, '\n' : r) -> (l ++ "\n", r)

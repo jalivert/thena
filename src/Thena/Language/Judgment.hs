@@ -48,7 +48,6 @@ import Thena.Language.Grammar
   , TypeReading (..)
   , typeReading
   , universeWord
-  , universeSpelling
   , Grammar (..)
   , GrammarError (..)
   , GrammarProblem (..)
@@ -62,6 +61,9 @@ import Thena.Language.Grammar
   , classesSubstituted
   , substitutionNames
   , variableProductions
+  , grammarKey
+  , grammarWord
+  , sortType
   )
 import Thena.Errors (BuildError (..))
 import Thena.Global.Env (ArgRole (..))
@@ -84,7 +86,9 @@ judgmentDatatype gs g rules = do
   Right ( SurfaceData [] name [] (foldr (SurfaceArrow . typeOf) (SurfaceUniverse 0) indices) (map fst ctors)
         , map snd ctors )
   where
-    name = nameDotted (grammarName g)
+    -- **The WORD, because placing it is 'Thena.Driver.datatypeProgram''s job**
+    -- (MS10 phase 258), exactly as a @language@ block's datatype already did.
+    name = grammarWord g
     -- **The judgment's own notation, which is its one type-former production**
     -- (MS8 phase 160) — the spelling of the statement this family makes, so its
     -- slots are the family's indices. A @notation@ block may add a function
@@ -173,7 +177,9 @@ constructor gs g r = do
         b : bs -> SurfacePi (b NE.:| bs) result
   Right (SurfaceConstructor [] (ruleName r) ty, replicate (length binders) Plain)
   where
-    judgment = nameDotted (grammarName g)
+    -- **The word, not the key** (MS10 phase 258): this is written into a
+    -- surface type, and a block inside @namespace A@ writes @typing@.
+    judgment = grammarWord g
     -- **The parser knows the production by its own name** (MS10 phase 248),
     -- which is @typing.typing@ now that a block's productions live in the
     -- namespace its datatype opens. @judgment@ stays the written word, because
@@ -274,7 +280,7 @@ constructor gs g r = do
         Just (TypeInside (Node p' _)) ->
           case [ l | h <- gs, q <- grammarProductions h
                    , gproductionName q == nameFromText p'
-                   , let l = nameDotted (grammarName h) ] of
+                   , let l = grammarKey h ] of
             l : _ -> Just l
             []    -> Nothing
         _ -> Nothing
@@ -299,7 +305,9 @@ constructor gs g r = do
     -- Every type or global the constructor's type can mention, which a
     -- metavariable must not shadow.
     types = nub $
-      [ n | h <- gs, let n = nameDotted (grammarName h) ]
+      -- **Words, because a metavariable is a word** (MS10 phase 258): what
+      -- must not be shadowed is what the author can write.
+      [ n | h <- gs, let n = grammarWord h ]
         ++ [ sortType srt | h <- gs, p <- grammarProductions h, Slot _ srt _ <- gproductionItems p ]
         ++ concatMap (substitutionNames gs) gs
         ++ ["And", "both", "cons", "nil"]
@@ -346,7 +354,9 @@ terminals gs = [ t | g <- gs, p <- grammarProductions g, Terminal t <- gproducti
 -- | The metavariables a reading mentions, in order, each with its type's name.
 mentions :: [Grammar] -> Tree -> Either BuildError [(String, String)]
 mentions gs t = case t of
-  Node n [Token x] | [MetavariableOf l] <- special n -> Right [(x, l)]
+  -- **The node carries the grammar's KEY and a binder wants the WORD** (MS10
+  -- phase 258) — this is the type a quantified metavariable is written at.
+  Node n [Token x] | [MetavariableOf l] <- special n -> Right [(x, wordOfKey gs l)]
   -- **A type is not a metavariable** (phase 160): @LC@ or @𝕌₀@ written as a
   -- premise is a type the rule's argument is at, so there is nothing to
   -- quantify over and nothing to rename.
@@ -379,7 +389,10 @@ term gs self@(selfRule, selfWord) rename t = case t of
   -- that grammar's datatype is; @𝕌₀@ is @Type₀@. Neither is renamed — a type
   -- is not a metavariable.
   Node n [child] | [TypeWrapper] <- special n -> term gs self rename child
-  Node n _ | [TypeNamed l] <- special n -> Right (SurfaceName [] l)
+  -- **A KEY BECOMES A WORD HERE** (MS10 phase 258): the node carries the
+  -- grammar's dotted key, which is what keeps two languages of one word apart,
+  -- and what goes into a surface type is the word the author would have written.
+  Node n _ | [TypeNamed l] <- special n -> Right (SurfaceName [] (wordOfKey gs l))
   Node n [Token u] | [UniverseRead] <- special n -> Right (SurfaceUniverse (maybe 0 id (universeWord u)))
   -- **Not renamed** (MS8 phase 172): the premise binder carries the user's own
   -- name, so this is the name of the thing it reaches.
@@ -478,7 +491,7 @@ ruleGrammar gs =
       _ -> s
 
     own g =
-      let l = nameDotted (grammarName g)
+      let l = grammarKey g
        in Earley.Rule ("metavariable " ++ l) l
             [Earley.Scan ("a metavariable of " ++ l) (metavariables (grammarMetavars g))] []
             : case substitutedClasses gs g of
@@ -577,14 +590,29 @@ substitutedClasses :: [Grammar] -> Grammar -> [String]
 substitutedClasses gs g = [ x | x <- map nameDotted (classesSubstituted gs g) ]
 
 -- | The grammar of that name, among those installed.
+-- | The word a grammar's key is written with — @A.Ty@ becomes @Ty@.
+--
+-- **Through the grammar and not by taking the last step off the string**, so a
+-- grammar whose own word holds no dot is the only thing this can answer with
+-- (MS10 phase 258). An unknown key is left as it stands, which keeps a refusal
+-- naming what was written.
+wordOfKey :: [Grammar] -> String -> String
+wordOfKey gs l = case grammarNamed gs l of
+  g : _ -> grammarWord g
+  []    -> l
+
+-- **@l@ IS A KEY, SO IT IS SPLIT ON ITS DOTS** (MS10 phase 258). @rootName@
+-- here made @A.Ty@ a root-level word holding dots, which matches no grammar.
 grammarNamed :: [Grammar] -> String -> [Grammar]
-grammarNamed gs l = [ g | g <- gs, grammarName g == rootName l ]
+grammarNamed gs l = [ g | g <- gs, grammarName g == nameFromText l ]
 
 -- | The language that owns a class — what the right-hand side of one of its
 -- pairs is a term of, and what its map is a map into.
+-- **It answers with the owner's WORD** (MS10 phase 258), because every caller
+-- writes it into a surface type rather than handing it to the parser.
 ownerOf :: [Grammar] -> String -> String -> String
 ownerOf gs l x = case [ classOwner gs h (rootName x) | h <- grammarNamed gs l ] of
-  Just g : _ -> nameDotted (grammarName g)
+  Just g : _ -> grammarWord g
   _ -> x
 
 -- | A class's @T@ — @String@ for every class a binder or an occurrence may be
@@ -625,15 +653,6 @@ isMetavariable gs n = any (`elem` names) (nameBases n)
     -- the languages' (§6.1).
     names = [ m | g <- gs, m <- grammarMetavars g ]
          ++ [ x | g <- gs, p <- grammarProductions g, Slot x (OfClass {}) _ <- gproductionItems p ]
-
-sortType :: Sort -> String
-sortType srt = case srt of
-  OfLanguage l -> nameOf l
-  OfClass _ t _ -> nameOf t
-  -- A rule's metavariables come from the grammars, and a universe slot can only
-  -- be written in a @notation@ block — a @judgment@ block's production carrying
-  -- one is refused by @UniverseSlot@ (MS8 phase 160).
-  OfUniverse n -> universeSpelling n
 
 nameOf :: GlobalName -> String
 nameOf = nameDotted

@@ -235,9 +235,14 @@ too**, so `data Nat` declares `Nat.Nat`, `Nat.zero` and `Nat.suc`, and a written
 `Nat` reaches the type because a declaration's short name is derived from the
 environment rather than recorded anywhere. **`namespace ‹name› where { … }` is
 built, and resolution walks outward through it. All five forms of `open` are
-built, and a name prints as the shortest ending that still means it.** **What is
-not built yet**: a `language`, `context`, `judgment` or `notation` block inside a
-`namespace` block — write it at the top level of the file.*
+built, and a name prints as the shortest ending that still means it.** **A `language`,
+`context`, `judgment` or `notation` block may be written inside a `namespace`
+block**, and what it declares and generates lands there: inside `namespace A`,
+`language Ty` is `A.Ty.Ty` with `A.Ty.base`, `A.Ty.subst-x` and the rest, and
+`open Ty` beside it brings them in — a namespace resolves by the same outward
+walk a name does. **What is not built yet**: a block inside a `namespace` finds
+its token class at the root only, so write `x : Token String` outside the
+namespace.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something

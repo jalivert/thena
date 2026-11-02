@@ -65,6 +65,7 @@ import Thena.Core.Term
   , Var
   , fresh
   , instantiate
+  , innermostOf
   )
 -- Only for 'Core'\'s @Eliminate@, which "Thena.Instral.Ops" also has a constructor
 -- named: the op that builds one and the node it builds must be told apart.
@@ -751,10 +752,11 @@ globalNamed m g = case globalUnder (knownTo m) (scope m) g of
 
 -- | The namespace a declaration made here goes into — the innermost rung of
 -- the walk, or the root (MS10 phase 254).
+-- **One definition, shared with 'Thena.Language.Grammar.checkGrammar' since
+-- MS10 phase 258** — 'Thena.Core.Term.innermostOf' is the rule, and a block and
+-- an op must place a declaration in the same namespace.
 namespaceOf :: Machine -> [String]
-namespaceOf m = case scopeWithin (scope m) of
-  ns : _ -> ns
-  []     -> []
+namespaceOf = innermostOf . scope
 
 -- | A written name, placed in the namespace the declaration is written in.
 --
@@ -1119,10 +1121,31 @@ perform instr rest m = case operation instr of
   -- sits under it is 'namespaceInhabited'\'s question, asked right here so that
   -- @open Foo@ with no @Foo.…@ anywhere is refused where it is written rather
   -- than becoming a silent no-op that makes every later name fail on its own.
-  Open o
-    | namespaceInhabited (openedPath o) (globals m) ->
-        Continue (advance m { scope = (scope m) { scopeOpens = o : scopeOpens (scope m) } })
-    | otherwise -> failure (NoSuchNamespace (intercalate "." (openedPath o))) m
+  --
+  -- **A NAMESPACE IS RESOLVED BY THE SAME WALK A NAME IS** (MS10 phase 258).
+  -- The written path used to be taken absolutely, so a @language@ block inside
+  -- @namespace A@ could not be opened by the word it was written with: @open Ty@
+  -- there asked for @Ty.…@ and the namespace is @A.Ty@. Since a block may now be
+  -- written inside a @namespace@ — and since phase 255 a block that writes its
+  -- letters with its own language shut installs them as literal text — that
+  -- @open@ is exactly what an author must write, so it has to resolve.
+  --
+  -- **'Thena.Core.Term.globalUnder' is the walk and it is not written a second
+  -- time here**: a path is a name whose last step is its word, @known@ is
+  -- /something is declared under this prefix/, and the enclosing rungs, the
+  -- @open@s and the two-answers refusal all come with it.
+  Open o -> case globalUnder inhabited (scope m) (asName (openedPath o)) of
+    Right c -> Continue (advance m { scope = (scope m)
+                 { scopeOpens = o { openedPath = asPath c } : scopeOpens (scope m) } })
+    Left [] -> failure (NoSuchNamespace (intercalate "." (openedPath o))) m
+    Left gs -> failure (AmbiguousName (intercalate "." (openedPath o))
+                         (map (intercalate "." . asPath) gs)) m
+    where
+      inhabited c = namespaceInhabited (asPath c) (globals m)
+      asName ws = case reverse ws of
+        w : before -> GlobalName (reverse before) w
+        []         -> GlobalName [] ""
+      asPath c = nameSteps c ++ [nameWord c]
 
   -- **A namespace is entered by pushing a prefix and nothing else** (MS10
   -- phase 254). Nothing is checked: a namespace holds whatever keys sit under

@@ -38,6 +38,7 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Errors (SyntaxError (..), Warning (..))
 import Thena.Global.Declare (DeclareError (..))
+import Thena.Global.Env (isDeclared)
 import Thena.Language.Grammar
 import Thena.Language.Reader
 import Thena.Language.Regex (Regex, parseRegex)
@@ -104,6 +105,46 @@ scoped =
         (_, ProofLoaded _ _ _ ws) ->
           ws @?= [ MetavariableNotOpen LanguageBlock "LC" "ty" "T" "Ty" ]
         (_, other) -> assertFailure (show other)
+
+    -- **A BLOCK MAY BE WRITTEN INSIDE A @namespace@ BLOCK — MS10 PHASE 258.**
+    -- All four kinds, and each one's datatype, constructors and generated
+    -- equipment land under the namespace. This is the placement half of the
+    -- scoping: the metavariable half was phase 255.
+  , testCase "all four block kinds declare inside a namespace" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 blocksInANamespace of
+        (_, ProofLoaded _ ds _ _) ->
+          ds @?= ["x", "A.Ty", "A.LC", "A.Ctx", "A.typing"]
+        (_, other) -> assertFailure (show other)
+
+    -- **The generated equipment is placed once, not twice.** A definition is
+    -- minted relative to the namespace and the declaring op supplies the
+    -- prefix, so an absolute mint would have landed at @A.A.LC.subst-x@.
+  , testCase "and a language's substitution is placed under the namespace" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 blocksInANamespace
+          env = globals (machineOf s1)
+      ( isDeclared (named "A.LC.subst-x") env
+        , isDeclared (named "A.LC.fv-x") env
+        , isDeclared (named "A.A.LC.subst-x") env
+        , isDeclared (named "LC.subst-x") env ) @?= (True, True, False, False)
+
+    -- **A block's own word opens where it is written** (MS10 phase 258): the
+    -- @open Ty@ inside the namespace is what every one of those blocks needs,
+    -- since a block that writes its letters with its language shut installs
+    -- them as literal text. A namespace resolves by the same walk a name does.
+  , testCase "and a namespace resolves by the walk, so open Ty works inside A" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (unlines
+             [ "module Opens where", ""
+             , "namespace A where"
+             , "  language Ty, T where"
+             , "    base -> \953"
+             , ""
+             , "  open Ty"
+             , "" ]) of
+        (_, ProofLoaded _ ds _ _) -> ds @?= ["A.Ty"]
+        (_, other) -> assertFailure (show other)
   ]
   where
     expr m = [ "language Expr, " ++ m ++ " where", "  lit  -> z"
@@ -112,6 +153,45 @@ scoped =
              , "  seq  -> ( " ++ m ++ "\8321 ; " ++ m ++ "\8322 )", "" ]
     judgment e c = [ "judgment compiles = " ++ e ++ " ~> " ++ c ++ " where", ""
                    , "  C-lit:  ----------", "          z ~> PUSH" ]
+
+    -- A token class stays at the root: a block inside a @namespace@ still
+    -- looks its class up there (MS10 phase 258 leaves that to the phase after
+    -- it, and the item says why — the generator concatenates a class's dotted
+    -- name into the names it mints).
+    blocksInANamespace = unlines
+      [ "module NSAll where", ""
+      , "x : Token String"
+      , "x = /[a-z][a-zA-Z0-9']*/"
+      , ""
+      , "namespace A where"
+      , "  language Ty, T, S where"
+      , "    base  -> \953"
+      , "    arrow -> ( T -> S )"
+      , ""
+      , "  open Ty"
+      , ""
+      , "  language LC, M, N, E where"
+      , "    var : x as occurrence -> x"
+      , "    abs : x as binder     -> ( \955 x : T . E[x] )"
+      , "    app                   -> ( M N )"
+      , ""
+      , "  open LC"
+      , ""
+      , "  context Ctx, G where"
+      , "    empty  -> \183"
+      , "    extend -> G , x : T"
+      , ""
+      , "  open Ctx"
+      , "  open extend-in"
+      , ""
+      , "  judgment typing = G \8866 M : T where"
+      , ""
+      , "    T-var:  x : T \8712 G"
+      , "            -----------"
+      , "            G \8866 x : T"
+      , ""
+      , "  open typing"
+      ]
 
     accepted what body want = testCase what $ do
       r <- loads body
@@ -147,8 +227,19 @@ lexing =
         @?= Right [TBlock NotationBlock " C where\n  join a b -> a \8746 b\n"]
   , testCase "outside a module the keyword is a keyword and nothing more" $
       tokens lexTokens "language L" @?= Right [TLanguage, TIdent "L"]
-  , testCase "and not at column 1 it is not a block either" $
-      tokens lexModule "  context C" @?= Right [TContext, TIdent "C"]
+    -- **AN INDENTED BLOCK IS A BLOCK SINCE MS10 PHASE 258**, which is what
+    -- lets one be written inside a @namespace@ block. It used to be refused by
+    -- the lexer — @tokens lexModule "  context C"@ gave @TContext@ and an
+    -- identifier — and the parser then said /unexpected context/.
+  , testCase "an indented block is a block too" $
+      tokens lexModule "  context C, G where\n    e -> .\n"
+        @?= Right [TBlock ContextBlock " C, G where\n    e -> .\n"]
+    -- **And the keyword's own column is what ends it**: a line back at the
+    -- keyword's column is the namespace's next item, not more of the block.
+  , testCase "and it ends at a line indented no further than the keyword" $
+      tokens lexModule "  context C, G where\n    e -> .\n  x : T\n"
+        @?= Right [ TBlock ContextBlock " C, G where\n    e -> .\n"
+                  , TIdent "x", TColon, TIdent "T" ]
   , -- His ruling, 2026-09-19: both words are reserved, as language is.
     -- @notation@ joined them at MS8 phase 158.
     testCase "context, judgment and notation are no longer names" $

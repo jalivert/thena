@@ -51,7 +51,7 @@ module Thena.Language.Lookup
 
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (declarationNamed, nameDotted, rootName)
+import Thena.Core.Term (declarationNamed, nameWord, rootName)
 import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
   ( Argument (..)
@@ -60,10 +60,10 @@ import Thena.Language.Grammar
   , Grammar (..)
   , Item (..)
   , Sort (..)
-  , universeSpelling
   , extensionsOf
   , isName
   , lookupNamesOf
+  , sortType
   )
 import Thena.Surface.Concrete
   ( Plicity (..)
@@ -142,7 +142,8 @@ relationOf g e = do
   let -- Every binder is primed until it names no type the constructor
       -- mentions and nothing bound before it, as 'Thena.Driver.grammarDatatype'
       -- primes a constructor's.
-      taken = [inN, "Eq", "Empty", nm (grammarName g)] ++ map (typeName . argumentSort) indices
+      -- **Words, because a binder is a word** (MS10 phase 258).
+      taken = [inN, "Eq", "Empty", nameWord (grammarName g)] ++ map (typeName . argumentSort) indices
       fresh used x | x `elem` taken || x `elem` used = fresh used (x ++ "'")
                    | otherwise = x
       names used xs = foldl (\(ys, u) x -> let y = fresh u x in (ys ++ [y], y : u)) ([], used) xs
@@ -203,14 +204,9 @@ relationOf g e = do
     classOf a = case argumentSort a of
       OfClass cls _ _ -> Just cls
       _ -> Nothing
-    nm = nameDotted
-    typeName srt = case srt of
-      OfLanguage l -> nm l
-      OfClass _ t _ -> nm t
-      -- A universe slot exists only in a @notation@ block, where no datatype is
-      -- generated; a @context@ production carrying one is refused by
-      -- @UniverseSlot@ (MS8 phase 160). The spelling is what it would be named.
-      OfUniverse n -> universeSpelling n
+    -- **'Thena.Language.Grammar.sortType' is the one definition** (MS10 phase
+    -- 258); this module had a third copy of it.
+    typeName = sortType
     typeOf = SurfaceName [] . typeName . argumentSort
     app f [] = f
     app f xs = SurfaceApp f (NE.fromList (map (SurfaceArg Explicit) xs))

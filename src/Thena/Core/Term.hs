@@ -28,6 +28,7 @@ module Thena.Core.Term
   , declarationNamed
   , globalUnder
   , InScope (..)
+  , innermostOf
   , rootScope
   , openingOnly
   , Opened (..)
@@ -302,6 +303,18 @@ openedWord o g = case lookup first [ (w, orig) | (orig, w) <- openedRenaming o ]
     under ws = case reverse ws of
       w : before -> GlobalName (openedPath o ++ reverse before) w
       []         -> GlobalName (openedPath o) (nameWord g)
+
+-- | The namespace a declaration written at this point goes into — the
+-- innermost rung of the walk, or the root (MS10 phase 254, shared at 258).
+--
+-- **One definition, because two things place a declaration**: an op, through
+-- 'Thena.Engine.declaredIn', and a block, through
+-- 'Thena.Language.Grammar.checkGrammar' — which is handed the same scope the
+-- machine carries and must agree with it exactly.
+innermostOf :: InScope -> [String]
+innermostOf sc = case scopeWithin sc of
+  ns : _ -> ns
+  []     -> []
 
 -- | At the root, with nothing opened — a prompt's scope before any @open@.
 rootScope :: InScope
