@@ -39,7 +39,7 @@ import Thena.Standard (withRules)
 
 import Thena.Core.Level (Level (..))
 import qualified Thena.Core.Term
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Literal (..), Var, fresh, rootName, nameDotted)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Literal (..), Var, fresh, rootName, rootScope, nameDotted)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
 import qualified Thena.Development.Cursor as Cursor
@@ -369,7 +369,7 @@ machineAt cur is = machineIn emptyGlobals cur is
 -- | The same, with globals of your own (MS10).
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env' expectedBase [] [] [] 1000 0
+  load is (Machine (Exec [] [] []) (Development cur) [] env' expectedBase [] [] rootScope 1000 0
                    NoUndischargeableTrust)
 
 -- | Elaborate against globals of your own.

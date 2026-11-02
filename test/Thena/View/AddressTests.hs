@@ -16,6 +16,7 @@
 -- in the positional parts cannot hide behind a self-consistent walk.
 module Thena.View.AddressTests (tests) where
 
+import Thena.Core.Term (rootScope)
 import Thena.Declared (opensIn)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -226,7 +227,7 @@ runTo m = case step m of
 -- | A machine at the root of @p@.
 machineAt :: Partial -> Machine
 machineAt p =
-  Machine (Exec [] [] []) (Development (enter p)) [] emptyGlobals expectedBase [] [] [] startCounter 0
+  Machine (Exec [] [] []) (Development (enter p)) [] emptyGlobals expectedBase [] [] rootScope startCounter 0
           NoUndischargeableTrust
 
 clickTests :: [TestTree]

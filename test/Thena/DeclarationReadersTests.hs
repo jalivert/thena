@@ -19,7 +19,7 @@ module Thena.DeclarationReadersTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core, nameDotted)
+import Thena.Core.Term (Core, nameDotted, rootScope)
 import Thena.Core.Trust (TrustLevel (..))
 import Thena.Declared ( opensIn
   , named
@@ -42,7 +42,7 @@ import Thena.Standard (expectedBase)
 -- left behind.
 machine :: [Instr] -> Machine
 machine is =
-  load is (Machine (Exec [] [] []) ps [] natVec expectedBase [] [] [] n 0
+  load is (Machine (Exec [] [] []) ps [] natVec expectedBase [] [] rootScope n 0
                    NoUndischargeableTrust)
   where
     (ps, n) = newDevelopment natVecCounter

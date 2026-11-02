@@ -69,7 +69,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), rootScope, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -567,7 +567,7 @@ newSession = Session
   -- can never be met is refused and one merely unmet is not. It is deliberately
   -- not 'NoTrust', which is the guarantee a user steps /up/ to, and deliberately
   -- not 'AnyTrust', which reports and enforces nothing.
-  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] [] n 0 NoUndischargeableTrust
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] rootScope n 0 NoUndischargeableTrust
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
@@ -881,14 +881,14 @@ data CommandError
 
 -- | Lex, parse, resolve as a core term, in the given environment and context.
 parseCore
-  :: [Grammar] -> GlobalEnv -> [[String]] -> Context -> Int -> String
+  :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> String
   -> Either SyntaxError (Core, Int)
 parseCore gr env opens = parseWith gr (\g e -> resolve g e opens) env
 
 
 -- | Lex, parse, resolve as a development (§2.7's longest-prefix convention).
 parseDevelopment
-  :: [Grammar] -> GlobalEnv -> [[String]] -> Context -> Int -> String
+  :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> String
   -> Either SyntaxError (Partial, Int)
 parseDevelopment gr env opens = parseWith gr (\g e -> resolvePartial g e opens) env
 
@@ -1103,7 +1103,7 @@ parseWith gr res env ctx n src = do
 -- is not a term: it has its own start symbol in the grammar and it is read in
 -- the empty context, never in the development's.
 parseDeclaration
-  :: [Grammar] -> GlobalEnv -> [[String]] -> Int -> String
+  :: [Grammar] -> GlobalEnv -> InScope -> Int -> String
   -> Either SyntaxError (InductiveDefinition, Int)
 parseDeclaration gr env opens n src = do
   ts  <- tokensOf src
@@ -1117,7 +1117,7 @@ parseDeclaration gr env opens n src = do
 -- the two are resolved in one continuous supply of names rather than two that
 -- overlap.
 parseEquated
-  :: [Grammar] -> GlobalEnv -> [[String]] -> Context -> Int -> String
+  :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> String
   -> Either SyntaxError ((Core, Core), Int)
 parseEquated gr env opens ctx n src = do
   ts       <- tokensOf src
@@ -1132,7 +1132,7 @@ parseEquated gr env opens ctx n src = do
 -- (§5.3), and resolving it where a scratch @assume@ happens to be in scope
 -- would let one in.
 parseStatement
-  :: [Grammar] -> GlobalEnv -> [[String]] -> Int -> String
+  :: [Grammar] -> GlobalEnv -> InScope -> Int -> String
   -> Either SyntaxError (Maybe String, (Core, Int))
 parseStatement gr env opens n src = do
   ts        <- tokensOf src
@@ -1630,7 +1630,7 @@ dispatch s name arg = case name of
   -- the rule base a second time.
   ":help"  -> noArgument (s, Helped commandSummary)
   ":quit"  -> noArgument (s, Quit)
-  ":core"  -> withArgument (view s (\e -> parseCore (grammars machine) e (opened machine)) Rendered arg)
+  ":core"  -> withArgument (view s (\e -> parseCore (grammars machine) e (scope machine)) Rendered arg)
   -- | @:surface ‹term›@ — parse a **surface** term and print it back (phase
   -- 39). The analogue of @:core@, and for the same reason: it is the only way
   -- to see what the parser made of what you wrote, and until phase 41 it is the
@@ -1641,7 +1641,7 @@ dispatch s name arg = case name of
   ":surface" -> withArgument $ case parseSurfaceTerm arg of
     Left e  -> (s, Failed e)
     Right t -> (s, RenderedSurface t)
-  ":dev"   -> withArgument (view s (\e -> parseDevelopment (grammars machine) e (opened machine)) RenderedDev arg)
+  ":dev"   -> withArgument (view s (\e -> parseDevelopment (grammars machine) e (scope machine)) RenderedDev arg)
   -- In @:parse@'s mode 'command' takes @:done@ before it gets here.
   ":done"  -> noArgument (s, Rejected NotParsing)
   -- | @:parse ‹Language› ‹text›@ — parse an object term with an installed
@@ -1700,7 +1700,7 @@ dispatch s name arg = case name of
     "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> (s, Rendered (whnf (globals machine) ctx t))
       _            -> (s, Rejected (NotThere NotInCore))
-    _  -> view s (\e -> parseCore (grammars machine) e (opened machine)) (Rendered . whnf (globals machine) ctx) arg
+    _  -> view s (\e -> parseCore (grammars machine) e (scope machine)) (Rendered . whnf (globals machine) ctx) arg
   -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
   -- argument it is the core focus, with one it is a term the user writes.
   -- **A bare argument is a surface term; corners are a core one** (MS4 phase
@@ -1711,7 +1711,7 @@ dispatch s name arg = case name of
       OnTerm _ _ t -> inferred t (names machine)
       _            -> (s, Rejected (NotThere NotInCore))
     _ | Just inner <- cornered arg ->
-          case parseCore (grammars machine) (globals machine) (opened machine) ctx (names machine) inner of
+          case parseCore (grammars machine) (globals machine) (scope machine) ctx (names machine) inner of
             Left e        -> (s, Failed e)
             Right (t, n1) -> inferred t n1
       | otherwise -> case parseSurfaceTerm arg of
@@ -1969,7 +1969,7 @@ dispatch s name arg = case name of
     -- @:show@ will take anything in any of the three tables, @:elim@ and
     -- @:judgment@ want a datatype.
     argumentNamed :: (GlobalName -> Bool) -> String -> Either [GlobalName] GlobalName
-    argumentNamed known what = globalUnder known (opened machine) (nameFromText what)
+    argumentNamed known what = globalUnder known (scope machine) (nameFromText what)
 
     -- | A refusal for a command's argument, in the words a term would use.
     noGlobal what amb
@@ -2029,7 +2029,7 @@ dispatch s name arg = case name of
     level :: InductiveDefinition -> String -> Either (Session, Response) Level
     level d u
       | null u    = Right (inductiveLevel d)
-      | otherwise = case parseCore (grammars machine) (globals machine) (opened machine) [] (names machine) u of
+      | otherwise = case parseCore (grammars machine) (globals machine) (scope machine) [] (names machine) u of
           Left e                -> Left (s, Failed e)
           Right (Universe l, _) -> Right l
           Right _               -> Left (s, Rejected (LevelExpected u))
@@ -2040,7 +2040,7 @@ dispatch s name arg = case name of
     -- @:revalidate@: a proof of a non-type is not worth entering.
     theorem = case sessionWork s of
       Attempting att -> (s, Rejected (AlreadyProving (attemptName att)))
-      Scratch -> case parseStatement (grammars machine) (globals machine) (opened machine) (names machine) arg of
+      Scratch -> case parseStatement (grammars machine) (globals machine) (scope machine) (names machine) arg of
         Left e             -> (s, Failed e)
         Right (Nothing, _) -> (s, Rejected (MissingArgument ":theorem"))
         Right (Just x, (ty, n1))
@@ -2196,7 +2196,7 @@ dispatch s name arg = case name of
         )
 
     declaration = withArgument $
-      case parseDeclaration (grammars machine) (globals machine) (opened machine) (names machine) arg of
+      case parseDeclaration (grammars machine) (globals machine) (scope machine) (names machine) arg of
         Left e -> (s, Failed e)
         Right (d, n1) ->
           let is = [ Do (DefineData d)
@@ -2234,7 +2234,7 @@ dispatch s name arg = case name of
             []
             []
 
-    goal = withArgument $ case parseCore (grammars machine) (globals machine) (opened machine) ctx (names machine) arg of
+    goal = withArgument $ case parseCore (grammars machine) (globals machine) (scope machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (t, n1) -> case setGoal t machine { names = n1 } of
         Left e   -> (s, Rejected (NotThere e))
@@ -2307,7 +2307,7 @@ dispatch s name arg = case name of
             (s', other) -> (s' { sessionMachine = restore before (sessionMachine s') }, other)
 
     conversion = withArgument $
-      case parseEquated (grammars machine) (globals machine) (opened machine) ctx (names machine) arg of
+      case parseEquated (grammars machine) (globals machine) (scope machine) ctx (names machine) arg of
         Left e -> (s, Failed e)
         Right ((a, b), n1) -> case convert (globals machine) ctx n1 a b of
           (why, owed, n2) -> (bump n2, Converted a b why owed)

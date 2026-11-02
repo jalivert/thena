@@ -56,6 +56,7 @@ import Thena.Core.Term
   , close
   , GlobalName (..)
   , globalUnder
+  , InScope (..)
   , nameDotted
   , nameFromText
   , rootName
@@ -241,11 +242,13 @@ data Machine = Machine
     -- not in 'GlobalEnv' — his ruling, 2026-09-19**, for 'signatures'\' reason:
     -- a grammar is notation for a declared name, which the surface and
     -- elaboration read and the kernel never does.
-  , opened      :: [[String]]
-    -- ^ **the namespaces @open@ has brought into view, latest first** (MS10
-    -- phase 247). NOT backtrackable, like 'signatures' and 'grammars', and here
-    -- for their reason: it is a fact about what a written name may mean, which
-    -- the surface and elaboration read and the kernel never does.
+  , scope       :: InScope
+    -- ^ **where a written name is looked up from** (MS10 phase 247, a record
+    -- since phase 254): the namespaces @open@ has brought into view, and the
+    -- ones the point being elaborated is inside. NOT backtrackable, like
+    -- 'signatures' and 'grammars', and here for their reason: it is a fact
+    -- about what a written name may mean, which the surface and elaboration
+    -- read and the kernel never does.
     --
     -- **A list of prefixes and not a table of contents — his ruling,
     -- 2026-10-30.** @GlobalEnv@ gains no namespace table, because what a
@@ -740,7 +743,7 @@ resumeAt a m = case pc (exec m) of
 -- the two together. Anything else that takes a word and wants a global belongs
 -- here too, and Γ is the caller's business — this is only about the globals.
 globalNamed :: Machine -> GlobalName -> Either FailReason GlobalName
-globalNamed m g = case globalUnder (knownTo m) (opened m) g of
+globalNamed m g = case globalUnder (knownTo m) (scope m) g of
   Right g' -> Right g'
   Left []  -> Left (CannotRead (ResolveFailed (NotInScope (nameDotted g))))
   Left gs  -> Left (AmbiguousName (nameDotted g) (map nameDotted gs))
@@ -993,7 +996,7 @@ perform instr rest m = case operation instr of
     Right (VRaw raw) -> case (,) <$> traverse (filling (env (exec m))) (termSplicesIn raw)
                                  <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw) of
       Left r   -> failure r m
-      Right (ts, ns) -> case resolveWith (grammars m) (ts ++ ns) (globals m) (opened m) contextAt (names m) raw of
+      Right (ts, ns) -> case resolveWith (grammars m) (ts ++ ns) (globals m) (scope m) contextAt (names m) raw of
         Left e        -> failure (CannotResolve e) m
         Right (t, n1) -> produce (VTerm t) m { names = n1 }
     Right _          -> failure ExpectedRaw m
@@ -1083,7 +1086,7 @@ perform instr rest m = case operation instr of
     Right g ->
       let ns = nameSteps g ++ [nameWord g]
        in if namespaceInhabited ns (globals m)
-            then Continue (advance m { opened = ns : opened m })
+            then Continue (advance m { scope = (scope m) { scopeOpens = ns : scopeOpens (scope m) } })
             else failure (NoSuchNamespace (nameDotted g)) m
 
   DeclarePrimitive nm ty -> case (,) <$> nameOf nm <*> term ty of

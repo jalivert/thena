@@ -14,7 +14,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
 import Thena.Core.Term
-  (Core (..), GlobalName (..), Ident (..), Var, close, fresh, rootName)
+  (Core (..), GlobalName (..), Ident (..), Var, close, fresh, rootName, rootScope)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   (Cursor, Focus (..), along, context, enter, focus, identsIn, rebuild)
@@ -60,7 +60,7 @@ machine = machineIn emptyGlobals
 
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env' [] [] [] [] 1000 0
+  load is (Machine (Exec [] [] []) (Development cur) [] env' [] [] [] rootScope 1000 0
                    NoUndischargeableTrust)
 
 -- | Run to a stop, and hand back the environment or the reason.

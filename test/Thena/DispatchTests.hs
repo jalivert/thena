@@ -14,7 +14,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..))
-import Thena.Core.Term (Core (..), Ident (..), fresh, rootName, nameDotted)
+import Thena.Core.Term (Core (..), Ident (..), fresh, rootName, rootScope, nameDotted)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
 import qualified Thena.Development.Cursor as Cursor
@@ -98,7 +98,7 @@ only r = bases [r]
 
 machine :: [RuleBase] -> Cursor -> [Instr] -> Machine
 machine base cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] [] [] 1000 0
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] [] rootScope 1000 0
                    NoUndischargeableTrust)
 
 -- | Run as the driver does, following every channel, and keep the messages.

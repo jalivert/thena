@@ -16,7 +16,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), levelOfNat)
-import Thena.Core.Term (Core (..), Ident (..), fresh, rootName)
+import Thena.Core.Term (Core (..), Ident (..), fresh, rootName, rootScope)
 import qualified Thena.Development.Component as Component
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Cursor (Cursor, enter, focus)
@@ -71,7 +71,7 @@ bases rs = [ruleBase "test" Nothing "" [] [] rs]
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
-  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] [] [] 1000 0
+  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] [] rootScope 1000 0
                    NoUndischargeableTrust)
 
 runOut :: Machine -> ([String], Either FailReason Machine)

@@ -27,6 +27,9 @@ module Thena.Core.Term
   , declarationOf
   , declarationNamed
   , globalUnder
+  , InScope (..)
+  , rootScope
+  , openingOnly
   , nameFromText
 
     -- * Terms
@@ -212,7 +215,35 @@ declarationOf (GlobalName ps _) = case reverse ps of
 declarationNamed :: GlobalName -> GlobalName
 declarationNamed (GlobalName ps w) = GlobalName (ps ++ [w]) w
 
--- | __Which global a written name means, under a set of open namespaces.__
+-- | __Where a written name is looked up from.__
+--
+-- **Two lists and they are not the same kind of thing** (MS10 phase 254).
+-- 'scopeWithin' is ordered and a nearer rung wins outright; 'scopeOpens' is a
+-- set, and two of them answering one written word is a refusal rather than a
+-- choice — his ruling of 2026-10-30.
+--
+-- **One record rather than two parameters**, for the reason
+-- 'Thena.Syntax.Resolve.Globals' already gives about the opens: a caller saying
+-- what is in scope says it in full, instead of every door having to remember a
+-- second argument.
+data InScope = InScope
+  { scopeWithin :: [[String]]
+    -- ^ the namespaces this point is inside, **innermost first** — what
+    -- @namespace X where { … }@ pushes for its declarations
+  , scopeOpens  :: [[String]]
+    -- ^ the namespaces an @open@ has brought into view, latest first
+  }
+  deriving (Eq, Show)
+
+-- | At the root, with nothing opened — a prompt's scope before any @open@.
+rootScope :: InScope
+rootScope = InScope [] []
+
+-- | Only these namespaces open, at the root.
+openingOnly :: [[String]] -> InScope
+openingOnly = InScope []
+
+-- | __Which global a written name means, in a scope.__
 --
 -- **The one walk, and every door calls it** (MS10 phase 249, repairing
 -- `~7zn7k`). It lives here, at the bottom of the import graph, because the two
@@ -236,31 +267,39 @@ declarationNamed (GlobalName ps w) = GlobalName (ps ++ [w]) w
 --   would type-check, so picking one would be the system deciding what the user
 --   did not write. The caller names them all.
 --
--- **The written name wins outright.** A path the writer wrote says what they
--- meant; an open prefix only says where else to look, and an @open@ may add a
--- way to resolve and never change one.
-globalUnder :: (GlobalName -> Bool) -> [[String]] -> GlobalName -> Either [GlobalName] GlobalName
-globalUnder known opens g
-  | known g = Right g
-  | otherwise = case filter known (candidates g) of
+-- **The enclosing namespaces are walked innermost outward, and nearer wins
+-- outright** (MS10 phase 254, his ruling of 2026-10-30). Inside @A.B@ a written
+-- @x@ is tried as @A.B.x@, then @A.x@, then @x@ — the root is the last rung of
+-- the walk and not the first. The @open@s are tried only once every rung has
+-- failed, which is what makes an @open@ able to add a way to resolve and never
+-- change one: a name that the walk answers is never reconsidered under one.
+--
+-- **A path the writer wrote says what they meant**, so the whole written name
+-- goes under each prefix: inside @A@, a written @B.c@ tries @A.B.c@ first.
+globalUnder
+  :: (GlobalName -> Bool) -> InScope -> GlobalName
+  -> Either [GlobalName] GlobalName
+globalUnder known sc g =
+  case [ c | ns <- scopeWithin sc ++ [[]], c <- under ns, known c ] of
+    c : _ -> Right c
+    []    -> case nub (filter known [ c | ns <- scopeOpens sc, c <- under ns ]) of
       [g'] -> Right g'
       gs   -> Left gs
   where
-    -- **The whole written name under each prefix**, so @open A@ and a written
+    -- **The whole written name under a prefix**, so @open A@ and a written
     -- @B.c@ tries @A.B.c@.
     --
-    -- **And each of those as a declaration's short name**: @Nat@ is the
-    -- datatype @Nat.Nat@, the alias 'declarationNamed' derives. It is applied
-    -- under the prefixes too, so @open A@ and a written @Nat@ reaches
-    -- @A.Nat.Nat@ — the alias is a fact about a name, not about the scope it
-    -- was found in.
+    -- **Then the same as a declaration's short name**: @Nat@ is the datatype
+    -- @Nat.Nat@, the alias 'declarationNamed' derives. It is applied under the
+    -- prefixes too, so @open A@ and a written @Nat@ reaches @A.Nat.Nat@ — the
+    -- alias is a fact about a name, not about the scope it was found in.
     --
-    -- **Deduplicated, because the two can agree**: @open Nat@ makes @Nat.Nat@ a
-    -- candidate by the prefix and by the alias both, and two routes to one name
-    -- is not an ambiguity.
-    candidates h =
-      nub [ c | q <- h : [ GlobalName (ns ++ nameSteps h) (nameWord h) | ns <- opens ]
-              , c <- [q, declarationNamed q] ]
+    -- **The exact name comes first and the alias second**, which is what makes
+    -- a rung answer with one name rather than two: a theorem called @Nat@ and a
+    -- datatype @Nat.Nat@ both answer a written @Nat@, and the theorem wins
+    -- because it is what the word names exactly (`~s89ch`).
+    under ns = let q = GlobalName (ns ++ nameSteps g) (nameWord g)
+                in [q, declarationNamed q]
 
 -- | The body of a binder, with the bound variable replaced by a de Bruijn index.
 --

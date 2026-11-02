@@ -20,6 +20,7 @@ import Thena.Core.Term
   , nameDotted
   , rootName
   , Ident (..)
+  , InScope
   , Scope
   , Var
   , close
@@ -86,8 +87,9 @@ type Local = [(String, Var)]
 data Globals = Globals
   { scopeNames :: [GlobalName]
     -- ^ what answers to a written name directly
-  , scopeOpens :: [[String]]
-    -- ^ the namespaces an @open@ has brought into view, latest first
+  , scopeIn :: InScope
+    -- ^ where a written name is looked up from: the namespaces an @open@ has
+    -- brought into view, and the ones this point is inside
     --
     -- __It rides with the names and is not a parameter of its own__ (MS10
     -- phase 249). It was absent, and 'plainAt' said so in a comment calling
@@ -99,9 +101,9 @@ data Globals = Globals
     -- rather than every door having to remember a second argument.
   }
 
-globalsOf :: GlobalEnv -> [[String]] -> Globals
-globalsOf e opens =
-  Globals (map fst (definitions e) ++ map fst (primitives e)) opens
+globalsOf :: GlobalEnv -> InScope -> Globals
+globalsOf e sc =
+  Globals (map fst (definitions e) ++ map fst (primitives e)) sc
 
 -- | What a written term's @${x}@ holes are filled with (MS5 phase 81).
 --
@@ -142,7 +144,7 @@ nameOf sp i = case i of
 -- | Resolve a raw tree as a core gr term. Holes, guesses and constraints are
 -- rejected here: they live only in a development (§3.1).
 resolve
-  :: [Grammar] -> GlobalEnv -> [[String]] -> Context -> Int -> Raw
+  :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> Raw
   -> Either ResolveError (Core, Int)
 resolve gr env = resolveWith gr [] env
 
@@ -153,18 +155,18 @@ resolve gr env = resolveWith gr [] env
 -- with no @${…}@ in it resolves identically either way, so nothing that existed
 -- before this phase can have changed meaning.
 resolveWith
-  :: [Grammar] -> Splices -> GlobalEnv -> [[String]] -> Context -> Int -> Raw
+  :: [Grammar] -> Splices -> GlobalEnv -> InScope -> Context -> Int -> Raw
   -> Either ResolveError (Core, Int)
-resolveWith gr sp env opens ctx = core gr env (globalsOf env opens) sp ctx []
+resolveWith gr sp env sc ctx = core gr env (globalsOf env sc) sp ctx []
 
 
 -- | Resolve a raw tree as a development, taking the LONGEST PREFIX (§2.7):
 -- every leading binder becomes a chain link, so 'Trailing' ends up holding
 -- something that is not a binder unless @⌜ ⌝@ says otherwise.
 resolvePartial
-  :: [Grammar] -> GlobalEnv -> [[String]] -> Context -> Int -> Raw
+  :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> Raw
   -> Either ResolveError (Partial, Int)
-resolvePartial gr env opens ctx = partial gr env (globalsOf env opens) [] ctx []
+resolvePartial gr env sc ctx = partial gr env (globalsOf env sc) [] ctx []
 
 -- --------------------------------------------------------------------------
 -- Core terms
@@ -364,7 +366,7 @@ core gr env gs sp ctx local n raw = case raw of
     -- 'Thena.Engine.globalNamed', so a written word cannot mean one thing in a
     -- surface term and another in a command's argument. The alias above is
     -- part of that walk, which is why it is no longer tried separately.
-    plainAt g args = case globalUnder (`elem` scopeNames gs) (scopeOpens gs) g of
+    plainAt g args = case globalUnder (`elem` scopeNames gs) (scopeIn gs) g of
       Right g'  -> Right (Global g' args, n)
       Left []   -> Left (NotInScope (nameDotted g))
       Left amb  -> Left (NameIsAmbiguous (nameDotted g) (map nameDotted amb))
@@ -525,9 +527,9 @@ constraint gr env gs sp ctx local n (RawConstraint bs s t ty) = do
 -- supplies its own index expressions and the record keeps those; the type
 -- former's index binders gr name positions, not values (§3.7).
 resolveData
-  :: [Grammar] -> GlobalEnv -> [[String]] -> Int -> RawData
+  :: [Grammar] -> GlobalEnv -> InScope -> Int -> RawData
   -> Either ResolveError (InductiveDefinition, Int)
-resolveData gr env opens n (RawData name ps ty cs) = do
+resolveData gr env sc n (RawData name ps ty cs) = do
   -- **A declaration writes no level parameters** (MS3 phase 33c). It used to —
   -- @data D {ℓ}@, minted here as 'LRigid's and in scope throughout — and that
   -- was scaffolding, the only way to make a datatype polymorphic before metas
@@ -548,7 +550,7 @@ resolveData gr env opens n (RawData name ps ty cs) = do
   (cs', n4) <- constructors gr env gs { scopeNames = dn : scopeNames gs } dn params (length indices) afterParams n3 cs
   Right (InductiveDefinition dn [] params indices level cs', n4)
   where
-    gs = globalsOf env opens
+    gs = globalsOf env sc
     -- **The declaration lives in the namespace it opens** (MS10 phase 248), the
     -- same placement 'Thena.Driver.datatypeProgram' gives a @data@ item in a
     -- file: @data Nat@ typed at the REPL declares @Nat.Nat@, @Nat.zero@ and

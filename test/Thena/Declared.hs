@@ -64,7 +64,7 @@ module Thena.Declared
 
 import Data.List (nub)
 
-import Thena.Core.Term (GlobalName (..), nameFromText, nameSteps)
+import Thena.Core.Term (GlobalName (..), InScope, nameFromText, nameSteps, openingOnly, rootScope)
 import Thena.Driver (parseDeclaration)
 import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals, inductives)
@@ -267,7 +267,7 @@ stepDecl =
 -- declared and not listed**, so a fixture cannot drift from them, and
 -- 'opensIn' is the same walk for a test that resolves a term afterwards.
 declared :: [String] -> (GlobalEnv, Int)
-declared srcs = let (env, n, _) = foldl one (emptyGlobals, 0, []) srcs in (env, n)
+declared srcs = let (env, n, _) = foldl one (emptyGlobals, 0, rootScope) srcs in (env, n)
   where
     one (env, n, opens) src = case parseDeclaration [] env opens n src of
       Left e -> error ("fixture does not parse: " ++ show e)
@@ -283,8 +283,8 @@ declared srcs = let (env, n, _) = foldl one (emptyGlobals, 0, []) srcs in (env, 
 -- that declares with 'declared' and then resolves a term written in short names
 -- passes @opensIn env@ where a REPL session passes @opened machine@ and a module
 -- passes the @open@s it has read.
-opensIn :: GlobalEnv -> [[String]]
-opensIn e = reverse (nub [ nameSteps g | (g, _) <- inductives e ])
+opensIn :: GlobalEnv -> InScope
+opensIn e = openingOnly (reverse (nub [ nameSteps g | (g, _) <- inductives e ]))
 
 nat, natVec, natFin :: GlobalEnv
 nat    = fst (declared [natDecl])
