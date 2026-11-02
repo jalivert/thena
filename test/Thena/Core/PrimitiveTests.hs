@@ -48,7 +48,8 @@ import Thena.Global.Env
   , emptyGlobals
   , lookupConstant
   )
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore)
 
 import Thena.Engine (Machine (..))
@@ -305,7 +306,7 @@ refusals =
 
 printsAndReadsBack :: Core -> Bool
 printsAndReadsBack t =
-  case parseCore [] env (opensIn env) ctx 0 (renderCore (Rendering [] 0) ctx t) of
+  case parseCore [] env (opensIn env) ctx 0 (renderCore (rendering [] 0) ctx t) of
     Right (t', _) -> t' == t
     Left _        -> False
 

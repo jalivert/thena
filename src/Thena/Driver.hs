@@ -69,7 +69,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, shortestEnding, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -140,6 +140,7 @@ import Thena.Global.Env
   , emptyGlobals
   , inductiveName
   , isDeclared
+  , knownIn
   , lookupConstant
   , lookupDefinition
   , lookupInductive
@@ -2301,7 +2302,7 @@ dispatch s name arg = case name of
         Left e -> (s, Failed e)
         Right (d, n1) ->
           let is = [ Do (DefineData d)
-                   , Do (Say (Lit (VText ("declared " ++ nameOf d))))
+                   , Do (Say (Lit (VText ("declared " ++ nameOf machine d))))
                    ]
            in progress
                 (sessionFuel s)
@@ -3657,8 +3658,19 @@ settled sub residue s = s { sessionWork = fmap' (sessionWork s) }
                , attemptResidue = residue
                }
 
-nameOf :: InductiveDefinition -> String
-nameOf = nameDotted . inductiveName
+-- | **Written the way the reader of the line will write it** (MS10 phase 254),
+-- which is the shortest ending that still resolves: @data Nat@ answers
+-- @declared Nat@, and it answers @declared Nat.Nat@ only where a second @Nat@
+-- would make the short word mean something else.
+nameOf :: Machine -> InductiveDefinition -> String
+nameOf m d = shortestEnding known (scope m) g
+  where
+    g = inductiveName d
+    -- **The datatype counts as declared, because it is about to be** — the
+    -- message is built into the program before the declaration runs, and
+    -- @declared Nat.Nat@ where @declared Nat@ is what the user will write from
+    -- now on would be a stale answer rather than a careful one.
+    known h = h == g || knownIn (globals m) h
 
 -- | Why a datatype got no no-confusion (phase 14).
 --

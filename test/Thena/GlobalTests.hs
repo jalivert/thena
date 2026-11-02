@@ -83,7 +83,9 @@ import Thena.Global.Env
   , generalised
   )
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
+  , renderingFor
   ,renderTrouble, renderEliminator, renderInductive)
 
 tests :: TestTree
@@ -205,11 +207,11 @@ equipment =
         let printed =
               [ length l
               | (_, d) <- inductives env
-              , l <- renderInductive (Rendering [] 0) d
+              , l <- renderInductive (rendering [] 0) d
               ]
                 ++ [ length l
                    | (g, d) <- inductives env
-                   , l <- renderEliminator (Rendering [] 0) g (fst (eliminatorType d LZero (pastEverything env)))
+                   , l <- renderEliminator (rendering [] 0) g (fst (eliminatorType d LZero (pastEverything env)))
                    ]
         (sum printed >= 0) @?= True
     ]
@@ -607,7 +609,11 @@ roundTripTests :: [TestTree]
 roundTripTests =
   [ testCase name $ case lookupInductive (declaredAs name) natVec of
       Nothing -> assertFailure (name ++ " was not declared")
-      Just d  -> case reread (renderInductive (Rendering [] natVecCounter) d) of
+      -- **Printed in the scope it is read back in** (MS10 phase 254), which is
+      -- what a round trip is: the printer writes the shortest ending that still
+      -- resolves, so printing with no scope and reading with one would be two
+      -- different questions. @data Nat.Nat@ prints @data Nat@ here.
+      Just d  -> case reread (renderInductive (renderingFor [] natVecCounter natVec (opensIn natVec)) d) of
         Left e   -> assertFailure e
         Right d' -> do
           formerType d' @?= formerType d

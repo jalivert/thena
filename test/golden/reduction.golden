@@ -1,41 +1,41 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
-declared Nat.Nat
+declared Nat
 thena spine> open Nat
 opened Nat
 thena spine> :whnf succ zero
-Nat.succ Nat.zero
+succ zero
 thena spine> claim "h" ⌜ Nat ⌝
 thena spine> claim "g" ⌜ (\ (_ : Nat) -> Nat) h ⌝
 thena spine> back
 thena spine> cross type
 thena core> :where
 focus
-  (λ (_ : Nat.Nat) -> Nat.Nat) h
+  (λ (_ : Nat) -> Nat) h
 path
   root ▸ h ▸ type of g
 context
-  h : Nat.Nat
+  h : Nat
 thena core> :whnf
-Nat.Nat
+Nat
 thena core> reduce
 reduced; now unreachable: h
 thena core> :where
 focus
-  Nat.Nat
+  Nat
 path
   root ▸ h ▸ type of g
 context
-  h : Nat.Nat
+  h : Nat
 thena core> :show
-  let ? h : Nat.Nat in
-▶ let ? g : Nat.Nat in
+  let ? h : Nat in
+▶ let ? g : Nat in
   let ? goal : Type₀ in
   goal
 thena core> back
 thena spine> back
 thena spine> claim "n" ⌜ Nat ⌝
 thena spine> :whnf elim Nat () (\ (_ : Nat) -> Nat) (zero succ) () n
-elim Nat.Nat () (λ (_ : Nat.Nat) -> Nat.Nat) (Nat.zero Nat.succ) () n
+elim Nat () (λ (_ : Nat) -> Nat) (zero succ) () n
 thena spine> :whnf elim Nat () (\ (_ : Nat) -> Nat) (zero) () n
 Nat has 2 constructor(s), so this elim needs 2 method(s), not 1
 thena spine> :whnf elim Nat (n) (\ (_ : Nat) -> Nat) (zero succ) () n

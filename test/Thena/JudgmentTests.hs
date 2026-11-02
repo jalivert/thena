@@ -228,14 +228,14 @@ generated =
   [ testCase ":show typing — quantified in order of first appearance, then the premises" $ do
       s <- loaded (header ++ typing)
       said s ":show typing" @?=
-        [ "data typing.typing : Ctx.Ctx -> LC.LC -> Ty.Ty -> Type₀ where"
-        , "  { typing.T-var : ∀ (x : String) (T : Ty.Ty) (Γ : Ctx.Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
-        , "  ; typing.T-abs : ∀ (Γ : Ctx.Ctx) (x : String) (S : Ty.Ty) (E : LC.LC) (T : Ty.Ty) -> typing`${Γ} , ${x} : ${S} ⊢ ${E} : ${T}` -> typing`${Γ} ⊢ ( λ ${x} : ${S} . ${E} ) : ( ${S} -> ${T} )`"
-        , "  ; typing.T-app : ∀ (Γ : Ctx.Ctx) (M : LC.LC) (S : Ty.Ty) (T : Ty.Ty) (N : LC.LC) -> typing`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typing`${Γ} ⊢ ${N} : ${S}` -> typing`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
+        [ "data typing : Ctx -> LC -> Ty -> Type₀ where"
+        , "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
+        , "  ; T-abs : ∀ (Γ : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty) -> typing`${Γ} , ${x} : ${S} ⊢ ${E} : ${T}` -> typing`${Γ} ⊢ ( λ ${x} : ${S} . ${E} ) : ( ${S} -> ${T} )`"
+        , "  ; T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC) -> typing`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typing`${Γ} ⊢ ${N} : ${S}` -> typing`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
         ]
   , testCase "a rule with no premises and no metavariable of its own" $ do
       s <- loaded (header ++ ["judgment okTy = T ok where", "", "  U:  ---", "      ι ok", ""])
-      said s ":show okTy" @?= ["data okTy.okTy : Ty.Ty -> Type₀ where", "  { okTy.U : okTy`ι ok` }"]
+      said s ":show okTy" @?= ["data okTy : Ty -> Type₀ where", "  { okTy.U : okTy`ι ok` }"]
   , testCase "suffixed metavariables are further ones of the same sort" $ do
       s <- loaded (header ++
         [ "judgment alike = T ~ S where", ""
@@ -243,8 +243,8 @@ generated =
         , "       ------------------------------"
         , "       T ~ T_r'", "" ])
       said s ":show alike" @?=
-        [ "data alike.alike : Ty.Ty -> Ty.Ty -> Type₀ where"
-        , "  { alike.Tr : ∀ (T : Ty.Ty) (T' : Ty.Ty) (T₁ : Ty.Ty) (T2 : Ty.Ty) (T_1 : Ty.Ty) (T_r' : Ty.Ty) -> alike`${T} ~ ${T'}` -> alike`${T'} ~ ${T₁}` -> alike`${T₁} ~ ${T2}` -> alike`${T2} ~ ${T_1}` -> alike`${T_1} ~ ${T_r'}` -> alike`${T} ~ ${T_r'}` }" ]
+        [ "data alike : Ty -> Ty -> Type₀ where"
+        , "  { alike.Tr : ∀ (T : Ty) (T' : Ty) (T₁ : Ty) (T2 : Ty) (T_1 : Ty) (T_r' : Ty) -> alike`${T} ~ ${T'}` -> alike`${T'} ~ ${T₁}` -> alike`${T₁} ~ ${T2}` -> alike`${T2} ~ ${T_1}` -> alike`${T_1} ~ ${T_r'}` -> alike`${T} ~ ${T_r'}` }" ]
     -- §6.1: the language's own name is one of its metavariables, and a binder
     -- named like the type it ranges over would shadow it.
   , testCase "a metavariable named like a type is primed, away from the others too" $ do
@@ -254,8 +254,8 @@ generated =
         , "      --------------------"
         , "      ( LC LC' ) twice", "" ])
       said s ":show again" @?=
-        [ "data again.again : LC.LC -> Type₀ where"
-        , "  { again.A : ∀ (LC'' : LC.LC) (LC' : LC.LC) -> again`${LC''} twice` -> again`${LC'} twice` -> again`( ${LC''} ${LC'} ) twice` }" ]
+        [ "data again : LC -> Type₀ where"
+        , "  { again.A : ∀ (LC'' : LC) (LC' : LC) -> again`${LC''} twice` -> again`${LC'} twice` -> again`( ${LC''} ${LC'} ) twice` }" ]
   , testCase "the notation is installed: a judgment literal is a type, and :parse reads one" $ do
       s <- loaded (header ++ typing)
       said s ":infer typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`"
@@ -270,7 +270,7 @@ premises =
       s <- loaded (header ++ typing)
       -- typing.T-app's two premises are one line; the constructor has both.
       said s ":show typing" !! 3
-        @?= "  ; typing.T-app : ∀ (Γ : Ctx.Ctx) (M : LC.LC) (S : Ty.Ty) (T : Ty.Ty) (N : LC.LC) -> typing`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typing`${Γ} ⊢ ${N} : ${S}` -> typing`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
+        @?= "  ; T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC) -> typing`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typing`${Γ} ⊢ ${N} : ${S}` -> typing`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
   , testCase "one premise per line, and one continued onto the next" $ do
       s <- loaded (header ++
         [ "judgment typed = Γ ⊢ M : T where", ""
@@ -280,7 +280,7 @@ premises =
         , "          ---------------"
         , "          Γ ⊢ ( M N ) : T", "" ])
       said s ":show typed" !! 1
-        @?= "  { typed.T-app : ∀ (Γ : Ctx.Ctx) (M : LC.LC) (S : Ty.Ty) (T : Ty.Ty) (N : LC.LC) -> typed`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typed`${Γ} ⊢ ${N} : ${S}` -> typed`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
+        @?= "  { typed.T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC) -> typed`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typed`${Γ} ⊢ ${N} : ${S}` -> typed`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
   , testCase "a named premise binds its name; an unnamed one is d‹k›" $ do
       s <- loaded (header ++ typing ++
         [ "judgment twice = Γ ⊢ M :: T where", ""
@@ -288,8 +288,8 @@ premises =
         , "      ------------------------------"
         , "      Γ ⊢ M :: T", "" ])
       said s ":show twice" @?=
-        [ "data twice.twice : Ctx.Ctx -> LC.LC -> Ty.Ty -> Type₀ where"
-        , "  { twice.B : ∀ (Γ : Ctx.Ctx) (M : LC.LC) (T : Ty.Ty) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> twice`${Γ} ⊢ ${M} :: ${T}` }" ]
+        [ "data twice : Ctx -> LC -> Ty -> Type₀ where"
+        , "  { twice.B : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> twice`${Γ} ⊢ ${M} :: ${T}` }" ]
       argumentNames s "twice" "B" @?= ["Γ", "M", "T", "left", "d2"]
     -- **A NAMED PREMISE IS IN SCOPE FOR EVERY PREMISE AFTER IT** (MS8 phase 172,
     -- across lines; phase 173 within one. HIS
@@ -310,7 +310,7 @@ premises =
       -- whole of the phase: the fourth argument is the derivation @p1@, and the
       -- fifth is a @Valid@ about that very derivation.
       said s ":show check" !! 1
-        @?= "  { check.CheckRule : ∀ (Γ : Ctx.Ctx) (M : LC.LC) (T : Ty.Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> check`${Γ} ⊢ ${M} ⇐ ${T}` }"
+        @?= "  { check.CheckRule : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> check`${Γ} ⊢ ${M} ⇐ ${T}` }"
       argumentNames s "check" "CheckRule" @?= ["Γ", "M", "T", "p1", "p2"]
     -- **The conclusion is parsed with every name in scope too**, and a premise
     -- at a bare type is where that is reachable: a judgment's own statement has
@@ -322,7 +322,7 @@ premises =
         , "          ------------"
         , "          Γ ⊩ m : T", "" ])
       said s ":show fits" !! 1
-        @?= "  { fits.F-any : ∀ (Γ : Ctx.Ctx) (T : Ty.Ty) (m : LC.LC) -> fits`${Γ} ⊩ ${m} : ${T}` }"
+        @?= "  { fits.F-any : ∀ (Γ : Ctx) (T : Ty) (m : LC) -> fits`${Γ} ⊩ ${m} : ${T}` }"
       -- @M@ is not quantified: the conclusion's term slot is the named premise,
       -- so there is no metavariable there to collect.
       argumentNames s "fits" "F-any" @?= ["Γ", "T", "m"]
@@ -338,7 +338,7 @@ premises =
         , "      --------------------------"
         , "      Γ ⊢ M ⇚ T", "" ])
       said s ":show oneline" !! 1
-        @?= "  { oneline.S : ∀ (Γ : Ctx.Ctx) (M : LC.LC) (T : Ty.Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> oneline`${Γ} ⊢ ${M} ⇚ ${T}` }"
+        @?= "  { oneline.S : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> oneline`${Γ} ⊢ ${M} ⇚ ${T}` }"
       argumentNames s "oneline" "S" @?= ["Γ", "M", "T", "p1", "p2"]
     -- **@:judgment@ shows a rule back in the form it was written in** (MS8
     -- phase 174). A @judgment@ block's rules go in above a bar and nothing ever
@@ -353,16 +353,16 @@ premises =
       s <- loaded (header ++ typing)
       said s ":judgment typing" @?=
         [ "  d1 : x : T ∈ Γ"
-        , "  -------------- typing.T-var"
+        , "  -------------- T-var"
         , "  Γ ⊢ x : T"
         , ""
         , "  d1 : Γ , x : S ⊢ E : T"
-        , "  -------------------------------- typing.T-abs"
+        , "  -------------------------------- T-abs"
         , "  Γ ⊢ ( λ x : S . E ) : ( S -> T )"
         , ""
         , "  d1 : Γ ⊢ M : ( S -> T )"
         , "  d2 : Γ ⊢ N : S"
-        , "  ----------------------- typing.T-app"
+        , "  ----------------------- T-app"
         , "  Γ ⊢ ( M N ) : T" ]
     -- **The statement is written as a paper writes it, not as a term.**
     -- @typing`${Γ} ⊢ ${M} : ${T}`@ is the term spelling and it round-trips,
@@ -378,7 +378,7 @@ premises =
   , testCase "a lookup premise is not read as a premise named by its metavariable" $ do
       s <- loaded (header ++ typing)
       said s ":show typing" !! 1
-        @?= "  { typing.T-var : ∀ (x : String) (T : Ty.Ty) (Γ : Ctx.Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
+        @?= "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
     -- **A PREMISE IS AN ARGUMENT'S TYPE, SO ANY TYPE MAY STAND ABOVE THE BAR**
     -- (MS8 phase 160, `~8b8gz`, `~z8n28`). A rule is a constructor, an argument
     -- may be at any type, and @LC@ is its own notation — so a rule may take a
@@ -392,8 +392,8 @@ premises =
         , "           -------------------"
         , "           Γ ⊩ M : T", "" ])
       said s ":show odd" @?=
-        [ "data odd.odd : Ctx.Ctx -> LC.LC -> Ty.Ty -> Type₀ where"
-        , "  { odd.O-term : ∀ (Γ : Ctx.Ctx) (M : LC.LC) (T : Ty.Ty) -> LC.LC -> typing`${Γ} ⊢ ${M} : ${T}` -> odd`${Γ} ⊩ ${M} : ${T}` }" ]
+        [ "data odd : Ctx -> LC -> Ty -> Type₀ where"
+        , "  { odd.O-term : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> LC -> typing`${Γ} ⊢ ${M} : ${T}` -> odd`${Γ} ⊩ ${M} : ${T}` }" ]
       -- The type mentions no metavariable, so it adds nothing to the implicit
       -- ∀ and the argument it binds is an unnamed premise like any other.
       argumentNames s "odd" "O-term" @?= ["Γ", "M", "T", "d1", "d2"]
@@ -430,18 +430,18 @@ substitution =
     testCase "E[x->N] is LC.subst-x" $ do
       s <- loaded (header ++ valueAndStep)
       said s ":show step" !! 1
-        @?= "  { step.E-beta : ∀ (N : LC.LC) (x : String) (T : Ty.Ty) (E : LC.LC) -> value`${N} value` -> step`( ( λ ${x} : ${T} . ${E} ) ${N} ) --> ${E} [ ${x} -> ${N} ]`"
+        @?= "  { E-beta : ∀ (N : LC) (x : String) (T : Ty) (E : LC) -> value`${N} value` -> step`( ( λ ${x} : ${T} . ${E} ) ${N} ) --> ${E} [ ${x} -> ${N} ]`"
   , testCase "a list is simultaneous, LC.subst-all, and chained brackets are sequential" $ do
       s <- loaded (header ++
         [ "judgment sub = M ~> N where", ""
         , "  S:  ---"
         , "      M ~> E[x->M, x'->N][x1->N']", "" ])
       said s ":show sub" @?=
-        [ "data sub.sub : LC.LC -> LC.LC -> Type₀ where"
+        [ "data sub : LC -> LC -> Type₀ where"
           -- The outer bracket prints in the notation; the inner @L.subst-all@
           -- is spliced, because a comma list stays rule-level sugar (§6.3) and
           -- has no production to print back as.
-        , "  { sub.S : ∀ (M : LC.LC) (E : LC.LC) (x : String) (x' : String) (N : LC.LC) (x1 : String) (N' : LC.LC) -> sub`${M} ~> ${LC.subst-all {0 0 0} E (List.cons {0} (And.And {0 0} String LC.LC) (And.both {0 0} String LC.LC x M) (List.cons {0} (And.And {0 0} String LC.LC) (And.both {0 0} String LC.LC x' N) (List.nil {0} (And.And {0 0} String LC.LC))))} [ ${x1} -> ${N'} ]` }" ]
+        , "  { sub.S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${subst-all {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))} [ ${x1} -> ${N'} ]` }" ]
     -- §6.3's CHECK: the left of -> is a binder-sorted name.
   , refusal "the left of -> is not a name"
       ["judgment sub = M ~> N where", "", "  S:  ---", "      M ~> E[M->N]", ""]
@@ -458,8 +458,8 @@ annotated =
         , "      ---------"
         , "      Γ ⊢ M :: T", "" ])
       said s ":show ann" @?=
-        [ "data ann.ann : Ctx.Ctx -> LC.LC -> Ty.Ty -> Type₀ where"
-        , "  { ann.A : ∀ (T : Ty.Ty) (M : LC.LC) (Γ : Ctx.Ctx) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> ann`${Γ} ⊢ ${M} :: ${T}` }" ]
+        [ "data ann : Ctx -> LC -> Ty -> Type₀ where"
+        , "  { ann.A : ∀ (T : Ty) (M : LC) (Γ : Ctx) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> ann`${Γ} ⊢ ${M} :: ${T}` }" ]
       argumentNames s "ann" "A" @?= ["T", "M", "Γ", "d", "d1"]
   , refusal "a name quantified twice — a rule's ∀ lists its metavariables, it does not nest"
       (typing ++

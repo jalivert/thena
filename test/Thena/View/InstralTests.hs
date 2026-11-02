@@ -31,7 +31,8 @@ import Thena.View.Instral
   )
 import Thena.View.Redraw (redraw, redrawSurface)
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderInstr)
 import Thena.Rules (allRules)
 
@@ -64,7 +65,7 @@ mismatch instr
   | shown == drawn = Nothing
   | otherwise = Just ("printed: " <> shown <> "\n  drawn:   " <> drawn)
   where
-    shown = renderInstr (Rendering [] 500) [] instr
+    shown = renderInstr (rendering [] 500) [] instr
     drawn = case displayBlock [] (Budget 200) [] [] 500 (Address []) Nothing [instr] of
       [v] -> redrawStatement v
       vs  -> "wrong count: " <> show (length vs)

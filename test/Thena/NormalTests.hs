@@ -24,7 +24,8 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore)
 
 target :: FilePath
@@ -87,5 +88,5 @@ tests =
       let ps  = definitionLevels d
           sub = maybe [] id (instantiateLevels ps (map (const LZero) ps))
        in ( length ps
-          , renderCore (Rendering [] (names m)) []
+          , renderCore (rendering [] (names m)) []
               (substLevelsIn sub (definitionType d)) )

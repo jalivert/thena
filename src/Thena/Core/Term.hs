@@ -33,6 +33,7 @@ module Thena.Core.Term
   , Opened (..)
   , openedWhole
   , openedWord
+  , shortestEnding
   , nameFromText
 
     -- * Terms
@@ -57,7 +58,7 @@ module Thena.Core.Term
   , levelMetasIn
   ) where
 
-import Data.List (nub)
+import Data.List (intercalate, nub)
 
 import Thena.Core.Level (Level (..), LevelVar, metasIn, substLevel)
 
@@ -370,6 +371,32 @@ globalUnder known sc g =
     opened o = case openedWord o g of
       Nothing -> []
       Just q  -> [q, declarationNamed q]
+
+-- | __How to write a name here: the shortest ending of it that still means
+-- it.__
+--
+-- **The inverse of 'globalUnder', and it asks that function rather than
+-- reasoning about it** (MS10 phase 254): an ending is right exactly when
+-- resolving it in this scope gives back the name we started from. So the
+-- printer cannot drift from the reader, and an ending that two namespaces
+-- would answer is rejected for free — 'globalUnder' calls that an ambiguity
+-- and does not return a name at all.
+--
+-- @Nat.Nat@ prints as @Nat@ with nothing open, because a declaration's short
+-- name resolves to it; @Nat.zero@ prints as @zero@ after @open Nat@ and as
+-- @Nat.zero@ before it. **With nothing declared and nothing open the answer is
+-- the whole path**, which is what a caller that knows no environment gets.
+shortestEnding :: (GlobalName -> Bool) -> InScope -> GlobalName -> String
+shortestEnding known sc g = case [ e | e <- endings, means e ] of
+  e : _ -> intercalate "." e
+  []    -> nameDotted g
+  where
+    ws = nameSteps g ++ [nameWord g]
+    -- Shortest first, and the whole name last.
+    endings = [ drop k ws | k <- [length ws - 1, length ws - 2 .. 0] ]
+    means e = case reverse e of
+      w : before -> globalUnder known sc (GlobalName (reverse before) w) == Right g
+      []         -> False
 
 -- | The body of a binder, with the bound variable replaced by a de Bruijn index.
 --

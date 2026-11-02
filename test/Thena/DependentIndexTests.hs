@@ -52,7 +52,8 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore)
 
 -- | Relative to the package root, which is where the suite runs.
@@ -96,7 +97,7 @@ tests =
         case lookupDefinition (rootName "tied") (globals (machineOf s')) of
           Nothing -> assertFailure "tied was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "\8704 (m : N.N) -> Q.Q (N.s m) (Fin.fz m) -> N.N"
 
       -- __AND THE SAME CHAIN CROSSED BY INJECTIVITY RATHER THAN BY SOLUTION —
@@ -112,7 +113,7 @@ tests =
         case lookupDefinition (rootName "tiedTwo") (globals (machineOf s')) of
           Nothing -> assertFailure "tiedTwo was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "\8704 (m : N.N) -> Small.Small (N.s m) (Fin.fz m) -> N.N"
 
       -- __And the arm answers with its own binder.__ The ambient @m@ and the
@@ -137,7 +138,7 @@ tests =
         case lookupDefinition (rootName "pinned") (globals (machineOf s')) of
           Nothing -> assertFailure "pinned was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "T.T (Fin.fs (N.s N.z) (Fin.fz N.z)) -> Fin.Fin (N.s N.z)"
 
       -- __And that arm binds the constructor's argument too.__ The type says
@@ -177,7 +178,7 @@ tests =
         case lookupDefinition (rootName "depth") (globals m) of
           Nothing -> assertFailure "depth was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names m)) [] (definitionType d)
+            renderCore (rendering [] (names m)) [] (definitionType d)
               @?= "\8704 (m : N.N) (j : Fin.Fin m) -> Holds.Holds (Pack.pack m j) -> N.N"
 
       -- __The @Vec@-style families, which the corpus had never had — MS9 phase
@@ -229,7 +230,7 @@ tests =
         case lookupDefinition (rootName "headAll") (globals (machineOf s')) of
           Nothing -> assertFailure "headAll was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "\8704 (A : Type\8320) (P : A -> Type\8320) (m : N.N) (a : A) (as : Vec.Vec {0} A m) -> All.All A P (N.s m) (Vec.vcons {0} A m a as) -> P a"
 
       -- __And the arm answers with the argument it bound__, which the type
@@ -258,7 +259,7 @@ tests =
         case lookupDefinition (rootName "chained") (globals (machineOf s')) of
           Nothing -> assertFailure "chained was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "\8704 (m : N.N) -> Chain.Chain (N.s m) (Fin.fz m) (Below.bz m) -> N.N"
 
       -- __And the arm answers with the constructor's own payload__, which the
@@ -297,7 +298,7 @@ tests =
         case lookupDefinition (rootName "belowRefl") (globals (machineOf s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "∀ (n : Nat.Nat) (i : Fin.Fin n) -> Below.Below n i -> Eq.Eq {0} (Fin.Fin n) i i"
     ]
 

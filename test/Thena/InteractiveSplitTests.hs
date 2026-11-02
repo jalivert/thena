@@ -33,7 +33,7 @@ import Thena.Driver (Session, command, machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Files (loadFile, startingSession)
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Render (Rendering (..), renderCore, renderResponse)
+import Thena.Render (rendering, renderCore, renderResponse)
 
 -- | Relative to the package root, which is where the suite runs.
 target :: FilePath
@@ -79,7 +79,7 @@ tests =
         case lookupDefinition (rootName "belowRefl") (globals (machineOf s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "\8704 (n : Nat.Nat) (i : Fin.Fin n) -> Below.Below n i -> Eq.Eq {0} (Fin.Fin n) i i"
 
       -- __And the arm really bound the constructor's own argument__: `vhead` of
@@ -89,7 +89,7 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadFile s target
         let (_, out) = step s' ":whnf vhead N z (vcons N z z (vnil N))"
-        out @?= ["N.z"]
+        out @?= ["z"]
 
       -- __A CASE THE SPECIALISER CLOSED IS NOT SHOWN TO THE AUTHOR__, which is
       -- the one place the interactive walk decides something the written one

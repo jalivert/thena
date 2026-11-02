@@ -53,7 +53,8 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Files (loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderTrouble, renderResponse, renderCore, renderEliminator)
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
@@ -338,7 +339,7 @@ preludeTests =
           -- eliminator is a scheme now, and what a use site sees is the
           -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
           -- which is a counter value and no business of this assertion.
-          renderEliminator (Rendering [] n0) (declaredAs "Eq") (atZero d (fst (eliminatorType d LZero n0)))
+          renderEliminator (rendering [] n0) (declaredAs "Eq") (atZero d (fst (eliminatorType d LZero n0)))
             @?= [ "elim Eq.Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq.Eq {0} A _ _1 -> Type₀) \
                   \-> (∀ (a : A) -> P a a (Eq.refl {0} A a)) \
                   \-> ∀ (_ : A) (_1 : A) (target : Eq.Eq {0} A _ _1) -> P _ _1 target"
@@ -558,7 +559,7 @@ declared n l = isDeclared (declaredAs n) (globals (machineOf (loadedSession l)))
 -- claims is that J computes, and the printed answer is the honest witness.
 renderedLast :: Loaded -> Maybe String
 renderedLast l = case reverse (loadedResponses l) of
-  Rendered t : _ -> Just (renderCore (Rendering [] (names (machineOf (loadedSession l)))) [] t)
+  Rendered t : _ -> Just (renderCore (rendering [] (names (machineOf (loadedSession l)))) [] t)
   _              -> Nothing
 
 -- | A datatype's own level parameters, all instantiated at zero.
@@ -987,7 +988,7 @@ tierTests =
   ]
   where
     renderResponse' s g = case lookupDefinition (rootName g) (globals (machineOf s)) of
-      Just d  -> [g ++ " = " ++ renderCore (Rendering [] 0) [] (definitionBody d)]
+      Just d  -> [g ++ " = " ++ renderCore (rendering [] 0) [] (definitionBody d)]
       Nothing -> [g ++ " is missing"]
 
     bothSpellings =

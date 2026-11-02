@@ -34,7 +34,8 @@ import Thena.Errors (SyntaxError (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Rules (RuleBase (..), RuleError (..), writtenPositions)
 import Data.List (isInfixOf, sort)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCursor, renderRuleError)
 import Thena.Repl (transcriptFrom)
 import Thena.Standard (expectedBase, expectedStandard, standardBases)
@@ -118,7 +119,7 @@ writtenLines =
     , testCase "a rule error and a type error print the same number" $
         assertBool "both say instruction 2"
           (all ("instruction 2" `isInfixOf`)
-             [ renderRuleError (UnboundInRule (rootName "go") 1 "nope")
+             [ renderRuleError (rendering [] 0) (UnboundInRule (rootName "go") 1 "nope")
              , renderInstralTypeError (Clash (InBody (rootName "go") 1) TCore TString) ])
     ]
   where
@@ -935,7 +936,7 @@ spliceTemplates =
       let s1 = fst (command s0 ":theorem t : Type")
           s2 = fst (command s1 "go")
       case snd (command s2 ":show") of
-        Shown c -> pure (renderCursor (Rendering [] (names (machineOf s2))) c)
+        Shown c -> pure (renderCursor (rendering [] (names (machineOf s2))) c)
         other   -> assertFailure ("the test rule built nothing: " ++ show other) >> pure ""
 
     loadRaw src = snd (loadRuleBases newSession [("s.thena.rules", src)])

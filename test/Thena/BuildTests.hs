@@ -44,7 +44,8 @@ import Thena.Language.Earley (parse, pieces)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar (Grammar, earleyRules)
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore)
 
 tests :: TestTree
@@ -219,7 +220,7 @@ terms =
 -- | The host\'s printer, for what a splice holds. The real one, so that a
 -- spliced term is written the way a reader would take it back.
 host :: Core -> String
-host = renderCore (Rendering [] 0) []
+host = renderCore (rendering [] 0) []
 
 -- | What a definition written with a tagged term literal elaborated to, or why
 -- the load stopped (MS6 phase 104).

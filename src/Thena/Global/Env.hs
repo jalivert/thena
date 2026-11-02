@@ -28,6 +28,7 @@ module Thena.Global.Env
   , lookupInductive
   , lookupConstructor
   , isDeclared
+  , knownIn
   , declaredNames
   , namespaceInhabited
   , addConstant
@@ -54,6 +55,7 @@ module Thena.Global.Env
   ) where
 
 import Data.List (isPrefixOf, nub)
+import Data.Maybe (isJust)
 
 import Thena.Core.Level
   ( Level (..)
@@ -452,6 +454,16 @@ isDeclared g e =
     || g `elem` map fst (primitives e)
     || g `elem` map fst (definitions e)
     || g `elem` map fst (inductives e)
+
+-- | __What a written name may resolve to here__ (MS10 phase 254) — the
+-- predicate 'Thena.Core.Term.globalUnder' and 'Thena.Core.Term.shortestEnding'
+-- both ask.
+--
+-- **A definition or a declaration**, which is the same pair
+-- 'Thena.Engine.knownTo' asked before this was lifted here: a reader needs it
+-- too, and the printer must not have a second copy of what counts as in scope.
+knownIn :: GlobalEnv -> GlobalName -> Bool
+knownIn e g = isJust (lookupDefinition g e) || isDeclared g e
 
 -- | Every name the global environment binds (phase 24c).
 --

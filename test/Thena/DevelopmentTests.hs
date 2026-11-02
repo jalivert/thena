@@ -24,7 +24,8 @@ import Thena.Fixtures
   , trailingLam
   , withConstraint
   )
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   , renderPartial)
 import Thena.Declared (opensIn)
 
@@ -77,10 +78,10 @@ generatedRoundTrip =
             -- that collides with one already there — §13e, and 'reprint' is
             -- safe from it only because its fixtures mint from zero.
             Right (p, n) ->
-              let once = renderPartial (Rendering [] n) [] p
+              let once = renderPartial (rendering [] n) [] p
                   twice = case parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] n once of
                     Left e            -> "PARSE FAILED: " ++ show e
-                    Right (p', n')    -> renderPartial (Rendering [] n') [] p'
+                    Right (p', n')    -> renderPartial (rendering [] n') [] p'
                in counterexample
                     (src ++ "\n  printed:\n" ++ once ++ "\n  reprinted:\n" ++ twice)
                     (property (twice == once))
@@ -221,10 +222,10 @@ renderTests =
     -- had no counter to pass and wrote @0@.
     testCase "a render seeded at zero is not the same render" $
       assertBool "seeding the counter made no difference"
-        (renderPartial (Rendering [] 0) [] idMidway
-           /= renderPartial (Rendering [] 500) [] idMidway)
+        (renderPartial (rendering [] 0) [] idMidway
+           /= renderPartial (rendering [] 500) [] idMidway)
   , testCase "the running example" $
-      renderPartial (Rendering [] 500) [] idMidway
+      renderPartial (rendering [] 500) [] idMidway
         @?= unlines'
           [ "λ (A : Type₀) ->"
           , "let ? id' : A -> A ≐ ("
@@ -235,7 +236,7 @@ renderTests =
           , "id'"
           ]
   , testCase "a constraint, with a non-empty Ξ" $
-      renderPartial (Rendering [] 500) [] withConstraint
+      renderPartial (rendering [] 500) [] withConstraint
         @?= unlines'
           [ "λ (A : Type₀) ->"
           , "λ (a : A) ->"
@@ -244,7 +245,7 @@ renderTests =
           , "h"
           ]
   , testCase "one link of each kind" $
-      renderPartial (Rendering [] 500) [] allFour
+      renderPartial (rendering [] 500) [] allFour
         @?= unlines'
           [ "λ (A : Type₀) ->"
           , "let d = A : Type₀ in"
@@ -255,10 +256,10 @@ renderTests =
           , "g"
           ]
   , testCase "a shadowed chain binder is freshened" $
-      renderPartial (Rendering [] 500) [] shadowedBinders
+      renderPartial (rendering [] 500) [] shadowedBinders
         @?= unlines' [ "λ (x : Type₀) ->", "λ (x1 : Type₀) ->", "x" ]
   , testCase "a guess body does not see the hole's name, so nothing is freshened" $
-      renderPartial (Rendering [] 500) [] guessShadowing
+      renderPartial (rendering [] 500) [] guessShadowing
         @?= unlines'
           [ "let ? x : Type₀ ≐ ("
           , "  λ (x : Type₀) ->"
@@ -267,7 +268,7 @@ renderTests =
           , "x"
           ]
   , testCase "a trailing binder is quoted, or it would re-read as a link" $
-      renderPartial (Rendering [] 500) [] trailingLam @?= "⌜ λ (A : Type₀) -> A ⌝"
+      renderPartial (rendering [] 500) [] trailingLam @?= "⌜ λ (A : Type₀) -> A ⌝"
   ]
 
 -- | 'unlines' appends a trailing newline; 'renderPartial' does not emit one.
@@ -355,7 +356,7 @@ scopeTests =
 roundTripTests :: [TestTree]
 roundTripTests =
   [ testCase (name ++ " survives print then read") $
-      reprint p @?= renderPartial (Rendering [] 500) [] p
+      reprint p @?= renderPartial (rendering [] 500) [] p
   | (name, p) <-
       [ ("the running example", idMidway)
       , ("a constraint", withConstraint)
@@ -378,8 +379,8 @@ roundTripTests =
 -- hypothetical: it silently turned @A -> A@ into @∀ (_ : A) -> _@ while this
 -- suite was being written (§13e).
 reprint :: Partial -> String
-reprint p = case parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 500 (renderPartial (Rendering [] 500) [] p) of
-  Right (p', n) -> renderPartial (Rendering [] n) [] p'
+reprint p = case parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 500 (renderPartial (rendering [] 500) [] p) of
+  Right (p', n) -> renderPartial (rendering [] n) [] p'
   Left e        -> "PARSE FAILED: " ++ show e
 
 isLeft :: Either a b -> Bool

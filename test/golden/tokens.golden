@@ -70,7 +70,7 @@ thena spine> :show e
 e : Token Char
 e = let refined = /[a-z]/ Char : Token Char in let e = refined : Token Char in e
 thena spine> :core /a\/b/ Comparison
-/a\/b/ Comparison.Comparison
+/a\/b/ Comparison
 thena spine> :infer (/[a-z]/ : Token Char)
 /[a-z]/ : Token Char : Token Char
 thena spine> :infer /[a-z]/

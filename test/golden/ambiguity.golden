@@ -45,9 +45,9 @@ thena spine> :show
 ▶ let ? goal : Type₀ in
   goal
 thena spine> data Box : Type where { }
-declared Box.Box
+declared Box
 thena spine> open Box
 opened Box
 thena spine> :show Box
-data Box.Box {ℓ₃₀} : Type (ℓ₃₀) where { }
+data Box {ℓ₃₀} : Type (ℓ₃₀) where { }
 thena spine> :quit

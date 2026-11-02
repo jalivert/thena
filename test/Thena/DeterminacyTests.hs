@@ -65,7 +65,8 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore, renderTrouble, renderResponse)
 
 -- | Relative to the package root, which is where the suite runs — the same
@@ -177,7 +178,7 @@ tests =
       _ : rest -> xs : tails' rest
 
     statementOf s' =
-      renderCore (Rendering [] (names (machineOf s'))) [] . definitionType
+      renderCore (rendering [] (names (machineOf s'))) [] . definitionType
         <$> lookupDefinition (rootName "determinacy") (globals (machineOf s'))
 
     theorem = "∀ (t : Term.Term) (t1 : Term.Term) -> Step.Step t t1 \

@@ -46,7 +46,8 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore, renderResponse)
 
 tests :: TestTree
@@ -261,7 +262,7 @@ classes =
         (s1, ProofLoaded {}) -> pure (globals (machineOf s1))
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
     typeOf env f =
-      unlevelled . renderCore (Rendering [] 0) [] . definitionType
+      unlevelled . renderCore (rendering [] 0) [] . definitionType
         -- **'named' and not @rootName@**: the generated family lives in the
         -- language's namespace, so @LC.fv-x@ is a path and a word.
         <$> lookupDefinition (named f) env
@@ -492,7 +493,7 @@ declared io =
       env <- io
       case lookupDefinition (named f) env of
         Nothing -> assertFailure (f ++ " was not declared")
-        Just d -> (unlevelled (renderCore (Rendering [] 0) [] (definitionType d)), length (definitionLevels d))
+        Just d -> (unlevelled (renderCore (rendering [] 0) [] (definitionType d)), length (definitionLevels d))
                     @?= (ty, levels)
   -- **A level parameter for every level nothing fixes**: List and And are
   -- polymorphic and a list of names is a list at any level, so the functions

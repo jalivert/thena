@@ -19,6 +19,7 @@ module Thena.Engine
   , Development (..)
   , newDevelopment
   , focusContext
+  , knownTo
   , flatten
   , setGoal
   , newDevelopmentNamed
@@ -137,7 +138,7 @@ import Thena.Global.Env
   , namespaceInhabited
   , recursiveArgument
   , definitionLevels
-  , isDeclared
+  , knownIn
   , lookupDefinition
   , eliminatorName
   , constructorArguments
@@ -771,7 +772,7 @@ declaredIn m (GlobalName ps w) = GlobalName (namespaceOf m ++ ps) w
 -- | What this machine's environment answers to, which is what
 -- 'Thena.Core.Term.globalUnder' asks.
 knownTo :: Machine -> GlobalName -> Bool
-knownTo m h = isJust (lookupDefinition h (globals m)) || isDeclared h (globals m)
+knownTo m = knownIn (globals m)
 
 failure :: FailReason -> Machine -> Outcome
 failure r0 m = unwind (length (stack (exec m))) (stack (exec m))

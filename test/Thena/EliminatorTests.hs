@@ -33,7 +33,8 @@ import Thena.Global.Env
   , inductiveLevels
   , lookupInductive
   )
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore, renderEliminator)
 
 tests :: TestTree
@@ -156,7 +157,7 @@ analysis name env n0 d l expect = testCase name $
     Nothing  -> assertFailure (d ++ " is not declared")
     Just def ->
       let (ty, _, _) = caseWrapper def l n0
-       in oneLine (renderCore (Rendering [] n0) [] (atZero def ty)) @?= expect
+       in oneLine (renderCore (rendering [] n0) [] (atZero def ty)) @?= expect
   where
     g = declaredAs d
 
@@ -172,7 +173,7 @@ rule name env n0 d l expect = testCase name $
     -- **Instantiated at the datatype's own levels** (MS3 phase 31g), which is
     -- what a use site sees. Rendering it uninstantiated would pin @ℓ@'s number
     -- — a counter value, and no business of an assertion about the shape.
-    Just def -> renderEliminator (Rendering [] n0) g (atZero def (fst (eliminatorType def l n0))) @?= [expect]
+    Just def -> renderEliminator (rendering [] n0) g (atZero def (fst (eliminatorType def l n0))) @?= [expect]
   where
     g = declaredAs d
 

@@ -64,7 +64,7 @@ import Thena.Global.Env
   , recursiveArgument
   )
 import Thena.Files (loadProofFile, startingSession)
-import Thena.Render (Rendering (..), renderCore, renderResponse)
+import Thena.Render (rendering, renderCore, renderResponse)
 import Thena.Tactics.Eliminate
   ( Elimination (..)
   , MethodShape (..)
@@ -840,7 +840,7 @@ goalIn ctx s = case specialisedGoal s of
   _                  -> Nothing
 
 shown :: Context -> Core -> String
-shown ctx = unwords . words . renderCore (Rendering [] 0) ctx
+shown ctx = unwords . words . renderCore (rendering [] 0) ctx
 
 -- | Build a context by parsing each entry's type against what precedes it, so
 -- that a dependent context reads as the user would type it —

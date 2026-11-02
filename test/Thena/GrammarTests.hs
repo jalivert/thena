@@ -588,7 +588,7 @@ notating =
       -- The family, which the hand-written route generated from the roles its
       -- @notation@ block declared.
       said byHand ":infer Lam.subst-w"
-        @?= ["Lam.subst-w : Lam.Lam -> String -> Lam.Lam -> Lam.Lam"]
+        @?= ["Lam.subst-w : Lam -> String -> Lam -> Lam"]
       said byHand ":infer Lam.subst-w" @?= said byBlock ":infer Lam.subst-w"
       -- And @same@ in the fixture is `refl`, so the load itself asserts that
       -- the notation builds exactly the hand-written constructor application.
@@ -670,7 +670,7 @@ notating =
           -- And the constructor's target prints in it: a judgment over a
           -- judgment, spelled.
           said s1 ":show Valid" !! 1
-            @?= "  { Valid.validAny : ∀ (G : Ctx.Ctx) (M : LC.LC) (T : Ty.Ty) (d : typing`${G} ⊢ ${M} : ${T}`) -> Valid`⊢ ${G} , ${M} , ${T} by ${d} valid` }"
+            @?= "  { validAny : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing`${G} ⊢ ${M} : ${T}`) -> Valid`⊢ ${G} , ${M} , ${T} by ${d} valid` }"
   , -- **A SUFFIXED WORD RESOLVES TO THE METAVARIABLE IT IS A SUFFIX OF** (MS8
     -- phase 160, HIS ruling of 2026-10-10). A type declared outside a block has
     -- no metavariables to alias, so its slots are its own name with subscripts

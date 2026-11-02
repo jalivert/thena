@@ -55,7 +55,7 @@ import Thena.Global.Env
   , GlobalEnv
   , addDefinition
   )
-import Thena.Render (Rendering (..), renderCore)
+import Thena.Render (rendering, renderCore)
 
 import Thena.Declared ( opensIn
   ,eqNat, eqNatCounter)
@@ -225,7 +225,7 @@ printing =
     -- still load-bearing** (his observation, 2026-10-05). A printer showing the
     -- claim alone would hide it.
     testCase "all three operands, in the node's own order" $
-      renderCore (Rendering [] eqNatCounter) ctx (trustedRefl eqZeroOne eqZeroZero)
+      renderCore (rendering [] eqNatCounter) ctx (trustedRefl eqZeroOne eqZeroZero)
         @?= "trusted (Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)) (Eq.Eq {0} Nat.Nat Nat.zero Nat.zero) (Eq.refl {0} Nat.Nat Nat.zero)"
   ]
 

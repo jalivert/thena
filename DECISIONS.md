@@ -235,10 +235,9 @@ too**, so `data Nat` declares `Nat.Nat`, `Nat.zero` and `Nat.suc`, and a written
 `Nat` reaches the type because a declaration's short name is derived from the
 environment rather than recorded anywhere. **`namespace ‹name› where { … }` is
 built, and resolution walks outward through it. All five forms of `open` are
-built.** **What is not built yet**: printing a name as the shortest ending that
-still resolves (so a name prints with its whole path today), and a `language`,
-`context`, `judgment` or `notation` block inside a `namespace` block — write it
-at the top level of the file.*
+built, and a name prints as the shortest ending that still means it.** **What is
+not built yet**: a `language`, `context`, `judgment` or `notation` block inside a
+`namespace` block — write it at the top level of the file.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something
@@ -336,6 +335,22 @@ root, and the whole name you wrote goes under each prefix — a path says what y
 meant, so writing `B.c` inside `A` tries `A.B.c` first. **The `open`s are tried
 only once that walk has failed**, which is what makes an `open` able to add a way
 to resolve and never change one.
+
+### A name is written the shortest way that still means it
+
+*Decided 2026-10-30, built 2026-11-02.* Everything Thena prints — a goal, a
+proof state, a refusal, `:show`, the text a module is saved as — writes each name
+as **the shortest ending of its path that resolves back to it where you are
+standing**. With nothing open, `Nat.Nat` is `Nat` and `Nat.zero` is `Nat.zero`;
+after `open Nat`, that constructor is `zero`; inside `namespace A`, `A.one` is
+`one`.
+
+**It is the reader's own answer and not a second rule.** The printer asks the
+resolver whether a candidate ending comes back as the name it started from, so
+the two cannot drift, and **an ending two open namespaces would both answer is
+not short enough** — the resolver calls that ambiguous and refuses it, so the
+printer writes more of the path instead. What is printed can always be typed
+back.
 
 ### `open` has five forms, and one of them lasts one declaration
 

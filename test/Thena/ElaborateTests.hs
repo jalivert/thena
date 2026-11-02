@@ -1095,8 +1095,8 @@ splittingTree =
       case r of
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
-      let (s2, q) = command s1 ":whnf pred (succ (Nat.succ Nat.zero))"
-      unwords (renderResponse s2 q) @?= "Nat.succ Nat.zero"
+      let (s2, q) = command s1 ":whnf pred (succ (succ zero))"
+      unwords (renderResponse s2 q) @?= "succ zero"
 
     -- __A RECURSIVE CALL IS THE INDUCTION HYPOTHESIS__ (MS9 phase 186, his
     -- ruling of 2026-10-19). The name being defined is assumed while the body
@@ -1121,7 +1121,7 @@ splittingTree =
       let (s2, q) = command s1
             ":convert double (succ (succ zero)) \8799 succ (succ (succ (succ zero)))"
       unwords (words (unwords (renderResponse s2 q))) @?=
-        "double (Nat.succ (Nat.succ Nat.zero)) \8799 Nat.succ (Nat.succ (Nat.succ (Nat.succ Nat.zero))) yes"
+        "double (succ (succ zero)) \8799 succ (succ (succ (succ zero))) yes"
 
     -- __The structural guard, and it is the whole of it.__ An eliminator makes
     -- the hypothesis available only at the smaller index, so a call on
@@ -1176,7 +1176,7 @@ splittingTree =
       [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
       , "pick = \\ x y p -> case p of { mk a b -> a }"
       ]
-      "stuck: String and Eq.Eq {0} String (String.append a b) (String.append x y) -> String cannot be made equal they differ by one argument, which the shorter side has to take first: Eq.Eq {0} String (String.append a b) (String.append x y)"
+      "stuck: String and Eq {0} String (String.append a b) (String.append x y) -> String cannot be made equal they differ by one argument, which the shorter side has to take first: Eq {0} String (String.append a b) (String.append x y)"
 
     -- __AND THE SPLIT IS NOT WRONG, WHICH IS WHY IT IS NOT REFUSED OUTRIGHT.__
     -- One @\\ q ->@ in the arm and the proof goes through — the equation is a
@@ -1194,13 +1194,13 @@ splittingTree =
       [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
       , "pick = \\ x y p -> case p of { }"
       ]
-      "stuck: this case did not vanish: it keeps Eq.Eq {0} String (String.append a b) (String.append x y), which no transition can discharge, so there is something to prove here"
+      "stuck: this case did not vanish: it keeps Eq {0} String (String.append a b) (String.append x y), which no transition can discharge, so there is something to prove here"
   , refusesIn catModule
       "and an arm with no body names it the same way"
       [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
       , "pick = \\ x y p -> case p of { mk a b -> }"
       ]
-      "stuck: this case did not vanish: it keeps Eq.Eq {0} String (String.append a b) (String.append x y), which no transition can discharge, so there is something to prove here"
+      "stuck: this case did not vanish: it keeps Eq {0} String (String.append a b) (String.append x y), which no transition can discharge, so there is something to prove here"
 
   , testCase "and the same split declares when the arm takes the equation" $ do
       (s0, _) <- startingSession
@@ -1280,7 +1280,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf namesOuter (s z) (evs z evz)"
-      unwords (renderResponse s2 q) @?= "IsSucc.isucc (N.s N.z)"
+      unwords (renderResponse s2 q) @?= "isucc (s z)"
 
     -- __AND THE THREE SHAPES PHASE 191 WAS BUILT FOR__, which had been a
     -- fixture nothing loaded: the copy that is refined and read under its own
@@ -1341,8 +1341,8 @@ splittingTree =
       case r of
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
-      let (s2, q) = command s1 ":whnf sameIndex (s z) (D.mk (N.s N.z))"
-      unwords (renderResponse s2 q) @?= "D.mk (N.s N.z)"
+      let (s2, q) = command s1 ":whnf sameIndex (s z) (mk (s z))"
+      unwords (renderResponse s2 q) @?= "mk (s z)"
 
     -- __AND SO DOES THE SCRUTINEE ITSELF__ (MS9 phase 202, @~hc4ps@), which is
     -- the last name a split refines that is not a binder of the method. Inside
@@ -1422,8 +1422,8 @@ splittingTree =
       let two = "(s (s z)) (as (s z) (as z az)) (s (s z)) (fs (s z) (s z) (fs z z fz))"
           (s2, q) = command s1 (":whnf inside " ++ two)
           (s3, q') = command s2 (":whnf outside " ++ two)
-      unwords (renderResponse s2 q) @?= "N.s N.z"
-      unwords (renderResponse s3 q') @?= "N.s N.z"
+      unwords (renderResponse s2 q) @?= "s z"
+      unwords (renderResponse s3 q') @?= "s z"
 
     -- __AND A RECURSION MAY SUPPLY A GENERALISED PREMISE__ (MS9 phase 198,
     -- @~krvdx@). Where the statement's own premises include one the split has to
@@ -1961,7 +1961,7 @@ splittingTree =
       -- there: @vcons@'s parameter is an argument like any other, and an
       -- under-applied former is not a 'Canonical' for ι to fire on.
       let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
-      unwords (renderResponse s2 q) @?= "Vec.vnil Nat.Nat"
+      unwords (renderResponse s2 q) @?= "vnil Nat"
 
     -- __AN EMPTY ARM IS HOW THE VANISHED CASE IS WRITTEN__ (MS9 phase 189, his
     -- ruling of 2026-10-20). @vnil@'s method is closed by a conflicting
@@ -1979,7 +1979,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
-      unwords (renderResponse s2 q) @?= "Vec.vnil Nat.Nat"
+      unwords (renderResponse s2 q) @?= "vnil Nat"
 
     -- __A BODY WHERE THE CASE VANISHED IS THE REFUSAL THE LAW ADDS__ (MS9 phase
     -- 190). @vnil@'s method is closed by a conflicting equation, so a term
@@ -2050,7 +2050,7 @@ splittingTree =
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1
             ":whnf left leaf leaf (okNode leaf leaf okLeaf okLeaf)"
-      unwords (renderResponse s2 q) @?= "Ok.okLeaf"
+      unwords (renderResponse s2 q) @?= "okLeaf"
 
     -- __TWO HYPOTHESES, AND THE CALL SAYS WHICH__ (MS9 phase 186). @okNode@
     -- has two recursive arguments, so the arm has a hypothesis about each; the
@@ -2072,7 +2072,7 @@ splittingTree =
             ":convert count (node leaf leaf) (okNode leaf leaf okLeaf okLeaf) \
             \\8799 succ zero"
       unwords (words (unwords (renderResponse s2 q))) @?=
-        "count (Tr.node Tr.leaf Tr.leaf) (Ok.okNode Tr.leaf Tr.leaf Ok.okLeaf Ok.okLeaf) \8799 Nat.succ Nat.zero yes"
+        "count (node leaf leaf) (okNode leaf leaf okLeaf okLeaf) \8799 succ zero yes"
 
     -- __And a call naming both is refused rather than guessed at.__ Which
     -- argument it recurses on is simply not written down, and there is no
@@ -2227,7 +2227,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf idOk leaf okLeaf"
-      unwords (renderResponse s2 q) @?= "Ok.okLeaf"
+      unwords (renderResponse s2 q) @?= "okLeaf"
 
     -- __And two indices, which is `progress`'s own shape__: a derivation
     -- indexed by both the term and its type, with the target bound as a λ
@@ -2286,7 +2286,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf predC (succ (succ zero))"
-      unwords (renderResponse s2 q) @?= "Nat.succ Nat.zero"
+      unwords (renderResponse s2 q) @?= "succ zero"
 
     -- __And the term says which word was written.__ @Nat.case@ applied, with a
     -- method per constructor and no hypothesis in either.
@@ -2326,7 +2326,7 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf vtailC Nat zero (vcons Nat zero zero (vnil Nat))"
-      unwords (renderResponse s2 q) @?= "Vec.vnil Nat.Nat"
+      unwords (renderResponse s2 q) @?= "vnil Nat"
 
     -- Coverage fails the same way under @case@, and says the same thing.
   , refuses "a case that survived with no arm is refused under case too"

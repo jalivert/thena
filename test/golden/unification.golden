@@ -1,20 +1,20 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
-declared Nat.Nat
+declared Nat
 thena spine> open Nat
 opened Nat
 thena spine> claim "h" ⌜ Nat ⌝
 thena spine> unify ⌜ succ h ⌝ ⌜ succ (succ zero) ⌝
 solved: h
 thena spine> :show
-  let h = Nat.succ Nat.zero : Nat.Nat in
+  let h = succ zero : Nat in
 ▶ let ? goal : Type₀ in
   goal
 thena spine> claim "f" ⌜ Nat -> Nat ⌝
 thena spine> unify ⌜ \ (x : Nat) -> f x ⌝ ⌜ \ (x : Nat) -> succ x ⌝
 solved: f
 thena spine> :show
-  let h = Nat.succ Nat.zero : Nat.Nat in
-  let f = λ (x : Nat.Nat) -> Nat.succ x : Nat.Nat -> Nat.Nat in
+  let h = succ zero : Nat in
+  let f = λ (x : Nat) -> succ x : Nat -> Nat in
 ▶ let ? goal : Type₀ in
   goal
 thena spine> claim "a" ⌜ Nat ⌝
@@ -22,24 +22,24 @@ thena spine> claim "b" ⌜ Nat ⌝
 thena spine> unify ⌜ a ⌝ ⌜ b ⌝
 solved: b
 thena spine> :show
-  let h = Nat.succ Nat.zero : Nat.Nat in
-  let f = λ (x : Nat.Nat) -> Nat.succ x : Nat.Nat -> Nat.Nat in
-  let ? a : Nat.Nat in
-  let b = a : Nat.Nat in
+  let h = succ zero : Nat in
+  let f = λ (x : Nat) -> succ x : Nat -> Nat in
+  let ? a : Nat in
+  let b = a : Nat in
 ▶ let ? goal : Type₀ in
   goal
 thena spine> unify ⌜ b ⌝ ⌜ zero ⌝
 solved: a
 thena spine> :show
-  let h = Nat.succ Nat.zero : Nat.Nat in
-  let f = λ (x : Nat.Nat) -> Nat.succ x : Nat.Nat -> Nat.Nat in
-  let a = Nat.zero : Nat.Nat in
-  let b = a : Nat.Nat in
+  let h = succ zero : Nat in
+  let f = λ (x : Nat) -> succ x : Nat -> Nat in
+  let a = zero : Nat in
+  let b = a : Nat in
 ▶ let ? goal : Type₀ in
   goal
 thena spine> claim "c" ⌜ Nat ⌝
 thena spine> unify ⌜ c ⌝ ⌜ succ c ⌝
-stuck: solving c with Nat.succ c would define it in terms of itself
+stuck: solving c with succ c would define it in terms of itself
 thena spine> unify ⌜ zero ⌝ ⌜ succ zero ⌝
-stuck: Nat.zero and Nat.succ Nat.zero cannot be made equal
+stuck: zero and succ zero cannot be made equal
 thena spine> :quit

@@ -1,46 +1,46 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
-declared Nat.Nat
+declared Nat
 thena spine> open Nat
 opened Nat
 thena spine> :theorem two : Nat
-proving two : Nat.Nat
+proving two : Nat
 thena spine> attack
 thena spine> :show
-▶ let ? two : Nat.Nat ≐ (
-    let ? two1 : Nat.Nat in
+▶ let ? two : Nat ≐ (
+    let ? two1 : Nat in
     two1
   ) in
   two
 thena spine> :undo
-▶ let ? two : Nat.Nat in
+▶ let ? two : Nat in
   two
 thena spine> :undo
 nothing to undo
 thena spine> :suspend
 suspended two
 thena spine> :proofs
-  two : Nat.Nat
+  two : Nat
 thena spine> data Bool : Type₀ where { true : Bool ; false : Bool }
-declared Bool.Bool
+declared Bool
 thena spine> open Bool
 opened Bool
 thena spine> :theorem one : Nat
-proving one : Nat.Nat
+proving one : Nat
 thena spine> try-core ⌜ zero ⌝
 thena spine> solve
 thena spine> qed
-one : Nat.Nat   ∎
+one : Nat   ∎
 thena spine> :resume two
 resumed two
 thena spine> :core true
-Bool.true
+true
 thena spine> try-core ⌜ succ (succ zero) ⌝
 thena spine> solve
 thena spine> qed
-two : Nat.Nat   ∎
+two : Nat   ∎
 thena spine> :show two
-two : Nat.Nat
-two = let two = Nat.succ (Nat.succ Nat.zero) : Nat.Nat in two
+two : Nat
+two = let two = succ (succ zero) : Nat in two
 thena spine> :undo
 nothing to undo
 thena spine> :quit

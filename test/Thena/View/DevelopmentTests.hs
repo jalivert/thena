@@ -40,7 +40,8 @@ import Thena.View.Development
   )
 import Thena.View.Core (Budget (..))
 import Thena.View.Redraw (chainText)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderPartial)
 
 tests :: TestTree
@@ -70,7 +71,7 @@ crossingCases =
     agree name p =
       testCase name $
         chainText (displayDevelopment [] (Budget 200) 500 (Address []) Nothing p)
-          @?= renderPartial (Rendering [] 500) [] p
+          @?= renderPartial (rendering [] 500) [] p
 
 -- ---------------------------------------------------------------------------
 -- Pure and blocked

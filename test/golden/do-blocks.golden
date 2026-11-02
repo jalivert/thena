@@ -3,25 +3,25 @@ do { attack ; intro }
 thena spine> :surface f (do { attack })
 f do { attack }
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
-declared Nat.Nat
+declared Nat
 thena spine> open Nat
 opened Nat
 thena spine> :theorem t : Nat
-proving t : Nat.Nat
+proving t : Nat
 thena spine> elaborate ⟨ do { attack ; prove } ⟩
 chose 18: solve
 backtracking to 18: regret
 chose 19: attack
 thena spine> :show
-▶ let ? t : Nat.Nat ≐ (
-    let ? t1 : Nat.Nat in
+▶ let ? t : Nat ≐ (
+    let ? t1 : Nat in
     t1
   ) in
   t
 thena spine> :abandon
 abandoned t
 thena spine> :theorem u : Nat
-proving u : Nat.Nat
+proving u : Nat
 thena spine> elaborate ⟨ do { say } ⟩
 do block 1, instruction 1: say takes 1 argument, not 0 arguments
 thena spine> :quit

@@ -1,11 +1,11 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
-declared Nat.Nat
+declared Nat
 thena spine> open Nat
 opened Nat
 thena spine> :revalidate
 valid
 thena spine> :goal Nat
-▶ let ? goal : Nat.Nat in
+▶ let ? goal : Nat in
   goal
 thena spine> :revalidate
 valid
@@ -17,25 +17,25 @@ thena spine> along
 thena core> unify ⌜ goal ⌝ ⌜ zero ⌝
 solved: goal
 thena core> :extract
-let goal = Nat.zero : Nat.Nat in goal
+let goal = zero : Nat in goal
 thena core> certify ⌜ Nat ⌝
 certified
 thena core> certify ⌜ Nat -> Nat ⌝
 the kernel refused it
 in the term:
-  let goal = Nat.zero : Nat.Nat in goal has type Nat.Nat
-    but Nat.Nat -> Nat.Nat was expected
-    Nat.Nat -> Nat.Nat and Nat.Nat do not match
+  let goal = zero : Nat in goal has type Nat
+    but Nat -> Nat was expected
+    Nat -> Nat and Nat do not match
 thena core> :revalidate
 valid
 thena core> back
 thena spine> assume "A" ⌜ Type₀ ⌝
 thena spine> :extract
-λ (A : Type₀) -> let goal = Nat.zero : Nat.Nat in goal
+λ (A : Type₀) -> let goal = zero : Nat in goal
 thena spine> certify ⌜ Nat ⌝
 the kernel refused it
 in the term:
-  λ (A : Type₀) -> let goal = Nat.zero : Nat.Nat in goal has type Type₀ -> Nat.Nat
-    but Nat.Nat was expected
-    Nat.Nat and Type₀ -> Nat.Nat do not match
+  λ (A : Type₀) -> let goal = zero : Nat in goal has type Type₀ -> Nat
+    but Nat was expected
+    Nat and Type₀ -> Nat do not match
 thena spine> :quit

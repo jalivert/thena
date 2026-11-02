@@ -40,7 +40,8 @@ import Thena.View.Core
   )
 import Thena.View.Redraw (redraw)
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore)
 
 tests :: TestTree
@@ -72,7 +73,7 @@ mismatch t
   | shown == drawn = Nothing
   | otherwise = Just ("printed: " <> shown <> "\n  drawn:   " <> drawn)
   where
-    shown = renderCore (Rendering [] 0) [] t
+    shown = renderCore (rendering [] 0) [] t
     drawn = redraw (displayCore [] (Budget 200) [] [] 0 (Address []) t)
 
 -- | A green test over an empty corpus would prove nothing.
@@ -171,7 +172,7 @@ objectCases =
   where
     agree name t = testCase name $ do
       gs <- loaded
-      redraw (displayCore gs (Budget 200) [] [] 0 (Address []) t) @?= renderCore (Rendering gs 0) [] t
+      redraw (displayCore gs (Budget 200) [] [] 0 (Address []) t) @?= renderCore (rendering gs 0) [] t
 
 -- ---------------------------------------------------------------------------
 -- Where a literal begins — MS7 phase 132

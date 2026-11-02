@@ -286,11 +286,20 @@ block with explicit braces here.
 ```
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> :show Nat
 data Nat : Type₀ where
   { zero : Nat
   ; succ : Nat -> Nat }
 ```
+
+**A declaration opens a namespace named after itself**, so the type is `Nat.Nat`
+and the constructors are `Nat.zero` and `Nat.succ`. A written `Nat` reaches the
+type anyway, because a declaration's short name is derived from the environment;
+`open Nat`, on the line above, is what lets the rest of this chapter write
+`zero` and `succ` without the prefix. `DECISIONS.md`, *Modules and namespaces*,
+has the whole of it — the other four forms of `open`, and `namespace` in a file.
 
 Now the three commands of the last chapter have something to look at:
 
@@ -311,14 +320,14 @@ thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
 data Box {ℓ₄₉₁₀} (A : Type (ℓ₄₉₁₀)) : Type (ℓ₄₉₁₀) where
-  { box : A -> Box {ℓ₄₉₁₀} A }
+  { Box.box : A -> Box {ℓ₄₉₁₀} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
 
 ```
 thena spine> data Big : Type₀ where { wrap : Type₀ -> Big }
-refused: the argument x of wrap lives in Type₁, which the datatype's own Type₀ does not contain
+refused: the argument x of Big.wrap lives in Type₁, which the datatype's own Type₀ does not contain
 ```
 
 Declaring a datatype checks strict positivity and **generates three things**:
@@ -1043,6 +1052,8 @@ between slices, and stops the search by simply not asking for the next one.
 ```
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> :step 6
 thena spine> declare idn : Nat -> Nat ; idn = \ n -> n
 pc
@@ -1053,7 +1064,7 @@ env
 stack
   call, 14 instruction(s) to resume
   call, 8 instruction(s) to resume
-  call, 178 instruction(s) to resume (returned)
+  call, 180 instruction(s) to resume (returned)
 thena spine> :run 6
 pc
   0  u = universe-at l
@@ -1064,7 +1075,7 @@ stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
   call, 8 instruction(s) to resume
-  call, 178 instruction(s) to resume (returned)
+  call, 180 instruction(s) to resume (returned)
 thena spine> :run
 solved: ?ℓ4876
 solved: ?ℓ4878
@@ -1090,6 +1101,8 @@ The kernel is an independent check. It does not trust the machine.
 ```
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> :goal Nat
 ▶ let ? goal : Nat in
   goal
