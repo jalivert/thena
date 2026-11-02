@@ -389,6 +389,60 @@ constructors being scoped under their type. The export list on a file's `module`
 clause is Haskell's, and it is provisional — per-declaration visibility, as Lean
 and Idris do it, is the likely successor.
 
+### A metavariable belongs to its language, so two languages may both use `e`
+
+*Decided 2026-11-02, built the same day.*
+
+A `language` block's metavariables are scoped to the namespace its datatype
+opens, exactly as its productions are. So this is fine, and used to be refused:
+
+```
+language Expr, e where
+  lit  -> z
+  plus -> ( e₁ + e₂ )
+
+language Code, e where
+  push -> PUSH
+  seq  -> ( e₁ ; e₂ )
+```
+
+**A block that talks about several languages opens each of them**, and that is
+the ceremony this costs:
+
+```
+language Ty, T, S where
+  base  -> ι
+  arrow -> ( T -> S )
+
+open Ty
+
+language LC, M, N, E where
+  abs : x as binder -> ( λ x : T . E[x] )     -- T is Ty's, and Ty is open
+```
+
+Deriving those `open`s from the notation's own slots was considered and
+declined: what a block may write is what you can see above it, and nothing
+else. **A metavariable is never qualified** — nothing writes `LC.e`, because a
+letter is not a name you can refer to, only a rule for reading a word inside a
+fence. Two open languages that both use one letter is refused and not chosen,
+and `open Code renaming ( e -> c )` is what settles it.
+
+**A language's own name needs no `open`**, since `LC` reaches the datatype
+`LC.LC` wherever its short name does.
+
+**Inside a rule or a derivation you open nothing.** A slot carries its language
+from the declaration — `judgment typing = Γ ⊢ M : T` fixes which language each
+of the three is — so at a `Ty` position only `Ty`'s letters are read, and the
+same letter in two languages cannot be ambiguous there.
+
+**Forget an `open` and you get a warning, not a refusal**, because a word that
+is no metavariable is a terminal and that is a legitimate notation:
+
+```
+warning: in the grammar of LC, production abs: T is read as a terminal.
+         It is a metavariable of Ty, which is not open here
+```
+
 ## Universes and levels
 
 *Decided across MS3 (2026-08-27 to 2026-08-29); written up 2026-08-30.*

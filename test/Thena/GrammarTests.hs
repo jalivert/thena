@@ -53,6 +53,7 @@ tests =
     [ testGroup "the lexer takes a block whole, in a module" lexing
     , testGroup "the reader gives its shape" reading
     , testGroup "the checker gives its meaning" meaning
+    , testGroup "a metavariable is scoped to its language" scoped
     , testGroup "and says which classes a grammar reaches" reaching
     , testGroup "and a notation block gives a function a spelling" notating
     , testGroup "and refuses what §4.5 refuses" refusals
@@ -64,6 +65,67 @@ tests =
         pure (toLazyByteString (stringUtf8
           (unlines (concatMap (renderTrouble s0) trouble ++ concatMap run (("the spec's STLC", stlc) : map fst refused ++ unreadable)))))
     ]
+
+-- ---------------------------------------------------------------------------
+
+-- | **A metavariable is scoped to the namespace its language's datatype opens**
+-- — HIS ruling of 2026-11-02, MS10 phase 255, `~g4k5g`. The table used to be
+-- every installed grammar's letters, so two object languages could not both use
+-- @e@; what a block may write is now what the @open@s above it bring into view.
+scoped :: [TestTree]
+scoped =
+  [ -- **The refusal the item measured, and it is gone.** Neither language is
+    -- open in the other's block, so @Expr@'s @e@ and @Code@'s @e@ are already
+    -- different names — no @namespace@ written anywhere.
+    accepted "two languages may both declare e"
+      (expr "e" ++ code "e") ["Expr", "Code"]
+    -- **A judgment borrows a letter per language it talks about**, which is the
+    -- case his ruling is about: a judgment declares none of its own.
+  , accepted "a judgment borrows a letter from each language it opens"
+      (expr "e" ++ ["open Expr", ""] ++ code "c" ++ ["open Code", ""] ++ judgment "e" "c")
+      ["Expr", "Code", "compiles"]
+    -- **Refused and not chosen**, as every other two-answer lookup is.
+  , refusal "two open languages that both use e is refused, naming both"
+      (expr "e" ++ code "e" ++ ["open Expr", "open Code", ""] ++ judgment "e" "e")
+      ("refused: in the judgment compiles: e is a metavariable of Code and Expr, "
+         ++ "all in scope here; open one renaming it")
+    -- **The tie-break is @open … renaming@**, and it needed nothing new.
+  , accepted "and a renaming settles it"
+      (expr "e" ++ code "e" ++ ["open Expr", "open Code renaming ( e -> c )", ""]
+         ++ judgment "e" "c")
+      ["Expr", "Code", "compiles"]
+    -- **The one silent thing the scoping introduced** (§4.2: a word that is no
+    -- metavariable is a terminal), so it is a warning and not a refusal.
+  , testCase "a letter whose language is shut is a terminal, and warns" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (unlines (["module Shut where", ""]
+             ++ ["language Ty, T, S where", "  base  -> \953", "  arrow -> ( T -> S )", ""]
+             ++ ["language LC, M where", "  app -> ( M M )", "  ty  -> ( T )"])) of
+        (_, ProofLoaded _ _ _ ws) ->
+          ws @?= [ MetavariableNotOpen LanguageBlock "LC" "ty" "T" "Ty" ]
+        (_, other) -> assertFailure (show other)
+  ]
+  where
+    expr m = [ "language Expr, " ++ m ++ " where", "  lit  -> z"
+             , "  plus -> ( " ++ m ++ "\8321 + " ++ m ++ "\8322 )", "" ]
+    code m = [ "language Code, " ++ m ++ " where", "  push -> PUSH"
+             , "  seq  -> ( " ++ m ++ "\8321 ; " ++ m ++ "\8322 )", "" ]
+    judgment e c = [ "judgment compiles = " ++ e ++ " ~> " ++ c ++ " where", ""
+                   , "  C-lit:  ----------", "          z ~> PUSH" ]
+
+    accepted what body want = testCase what $ do
+      r <- loads body
+      r @?= Right want
+    refusal what body want = testCase what $ do
+      r <- loads body
+      r @?= Left want
+
+    loads body = do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (["module Scoped where", ""] ++ body))
+      pure $ case r of
+        ProofLoaded _ names _ _ -> Right names
+        _                       -> Left (last (renderResponse s1 r))
 
 -- ---------------------------------------------------------------------------
 
@@ -885,7 +947,7 @@ refused =
     -- there is nothing there for substitution to do.
   , ( ( "a binder free in a language that reaches no such class"
       , "module M where\n\nx : Token String\nx = /[a-z]+/\n\n"
-          ++ "language P, R where\n  base -> o\n\n"
+          ++ "language P, R where\n  base -> o\nopen P\n\n"
           ++ "language L, M where\n  var : x as occurrence -> x\n"
           ++ "  f : x as binder -> ( let x = M in R[x] )\n"
       )

@@ -273,7 +273,7 @@ notation =
   , testCase "a context written with its slot last loses the separator before it" $ do
       s <- loaded
         [ "module Last where", "", "x : Token String", "x = /[a-z]+/", ""
-        , "language Ty, T where", "  base -> \953", ""
+        , "language Ty, T where", "  base -> \953", "open Ty", ""
         , "context D, \916 where", "  none -> \949", "  push -> x : T ; \916", "" ]
       said s ":show push-in" !! 0
         @?= "data push-in : String -> Ty -> D -> Type\8320 where"

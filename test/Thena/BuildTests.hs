@@ -72,6 +72,7 @@ stlc =
     , "language Ty, T, S where"
     , "  base  -> \953"
     , "  arrow -> ( T -> S )"
+    , "open Ty"
     , ""
     , "language LC, M, N, E where"
     , "  var : x as occurrence -> x"

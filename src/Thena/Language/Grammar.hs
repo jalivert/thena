@@ -65,11 +65,11 @@ module Thena.Language.Grammar
   ) where
 
 import Data.List (nub, (\\))
-import Data.Maybe (isJust, listToMaybe)
+import Data.Maybe (isJust, isNothing, listToMaybe)
 
 import Thena.Core.Level (Normal (..), normalise)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), declarationNamed, inDeclarationOf, nameDotted, nameFromText, rootName, Ident (..), Literal (..), instantiate, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), Opened (..), declarationNamed, globalUnder, inDeclarationOf, nameDotted, nameFromText, rootName, Ident (..), Literal (..), instantiate, tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Regex (Regex, andThen, fromRanges, matches, oneOf, parseRegex, primingChar, singleChar, star)
@@ -189,8 +189,15 @@ data GrammarProblem
   = MetavariableRepeated String
     -- ^ written twice in the head
   | MetavariableTaken String
-    -- ^ already a metavariable of another grammar, or a token class — a name
-    -- in a production must mean one thing
+    -- ^ already a metavariable of another grammar **that is in scope here**, or
+    -- a token class — a name in a production must mean one thing
+  | MetavariableAmbiguous String [String]
+    -- ^ a letter, and the languages in scope that each declare it (MS10 phase
+    -- 255, HIS ruling of 2026-11-02). **A metavariable is scoped to its
+    -- language's namespace**, so two languages declaring @e@ is ordinary; what
+    -- cannot be read is a block with both of them open, where the letter has
+    -- two meanings and the block said nothing about which. @open … renaming@ is
+    -- what says it
   | NameTaken
     -- ^ the datatype's name is already declared
   | ConstructorTaken String
@@ -384,16 +391,27 @@ data ProductionProblem
     -- modelled language is the @language@ block
   deriving (Eq, Show)
 
--- | Validate a block against the grammars already installed and the global
--- environment. The warnings are §4.5's vacuous binders.
-checkGrammar :: [Grammar] -> GlobalEnv -> Block -> Either GrammarError (Grammar, [Warning])
-checkGrammar installed env b = do
+-- | Validate a block against the grammars already installed, the global
+-- environment and **the scope the block is written in**. The warnings are
+-- §4.5's vacuous binders.
+--
+-- __The scope is what says which metavariables the block may write__ (MS10
+-- phase 255, `~g4k5g`): a letter belongs to its language's namespace, so a
+-- block reaches @LC@'s @e@ only where @LC@ is open. See 'metavarsElsewhere'.
+checkGrammar :: InScope -> [Grammar] -> GlobalEnv -> Block -> Either GrammarError (Grammar, [Warning])
+checkGrammar sc installed env b = do
   -- The block's own name first: a language named like something declared is
   -- that, before it is anything about metavariables.
   if taken name then refuse NameTaken else Right ()
   if name `elem` builtInTags then refuse BuiltInTag else Right ()
   case heads \\ nub heads of
     x : _ -> refuse (MetavariableRepeated x)
+    [] -> Right ()
+  -- **Before this block's own letters, the ones the scope cannot read**: a
+  -- word two open languages both answer means nothing here, whether or not
+  -- this block goes on to write it.
+  case metavarsAmbiguous of
+    (x, ls) : _ -> refuse (MetavariableAmbiguous x ls)
     [] -> Right ()
   case [ x | x <- heads, isJust (lookup x metavarsElsewhere) || isJust (tokenClassOf env x) ] of
     x : _ -> refuse (MetavariableTaken x)
@@ -428,7 +446,7 @@ checkGrammar installed env b = do
   case [ f | f <- substitutionNames (installed ++ [g]) g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (FunctionTaken f)
     [] -> Right ()
-  Right (g, concatMap snd prods ++ unprimeable g)
+  Right (g, concatMap snd prods ++ unprimeable g ++ notOpen (map fst prods))
   where
     kind = blockKind b
     name = blockName b
@@ -443,6 +461,22 @@ checkGrammar installed env b = do
     -- constructor of it**, and the same placement gives it: its written word is
     -- the block's own name, so it lands on @J.J@.
     datatype = declarationNamed (rootName name)
+
+    -- **A LETTER THAT IS A TERMINAL ONLY BECAUSE ITS LANGUAGE IS NOT OPEN**
+    -- (MS10 phase 255). §4.2 makes a word that is no metavariable a terminal,
+    -- so forgetting the @open@ is not a refusal: @( λ x : T . M )@ reads the
+    -- letter @T@ as the text @T@ and the notation works. **That is the one
+    -- silent thing the scoping introduced**, so the author is told — his second
+    -- principle, where the warning carries what a refusal would have prevented.
+    notOpen ps = nub
+      [ MetavariableNotOpen kind name (productionName' p) t (nameDotted l)
+      | p <- ps
+      , Terminal t <- gproductionItems p
+      , w <- nameBases t
+      , isNothing (lookup w metavarsElsewhere)
+      , l : _ <- [[ l' | (q, l') <- metavarKeys, nameWord q == w ]]
+      ]
+    productionName' = nameWord . gproductionName
 
     -- **A language whose identifier class no character extends** (MS6 closeout
     -- 23, phase 146). 'Thena.Language.Regex.primingChar' decides it on the
@@ -469,8 +503,49 @@ checkGrammar installed env b = do
     refuse :: GrammarProblem -> Either GrammarError a
     refuse = Left . GrammarError kind name
 
+    -- **A METAVARIABLE IS SCOPED TO ITS LANGUAGE'S NAMESPACE, AND A BLOCK THAT
+    -- TALKS ABOUT SEVERAL LANGUAGES WRITES AN @open@ FOR EACH** (MS10 phase
+    -- 255, HIS ruling of 2026-11-02, `~g4k5g`): /"It is explicit, direct,
+    -- obvious."/ The table was every installed grammar's letters, which is why
+    -- two object languages could not both use @e@ — the collision a student
+    -- meets first, and the one thing the datatype rule's namespaces did not
+    -- answer on their own.
+    --
+    -- **A letter is not a referable name** — nothing writes @LC.e@ — so what is
+    -- scoped is where it is /looked up/, and the key it is looked up under is
+    -- the name it would have had: @e@ in the namespace @LC@'s datatype opens.
+    -- 'Thena.Core.Term.globalUnder' then answers it exactly as it answers a
+    -- global, which is what keeps the enclosing walk, the @open@s, the
+    -- @renaming@ and the two-answers refusal from being written a second time
+    -- here.
+    metavarKeys =
+      [ (inDeclarationOf (declarationNamed (grammarName g)) m, grammarName g)
+      | g <- installed, m <- grammarMetavars g ]
+
+    -- **Every word that could be written here for one of them**: the letters
+    -- themselves, and whatever an @open … renaming@ spells one as — the
+    -- original is out of scope under a renaming, so the renamed word is the
+    -- only way in.
+    metavarWords =
+      nub (map (nameWord . fst) metavarKeys
+             ++ [ w | o <- scopeOpens sc, (_, w) <- openedRenaming o ])
+
+    metavarAnswer x = globalUnder (`elem` map fst metavarKeys) sc (rootName x)
+
     metavarsElsewhere =
-      [ (m, grammarName g) | g <- installed, m <- grammarMetavars g ]
+      [ (x, l)
+      | x <- metavarWords
+      , Right q <- [metavarAnswer x]
+      , Just l <- [lookup q metavarKeys] ]
+
+    -- **Refused and not chosen**, as every other two-answer lookup is: either
+    -- language would read, so taking one would be the system deciding what the
+    -- block did not say.
+    metavarsAmbiguous =
+      [ (x, nub [ nameDotted l | q <- qs, Just l <- [lookup q metavarKeys] ])
+      | x <- metavarWords
+      , Left qs <- [metavarAnswer x]
+      , length qs > 1 ]
 
     -- A global, or a name a grammar already installed will generate.
     --

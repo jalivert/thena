@@ -3462,7 +3462,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
                 then stop m' msgs warns (Paused spent)
                 else spending fuel spent s { sessionMachine = m' } msgs warns
 
-  Engine.DeclaringGrammar b m -> case checkGrammar (grammars m) (globals m) b of
+  Engine.DeclaringGrammar b m -> case checkGrammar (Engine.scope m) (grammars m) (globals m) b of
     Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
     -- **A judgment's datatype is its rules** (MS6 phase 108, §6.5), read with
     -- its own notation installed, since a rule may have a premise of the

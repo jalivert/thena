@@ -661,7 +661,7 @@ refused =
     -- **Two unrelated languages reading one class is ordinary** and is the test
     -- below this list; it is holding a slot of the other that refuses.
   , refusal "a class reached through two languages that both read it"
-      [ "language K, A where", "  kvar : x as occurrence -> x", ""
+      [ "language K, A where", "  kvar : x as occurrence -> x", "open K", ""
       , "language L, M where", "  v : x as occurrence -> x", "  box -> ( box A )" ]
       "refused: in the grammar of L: L and K both read an occurrence at x, and this grammar reaches both, so a substitution for x has no one language to replace a name with"
   , refusal "an occurrence beside something else"
@@ -674,7 +674,7 @@ refused =
     -- class the block installs and warns instead, which
     -- "Thena.GrammarTests" pins.
   , refusal "a binder free in a language that reaches no such class"
-      [ "language K, A where", "  k -> k", ""
+      [ "language K, A where", "  k -> k", "open K", ""
       , "language L, M where", "  v : x as occurrence -> x", "  bind : x as binder -> ( \955 x . A[x] )" ]
       "refused: in the grammar of L, production L.bind: a binder is free in A, which is of K, and nothing K reaches occurs at x, so there is nothing there to rename"
   , refusal "a generated name already declared"

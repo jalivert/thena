@@ -285,6 +285,28 @@ language LC, M, N, E where
 - **Load the module before the rule file that uses its tag.** A rule file is
   read with the grammars the session already has.
 
+**A metavariable belongs to its language.** `M`, `N` and `E` above are `LC`'s,
+and nothing outside `LC`'s namespace sees them until it is opened — so two
+languages may both call a metavariable `e`, and a block that writes another
+language's letter opens it first:
+
+```
+language Ty, T, S where
+  base  -> ι
+  arrow -> ( T -> S )
+
+open Ty
+
+language LC, M, N, E where
+  abs : x as binder -> ( λ x : T . E[x] )     -- T is Ty's, and Ty is open
+```
+
+A language's own name needs no `open`. **Inside a rule or a derivation you open
+nothing**: a slot carries its language from the declaration, so at a `Ty`
+position only `Ty`'s letters are read. Forget an `open` and the word becomes a
+terminal — a legitimate notation — and you are warned rather than refused.
+`DECISIONS.md` has the whole decision.
+
 `language` in a rule file is a syntax error. MS5 declared languages there, with a
 type of their own and a coercion `surface-of`; both are gone.
 

@@ -95,6 +95,15 @@ data Warning
     -- ^ the block, the production, and a binder declared @as binders@ that no
     -- @[…]@ mentions (@ms6\/SPEC.md@ §4.5, MS6 phase 101). A vacuous binder is
     -- allowed — that is why it can be declared — and worth saying.
+  | MetavariableNotOpen BlockKind String String String String
+    -- ^ the block, the production, a word it reads as a /terminal/, and the
+    -- language whose metavariable that word is — which is not in scope here
+    -- (MS10 phase 255). **A metavariable is scoped to its language's
+    -- namespace** since his ruling of 2026-11-02, so a block that forgets the
+    -- @open@ does not get a refusal: §4.2 says a word that is no metavariable
+    -- is a terminal, and the notation quietly reads the letter as text. Nothing
+    -- is broken — a terminal @T@ is a perfectly good notation — so the author
+    -- is told rather than prevented, exactly as 'UnprimeableClass' tells them.
   | UnprimeableClass BlockKind String String
     -- ^ the block, the language's name, and its identifier class's name — a class no
     -- single character extends, so a generated @L.fresh-\8249k\8250@ cannot rename a

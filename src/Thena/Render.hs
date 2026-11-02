@@ -1498,6 +1498,13 @@ orList xs = case reverse xs of
   [x]     -> x
   x : ys  -> intercalate ", " (reverse ys) ++ " or " ++ x
 
+-- | @a@, @a and b@, @a, b and c@ — for a message that lists all of them.
+andList :: [String] -> String
+andList xs = case reverse xs of
+  []      -> ""
+  [x]     -> x
+  x : ys  -> intercalate ", " (reverse ys) ++ " and " ++ x
+
 -- | A hint, printed as written (phase 17b).
 --
 -- 'Raw' is the parser's own tree, so this is the inverse of the parser and not
@@ -1800,6 +1807,11 @@ signature ren@(Rendering _ n0 _ _) ps0 ty0 = braced n0 [] ps0 ty0
 renderWarning :: Warning -> String
 renderWarning w = "warning: " ++ case w of
   VacuousBinder k g p x -> blockAt k g ++ ", production " ++ p ++ ": " ++ x ++ " binds in nothing"
+  -- **It says what the word is being read as**, because that is the thing the
+  -- author cannot see: the notation works either way (MS10 phase 255).
+  MetavariableNotOpen k g p x l ->
+    blockAt k g ++ ", production " ++ p ++ ": " ++ x ++ " is read as a terminal."
+      ++ " It is a metavariable of " ++ l ++ ", which is not open here"
   -- **What is lost is printing, and only printing** — so the line says that
   -- rather than sounding like a refusal (MS6 closeout 23, phase 146).
   UnprimeableClass k g cls ->
@@ -1813,6 +1825,11 @@ renderDeclareError ren e = case e of
   GrammarRefused (GrammarError k g problem) -> case problem of
     MetavariableRepeated x -> blockAt k g ++ ": " ++ x ++ " is named twice"
     MetavariableTaken x -> blockAt k g ++ ": " ++ x ++ " is already a metavariable or a token class"
+    -- **Named in the order they were opened**, latest first, because that is
+    -- the order the writer wrote them in and the renaming goes on one of them.
+    MetavariableAmbiguous x ls ->
+      blockAt k g ++ ": " ++ x ++ " is a metavariable of " ++ andList ls
+        ++ ", all in scope here; open one renaming it"
     NameTaken -> g ++ " is already declared"
     BuiltInTag -> g ++ " is one of Thena's own tags, so a language may not take its name"
     ConstructorTaken p -> g ++ "'s constructor " ++ p ++ " is already declared"

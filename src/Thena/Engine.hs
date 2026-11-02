@@ -1101,8 +1101,11 @@ perform instr rest m = case operation instr of
   --
   -- **A block cannot be written inside a @namespace@ block yet** (MS10 phase
   -- 254), and the lexer is what says so: it takes a block whole only at column
-  -- 1, so an indented one does not reach here at all. Scoping a grammar is the
-  -- metavariable half of `~g4k5g` and is the next piece of this partition.
+  -- 1, so an indented one does not reach here at all. **The metavariable half
+  -- of `~g4k5g` is built** (phase 255): a letter is scoped to its language's
+  -- namespace, which 'Thena.Language.Grammar.checkGrammar' reads off the scope
+  -- this machine carries. What is left is the placement half — a grammar's own
+  -- name still roots.
   DeclareGrammar b -> DeclaringGrammar b (advance m)
 
   -- **Both read their name as a name, path and all** (MS10 phase 243). Each
