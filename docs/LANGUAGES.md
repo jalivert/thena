@@ -307,6 +307,13 @@ position only `Ty`'s letters are read. Forget an `open` and the word becomes a
 terminal — a legitimate notation — and you are warned rather than refused.
 `DECISIONS.md` has the whole decision.
 
+**A token class is scoped the same way.** `x : Token String` may be written
+inside a `namespace` beside the block that reads it, and a block that cannot see
+a class reads its word as a terminal and is warned, exactly as for a letter. The
+names generated from a class are suffixed with the class's **word** — `A.LC.fv-x`
+for a class `A.x` — so one language reaching two classes both written `x` is
+refused and names both.
+
 `language` in a rule file is a syntax error. MS5 declared languages there, with a
 type of their own and a coercion `surface-of`; both are gone.
 

@@ -240,9 +240,11 @@ built, and a name prints as the shortest ending that still means it.** **A `lang
 block**, and what it declares and generates lands there: inside `namespace A`,
 `language Ty` is `A.Ty.Ty` with `A.Ty.base`, `A.Ty.subst-x` and the rest, and
 `open Ty` beside it brings them in — a namespace resolves by the same outward
-walk a name does. **What is not built yet**: a block inside a `namespace` finds
-its token class at the root only, so write `x : Token String` outside the
-namespace.*
+walk a name does, and **that includes a token class**, so `x : Token String` may
+be written inside the namespace with the block that reads it. A class carries
+its path like anything else, while **the name generated from it is suffixed with
+the class's word** — `A.LC.fv-x` for a class `A.x`, because a word holds no dot
+— so one language reaching two classes both written `x` is refused.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something

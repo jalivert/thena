@@ -1812,6 +1812,12 @@ renderWarning w = "warning: " ++ case w of
   MetavariableNotOpen k g p x l ->
     blockAt k g ++ ", production " ++ p ++ ": " ++ x ++ " is read as a terminal."
       ++ " It is a metavariable of " ++ l ++ ", which is not open here"
+  -- **The class is named in full**, because its path is what the author has to
+  -- act on — an @open@ of it, or writing it where the block can see it (MS10
+  -- phase 259).
+  TokenClassNotOpen k g p x c ->
+    blockAt k g ++ ", production " ++ p ++ ": " ++ x ++ " is read as a terminal."
+      ++ " It is the token class " ++ c ++ ", which is not in scope here"
   -- **What is lost is printing, and only printing** — so the line says that
   -- rather than sounding like a refusal (MS6 closeout 23, phase 146).
   UnprimeableClass k g cls ->
@@ -1864,6 +1870,14 @@ renderDeclareError ren e = case e of
         ++ " both read an occurrence at " ++ cls
         ++ ", and this grammar reaches both, so a substitution for " ++ cls
         ++ " has no one language to replace a name with"
+    -- **It names both classes in full**, because the word is what the author
+    -- wrote and the paths are the only thing that tells them apart (MS10 phase
+    -- 259).
+    ClassWordTwice w cs ->
+      blockAt k g ++ ": it reaches " ++ intercalate " and " (map (nameString ren) cs)
+        ++ ", which are both written " ++ w
+        ++ ", and a generated name is suffixed with a class's word \8212 so "
+        ++ "fv-" ++ w ++ " would mean two things"
     InProduction p why -> blockAt k g ++ ", production " ++ p ++ ": " ++ case why of
       NoItems -> "it has no items"
       -- MS8 phase 171: a notation names its own arguments.

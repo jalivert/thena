@@ -71,6 +71,7 @@ import Thena.Language.Grammar
   , Sort (..)
   , allOf
   , classOwner
+  , classWord
   , classesSubstituted
   , freshOf
   , fvOf
@@ -95,10 +96,10 @@ import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), Surf
 -- the ordinary declaration path now admits and what the environment holds.
 substitutionDefinitions :: [Grammar] -> Grammar -> [(GlobalName, Surface, Surface)]
 substitutionDefinitions gs g =
-  [ (freshOf langName k, arrows [string, listOf string] string, freshBody k) | k <- owned ]
-    ++ [ (fvOf langName k, arrows [self] (listOf string), fvBody k) | k <- reached ]
+  [ (freshOf langName (classWord k), arrows [string, listOf string] string, freshBody k) | k <- owned ]
+    ++ [ (fvOf langName (classWord k), arrows [self] (listOf string), fvBody k) | k <- reached ]
     ++ [ (allOf langName, arrows (self : map mapType reached) self, allBody) | not (null reached) ]
-    ++ [ (substOf langName k, arrows [self, string, ownerSelf k] self, oneBody k) | k <- reached ]
+    ++ [ (substOf langName (classWord k), arrows [self, string, ownerSelf k] self, oneBody k) | k <- reached ]
   where
     -- **MINTED RELATIVE, WRITTEN AS A WORD** (MS10 phase 258). @langName@ is
     -- what the generated names hang off and it must carry no namespace, because
@@ -106,8 +107,13 @@ substitutionDefinitions gs g =
     -- written into the types, so it is the word the author would have written.
     langName = grammarWritten g
     lang = grammarWord g
-    reached = map nameDotted (classesSubstituted gs g)
-    owned = map (nameDotted . fst) (variableProductions g)
+    -- **A CLASS IS CARRIED AS ITS NAME AND SPELLED AS ITS WORD** (MS10 phase
+    -- 259). Resolved in scope, @A.x@ and @B.x@ are two classes, so what is
+    -- compared below is the name; what a generated name hangs off, and what a
+    -- bound variable this code writes is called, is
+    -- 'Thena.Language.Grammar.classWord'.
+    reached = classesSubstituted gs g
+    owned = map fst (variableProductions g)
     -- **Constructors only** (MS8 phase 158): these become the eliminator's
     -- methods, one per constructor of the datatype, and a @notation@ block's
     -- function production is not one of them.
@@ -129,7 +135,7 @@ substitutionDefinitions gs g =
     -- ---------------------------------------------------------------------
     -- Which language owns a class, and what it generated. 'reached' has
     -- filtered out the classes with no owner, so these are total on it.
-    owner k = case classOwner gs g (rootName k) of
+    owner k = case classOwner gs g k of
       Just h -> h
       Nothing -> g
     ownerName k = grammarWord (owner k)
@@ -138,10 +144,10 @@ substitutionDefinitions gs g =
     -- binder of that class becomes.
     ownerVar k y = app (global (varConOf (owner k) k)) [y]
     varConOf h k = fromMaybe (rootName "") (listToMaybe
-      [ gproductionName p | (c', p) <- variableProductions h, c' == rootName k ])
+      [ gproductionName p | (c', p) <- variableProductions h, c' == k ])
     -- The classes another language has substitution for — a subset of this
     -- one's, because reaching it reaches everything it reaches.
-    reachedBy l = map nameDotted (classesSubstituted gs (grammarNamed l))
+    reachedBy l = classesSubstituted gs (grammarNamed l)
     grammarNamed l = case [ h | h <- gs, grammarName h == l ] of
       h : _ -> h
       [] -> g
@@ -216,7 +222,7 @@ substitutionDefinitions gs g =
     -- and the name it mints then cannot be printed in the notation. That is not
     -- prevented — his second principle — and 'Thena.Language.Grammar.checkGrammar'
     -- warns at the block instead, so the author is told rather than refused.
-    primeChar k = fromMaybe '\'' (variableRegex g (rootName k) >>= primingChar)
+    primeChar k = fromMaybe '\'' (variableRegex g k >>= primingChar)
 
     freshBody k =
       lamL ["y", "avoid"]
@@ -251,16 +257,16 @@ substitutionDefinitions gs g =
           rs = recNames args
           under bs = foldr (consOf string . v) (v "bound") [ as !! i | i <- bs, binderAt args i == Just k ]
           step (a, arg) acc = case (argumentRole arg, recOf args rs a, argumentSort arg) of
-            (Occurrence c, _, _) | c == rootName k ->
+            (Occurrence c, _, _) | c == k ->
               decide (listOf string) (member (v a) (v "bound")) acc (consOf string (v a) acc)
             (Scope bs, Just r, _) -> app (v r) [under bs, acc]
             (Plain, Just r, _) -> app (v r) [v "bound", acc]
             -- A slot of another language that can hold a free k-name: ask that
             -- language, then take out the names bound on the way in.
             (Scope bs, Nothing, OfLanguage l) | k `elem` reachedBy l ->
-              without (app (global (fvOf l k)) [v a]) (under bs) acc
+              without (app (global (fvOf l (classWord k))) [v a]) (under bs) acc
             (Plain, Nothing, OfLanguage l) | k `elem` reachedBy l ->
-              without (app (global (fvOf l k)) [v a]) (v "bound") acc
+              without (app (global (fvOf l (classWord k))) [v a]) (v "bound") acc
             _ -> acc
        in lamL (as ++ rs ++ ["bound", "acc"]) (foldr step (v "acc") (zip as args))
 
@@ -271,7 +277,7 @@ substitutionDefinitions gs g =
         (elimOn lang [] (lamL ["u"] (arrows (map mapType reached) self))
            (map allMethod prods) (v "t"))
 
-    mapVar k = "s-" ++ k
+    mapVar k = "s-" ++ classWord k
 
     -- What the class-k map sends @y@ to: the first pair that names it, or @y@
     -- itself as a term of the class's owning language.
@@ -292,11 +298,11 @@ substitutionDefinitions gs g =
           -- A binder is renamed when its class has a map; one at a class no
           -- language owns keeps its name, because nothing can occur at it.
           binders = [ i | (i, arg) <- zip [0 :: Int ..] args
-                        , Binder cn <- [argumentRole arg], let c = nameDotted cn, c `elem` reached ]
+                        , Binder c <- [argumentRole arg], c `elem` reached ]
           binderClasses = nub [ c | i <- binders, Just c <- [binderAt args i] ]
           bindersAt c = [ i | i <- binders, binderAt args i == Just c ]
           renamed i = "z" ++ show i
-          avoidName c = "avoid-" ++ c
+          avoidName c = "avoid-" ++ classWord c
           -- A renaming for each binder of the class, and each avoids the names
           -- already chosen for the ones before it and the names of the ones
           -- after — the ones of its own class only, since no other can capture.
@@ -343,20 +349,20 @@ substitutionDefinitions gs g =
                        , lamL ["y", "ys", "ry"]
                            (elimOn "List" [string] (lamL ["l"] (listOf string))
                               [ v "ry", lamL ["h", "hs", "rh"] (consOf string (v "h") (v "rh")) ]
-                              (app (global (fvOf (grammarName (owner k)) c)) [lookupIn k (v "y") (v (mapVar k))]))
+                              (app (global (fvOf (grammarName (owner k)) (classWord c))) [lookupIn k (v "y") (v (mapVar k))]))
                        ]
-                       (app (global (fvOf langName k)) [app (global (gproductionName p)) (map v as)]))
+                       (app (global (fvOf langName (classWord k))) [app (global (gproductionName p)) (map v as)]))
                   (nilOf string)
                   [ k | k <- reached, c `elem` reachedBy (grammarName (owner k)) ]
           withRenamings =
             foldr (\i body ->
-                     let c = fromMaybe "" (binderAt args i)
+                     let c = fromMaybe (rootName "") (binderAt args i)
                       in SurfaceLet (local (renamed i)) (Just string)
-                           (app (global (freshOf (grammarWritten (owner c)) c)) [v (as !! i), avoidTerm i c]) body)
+                           (app (global (freshOf (grammarWritten (owner c)) (classWord c))) [v (as !! i), avoidTerm i c]) body)
                   rebuilt binders
        in lamL (as ++ rs ++ map mapVar reached) $ case (map argumentRole args, as) of
             -- A variable production: the whole node is what its class's map says.
-            ([Occurrence cn], [y]) -> let c = nameDotted cn in lookupIn c (v y) (v (mapVar c))
+            ([Occurrence c], [y]) -> lookupIn c (v y) (v (mapVar c))
             _ | null binders -> rebuilt
               | otherwise ->
                   foldr (\c body -> SurfaceLet (local (avoidName c)) (Just (listOf string)) (images c) body)
@@ -384,9 +390,9 @@ substitutionDefinitions gs g =
 -- | The class a binder argument of this production binds at, by position — a
 -- 'Thena.Global.Env.Scope' names positions, and the class is on the role there
 -- rather than carried twice.
-binderAt :: [Argument] -> Int -> Maybe String
+binderAt :: [Argument] -> Int -> Maybe GlobalName
 binderAt args i = case drop i args of
-  a : _ | Binder cn <- argumentRole a -> Just (nameDotted cn)
+  a : _ | Binder cn <- argumentRole a -> Just cn
   _ -> Nothing
 
 -- | The @notation@ block generated substitution declares — @E[x -> M]@, one
@@ -439,11 +445,15 @@ substitutionNotations gs g
     -- @notation@ production names its arguments now, so the generator says what
     -- it means and no grammar has to carry a word for it.
     prods =
-      [ Production 0 (nameDotted (substOf (grammarWritten g) k))
-          [ Param (target k) Nothing, Param k (Just k), Param (replacement k) Nothing ]
+      -- **A CLASS IS WRITTEN AS ITS WORD HERE TOO** (MS10 phase 259), both in
+      -- the function's name and in the slot's ascription — and the ascription
+      -- is then resolved in scope by 'Thena.Language.Grammar.checkNotation',
+      -- which is the same door a written @notation@ block's goes through.
+      [ Production 0 (nameDotted (substOf (grammarWritten g) (classWord k)))
+          [ Param (target k) Nothing, Param (classWord k) (Just (classWord k)), Param (replacement k) Nothing ]
           Nothing
-          (map Word [target k, "[", k, "->", replacement k, "]"])
-      | k <- map nameDotted (classesSubstituted gs g)
+          (map Word [target k, "[", classWord k, "->", replacement k, "]"])
+      | k <- classesSubstituted gs g
       ]
 
     -- **Three parameters: the term, the name replaced, and what replaces it.**
@@ -455,8 +465,8 @@ substitutionNotations gs g
     -- the middle parameter's. They used to be metavariables hunted out of the
     -- grammars, and the hunt existed only because a slot's word had to be a
     -- metavariable somewhere; a parameter list says what it means.
-    target k = pick "e" [ c | c <- ["e", "e1"], c /= k ]
-    replacement k = pick "n" [ c | c <- ["n", "n1"], c /= k, c /= target k ]
+    target k = pick "e" [ c | c <- ["e", "e1"], c /= classWord k ]
+    replacement k = pick "n" [ c | c <- ["n", "n1"], c /= classWord k, c /= target k ]
     pick dflt cs = fromMaybe dflt (listToMaybe cs)
 
 -- ---------------------------------------------------------------------------

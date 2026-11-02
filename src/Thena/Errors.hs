@@ -104,6 +104,14 @@ data Warning
     -- is a terminal, and the notation quietly reads the letter as text. Nothing
     -- is broken — a terminal @T@ is a perfectly good notation — so the author
     -- is told rather than prevented, exactly as 'UnprimeableClass' tells them.
+  | TokenClassNotOpen BlockKind String String String String
+    -- ^ the block, the production, a word it reads as a /terminal/, and the
+    -- token class of that word, named in full — a class that is not in scope
+    -- here (MS10 phase 259). **The class twin of 'MetavariableNotOpen', and it
+    -- is the same silence**: a class is resolved in the scope its block sits in
+    -- since the last piece of `~g4k5g`, so @x : Token String@ in another
+    -- namespace leaves @x@ a perfectly good terminal and the notation reads the
+    -- letter as text. Told rather than prevented, for the reason that one is.
   | UnprimeableClass BlockKind String String
     -- ^ the block, the language's name, and its identifier class's name — a class no
     -- single character extends, so a generated @L.fresh-\8249k\8250@ cannot rename a

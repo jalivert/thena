@@ -114,7 +114,7 @@ scoped =
       (s0, _) <- startingSession
       case loadProofSource s0 blocksInANamespace of
         (_, ProofLoaded _ ds _ _) ->
-          ds @?= ["x", "A.Ty", "A.LC", "A.Ctx", "A.typing"]
+          ds @?= ["A.x", "A.Ty", "A.LC", "A.Ctx", "A.typing"]
         (_, other) -> assertFailure (show other)
 
     -- **The generated equipment is placed once, not twice.** A definition is
@@ -133,6 +133,65 @@ scoped =
     -- @open Ty@ inside the namespace is what every one of those blocks needs,
     -- since a block that writes its letters with its language shut installs
     -- them as literal text. A namespace resolves by the same walk a name does.
+    -- **A CLASS THE BLOCK CANNOT SEE IS A TERMINAL, AND THAT IS SILENT**
+    -- (MS10 phase 259). §4.2 makes any unresolved word a terminal, so a class
+    -- shut away in another namespace is the same trap phase 255 found for a
+    -- letter — and gets the same warning, naming the class in full.
+  , testCase "a class in a closed namespace is read as a terminal, with a warning" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (unlines
+             [ "module Shut where", ""
+             , "namespace B where"
+             , "  x : Token String"
+             , "  x = /[a-z][a-zA-Z0-9']*/"
+             , ""
+             , "namespace A where"
+             , "  language LC, M, N where"
+             , "    app -> ( M N )"
+             , "    idx -> ( x )"
+             , "" ]) of
+        (_, ProofLoaded _ ds _ ws) -> do
+          ds @?= ["B.x", "A.LC"]
+          ws @?= [ TokenClassNotOpen LanguageBlock "LC" "idx" "x" "B.x" ]
+        (_, other) -> assertFailure (show other)
+
+    -- **TWO CLASSES OF ONE WORD ARE REFUSED, because a generated name is
+    -- suffixed with the WORD** (MS10 phase 259): @fv-x@ would mean two things.
+    -- It cannot arise at the root — one word there is one class — so the paths
+    -- are what made it possible, and the refusal names both.
+  , testCase "one language reaching two classes of one word is refused" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines
+             [ "module Twice where", ""
+             , "namespace B where"
+             , "  x : Token String"
+             , "  x = /[a-z][a-zA-Z0-9']*/"
+             , ""
+             , "  language L1, P where"
+             , "    v : x as occurrence -> x"
+             , "    pp -> ( P P )"
+             , ""
+             , "namespace C where"
+             , "  x : Token String"
+             , "  x = /[a-z][a-zA-Z0-9']*/"
+             , ""
+             , "  language L2, Q where"
+             , "    w : x as occurrence -> x"
+             , "    qq -> [ Q Q ]"
+             , ""
+             , "open B.L1"
+             , "open C.L2"
+             , ""
+             , "language Top, R where"
+             , "  pair -> ( P , Q )"
+             , "" ])
+      case r of
+        ProofLoaded {} -> assertFailure "two classes of one word were accepted"
+        _ -> last (renderResponse s1 r) @?=
+               "refused: in the grammar of Top: it reaches B.x and C.x, which are"
+                 ++ " both written x, and a generated name is suffixed with a"
+                 ++ " class's word \8212 so fv-x would mean two things"
+
   , testCase "and a namespace resolves by the walk, so open Ty works inside A" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 (unlines
@@ -154,16 +213,16 @@ scoped =
     judgment e c = [ "judgment compiles = " ++ e ++ " ~> " ++ c ++ " where", ""
                    , "  C-lit:  ----------", "          z ~> PUSH" ]
 
-    -- A token class stays at the root: a block inside a @namespace@ still
-    -- looks its class up there (MS10 phase 258 leaves that to the phase after
-    -- it, and the item says why — the generator concatenates a class's dotted
-    -- name into the names it mints).
+    -- **The token class is INSIDE the namespace** (MS10 phase 259, the last
+    -- piece of `~g4k5g`): a class resolves by the same outward walk a
+    -- metavariable and a function name do, and what the generated names hang
+    -- off is the class's word, so @A.x@ still gives @A.LC.fv-x@.
     blocksInANamespace = unlines
       [ "module NSAll where", ""
-      , "x : Token String"
-      , "x = /[a-z][a-zA-Z0-9']*/"
-      , ""
       , "namespace A where"
+      , "  x : Token String"
+      , "  x = /[a-z][a-zA-Z0-9']*/"
+      , ""
       , "  language Ty, T, S where"
       , "    base  -> \953"
       , "    arrow -> ( T -> S )"

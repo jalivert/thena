@@ -58,6 +58,7 @@ import Thena.Language.Grammar
   , allOf
   , earleyRules
   , classOwner
+  , classWord
   , classesSubstituted
   , substitutionNames
   , variableProductions
@@ -586,8 +587,11 @@ special n = case words n of
 
 -- | The classes a substitution written in a rule may be for — every class the
 -- language has a generated substitution for (§6.3, per class at MS8 phase 155).
+-- **A class is written as its WORD** (MS10 phase 259) — that is what a rule's
+-- text says where a class slot goes, and what the generated substitution's own
+-- name hangs off.
 substitutedClasses :: [Grammar] -> Grammar -> [String]
-substitutedClasses gs g = [ x | x <- map nameDotted (classesSubstituted gs g) ]
+substitutedClasses gs g = map classWord (classesSubstituted gs g)
 
 -- | The grammar of that name, among those installed.
 -- | The word a grammar's key is written with — @A.Ty@ becomes @Ty@.
@@ -610,16 +614,23 @@ grammarNamed gs l = [ g | g <- gs, grammarName g == nameFromText l ]
 -- pairs is a term of, and what its map is a map into.
 -- **It answers with the owner's WORD** (MS10 phase 258), because every caller
 -- writes it into a surface type rather than handing it to the parser.
+-- **The class is found by its WORD among the ones that language reaches** (MS10
+-- phase 259), because a class carries a path now and @x@ is what the rule
+-- wrote. One grammar reaching two classes of one word is refused
+-- ('Thena.Language.Grammar.substitutable'), so there is nothing to choose
+-- between.
 ownerOf :: [Grammar] -> String -> String -> String
-ownerOf gs l x = case [ classOwner gs h (rootName x) | h <- grammarNamed gs l ] of
-  Just g : _ -> grammarWord g
+ownerOf gs l x = case [ g | h <- grammarNamed gs l
+                          , c <- classesSubstituted gs h, classWord c == x
+                          , Just g <- [classOwner gs h c] ] of
+  g : _ -> grammarWord g
   _ -> x
 
 -- | A class's @T@ — @String@ for every class a binder or an occurrence may be
 -- at (§4.5 refuses any other), asked rather than assumed so that `~tmnrr`'s
 -- @Int@ class has one place to change.
 classType :: [Grammar] -> String -> String
-classType gs x = case [ t | g <- gs, (c, _) <- variableProductions g, c == rootName x
+classType gs x = case [ t | g <- gs, (c, _) <- variableProductions g, classWord c == x
                           , p <- grammarProductions g
                           , Slot y (OfClass _ tn _) _ <- gproductionItems p, let t = nameDotted tn, y == x ] of
   t : _ -> t
