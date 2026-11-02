@@ -34,6 +34,7 @@ module Thena.Language.Grammar
   , grammarWord
   , grammarWritten
   , classWord
+  , grammarForTag
   , sortType
   , notationInto
   , constructorProductions
@@ -810,6 +811,31 @@ grammarWord = nameWord . grammarName
 -- division 'Thena.Driver.datatypeProgram' already has for the datatype.
 grammarWritten :: Grammar -> GlobalName
 grammarWritten = rootName . grammarWord
+
+-- | __The grammar a TAG names, resolved by the one walk__ (MS10 phase 260,
+-- `~zjkvd`, HIS ruling of 2026-10-30: /"Ok, the first it is"/ — a tag resolves
+-- like any other name).
+--
+-- So @open A@ then @Ty`ι`@ reads a term of @A.Ty@, @open A renaming (Ty to T)@
+-- makes it @T`ι`@, and two opened namespaces both offering a @Ty@ is an
+-- ambiguity rather than a silent choice — none of which is written here:
+-- 'Thena.Core.Term.globalUnder' is the walk, and this is the predicate it asks.
+--
+-- **'Left' carries what the ambiguity was**, as
+-- 'Thena.Syntax.Resolve.plainAt' does for an ordinary name: @Left []@ is
+-- "nothing answers to it" and a longer list is "more than one does".
+--
+-- **The tag is taken as WRITTEN**, through 'Thena.Core.Term.nameFromText' and
+-- never @rootName@ — a qualified tag is a path and not a word holding dots.
+grammarForTag :: InScope -> [Grammar] -> String -> Either [GlobalName] Grammar
+grammarForTag sc gs tag = case globalUnder isGrammar sc (nameFromText tag) of
+  Right c  -> case [ g | g <- gs, grammarName g == c ] of
+    g : _ -> Right g
+    -- Cannot arise: the predicate is what the walk answered by.
+    []    -> Left []
+  Left amb -> Left amb
+  where
+    isGrammar c = any ((== c) . grammarName) gs
 
 -- | __A token class's name as a generated name's SUFFIX — the word.__
 --

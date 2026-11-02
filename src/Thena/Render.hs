@@ -2508,6 +2508,9 @@ renderObjectError :: ObjectError -> String
 renderObjectError e = case e of
   NoSuchObjectLanguage lang ->
     "no language called " ++ lang ++ " has been declared"
+  -- **Both named in full**, because writing the path is what resolves it.
+  ObjectLanguageAmbiguous lang ls ->
+    lang ++ " could be " ++ intercalate " or " ls ++ ", so it is ambiguous here"
   NoSuchObjectProduction lang w ->
     lang ++ " has no production called " ++ w
   ObjectNotParsed lang text why -> renderUnparsed lang text why

@@ -135,6 +135,38 @@ reading io =
         BasesIllTyped (_ : _) -> pure ()
         other -> assertFailure (show other)
 
+    -- **A RULE FILE IS NOT READ IN A SCOPE, SO A TAG THERE IS WRITTEN IN FULL**
+    -- (MS10 phase 260, `~zjkvd`). His ruling is that a tag resolves like any
+    -- other name, and in a rule file every other name is written whole \u2014 there
+    -- is no @module@ clause and no @open@ for a word to resolve against. So a
+    -- language in a namespace is reached by its path, and the pattern's shape
+    -- carries the production's whole name as it always did.
+  , testCase "a rule file reaches a namespaced language by its path" $ do
+      (s0, _) <- startingSession
+      shipped <- rulesPath >>= readFile
+      s1 <- case loadProofSource s0 (unlines
+              [ "module Nested where", ""
+              , "namespace A where"
+              , "  x : Token String"
+              , "  x = /[a-z]+/"
+              , ""
+              , "  language LC, M, N where"
+              , "    var : x as occurrence -> x"
+              , "    app                   -> ( M N )"
+              , ""
+              , "  open LC"
+              , "" ]) of
+              (s, ProofLoaded {}) -> pure s
+              (_, other) -> assertFailure (show other)
+      r <- withRules (pure (s1, shipped))
+             (base "rule swap A.LC[app]`( ${f} ${a} )` :- do say \"x\"")
+      case r of
+        Right (x : _) -> ruleParams x
+          @?= [ PObject (SNode (named "A.LC.app")
+                           [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ]) ]
+        Right []   -> assertFailure "the base declared no rule"
+        Left other -> assertFailure (show other)
+
   , testCase "a tag naming no language is refused" $ do
       r <- refused io (base "rule v Nope`x` :- do say \"x\"")
       case r of

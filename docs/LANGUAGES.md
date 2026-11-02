@@ -284,6 +284,12 @@ language LC, M, N, E where
 
 - **Load the module before the rule file that uses its tag.** A rule file is
   read with the grammars the session already has.
+- **A tag resolves like any other name.** A language inside a `namespace` is
+  reached by its word wherever that namespace is open — inside the block, or
+  after an `open` — and by its path always: `` A.LC`( f g )` ``, brackets
+  included. `open … renaming` renames a tag as it renames anything else, and two
+  opened namespaces offering one tag is refused rather than chosen. **In a rule
+  file a tag is written in full**, since a rule file is not read in a scope.
 
 **A metavariable belongs to its language.** `M`, `N` and `E` above are `LC`'s,
 and nothing outside `LC`'s namespace sees them until it is opened — so two

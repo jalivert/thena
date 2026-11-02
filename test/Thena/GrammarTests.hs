@@ -192,6 +192,101 @@ scoped =
                  ++ " both written x, and a generated name is suffixed with a"
                  ++ " class's word \8212 so fv-x would mean two things"
 
+    -- **A TAG RESOLVES LIKE ANY OTHER NAME — MS10 PHASE 260, `~zjkvd`, HIS
+    -- RULING OF 2026-10-30.** Until this phase a tag was matched against a
+    -- root-level grammar name, so a language inside a @namespace@ had no
+    -- writable terms in any spelling: the bare word found nothing and the
+    -- qualified one did not lex. Four readings, in one load.
+  , testCase "a tag resolves by the walk, qualified or bare, inside or after open" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (unlines
+             [ "module Tags where", ""
+             , "namespace A where"
+             , "  x : Token String"
+             , "  x = /[a-z][a-zA-Z0-9']*/"
+             , ""
+             , "  language LC, M, N, E where"
+             , "    var : x as occurrence -> x"
+             , "    app                   -> ( M N )"
+             , ""
+             , "  open LC"
+             , ""
+             , "  bare : LC"
+             , "  bare = LC" ++ region "( y y )"
+             , ""
+             , "  atProduction : LC"
+             , "  atProduction = LC[var]" ++ region "y"
+             , ""
+             , "  qualified : LC"
+             , "  qualified = A.LC" ++ region "( y y )"
+             , ""
+             , "open A"
+             , ""
+             , "afterOpen : A.LC"
+             , "afterOpen = LC" ++ region "( z z )"
+             , "" ]) of
+        (_, ProofLoaded _ ds _ _) ->
+          ds @?= [ "A.x", "A.LC", "A.bare", "A.atProduction", "A.qualified", "afterOpen" ]
+        (_, other) -> assertFailure (show other)
+
+    -- **`open … renaming` reaches a tag, and the original word does not** — both
+    -- for free, because the walk is `globalUnder` and nothing about a tag is
+    -- written a second time.
+  , testCase "a renamed open renames the tag, and the original word is gone" $ do
+      (s0, _) <- startingSession
+      let src extra = unlines
+             ([ "module Renamed where", ""
+              , "x : Token String"
+              , "x = /[a-z][a-zA-Z0-9']*/"
+              , ""
+              , "namespace A where"
+              , "  language LC, M, N where"
+              , "    var : x as occurrence -> x"
+              , "    app                   -> ( M N )"
+              , ""
+              , "  open LC"
+              , ""
+              , "open A renaming ( LC -> Lam )"
+              , ""
+              , "renamed : A.LC"
+              , "renamed = Lam" ++ region "( y y )"
+              , "" ] ++ extra)
+      case loadProofSource s0 (src []) of
+        (_, ProofLoaded _ ds _ _) -> ds @?= ["x", "A.LC", "renamed"]
+        (_, other) -> assertFailure (show other)
+      let (s1, r) = loadProofSource s0
+                      (src ["gone : A.LC", "gone = LC" ++ region "( y y )", ""])
+      case r of
+        ProofLoaded {} -> assertFailure "the renamed-away word still named the language"
+        _ -> last (renderResponse s1 r) @?=
+               "stuck: no language called LC has been declared"
+
+    -- **TWO OPENED NAMESPACES OFFERING ONE TAG IS REFUSED, not chosen** — the
+    -- same answer every other two-answer lookup gives, and the writer's fix is
+    -- the path. `~7x8rt` owns the wording of a scoping refusal.
+  , testCase "two opened namespaces offering one tag is ambiguous" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines
+             [ "module Ambiguous where", ""
+             , "namespace A where"
+             , "  language Ty where"
+             , "    base -> \953"
+             , ""
+             , "namespace B where"
+             , "  language Ty where"
+             , "    other -> \969"
+             , ""
+             , "open A"
+             , "open B"
+             , ""
+             , "which : A.Ty"
+             , "which = Ty" ++ region "\953"
+             , "" ])
+      case r of
+        ProofLoaded {} -> assertFailure "an ambiguous tag was accepted"
+        _ -> last (renderResponse s1 r) @?=
+               "stuck: Ty could be B.Ty or A.Ty, so it is ambiguous here"
+
   , testCase "and a namespace resolves by the walk, so open Ty works inside A" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 (unlines
@@ -206,6 +301,9 @@ scoped =
         (_, other) -> assertFailure (show other)
   ]
   where
+    -- A backtick written as its code point, because this file is Haskell
+    -- source and a tag's fence is a backtick either way.
+    region txt = [toEnum 96] ++ txt ++ [toEnum 96]
     expr m = [ "language Expr, " ++ m ++ " where", "  lit  -> z"
              , "  plus -> ( " ++ m ++ "\8321 + " ++ m ++ "\8322 )", "" ]
     code m = [ "language Code, " ++ m ++ " where", "  push -> PUSH"

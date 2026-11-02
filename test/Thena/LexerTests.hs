@@ -32,6 +32,17 @@ tests =
             [TTagOpenAt "LC" "var", TRaw "x", TTagClose]
         , lexes "and it opens a region like any other tag" "LC[var]``"
             [TTagOpenAt "LC" "var", TTagClose]
+          -- **A TAG MAY BE QUALIFIED** (MS10 phase 260, `~zjkvd`): a tag
+          -- resolves like any other name, so a path has to be writable. It
+          -- needs its own rules because @.@ is reserved since phase 240 \u2014
+          -- @\@ident@ cannot reach past the first step, and this was
+          -- *unexpected character* before.
+        , lexes "a qualified tag" "A.LC`x`"
+            [TTagOpen "A.LC", TRaw "x", TTagClose]
+        , lexes "a qualified tag with a production" "A.LC[var]`x`"
+            [TTagOpenAt "A.LC" "var", TRaw "x", TTagClose]
+        , lexes "and a deeper path" "A.B.LC`x`"
+            [TTagOpen "A.B.LC", TRaw "x", TTagClose]
         , lexes
             "the tag may be any identifier, including one above ASCII"
             "\120138`x`"

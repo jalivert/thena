@@ -894,6 +894,13 @@ data ObjectError
     -- when the literal is resolved or elaborated**, not when it is read: a
     -- module is parsed whole before its own block is installed, so this is the
     -- earliest the question can be asked.
+  | ObjectLanguageAmbiguous String [String]
+    -- ^ a bare tag that more than one namespace in scope answers, and the
+    -- grammars that answered (MS10 phase 260, `~zjkvd`). **A tag resolves like
+    -- any other name** — his ruling of 2026-10-30 — so two opened namespaces
+    -- each holding a @Ty@ leave @Ty\`…\`@ with two readings, and it is refused
+    -- rather than chosen, as every other two-answer lookup is. **The fix the
+    -- writer has is the path**, which is why the refusal names both in full.
   | NoSuchObjectProduction String String
     -- ^ @LC[nope]\`…\`@ — the language, and a production it does not have.
   | ObjectNotParsed String String ParseFailure

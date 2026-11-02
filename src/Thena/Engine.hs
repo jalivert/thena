@@ -111,14 +111,13 @@ import qualified Thena.Language.Earley as Earley
 import Thena.Language.Build
   ( atCharacters
   , buildSurface
-  , languageNames
   , objectInput
   , objectText
   , productionNames
   , productionRule
   )
 import Thena.Language.Grammar
-  (Grammar (..), earleyRules)
+  (Grammar (..), earleyRules, grammarForTag, grammarKey)
 import Thena.Language.Reader (Block)
 import Thena.Instral.Ops
   ( AnswerKind
@@ -1875,20 +1874,28 @@ perform instr rest m = case operation instr of
   Op.ObjectTerm x -> case surfaceAt x of
     Left r  -> failure r m
     Right s -> case s of
-      Concrete.SurfaceObject lang prod ps
-        | lang `notElem` languageNames (grammars m) ->
-            failure (ObjectFailed (NoSuchObjectLanguage lang)) m
-        | Just w <- prod, w `notElem` productionNames (grammars m) lang ->
-            failure (ObjectFailed (NoSuchObjectProduction lang w)) m
-        | otherwise ->
+      -- **THE TAG RESOLVES BY THE WALK** (MS10 phase 260, `~zjkvd`, his ruling
+      -- of 2026-10-30), through the same 'Thena.Core.Term.InScope' the machine
+      -- carries for every other name — so after @open A@ a term of @A.Ty@ is
+      -- written @Ty`ι`@, and the key the parser wants comes off the grammar
+      -- that answered.
+      Concrete.SurfaceObject lang prod ps -> case grammarForTag (scope m) (grammars m) lang of
+        Left [] -> failure (ObjectFailed (NoSuchObjectLanguage lang)) m
+        Left amb ->
+          failure (ObjectFailed (ObjectLanguageAmbiguous lang (map nameDotted amb))) m
+        Right gr'
+          | Just w <- prod, w `notElem` productionNames (grammars m) (grammarKey gr') ->
+              failure (ObjectFailed (NoSuchObjectProduction lang w)) m
+          | otherwise ->
             -- **The bracket is a word and the parser wants the rule's name**
             -- (MS10 phase 248): @LC[app]@ starts at @LC.app@. The guard above
             -- has already refused a word this language has no production for,
             -- so the fallback cannot be reached.
+            let key = grammarKey gr' in
             case Earley.parse (earleyRules (grammars m))
-                              (maybe (Earley.StartAt lang)
-                                     (\w -> maybe (Earley.StartAt lang) Earley.StartRule
-                                              (productionRule (grammars m) lang w))
+                              (maybe (Earley.StartAt key)
+                                     (\w -> maybe (Earley.StartAt key) Earley.StartRule
+                                              (productionRule (grammars m) key w))
                                      prod)
                               (objectInput (regionBits ps)) of
               Left why ->

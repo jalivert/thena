@@ -46,12 +46,12 @@ import qualified Thena.Language.Earley as Earley
 import Thena.Language.Build
   ( atCharacters
   , buildCore
-  , languageNames
   , objectInput
   , objectText
   , productionNames
+  , productionRule
   )
-import Thena.Language.Grammar (Grammar, earleyRules)
+import Thena.Language.Grammar (Grammar, earleyRules, grammarForTag, grammarKey)
 import Thena.Syntax.Concrete
   ( Raw (..)
   , RawPiece (..)
@@ -187,17 +187,21 @@ core gr env gs sp ctx local n raw = case raw of
   -- **Its splices are ordinary terms of this language**, resolved here and
   -- passed to 'buildCore' in the order they were written, which is the order
   -- the parser numbers them in.
-  RawObject lang prod ps
-    | lang `notElem` languageNames gr ->
-        Left (NotAnObjectTerm (NoSuchObjectLanguage lang))
-    | Just w <- prod, w `notElem` productionNames gr lang ->
-        Left (NotAnObjectTerm (NoSuchObjectProduction lang w))
-    | otherwise -> do
+  -- **THE TAG RESOLVES BY THE WALK** (MS10 phase 260, `~zjkvd`, his ruling of
+  -- 2026-10-30): the written word reaches a grammar wherever its namespace is
+  -- open, exactly as the datatype's name does, and the /key/ the parser wants
+  -- comes off the grammar it found rather than off what was written.
+  RawObject lang prod ps -> case grammarForTag (scopeIn gs) gr lang of
+    Left []  -> Left (NotAnObjectTerm (NoSuchObjectLanguage lang))
+    Left amb -> Left (NotAnObjectTerm (ObjectLanguageAmbiguous lang (map nameDotted amb)))
+    Right g | Just w <- prod, w `notElem` productionNames gr (grammarKey g) ->
+                Left (NotAnObjectTerm (NoSuchObjectProduction lang w))
+            | otherwise -> object (grammarKey g)
+   where
+      object key = do
         (ts, n1) <- spliced n ps
         let bits = [ either Left (const (Right ())) (piece pc) | pc <- ps ]
-        tree <- case Earley.parse (earleyRules gr)
-                       (maybe (Earley.StartAt lang) Earley.StartRule prod)
-                       (objectInput bits) of
+        tree <- case Earley.parse (earleyRules gr) (start' key) (objectInput bits) of
           Left why -> Left (NotAnObjectTerm
                               (ObjectNotParsed lang (objectText bits)
                                  (atCharacters bits why)))
@@ -205,7 +209,14 @@ core gr env gs sp ctx local n raw = case raw of
         case buildCore gr ts tree of
           Left why -> Left (NotAnObjectTerm (ObjectNotATerm lang why))
           Right t  -> Right (t, n1)
-    where
+      -- **The bracket is a word and the parser wants the rule's name** (MS10
+      -- phase 248), and the word is looked up in the grammar the tag resolved
+      -- to. The guard above has already refused a word it has no production
+      -- for, so the fallback cannot be reached.
+      start' key = maybe (Earley.StartAt key)
+                         (\w -> maybe (Earley.StartAt key) Earley.StartRule
+                                  (productionRule gr key w))
+                         prod
       piece pc = case pc of
         RawChunk txt -> Left txt
         RawSpliced e -> Right e

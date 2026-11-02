@@ -52,7 +52,7 @@ module Thena.Rules
   ) where
 
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, rootName)
+import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, nameFromText, rootName)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor (Cursor, Focus (..), context, expectedType, focus)
 import Thena.Global.Env (GlobalEnv)
@@ -1457,9 +1457,21 @@ assembled g i tag sk = case sk of
   SHole _ _     -> Left (ObjectRegionNotATerm g i tag (Incomplete tag))
 
 -- | The installed grammar a tag names, if it names one (MS6 phase 104c).
+--
+-- **A RULE FILE IS NOT READ IN A SCOPE, SO A TAG THERE IS WRITTEN IN FULL**
+-- (MS10 phase 260). His ruling of 2026-10-30 is that a tag resolves like any
+-- other name, and in a rule file every other name is written whole — a rule
+-- calls @Vec.Vec@ and matches @LC.var@, because there is no @module@ clause and
+-- no @open@ for a word to be resolved against. **So the tag goes through
+-- 'Thena.Core.Term.nameFromText' and not @rootName@**: @A.Ty@ is a path, which
+-- is the one thing that was missing, and a bare word still names a root-level
+-- grammar. The two readers that /do/ stand in a scope — a development-calculus
+-- term and a surface term — use 'Thena.Language.Grammar.grammarForTag'
+-- instead. When `~jmw4k` gives a rule base imports, this is where the scope
+-- arrives.
 objectGrammar :: [Grammar] -> String -> Maybe Grammar
 objectGrammar gs tag =
-  case [ gr | gr <- gs, rootName tag == grammarName gr ] of
+  case [ gr | gr <- gs, nameFromText tag == grammarName gr ] of
     gr : _ -> Just gr
     []     -> Nothing
 

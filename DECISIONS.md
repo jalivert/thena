@@ -244,7 +244,44 @@ walk a name does, and **that includes a token class**, so `x : Token String` may
 be written inside the namespace with the block that reads it. A class carries
 its path like anything else, while **the name generated from it is suffixed with
 the class's word** — `A.LC.fv-x` for a class `A.x`, because a word holds no dot
-— so one language reaching two classes both written `x` is refused.*
+— so one language reaching two classes both written `x` is refused. **And a tag
+resolves like any other name**: see below.*
+
+**A TAG RESOLVES LIKE ANY OTHER NAME.** `` LC`( f g )` `` reaches `A.LC` wherever
+`A` is open — inside the `namespace` block itself, or after an `open A` — and the
+path may always be written instead:
+
+```
+namespace A where
+  language LC, M, N where
+    var : x as occurrence -> x
+    app                   -> ( M N )
+  open LC
+
+  bare : LC
+  bare = LC`( f g )`          -- inside the block, the word reaches it
+
+open A
+
+after : A.LC
+after = LC`( f g )`           -- A is open, so the word reaches it here too
+
+qualified : A.LC
+qualified = A.LC`( f g )`     -- the path always works, brackets included:
+                              -- A.LC[var]`f`
+```
+
+- **`open … renaming` reaches a tag too.** After `open A renaming ( LC -> Lam )`,
+  `` Lam`( f g )` `` is a term of `A.LC` and `LC` names nothing — a renaming
+  replaces the word rather than adding one, here as everywhere.
+- **Two opened namespaces offering one tag is refused, not chosen.** With an `A.Ty`
+  and a `B.Ty` both open, `` Ty`ι` `` answers
+  *Ty could be B.Ty or A.Ty, so it is ambiguous here*. Write the path.
+- **`LC[var]` names the production inside the tag's language**, so the bracket is a
+  lookup in whatever the tag resolved to and never a global one.
+- **In a rule file a tag is written in full**, because a rule file is not read in a
+  scope: it has no `module` clause and no `open`, so every name in one is written
+  whole — `A.LC[app]` there, exactly as a rule already calls `Vec.Vec`.
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something

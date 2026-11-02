@@ -245,11 +245,19 @@ tokens :-
   "Type"        { \p _ -> Located (posOf p) TUniverseOpen }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
   @ident \`      { \p str -> Located (posOf p) (TTagOpen (init str)) }
+  -- **A TAG MAY BE QUALIFIED** (MS10 phase 260): a tag resolves like any other
+  -- name — his ruling of 2026-10-30 — so @A.Ty\`…\`@ has to be writable, the
+  -- way @A.Ty@ is writable as a name. **It needs a rule of its own because @.@
+  -- is reserved**: it stopped being an @$idchar@ at phase 240, so @\@ident@ cannot
+  -- reach past the first step and a qualified tag was *unexpected character
+  -- @\`@* until this line. The bare word still works and goes through the walk.
+  @qualified \`  { \p str -> Located (posOf p) (TTagOpen (init str)) }
   -- **A tag may name the production to start at** (MS6 phase 104,
   -- @ms6\/SPEC.md@ §8): @LC[var]\`…\`@ reads a variable occurrence where
   -- @LC\`…\`@ reads any term. The brackets are reserved characters, so no
   -- identifier contains one and this rule cannot take a longer name apart.
   @ident \[ @ident \] \` { \p str -> Located (posOf p) (tagAt (init str)) }
+  @qualified \[ @ident \] \` { \p str -> Located (posOf p) (tagAt (init str)) }
   "⟨"           { keyword (TTagOpen "surface") }
   @qualified    { \p s -> Located (posOf p) (TQIdent (steps s)) }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
