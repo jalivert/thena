@@ -102,7 +102,7 @@ genRaw = sized . go
             pure (RawLet (RawWord x) v ty b)
         , -- Nat has no parameters, no indices, and two constructors, so the
           -- shape is fixed: () motive (mz ms) ().
-          RawElim (RawWord "Nat") [] [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
+          RawElim [] (RawWord "Nat") [] [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
                               <*> pure [] <*> half
           -- MS8 phase 150, and it is what makes the round trip a statement about
           -- the trusted node rather than a comment: the printer parenthesises its

@@ -92,10 +92,16 @@ data Raw
     --
     -- **The grammars are asked for at resolution**, not here: a module is
     -- parsed whole before its own @language@ block is installed.
-  | RawElim RawIdent [Int] [Raw] Raw [Raw] [Raw] Raw
+  | RawElim [String] RawIdent [Int] [Raw] Raw [Raw] [Raw] Raw
     -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
     -- positional, and in exactly 'Thena.Core.Term.Core''s own field order for
     -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.
+    --
+    -- **The head carries its path's steps, like every other written name**
+    -- (MS10 phase 254, his ruling of 2026-11-02): the datatype is @Nat.Nat@, so
+    -- the printer writes @elim Nat.Nat@ and this is what reads it back. It was
+    -- the one reference position in either language that could not take a path,
+    -- which made the round trip fail on every @elim@ once names were qualified.
   | RawTrusted Raw Raw Raw
     -- ^ @trusted claimed actual body@ (MS8 phase 150) — the development
     -- calculus's spelling of 'Thena.Core.Term.Trusted', with all three fields
@@ -193,7 +199,7 @@ splices t = case t of
   RawGuess n ty g p  -> named n ++ splices ty ++ splices g ++ splices p
   RawPending _ p     -> splices p
   RawQuote q         -> splices q
-  RawElim d _ ps m ms is tg ->
+  RawElim _ d _ ps m ms is tg ->
     named d ++ concatMap splices ps ++ splices m ++ concatMap splices ms
       ++ concatMap splices is ++ splices tg
   RawTrusted c a b   -> splices c ++ splices a ++ splices b

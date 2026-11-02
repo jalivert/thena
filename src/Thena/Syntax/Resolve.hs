@@ -308,9 +308,10 @@ core gr env gs sp ctx local n raw = case raw of
   -- §3.6's "one namespace, the innermost wins" that round-tripped perfectly
   -- and so was invisible to every test. Now a shadowed name resolves to the
   -- local and is refused, because a local is not a datatype.
-  RawElim di rls ps m ms is t -> do
-    d         <- nameOf sp di
-    dn        <- datatypeNamed gr env gs sp ctx local d
+  RawElim dps di rls ps m ms is t -> do
+    w         <- nameOf sp di
+    let d = nameDotted (GlobalName dps w)
+    dn        <- datatypeNamed gr env gs sp ctx local dps w
     def       <- maybe (Left (NotADatatype d)) Right (lookupInductive dn env)
     let dls = map levelOfNat rls
     (ps', n1) <- coreList gr env gs sp ctx local n ps
@@ -384,11 +385,13 @@ core gr env gs sp ctx local n raw = case raw of
 -- type former exists but its eliminator does not, because the eliminator is
 -- generated from the completed declaration.
 datatypeNamed
-  :: [Grammar] -> GlobalEnv -> Globals -> Splices -> Context -> Local -> String
+  :: [Grammar] -> GlobalEnv -> Globals -> Splices -> Context -> Local
+  -> [String] -> String
   -> Either ResolveError GlobalName
-datatypeNamed gr env gs sp ctx local d = case core gr env gs sp ctx local 0 (RawName [] d) of
-  Right (Global g _, _) -> Right g
-  _                   -> Left (NotADatatype d)
+datatypeNamed gr env gs sp ctx local ps d =
+  case core gr env gs sp ctx local 0 (RawName ps d) of
+    Right (Global g _, _) -> Right g
+    _                     -> Left (NotADatatype (nameDotted (GlobalName ps d)))
 
 -- | A run of terms in the same local scope, left to right, threading the
 -- counter — what @elim@\'s three list-valued fields need (§2.6).

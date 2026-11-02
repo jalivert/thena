@@ -485,5 +485,8 @@ lam xs b = SurfaceLam (NE.fromList [ SurfaceBinder Explicit x Nothing | x <- xs 
 arrows :: [Surface] -> Surface -> Surface
 arrows ds r = foldr SurfaceArrow r ds
 
+-- | **The datatype is named by a bare word and resolved like any other**, so
+-- nothing generated here writes a path: @elim List@ finds @List.List@ through
+-- the same lookup a user's @elim List@ goes through.
 elimOn :: String -> [Surface] -> Surface -> [Surface] -> Surface -> Surface
-elimOn d ps motive methods = SurfaceElim d ps motive methods []
+elimOn d ps motive methods = SurfaceElim [] d ps motive methods []

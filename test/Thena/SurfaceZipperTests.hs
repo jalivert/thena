@@ -81,7 +81,7 @@ annotTerm = SurfaceAnnot (nm "e") (nm "ty")
 
 -- | @elim D (p) mot (m1 m2) (i) tgt@
 elimSurface :: Surface
-elimSurface = SurfaceElim "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"] (nm "tgt")
+elimSurface = SurfaceElim [] "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"] (nm "tgt")
 
 -- | @induction tgt of { nil -> b1 ; cons n -> b2 }@ (MS9 phase 181)
 splitTerm :: Surface
@@ -157,7 +157,7 @@ descents =
     bare = SurfaceBinder Explicit "x" Nothing
     elimFields = [nm "p", nm "mot", nm "m1", nm "m2", nm "i", nm "tgt"]
     elimAt k f =
-      intoElimField "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"] (nm "tgt")
+      intoElimField [] "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"] (nm "tgt")
         k f (rootedAt elimSurface)
 
 -- | **A frame that writes nowhere passes the test above by coincidence**, and
@@ -197,7 +197,7 @@ markers =
          ]
       ++ [ ( "an elim's field " ++ show k
            , elimWith k
-           , intoElimField "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"]
+           , intoElimField [] "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"]
                (nm "tgt") k marker (rootedAt elimSurface)
            )
          | k <- [0 .. 5]
@@ -216,7 +216,7 @@ markers =
       let fs = [ if i == k then marker else f | (i, f) <- zip [0 ..] flat ]
        in case fs of
             [p, mot, m1, m2, i, tgt] ->
-              SurfaceElim "D" [p] mot [m1, m2] [i] tgt
+              SurfaceElim [] "D" [p] mot [m1, m2] [i] tgt
             _ -> elimSurface
     flat = [nm "p", nm "mot", nm "m1", nm "m2", nm "i", nm "tgt"]
 

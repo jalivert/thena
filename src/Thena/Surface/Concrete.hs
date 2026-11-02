@@ -154,7 +154,7 @@ data Surface
     -- His proposal, and it is what removes the need for a surface term meaning
     -- /no proof given, search for one/: the user writes @do { prove }@, and a
     -- search strategy is then a rule name rather than syntax.
-  | SurfaceElim String [Surface] Surface [Surface] [Surface] Surface
+  | SurfaceElim [String] String [Surface] Surface [Surface] [Surface] Surface
     -- ^ @elim d (params) motive (methods) (indices) target@ — the same
     -- positional shape 'Thena.Syntax.Concrete.RawElim' has, because there is no
     -- pattern matching in the surface language yet and this is how a proof by
@@ -410,7 +410,7 @@ blocksIn t = case t of
   SurfaceLet _ mt v b -> maybe [] blocksIn mt ++ blocksIn v ++ blocksIn b
   SurfaceAnnot e ty   -> blocksIn e ++ blocksIn ty
   SurfaceTrusted ty e -> blocksIn ty ++ blocksIn e
-  SurfaceElim _ ls m is ms tg ->
+  SurfaceElim _ _ ls m is ms tg ->
     concatMap blocksIn ls ++ blocksIn m ++ concatMap blocksIn is
       ++ concatMap blocksIn ms ++ blocksIn tg
   -- A splice is a term like any other, so a block inside one is found here.

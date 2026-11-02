@@ -600,7 +600,7 @@ elimTests =
   testGroup
     "an elim names a datatype"
     [ testCase "and an unknown one is a scope error, not a missing rule" $
-        case elaborating (SurfaceElim "D" [] (SurfaceName [] "a") [] [] (SurfaceName [] "a")) of
+        case elaborating (SurfaceElim [] "D" [] (SurfaceName [] "a") [] [] (SurfaceName [] "a")) of
           Left (CannotRead (ResolveFailed (NotADatatype "D"))) -> pure ()
           other -> assertFailure ("expected NotADatatype: " ++ show other)
     ]

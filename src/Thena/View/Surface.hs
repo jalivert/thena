@@ -169,8 +169,9 @@ displaySurface s = case s of
   SurfaceLet x ty v b -> ASurfaceLet x (fmap displaySurface ty) (displaySurface v) (displaySurface b)
   SurfaceAnnot e ty -> ASurfaceAnnotation (displaySurface e) (displaySurface ty)
   SurfaceTrusted ty e -> ASurfaceTrusted (displaySurface ty) (displaySurface e)
-  SurfaceElim d ps mot ms is tgt ->
-    ASurfaceElimination d (map displaySurface ps) (displaySurface mot)
+  SurfaceElim dps d ps mot ms is tgt ->
+    ASurfaceElimination (nameDotted (GlobalName dps d))
+      (map displaySurface ps) (displaySurface mot)
       (map displaySurface ms) (map displaySurface is) (displaySurface tgt)
   SurfaceSplit a tgt as ->
     ASurfaceSplit a (displaySurface tgt)

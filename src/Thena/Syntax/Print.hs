@@ -242,9 +242,9 @@ surf p (SurfaceSplit a tgt as) =
     -- what this prints reads back as the same tree (MS9 phase 189).
     arm (SurfaceArm pat Nothing)  = surfacePattern pat ++ " ->"
     arm (SurfaceArm pat (Just b)) = surfacePattern pat ++ " -> " ++ surf Loose b
-surf p (SurfaceElim d ps mot ms is tgt) =
+surf p (SurfaceElim dps d ps mot ms is tgt) =
   paren (p >= Tight)
-    ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
+    ("elim " ++ nameDotted (GlobalName dps d) ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
        ++ " " ++ list is ++ " " ++ surf Tight tgt)
 
 -- | A written pattern, back as it was written.

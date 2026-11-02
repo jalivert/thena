@@ -1483,12 +1483,14 @@ perform instr rest m = case operation instr of
   ElimSpine x -> case operandSurface (env (exec m)) x of
     Left r  -> failure r m
     Right z -> case outerArgs (Zipper.focus z) of
-      -- **The datatype's written word goes through 'globalNamed'** (MS10 phase
+      -- **The datatype's written name goes through 'globalNamed'** (MS10 phase
       -- 248), because @elim Nat@ names the type and the type is @Nat.Nat@. An
       -- @open@ reaches it here too, which it has to: there is one rule for what
-      -- a written name means.
-      (Concrete.SurfaceElim d ps mot ms is tgt, extra) ->
-        case either (const Nothing) Just (globalNamed m (nameFromText d))
+      -- a written name means. **And it is written with its path if the user
+      -- wrote one** (phase 254), like every other reference.
+      (Concrete.SurfaceElim dps dw ps mot ms is tgt, extra)
+        | let d = nameDotted (GlobalName dps dw) ->
+        case either (const Nothing) Just (globalNamed m (GlobalName dps dw))
                >>= \dn -> (,) dn <$> lookupInductive dn (globals m) of
           Nothing  -> failure (CannotRead (ResolveFailed (NotADatatype d))) m
           Just (dn, def)

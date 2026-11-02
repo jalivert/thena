@@ -126,10 +126,10 @@ Term :: { Raw }
   -- **Level arguments are written or omitted** (MS3 phase 31c). Omitting them
   -- is the only spelling for a monomorphic family, which is every family
   -- written before this phase, so nothing existing moves.
-  | elim Ident '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
-      { RawElim $2 [] (reverse $4) $6 (reverse $8) (reverse $11) $13 }
-  | elim Ident LevelArgs '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
-      { RawElim $2 $3 (reverse $5) $7 (reverse $9) (reverse $12) $14 }
+  | elim ElimHead '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+      { RawElim (fst $2) (snd $2) [] (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+  | elim ElimHead LevelArgs '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+      { RawElim (fst $2) (snd $2) $3 (reverse $5) $7 (reverse $9) (reverse $12) $14 }
   | App '->' Term                                  { RawArrow $1 $3 }
   | App                                            { $1 }
 
@@ -591,6 +591,16 @@ Binders :: { [RawBinder] }
 Ident :: { RawIdent }
   : ident                                  { RawWord $1 }
   | '${' ident '}$'                        { RawIdentSplice $2 }
+
+-- | The datatype an @elim@ names, with its path's steps (MS10 phase 254).
+--
+-- **A reference position takes a path, and this was the last one that did
+-- not** — his ruling of 2026-11-02. The printer writes @elim Nat.Nat@ because
+-- the datatype /is/ @Nat.Nat@, so without this the round trip fails on every
+-- @elim@. A splice still stands here, and has no path: @${d}$@ supplies a word.
+ElimHead :: { ([String], RawIdent) }
+  : Ident                                  { ([], $1) }
+  | qident                                 { (init $1, RawWord (last $1)) }
 
 Binder :: { RawBinder }
   : '(' Ident ':' Term ')'                 { RawBinder $2 $4 }

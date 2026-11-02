@@ -383,8 +383,12 @@ Atom :: { Surface }
   -- **An atom, so it needs no parentheses in an argument run** — @try (do { … })@
   -- and @try do { … }@ both read, the same way a parenthesised term does.
   | do '{' Block '}'                       { SurfaceDo (reverse $3) }
-  | elim ident '(' Terms ')' Atom '(' Terms ')' '(' Terms ')' Atom
-      { SurfaceElim $2 (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+  -- **The datatype takes a path, like every other reference** (MS10 phase
+  -- 254, his ruling of 2026-11-02): @elim Nat.Nat@ names the type the way the
+  -- printer writes it, and @elim Nat@ still reads because a written name is
+  -- resolved the one way every written name is.
+  | elim QName '(' Terms ')' Atom '(' Terms ')' '(' Terms ')' Atom
+      { SurfaceElim (fst $2) (snd $2) (reverse $4) $6 (reverse $8) (reverse $11) $13 }
   -- **Two atoms, and an atom itself** (MS8 phase 150) — a keyword and a fixed
   -- number of operands is self-delimiting, so it stands where a name stands.
   -- The third field of the core node is not written here: it is derived, and
