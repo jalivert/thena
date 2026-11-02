@@ -52,6 +52,7 @@ import Thena.Global.Env
   , isDeclared
   , lookupInductive
   )
+import Thena.Global.Declare (DeclareError (..))
 import Thena.Files (loadProofFile, startingSession)
 import Thena.Render
   ( rendering
@@ -776,6 +777,28 @@ moduleTests =
       let (s1, _) = loadProofSource s0 mistypedBlockModule
       isDeclared (rootName "Nat") (globals (machineOf s1)) @?= False
 
+  , -- **A module that redeclares a name is refused for the name.**
+    -- It is the first thing a newcomer does — write @data Nat@, or copy an
+    -- @Eq@ out of an example — and until this was fixed what came back was a
+    -- sentence about a constructor's target, because the elaborated target of
+    -- an already-declared datatype is a saturated @Canonical@ former and
+    -- 'Thena.Global.Declare.targetIndices' read only the @Global@ spine.
+    testCase "a module redeclaring a prelude datatype is refused for the name" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 redeclaringModule of
+        (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= declaredAs "Unit"
+        (_, other) -> assertFailure (show other)
+
+  , -- **And the same holds with no prelude in it**: one module declaring the
+    -- same datatype twice. The second is refused for its name, which is what
+    -- says the first fix is about the shape of the target and not about where
+    -- the clashing declaration came from.
+    testCase "and the same datatype twice in one module is refused the same way" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 twiceDeclaredModule of
+        (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= declaredAs "Widget"
+        (_, other) -> assertFailure (show other)
+
   , -- **Everything goes back except the fresh counter**, which must go forward
     -- or a name the user has seen would be reissued (MS2 closeout 4f) — and a
     -- failed load does show them, in its @solved: ?ℓn@ lines.
@@ -912,6 +935,19 @@ moduleTests =
       \\n\
       \do\n\
       \  prim-try 3\n"
+
+    redeclaringModule =
+      "module M where\n\
+      \data Unit : Type\8320 where\n\
+      \  unit : Unit\n"
+
+    twiceDeclaredModule =
+      "module M where\n\
+      \data Widget : Type\8320 where\n\
+      \  mk : Widget\n\
+      \\n\
+      \data Widget : Type\8320 where\n\
+      \  mk2 : Widget\n"
 
     twoBlockModule =
       "module M where\n\

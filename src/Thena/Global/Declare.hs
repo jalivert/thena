@@ -774,15 +774,43 @@ peelAll = peelToUniverse
 targetIndices
   :: GlobalName -> Context -> Int -> String -> Core
   -> Either ResolveError [Core]
-targetIndices dn params want cn t = case spine t of
-  (Global g _, as)
-    | g == dn ->
-        if length as /= length params + want
-          then Left (TargetArgumentCount cn (length params + want) (length as))
-          else passed params (take (length params) as)
-                 >> Right (drop (length params) as)
-  _ -> Left (TargetIsNotTheDatatype cn)
+targetIndices dn params want cn t = case applied t of
+  Nothing -> Left (TargetIsNotTheDatatype cn)
+  Just as
+    | length as /= length params + want ->
+        Left (TargetArgumentCount cn (length params + want) (length as))
+    | otherwise ->
+        passed params (take (length params) as)
+          >> Right (drop (length params) as)
   where
+    -- | The datatype's arguments, in either of the two shapes a target has.
+    --
+    -- **A saturated former is the same target as a spine of applications**, and
+    -- reading only the spine is the 'Canonical' trap: the elaborated path hands
+    -- back @Canonical dn [] []@ whenever @dn@ is /already declared/, because
+    -- resolution answers a declared datatype with its saturated former, where an
+    -- undeclared one can only be @Global dn@ waiting for its arguments.
+    --
+    -- **What that cost was a message blaming the wrong thing**: a
+    -- surface module redeclaring a datatype the session has — @data Unit@ over
+    -- the prelude's, or the same @data@ twice in one file — failed here, so the
+    -- user was told /unit's target is not the datatype applied to its
+    -- parameters/ when the truth is that the name is taken. Reading both shapes
+    -- lets the definition be built and 'checkNames' refuse it for the reason it
+    -- is refused. Nothing legal reaches the second shape, since a constructor's
+    -- target names the datatype being declared and that name is free.
+    --
+    -- **Not 'Thena.Language.Build.spineOf', which is the general answer to
+    -- /what datatype is this/ and the one to reach for elsewhere.** It answers
+    -- only where there are no level arguments, which is right for an
+    -- object-language reading and wrong here: this check has ignored a target's
+    -- levels since it was written, and a datatype whose declared level
+    -- generalised carries them.
+    applied u = case spine u of
+      (Global g _, as)        | g == dn -> Just as
+      (Canonical g _ as, [])  | g == dn -> Just as
+      _                                 -> Nothing
+
     passed [] _ = Right ()
     passed (p : more) (a : as)
       | a == Free (entryVar p) = passed more as
