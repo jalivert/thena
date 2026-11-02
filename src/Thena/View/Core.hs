@@ -38,7 +38,9 @@ import Data.List (elemIndex)
 
 import Thena.Core.Term
   ( Core (..)
+  , Spelling
   , nameDotted
+  , spelledIn
   , Ident (..)
   , Literal (..)
   , Var
@@ -240,7 +242,8 @@ newtype Budget = Budget Int
 -- points at it. A variable missing from it displays with no binder rather than
 -- with a wrong one.
 displayCore
-  :: [Grammar]
+  :: Spelling
+  -> [Grammar]
   -> Budget
   -> Env
   -> [(Var, Address)]
@@ -248,9 +251,22 @@ displayCore
   -> Address
   -> Core
   -> Display
-displayCore grammars budget env binders counter here term =
+displayCore spelling grammars budget env binders counter here term =
   go budget env binders counter here term
   where
+    -- **A NAME IS WRITTEN THE SHORTEST WAY THAT STILL MEANS IT HERE** (MS10
+    -- phase 256, `~fjrrr`), which is what 'Thena.Render' has done since phase
+    -- 254. It was 'nameDotted', so the TUI showed @Nat.zero@ where the REPL
+    -- showed @zero@ — **one name with two spellings according to which door the
+    -- reader came in by**, which is the first design principle's own case and
+    -- the same argument that moved the written-name walk into
+    -- 'Thena.Core.Term.globalUnder'.
+    --
+    -- **The object term's own tag is NOT this** (below, in 'fromDraft'): a
+    -- fence is written whole by 'Thena.Language.Build.printTerm' too, and the
+    -- two printers agreeing is the point.
+    named = spelledIn spelling
+
     -- **Tried first, at every node, not only at the top of the call** — a
     -- term inside an ordinary application's argument is exactly as eligible
     -- as the term `displayCore` was asked for. `Thena.Render.go` makes the same
@@ -356,7 +372,7 @@ displayCore grammars budget env binders counter here term =
     shapeOf b e bs n at t = case t of
       Bound i -> ADangling i
       Free v -> AVariable (nameOf v e) (lookup v bs)
-      Global g ls -> AGlobal (nameDotted g) (map renderLevelAtom ls)
+      Global g ls -> AGlobal (named g) (map renderLevelAtom ls)
       Universe l -> AUniverse (renderLevel l)
       Primitive l -> ALiteral (literal l)
       App f a -> AnApplication (go b e bs n (down at Fun) f) (go b e bs n (down at Arg) a)
@@ -371,7 +387,7 @@ displayCore grammars budget env binders counter here term =
               (Binding nm (go b e bs n (down at Type) ty))
               (go b e bs n (down at Val) val)
               (go b e' bs' n1 (down at Body) (open v sc))
-      Canonical gn ls as | let g = nameDotted gn ->
+      Canonical gn ls as | let g = named gn ->
         AFormer g (map renderLevelAtom ls) (slots b e bs n at CanonArg as)
       Trusted cl ac bd ->
         ATrusted
@@ -380,7 +396,7 @@ displayCore grammars budget env binders counter here term =
           (go b e bs n (down at Body) bd)
       Eliminate d' ls ps m ms is tgt ->
         AnElimination
-          (nameDotted d')
+          (named d')
           (map renderLevelAtom ls)
           (slots b e bs n at Param ps)
           (go b e bs n (down at Motive) m)

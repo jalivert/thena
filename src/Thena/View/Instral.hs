@@ -29,7 +29,7 @@ module Thena.View.Instral
 
 import Data.List (intercalate)
 
-import Thena.Core.Term (nameDotted, Literal (..))
+import Thena.Core.Term (Spelling, spelledIn, nameDotted, Literal (..))
 import Thena.Global.Env (inductiveName)
 import Thena.Instral.Ops
   ( AnswerKind (..)
@@ -177,7 +177,8 @@ data ValueView
 -- same "no finer position yet" choice phase 115c made for a constraint's
 -- fields.
 displayBlock
-  :: [Grammar]
+  :: Spelling
+  -> [Grammar]
   -> Budget
   -> Env
   -> [(Var, Address)]
@@ -186,7 +187,7 @@ displayBlock
   -> Maybe Int
   -> [Instr]
   -> [StatementView]
-displayBlock gs budget env bs n at next instrs =
+displayBlock sp gs budget env bs n at next instrs =
   [ statement k instr | (k, instr) <- zip [0 ..] instrs ]
   where
     statement k instr =
@@ -196,7 +197,7 @@ displayBlock gs budget env bs n at next instrs =
         , statementBind = bindOf instr
         , statementAnnotation = annotationOf instr
         , statementWord = opKeyword (opOf instr)
-        , statementOperands = map (displayOperand gs budget env bs n at) (operandsOf (opOf instr))
+        , statementOperands = map (displayOperand sp gs budget env bs n at) (operandsOf (opOf instr))
         , statementDetail = detailOf (opOf instr)
         }
 
@@ -214,7 +215,7 @@ displayBlock gs budget env bs n at next instrs =
 
     detailOf o = case o of
       Ask _ k'     -> Just (AsksFor (answerKindText k'))
-      DefineData d -> Just (Declares (nameDotted (inductiveName d)))
+      DefineData d -> Just (Declares (spelledIn sp (inductiveName d)))
       Call nm _    -> Just (Calls nm)
       CrossType    -> Just (Crosses "type")
       CrossValue   -> Just (Crosses "val")
@@ -222,15 +223,15 @@ displayBlock gs budget env bs n at next instrs =
 
 -- | An operand, generically — shared with 'Thena.View.Rules', whose head
 -- tests carry operands with no statement around them at all.
-displayOperand :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Operand -> OperandView
-displayOperand gs budget env bs n at o = case o of
+displayOperand :: Spelling -> [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Operand -> OperandView
+displayOperand sp gs budget env bs n at o = case o of
   Ref x -> OpndRef x
-  Lit v -> OpndLiteral (displayValue gs budget env bs n at v)
+  Lit v -> OpndLiteral (displayValue sp gs budget env bs n at v)
   ListOf os -> OpndList (map go os)
   PairOf a b -> OpndPair (go a) (go b)
   ObjectOf sk -> OpndObject (skeleton sk)
   where
-    go = displayOperand gs budget env bs n at
+    go = displayOperand sp gs budget env bs n at
     skeleton sk = case sk of
       SNode sn kids -> SkelNode (nameDotted sn) (map skeleton kids)
       SLit l -> SkelLiteral (literalText l)
@@ -238,8 +239,8 @@ displayOperand gs budget env bs n at o = case o of
 
 -- | A runtime value, generically — shared with 'Thena.View.Machine',
 -- whose @env@ pane is values with no operand around them at all.
-displayValue :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Value -> ValueView
-displayValue gs budget env bs n at v = case v of
+displayValue :: Spelling -> [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Value -> ValueView
+displayValue sp gs budget env bs n at v = case v of
   VText s -> ValText (escapeString s)
   -- **Not escaped, because it is not a literal**: a name's word is
   -- unrestricted and may hold brackets or spaces, so there is no spelling that
@@ -266,12 +267,12 @@ displayValue gs budget env bs n at v = case v of
   VOption (Just v') -> ValSome (go v')
   VPair a b -> ValPair (go a) (go b)
   VLevel l -> ValLevel (renderLevel l)
-  VTerm t -> ValTerm (displayCore gs budget env bs n at t)
+  VTerm t -> ValTerm (displayCore sp gs budget env bs n at t)
   VClosure {} -> ValOpaque "closure"
   VRaw _ -> ValOpaque "core-region"
-  VSurface z -> ValSurface (displaySurface (focus z))
+  VSurface z -> ValSurface (displaySurface sp (focus z))
   where
-    go = displayValue gs budget env bs n at
+    go = displayValue sp gs budget env bs n at
 
 literalText :: Literal -> String
 literalText l = case l of

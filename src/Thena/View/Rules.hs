@@ -18,7 +18,7 @@ module Thena.View.Rules
   , displayRule
   ) where
 
-import Thena.Core.Term (nameDotted, Var)
+import Thena.Core.Term (Spelling, Var, spelledIn)
 import Thena.Instral.Ops (Rule (..), Test)
 import Thena.Instral.Pattern (Pattern (..))
 import Thena.Language.Grammar (Grammar)
@@ -69,19 +69,19 @@ data TestView = TestView
 -- keeps its corners (it says "put something here"), anything else is shown
 -- as written (it says what shape the something must be).
 displayRule
-  :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address
+  :: Spelling -> [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address
   -> Maybe Signature -> Rule -> RuleView
-displayRule gs budget env bs n at sig r =
+displayRule sp gs budget env bs n at sig r =
   RuleView
     (nameOf (ruleName r))
     (map test (ruleHead r))
     (map placeholder (ruleParams r))
-    (displayBlock gs budget env bs n at Nothing (ruleBody r))
+    (displayBlock sp gs budget env bs n at Nothing (ruleBody r))
     (fmap displaySignature sig)
   where
-    nameOf = nameDotted
+    nameOf = spelledIn sp
     placeholder pt = case pt of
       PVar x -> "\8249" ++ x ++ "\8250"
       _      -> patternText pt
     test :: Test -> TestView
-    test t = TestView (testWord t) (map (displayOperand gs budget env bs n at) (testOperands t))
+    test t = TestView (testWord t) (map (displayOperand sp gs budget env bs n at) (testOperands t))

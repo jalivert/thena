@@ -22,7 +22,7 @@ import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
-import Thena.Core.Term (nameDotted)
+import Thena.Core.Term (nameDotted, wholePath)
 import Thena.Instral.Ops (Rule (ruleBody, ruleHead), ruleName)
 import Thena.View.Type (displaySignature)
 import Thena.View (rulesView)
@@ -122,7 +122,7 @@ mismatch r
             <> "\n  drawn head:   " <> unlines drawnHead
         )
   where
-    rv = displayRule [] (Budget 200) [] [] 500 (Address []) Nothing r
+    rv = displayRule wholePath [] (Budget 200) [] [] 500 (Address []) Nothing r
     shownLine = case renderMatches (rendering [] 0) [r] of
       [line] -> line
       other  -> "wrong count: " <> show (length other)

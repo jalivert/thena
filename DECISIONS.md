@@ -352,6 +352,14 @@ not short enough** — the resolver calls that ambiguous and refuses it, so the
 printer writes more of the path instead. What is printed can always be typed
 back.
 
+**A structured editor spells it the same way.** The shapes a graphical frontend
+draws from — not only the lines a terminal prints — carry the same ending, so
+the same term reads the same whichever you are looking at it through. Two
+exceptions, and both are because nothing is standing anywhere: a *pattern* in a
+rule is written whole, since a rule file is not read in a scope, and a *name
+used as a value* is written whole, since a name on its own has no term around it
+to be standing in.
+
 ### `open` has five forms, and one of them lasts one declaration
 
 *Decided 2026-10-30, built 2026-11-02.*

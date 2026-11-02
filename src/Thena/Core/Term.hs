@@ -34,6 +34,9 @@ module Thena.Core.Term
   , openedWhole
   , openedWord
   , shortestEnding
+  , Spelling (..)
+  , wholePath
+  , spelledIn
   , nameFromText
 
     -- * Terms
@@ -371,6 +374,28 @@ globalUnder known sc g =
     opened o = case openedWord o g of
       Nothing -> []
       Just q  -> [q, declarationNamed q]
+
+-- | __Where a name is being written from, and what answers there.__
+--
+-- The two arguments 'shortestEnding' takes, travelling together — because they
+-- always do: a scope with no environment answers nothing, and an environment
+-- with no scope answers the whole path. 'Thena.Render.Rendering' holds the same
+-- pair beside the grammars, and **the view\'s shapes take one of these** (MS10
+-- phase 256, `~fjrrr`), so that a name has one spelling whichever door the
+-- reader came in by.
+data Spelling = Spelling
+  { spellingKnown :: GlobalName -> Bool
+  , spellingScope :: InScope
+  }
+
+-- | A spelling that knows no environment and has nothing open — every name is
+-- written whole. What a caller with no session to ask gets.
+wholePath :: Spelling
+wholePath = Spelling (const False) rootScope
+
+-- | The shortest ending of this name that still means it here.
+spelledIn :: Spelling -> GlobalName -> String
+spelledIn sp = shortestEnding (spellingKnown sp) (spellingScope sp)
 
 -- | __How to write a name here: the shortest ending of it that still means
 -- it.__

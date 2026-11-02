@@ -19,6 +19,7 @@ import Thena.Driver
   )
 import Thena.Engine (Machine (..))
 import Thena.Instral.Ops (Instr, Rule (..))
+import Thena.Core.Term (wholePath)
 import Thena.View.Address (Address (..))
 import Thena.View.Core (Budget (..))
 import Thena.View.Instral
@@ -66,7 +67,7 @@ mismatch instr
   | otherwise = Just ("printed: " <> shown <> "\n  drawn:   " <> drawn)
   where
     shown = renderInstr (rendering [] 500) [] instr
-    drawn = case displayBlock [] (Budget 200) [] [] 500 (Address []) Nothing [instr] of
+    drawn = case displayBlock wholePath [] (Budget 200) [] [] 500 (Address []) Nothing [instr] of
       [v] -> redrawStatement v
       vs  -> "wrong count: " <> show (length vs)
 

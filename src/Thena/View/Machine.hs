@@ -18,7 +18,7 @@ module Thena.View.Machine
   , displayMachine
   ) where
 
-import Thena.Core.Term (Var)
+import Thena.Core.Term (Spelling, Var)
 import Thena.Engine (Exec (..), Frame (..), Machine (..))
 import Thena.Language.Grammar (Grammar)
 import Thena.View.Address (Address)
@@ -51,11 +51,11 @@ data MachineView = MachineView
 -- which index is live (115d) — for a running machine that is always index
 -- @0@ when there is a @pc@ left to run at all, and no index when there is
 -- not.
-displayMachine :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Machine -> MachineView
-displayMachine gs budget penv bs n at m =
+displayMachine :: Spelling -> [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Machine -> MachineView
+displayMachine sp gs budget penv bs n at m =
   MachineView
-    (displayBlock gs budget penv bs n at headOfPc (pc ex))
-    [ (x, displayValue gs budget penv bs n at v) | (x, v) <- env ex ]
+    (displayBlock sp gs budget penv bs n at headOfPc (pc ex))
+    [ (x, displayValue sp gs budget penv bs n at v) | (x, v) <- env ex ]
     (map displayFrame (stack ex))
   where
     ex = exec m

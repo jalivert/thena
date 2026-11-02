@@ -54,6 +54,7 @@ module Thena.View
 
     -- * The views
   , Budget (..)
+  , spellingOf
   , developmentView
   , machineView
   , focusTypeView
@@ -73,7 +74,7 @@ module Thena.View
 import Data.Foldable (toList)
 
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (GlobalName (..), nameDotted, Ident (..), Var)
+import Thena.Core.Term (GlobalName (..), Spelling (..), nameDotted, Ident (..), Var)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefix, rebuild)
 import Thena.Development.Partial (Partial (..))
@@ -88,7 +89,7 @@ import Thena.Driver
   , workingOn
   )
 import Thena.Core.Trust (TrustLevel)
-import Thena.Engine (Machine (..), cursor, development, focusContext)
+import Thena.Engine (Machine (..), cursor, development, focusContext, knownTo)
 import Thena.Global.Env (GlobalEnv)
 import Thena.Instral.Type (Signature)
 import Thena.Instral.Ops (ruleName, Instr, Rule)
@@ -207,9 +208,21 @@ focusProgram = focusing
 
 -- | The development chain, the focus marked (@ms7\/CLOSEOUT.md@ 7: the whole
 -- chain, no budget on its length — the editor scrolls to the focus itself).
+-- | __Where the session is standing, so that a name in a SHAPE is spelled the
+-- way the same name in TEXT is__ (MS10 phase 256, `~fjrrr`).
+--
+-- The views below pass it themselves; it is exported because
+-- 'Thena.View.Core.displayCore' takes one and a frontend holding a session has
+-- no other way to build it. **It is 'Thena.Render.renderingIn' without the
+-- grammars** — the same two fields, read off the same machine, which is what
+-- makes the text and the shapes agree rather than happen to agree.
+spellingOf :: Session -> Spelling
+spellingOf s = Spelling (knownTo (machineOf s)) (scope (machineOf s))
+
 developmentView :: Budget -> Session -> [LinkView]
 developmentView budget s =
   displayDevelopment
+    (spellingOf s)
     (sessionGrammars s)
     budget
     (sessionNames s)
@@ -221,6 +234,7 @@ developmentView budget s =
 machineView :: Budget -> Session -> MachineView
 machineView budget s =
   displayMachine
+    (spellingOf s)
     (sessionGrammars s)
     budget
     (envAt s)
@@ -244,7 +258,8 @@ focusTypeView :: Budget -> Session -> Maybe Display
 focusTypeView budget s = fmap display (expectedType (sessionCursor s))
   where
     display =
-      displayCore (sessionGrammars s) budget (envAt s) (binderAddresses s) (sessionNames s) (focusAddress s)
+      displayCore (spellingOf s) (sessionGrammars s) budget (envAt s) (binderAddresses s)
+        (sessionNames s) (focusAddress s)
 
 -- | Every rule base, in order, each with its rules.
 --
@@ -298,6 +313,7 @@ matchesView budget s =
 trustView :: Budget -> Session -> TrustView
 trustView budget s =
   displayTrust
+    (spellingOf s)
     (sessionGrammars s)
     budget
     (binderAddresses s)
@@ -347,7 +363,8 @@ statementOfferView s = statementOffer (sessionGrammars s) (sessionRules s)
 -- | One rule, with the session's plumbing supplied.
 ruleOf :: Budget -> Session -> Maybe Signature -> Rule -> RuleView
 ruleOf budget s =
-  displayRule (sessionGrammars s) budget (envAt s) (binderAddresses s) (sessionNames s) (focusAddress s)
+  displayRule (spellingOf s) (sessionGrammars s) budget (envAt s) (binderAddresses s)
+    (sessionNames s) (focusAddress s)
 
 -- | A global name as the string a signature table is keyed by.
 globalString :: GlobalName -> String

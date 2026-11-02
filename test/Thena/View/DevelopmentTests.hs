@@ -19,7 +19,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..))
-import Thena.Core.Term (Core (..), Ident (..), fresh)
+import Thena.Core.Term (Core (..), Ident (..), fresh, wholePath)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (along, enter, focus, into, prefix)
 import Thena.Development.Partial (Partial (..))
@@ -70,7 +70,7 @@ crossingCases =
   where
     agree name p =
       testCase name $
-        chainText (displayDevelopment [] (Budget 200) 500 (Address []) Nothing p)
+        chainText (displayDevelopment wholePath [] (Budget 200) 500 (Address []) Nothing p)
           @?= renderPartial (rendering [] 500) [] p
 
 -- ---------------------------------------------------------------------------
@@ -109,7 +109,7 @@ flagCases =
       claimFlag "h" unblocked @?= Just False
   ]
   where
-    linksOf p = allLinks (displayDevelopment [] (Budget 200) 500 (Address []) Nothing p)
+    linksOf p = allLinks (displayDevelopment wholePath [] (Budget 200) 500 (Address []) Nothing p)
 
     guessFlags name p =
       case [s | LinkView _ _ s@AGuessLink {guessName = n} <- linksOf p, n == name] of
@@ -135,14 +135,14 @@ focusCases =
   [ testCase "the third link, and no other, is marked" $ do
       cur <- unwrap (along =<< along (enter allFour))
       let route = Just (toList (prefix cur), focus cur)
-          links = displayDevelopment [] (Budget 200) 500 (Address []) route allFour
+          links = displayDevelopment wholePath [] (Budget 200) 500 (Address []) route allFour
       map linkFocus links @?= [False, False, True, False, False]
   , testCase "inside a guess's own body, the guess link itself is not marked" $ do
       -- One `along` reaches the guess; `into` enters its body, where
       -- `idMidway`'s own `Assume a` is the first link.
       cur <- unwrap (into =<< along (enter idMidway))
       let route = Just (toList (prefix cur), focus cur)
-          links = displayDevelopment [] (Budget 200) 500 (Address []) route idMidway
+          links = displayDevelopment wholePath [] (Budget 200) 500 (Address []) route idMidway
       map linkFocus links @?= [False, False, False]
       case links of
         [_, LinkView _ _ AGuessLink {guessBody = body}, _] ->

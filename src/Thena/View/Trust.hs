@@ -40,7 +40,7 @@ module Thena.View.Trust
   ) where
 
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (nameDotted, Ident (..), Var)
+import Thena.Core.Term (Spelling, spelledIn, Ident (..), Var)
 import Thena.Core.Trust
   ( TrustClaim (..)
   , TrustClass (..)
@@ -104,7 +104,8 @@ data ClaimView = ClaimView
 -- are looking at rests on/, which is true, and inventing a route into them
 -- would invite a @goto@ into nothing.
 displayTrust
-  :: [Grammar]
+  :: Spelling
+  -> [Grammar]
   -> Budget
   -> [(Var, Address)]
   -> Int
@@ -112,7 +113,7 @@ displayTrust
   -> TrustLevel
   -> [TrustClaim]
   -> TrustView
-displayTrust grammars budget binders counter here lvl claims =
+displayTrust sp grammars budget binders counter here lvl claims =
   TrustView
     { trustViewLevel   = lvl
     , trustViewClaims  = map one claims
@@ -123,12 +124,15 @@ displayTrust grammars budget binders counter here lvl claims =
       ClaimView
         { claimViewClass   = claimClass c
         , claimViewSite    = claimSite c
-        , claimViewRoute   = [ g | g <- map nameDotted (claimRoute c) ]
+          -- **The route shortens too** (MS10 phase 256): 'Thena.Render' spells
+          -- the same list with 'Thena.Render.nameString', and @:trust@ and a
+          -- trust pane showing one name two ways is the defect `~fjrrr` names.
+        , claimViewRoute   = map (spelledIn sp) (claimRoute c)
         , claimViewClaimed = display c (claimClaimed c)
         , claimViewBody    = display c (claimActual c)
         }
 
-    display c = displayCore grammars budget (envOf (claimContext c)) binders counter here
+    display c = displayCore sp grammars budget (envOf (claimContext c)) binders counter here
 
     permitted k = case lvl of
       AnyTrust               -> True

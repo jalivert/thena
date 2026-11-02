@@ -27,6 +27,7 @@ import Thena.Engine (Exec (..), Frame (..), Machine (..))
 import Thena.Instral.Ops (Instr (..), Op (Assume), Operand (..), Value (..))
 import Thena.Instral.Pattern (Pattern (..))
 import Thena.Language.Grammar (Grammar)
+import Thena.Core.Term (wholePath)
 import Thena.View.Address (Address (..))
 import Thena.View.Core (Budget (..))
 import Thena.View.Instral
@@ -87,7 +88,7 @@ mismatchMachine gs m
   | otherwise = assertFailure ("printed:\n" ++ unlines shown ++ "drawn:\n" ++ unlines drawn)
   where
     shown = renderMachine (rendering gs 500) [] m
-    drawn = redrawMachine (displayMachine gs (Budget 200) [] [] 500 (Address []) m)
+    drawn = redrawMachine (displayMachine wholePath gs (Budget 200) [] [] 500 (Address []) m)
 
 -- ---------------------------------------------------------------------------
 -- What an editor is, for a machine

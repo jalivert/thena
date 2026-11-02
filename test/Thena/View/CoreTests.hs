@@ -16,7 +16,7 @@ module Thena.View.CoreTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), Literal (..), rootName)
+import Thena.Core.Term (Core (..), Literal (..), rootName, wholePath)
 import Thena.Declared (named)
 import Thena.Global.Env
   ( Constant (..)
@@ -42,7 +42,10 @@ import Thena.View.Redraw (redraw)
 import Thena.Files (startingSession)
 import Thena.Render
   ( rendering
-  ,renderCore)
+  , renderCore
+  , renderingOf
+  )
+import Thena.View (sessionGrammars, sessionNames, spellingOf)
 
 tests :: TestTree
 tests =
@@ -52,7 +55,38 @@ tests =
     , testCase "and the corpus really holds terms" notVacuous
     , testGroup "a modelled language's notation (phase 115b)" objectCases
     , testGroup "where a tagged literal begins (phase 132)" regionCases
+    , testGroup "a name is spelled as the text printer spells it (`~fjrrr`)" spelled
     ]
+
+-- | __THE SHAPE AND THE TEXT SPELL ONE NAME ONE WAY__ (MS10 phase 256).
+--
+-- 'Thena.Render' has written the shortest ending that still resolves since
+-- phase 254 and the shapes wrote 'Thena.Core.Term.nameDotted', so the TUI
+-- showed @Nat.zero@ where the REPL showed @zero@ — one name with two spellings
+-- according to which door the reader came in by. **The assertion is the
+-- agreement and not the spelling**, so neither printer can be changed alone.
+spelled :: [TestTree]
+spelled =
+  [ testCase "with nothing open, both write the whole path" $
+      bothSay [] "Col.red"
+  , testCase "after open Col, both write the short word" $
+      bothSay ["", "open Col"] "red"
+  ]
+  where
+    bothSay extra want = do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (unlines
+             ([ "module Spelling where", ""
+              , "data Col : Type where"
+              , "  { red : Col }"
+              ] ++ extra)) of
+        (s1, ProofLoaded {}) -> do
+          let t = Global (named "Col.red") []
+              shape = redraw (displayCore (spellingOf s1) (sessionGrammars s1)
+                                (Budget 200) [] [] (sessionNames s1) (Address []) t)
+          shape @?= want
+          shape @?= renderCore (renderingOf s1) [] t
+        (_, other) -> assertFailure (show other)
 
 -- | Every term the prelude and the standard base leave in the environment.
 termsOf :: GlobalEnv -> [Core]
@@ -74,7 +108,7 @@ mismatch t
   | otherwise = Just ("printed: " <> shown <> "\n  drawn:   " <> drawn)
   where
     shown = renderCore (rendering [] 0) [] t
-    drawn = redraw (displayCore [] (Budget 200) [] [] 0 (Address []) t)
+    drawn = redraw (displayCore wholePath [] (Budget 200) [] [] 0 (Address []) t)
 
 -- | A green test over an empty corpus would prove nothing.
 notVacuous :: IO ()
@@ -172,7 +206,7 @@ objectCases =
   where
     agree name t = testCase name $ do
       gs <- loaded
-      redraw (displayCore gs (Budget 200) [] [] 0 (Address []) t) @?= renderCore (rendering gs 0) [] t
+      redraw (displayCore wholePath gs (Budget 200) [] [] 0 (Address []) t) @?= renderCore (rendering gs 0) [] t
 
 -- ---------------------------------------------------------------------------
 -- Where a literal begins — MS7 phase 132
@@ -240,7 +274,7 @@ regionCases =
   , testCase "the seamless form is the expanded one without tag or fences" $ do
       gs <- loaded
       let t = con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]]
-          d = displayCore gs (Budget 200) [] [] 0 (Address []) t
+          d = displayCore wholePath gs (Budget 200) [] [] 0 (Address []) t
       expanded <- pure (redraw d)
       case displayShape d of
         ARegion inner -> case displayShape inner of
@@ -255,4 +289,4 @@ regionCases =
   where
     shapeOf t = do
       gs <- loaded
-      pure (displayShape (displayCore gs (Budget 200) [] [] 0 (Address []) t))
+      pure (displayShape (displayCore wholePath gs (Budget 200) [] [] 0 (Address []) t))
