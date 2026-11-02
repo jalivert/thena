@@ -41,7 +41,7 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` `.` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -233,11 +233,12 @@ primitive functions have moved in too** — `String.eq`, `Char.eq`, `Int.eq` and
 `appendString`. **A datatype's constructors and the type itself have moved in
 too**, so `data Nat` declares `Nat.Nat`, `Nat.zero` and `Nat.suc`, and a written
 `Nat` reaches the type because a declaration's short name is derived from the
-environment rather than recorded anywhere. **What is not built yet**: `namespace`
-blocks and resolution outward through them, the forms of `open` other than
-`open ‹namespace›`, printing a name as the shortest ending that still resolves
-(so a name prints with its whole path today), and `open` as a line at the prompt,
-which means a command's argument is written with its path.*
+environment rather than recorded anywhere. **`namespace ‹name› where { … }` is
+built, and resolution walks outward through it.** **What is not built yet**: the
+forms of `open` other than `open ‹namespace›`, printing a name as the shortest
+ending that still resolves (so a name prints with its whole path today), and a
+`language`, `context`, `judgment` or `notation` block inside a `namespace` block,
+which is refused where it is written — write it at the top level of the file.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something
@@ -306,6 +307,35 @@ names both so you can write the one you meant. And `open X` where nothing at all
 is named `X.…` is refused where you wrote it, rather than left to make every
 later name fail on its own; a namespace is never declared, so that is the only
 check there is.
+
+### A namespace is declared, nests, and is walked outward
+
+*Decided 2026-10-30, built 2026-11-02.* A namespace is a prefix and nothing
+more, so nesting one inside another is a longer prefix and `namespace A.B` says
+the same thing on one line:
+
+```
+namespace Stlc where
+
+  data Ty : Type where
+    base  : Ty
+    arrow : Ty -> Ty -> Ty
+
+  namespace Proofs where
+
+    arrowInjective : ∀ (a : Ty.Ty) -> …
+```
+
+That declares `Stlc.Ty.Ty`, `Stlc.Ty.base`, `Stlc.Ty.arrow` and
+`Stlc.Proofs.arrowInjective`.
+
+**Inside `A.B`, a name you write is tried in `A.B`, then in `A`, then at the
+root, and a nearer answer wins outright.** So `Ty.Ty` written inside
+`Stlc.Proofs` finds `Stlc.Ty.Ty` even when there is a different `Ty.Ty` at the
+root, and the whole name you wrote goes under each prefix — a path says what you
+meant, so writing `B.c` inside `A` tries `A.B.c` first. **The `open`s are tried
+only once that walk has failed**, which is what makes an `open` able to add a way
+to resolve and never change one.
 
 A file is the unit of import and is **not** a namespace: you import a file by
 its path, and what things are called comes from the `namespace` blocks they sit

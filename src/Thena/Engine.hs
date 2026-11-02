@@ -58,7 +58,6 @@ import Thena.Core.Term
   , globalUnder
   , InScope (..)
   , nameDotted
-  , nameFromText
   , rootName
   , Ident (..)
   , Var
@@ -748,6 +747,26 @@ globalNamed m g = case globalUnder (knownTo m) (scope m) g of
   Left []  -> Left (CannotRead (ResolveFailed (NotInScope (nameDotted g))))
   Left gs  -> Left (AmbiguousName (nameDotted g) (map nameDotted gs))
 
+-- | The namespace a declaration made here goes into — the innermost rung of
+-- the walk, or the root (MS10 phase 254).
+namespaceOf :: Machine -> [String]
+namespaceOf m = case scopeWithin (scope m) of
+  ns : _ -> ns
+  []     -> []
+
+-- | A written name, placed in the namespace the declaration is written in.
+--
+-- **The steps the writer wrote nest inside it**, so @Ty.subst-X@ inside
+-- @namespace A@ declares @A.Ty.subst-X@ — the same nesting a constructor
+-- written with a path already gets inside its datatype's namespace.
+--
+-- **Every declaring op goes through this and none of them knows what a
+-- namespace is**, which is what keeps one rule for where a name lands: a
+-- @data@, a @define-global@ a rule emitted, a primitive and a @language@
+-- block's datatype all take their place from the machine.
+declaredIn :: Machine -> GlobalName -> GlobalName
+declaredIn m (GlobalName ps w) = GlobalName (namespaceOf m ++ ps) w
+
 -- | What this machine's environment answers to, which is what
 -- 'Thena.Core.Term.globalUnder' asks.
 knownTo :: Machine -> GlobalName -> Bool
@@ -1054,6 +1073,15 @@ perform instr rest m = case operation instr of
   -- **A surface datatype reaches the driver as a written one does** (MS4 phase
   -- 42b): this assembles the record and 'Declaring' carries it out, so
   -- @Thena.Global.Declare.declare@ checks both by the same code.
+  --
+  -- **Its name is absolute where @define-global@'s is relative to the namespace
+  -- in hand, and the reason is the constructors** (MS10 phase 254): a
+  -- constructor's type is elaborated with the datatype assumed under its own
+  -- name and then applied to it, so the name is fixed /before/ anything is
+  -- elaborated — and placing it afterwards would leave the elaborated types
+  -- mentioning a global that is not the one being declared.
+  -- 'Thena.Driver.datatypeProgram' takes the namespace for that reason, and it
+  -- is handed the same prefix this machine holds.
   MakeData d nps cns roles tys -> case traverse term tys of
     Left r -> failure r m
     Right ts -> case ts of
@@ -1068,6 +1096,11 @@ perform instr rest m = case operation instr of
 
   -- Out through the channel, exactly as 'DefineGlobal' goes: the driver checks
   -- the name is one with a reduction rule and installs the constant.
+  --
+  -- **A block cannot be written inside a @namespace@ block yet** (MS10 phase
+  -- 254), and the lexer is what says so: it takes a block whole only at column
+  -- 1, so an indented one does not reach here at all. Scoping a grammar is the
+  -- metavariable half of `~g4k5g` and is the next piece of this partition.
   DeclareGrammar b -> DeclaringGrammar b (advance m)
 
   -- **Both read their name as a name, path and all** (MS10 phase 243). Each
@@ -1089,11 +1122,24 @@ perform instr rest m = case operation instr of
             then Continue (advance m { scope = (scope m) { scopeOpens = ns : scopeOpens (scope m) } })
             else failure (NoSuchNamespace (nameDotted g)) m
 
-  DeclarePrimitive nm ty -> case (,) <$> nameOf nm <*> term ty of
+  -- **A namespace is entered by pushing a prefix and nothing else** (MS10
+  -- phase 254). Nothing is checked: a namespace holds whatever keys sit under
+  -- it, and entering an empty one is how it stops being empty — where @open@ of
+  -- an empty one is refused, because there it could only be a silent no-op.
+  EnterNamespace nm -> case nameOf nm of
+    Left r  -> failure r m
+    Right g ->
+      let ns = namespaceOf m ++ nameSteps g ++ [nameWord g]
+       in Continue (advance m { scope = (scope m) { scopeWithin = ns : scopeWithin (scope m) } })
+
+  LeaveNamespace ->
+    Continue (advance m { scope = (scope m) { scopeWithin = drop 1 (scopeWithin (scope m)) } })
+
+  DeclarePrimitive nm ty -> case (,) <$> declaredNameOf nm <*> term ty of
     Left r -> failure r m
     Right (x, t) -> Primitively x t (advance m)
 
-  DefineGlobal ps nm ty tm -> case (,,) <$> nameOf nm <*> term ty <*> term tm of
+  DefineGlobal ps nm ty tm -> case (,,) <$> declaredNameOf nm <*> term ty <*> term tm of
     Left r -> failure r m
     Right (x, t, v) -> Defining x ps t v (advance m)
 
@@ -2247,6 +2293,9 @@ perform instr rest m = case operation instr of
 
     text    = operandText (env (exec m))
     nameOf  = operandName (env (exec m))
+    -- **What a declaring op installs**, which is what was written placed in the
+    -- namespace it is written in — see 'declaredIn'.
+    declaredNameOf o = declaredIn m <$> nameOf o
     wordOf  = operandWord (env (exec m))
     term    = operandTerm (env (exec m))
 

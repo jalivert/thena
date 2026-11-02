@@ -87,7 +87,7 @@ import Thena.Language.Regex
   , star
   )
 import Data.Char (isSpace)
-import Data.List (dropWhileEnd, isSuffixOf, nub, stripPrefix)
+import Data.List (intercalate, dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
@@ -1196,6 +1196,14 @@ data Item
     -- ^ @open ‹namespace›@ (MS10 phase 247) — the namespace's whole path, as a
     -- name. It declares nothing; it changes what the declarations after it can
     -- see.
+  | ItemNamespace GlobalName [Item]
+    -- ^ @namespace ‹name› where { … }@ (MS10 phase 254) — the namespace, and
+    -- the items inside it.
+    --
+    -- **A tree and not a flattened list with markers**, because a module is
+    -- printed back from these items and the nesting is what it is written
+    -- with. The program 'surfaceProgram' builds /is/ flat: two ops around the
+    -- inner instructions, which is where the prefix comes from.
   | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
     -- resolves it while the file is being read, so a block with bad operands is
@@ -1213,6 +1221,12 @@ regroup = go
     go [] = Right []
     go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
     go (SurfaceOpen ps x : rest) = (ItemOpen (GlobalName ps x) :) <$> go rest
+    -- **The declarations inside are regrouped by the same pass** (MS10 phase
+    -- 254), so a signature and its equation pair inside a namespace exactly as
+    -- they do outside one, and nesting needs nothing of its own.
+    go (SurfaceNamespace ps x ds : rest) = do
+      inner <- go ds
+      (ItemNamespace (GlobalName ps x) inner :) <$> go rest
     -- **Read here, so an unreadable block is a syntax error** and the module
     -- stops before anything in it elaborates (MS6 phase 101). What its names
     -- mean is asked later, at its place in the load ('DeclaringGrammar').
@@ -1251,10 +1265,16 @@ regroup = go
 -- anything in Haskell.
 surfaceProgram
   :: Int -> [Item] -> ([Instr], Int)
-surfaceProgram n0 items = foldl item ([], n0) items
+surfaceProgram n0 items = foldl (item []) ([], n0) items
   where
-  item (acc, n) (ItemData d)       = let (is, n1) = datatypeProgram n d Nothing in (acc ++ is, n1)
-  item acc (ItemTheorem x ty body) = declaring acc (x, ty, body)
+  -- **@ns@ is the namespace the item is written in**, and only a @data@ item
+  -- needs it here: a theorem, a primitive and anything a rule declares take
+  -- their place from the machine instead, which 'Thena.Engine.declaredIn' does.
+  -- A datatype cannot, because its constructors are elaborated against its own
+  -- name before any of them is built — see 'Thena.Instral.Ops.MakeData'.
+  item ns (acc, n) (ItemData d) =
+    let (is, n1) = datatypeProgram ns n d Nothing in (acc ++ is, n1)
+  item _ acc (ItemTheorem x ty body) = declaring acc (x, ty, body)
   -- **A top-level block is a call to a rule** (MS6 phase 104b), and the rule is
   -- @run-block@ in the shipped base, whose whole body is @play t@. So how a
   -- module\'s blocks are treated is written in user space and a user may
@@ -1268,15 +1288,24 @@ surfaceProgram n0 items = foldl item ([], n0) items
   -- environment, so spliced blocks shared a scope at run time while
   -- @topLevelBlocks@ typed each in a scope of its own and refused the
   -- disagreement. The call\'s frame is what makes the scope real.
-  item (acc, n) (ItemBlock b) =
+  item _ (acc, n) (ItemBlock b) =
     (acc ++ [Do (Call "run-block" [Lit (VSurface (rootedAt (SurfaceDo b)))])], n)
   -- One instruction that yields the block to the driver, which checks it
   -- against what the module has declared so far (MS6 phase 101).
-  item (acc, n) (ItemGrammar b) = (acc ++ [Do (DeclareGrammar b)], n)
+  item _ (acc, n) (ItemGrammar b) = (acc ++ [Do (DeclareGrammar b)], n)
   -- **One instruction, where it is written** (MS10 phase 247): the program is
   -- played in order, so an @open@'s effect reaching only the declarations after
   -- it falls out of the sequencing and needs nothing of its own.
-  item (acc, n) (ItemOpen g) = (acc ++ [Do (Open (Lit (VName g)))], n)
+  item _ (acc, n) (ItemOpen g) = (acc ++ [Do (Open (Lit (VName g)))], n)
+  -- **Two ops around the items inside** (MS10 phase 254). Where a declaration
+  -- lands and what a written name may mean both come from the machine, so the
+  -- items inside need no rewriting here — and a nested namespace is the same
+  -- shape one level down.
+  item ns (acc, n) (ItemNamespace g is) =
+    let inner' = ns ++ nameSteps g ++ [nameWord g]
+        (inner, n1) = foldl (item inner') ([], n) is
+     in ( acc ++ [Do (EnterNamespace (Lit (VName g)))] ++ inner ++ [Do LeaveNamespace]
+        , n1 )
 
   -- | The plicity of each argument position a signature writes.
   --
@@ -1391,10 +1420,11 @@ surfaceProgram n0 items = foldl item ([], n0) items
 -- the equipment generated later needs nothing of its own: everything that mints
 -- a name from the datatype's goes through 'Thena.Core.Term.inDeclarationOf' and
 -- lands beside the constructors.
-datatypeProgram :: Int -> SurfaceData -> Maybe [[ArgRole]] -> ([Instr], Int)
-datatypeProgram n d roles =
+datatypeProgram
+  :: [String] -> Int -> SurfaceData -> Maybe [[ArgRole]] -> ([Instr], Int)
+datatypeProgram ns n d roles =
   let nm      = surfaceDataName d
-      dn      = declarationNamed (GlobalName (surfaceDataSteps d) nm)
+      dn      = declarationNamed (GlobalName (ns ++ surfaceDataSteps d) nm)
       ps      = surfaceDataParameters d
       cs      = surfaceDataConstructors d
       (l, n1) = freshLevelMeta n
@@ -1528,8 +1558,8 @@ loadProofItems s nm items =
      in case progress Nothing s { sessionMachine = load is machine { names = n1 } } [] [] of
           (s', Ran _ ws Completed) ->
             ( s'
-            , ProofLoaded nm [ n | Just n <- map declaredName items ]
-                             (length [ () | ItemBlock _ <- items ])
+            , ProofLoaded nm (concatMap declaredNames items)
+                             (sum (map blocksIn items))
                              ws
             )
           -- **A load that does not complete declares nothing** (MS6 closeout 15,
@@ -1565,6 +1595,28 @@ rolledBack before after =
                               { names = names (sessionMachine after) } }
 
 -- | What an item adds to the environment, for the summary line.
+--
+-- **A list and not a @Maybe@ since MS10 phase 254**, because a @namespace@
+-- block holds items of its own and the summary names what landed, wherever it
+-- was written.
+declaredNames :: Item -> [String]
+declaredNames = go []
+  where
+    -- **The namespace it was written in comes with it**, because @declared A.one@
+    -- is what landed and @declared one@ would name a key the environment has
+    -- not got.
+    go ns (ItemNamespace g is) =
+      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) is
+    go ns i = [ intercalate "." (ns ++ [n]) | Just n <- [declaredName i] ]
+
+-- | How many top-level blocks an item holds, for the summary's count.
+blocksIn :: Item -> Int
+blocksIn i = case i of
+  ItemBlock _        -> 1
+  ItemNamespace _ is -> sum (map blocksIn is)
+  _                  -> 0
+
+-- | The one name an item declares, where it declares exactly one.
 declaredName :: Item -> Maybe String
 declaredName i = case i of
   ItemData d        -> Just (nameDotted (GlobalName (surfaceDataSteps d) (surfaceDataName d)))
@@ -1576,6 +1628,10 @@ declaredName i = case i of
   -- **An @open@ declares nothing** — it changes what is in view and adds no key
   -- to the environment (MS10 phase 247).
   ItemOpen _        -> Nothing
+  -- **A namespace declares nothing of its own** (MS10 phase 254) — it is a
+  -- prefix, and what it holds is the items inside it, each of which is named in
+  -- the summary by its own entry.
+  ItemNamespace _ _ -> Nothing
   -- The language's name. Until phase 103 generates its datatype, what it
   -- declares is the grammar alone — the metavariables and the notation.
   -- **A @notation@ block declares nothing at all** (MS8 phase 158, §4.8): the
@@ -3370,7 +3426,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
       case judgmentDatatype (g : grammars m) g (blockRules b) of
         Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
         Right (sd, roles) ->
-          let (is, n1) = datatypeProgram (names m) sd (Just roles)
+          let (is, n1) = datatypeProgram [] (names m) sd (Just roles)
               m' = (Engine.splicing is m) { grammars = g : grammars m, names = n1 }
            in if exhausted
                 then stop m' msgs (reverse ws ++ warns) (Paused spent)
@@ -3381,7 +3437,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
       -- that could only happen once the load reached it. So the instructions go
       -- in front of what is left of the program, and the datatype is elaborated
       -- and declared exactly as a written one is.
-      let (is, n1) = datatypeProgram (names m) sd (Just roles)
+      let (is, n1) = datatypeProgram [] (names m) sd (Just roles)
           (sd, roles) = grammarDatatype g
           -- **Then its substitution** (MS6 phase 105, §4.7): four ordinary
           -- definitions, elaborated by the same instructions a written one is,
@@ -3404,7 +3460,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
           -- two kinds of binding gets a lookup relation for each, and their
           -- instructions run in declaration order.
           (ls, n3) = foldl (\(is0, n) (ld, lroles) ->
-                              let (is1, n') = datatypeProgram n ld (Just lroles)
+                              let (is1, n') = datatypeProgram [] n ld (Just lroles)
                                in (is0 ++ is1, n'))
                            ([], n2) (lookupDatatypes g)
           installed = reverse (lookupGrammars g) ++ [g]

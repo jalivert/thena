@@ -501,6 +501,7 @@ describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
   TOpen       -> "open"
+  TNamespace  -> "namespace"
   TLanguage   -> "language"
   TContext    -> "context"
   TJudgment   -> "judgment"

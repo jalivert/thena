@@ -1129,6 +1129,28 @@ data Op
     -- **A declaration and not a rule-body operation** (§3.7), exactly as @data@
     -- is: the word exists so that 'opKeyword' stays total, and
     -- "Thena.Rules" refuses it in a body one step before @validate@ would.
+  | EnterNamespace Operand
+    -- ^ @namespace ‹name› where { … }@, entered — **everything declared until
+    -- the matching 'LeaveNamespace' goes inside this namespace** (MS10 phase
+    -- 254).
+    --
+    -- **Two ops and not a field on each declaration**, which is what keeps one
+    -- rule for where a name lands: a @data@, a generated definition, a
+    -- @language@ block's datatype and a @define-global@ written in a top-level
+    -- @do@ block all take their place from the machine, so none of them has to
+    -- know what a namespace is.
+    --
+    -- **The push is absolute**: inside @A@, @namespace B@ pushes @A.B@, so a
+    -- rung of the walk is a whole prefix and the walk is a list scan rather
+    -- than an accumulation.
+    --
+    -- **Nothing is checked here.** A namespace is a prefix, so entering one
+    -- that holds nothing yet is exactly the case that declares into it — which
+    -- is where @open@ differs, and @open@ refuses an empty one because it would
+    -- otherwise be a silent no-op.
+  | LeaveNamespace
+    -- ^ the end of a @namespace@ block's declarations (MS10 phase 254) — pops
+    -- what 'EnterNamespace' pushed.
   | DeclarePrimitive Operand Operand
     -- ^ name, type — **install a primitive constant** (MS6 phase 97b), the way
     -- 'DefineGlobal' installs a definition and for the same reason: no
@@ -1537,6 +1559,8 @@ resultOf o = case o of
   DefineData _ -> Nothing
   Certify _    -> Nothing
   Open {} -> Nothing
+  EnterNamespace {} -> Nothing
+  LeaveNamespace -> Nothing
   DeclarePrimitive {} -> Nothing
   DeclareGrammar {} -> Nothing
   DefineGlobal {} -> Nothing
@@ -1768,6 +1792,8 @@ operandTypes o = case o of
   Try    a     -> [(a, TCore)]
   Certify a    -> [(a, TCore)]
   Open a -> [(a, TName)]
+  EnterNamespace a -> [(a, TName)]
+  LeaveNamespace -> []
   DeclarePrimitive a b -> [(a, TName), (b, TCore)]
   DeclareGrammar _ -> []
   DefineGlobal _ a b c -> [(a, TName), (b, TCore), (c, TCore)]
@@ -2357,6 +2383,8 @@ opKeyword o = case o of
   Define _ _   -> "define"
   Certify _    -> "certify"
   Open {} -> "open"
+  EnterNamespace {} -> "namespace"
+  LeaveNamespace -> "leave-namespace"
   DeclarePrimitive {} -> "declare-primitive"
   DeclareGrammar {} -> "declare-grammar"
   DefineGlobal {} -> "define-global"

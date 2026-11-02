@@ -52,6 +52,13 @@ printItem i = case i of
   -- declaration like any other and the printed module has to carry it: a file
   -- printed without its opens would not re-read.
   ItemOpen g -> ["open " ++ nameDotted g]
+  -- **The block, indented, with its items a blank line apart** — the layout the
+  -- parser reads back (MS10 phase 254). The name is written as it was: a
+  -- namespace's path is relative to the one it sits in, so what the item holds
+  -- is what goes back on the line.
+  ItemNamespace g is ->
+    ("namespace " ++ nameDotted g ++ " where")
+      : map ("  " ++) (intercalate [""] (map printItem is))
 
 -- | A datatype declaration.
 --

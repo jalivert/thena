@@ -170,6 +170,7 @@ kindOf t = case t of
   TModule       -> AKeyword
   -- MS10 phase 247: @open@ is a declaration, and a keyword like the rest.
   TOpen         -> AKeyword
+  TNamespace    -> AKeyword
   TDo           -> AKeyword
   TRule         -> AKeyword
   TLanguage     -> AKeyword

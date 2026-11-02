@@ -196,6 +196,12 @@ tokens :-
   -- and @module@ and is reserved for their reason: the header is real syntax
   -- rather than a textual pre-pass.
   "open"        { keyword TOpen }
+  -- **Reserved at MS10 phase 254**, for @namespace ‹name› where { … }@ — the
+  -- fifth word to narrow identifiers project-wide. His ruling of 2026-10-30
+  -- costed it with the partition and took it: a namespace that is declared,
+  -- rather than taken from the file's path, is what decouples the unit you
+  -- import from the scope a name lives in.
+  "namespace"   { keyword TNamespace }
   -- **The escape opener is an ordinary token too** (MS5 phase 81). The region
   -- scanner emits one when it meets @${@ inside a tagged region; this is what
   -- lets the same spelling be read again when the region's text is lexed for
@@ -307,6 +313,7 @@ data Token
     -- what it saw rather than failing, and so a later operator may claim it.
   | TData
   | TOpen        -- ^ @open@, the declaration that brings a namespace into view (MS10 phase 247)
+  | TNamespace   -- ^ @namespace ‹name› where { … }@ (MS10 phase 254)
   | TModule
   | TDo
   | TRule

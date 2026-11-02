@@ -344,6 +344,24 @@ data SurfaceDecl
     -- **Its effect runs from where it is written to the end of the enclosing
     -- namespace**, which for a file with no @namespace@ block is the rest of
     -- the file — so a declaration above it does not see it.
+  | SurfaceNamespace [String] String [SurfaceDecl]
+    -- ^ @namespace ‹name› where { … }@ — **declare a namespace and put these
+    -- declarations in it** (MS10 phase 254).
+    --
+    -- **A namespace is a prefix, so nesting is a longer prefix and needs no
+    -- mechanism of its own**: @namespace A where { namespace B where { … } }@
+    -- puts a @foo@ inside at @A.B.foo@. Written with a path, @namespace A.B@ is
+    -- the same thing said in one line.
+    --
+    -- **Open-ended, like Lean's and unlike a Haskell module** — his ruling of
+    -- 2026-10-30: two files may both add to @A@, because the environment is
+    -- keyed by a qualified name and two keys sharing a prefix is not a conflict.
+    -- A check would have to be /added/ to forbid it.
+    --
+    -- **What the declarations inside can see is the walk, not an @open@**: a
+    -- written word is tried in @A.B@, then in @A@, then at the root, and a
+    -- nearer rung wins outright. 'Thena.Core.Term.InScope' carries the two
+    -- apart.
   | SurfaceGrammar   BlockKind Int String
     -- ^ a @language@ or @context@ block (MS6 phase 101): its kind, the line of
     -- its keyword, and its text, raw. "Thena.Driver.regroup" reads it.

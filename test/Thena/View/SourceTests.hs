@@ -49,6 +49,7 @@ tests =
     , testCase "every module in the corpus re-parses from its printing" modules
     , testCase "a printed value re-reads, tabs and all" valueReReads
     , testCase "and the corpus really holds terms" notVacuous
+    , testCase "a namespace block survives printing, nesting and all" namespaces
     ]
 
 -- | **A green test over an empty corpus is the failure @CLAUDE.md@ records three
@@ -91,6 +92,7 @@ termsOf i = case i of
   ItemBlock _ -> []
   ItemGrammar _ -> []
   ItemOpen _ -> []
+  ItemNamespace _ is -> concatMap termsOf is
 
 -- | Every surface file the project ships.
 paths :: IO [FilePath]
@@ -172,6 +174,34 @@ modules = do
       | otherwise = ["    was:  " <> take 200 (show a), "    came: " <> take 200 (show b)]
     firstDifference as bs = ["    lengths differ: " <> show (length as) <> " vs " <> show (length bs)]
 
+-- | A @namespace@ block printed back and read again (MS10 phase 254).
+--
+-- **Written out here rather than left to the corpus**, which has no namespaced
+-- file yet: the printer indents the block and the layout pass is what has to
+-- read that back, so nesting is the case worth pinning.
+namespaces :: IO ()
+namespaces = case parseSurfaceModule src of
+  Left e -> assertFailure ("did not parse: " <> take 200 (show e))
+  Right (nm, items) -> case parseSurfaceModule (printSurfaceModule nm items) of
+    Left e -> assertFailure ("its printing did not parse: " <> take 300 (show e))
+    Right (nm', items')
+      | nm' /= nm -> assertFailure ("came back as module " <> nm')
+      | items' /= items -> assertFailure ("items differ: " <> take 400 (show items'))
+      | otherwise -> pure ()
+  where
+    src =
+      "module NS where\n\
+      \namespace A where\n\
+      \  data Leaf : Type\8320 where\n\
+      \    leaf : Leaf\n\
+      \\n\
+      \  namespace B where\n\
+      \    inner : A.Leaf.Leaf\n\
+      \    inner = Leaf.leaf\n\
+      \\n\
+      \  outer : Leaf.Leaf\n\
+      \  outer = Leaf.leaf\n"
+
 -- | An item with every recorded source line set to zero.
 unlined :: Item -> Item
 unlined i = case i of
@@ -181,4 +211,5 @@ unlined i = case i of
         { blockProductions = [ pr { productionLine = 0 } | pr <- blockProductions b ]
         , blockRules = [ r { ruleLine = 0 } | r <- blockRules b ]
         }
+  ItemNamespace g is -> ItemNamespace g (map unlined is)
   other -> other

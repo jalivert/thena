@@ -82,6 +82,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   '...'   { Located _ TSpread }
   '.'     { Located _ TDot }
   open    { Located _ TOpen }
+  namespace { Located _ TNamespace }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
   ','     { Located _ TComma }
@@ -285,6 +286,12 @@ Decl :: { SurfaceDecl }
   -- **A declaration, not a layout block** (MS10 phase 247, his ruling): it
   -- names a namespace and its effect runs to the end of the enclosing one.
   | open QName                             { SurfaceOpen (fst $2) (snd $2) }
+  -- **A layout block, where @open@ is a line** (MS10 phase 254): a namespace
+  -- says which declarations are in it, so it has to hold them. Nesting is a
+  -- longer prefix and costs no mechanism, and @namespace A.B where { … }@ is
+  -- the same thing written in one line.
+  | namespace QName where '{' Decls '}'
+      { SurfaceNamespace (fst $2) (snd $2) (reverse $5) }
   -- **A top-level block is an item, not an expression** — his, 2026-09-03.
   -- Same syntax, different role: at the top of a module it plays where the
   -- other items declare.

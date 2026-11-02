@@ -20,7 +20,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
-import Thena.Core.Term (rootName)
+import Thena.Core.Term (Core (..), rootName)
 import Thena.Errors (FailReason (..))
 import Thena.Declared (declaredAs, named)
 import Thena.Driver
@@ -42,7 +42,7 @@ import Thena.Driver
   )
 import Thena.Engine (Development, Machine (..), development)
 import Thena.Files (rulesPath)
-import Thena.Core.Term (Core, substLevelsIn)
+import Thena.Core.Term (substLevelsIn)
 import Thena.Global.Env
   ( Definition (..)
   , lookupDefinition
@@ -72,7 +72,131 @@ tests =
     , testGroup "three kinds behind one word (phase 43)" kindTests
     , testGroup "a proof module (phase 43)" moduleTests
     , testGroup "MS4 tier 0 (phase 43)" tierTests
+    , testGroup "a namespace block (MS10 phase 254)" namespaceTests
     ]
+
+-- --------------------------------------------------------------------------
+-- @namespace@ (MS10 phase 254)
+-- --------------------------------------------------------------------------
+
+-- | A namespace is a prefix, and the walk out of one.
+--
+-- **Both halves are asserted on the same module**, because they are two sides
+-- of one thing: a declaration goes inside the namespace, and a name written
+-- inside it is looked for there first. A module that declared correctly but
+-- resolved at the root would not load at all, and one that resolved correctly
+-- while declaring at the root would load and declare the wrong keys — so each
+-- test says which it is checking.
+namespaceTests :: [TestTree]
+namespaceTests =
+  [ testCase "it puts what it declares inside itself" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 namespacedModule of
+        (s1, ProofLoaded {}) -> do
+          let env = globals (machineOf s1)
+          isDeclared (named "A.Nat.Nat") env @?= True
+          isDeclared (named "A.Nat.zero") env @?= True
+          isJust (lookupDefinition (named "A.one") env) @?= True
+          -- **Nothing lands at the root**, which is the half a module that
+          -- resolved correctly would still get wrong.
+          isDeclared (named "Nat.Nat") env @?= False
+        (_, other) -> assertFailure (show other)
+
+  , -- @one = Nat.succ Nat.zero@ is written inside @A@ with no @open@, so it
+    -- loads only because the walk tried @A.Nat.succ@.
+    testCase "and a name written inside it is tried there first" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 namespacedModule of
+        (_, ProofLoaded _ ds _ _) -> ds @?= ["A.Nat", "A.one", "A.two"]
+        (_, other) -> assertFailure (show other)
+
+  , testCase "nesting is a longer prefix and needs nothing of its own" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 nestedModule of
+        (s1, ProofLoaded {}) -> do
+          let env = globals (machineOf s1)
+          isDeclared (named "A.B.Leaf.Leaf") env @?= True
+          isJust (lookupDefinition (named "A.B.inner") env) @?= True
+          isJust (lookupDefinition (named "A.outer") env) @?= True
+        (_, other) -> assertFailure (show other)
+
+  , -- **The whole point of the walk being ordered**: @Nat.Nat@ is a name at the
+    -- root /and/ inside @A@, and inside @A@ it means the inner one. His ruling
+    -- of 2026-10-30 — nearer wins outright, where two @open@s would be refused.
+    testCase "a nearer namespace wins over the root outright" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 shadowingModule of
+        (s1, ProofLoaded {}) -> do
+          let env = globals (machineOf s1)
+          -- @inner@'s type is written @Nat.Nat@ inside @A@, so it is @A@'s.
+          case lookupDefinition (named "A.inner") env of
+            Just d  -> definitionType d @?= Canonical (named "A.Nat.Nat") [] []
+            Nothing -> assertFailure "A.inner was not declared"
+          -- The same text outside the block is the root's, unchanged.
+          case lookupDefinition (named "outer") env of
+            Just d  -> definitionType d @?= Canonical (named "Nat.Nat") [] []
+            Nothing -> assertFailure "outer was not declared"
+        (_, other) -> assertFailure (show other)
+
+  , -- A namespace's effect ends with its block, which is what makes it a
+    -- declaration rather than a mode: the word after it is at the root again.
+    testCase "and the block is where its effect ends" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 escapingModule of
+        (_, Ran _ _ (Halted (CannotRead _))) -> pure ()
+        (_, other) -> assertFailure (show other)
+  ]
+  where
+    namespacedModule =
+      "module NS where\n\
+      \namespace A where\n\
+      \  data Nat : Type\8320 where\n\
+      \    zero : Nat\n\
+      \    succ : Nat -> Nat\n\
+      \\n\
+      \  one : Nat.Nat\n\
+      \  one = Nat.succ Nat.zero\n\
+      \\n\
+      \  two : A.Nat.Nat\n\
+      \  two = Nat.succ one\n"
+
+    nestedModule =
+      "module NS where\n\
+      \namespace A where\n\
+      \  namespace B where\n\
+      \    data Leaf : Type\8320 where\n\
+      \      leaf : Leaf\n\
+      \\n\
+      \    inner : Leaf.Leaf\n\
+      \    inner = Leaf.leaf\n\
+      \\n\
+      \  outer : B.Leaf.Leaf\n\
+      \  outer = B.Leaf.leaf\n"
+
+    shadowingModule =
+      "module NS where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \\n\
+      \namespace A where\n\
+      \  data Nat : Type\8320 where\n\
+      \    one : Nat\n\
+      \\n\
+      \  inner : Nat.Nat\n\
+      \  inner = Nat.one\n\
+      \\n\
+      \outer : Nat.Nat\n\
+      \outer = Nat.zero\n"
+
+    -- @A@'s @only@ is reached from inside the block and not from after it.
+    escapingModule =
+      "module NS where\n\
+      \namespace A where\n\
+      \  data Leaf : Type\8320 where\n\
+      \    leaf : Leaf\n\
+      \\n\
+      \escaped : Leaf.Leaf\n\
+      \escaped = Leaf.leaf\n"
 
 -- --------------------------------------------------------------------------
 -- The prelude
