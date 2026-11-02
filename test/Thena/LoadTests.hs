@@ -21,7 +21,7 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (Core (..), rootName)
-import Thena.Errors (FailReason (..))
+import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..))
 import Thena.Declared (declaredAs, named)
 import Thena.Driver
   ( LoadError (..)
@@ -73,7 +73,110 @@ tests =
     , testGroup "a proof module (phase 43)" moduleTests
     , testGroup "MS4 tier 0 (phase 43)" tierTests
     , testGroup "a namespace block (MS10 phase 254)" namespaceTests
+    , testGroup "the five forms of open (MS10 phase 254)" openTests
     ]
+
+-- --------------------------------------------------------------------------
+-- The forms of @open@ (MS10 phase 254)
+-- --------------------------------------------------------------------------
+
+-- | His ruling of 2026-10-30 gives five, and each is asserted by what it keeps
+-- OUT as well as by what it lets in.
+--
+-- **A form that let everything in would pass a test that only checked what it
+-- admits**, which is the whole risk here: @open X ( a )@ and @open X@ differ
+-- only in what they refuse.
+openTests :: [TestTree]
+openTests =
+  [ testCase "open X Y Z opens each of them" $ loads twoNamespaces
+
+  , testCase "open X ( a b ) admits those words" $ loads selective
+  , testCase "and keeps the others out" $ notInScope selectiveMisses "succ"
+
+  , testCase "open X hiding ( a ) admits the rest" $ loads hidingSome
+  , testCase "and keeps that one out" $ notInScope hidingMisses "succ"
+
+  , testCase "open X renaming ( a -> b ) admits it as b" $ loads renamingOne
+  , -- **The old spelling goes**, as Agda's renaming does — which is what makes
+    -- it the tie-break for two languages sharing a letter rather than a second
+    -- way in.
+    testCase "and the word it renamed is no longer in scope" $
+      notInScope renamingMisses "succ"
+
+  , -- **One declaration is the signature and the equation**, because that is
+    -- what a declaration is in this language.
+    testCase "open X in reaches the declaration under it, pair and all" $
+      loads localOpen
+  , testCase "and stops at the end of it" $ notInScope localOpenEnds "succ"
+  ]
+  where
+    loads src = do
+      (s0, _) <- startingSession
+      case loadProofSource s0 src of
+        (_, ProofLoaded {}) -> pure ()
+        (_, other)          -> assertFailure (show other)
+
+    notInScope src w = do
+      (s0, _) <- startingSession
+      case loadProofSource s0 src of
+        (_, Ran _ _ (Halted (CannotRead (ResolveFailed (NotInScope x)))))
+          | x == w -> pure ()
+        (_, Ran _ _ (Halted r)) -> assertFailure (show r)
+        (_, other)              -> assertFailure (show other)
+
+    nat =
+      "data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \  succ : Nat -> Nat\n"
+
+    header o = "module O where\n" ++ nat ++ o
+
+    twoNamespaces =
+      header "data Bit : Type\8320 where\n\
+             \  off : Bit\n\
+             \open Nat Bit\n\
+             \both : Bit.Bit\n\
+             \both = off\n"
+
+    selective =
+      header "open Nat ( zero )\n\
+             \only : Nat.Nat\n\
+             \only = zero\n"
+
+    selectiveMisses =
+      header "open Nat ( zero )\n\
+             \bad : Nat.Nat\n\
+             \bad = succ zero\n"
+
+    hidingSome =
+      header "open Nat hiding ( succ )\n\
+             \only : Nat.Nat\n\
+             \only = zero\n"
+
+    hidingMisses =
+      header "open Nat hiding ( succ )\n\
+             \bad : Nat.Nat\n\
+             \bad = succ zero\n"
+
+    renamingOne =
+      header "open Nat renaming ( succ -> s )\n\
+             \good : Nat.Nat\n\
+             \good = s Nat.zero\n"
+
+    renamingMisses =
+      header "open Nat renaming ( succ -> s )\n\
+             \bad : Nat.Nat\n\
+             \bad = succ Nat.zero\n"
+
+    localOpen =
+      header "open Nat in one : Nat.Nat\n\
+             \one = succ zero\n"
+
+    localOpenEnds =
+      header "open Nat in one : Nat.Nat\n\
+             \one = succ zero\n\
+             \after : Nat.Nat\n\
+             \after = succ Nat.zero\n"
 
 -- --------------------------------------------------------------------------
 -- @namespace@ (MS10 phase 254)

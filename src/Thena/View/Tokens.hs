@@ -171,6 +171,8 @@ kindOf t = case t of
   -- MS10 phase 247: @open@ is a declaration, and a keyword like the rest.
   TOpen         -> AKeyword
   TNamespace    -> AKeyword
+  THiding       -> AKeyword
+  TRenaming     -> AKeyword
   TDo           -> AKeyword
   TRule         -> AKeyword
   TLanguage     -> AKeyword

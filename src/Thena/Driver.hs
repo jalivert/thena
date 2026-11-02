@@ -69,7 +69,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), rootScope, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -194,6 +194,7 @@ import Thena.Surface.Concrete
   , SurfaceConstructor (..)
   , SurfaceData (..)
   , SurfaceDecl (..)
+  , SurfaceOpenSpec (..)
   , SurfaceModule (..)
   , PairingError (..)
   )
@@ -1192,10 +1193,13 @@ data Item
     -- **a path and a word** since MS10 phase 243, so a generated definition can
     -- be admitted into its namespace by the ordinary declaration path
   | ItemBlock [RawInstr]
-  | ItemOpen GlobalName
-    -- ^ @open ‹namespace›@ (MS10 phase 247) — the namespace's whole path, as a
-    -- name. It declares nothing; it changes what the declarations after it can
-    -- see.
+  | ItemOpen Opened
+    -- ^ @open ‹namespace›@ (MS10 phase 247) — the namespace's whole path and
+    -- whatever the line said about which of its names it brings in (phase 254).
+    -- It declares nothing; it changes what the declarations after it can see.
+    --
+    -- **One per namespace**, so @open X Y Z@ regroups into three of these: the
+    -- plural is the line's, not the item's.
   | ItemNamespace GlobalName [Item]
     -- ^ @namespace ‹name› where { … }@ (MS10 phase 254) — the namespace, and
     -- the items inside it.
@@ -1204,6 +1208,13 @@ data Item
     -- printed back from these items and the nesting is what it is written
     -- with. The program 'surfaceProgram' builds /is/ flat: two ops around the
     -- inner instructions, which is where the prefix comes from.
+  | ItemOpenIn [Opened] [Item]
+    -- ^ @open X in ‹one declaration›@ (MS10 phase 254) — the opens, and the
+    -- declaration they reach.
+    --
+    -- **A list of items because a declaration is one item here**, and the list
+    -- is what makes the shape the same as 'ItemNamespace'\'s: both are a scope
+    -- with contents, and 'surfaceProgram' treats them the same way.
   | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
     -- resolves it while the file is being read, so a block with bad operands is
@@ -1218,34 +1229,57 @@ data Item
 regroup :: [SurfaceDecl] -> Either SyntaxError [Item]
 regroup = go
   where
+    -- **What the line said, as one namespace's 'Opened'** (MS10 phase 254).
+    opened spec p = case spec of
+      OpenWhole        -> openedWhole p
+      OpenOnly ws      -> (openedWhole p) { openedOnly = Just ws }
+      OpenHiding ws    -> (openedWhole p) { openedHiding = ws }
+      OpenRenaming rs  -> (openedWhole p) { openedRenaming = rs }
+
     go [] = Right []
-    go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
-    go (SurfaceOpen ps x : rest) = (ItemOpen (GlobalName ps x) :) <$> go rest
+    go ds = do
+      (is, rest) <- one ds
+      (is ++) <$> go rest
+
+    -- | **One declaration, and what is left** (MS10 phase 254). It was a
+    -- straight list walk until @open X in ‹declaration›@ needed to know where
+    -- one declaration ends: a signature and its equation are two of these and
+    -- one declaration, so the open has to cover both, and only the pass that
+    -- pairs them can say so.
+    one [] = Right ([], [])
+    one (SurfaceDatatype d : rest) = Right ([ItemData d], rest)
+    one (SurfaceOpen ns spec : rest) =
+      Right ([ ItemOpen (opened spec (ps ++ [x])) | (ps, x) <- ns ], rest)
+    -- **The declaration it reaches is taken by this same function**, so
+    -- @open X in@ before a signature covers the equation under it too.
+    one (SurfaceOpenIn ns spec d : rest) = do
+      (is, rest') <- one (d : rest)
+      Right ([ItemOpenIn [ opened spec (ps ++ [x]) | (ps, x) <- ns ] is], rest')
     -- **The declarations inside are regrouped by the same pass** (MS10 phase
     -- 254), so a signature and its equation pair inside a namespace exactly as
     -- they do outside one, and nesting needs nothing of its own.
-    go (SurfaceNamespace ps x ds : rest) = do
+    one (SurfaceNamespace ps x ds : rest) = do
       inner <- go ds
-      (ItemNamespace (GlobalName ps x) inner :) <$> go rest
+      Right ([ItemNamespace (GlobalName ps x) inner], rest)
     -- **Read here, so an unreadable block is a syntax error** and the module
     -- stops before anything in it elaborates (MS6 phase 101). What its names
     -- mean is asked later, at its place in the load ('DeclaringGrammar').
-    go (SurfaceGrammar k l txt : rest) = case readBlock k l txt of
-      Right b -> (ItemGrammar b :) <$> go rest
+    one (SurfaceGrammar k l txt : rest) = case readBlock k l txt of
+      Right b -> Right ([ItemGrammar b], rest)
       Left e  -> Left (BlockUnreadable e)
     -- **Carried as it was written** (MS6 phase 104b). Resolving it here would
     -- ask what its words mean before the declarations above it have run — and
     -- a @language@ block above it is exactly such a declaration. It is
     -- resolved, checked and played where it stands, by @run-block@.
-    go (SurfaceBlock b : rest) = (ItemBlock b :) <$> go rest
+    one (SurfaceBlock b : rest) = Right ([ItemBlock b], rest)
     -- **Paired on the whole name, path included** (MS10 phase 243): @Ty.fv-X@
     -- and @fv-X@ are two names, so a signature written with a path wants its
     -- equation written with the same one.
-    go (SurfaceSignature ps x ty : SurfaceEquation qs y body : rest)
-      | (ps, x) == (qs, y) = (ItemTheorem (GlobalName ps x) ty body :) <$> go rest
-    go (SurfaceSignature ps x _ : _) =
+    one (SurfaceSignature ps x ty : SurfaceEquation qs y body : rest)
+      | (ps, x) == (qs, y) = Right ([ItemTheorem (GlobalName ps x) ty body], rest)
+    one (SurfaceSignature ps x _ : _) =
       Left (DeclarationsUnpaired (SignatureWithNoEquation (nameDotted (GlobalName ps x))))
-    go (SurfaceEquation ps x _ : _) =
+    one (SurfaceEquation ps x _ : _) =
       Left (DeclarationsUnpaired (EquationWithNoSignature (nameDotted (GlobalName ps x))))
 
 -- --------------------------------------------------------------------------
@@ -1296,7 +1330,15 @@ surfaceProgram n0 items = foldl (item []) ([], n0) items
   -- **One instruction, where it is written** (MS10 phase 247): the program is
   -- played in order, so an @open@'s effect reaching only the declarations after
   -- it falls out of the sequencing and needs nothing of its own.
-  item _ (acc, n) (ItemOpen g) = (acc ++ [Do (Open (Lit (VName g)))], n)
+  item _ (acc, n) (ItemOpen o) = (acc ++ [Do (Open o)], n)
+  -- **The opens go on, the declaration runs, the opens come off** (MS10 phase
+  -- 254) — the same shape a @namespace@ block compiles to, which is what makes
+  -- @open X in@ need nothing of its own beyond the op that pops.
+  item ns (acc, n) (ItemOpenIn os is) =
+    let (inner, n1) = foldl (item ns) ([], n) is
+     in ( acc ++ [ Do (Open o) | o <- os ] ++ inner
+              ++ [ Do LeaveOpen | _ <- os ]
+        , n1 )
   -- **Two ops around the items inside** (MS10 phase 254). Where a declaration
   -- lands and what a written name may mean both come from the machine, so the
   -- items inside need no rewriting here — and a nested namespace is the same
@@ -1607,6 +1649,7 @@ declaredNames = go []
     -- not got.
     go ns (ItemNamespace g is) =
       concatMap (go (ns ++ nameSteps g ++ [nameWord g])) is
+    go ns (ItemOpenIn _ is) = concatMap (go ns) is
     go ns i = [ intercalate "." (ns ++ [n]) | Just n <- [declaredName i] ]
 
 -- | How many top-level blocks an item holds, for the summary's count.
@@ -1614,6 +1657,7 @@ blocksIn :: Item -> Int
 blocksIn i = case i of
   ItemBlock _        -> 1
   ItemNamespace _ is -> sum (map blocksIn is)
+  ItemOpenIn _ is    -> sum (map blocksIn is)
   _                  -> 0
 
 -- | The one name an item declares, where it declares exactly one.
@@ -1630,8 +1674,9 @@ declaredName i = case i of
   ItemOpen _        -> Nothing
   -- **A namespace declares nothing of its own** (MS10 phase 254) — it is a
   -- prefix, and what it holds is the items inside it, each of which is named in
-  -- the summary by its own entry.
+  -- the summary by its own entry. An @open … in@ is the same.
   ItemNamespace _ _ -> Nothing
+  ItemOpenIn _ _    -> Nothing
   -- The language's name. Until phase 103 generates its datatype, what it
   -- declares is the grammar alone — the metavariables and the notation.
   -- **A @notation@ block declares nothing at all** (MS8 phase 158, §4.8): the
@@ -2281,7 +2326,7 @@ dispatch s name arg = case name of
           -- load reports per declaration; a line typed at the prompt that answered
           -- nothing at all would leave the user unable to tell it took, and the
           -- refusal path already speaks. The wording follows @declared ‹name›@.
-          is = [ Do (Open (Lit (VName g)))
+          is = [ Do (Open (openedWhole (nameSteps g ++ [nameWord g])))
                , Do (Say (Lit (VText ("opened " ++ nameDotted g))))
                ]
        in progress

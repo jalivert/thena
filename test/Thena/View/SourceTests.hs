@@ -93,6 +93,7 @@ termsOf i = case i of
   ItemGrammar _ -> []
   ItemOpen _ -> []
   ItemNamespace _ is -> concatMap termsOf is
+  ItemOpenIn _ is -> concatMap termsOf is
 
 -- | Every surface file the project ships.
 paths :: IO [FilePath]
@@ -212,4 +213,5 @@ unlined i = case i of
         , blockRules = [ r { ruleLine = 0 } | r <- blockRules b ]
         }
   ItemNamespace g is -> ItemNamespace g (map unlined is)
+  ItemOpenIn os is -> ItemOpenIn os (map unlined is)
   other -> other

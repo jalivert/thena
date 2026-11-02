@@ -1703,6 +1703,7 @@ operation gs g i (RawOp w as)
       -- so is the end of one.
       ("namespace", _)            -> Left (DeclarationInBody g i)
       ("leave-namespace", _)      -> Left (DeclarationInBody g i)
+      ("leave-open", _)           -> Left (DeclarationInBody g i)
 
       _ -> case (lookup w nullaryOps, lookup w unaryOps, lookup w binaryOps, as) of
         (Just o,  _, _, [])       -> Right o

@@ -31,6 +31,7 @@ import Thena.Surface.Concrete
   , Surface (..)
   , ObjectPiece (..)
   , SurfaceDecl (..)
+  , SurfaceOpenSpec (..)
   , SurfaceModule (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
@@ -83,6 +84,8 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   '.'     { Located _ TDot }
   open    { Located _ TOpen }
   namespace { Located _ TNamespace }
+  hiding  { Located _ THiding }
+  renaming { Located _ TRenaming }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
   ','     { Located _ TComma }
@@ -285,7 +288,11 @@ Decl :: { SurfaceDecl }
   | Datatype                               { SurfaceDatatype $1 }
   -- **A declaration, not a layout block** (MS10 phase 247, his ruling): it
   -- names a namespace and its effect runs to the end of the enclosing one.
-  | open QName                             { SurfaceOpen (fst $2) (snd $2) }
+  -- **The five forms his ruling of 2026-10-30 gives.** Four say what the line
+  -- brings in and do not combine; the fifth says how far it reaches, and it
+  -- composes with any of them.
+  | open OpenHead                          { SurfaceOpen (fst $2) (snd $2) }
+  | open OpenHead in Decl                  { SurfaceOpenIn (fst $2) (snd $2) $4 }
   -- **A layout block, where @open@ is a line** (MS10 phase 254): a namespace
   -- says which declarations are in it, so it has to hold them. Nesting is a
   -- longer prefix and costs no mechanism, and @namespace A.B where { … }@ is
@@ -360,6 +367,34 @@ Arg :: { SurfaceArg }
 QName :: { ([String], String) }
   : ident                                  { ([], $1) }
   | qident                                 { (init $1, last $1) }
+
+-- | What an @open@ opens, and what it says about which names it brings in
+-- (MS10 phase 254). Several namespaces only in the plain form: a selection is
+-- about one namespace's words, so naming two would not say whose they are.
+OpenHead :: { ([([String], String)], SurfaceOpenSpec) }
+  : QNames                                 { (reverse $1, OpenWhole) }
+  | QName '(' Words ')'                    { ([$1], OpenOnly (reverse $3)) }
+  | QName hiding '(' Words ')'             { ([$1], OpenHiding (reverse $4)) }
+  | QName renaming '(' Renamings ')'       { ([$1], OpenRenaming (reverse $4)) }
+
+-- | One or more, for @open X Y Z@ (MS10 phase 254). Reversed by its caller.
+QNames :: { [([String], String)] }
+  : QName                                  { [$1] }
+  | QNames QName                           { $2 : $1 }
+
+-- | The words an @open@ selects, hides, or renames from. **Words and not
+-- names**: a namespace is a prefix, so what an @open@ can speak about is the
+-- step that follows it.
+Words :: { [String] }
+  : ident                                  { [$1] }
+  | Words ident                            { $2 : $1 }
+
+Renamings :: { [(String, String)] }
+  : Renaming                               { [$1] }
+  | Renamings Renaming                     { $2 : $1 }
+
+Renaming :: { (String, String) }
+  : ident '->' ident                       { ($1, $3) }
 
 Atom :: { Surface }
   : QName                                  { qualifiedName (fst $1) (snd $1) }

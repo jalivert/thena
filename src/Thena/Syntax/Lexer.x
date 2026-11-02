@@ -202,6 +202,12 @@ tokens :-
   -- rather than taken from the file's path, is what decouples the unit you
   -- import from the scope a name lives in.
   "namespace"   { keyword TNamespace }
+  -- **Reserved at MS10 phase 254**, for @open X hiding ( … )@ and
+  -- @open X renaming ( e -> c )@ — the sixth and seventh words to narrow
+  -- identifiers project-wide, and the last the module system needs. They are
+  -- part of a declaration's syntax, so they are reserved for @data@'s reason.
+  "hiding"      { keyword THiding }
+  "renaming"    { keyword TRenaming }
   -- **The escape opener is an ordinary token too** (MS5 phase 81). The region
   -- scanner emits one when it meets @${@ inside a tagged region; this is what
   -- lets the same spelling be read again when the region's text is lexed for
@@ -314,6 +320,8 @@ data Token
   | TData
   | TOpen        -- ^ @open@, the declaration that brings a namespace into view (MS10 phase 247)
   | TNamespace   -- ^ @namespace ‹name› where { … }@ (MS10 phase 254)
+  | THiding      -- ^ @open X hiding ( … )@ (MS10 phase 254)
+  | TRenaming    -- ^ @open X renaming ( e -> c )@ (MS10 phase 254)
   | TModule
   | TDo
   | TRule

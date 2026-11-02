@@ -57,6 +57,7 @@ import Thena.Core.Term
   , GlobalName (..)
   , globalUnder
   , InScope (..)
+  , Opened (..)
   , nameDotted
   , rootName
   , Ident (..)
@@ -1114,13 +1115,10 @@ perform instr rest m = case operation instr of
   -- sits under it is 'namespaceInhabited'\'s question, asked right here so that
   -- @open Foo@ with no @Foo.…@ anywhere is refused where it is written rather
   -- than becoming a silent no-op that makes every later name fail on its own.
-  Open nm -> case nameOf nm of
-    Left r  -> failure r m
-    Right g ->
-      let ns = nameSteps g ++ [nameWord g]
-       in if namespaceInhabited ns (globals m)
-            then Continue (advance m { scope = (scope m) { scopeOpens = ns : scopeOpens (scope m) } })
-            else failure (NoSuchNamespace (nameDotted g)) m
+  Open o
+    | namespaceInhabited (openedPath o) (globals m) ->
+        Continue (advance m { scope = (scope m) { scopeOpens = o : scopeOpens (scope m) } })
+    | otherwise -> failure (NoSuchNamespace (intercalate "." (openedPath o))) m
 
   -- **A namespace is entered by pushing a prefix and nothing else** (MS10
   -- phase 254). Nothing is checked: a namespace holds whatever keys sit under
@@ -1131,6 +1129,9 @@ perform instr rest m = case operation instr of
     Right g ->
       let ns = namespaceOf m ++ nameSteps g ++ [nameWord g]
        in Continue (advance m { scope = (scope m) { scopeWithin = ns : scopeWithin (scope m) } })
+
+  LeaveOpen ->
+    Continue (advance m { scope = (scope m) { scopeOpens = drop 1 (scopeOpens (scope m)) } })
 
   LeaveNamespace ->
     Continue (advance m { scope = (scope m) { scopeWithin = drop 1 (scopeWithin (scope m)) } })

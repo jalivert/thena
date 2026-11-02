@@ -30,6 +30,9 @@ module Thena.Core.Term
   , InScope (..)
   , rootScope
   , openingOnly
+  , Opened (..)
+  , openedWhole
+  , openedWord
   , nameFromText
 
     -- * Terms
@@ -230,18 +233,79 @@ data InScope = InScope
   { scopeWithin :: [[String]]
     -- ^ the namespaces this point is inside, **innermost first** — what
     -- @namespace X where { … }@ pushes for its declarations
-  , scopeOpens  :: [[String]]
+  , scopeOpens  :: [Opened]
     -- ^ the namespaces an @open@ has brought into view, latest first
   }
   deriving (Eq, Show)
+
+-- | __One @open@, with whatever it said about which names it brings in.__
+--
+-- **His ruling of 2026-10-30 gives five forms and this is all of them**:
+-- @open X@, @open X Y Z@ (which is three of these), @open X ( a b )@,
+-- @open X hiding ( … )@ and @open X renaming ( e -\> c )@.
+--
+-- **Hiding and renaming are a filter on the WORD, not on a path.** A namespace
+-- is a prefix, so what an @open@ can say something about is the word that
+-- follows the prefix — and for a deeper name it is the first step, so
+-- @open A ( B )@ brings in @B.c@ and nothing else of @A@'s.
+--
+-- **Renaming replaces the word rather than adding one**, as Agda's does: after
+-- @open Expr renaming ( e -\> expr )@ a written @expr@ is @Expr.e@ and a written
+-- @e@ is not in scope. Which is what makes it the tie-break when two opened
+-- languages use one letter.
+--
+-- **Visibility, and not opacity.** A name an @open@ hid is still a key in the
+-- environment and still what a term carries, so a hidden constructor can appear
+-- in a printed goal. Making it genuinely opaque would mean the printer and the
+-- kernel respecting an @open@, which is not what this is.
+data Opened = Opened
+  { openedPath     :: [String]
+    -- ^ the namespace's whole path
+  , openedOnly     :: Maybe [String]
+    -- ^ @Just ws@ for @open X ( ws )@ — only these words. 'Nothing' is every
+    -- word under the prefix, which is what @open X@ says.
+  , openedHiding   :: [String]
+    -- ^ the words @open X hiding ( … )@ keeps out
+  , openedRenaming :: [(String, String)]
+    -- ^ @(original, as written)@ — @open X renaming ( e -\> c )@ is @("e", "c")@
+  }
+  deriving (Eq, Show)
+
+-- | @open X@ — the whole namespace, nothing hidden and nothing renamed.
+openedWhole :: [String] -> Opened
+openedWhole p = Opened p Nothing [] []
+
+-- | The word an @open@ answers a written name with, if it answers it at all.
+--
+-- **The written name's first step is what is filtered**, and a renaming
+-- replaces it. 'Nothing' means this @open@ says nothing about the name.
+openedWord :: Opened -> GlobalName -> Maybe GlobalName
+openedWord o g = case lookup first [ (w, orig) | (orig, w) <- openedRenaming o ] of
+  Just orig -> Just (under (orig : rest))
+  Nothing
+    | first `elem` map fst (openedRenaming o) -> Nothing
+      -- **a word that was renamed is no longer in scope under its own
+      -- spelling**, which is what makes a renaming a tie-break rather than a
+      -- second way in
+    | first `elem` openedHiding o -> Nothing
+    | maybe False (notElem first) (openedOnly o) -> Nothing
+    | otherwise -> Just (under (first : rest))
+  where
+    -- 'nameSteps' may be empty; the word never is, so this list never is.
+    (first, rest) = case nameSteps g of
+      st : sts -> (st, sts ++ [nameWord g])
+      []       -> (nameWord g, [])
+    under ws = case reverse ws of
+      w : before -> GlobalName (openedPath o ++ reverse before) w
+      []         -> GlobalName (openedPath o) (nameWord g)
 
 -- | At the root, with nothing opened — a prompt's scope before any @open@.
 rootScope :: InScope
 rootScope = InScope [] []
 
--- | Only these namespaces open, at the root.
+-- | Only these namespaces open whole, at the root.
 openingOnly :: [[String]] -> InScope
-openingOnly = InScope []
+openingOnly ps = InScope [] (map openedWhole ps)
 
 -- | __Which global a written name means, in a scope.__
 --
@@ -282,7 +346,7 @@ globalUnder
 globalUnder known sc g =
   case [ c | ns <- scopeWithin sc ++ [[]], c <- under ns, known c ] of
     c : _ -> Right c
-    []    -> case nub (filter known [ c | ns <- scopeOpens sc, c <- under ns ]) of
+    []    -> case nub (filter known (concatMap opened (scopeOpens sc))) of
       [g'] -> Right g'
       gs   -> Left gs
   where
@@ -300,6 +364,12 @@ globalUnder known sc g =
     -- because it is what the word names exactly (`~s89ch`).
     under ns = let q = GlobalName (ns ++ nameSteps g) (nameWord g)
                 in [q, declarationNamed q]
+    -- **An @open@ may say nothing about this name at all** — hidden, not in its
+    -- selection, or spelled under a word it renamed — and then it offers no
+    -- candidate, so it cannot make an ambiguity either.
+    opened o = case openedWord o g of
+      Nothing -> []
+      Just q  -> [q, declarationNamed q]
 
 -- | The body of a binder, with the bound variable replaced by a de Bruijn index.
 --

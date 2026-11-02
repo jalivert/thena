@@ -19,6 +19,7 @@ module Thena.Surface.Concrete
   ( Surface (..)
   , ObjectPiece (..)
   , SurfaceDecl (..)
+  , SurfaceOpenSpec (..)
   , SurfaceModule (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
@@ -329,21 +330,57 @@ data SurfaceModule = SurfaceModule
 -- steps is every declaration anything wrote before MS10. **It is the written
 -- pieces and not a resolved 'Thena.Core.Term.GlobalName'**, because a
 -- declaration inside an enclosing namespace will be relative to it.
+-- | What an @open@ said about which of a namespace's names it brings in (MS10
+-- phase 254).
+--
+-- **Only one of these at a time**, which is his ruling's shape: the forms are
+-- @open X@, @open X ( a b )@, @open X hiding ( … )@ and
+-- @open X renaming ( e -> c )@, and nothing combines two. A combination would
+-- have to say which applied first, and nothing wants it yet.
+data SurfaceOpenSpec
+  = OpenWhole                      -- ^ @open X@, and @open X Y Z@
+  | OpenOnly [String]              -- ^ @open X ( a b )@
+  | OpenHiding [String]            -- ^ @open X hiding ( a b )@
+  | OpenRenaming [(String, String)]
+    -- ^ @open X renaming ( e -> c )@ — @(original, as written)@
+    --
+    -- **@-\>@ and not @→@**, which is a legal identifier character here: making
+    -- the glyph a token would narrow what a name may contain, and that is a
+    -- decision about identifiers rather than about @open@.
+  deriving (Eq, Show)
+
 data SurfaceDecl
   = SurfaceSignature [String] String Surface   -- ^ @foo : T@, @Ns.foo : T@
   | SurfaceEquation  [String] String Surface   -- ^ @foo = e@, @Ns.foo = e@
   | SurfaceDatatype  SurfaceData      -- ^ @data D … where { … }@ (phase 42b)
-  | SurfaceOpen      [String] String
-    -- ^ @open ‹namespace›@ — **bring a namespace into view** (MS10 phase 247).
+  | SurfaceOpen      [([String], String)] SurfaceOpenSpec
+    -- ^ @open ‹namespace›@ — **bring namespaces into view** (MS10 phase 247,
+    -- all five forms at 254).
     --
-    -- The steps and the last word of the namespace's own path, so @open A.B@ is
-    -- @SurfaceOpen ["A"] "B"@ and the namespace is @A.B@. **A namespace is a
-    -- prefix and not a thing that is declared**, so there is nothing here but
-    -- the path: what it contains is whatever keys the environment has under it.
+    -- The steps and the last word of each namespace's own path, so @open A.B@
+    -- is @[(["A"], "B")]@ and the namespace is @A.B@. **A namespace is a prefix
+    -- and not a thing that is declared**, so there is nothing here but the
+    -- path: what it contains is whatever keys the environment has under it.
+    --
+    -- **Several paths, because @open X Y Z@ is one line and three opens** — it
+    -- is pulled apart by 'Thena.Driver.regroup', so nothing below this carries
+    -- the plural.
     --
     -- **Its effect runs from where it is written to the end of the enclosing
     -- namespace**, which for a file with no @namespace@ block is the rest of
     -- the file — so a declaration above it does not see it.
+  | SurfaceOpenIn [([String], String)] SurfaceOpenSpec SurfaceDecl
+    -- ^ @open X in ‹one declaration›@ — **the open reaches that declaration and
+    -- stops** (MS10 phase 254), which is his *"one local let-like"*.
+    --
+    -- **One declaration means the signature and the equation**, because that is
+    -- what a declaration is in this language — 'SurfaceDecl' is half of one.
+    -- 'Thena.Driver.regroup' takes the pair, so
+    --
+    -- > open Nat in two : Nat.Nat
+    -- > two = succ zero
+    --
+    -- is one declaration under one @open@, and @succ@ resolves in both lines.
   | SurfaceNamespace [String] String [SurfaceDecl]
     -- ^ @namespace ‹name› where { … }@ — **declare a namespace and put these
     -- declarations in it** (MS10 phase 254).

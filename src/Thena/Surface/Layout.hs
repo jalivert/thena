@@ -97,13 +97,29 @@ closesBlock t = case t of
 data Context
   = Explicit      -- ^ the user wrote @{@; the Report's @0@
   | Paren         -- ^ the user wrote @(@ (MS4 phase 43)
-  | Implicit Int  -- ^ opened by the offside rule, at this column
+  | Implicit Opener Int
+    -- ^ opened by the offside rule, by this keyword, at this column
   deriving (Eq, Show)
+
+-- | Which keyword opened an implicit block (MS10 phase 254).
+--
+-- **Only @let@ is distinguished, because only @in@ asks** — see 'closesBlock'.
+-- @where@, @do@ and @of@ are one answer between them: nothing closes their
+-- blocks by appearing.
+data Opener = ByLet | ByBlock
+  deriving (Eq, Show)
+
+-- | The opener a layout keyword is.
+openerOf :: Token -> Opener
+openerOf TLet = ByLet
+openerOf _    = ByBlock
 
 -- | A marker the pre-pass inserts, then the main pass consumes.
 data Item
   = Tok (Located Token)
-  | Open Pos Int   -- ^ the Report's @{n}@: a block may open at this column
+  | Open Pos Int Opener
+    -- ^ the Report's @{n}@: a block may open at this column, opened by this
+    -- keyword
   | Line Pos Int   -- ^ the Report's @\<n\>@: a line begins at this column
 
 -- | Insert the braces and semicolons the offside rule implies.
@@ -138,7 +154,7 @@ layout = run [] . mark
 -- Two clauses of the shipped base have an empty body, so this is not a corner.
 layoutFile :: [Located Token] -> Either LayoutError [Located Token]
 layoutFile []                       = Right [at endOfInput TLBrace, at endOfInput TRBrace]
-layoutFile ts@(Located p@(Pos _ c) _ : _) = run [] (Open p c : mark ts)
+layoutFile ts@(Located p@(Pos _ c) _ : _) = run [] (Open p c ByBlock : mark ts)
 
 -- | The Report's two markers.
 --
@@ -158,10 +174,10 @@ mark (t : ts)     = Tok t : go t ts
     -- @0:0: unexpected }@. Column 0 is what makes 'run' answer with @{ }@ and
     -- then close every block that is still open.
     go (Located _ pk) []
-      | layoutKeyword pk = [Open endOfInput 0]
+      | layoutKeyword pk = [Open endOfInput 0 (openerOf pk)]
     go _ [] = []
     go (Located (Pos pl _) pk) (u@(Located q@(Pos l c) _) : us)
-      | layoutKeyword pk && not (isOpenBrace u) = Open q c : Tok u : go u us
+      | layoutKeyword pk && not (isOpenBrace u) = Open q c (openerOf pk) : Tok u : go u us
       | l /= pl                                 = Line q c : Tok u : go u us
       | otherwise                               = Tok u : go u us
 
@@ -175,16 +191,16 @@ run cs is = case (is, cs) of
   -- around it. A block that is not gets an empty one, which is the Report's
   -- @{ }@ and gives a parse error at the right place rather than a silent
   -- reparent.
-  (Open p n : ts, Implicit m : ms)
-    | n > m     -> (at p TLBrace :) <$> run (Implicit n : Implicit m : ms) ts
-    | otherwise -> ([at p TLBrace, at p TRBrace] ++) <$> run (Implicit m : ms) (Line p n : ts)
-  (Open p n : ts, ms)
-    | n > 0     -> (at p TLBrace :) <$> run (Implicit n : ms) ts
+  (Open p n o : ts, Implicit o' m : ms)
+    | n > m     -> (at p TLBrace :) <$> run (Implicit o n : Implicit o' m : ms) ts
+    | otherwise -> ([at p TLBrace, at p TRBrace] ++) <$> run (Implicit o' m : ms) (Line p n : ts)
+  (Open p n o : ts, ms)
+    | n > 0     -> (at p TLBrace :) <$> run (Implicit o n : ms) ts
     | otherwise -> ([at p TLBrace, at p TRBrace] ++) <$> run ms (Line p n : ts)
 
   -- @L (\<n\> : ts) (m : ms)@ — same column is a new item, less is the end of
   -- the block, more is a continuation line and says nothing.
-  (Line p n : ts, Implicit m : ms)
+  (Line p n : ts, Implicit o m : ms)
     -- **A line that begins with a closing token is not a new item.** Without
     -- this, @let x = a@ / @    in y@ — @in@ at the bindings' own column — would
     -- get a @;@ from this rule and then a @}@ from 'closesBlock', leaving a
@@ -207,9 +223,9 @@ run cs is = case (is, cs) of
     -- rule ever written and saying what a leading @;@ means. **It is the same
     -- kind of departure 'closesBlock' already is**, and the same justification:
     -- the Report defers to @parse-error(t)@ where we name the token.
-    | semiNext ts -> run (Implicit m : ms) ts
-    | n == m, closingNext ts -> run (Implicit m : ms) ts
-    | n == m    -> (at p TSemi :) <$> run (Implicit m : ms) ts
+    | semiNext ts -> run (Implicit o m : ms) ts
+    | n == m, closingNext ts -> run (Implicit o m : ms) ts
+    | n == m    -> (at p TSemi :) <$> run (Implicit o m : ms) ts
     -- **A closing token that is ALSO offside closes the blocks it is offside
     -- of, and then closes no more** (2026-09-13). The offside rule and
     -- 'closesBlock' were both firing for the same @in@, so
@@ -232,7 +248,7 @@ run cs is = case (is, cs) of
     -- over — an @in@ indented /past/ the block, where the column rule fires not
     -- at all and one close is right.
     | n < m, closingNext ts ->
-        let (k, ms') = offside n (Implicit m : ms)
+        let (k, ms') = offside n (Implicit o m : ms)
          in (replicate k (at p TRBrace) ++) <$> emitClosing ms' ts
     | n <  m    -> (at p TRBrace :) <$> run ms (Line p n : ts)
   (Line _ _ : ts, ms) -> run ms ts
@@ -262,10 +278,10 @@ run cs is = case (is, cs) of
   -- means, and it terminates because each step pops a context. This is the one
   -- place re-processing is right; see 'closesBlock' for the case where it is
   -- not.
-  (Tok (Located p k) : _, Implicit _ : ms)
+  (Tok (Located p k) : _, Implicit _ _ : ms)
     | k == TRParen, Paren    `elem` ms -> reclose p
     | k == TRBrace, Explicit `elem` ms -> reclose p
-  (Tok (Located p TRBrace) : _, Implicit _ : _) -> Left (UnmatchedClose p)
+  (Tok (Located p TRBrace) : _, Implicit _ _ : _) -> Left (UnmatchedClose p)
 
   -- 'closesBlock' stands in for the Report's @parse-error(t)@.
   -- **Exactly one block per closing token**, and the token is then emitted
@@ -279,23 +295,46 @@ run cs is = case (is, cs) of
   -- the outer one too. The Report does not have this problem because
   -- @parse-error(t)@ stops asking as soon as the parser can continue — one
   -- close is exactly what "the parser can continue" means here.
-  (Tok t@(Located p k) : ts, Implicit _ : ms)
-    | closesBlock k -> ((at p TRBrace :) . (t :)) <$> run ms ts
+  -- **@in@ closes a @let@'s block and nothing else** (MS10 phase 254). It used
+  -- to close whatever implicit block was innermost, which was right while @in@
+  -- belonged to @let@ alone — and @open X in ‹declaration›@ broke it at once:
+  -- the @in@ closed the /module's/ block, since no block had been opened since
+  -- the @open@. So the blocks an @in@ closes are the ones between it and the
+  -- @let@ it belongs to, and with no @let@ to belong to it closes none.
+  --
+  -- **This is nearer the Report than the list was**, for 'closesBlock''s own
+  -- reason: @parse-error(t)@ fires only where the parser cannot continue, and
+  -- after @open X@ it can. It also removes the limitation that function's header
+  -- recorded — @let x = induction v of nil -> a in x@ on one line, where the
+  -- @in@ had two blocks to close and closed one.
+  (Tok t@(Located p k) : ts, cs'@(Implicit _ _ : _))
+    | closesBlock k, Just (j, ms) <- toLet cs' ->
+        ((replicate j (at p TRBrace) ++) . (t :)) <$> run ms ts
 
   (Tok t : ts, ms) -> (t :) <$> run ms ts
 
   -- The end: implicit blocks close, an explicit one is an error. An unclosed
   -- @(@ is left to the parser, which has a better message for it than layout
   -- could invent.
-  ([], Implicit _ : ms) -> (at endOfInput TRBrace :) <$> run ms []
+  ([], Implicit _ _ : ms) -> (at endOfInput TRBrace :) <$> run ms []
   ([], Paren : ms)      -> run ms []
   ([], Explicit : _)    -> Left (MissingClose endOfInput)
   ([], [])              -> Right []
   where
     -- Every implicit block this column is offside of, and how many there are.
-    offside n (Implicit m : ms)
+    offside n (Implicit o m : ms)
       | n < m = let (k, ms') = offside n ms in (k + 1, ms')
+      | otherwise = (0 :: Int, Implicit o m : ms)
     offside _ ms = (0 :: Int, ms)
+
+    -- | How many implicit blocks lie between here and the @let@ that opened
+    -- one, that one included, and what is left under it. 'Nothing' when there
+    -- is no @let@ to reach without passing a bracket the user opened.
+    toLet (Implicit ByLet _ : ms) = Just (1 :: Int, ms)
+    toLet (Implicit ByBlock _ : ms) = do
+      (j, ms') <- toLet ms
+      Just (j + 1, ms')
+    toLet _ = Nothing
 
     -- The closing token itself, emitted without a close of its own — the
     -- @Line@ above has already done it.

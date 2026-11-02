@@ -41,7 +41,7 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` `.` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -234,11 +234,11 @@ primitive functions have moved in too** — `String.eq`, `Char.eq`, `Int.eq` and
 too**, so `data Nat` declares `Nat.Nat`, `Nat.zero` and `Nat.suc`, and a written
 `Nat` reaches the type because a declaration's short name is derived from the
 environment rather than recorded anywhere. **`namespace ‹name› where { … }` is
-built, and resolution walks outward through it.** **What is not built yet**: the
-forms of `open` other than `open ‹namespace›`, printing a name as the shortest
-ending that still resolves (so a name prints with its whole path today), and a
-`language`, `context`, `judgment` or `notation` block inside a `namespace` block,
-which is refused where it is written — write it at the top level of the file.*
+built, and resolution walks outward through it. All five forms of `open` are
+built.** **What is not built yet**: printing a name as the shortest ending that
+still resolves (so a name prints with its whole path today), and a `language`,
+`context`, `judgment` or `notation` block inside a `namespace` block — write it
+at the top level of the file.*
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something
@@ -336,6 +336,32 @@ root, and the whole name you wrote goes under each prefix — a path says what y
 meant, so writing `B.c` inside `A` tries `A.B.c` first. **The `open`s are tried
 only once that walk has failed**, which is what makes an `open` able to add a way
 to resolve and never change one.
+
+### `open` has five forms, and one of them lasts one declaration
+
+*Decided 2026-10-30, built 2026-11-02.*
+
+```
+open Nat                          -- everything in Nat, to the end of the block
+open Nat Bit List                 -- three namespaces, one line
+open Nat ( zero succ )            -- only those words
+open Nat hiding ( succ )          -- everything but that one
+open Nat renaming ( succ -> s )   -- succ is written s, and succ is not in scope
+open Nat in two : Nat.Nat         -- just this declaration
+two = succ zero
+```
+
+**A selection speaks about words, not paths**, because a namespace is a prefix
+and the word is what follows it — so `open A ( B )` brings in `B.c` and nothing
+else of `A`'s. **A renaming replaces the word rather than adding one**, as
+Agda's does, which is what makes it the way to settle two namespaces that use
+the same word. And **the `in` form covers the declaration under it, signature
+and equation both**, because that is what one declaration is here.
+
+**Hiding is visibility and not opacity.** A name you hid is still a key in the
+environment and still what a term carries, so a hidden constructor can appear in
+a goal the system shows you. Making it genuinely opaque would mean the printer
+and the kernel respecting an `open`, which is a different feature.
 
 A file is the unit of import and is **not** a namespace: you import a file by
 its path, and what things are called comes from the `namespace` blocks they sit

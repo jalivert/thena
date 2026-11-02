@@ -502,6 +502,8 @@ describe t = case t of
   TLambda     -> "λ"
   TOpen       -> "open"
   TNamespace  -> "namespace"
+  THiding     -> "hiding"
+  TRenaming   -> "renaming"
   TLanguage   -> "language"
   TContext    -> "context"
   TJudgment   -> "judgment"

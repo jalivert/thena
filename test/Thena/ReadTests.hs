@@ -14,7 +14,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
 import Thena.Core.Term
-  (Core (..), GlobalName (..), Ident (..), Var, close, fresh, rootName, rootScope)
+  (Core (..), GlobalName (..), Ident (..), Var, close, fresh, openedWhole, rootName, rootScope)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   (Cursor, Focus (..), along, context, enter, focus, identsIn, rebuild)
@@ -469,14 +469,14 @@ resolveTests =
       -- of what @open@ does: the written name is tried under each open prefix.
     , testCase "an open namespace is what makes the base word resolve" $ do
         v <- expectBoundIn qualified hole
-               [ Do (Open (Lit (VName (rootName "Ns"))))
+               [ Do (Open (openedWhole ["Ns"]))
                , Bind (Op.PVar "v") Nothing (ResolveName (Lit (VText "thing"))) ] "v"
         v @?= VTerm (Global (GlobalName ["Ns"] "thing") [])
 
       -- **A namespace nothing sits under is refused where it is written**, not
       -- left to make every later name fail on its own.
     , testCase "opening a namespace that holds nothing is refused" $
-        case runIn qualified hole [Do (Open (Lit (VName (rootName "Nope"))))] of
+        case runIn qualified hole [Do (Open (openedWhole ["Nope"]))] of
           Left (NoSuchNamespace n) -> n @?= "Nope"
           other -> assertFailure ("expected NoSuchNamespace, got " ++ show (fmap (const ()) other))
 
@@ -485,8 +485,8 @@ resolveTests =
       -- be the system deciding what the user did not write.
     , testCase "two open namespaces answering one word is ambiguous" $
         case runIn twoNamespaces hole
-               [ Do (Open (Lit (VName (rootName "Ns"))))
-               , Do (Open (Lit (VName (rootName "Other"))))
+               [ Do (Open (openedWhole ["Ns"]))
+               , Do (Open (openedWhole ["Other"]))
                , Do (ResolveName (Lit (VText "thing"))) ] of
           Left (AmbiguousName n gs) -> do
             n @?= "thing"
@@ -497,7 +497,7 @@ resolveTests =
       -- way to resolve and never change one that already worked.
     , testCase "a name that already resolves is not reconsidered under an open" $ do
         v <- expectBoundIn twoNamespaces hole
-               [ Do (Open (Lit (VName (rootName "Ns"))))
+               [ Do (Open (openedWhole ["Ns"]))
                , Bind (Op.PVar "v") Nothing
                       (ResolveName (Lit (VName (GlobalName ["Other"] "thing")))) ] "v"
         v @?= VTerm (Global (GlobalName ["Other"] "thing") [])

@@ -49,7 +49,7 @@ import Data.Maybe (isJust)
 
 import Thena.Core.Level (Level)
 import Thena.Core.Term
-  (Core (App, Canonical, Global, Primitive), GlobalName (..), Literal (..),
+  (Core (App, Canonical, Global, Primitive), GlobalName (..), Literal (..), Opened,
    nameDotted)
 import Thena.Instral.Pattern
   (Pattern (..), Skeleton (..), Slot (..), skeletonHoles, patternBinds, patternIrrefutable)
@@ -1115,9 +1115,16 @@ data Op
     -- the driver checks and installs, as 'DeclarePrimitive' does — so the check
     -- runs at the block's own place in the module, after the token classes
     -- above it.
-  | Open Operand
+  | Open Opened
     -- ^ @open ‹namespace›@ — **bring a namespace into view for the rest of the
-    -- enclosing one** (MS10 phase 247).
+    -- enclosing one** (MS10 phase 247), in any of the five forms his ruling of
+    -- 2026-10-30 gives — see 'Thena.Core.Term.Opened'.
+    --
+    -- **A field rather than an operand** (MS10 phase 254), for
+    -- 'DeclareGrammar'\'s reason: it is written down and never computed. An
+    -- @open@ is refused in a rule body, so nothing can ever hand it one it
+    -- worked out — and as operands the selective forms would want a list of
+    -- names and a list of pairs, which is three operands nothing writes.
     --
     -- **It installs nothing.** A namespace is a prefix over the keys the
     -- environment already has, so this adds the prefix to the machine's list of
@@ -1129,6 +1136,13 @@ data Op
     -- **A declaration and not a rule-body operation** (§3.7), exactly as @data@
     -- is: the word exists so that 'opKeyword' stays total, and
     -- "Thena.Rules" refuses it in a body one step before @validate@ would.
+  | LeaveOpen
+    -- ^ the end of what @open X in ‹one declaration›@ reaches (MS10 phase 254)
+    -- — takes the newest 'Open' back out of view.
+    --
+    -- **Symmetric with 'LeaveNamespace' and not the same op**, because the two
+    -- lists are not the same kind of thing: the namespaces are ordered rungs
+    -- and the opens are a set.
   | EnterNamespace Operand
     -- ^ @namespace ‹name› where { … }@, entered — **everything declared until
     -- the matching 'LeaveNamespace' goes inside this namespace** (MS10 phase
@@ -1559,6 +1573,7 @@ resultOf o = case o of
   DefineData _ -> Nothing
   Certify _    -> Nothing
   Open {} -> Nothing
+  LeaveOpen -> Nothing
   EnterNamespace {} -> Nothing
   LeaveNamespace -> Nothing
   DeclarePrimitive {} -> Nothing
@@ -1791,7 +1806,8 @@ operandTypes o = case o of
   UnifyInto a b -> [(a, TCore), (b, TCore)]
   Try    a     -> [(a, TCore)]
   Certify a    -> [(a, TCore)]
-  Open a -> [(a, TName)]
+  Open _ -> []
+  LeaveOpen -> []
   EnterNamespace a -> [(a, TName)]
   LeaveNamespace -> []
   DeclarePrimitive a b -> [(a, TName), (b, TCore)]
@@ -2383,6 +2399,7 @@ opKeyword o = case o of
   Define _ _   -> "define"
   Certify _    -> "certify"
   Open {} -> "open"
+  LeaveOpen -> "leave-open"
   EnterNamespace {} -> "namespace"
   LeaveNamespace -> "leave-namespace"
   DeclarePrimitive {} -> "declare-primitive"

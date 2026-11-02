@@ -24,7 +24,7 @@ module Thena.View.Source
 
 import Data.List (intercalate)
 
-import Thena.Core.Term (GlobalName (..), nameDotted)
+import Thena.Core.Term (GlobalName (..), Opened (..), nameDotted)
 import Thena.Driver (Item (..))
 import Thena.Surface.Concrete
   ( Surface (..)
@@ -51,14 +51,41 @@ printItem i = case i of
   -- **One line, and the name as written** (MS10 phase 248). An @open@ is a
   -- declaration like any other and the printed module has to carry it: a file
   -- printed without its opens would not re-read.
-  ItemOpen g -> ["open " ++ nameDotted g]
+  ItemOpen o -> [opens [o]]
   -- **The block, indented, with its items a blank line apart** — the layout the
   -- parser reads back (MS10 phase 254). The name is written as it was: a
   -- namespace's path is relative to the one it sits in, so what the item holds
   -- is what goes back on the line.
+  -- **The open and the first line of the declaration it reaches are one line**
+  -- — which is how it was written, and what reads back: @in@ takes a
+  -- declaration, so a newline after it would start a new one (MS10 phase 254).
+  ItemOpenIn os is -> case concatMap printItem is of
+    first : rest -> (opens os ++ " in " ++ first) : rest
+    []           -> [opens os ++ " in"]
   ItemNamespace g is ->
     ("namespace " ++ nameDotted g ++ " where")
       : map ("  " ++) (intercalate [""] (map printItem is))
+
+-- | The @open@ line of an @open … in@, without its @in@ (MS10 phase 254).
+--
+-- **Only the plain form takes several namespaces**, so the restriction belongs
+-- to whichever one carries it and there is never more than one.
+opens :: [Opened] -> String
+opens os =
+  "open " ++ unwords [ intercalate "." (openedPath o) | o <- os ]
+          ++ concatMap restriction os
+
+-- | What an @open@ said about which names it brings in, written back (MS10
+-- phase 254).
+--
+-- **A line says one of these or none**, so there is nothing to order here.
+restriction :: Opened -> String
+restriction o
+  | Just ws <- openedOnly o            = " ( " ++ unwords ws ++ " )"
+  | ws@(_ : _) <- openedHiding o        = " hiding ( " ++ unwords ws ++ " )"
+  | rs@(_ : _) <- openedRenaming o      =
+      " renaming ( " ++ unwords [ a ++ " -> " ++ b | (a, b) <- rs ] ++ " )"
+  | otherwise                           = ""
 
 -- | A datatype declaration.
 --
