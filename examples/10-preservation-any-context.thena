@@ -20,7 +20,7 @@
 -- associative, and a string differs from itself with a `'` appended, with or
 -- without more after it. Each is a one-line fact about a primitive that
 -- computes only on literals, and each is the same shape as the prelude's
--- `eqStringEqual` — a verdict about open arguments that the type theory cannot
+-- `String.eqEqual` — a verdict about open arguments that the type theory cannot
 -- reach but the reducer honours.
 --
 -- **The chooser's specification is a THEOREM here, not a claim.** `freshIsFresh`
@@ -50,8 +50,8 @@
 -- — **but the declarations in this file still load there**, because `declare`
 -- does not consult the level.
 --
--- `eqStringEqual` and `eqStringRefl` are in the same report and are not this
--- file's: they are `decString`'s, and substitution decides names, so any proof
+-- `String.eqEqual` and `String.eqRefl` are in the same report and are not this
+-- file's: they are `String.dec`'s, and substitution decides names, so any proof
 -- about it reaches them.
 --
 -- == It is written in splits, and 107 `elim`s became 25
@@ -63,7 +63,7 @@
 --   * **a scrutinee that is COMPUTED, where the arm needs the verdict as an
 --     equation.** `inRemove`, `removeLonger` and `walk` each ask
 --     `String.eq c a` or `member c avoid` and then call a lemma —
---     `eqStringEqual`, `neqFromDifferent`, `sameIsIn` — that takes the answer
+--     `String.eqEqual`, `neqFromDifferent`, `sameIsIn` — that takes the answer
 --     as an `Eq`. A `case` refines the goal, which is what `remove`'s own
 --     unfolding needs, but it cannot hand the arm that equation. This is the
 --     `with`-abstraction the language does not have, written out by hand.
@@ -108,14 +108,14 @@ symEq : forall (A : Type₀) (x : A) (y : A) -> (Eq A x y : Type₀) -> (Eq A y 
 symEq = \ A x y e -> case e of { refl c -> refl A c }
 
 -- `String.eq a a` does not reduce on an open `a`, so the `refl` comes from
--- `eqStringRefl` and the contradiction is transported along it.
+-- `String.eqRefl` and the contradiction is transported along it.
 neqFromDifferent : forall (a : String) (c : String)
                 -> (Eq Comparison (String.eq a c) different : Type₀)
                 -> (Eq String a c : Type₀) -> (Empty : Type₀)
 neqFromDifferent = \ a c dq q -> case q of
   { refl u -> transport Comparison isSame (String.eq u u) different dq
                 (transport Comparison isSame same (String.eq u u)
-                   (symEq Comparison (String.eq u u) same (eqStringRefl u)) unit) }
+                   (symEq Comparison (String.eq u u) same (String.eqRefl u)) unit) }
 
 -- ---------------------------------------------------------------------------
 -- The chain of candidates, and that it is pairwise distinct
@@ -206,7 +206,7 @@ inRemove : forall (d : String) (c : String) (xs : List String)
 inRemove = \ d c xs i nq -> induction xs of
   { nil -> absurdly (In d (remove c (nil String))) i
     -- The one shape no split can take: the scrutinee is COMPUTED, and the arm
-    -- needs the equation that says which way it went — @eqStringEqual@ asks for
+    -- needs the equation that says which way it went — @String.eqEqual@ asks for
     -- it. A @case@ on @String.eq c a@ refines the goal, which is what @remove@'s
     -- own unfolding needs, but it cannot hand the arm that equation.
   ; cons a as ->
@@ -216,7 +216,7 @@ inRemove = \ d c xs i nq -> induction xs of
         ((\ eq -> case i of
             { orLeft e -> absurdly (In d as)
                             (nq (transport String (\ z -> Eq String d z) a c
-                                   (symEq String c a (eqStringEqual c a eq)) e))
+                                   (symEq String c a (String.eqEqual c a eq)) e))
             ; orRight j -> j })
          (\ eq -> case i of
             { orLeft e -> orLeft (Eq String d a) (In d (remove c as)) e
@@ -630,7 +630,7 @@ weakenFv = \ D e V d y1 U nf -> induction d of
           (\ q -> nf (orLeft (Eq String y1 x) (In y1 (nil String)) (sym String x y1 q))) i)
   ; T-abs D0 x S E T0 d1 ->
       T-abs (extend D0 y1 U) x S E T0
-        (case (decString x y1) of
+        (case (String.dec x y1) of
            { yes q -> subst String (\ w -> typing (extend (extend D0 w U) x S) E T0) x y1 q
                         (weaken (extend D0 x S) E T0 d1 (extend (extend D0 x U) x S)
                           (inclShadow D0 x U S))

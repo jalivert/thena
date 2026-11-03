@@ -22,8 +22,8 @@
 -- returns the binder itself (`freshKeeps`), and the binder of the result is
 -- the binder of the term.
 --
--- **A proof can follow the function's decisions because they are `decString`'s**
--- (MS6 phase 109a): eliminating `decString y x` in a proof gives `Eq String y x`
+-- **A proof can follow the function's decisions because they are `String.dec`'s**
+-- (MS6 phase 109a): eliminating `String.dec y x` in a proof gives `Eq String y x`
 -- in one branch and its refutation in the other, for names nobody knows.
 --
 -- **For closed terms only**, as Software Foundations states it. For any Γ the
@@ -45,7 +45,7 @@
 -- are two, and they are the measure of where the feature stops:
 --
 --   * a lemma that decides on a COMPUTED value — `memberSpec`, `freshKeeps`,
---     `lookHit`, `lookMiss` — eliminates `decString` or `member` and must
+--     `lookHit`, `lookMiss` — eliminates `String.dec` or `member` and must
 --     rewrite the goal's own occurrences of it. That is what `with` is for,
 --     and `with` is not built.
 --   * `arrowInj`, whose equation has a compound term built from AMBIENT
@@ -85,7 +85,7 @@ member : String -> List String -> Comparison
 member = \ c xs ->
   elim List (String) (\ l -> Comparison)
     ((different)
-     (\ b bs rb -> elim Dec ((Eq String c b)) (\ d -> Comparison) ((\ p -> same) (\ n -> rb)) () (decString c b)))
+     (\ b bs rb -> elim Dec ((Eq String c b)) (\ d -> Comparison) ((\ p -> same) (\ n -> rb)) () (String.dec c b)))
     () xs
 
 look : String -> List (And String LC) -> LC
@@ -93,7 +93,7 @@ look = \ y s ->
   elim List ((And String LC)) (\ l -> LC)
     ((var y)
      (\ p ps rp -> elim And (String LC) (\ q -> LC)
-                     ((\ k w -> elim Dec ((Eq String y k)) (\ d -> LC) ((\ p1 -> w) (\ n -> rp)) () (decString y k)))
+                     ((\ k w -> elim Dec ((Eq String y k)) (\ d -> LC) ((\ p1 -> w) (\ n -> rp)) () (String.dec y k)))
                      () p))
     () s
 
@@ -176,7 +176,7 @@ memberSpec = \ c xs ->
                                                       ((\ e -> n e) (\ i -> andRight (Eq Comparison (member c bs) different) (In c bs -> Empty) h i))
                                                       () o))))
                      () rb))
-          () (decString c b)))
+          () (String.dec c b)))
     () xs
 
 -- ---------------------------------------------------------------------------
@@ -396,7 +396,7 @@ listNil = \ l f -> case l of
                    (f a (orLeft (Eq String a a) (In a as) (refl String a))) }
 
 -- ---------------------------------------------------------------------------
--- Looking up in a substitution — following decString
+-- Looking up in a substitution — following String.dec
 
 lookHit : forall (x : String) (w : LC) (s : List (And String LC))
             -> Eq LC (look x (cons (And String LC) (both String LC x w) s)) w
@@ -404,7 +404,7 @@ lookHit = \ x w s ->
   elim Dec ((Eq String x x))
     (\ d -> Eq LC (elim Dec ((Eq String x x)) (\ d1 -> LC) ((\ p1 -> w) (\ n -> look x s)) () d) w)
     ((\ p -> refl LC w) (\ n -> absurdly (Eq LC (look x s) w) (n (refl String x))))
-    () (decString x x)
+    () (String.dec x x)
 
 lookMiss : forall (y : String) (x : String) (w : LC) (s : List (And String LC)) (ne : Eq String y x -> Empty)
              -> Eq LC (look y (cons (And String LC) (both String LC x w) s)) (look y s)
@@ -412,7 +412,7 @@ lookMiss = \ y x w s ne ->
   elim Dec ((Eq String y x))
     (\ d -> Eq LC (elim Dec ((Eq String y x)) (\ d1 -> LC) ((\ p1 -> w) (\ n -> look y s)) () d) (look y s))
     ((\ p -> absurdly (Eq LC w (look y s)) (ne p)) (\ n -> refl LC (look y s)))
-    () (decString y x)
+    () (String.dec y x)
 
 -- ---------------------------------------------------------------------------
 -- The invariant: every name of Γ is sent to itself, found in Δ at its type, or

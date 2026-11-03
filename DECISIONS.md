@@ -229,9 +229,13 @@ declaration derives are one step deeper, in `Nat.lemmata`**:
 `LC.subst-x`, `LC.subst-all` and `LC.fresh-x`, and **a declaration of your own
 may be written with a path**: `Ty.lemma : …` declares `lemma` in `Ty`. **The four
 primitive functions have moved in too** — `String.eq`, `Char.eq`, `Int.eq` and
-`String.append`, where they were `eqString`, `eqChar`, `eqInt` and
-`appendString`. **A datatype's constructors and the type itself have moved in
-too**, so `data Nat` declares `Nat.Nat`, `Nat.zero` and `Nat.suc`, and a written
+`String.append`, where they were `eqString`, `eqChar`, `eqInt` and `appendString` — **and so have the prelude's own nine theorems about them**, which
+are now `String.eqEqual`, `String.eqRefl` and `String.dec` with the matching `Char`
+and `Int` triples, written as a `namespace` block in `prelude/prelude.thena`. They
+were `eqStringEqual`, `eqStringRefl` and `decString`: a name is how you find a law,
+and the law about `String.eq` belongs where `String.eq` is.
+
+**A datatype's constructors and the type itself have moved in too**, so `data Nat` declares `Nat.Nat`, `Nat.zero` and `Nat.suc`, and a written
 `Nat` reaches the type because a declaration's short name is derived from the
 environment rather than recorded anywhere. **`namespace ‹name› where { … }` is
 built, and resolution walks outward through it. All five forms of `open` are
@@ -732,7 +736,7 @@ preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 
 in the surface language, with `elim` and no proof sugar. **It is about the
 generated `LC.subst-all`**, not a substitution written for the proof: the
 proof names the generated function's pieces, checks with `refl` that they are
-the same terms, and follows its `decString` decisions case by case.
+the same terms, and follows its `String.dec` decisions case by case.
 
 **It is proved twice.** `examples/08-preservation-by-tactics.thena.script`
 proves every lemma again by tactics — `:theorem`, `attack`, `intro`,
@@ -768,7 +772,7 @@ primeMoreDiffers String.eq a ((a ++ "'") ++ b)    is  different
 
 Each is a fact about a primitive that computes only on two literals and goes
 neutral on anything else, which is the same position the prelude's
-`eqStringEqual` is in. On literals each one **discharges**: both sides reduce,
+`String.eqEqual` is in. On literals each one **discharges**: both sides reduce,
 claimed and actual become convertible, and the node contracts — `:whnf
 appendAssoc "a" "b" "c"` is its own body. They are pending exactly where they
 carry weight.
@@ -790,13 +794,13 @@ induction over a length, and `length (a ++ b) = length a + length b` is a claim
 about open arguments like any other: adding `lengthString` and arithmetic would
 have traded one trusted law for two and widened the kernel permanently.
 
-### `decString` compares two strings and hands you the proof
+### `String.dec` compares two strings and hands you the proof
 
 *Decided 2026-09-21.* Beside `String.eq`, `Char.eq` and `Int.eq`, the prelude
-declares `decString`, `decChar` and `decInt`:
+declares `String.dec`, `Char.dec` and `Int.dec`:
 
 ```
-decString : ∀ (a : String) (b : String) -> Dec (Eq String a b)
+String.dec : ∀ (a : String) (b : String) -> Dec (Eq String a b)
 
 data Dec (A : Type) : Type where
   yes : forall (p : A) -> Dec A
@@ -806,7 +810,7 @@ data Dec (A : Type) : Type where
 On two literals it computes to `yes (refl String "a")`, or to `no ‹a
 refutation›` — a real proof of `Eq String "a" "b" -> Empty` that the kernel
 checks like any other. On a name you do not know it does not compute, and that
-is where it earns its place: **eliminating `decString y x` gives you
+is where it earns its place: **eliminating `String.dec y x` gives you
 `Eq String y x` in one branch and its refutation in the other**, where
 `String.eq y x` tells you only which branch you are in. So a proof about a
 name nobody knows can follow the decision:
@@ -816,10 +820,10 @@ varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty
             -> Eq LC (LC.subst-x (var y) x N) (var y)
 ```
 
-**Generated substitution decides with `decString`**, which is what lets a
+**Generated substitution decides with `String.dec`**, which is what lets a
 proof about `LC.subst-x` follow it at all. What is trusted is the same as for
 `String.eq`: the verdict on two literals. The refutation it writes is built
-from `decString` itself and checked by the kernel.
+from `String.dec` itself and checked by the kernel.
 
 ### Trust is a term, and it reduces away when it stops being needed
 
@@ -1176,19 +1180,19 @@ is tie that answer to the equality type — `String.eq y x` says nothing about
 written as one:
 
 ```
-eqStringEqual : ∀ (a b : String) -> Eq Comparison (String.eq a b) same -> Eq String a b
-eqStringRefl  : ∀ (a : String) -> Eq Comparison (String.eq a a) same
+String.eqEqual : ∀ (a b : String) -> Eq Comparison (String.eq a b) same -> Eq String a b
+String.eqRefl  : ∀ (a : String) -> Eq Comparison (String.eq a a) same
 ```
 
 Both are definitions in the prelude whose bodies are `trusted` terms, and
-`decString`, which answers `yes` with a proof or `no` with a refutation, is an
+`String.dec`, which answers `yes` with a proof or `no` with a refutation, is an
 ordinary definition built on them — it eliminates the comparison with a motive
 that keeps the answer, so each branch is handed the evidence of which answer it
 is, and the refutation is *derived* rather than built by the implementation.
-`decString` itself trusts nothing.
+`String.dec` itself trusts nothing.
 
 **What this buys is that the trust is listed rather than built in.** A user who
-asks what a proof rests on is told `in decString · eqStringEqual`, with both the
+asks what a proof rests on is told `in String.dec · String.eqEqual`, with both the
 claimed type and the type the body really had, and can read the four lines of
 prelude that say it. Before, the same trust was sixty lines of Haskell that
 constructed the answer term, and no command could name it at all.
@@ -1196,7 +1200,7 @@ constructed the answer term, and no command could name it at all.
 **It costs the strictest trust setting for these proofs, and that is stated
 rather than hidden.** The claims are read at their own definition's binders,
 where they are *pending* — so *no trust* will not close a proof that decides a
-literal equality, even though `decString "x" "x"` reduces to `refl String "x"`
+literal equality, even though `String.dec "x" "x"` reduces to `refl String "x"`
 with nothing trusted left in it. Finding out which claims survive reduction means
 reducing, which may diverge and has no business in `qed`'s path, so the strictest
 setting is a statement about what a proof reaches and not about what is left when
@@ -3828,7 +3832,7 @@ the whole type decides it. Ascribing the type
 pins it:
 
 ```
-eqStringEqual : ∀ (a : String) (b : String)
+String.eqEqual : ∀ (a : String) (b : String)
   -> (Eq Comparison (String.eq a b) same : Type₀) -> (Eq String a b : Type₀)
 ```
 

@@ -314,7 +314,7 @@ printsAndReadsBack t =
 -- Deciding, retired into the prelude (MS8 phase 152)
 -- --------------------------------------------------------------------------
 
--- | @decString@, @decChar@ and @decInt@ used to be reduction rules in Haskell:
+-- | @String.dec@, @Char.dec@ and @Int.dec@ used to be reduction rules in Haskell:
 -- a 'Thena.Core.Reduce.PrimitiveRule' that read the declared type back and
 -- /wrote/ a @yes@ carrying a @refl@, or a @no@ carrying a refutation it built
 -- itself. **They are definitions in @prelude\/prelude.thena@ now**, each
@@ -349,7 +349,7 @@ deciding =
         Canonical (GlobalName ["Dec"] "no") _ [_, _] -> pure ()
         other -> assertFailure (show other)
     -- **The load-bearing one.** The refutation is no longer written by the
-    -- reducer; it is derived in the prelude from @eqStringRefl@ and
+    -- reducer; it is derived in the prelude from @String.eqRefl@ and
     -- @transport@, and the kernel still has to accept it at exactly the type
     -- the constructor wants.
   , testCase "and the derived refutation is a proof the kernel accepts" $ do
@@ -378,7 +378,7 @@ deciding =
     -- **The retirement is complete, and this is what says so.** @primitive@
     -- accepts only the names 'Thena.Core.Reduce.primitiveNames' has a rule
     -- for, so with the rule gone the declaration the prelude used to make is
-    -- refused outright at every type — nobody can put @decString@ back as a
+    -- refused outright at every type — nobody can put @String.dec@ back as a
     -- constant with no body.
   , testCase "declare-primitive no longer knows the name at all" $
       mapM_ (\p -> isRight' (checkedPrimitive emptyGlobals (rootName ("dec" ++ p))
@@ -388,7 +388,9 @@ deciding =
   where
     v = fst (fresh 703)
     str s = Primitive (LString s)
-    decide p = foldl App (Global (rootName ("dec" ++ p)) [])
+    -- **The path, not a root word with the type glued on** (MS10 phase 262):
+    -- the decision lives in its type's namespace, so it is @String.dec@.
+    decide p = foldl App (Global (named (p ++ ".dec")) [])
     fst3 (a, _, _) = a
     isRight' = either (const False) (const True)
     prim p = Global (rootName p) []
@@ -399,6 +401,6 @@ deciding =
       (why, obs, _)    -> assertFailure (show (why, length obs))
 
 -- | The environment a fresh session starts in — the rule base and the shipped
--- prelude, which is where @decString@ lives now.
+-- prelude, which is where @String.dec@ lives now.
 preludeGlobals :: IO GlobalEnv
 preludeGlobals = globals . machineOf . fst <$> startingSession

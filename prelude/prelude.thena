@@ -98,12 +98,12 @@ open Dec
 
 -- **Comparison with evidence** (MS6 phase 109a, his choice on
 -- `ms6/CLOSEOUT.md` 32; a definition rather than a primitive since MS8 phase
--- 152). On two literals `decString a b` is `yes (refl String a)` or
+-- 152). On two literals `String.dec a b` is `yes (refl String a)` or
 -- `no ‹a refutation›`, and on a name nobody knows it is stuck — so a proof
 -- that eliminates it gets `Eq String y x` in one branch and
 -- `Eq String y x -> Empty` in the other. `String.eq` says only which, and that
 -- is why a proof about a name it does not know could not use it. Generated
--- substitution decides with `decString`, so a proof about it follows the same
+-- substitution decides with `String.dec`, so a proof about it follows the same
 -- decision.
 --
 -- **This used to be a reduction rule in Haskell, and now it is three
@@ -145,95 +145,98 @@ transport = λ (A : Type₀) (P : A -> Type₀) (x : A) (y : A) (e : Eq A x y) (
 isSame : Comparison -> Type₀
 isSame = λ (c : Comparison) -> elim Comparison () (λ (z : Comparison) -> Type₀) ((Unit) (Empty)) () c
 
--- **The two laws of `String.eq`, and the whole of what `decString` trusts.** Neither
--- is derivable: nothing in the type theory ties a comparison on an unknown
--- name to the equality type, which is what made closed-term preservation the
--- only way through before this existed.
---
--- `eqStringEqual` says a `same` answer means the two really are equal. Its body
--- is `refl String a`, honestly of type `Eq String a a`, and the claim is that it has
--- type `Eq String a b` — so on two equal literals the two types are convertible,
--- the node contracts away, and the claim is **discharged**. On a name nobody
--- knows it is **pending**, and on two literals that differ it is
--- **undischargeable**, which is right: you would have had to forge the `same`.
-eqStringEqual : ∀ (a : String) (b : String) -> (Eq Comparison (String.eq a b) same : Type₀) -> (Eq String a b : Type₀)
-eqStringEqual = λ (a : String) (b : String) (p : Eq Comparison (String.eq a b) same) -> trusted (Eq String a b) (refl String a)
+namespace String where
+  -- **The two laws of `String.eq`, and the whole of what `String.dec` trusts.** Neither
+  -- is derivable: nothing in the type theory ties a comparison on an unknown
+  -- name to the equality type, which is what made closed-term preservation the
+  -- only way through before this existed.
+  --
+  -- `String.eqEqual` says a `same` answer means the two really are equal. Its body
+  -- is `refl String a`, honestly of type `Eq String a a`, and the claim is that it has
+  -- type `Eq String a b` — so on two equal literals the two types are convertible,
+  -- the node contracts away, and the claim is **discharged**. On a name nobody
+  -- knows it is **pending**, and on two literals that differ it is
+  -- **undischargeable**, which is right: you would have had to forge the `same`.
+  eqEqual : ∀ (a : String) (b : String) -> (Eq Comparison (String.eq a b) same : Type₀) -> (Eq String a b : Type₀)
+  eqEqual = λ (a : String) (b : String) (p : Eq Comparison (String.eq a b) same) -> trusted (Eq String a b) (refl String a)
 
--- `eqStringRefl` says the comparison answers `same` of a literal and itself.
--- Discharged at every literal, pending on a name — and it is what lets the
--- refutation below be honest.
-eqStringRefl : ∀ (a : String) -> (Eq Comparison (String.eq a a) same : Type₀)
-eqStringRefl = λ (a : String) -> trusted (Eq Comparison (String.eq a a) same) (refl Comparison same)
+  -- `String.eqRefl` says the comparison answers `same` of a literal and itself.
+  -- Discharged at every literal, pending on a name — and it is what lets the
+  -- refutation below be honest.
+  eqRefl : ∀ (a : String) -> (Eq Comparison (String.eq a a) same : Type₀)
+  eqRefl = λ (a : String) -> trusted (Eq Comparison (String.eq a a) same) (refl Comparison same)
 
--- **`decString` itself trusts nothing.** It eliminates the comparison with a
--- motive that keeps the answer — `Eq Comparison (String.eq a b) c` — so each branch
--- is handed the evidence of which answer it is. The `same` branch passes that
--- to `eqStringEqual`; the `different` branch carries `eqStringRefl a` along the
--- supposed equality to get `String.eq a b ≡ same`, rewrites the `different`
--- evidence by it to get `same ≡ different`, and transports `unit` along
--- *that* into `isSame different`, which **is** `Empty`.
-decString : ∀ (a : String) (b : String) -> (Dec (Eq String a b) : Type₀)
-decString = λ (a : String) (b : String) -> (elim Comparison () (λ (c : Comparison) -> Eq Comparison (String.eq a b) c -> Dec (Eq String a b)) ((λ (p : Eq Comparison (String.eq a b) same) -> yes (Eq String a b) (eqStringEqual a b p)) (λ (p : Eq Comparison (String.eq a b) different) -> no (Eq String a b) (λ (q : Eq String a b) -> transport Comparison isSame same different (transport Comparison (λ (z : Comparison) -> Eq Comparison z different) (String.eq a b) same (transport String (λ (z : String) -> Eq Comparison (String.eq a z) same) a b q (eqStringRefl a)) p) (unit)))) () (String.eq a b)) (refl Comparison (String.eq a b))
+  -- **`String.dec` itself trusts nothing.** It eliminates the comparison with a
+  -- motive that keeps the answer — `Eq Comparison (String.eq a b) c` — so each branch
+  -- is handed the evidence of which answer it is. The `same` branch passes that
+  -- to `String.eqEqual`; the `different` branch carries `eqRefl a` along the
+  -- supposed equality to get `String.eq a b ≡ same`, rewrites the `different`
+  -- evidence by it to get `same ≡ different`, and transports `unit` along
+  -- *that* into `isSame different`, which **is** `Empty`.
+  dec : ∀ (a : String) (b : String) -> (Dec (Eq String a b) : Type₀)
+  dec = λ (a : String) (b : String) -> (elim Comparison () (λ (c : Comparison) -> Eq Comparison (String.eq a b) c -> Dec (Eq String a b)) ((λ (p : Eq Comparison (String.eq a b) same) -> yes (Eq String a b) (eqEqual a b p)) (λ (p : Eq Comparison (String.eq a b) different) -> no (Eq String a b) (λ (q : Eq String a b) -> transport Comparison isSame same different (transport Comparison (λ (z : Comparison) -> Eq Comparison z different) (String.eq a b) same (transport String (λ (z : String) -> Eq Comparison (String.eq a z) same) a b q (eqRefl a)) p) (unit)))) () (String.eq a b)) (refl Comparison (String.eq a b))
 
--- **The two laws of `Char.eq`, and the whole of what `decChar` trusts.** Neither
--- is derivable: nothing in the type theory ties a comparison on an unknown
--- name to the equality type, which is what made closed-term preservation the
--- only way through before this existed.
---
--- `eqCharEqual` says a `same` answer means the two really are equal. Its body
--- is `refl Char a`, honestly of type `Eq Char a a`, and the claim is that it has
--- type `Eq Char a b` — so on two equal literals the two types are convertible,
--- the node contracts away, and the claim is **discharged**. On a name nobody
--- knows it is **pending**, and on two literals that differ it is
--- **undischargeable**, which is right: you would have had to forge the `same`.
-eqCharEqual : ∀ (a : Char) (b : Char) -> (Eq Comparison (Char.eq a b) same : Type₀) -> (Eq Char a b : Type₀)
-eqCharEqual = λ (a : Char) (b : Char) (p : Eq Comparison (Char.eq a b) same) -> trusted (Eq Char a b) (refl Char a)
+namespace Char where
+  -- **The two laws of `Char.eq`, and the whole of what `Char.dec` trusts.** Neither
+  -- is derivable: nothing in the type theory ties a comparison on an unknown
+  -- name to the equality type, which is what made closed-term preservation the
+  -- only way through before this existed.
+  --
+  -- `Char.eqEqual` says a `same` answer means the two really are equal. Its body
+  -- is `refl Char a`, honestly of type `Eq Char a a`, and the claim is that it has
+  -- type `Eq Char a b` — so on two equal literals the two types are convertible,
+  -- the node contracts away, and the claim is **discharged**. On a name nobody
+  -- knows it is **pending**, and on two literals that differ it is
+  -- **undischargeable**, which is right: you would have had to forge the `same`.
+  eqEqual : ∀ (a : Char) (b : Char) -> (Eq Comparison (Char.eq a b) same : Type₀) -> (Eq Char a b : Type₀)
+  eqEqual = λ (a : Char) (b : Char) (p : Eq Comparison (Char.eq a b) same) -> trusted (Eq Char a b) (refl Char a)
 
--- `eqCharRefl` says the comparison answers `same` of a literal and itself.
--- Discharged at every literal, pending on a name — and it is what lets the
--- refutation below be honest.
-eqCharRefl : ∀ (a : Char) -> (Eq Comparison (Char.eq a a) same : Type₀)
-eqCharRefl = λ (a : Char) -> trusted (Eq Comparison (Char.eq a a) same) (refl Comparison same)
+  -- `Char.eqRefl` says the comparison answers `same` of a literal and itself.
+  -- Discharged at every literal, pending on a name — and it is what lets the
+  -- refutation below be honest.
+  eqRefl : ∀ (a : Char) -> (Eq Comparison (Char.eq a a) same : Type₀)
+  eqRefl = λ (a : Char) -> trusted (Eq Comparison (Char.eq a a) same) (refl Comparison same)
 
--- **`decChar` itself trusts nothing.** It eliminates the comparison with a
--- motive that keeps the answer — `Eq Comparison (Char.eq a b) c` — so each branch
--- is handed the evidence of which answer it is. The `same` branch passes that
--- to `eqCharEqual`; the `different` branch carries `eqCharRefl a` along the
--- supposed equality to get `Char.eq a b ≡ same`, rewrites the `different`
--- evidence by it to get `same ≡ different`, and transports `unit` along
--- *that* into `isSame different`, which **is** `Empty`.
-decChar : ∀ (a : Char) (b : Char) -> (Dec (Eq Char a b) : Type₀)
-decChar = λ (a : Char) (b : Char) -> (elim Comparison () (λ (c : Comparison) -> Eq Comparison (Char.eq a b) c -> Dec (Eq Char a b)) ((λ (p : Eq Comparison (Char.eq a b) same) -> yes (Eq Char a b) (eqCharEqual a b p)) (λ (p : Eq Comparison (Char.eq a b) different) -> no (Eq Char a b) (λ (q : Eq Char a b) -> transport Comparison isSame same different (transport Comparison (λ (z : Comparison) -> Eq Comparison z different) (Char.eq a b) same (transport Char (λ (z : Char) -> Eq Comparison (Char.eq a z) same) a b q (eqCharRefl a)) p) (unit)))) () (Char.eq a b)) (refl Comparison (Char.eq a b))
+  -- **`Char.dec` itself trusts nothing.** It eliminates the comparison with a
+  -- motive that keeps the answer — `Eq Comparison (Char.eq a b) c` — so each branch
+  -- is handed the evidence of which answer it is. The `same` branch passes that
+  -- to `Char.eqEqual`; the `different` branch carries `eqRefl a` along the
+  -- supposed equality to get `Char.eq a b ≡ same`, rewrites the `different`
+  -- evidence by it to get `same ≡ different`, and transports `unit` along
+  -- *that* into `isSame different`, which **is** `Empty`.
+  dec : ∀ (a : Char) (b : Char) -> (Dec (Eq Char a b) : Type₀)
+  dec = λ (a : Char) (b : Char) -> (elim Comparison () (λ (c : Comparison) -> Eq Comparison (Char.eq a b) c -> Dec (Eq Char a b)) ((λ (p : Eq Comparison (Char.eq a b) same) -> yes (Eq Char a b) (eqEqual a b p)) (λ (p : Eq Comparison (Char.eq a b) different) -> no (Eq Char a b) (λ (q : Eq Char a b) -> transport Comparison isSame same different (transport Comparison (λ (z : Comparison) -> Eq Comparison z different) (Char.eq a b) same (transport Char (λ (z : Char) -> Eq Comparison (Char.eq a z) same) a b q (eqRefl a)) p) (unit)))) () (Char.eq a b)) (refl Comparison (Char.eq a b))
 
--- **The two laws of `Int.eq`, and the whole of what `decInt` trusts.** Neither
--- is derivable: nothing in the type theory ties a comparison on an unknown
--- name to the equality type, which is what made closed-term preservation the
--- only way through before this existed.
---
--- `eqIntEqual` says a `same` answer means the two really are equal. Its body
--- is `refl Int a`, honestly of type `Eq Int a a`, and the claim is that it has
--- type `Eq Int a b` — so on two equal literals the two types are convertible,
--- the node contracts away, and the claim is **discharged**. On a name nobody
--- knows it is **pending**, and on two literals that differ it is
--- **undischargeable**, which is right: you would have had to forge the `same`.
-eqIntEqual : ∀ (a : Int) (b : Int) -> (Eq Comparison (Int.eq a b) same : Type₀) -> (Eq Int a b : Type₀)
-eqIntEqual = λ (a : Int) (b : Int) (p : Eq Comparison (Int.eq a b) same) -> trusted (Eq Int a b) (refl Int a)
+namespace Int where
+  -- **The two laws of `Int.eq`, and the whole of what `Int.dec` trusts.** Neither
+  -- is derivable: nothing in the type theory ties a comparison on an unknown
+  -- name to the equality type, which is what made closed-term preservation the
+  -- only way through before this existed.
+  --
+  -- `Int.eqEqual` says a `same` answer means the two really are equal. Its body
+  -- is `refl Int a`, honestly of type `Eq Int a a`, and the claim is that it has
+  -- type `Eq Int a b` — so on two equal literals the two types are convertible,
+  -- the node contracts away, and the claim is **discharged**. On a name nobody
+  -- knows it is **pending**, and on two literals that differ it is
+  -- **undischargeable**, which is right: you would have had to forge the `same`.
+  eqEqual : ∀ (a : Int) (b : Int) -> (Eq Comparison (Int.eq a b) same : Type₀) -> (Eq Int a b : Type₀)
+  eqEqual = λ (a : Int) (b : Int) (p : Eq Comparison (Int.eq a b) same) -> trusted (Eq Int a b) (refl Int a)
 
--- `eqIntRefl` says the comparison answers `same` of a literal and itself.
--- Discharged at every literal, pending on a name — and it is what lets the
--- refutation below be honest.
-eqIntRefl : ∀ (a : Int) -> (Eq Comparison (Int.eq a a) same : Type₀)
-eqIntRefl = λ (a : Int) -> trusted (Eq Comparison (Int.eq a a) same) (refl Comparison same)
+  -- `Int.eqRefl` says the comparison answers `same` of a literal and itself.
+  -- Discharged at every literal, pending on a name — and it is what lets the
+  -- refutation below be honest.
+  eqRefl : ∀ (a : Int) -> (Eq Comparison (Int.eq a a) same : Type₀)
+  eqRefl = λ (a : Int) -> trusted (Eq Comparison (Int.eq a a) same) (refl Comparison same)
 
--- **`decInt` itself trusts nothing.** It eliminates the comparison with a
--- motive that keeps the answer — `Eq Comparison (Int.eq a b) c` — so each branch
--- is handed the evidence of which answer it is. The `same` branch passes that
--- to `eqIntEqual`; the `different` branch carries `eqIntRefl a` along the
--- supposed equality to get `Int.eq a b ≡ same`, rewrites the `different`
--- evidence by it to get `same ≡ different`, and transports `unit` along
--- *that* into `isSame different`, which **is** `Empty`.
-decInt : ∀ (a : Int) (b : Int) -> (Dec (Eq Int a b) : Type₀)
-decInt = λ (a : Int) (b : Int) -> (elim Comparison () (λ (c : Comparison) -> Eq Comparison (Int.eq a b) c -> Dec (Eq Int a b)) ((λ (p : Eq Comparison (Int.eq a b) same) -> yes (Eq Int a b) (eqIntEqual a b p)) (λ (p : Eq Comparison (Int.eq a b) different) -> no (Eq Int a b) (λ (q : Eq Int a b) -> transport Comparison isSame same different (transport Comparison (λ (z : Comparison) -> Eq Comparison z different) (Int.eq a b) same (transport Int (λ (z : Int) -> Eq Comparison (Int.eq a z) same) a b q (eqIntRefl a)) p) (unit)))) () (Int.eq a b)) (refl Comparison (Int.eq a b))
+  -- **`Int.dec` itself trusts nothing.** It eliminates the comparison with a
+  -- motive that keeps the answer — `Eq Comparison (Int.eq a b) c` — so each branch
+  -- is handed the evidence of which answer it is. The `same` branch passes that
+  -- to `Int.eqEqual`; the `different` branch carries `eqRefl a` along the
+  -- supposed equality to get `Int.eq a b ≡ same`, rewrites the `different`
+  -- evidence by it to get `same ≡ different`, and transports `unit` along
+  -- *that* into `isSame different`, which **is** `Empty`.
+  dec : ∀ (a : Int) (b : Int) -> (Dec (Eq Int a b) : Type₀)
+  dec = λ (a : Int) (b : Int) -> (elim Comparison () (λ (c : Comparison) -> Eq Comparison (Int.eq a b) c -> Dec (Eq Int a b)) ((λ (p : Eq Comparison (Int.eq a b) same) -> yes (Eq Int a b) (eqEqual a b p)) (λ (p : Eq Comparison (Int.eq a b) different) -> no (Eq Int a b) (λ (q : Eq Int a b) -> transport Comparison isSame same different (transport Comparison (λ (z : Comparison) -> Eq Comparison z different) (Int.eq a b) same (transport Int (λ (z : Int) -> Eq Comparison (Int.eq a z) same) a b q (eqRefl a)) p) (unit)))) () (Int.eq a b)) (refl Comparison (Int.eq a b))
 
 data Sigma (A : Type₀) (B : A -> Type₀) : Type₀ where
   pair : forall (a : A) (b : B a) -> Sigma A B

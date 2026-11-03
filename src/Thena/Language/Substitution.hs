@@ -42,14 +42,14 @@
 -- of @L@ that scopes over the slot. @P@ is declared before @L@, so this is not
 -- mutual recursion — which `~m5dvd` would need.
 --
--- **Everything is done by @elim@**, and the only primitives are @decString@ and
+-- **Everything is done by @elim@**, and the only primitives are @String.dec@ and
 -- @String.append@: two names are compared by eliminating a @Dec@, and a fresh one
 -- is made by priming.
 --
--- **@decString@, not @String.eq@** (MS6 phase 109a, his choice on
+-- **@String.dec@, not @String.eq@** (MS6 phase 109a, his choice on
 -- @ms6\/CLOSEOUT.md@ 32). A proof about substitution has to follow the same
 -- decision the function makes, and on a name it does not know it can only do
--- that by eliminating the same term. @decString y x@ hands each branch its
+-- that by eliminating the same term. @String.dec y x@ hands each branch its
 -- evidence — @Eq String y x@ or its refutation — where @String.eq y x@ said only
 -- which branch, so no proof over an open name could get past it.
 module Thena.Language.Substitution
@@ -165,7 +165,7 @@ substitutionDefinitions gs g =
     -- the prelude names this code writes short.
     referenced =
       map (nameDotted . grammarName) gs
-        ++ [ "String", "List", "And", "Comparison", "Dec", "Eq", "decString" ]
+        ++ [ "String", "List", "And", "Comparison", "Dec", "Eq" ]
     local x | x `elem` referenced = local (x ++ "'")
             | otherwise = x
     v = name . local
@@ -184,12 +184,14 @@ substitutionDefinitions gs g =
         xs
 
     -- The first method when @y@ and @key@ are the same name, the second
-    -- otherwise, deciding with @decString@ — whose evidence each method is
-    -- given and ignores.
+    -- otherwise, deciding with @String.dec@ — whose evidence each method is
+    -- given and ignores. **Qualified since MS10 phase 262**, so it is out of
+    -- 'referenced' for the same reason @String.append@ never was: a path
+    -- resolves on its own and no binder can shadow it.
     compareNames ty y key whenSame whenDifferent =
       elimOn "Dec" [app (name "Eq") [string, y, key]] (lamL ["d"] ty)
         [lamL ["p"] whenSame, lamL ["n"] whenDifferent]
-        (app (name "decString") [y, key])
+        (app (qname ["String"] "dec") [y, key])
 
     -- The first constructor's method when @c@ is @same@, the second's otherwise.
     decide ty c whenSame whenDifferent =

@@ -691,8 +691,8 @@ refused =
 -- ---------------------------------------------------------------------------
 -- Following the decision (MS6 phase 109a, ms6/CLOSEOUT.md 32)
 
--- | **What @decString@ was for.** At @var y@ the generated code eliminates
--- @decString y x@; a proof about a name it does not know eliminates the same
+-- | **What @String.dec@ was for.** At @var y@ the generated code eliminates
+-- @String.dec y x@; a proof about a name it does not know eliminates the same
 -- term, and each branch hands it the evidence it needs. With @String.eq@ there
 -- the @same@ branch had no @Eq String y x@ and neither lemma could be stated
 -- and proved. These are the base case of the substitution lemma phase 109b
@@ -716,13 +716,13 @@ followed =
       , "  elim Dec ((Eq String x x))"
       , "    (\\ d -> Eq LC (elim Dec ((Eq String x x)) (\\ d -> LC) ((\\ p -> N) (\\ n -> var x)) () d) N)"
       , "    ((\\ p -> refl LC N) (\\ n -> absurdly (Eq LC (var x) N) (n (refl String x))))"
-      , "    () (decString x x)"
+      , "    () (String.dec x x)"
       , ""
       , "varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty) -> Eq LC (LC.subst-x (var y) x N) (var y)"
       , "varMiss = \\ y x N ne ->"
       , "  elim Dec ((Eq String y x))"
       , "    (\\ d -> Eq LC (elim Dec ((Eq String y x)) (\\ d -> LC) ((\\ p -> N) (\\ n -> var y)) () d) (var y))"
       , "    ((\\ p -> absurdly (Eq LC N (var y)) (ne p)) (\\ n -> refl LC (var y)))"
-      , "    () (decString y x)"
+      , "    () (String.dec y x)"
       ]
 

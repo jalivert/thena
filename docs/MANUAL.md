@@ -48,20 +48,20 @@ You land at a prompt with a small prelude already loaded, and one empty goal.
 | the result of comparing | `Comparison`, `same`, `different` |
 | a decision, with its evidence | `Dec`, `yes`, `no` |
 | transport along an equality | `transport` proved |
-| deciding a literal equality | `decString`, `decChar`, `decInt` proved, each from two trusted laws |
+| deciding a literal equality | `String.dec`, `Char.dec`, `Int.dec` proved, each from two trusted laws |
 
 `String`, `Char`, `Int` and `Token` are in scope as well — those are built in
 rather than declared, so they are there in any environment — along with the
 four primitive functions, `String.eq`, `Char.eq`, `Int.eq` and `String.append`.
 
-`decString a b` answers `yes` with a proof that `a` and `b` are equal, or `no`
+`String.dec a b` answers `yes` with a proof that `a` and `b` are equal, or `no`
 with a refutation, and on a name it does not know it is stuck — so a proof that
 eliminates it gets the equality in one branch and its refutation in the other.
 That is what `String.eq` alone cannot give you, and it is the reason the prelude
-has both. `decString` is a *definition*, written in `prelude/prelude.thena`,
+has both. `String.dec` is a *definition*, written in `prelude/prelude.thena`,
 and what it rests on is two `trusted` claims about `String.eq`: that a `same`
-answer means the two really are equal (`eqStringEqual`), and that the
-comparison answers `same` of a literal and itself (`eqStringRefl`). Chapter 9
+answer means the two really are equal (`String.eqEqual`), and that the
+comparison answers `same` of a literal and itself (`String.eqRefl`). Chapter 9
 is what those are; `isSame` is the helper that tells the two answers apart.
 
 **There is no `Nat`, and no arithmetic.** A module that wants numbers declares
@@ -1064,7 +1064,7 @@ env
 stack
   call, 14 instruction(s) to resume
   call, 8 instruction(s) to resume
-  call, 180 instruction(s) to resume (returned)
+  call, 186 instruction(s) to resume (returned)
 thena spine> :run 6
 pc
   0  u = universe-at l
@@ -1075,7 +1075,7 @@ stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
   call, 8 instruction(s) to resume
-  call, 180 instruction(s) to resume (returned)
+  call, 186 instruction(s) to resume (returned)
 thena spine> :run
 solved: ?ℓ4876
 solved: ?ℓ4878
@@ -1254,7 +1254,7 @@ This is not only a facility for your own proofs: the prelude uses it. Deciding
 whether two strings are equal is the case, and it is the one that forced the
 feature. `String.eq` computes — it answers `same` or `different` on two literals
 — but nothing in the type theory connects that answer to the equality type, and
-no term you can write closes the gap. So `decString` is a definition resting on
+no term you can write closes the gap. So `String.dec` is a definition resting on
 two claims about `String.eq`, and `:trust` names both:
 
 ```
@@ -1265,38 +1265,38 @@ thena spine> :theorem decides : Dec {0 0} (Eq {0} String "x" "x")
 proving decides : Dec {0 0} (Eq {0} String "x" "x")
 thena spine> attack
 thena spine> into
-thena spine> try-core ⌜ decString "x" "x" ⌝
+thena spine> try-core ⌜ String.dec "x" "x" ⌝
 thena spine> solve
 thena spine> back
 thena spine> solve
 thena spine> :trust
 trust: no undischargeable trust
-  pending, in decString · eqStringEqual
+  pending, in String.dec · String.eqEqual
     claims Eq {0} String a b
     body   Eq {0} String a a
-  pending, in decString · eqStringRefl
+  pending, in String.dec · String.eqRefl
     claims Eq {0} Comparison (String.eq a a) same
     body   Eq {0} Comparison same same
 thena spine> qed
 decides : Dec {0 0} (Eq {0} String "x" "x")   ∎
-  pending, in decString · eqStringEqual
+  pending, in String.dec · String.eqEqual
     claims Eq {0} String a b
     body   Eq {0} String a a
-  pending, in decString · eqStringRefl
+  pending, in String.dec · String.eqRefl
     claims Eq {0} Comparison (String.eq a a) same
     body   Eq {0} Comparison same same
 ```
 
-`in decString · eqStringEqual` is the route: the claim is not in your proof, it
+`in String.dec · String.eqEqual` is the route: the claim is not in your proof, it
 is in a definition your proof reached through another one. Both read **pending**,
 and here is why that is worth understanding rather than working around. The
-claims are read at `eqStringEqual`'s own definition, where `a` and `b` are its
+claims are read at `String.eqEqual`'s own definition, where `a` and `b` are its
 binders and nothing is settled — and they are read there rather than at `"x"`
 and `"x"` because the walk takes one hop into a definition and stops. It is not
 a normaliser, deliberately: finding out which claims *survive* reduction means
 reducing, and `qed` may not be made to diverge.
 
-So `:trust none` will not close this proof, even though `decString "x" "x"`
+So `:trust none` will not close this proof, even though `String.dec "x" "x"`
 reduces to `refl {0} String "x"` with nothing trusted left in it. The strictest
 setting is a statement about what a proof *reaches*, not about what is left
 after it runs. If you want it, the two laws are four lines of

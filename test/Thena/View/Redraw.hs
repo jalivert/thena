@@ -86,7 +86,7 @@ redraw = at Loose
       -- @(elim … tgt) arg@ drawn without the parentheses is @elim … tgt arg@,
       -- which the core grammar refuses outright. 'Thena.Render' has always
       -- parenthesised here; nothing in the prelude put an elimination in
-      -- function position until @decString@ became a definition.
+      -- function position until @String.dec@ became a definition.
       AnElimination d ls ps m ms is t ->
         paren (prec > Loose) $
           unwords
