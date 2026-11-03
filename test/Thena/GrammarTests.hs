@@ -155,6 +155,44 @@ scoped =
           ws @?= [ TokenClassNotOpen LanguageBlock "LC" "idx" "x" "B.x" ]
         (_, other) -> assertFailure (show other)
 
+    -- **AN @open@ REACHES TO THE END OF THE BLOCK IT IS WRITTEN IN — HIS
+    -- RULING OF 2026-11-03, `~ckmsk`.** Before it, a @namespace@ block's
+    -- @open@ kept working for the rest of the file, so the second of two
+    -- namespaces could not declare a language of the same word: it was refused
+    -- 'MetavariableTaken', which is very nearly the collision this milestone
+    -- exists to remove. **And nothing the author wrote was wrong** — since
+    -- phase 255 a block MUST be opened beside itself or its letters stop being
+    -- metavariables, so the required shape was the leaking one.
+  , testCase "two namespaces may both hold a language of one word" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 twoNamespacesOneWord of
+        (_, ProofLoaded _ ds _ ws) -> (ds, ws) @?= (["A.Ty", "B.Ty"], [])
+        (_, other) -> assertFailure (show other)
+
+    -- **The pop is why the bare word answers neither**, and that is the point:
+    -- the opens came off with their blocks, so @Ty@ outside them is not a
+    -- language at all — where a term of each is still written by its path.
+  , testCase "and the word that each block opened is shut again after it" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 twoNamespacesOneWord
+          ask t = last (said s1 (":infer " ++ t))
+      ( ask "A.Ty`\956`", ask "B.Ty`\959`", ask "Ty`\956`" ) @?=
+        ( "A.Ty`\956` : A.Ty.Ty"
+        , "B.Ty`\959` : B.Ty.Ty"
+        , "stuck: no language called Ty has been declared" )
+
+    -- **A FILE'S TOP LEVEL IS NOT ONE OF THOSE BLOCKS** and its @open@s are
+    -- unchanged — they join the session, which is what @examples/02@'s closing
+    -- @open Ctx@ is for and what `~7zn7k` settled. So the same two namespaces
+    -- with an @open A@ written at the file's level answer the bare word.
+  , testCase "a file-level open is not popped, so the bare word resolves" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 (twoNamespacesOneWord ++ "\nopen A\n")
+      -- **And the TYPE shortens too**, which is the same open read back by
+      -- the printer: @A.Ty.Ty@ spells as @Ty@ while the open is live, where the
+      -- test above printed it whole with both blocks shut.
+      last (said s1 ":infer Ty`\956`") @?= "Ty`\956` : Ty"
+
     -- **TWO CLASSES OF ONE WORD ARE REFUSED, because a generated name is
     -- suffixed with the WORD** (MS10 phase 259): @fv-x@ would mean two things.
     -- It cannot arise at the root — one word there is one class — so the paths
@@ -315,6 +353,25 @@ scoped =
     -- piece of `~g4k5g`): a class resolves by the same outward walk a
     -- metavariable and a function name do, and what the generated names hang
     -- off is the class's word, so @A.x@ still gives @A.LC.fv-x@.
+    -- Two namespaces, each declaring a language of the same word and opening
+    -- it beside itself, which is the shape phase 255 requires.
+    twoNamespacesOneWord = unlines
+      [ "module TwoTy where", ""
+      , "namespace A where"
+      , "  language Ty, T, S where"
+      , "    base  -> \956"
+      , "    arrow -> ( T -> S )"
+      , ""
+      , "  open Ty"
+      , ""
+      , "namespace B where"
+      , "  language Ty, T, S where"
+      , "    base  -> \959"
+      , "    arrow -> ( T => S )"
+      , ""
+      , "  open Ty"
+      , "" ]
+
     blocksInANamespace = unlines
       [ "module NSAll where", ""
       , "namespace A where"

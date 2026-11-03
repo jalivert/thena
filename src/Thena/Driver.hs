@@ -1344,10 +1344,30 @@ surfaceProgram n0 items = foldl (item []) ([], n0) items
   -- lands and what a written name may mean both come from the machine, so the
   -- items inside need no rewriting here — and a nested namespace is the same
   -- shape one level down.
+  --
+  -- **AND THE OPENS THE BLOCK ADDED COME OFF WITH IT — HIS RULING, 2026-11-03,
+  -- `~ckmsk`: AN @open@ REACHES TO THE END OF THE BLOCK IT IS WRITTEN IN.** A
+  -- @namespace@ block is a scope and everything else written in one is already
+  -- scoped to it, so a file-wide @open@ would be the special case; and since
+  -- phase 255 a @language@ block must be opened beside itself or its letters
+  -- stop being metavariables, which made the shape the system /requires/ the
+  -- one that leaked. Two namespaces could not both hold a @language Ty@ before
+  -- this: the second was refused 'MetavariableTaken'.
+  --
+  -- **A file's top level is not one of these blocks** and its @open@s are
+  -- unchanged — they join the session, which is what @examples/02@'s closing
+  -- @open Ctx@ is for and what `~7zn7k` settled.
+  --
+  -- **The count comes from the instructions, not from the items**, so a nested
+  -- @namespace@ and an @open … in@ need no case here: both balance their own
+  -- opens, so the difference is exactly what this block left pushed.
   item ns (acc, n) (ItemNamespace g is) =
     let inner' = ns ++ nameSteps g ++ [nameWord g]
         (inner, n1) = foldl (item inner') ([], n) is
-     in ( acc ++ [Do (EnterNamespace (Lit (VName g)))] ++ inner ++ [Do LeaveNamespace]
+        pushed = length [ () | Do (Open _) <- inner ]
+                   - length [ () | Do LeaveOpen <- inner ]
+     in ( acc ++ [Do (EnterNamespace (Lit (VName g)))] ++ inner
+              ++ [ Do LeaveOpen | _ <- [1 .. pushed] ] ++ [Do LeaveNamespace]
         , n1 )
 
   -- | The plicity of each argument position a signature writes.

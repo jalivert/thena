@@ -327,8 +327,12 @@ becoming a name whose single word contains dots. A path is structure, and
 nothing may hold it as spelling.
 
 **`open ‹namespace›` brings a namespace into view**, from where it is written to
-the end of the enclosing one. It is a declaration and not a block, so it sits
-beside your other declarations and the ones above it do not see it:
+the end of the enclosing one — so an `open` inside a `namespace` block ends with
+that block, and a file's top level, having no enclosing namespace, keeps its
+`open`s for the rest of the session. That is what lets two namespaces in one
+file each declare a `language Ty` and open it beside itself. It is a declaration
+and not a block, so it sits beside your other declarations and the ones above it
+do not see it:
 
 ```
 data Nat : Type where
