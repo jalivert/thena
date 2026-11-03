@@ -25,6 +25,7 @@ import Thena.Driver
   , loadProofSource
   )
 import Thena.Engine (Machine (..))
+import Thena.Global.Env (isDeclared)
 import Thena.Language.Build (buildTerm, printRegion)
 import Thena.Language.Earley (parse, pieces)
 import qualified Thena.Language.Earley as Earley
@@ -73,6 +74,25 @@ header =
 -- needs one empty and one extension production"* — so the context of POPLMark
 -- part 2A could not be written down at all, and nothing about it could be stated
 -- let alone proved.
+-- | Two contexts in one module whose extension productions share a word —
+-- @bind@ — which is `~gkbgs`'s case and was refused before MS10 phase 263.
+twoContexts :: [String]
+twoContexts =
+  [ "module TwoCtx where", ""
+  , "x : Token String"
+  , "x = /[a-z][a-zA-Z0-9']*/", ""
+  , "language Ty, T, S where"
+  , "  base  -> \953"
+  , "  arrow -> ( T -> S )", ""
+  , "open Ty", ""
+  , "context Ctx, \915 where"
+  , "  empty -> \183"
+  , "  bind  -> \915 , x : T", ""
+  , "context Dtx, \916 where"
+  , "  nil  -> \8900"
+  , "  bind -> \916 ; x : T", ""
+  ]
+
 fsubHeader :: [String]
 fsubHeader =
   [ "module Fsub where"
@@ -101,7 +121,33 @@ fsubHeader =
 
 twoKinds :: [TestTree]
 twoKinds =
-  [ testCase "a context with two extensions gets a lookup relation for each" $ do
+  [ -- **TWO CONTEXTS MAY SHARE AN EXTENSION WORD — HIS RULING OF 2026-11-03,
+    -- `~gkbgs`, built in MS10 phase 263.** The lookup family stayed at the root
+    -- when every production moved into its datatype's namespace, so two
+    -- contexts whose extensions were both called @bind@ both wanted @bind-in@
+    -- there and the second was refused as already declared. Nothing in the
+    -- corpus met it, each example having one context — which is why only a test
+    -- can hold this.
+    testCase "two contexts may each have an extension of the same word" $ do
+      s <- loaded twoContexts
+      map (take 1 . said s) [":show Ctx.bind-in", ":show Dtx.bind-in"] @?=
+        [ ["data Ctx.bind-in.bind-in : String -> Ty -> Ctx -> Type\8320 where"]
+        , ["data Dtx.bind-in.bind-in : String -> Ty -> Dtx -> Type\8320 where"]
+        ]
+
+    -- **And the whole family is in the context's namespace, not just the
+    -- relation**: the constructors come with it, because they are placed
+    -- relative to the datatype exactly as a written @data@'s are.
+  , testCase "and the relation's constructors are in there with it" $ do
+      s <- loaded twoContexts
+      let env = globals (machineOf s)
+      map (\n -> isDeclared (named n) env)
+        [ "Ctx.bind-in.bind-in", "Ctx.bind-in.bind-here"
+        , "Ctx.bind-in.bind-there-bind", "Dtx.bind-in.bind-here"
+        , "bind-in", "bind-here" ]
+        @?= [True, True, True, True, False, False]
+
+  , testCase "a context with two extensions gets a lookup relation for each" $ do
       s <- loaded fsubHeader
       map (take 1 . said s) [":show bindTm-in", ":show bindTy-in"] @?=
         [ ["data bindTm-in : String -> Ty -> Ctx -> Type\8320 where"]
@@ -238,11 +284,11 @@ declared =
       said s ":show extend-in" @?=
         [ "data extend-in : String -> Ty -> Ctx -> Type₀ where"
         , "  { extend-here : ∀ (Γ : Ctx) (x : String) (T : Ty)"
-            ++ " -> extend-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
+            ++ " -> Ctx.extend-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
         , "  ; extend-there-extend : ∀ (Γ : Ctx) (x : String) (T : Ty)"
             ++ " (x' : String) (T' : Ty)"
             ++ " -> (Eq {0} String x x' -> Empty {0})"
-            ++ " -> extend-in`${x} : ${T} ∈ ${Γ}` -> extend-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }"
+            ++ " -> Ctx.extend-in`${x} : ${T} ∈ ${Γ}` -> Ctx.extend-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }"
         ]
   ]
 
@@ -251,23 +297,23 @@ notation =
   [ testCase "the notation is read and built as the relation applied" $ do
       s <- loaded header
       let gs = grammars (machineOf s)
-      case parse (earleyRules gs) (Earley.StartAt "extend-in") (pieces "x : \953 \8712 \183 , y : \953") of
+      case parse (earleyRules gs) (Earley.StartAt "Ctx.extend-in") (pieces "x : \953 \8712 \183 , y : \953") of
         Left why -> assertFailure (show why)
         Right tree -> buildTerm gs tree @?= Right
-          (apps "extend-in.extend-in"
+          (apps "Ctx.extend-in.extend-in"
             [ str "x", con "Ty.base"
             , apps "Ctx.extend" [con "Ctx.empty", str "y", con "Ty.base"] ])
   , testCase "and prints back as the text it was read from" $ do
       s <- loaded header
       let m = machineOf s
       printRegion (grammars m) (renderCore (rendering [] 0) [])
-          (apps "extend-in.extend-in"
+          (apps "Ctx.extend-in.extend-in"
             [ str "x", con "Ty.base"
             , apps "Ctx.extend" [con "Ctx.empty", str "x", con "Ty.base"] ])
         @?= Just "x : \953 \8712 \183 , x : \953"
   , testCase "a lookup literal is a type" $ do
       s <- loaded header
-      said s ":infer extend-in`x : \953 \8712 \183`" @?= ["extend-in`x : \953 \8712 \183` : Type\8320"]
+      said s ":infer Ctx.extend-in`x : \953 \8712 \183`" @?= ["Ctx.extend-in`x : \953 \8712 \183` : Type\8320"]
     -- **The separator is the terminals between the context slot and its
     -- neighbouring slot** — the next one, or the previous when it is last.
   , testCase "a context written with its slot last loses the separator before it" $ do
@@ -275,9 +321,12 @@ notation =
         [ "module Last where", "", "x : Token String", "x = /[a-z]+/", ""
         , "language Ty, T where", "  base -> \953", "open Ty", ""
         , "context D, \916 where", "  none -> \949", "  push -> x : T ; \916", "" ]
-      said s ":show push-in" !! 0
-        @?= "data push-in : String -> Ty -> D -> Type\8320 where"
-      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "push-in")
+      -- **Whole, because this fixture opens nothing** — the relation is in the
+      -- context's namespace since MS10 phase 263, and the printer writes the
+      -- shortest ending that resolves where the reader stands.
+      said s ":show D.push-in" !! 0
+        @?= "data D.push-in.push-in : String -> Ty -> D -> Type\8320 where"
+      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "D.push-in")
                  (pieces "x : \953 \8712 x : \953 ; \949") of
         Left why -> assertFailure (show why)
         Right _ -> pure ()
@@ -291,24 +340,24 @@ proofs :: [TestTree]
 proofs =
   [ testCase "a lookup at the top is extend-here" $ do
       _ <- loaded (header ++
-        [ "found : extend-in`x : \953 \8712 \183, x : \953`"
+        [ "found : Ctx.extend-in`x : \953 \8712 \183, x : \953`"
         , "found = extend-here empty \"x\" base" ])
       pure ()
   , testCase "one under a later binding of another name is extend-there-extend, with ne proved" $ do
       _ <- loaded (header ++ xNotY ++
-        [ "under : extend-in`x : \953 \8712 \183, x : \953, y : \953`"
+        [ "under : Ctx.extend-in`x : \953 \8712 \183, x : \953, y : \953`"
         , "under = extend-there-extend (extend empty \"x\" base) \"x\" base \"y\" base xNotY (extend-here empty \"x\" base)" ])
       pure ()
   , testCase "extend-here does not reach under a later binding" $ do
       r <- load (header ++
-        [ "wrong : extend-in`x : \953 \8712 \183, x : \953, y : \953`"
+        [ "wrong : Ctx.extend-in`x : \953 \8712 \183, x : \953, y : \953`"
         , "wrong = extend-here (extend empty \"x\" base) \"x\" base" ])
       either (const (pure ())) (const (assertFailure "extend-here was accepted under y")) r
     -- The shadowing: to reach the earlier x past a later x, ne must prove
     -- x ≠ x, and xNotY is a proof of something else.
   , testCase "and extend-there-extend cannot skip a binding of the same name" $ do
       r <- load (header ++ xNotY ++
-        [ "shadowed : extend-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
+        [ "shadowed : Ctx.extend-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
         , "shadowed = extend-there-extend (extend empty \"x\" base) \"x\" base \"x\" (arrow base base) xNotY (extend-here empty \"x\" base)" ])
       either (const (pure ())) (const (assertFailure "a shadowed binding was reached")) r
     -- And what it would take is exactly a refutation of refl: reaching the
@@ -316,7 +365,7 @@ proofs =
     -- Empty. So the shadowed binding cannot be reached by any term.
   , testCase "what it would take is a proof that x is not x" $ do
       _ <- loaded (header ++
-        [ "needs : (Eq String \"x\" \"x\" -> Empty) -> extend-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
+        [ "needs : (Eq String \"x\" \"x\" -> Empty) -> Ctx.extend-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
         , "needs = \\ ne -> extend-there-extend (extend empty \"x\" base) \"x\" base \"x\" (arrow base base) ne (extend-here empty \"x\" base)"
         , ""
         , "absurdly : (Eq String \"x\" \"x\" -> Empty) -> Empty"
@@ -332,9 +381,12 @@ refused =
   , refusal "an extension with two"
       ["y : Token String", "y = /[a-z]+/", "", "context C, G where", "  e -> \183", "  f -> G , x = y : T"]
       "refused: in the context C: its extension C.f needs exactly one name to look up, and it has x, y"
+    -- **The PLACED name, since MS10 phase 263** (`~gkbgs`): the family is in the
+    -- context's namespace, so a root-level @f-here@ no longer collides with it
+    -- and the name that does is the one the relation would declare.
   , refusal "a lookup name already declared"
-      ["f-here : Ty", "f-here = base", "", "context C, G where", "  e -> \183", "  f -> G , x : T"]
-      "refused: C's lookup f-here is already declared"
+      ["C.f-in.f-here : Ty", "C.f-in.f-here = base", "", "context C, G where", "  e -> \183", "  f -> G , x : T"]
+      "refused: C's lookup C.f-in.f-here is already declared"
     -- **A production with TWO of its own slots is still refused** (MS8 phase
     -- 156): a lookup relation steps over one binding, and there is nothing for
     -- it to read in a form that joins two contexts. More than one *extension* is

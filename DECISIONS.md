@@ -2114,6 +2114,16 @@ for `bindTy-in`. **The names come from the extension production, not the
 context**, because three names taken from the context alone would collide the
 moment there are two extensions.
 
+**AND THE WHOLE FAMILY LIVES IN THE CONTEXT'S NAMESPACE** — *decided 2026-11-03.*
+A `context Ctx` whose extension is `bind` declares the relation
+`Ctx.bind-in.bind-in`, with `Ctx.bind-in.bind-here` and
+`Ctx.bind-in.bind-there-bind` inside it; `open Ctx` reaches it as `bind-in`, and
+`open Ctx.bind-in` reaches the constructors by their own words. It is the same
+rule twice over — a declaration lives in the namespace it opens — and it is what
+lets **two contexts in one module each have an extension called `bind`**, where
+before both lookup relations wanted `bind-in` at the top level and the second was
+refused as already declared.
+
 **Its notation is the extension with the context taken out, then `∈` and the
 context**, and it is a grammar like any other: `` extend-in`x : ι ∈ ·, x : ι` ``
 is the type `extend-in "x" base (extend empty "x" base)`, `:parse extend-in …`

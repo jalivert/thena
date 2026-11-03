@@ -56,6 +56,8 @@ module Thena.Language.Grammar
   , allOf
   , lookupNames
   , lookupNamesOf
+  , lookupPlaced
+  , lookupRelation
   , extensionsOf
   , isName
   , variableProductions
@@ -1624,8 +1626,45 @@ isName a = case argumentSort a of
 
 -- | Everything a context's lookup relations declare (§5.3), in order — one
 -- relation per extension production (MS8 phase 156).
+--
+-- **PLACED AND DOTTED SINCE MS10 PHASE 263, `~gkbgs`, HIS RULING OF 2026-11-03**,
+-- because that is what a clash is checked against and the family is no longer at
+-- the root: two contexts whose extension productions share a word used to collide
+-- here, where their namespaces tell them apart. 'lookupNamesOf' still gives the
+-- WORDS, which is what the relation's own declaration is written from.
 lookupNames :: Grammar -> [String]
-lookupNames g = concatMap (lookupNamesOf g) (extensionsOf g)
+lookupNames g = map nameDotted (lookupPlaced g)
+
+-- | __Where a context's lookup family lands — absolutely__ (MS10 phase 263).
+--
+-- **The relation lives in the CONTEXT'S namespace** and opens one of its own, so
+-- @context Ctx@ with an extension @bind@ gives the relation
+-- @Ctx.bind-in.bind-in@ and the constructors @Ctx.bind-in.bind-here@ and
+-- @Ctx.bind-in.bind-there-bind@. **No placement rule of its own**: it is
+-- 'Thena.Core.Term.inDeclarationOf' twice, once for the context's namespace and
+-- once for the relation's, exactly as a datatype's constructors are placed.
+--
+-- **Not @Ctx.lemmata.bind-in@.** 'Thena.Core.Term.inLemmataOf' is for material a
+-- user never wrote and rarely names; a lookup relation is what a @context@ block
+-- is /for/ — the author writes it, in its own notation.
+lookupPlaced :: Grammar -> [GlobalName]
+lookupPlaced g = concatMap placedFor (extensionsOf g)
+  where
+    placedFor e = case lookupNamesOf g e of
+      inN : cons ->
+        let rel = lookupRelation (grammarName g) inN
+         in declarationNamed rel : [ inDeclarationOf (declarationNamed rel) c | c <- cons ]
+      [] -> []
+
+-- | __The namespace one lookup relation opens__, from the context's name and the
+-- relation's word (MS10 phase 263).
+--
+-- **Takes the context's name as it is handed in**, so the caller decides whether
+-- it is absolute — for a clash check, which asks the environment — or the written
+-- word, for minting, where 'Thena.Engine.declaredIn' supplies the enclosing
+-- namespace. The same division 'grammarWritten' already draws.
+lookupRelation :: GlobalName -> String -> GlobalName
+lookupRelation ctx = inDeclarationOf (declarationNamed ctx)
 
 -- | What one extension's lookup relation declares, in order: the relation, its
 -- @here@, then one @there@ for each extension it may step over.
@@ -1640,10 +1679,10 @@ lookupNames g = concatMap (lookupNamesOf g) (extensionsOf g)
 --
 -- __The production's WORD, not its full name__ (MS10 phase 248). A production
 -- is @Ctx.bind@ now, and a word with dots in it is the one shape his ruling of
--- 2026-10-30 forbids — so the three are @bind-in@, @bind-here@ and
--- @bind-there-bind@, **at the root**, which is where partition two left them.
--- That is a wart: two contexts whose extension productions share a word now
--- collide here, where their namespaces would have told them apart.
+-- 2026-10-30 forbids — so the three words are @bind-in@, @bind-here@ and
+-- @bind-there-bind@. **Words, and where they LAND is 'lookupPlaced'** (MS10
+-- phase 263): the family is in the context's namespace, so two contexts sharing
+-- an extension word no longer collide.
 lookupNamesOf :: Grammar -> GProduction -> [String]
 lookupNamesOf g e =
   [ n ++ "-in", n ++ "-here" ]

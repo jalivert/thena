@@ -229,7 +229,7 @@ generated =
       s <- loaded (header ++ typing)
       said s ":show typing" @?=
         [ "data typing : Ctx -> LC -> Ty -> Type₀ where"
-        , "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
+        , "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx.extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
         , "  ; T-abs : ∀ (Γ : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty) -> typing`${Γ} , ${x} : ${S} ⊢ ${E} : ${T}` -> typing`${Γ} ⊢ ( λ ${x} : ${S} . ${E} ) : ( ${S} -> ${T} )`"
         , "  ; T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC) -> typing`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typing`${Γ} ⊢ ${N} : ${S}` -> typing`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
         ]
@@ -378,7 +378,7 @@ premises =
   , testCase "a lookup premise is not read as a premise named by its metavariable" $ do
       s <- loaded (header ++ typing)
       said s ":show typing" !! 1
-        @?= "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
+        @?= "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx.extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
     -- **A PREMISE IS AN ARGUMENT'S TYPE, SO ANY TYPE MAY STAND ABOVE THE BAR**
     -- (MS8 phase 160, `~8b8gz`, `~z8n28`). A rule is a constructor, an argument
     -- may be at any type, and @LC@ is its own notation — so a rule may take a

@@ -51,7 +51,7 @@ module Thena.Language.Lookup
 
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (declarationNamed, nameWord, rootName)
+import Thena.Core.Term (declarationNamed, nameWord)
 import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
   ( Argument (..)
@@ -61,8 +61,10 @@ import Thena.Language.Grammar
   , Item (..)
   , Sort (..)
   , extensionsOf
+  , grammarWord
   , isName
   , lookupNamesOf
+  , lookupRelation
   , sortType
   )
 import Thena.Surface.Concrete
@@ -85,6 +87,7 @@ lookupGrammars g = [ lg | e <- extensionsOf g, Just lg <- [notationOf g e] ]
 notationOf :: Grammar -> GProduction -> Maybe Grammar
 notationOf g e = do
   inN : _ <- Just (lookupNamesOf g e)
+  let relation = lookupRelation (grammarName g) inN
   let (before, rest) = break own (gproductionItems e)
   (ctxSlot, after) <- case rest of
     s : more -> Just (s, more)
@@ -108,10 +111,16 @@ notationOf g e = do
   -- declaration lives in the namespace it opens, so the type former's own
   -- spelling has to carry that step or the printer cannot find the production
   -- for a term whose head is the declared relation — and a constructor's type
-  -- then prints as an application where the notation should stand. The grammar
-  -- keeps the written word as its name, exactly as @Ctx@ does for @Ctx.Ctx@.
-  Just (Grammar JudgmentBlock (rootName inN) [inN]
-          [GProduction (declarationNamed (rootName inN)) items args TypeFormer])
+  -- then prints as an application where the notation should stand.
+  --
+  -- **AND THE RELATION IS IN THE CONTEXT'S NAMESPACE SINCE MS10 PHASE 263**
+  -- (`~gkbgs`, his ruling of 2026-11-03), so the grammar's name is
+  -- @A.Ctx.extend-in@ — **absolute, because a tag resolves against a grammar's
+  -- name by the walk** ('Thena.Language.Grammar.grammarForTag') and an installed
+  -- grammar has to carry where it is. What is MINTED from it is relative, and
+  -- that is 'relationOf''s business, not this one's.
+  Just (Grammar JudgmentBlock relation [inN]
+          [GProduction (declarationNamed relation) items args TypeFormer])
   where
     own i = case i of
       Slot _ srt _ -> srt == OfLanguage (grammarName g)
@@ -164,6 +173,13 @@ relationOf g e = do
       lookupOr x entry = case lookup x entry of
         Just y -> y
         Nothing -> x
+      -- **The BARE word, even though the relation is in the context's
+      -- namespace since MS10 phase 263.** A constructor's type is elaborated
+      -- with the datatype under an 'Thena.Instral.Ops.Assume' named after its
+      -- WORD ('Thena.Driver.datatypeProgram'), so the self-reference is a local
+      -- and not a global at all — writing @Ctx.extend-in@ here answered
+      -- /not in scope/, measured, because that path is only declared once
+      -- @MakeData@ has run.
       inRel entry ctx = app (ref inN) ([ ref y | (_, y) <- entry ] ++ [ctx])
       outerEntry = zip (map argumentName others) outer
       keyOf a entry = ref (lookupOr (argumentName a) entry)
@@ -197,7 +213,10 @@ relationOf g e = do
             , replicate (2 + length others + length kOthers + length premises) Plain )
       theres = map stepping (zip thereNs (extensionsOf g))
       relType = foldr (SurfaceArrow . typeOf) (SurfaceUniverse 0) indices
-  Just ( SurfaceData [] inN [] relType (here : map fst theres)
+  -- **The context's WORD as the path, and nothing deeper** (MS10 phase 263):
+  -- 'Thena.Engine.declaredIn' supplies the enclosing namespace, so minting
+  -- @A.Ctx.extend-in@ here would place it twice.
+  Just ( SurfaceData [grammarWord g] inN [] relType (here : map fst theres)
        , replicate (1 + length others) Plain : map snd theres )
   where
     entryOf k = [ a | a <- gproductionArguments k, argumentSort a /= OfLanguage (grammarName g) ]
