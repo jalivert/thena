@@ -193,6 +193,33 @@ scoped =
       -- test above printed it whole with both blocks shut.
       last (said s1 ":infer Ty`\956`") @?= "Ty`\956` : Ty"
 
+    -- **A GENERATED NOTATION MAY NOT DEPEND ON WHICH @open@ THE AUTHOR WROTE**
+    -- (MS10 phase 265). The ascription in a generated @subst-x@ production was
+    -- the class's WORD, so a language reaching a class in another namespace was
+    -- refused outright — @open Source.LC@ is all the metavariables need, and
+    -- the bare @x@ in the generated block then reached nothing at all. The
+    -- ascription is the class's PATH now, where the function's name still hangs
+    -- off its word. **The @swapped@ line is the notation itself**, so the block
+    -- is exercised and not merely accepted.
+  , testCase "a language reaches a class in another namespace with only its own open" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 classAcrossANamespace of
+        (_, ProofLoaded _ ds _ ws) ->
+          (ds, ws) @?= (["Source.x", "Source.LC", "Wrap", "swapped"], [])
+        (_, other) -> assertFailure (show other)
+
+    -- **And the generated family is the reaching language's, suffixed with the
+    -- reached class's word** — @Wrap.subst-x@ for a class @Source.x@, which is
+    -- the one place in the module system where a path is dropped. `~ps4c7` is
+    -- the ruling that owes.
+  , testCase "and the generated family hangs off the reached class's word" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 classAcrossANamespace
+          env = globals (machineOf s1)
+      ( isDeclared (named "Wrap.subst-x") env
+        , isDeclared (named "Wrap.fv-x") env
+        , isDeclared (named "Wrap.subst-Source.x") env ) @?= (True, True, False)
+
     -- **TWO CLASSES OF ONE WORD ARE REFUSED, because a generated name is
     -- suffixed with the WORD** (MS10 phase 259): @fv-x@ would mean two things.
     -- It cannot arise at the root — one word there is one class — so the paths
@@ -370,6 +397,29 @@ scoped =
       , "    arrow -> ( T => S )"
       , ""
       , "  open Ty"
+      , "" ]
+
+    -- **A class inside a namespace, reached by a language outside it** (MS10
+    -- phase 265). @Wrap@ reads @Source.LC@'s terms, so it reaches @Source.x@
+    -- through them and gets a substitution family of its own — and the only
+    -- @open@ it needs is the one its metavariable @M@ needs.
+    classAcrossANamespace = unlines
+      [ "module Notate where", ""
+      , "namespace Source where"
+      , "  x : Token String"
+      , "  x = /[a-z][a-zA-Z0-9']*/"
+      , ""
+      , "  language LC, M, N, E where"
+      , "    var : x as occurrence -> x"
+      , "    app                   -> ( M N )"
+      , ""
+      , "open Source.LC"
+      , ""
+      , "language Wrap, W where"
+      , "  box -> [ M ]"
+      , ""
+      , "swapped : Wrap"
+      , "swapped = Wrap`[ ( a b ) ][ a -> c ]`"
       , "" ]
 
     blocksInANamespace = unlines

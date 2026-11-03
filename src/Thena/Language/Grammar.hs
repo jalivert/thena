@@ -1715,10 +1715,19 @@ contextShaped own g =
 -- reads a metavariable and names a function. The class it answers with is
 -- __the name, not the word__: that is what keeps @A.x@ and @B.x@ two classes,
 -- and 'classWord' is what a generated name hangs off.
+--
+-- __THE SPELLING IS TAKEN AS WRITTEN__, through 'Thena.Core.Term.nameFromText'
+-- and never @rootName@ — so a qualified class is a path and not a word holding
+-- dots, exactly as a qualified tag is in 'grammarForTag'. A @language@ block's
+-- slot can only write the word, because there the class's word doubles as the
+-- argument's name; a @notation@ block's ascription is a field of its own and may
+-- write the path, which is what lets
+-- 'Thena.Language.Substitution.substitutionNotations' generate a block whose
+-- meaning does not depend on which @open@ the author happened to need.
 tokenClassOf :: InScope -> GlobalEnv -> String -> Maybe (GlobalName, GlobalName, Regex)
 tokenClassOf sc env x = do
   cls <- either (const Nothing) Just
-           (globalUnder (isJust . tokenClassAt env) sc (rootName x))
+           (globalUnder (isJust . tokenClassAt env) sc (nameFromText x))
   (t, re) <- tokenClassAt env cls
   Just (cls, t, re)
 

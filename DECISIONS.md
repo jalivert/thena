@@ -1603,6 +1603,32 @@ The ascription names the **class** and not the parameter, because that name is
 the word a rule writes where the slot is — F-sub's rules write `X # Γ`, as the
 paper does.
 
+**And it may name the class with a path**, like every other name:
+`notation notIn (v : Fsub.X) G -> v # G where` reaches the class `Fsub.X`
+wherever it is written, open or not. This is what lets a language reach a class
+in another namespace at all: a language gets a substitution family generated for
+every class it reaches, each generated as a `notation` block of its own, and
+those blocks name the class in full — so
+
+```
+namespace Source where
+  x : Token String
+  x = /[a-z][a-zA-Z0-9']*/
+  language LC, M, N where
+    var : x as occurrence -> x
+    app                   -> ( M N )
+
+open Source.LC                -- all that M needs, and all that is needed
+
+language Wrap, W where
+  box -> [ M ]                -- reaches Source.x through M, so Wrap.subst-x
+```
+
+works with no `open Source`. **The generated function's name is still suffixed
+with the class's *word*** — `Wrap.subst-x` for a class `Source.x` — because a
+word holds no dot, which is why two classes both written `x` still cannot both
+be reached.
+
 **What it buys is a refusal.** `#` is *this type variable is not declared in Γ*,
 and with the class in place a term variable cannot be written there:
 

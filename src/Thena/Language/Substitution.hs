@@ -447,12 +447,18 @@ substitutionNotations gs g
     -- @notation@ production names its arguments now, so the generator says what
     -- it means and no grammar has to carry a word for it.
     prods =
-      -- **A CLASS IS WRITTEN AS ITS WORD HERE TOO** (MS10 phase 259), both in
-      -- the function's name and in the slot's ascription — and the ascription
-      -- is then resolved in scope by 'Thena.Language.Grammar.checkNotation',
-      -- which is the same door a written @notation@ block's goes through.
+      -- **THE FUNCTION'S NAME HANGS OFF THE CLASS'S WORD; THE ASCRIPTION IS THE
+      -- CLASS'S PATH.** The name has no choice — a word may hold no dot, his
+      -- ruling of 2026-10-30 — but the ascription is a field of its own, so it
+      -- says which class whatever the reader has open. Writing the word there
+      -- made a generated block depend on an @open@ the author never wrote for
+      -- it: a @language@ inside @namespace Source@ needs only @open Source.LC@
+      -- for its metavariables, and the generated @subst-x@ would then be refused
+      -- because the bare @x@ reached nothing. 'Thena.Language.Grammar.checkNotation'
+      -- resolves it through the same door a written @notation@ block's goes
+      -- through, which since this phase takes a path.
       [ Production 0 (nameDotted (substOf (grammarWritten g) (classWord k)))
-          [ Param (target k) Nothing, Param (classWord k) (Just (classWord k)), Param (replacement k) Nothing ]
+          [ Param (target k) Nothing, Param (classWord k) (Just (nameDotted k)), Param (replacement k) Nothing ]
           Nothing
           (map Word [target k, "[", classWord k, "->", replacement k, "]"])
       | k <- classesSubstituted gs g
