@@ -522,6 +522,90 @@ warning: in the grammar of LC, production abs: T is read as a terminal.
          It is a metavariable of Ty, which is not open here
 ```
 
+### Surface files are imported; rule bases are consulted
+
+*Decided 2026-11-03. Not built — MS11, with one piece pulled into MS10.*
+
+Two acts, and which one you write depends on what you are reaching for, not on
+which language you are writing in. **Both are writable in a surface file, in an
+instral rule file, and at the prompt.**
+
+```
+import Stlc          -- a SURFACE file: its definitions, datatypes, languages
+consult tactics      -- an INSTRAL file: its rules and its functions
+```
+
+`import` makes names reachable. `consult` makes a base's rules **and functions**
+callable — inside a surface `do` block, at the prompt, and from another rule file.
+Neither wraps what it brings in: a file is not a namespace, so `import Stlc` makes
+`Lang.LC` reachable as `Lang.LC`, and `open Lang` is what shortens it.
+
+**A file states what it refers to; it never relies on the session.** An instral rule
+file that talks about a language `import`s the surface file declaring it. Until this
+decision a rule file was read with whatever grammars the session happened to hold,
+which worked only because loading threw everything into one flat scope — so a rule
+file's meaning depended on what a considerate user had loaded first. No language
+works that way and Thena will not.
+
+**`public` is how a dependency travels.** `public import` and `public consult`
+republish what they bring in: *you get whatever the thing you imported got.*
+Without `public`, you don't — if A consults X and B imports A, B's own proofs do
+not see X's rules, and B asking for them is one explicit line that fails loudly if
+it is missing.
+
+### Consults are a STACK, and clauses are a queue
+
+*Decided 2026-11-03. Not built — MS11.*
+
+**The last thing you consulted is tried first.** That is the whole rule, and it does
+not matter how deep in a namespace you are standing:
+
+```
+consult broad-tactics        -- tried third
+consult sharper-tactics      -- tried second
+
+thm : …
+thm = do { consult crush-this-one ; … }   -- tried FIRST, and only in here
+```
+
+The shipped base is consulted for you before any of these, so it sits at the bottom
+of the stack and is tried last — which is *universal tactics at the bottom*, falling
+out of the stack rather than being a rule of its own. **A consult reaches to the end
+of the block it is written in**, so the one in that `do` block applies there and
+nowhere else.
+
+**This is the order the engine tries rules in when no name is given** — you at a
+hole, `:matches`, `prove`. A rule called *by name* is found by the ordinary name
+walk, and since rules are not open to extension there is only ever one rule of a
+given name to find.
+
+**THE QUIRK, AND IT IS DELIBERATE.** Inside a rule base, the clauses of a rule are
+tried in **written order, top down** — a queue, as every rule language does it and
+as a paper's numbered cases read. Consults go the other way: **a stack, bottom up.**
+So reading one file, the consults at the top have the *lowest* priority while the
+clauses below them have the *highest*. Two directions, both called "written order".
+
+It is not an oversight and there is no good way around it. Clauses have to be a
+queue — the precedent is universal and the alternative is unreadable. But consults
+as a queue would prevent the thing Thena is for: **a specialised, single-use rule
+base written to crush one goal, brought in exactly where that goal is, and tried
+before anything general.** A queue would bury it under every library you had
+already consulted.
+
+### Rules are not open to extension
+
+*Decided 2026-10-30, reaffirmed 2026-11-03.*
+
+To add a case to `elaborate` you open the file that defines `elaborate` and edit it.
+No import or consult ever merges clauses into a predicate someone else owns, so
+there is no merge order to specify and no cross-file priority to invent.
+
+**This is deliberately the restrictive choice, and the reason is the order of
+events**: opening rules later, with a declared semantics for what an extension means
+and where it lands, stays available. Shipping them open now and discovering the
+semantics afterwards does not — it would mean changing the meaning of code people
+had already written. Expect this to be revisited once the system is stable.
+
 ## Universes and levels
 
 *Decided across MS3 (2026-08-27 to 2026-08-29); written up 2026-08-30.*
