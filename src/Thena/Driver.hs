@@ -176,6 +176,8 @@ import Thena.Rules
   ( RuleBase (..)
   , RuleError
   , RuleIter
+  , Reading (..)
+  , rootReading
   , matches
   , next
   , resolveRule
@@ -208,6 +210,8 @@ import qualified Thena.Surface.Parser as Surface
 import Thena.Syntax.Concrete (Raw (..))
 import Thena.Instral.Concrete
   ( RawDecl (..)
+  , RawOpen (..)
+  , RawOpenSpec (..)
   , RawRhs (..)
   , RawInstr (..)
   , RawOp (..)
@@ -948,8 +952,12 @@ data BlockProblem
 -- **The blocks are typed as extra bodies, not as callables.** Nothing can call
 -- one — it has no name a user could write — so it is handed to 'inferProgram'
 -- beside 'allCallable' rather than inside it.
+-- **In no scope** (MS10 phase 267): a block written inside a surface literal is
+-- resolved again when 'Thena.Instral.Ops.Play' runs it, and that reader has the
+-- session's scope where this one has the file's. The two must not disagree, so
+-- both read a tag whole — 'Thena.Engine' has the rest of why.
 checkSurfaceBlocks :: [Grammar] -> [RuleBase] -> GlobalName -> [Instr] -> Maybe BlockProblem
-checkSurfaceBlocks gs bases nm prog = case surfaceBlocks gs nm prog of
+checkSurfaceBlocks gs bases nm prog = case surfaceBlocks (rootReading gs) nm prog of
   Left errs -> Just (BlockIll errs)
   Right bs  -> case concatMap validate bs of
     e : es -> Just (BlockIll (e : es))
@@ -1007,7 +1015,12 @@ instralEntry gs bases src = do
             -- environment, and that is the behaviour already recorded — the
             -- driver has only ever built literals, so a typed command names a
             -- hole and never a reference.
-            (resolveBlock gs (rootName "entry") []
+            -- **And in no scope** (MS10 phase 267). An @open@ is a declaration
+            -- of the file or the session that wrote it; nothing hands the
+            -- session's scope to @instral@ today, and a prompt entry has no
+            -- @open@ of its own to honour — a local one does not exist
+            -- (`~c2smp`).
+            (resolveBlock (rootReading gs) (rootName "entry") []
                (concatMap hoist (reverse is)))
   -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
   -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
@@ -1957,7 +1970,7 @@ dispatch s name arg = case name of
     -- its value. Outside a yield 'load' clears the environment, and nothing is.
     Right (SurfaceDo body) ->
       let bound = if Engine.isYielding machine then env (exec machine) else []
-       in case resolveBlock (grammars machine) (rootName "entry") (map fst bound) body of
+       in case resolveBlock (rootReading (grammars machine)) (rootName "entry") (map fst bound) body of
         Left errs -> (s, Failed (blockProblem errs))
         Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] [] is) of
           Just (BlockIll es)      -> (s, LineRefused es)
@@ -2877,6 +2890,55 @@ parseInstralType src = do
     Right Nothing  -> Left (LineIllFormed [UnitInsideAType "a query"])
     Right (Just u) -> Right u
 
+-- | **Every declaration of a rule file beside the scope it stands in** (MS10
+-- phase 267).
+--
+-- The file's own @open@ lines are what build that scope, and they build it as
+-- the walk passes them: @open X@ is in force from its line to the end of the
+-- file, and @open X in ‹d›@ for @d@ alone. **That is the surface language's
+-- rule, not a second one** — his ruling of 2026-10-30 gave @open@ five forms
+-- and said what each reaches, and a rule file writes the same five.
+--
+-- **An @open@ itself is dropped**, because it declares nothing: what it said is
+-- in the 'Reading' beside every declaration under it.
+--
+-- **The namespace is taken as written and is not checked against anything.**
+-- The surface language's @Open@ op resolves the path against the environment
+-- first, so @open B@ inside @namespace A@ reaches @A.B@; here there is no
+-- enclosing namespace, and no environment either — the shipped base is read
+-- before the prelude declares its first name ('Thena.Files.startingSession').
+-- So a path that reaches nothing is simply an @open@ that brings nothing in,
+-- and what the author sees is the tag it failed to shorten.
+scopedDecls :: [Grammar] -> [RawDecl] -> [(Reading, RawDecl)]
+scopedDecls gs = go rootScope
+  where
+    go _ []  = []
+    go sc (d : rest) = case d of
+      DeclOpen o        -> go (brings o sc) rest
+      -- **One declaration, and then the file carries on without it.** The
+      -- inner one may be another @open … in@, which is why it goes back
+      -- through this walk rather than being paired here.
+      DeclOpenIn o cov  -> go (brings o sc) [cov] ++ go sc rest
+      _                 -> (Reading gs sc, d) : go sc rest
+
+    brings o sc = sc { scopeOpens = openedOf o ++ scopeOpens sc }
+
+-- | What an @open@ line in a rule file said, as one 'Opened' per namespace it
+-- named (MS10 phase 267).
+--
+-- **The twin of 'regroup''s @opened@**, which does this for the surface
+-- language's written form. Two readers, one resolved form — a line that names
+-- three namespaces is three of these, and only the plain form may name more
+-- than one.
+openedOf :: RawOpen -> [Opened]
+openedOf (RawOpen ns spec) = [ said (ps ++ [x]) | (ps, x) <- ns ]
+  where
+    said p = case spec of
+      RawOpenWhole        -> openedWhole p
+      RawOpenOnly ws      -> (openedWhole p) { openedOnly = Just ws }
+      RawOpenHiding ws    -> (openedWhole p) { openedHiding = ws }
+      RawOpenRenaming rs  -> (openedWhole p) { openedRenaming = rs }
+
 -- | Resolve every declaration, then validate every rule. Every error, not the
 -- first — 'validate'\'s reason.
 --
@@ -2885,6 +2947,11 @@ parseInstralType src = do
 -- questions about the whole program and belong to 'Thena.Instral.Infer'. What
 -- /is/ answered here is what one file can answer — that the type names a type,
 -- and that a callable has at most one signature.
+-- **AND AN @open@ IS READ IN ITS PLACE** (MS10 phase 267), which is the
+-- pulled-forward piece of `~jmw4k`: the file's own @open@ lines decide what a
+-- tag in it may be written as, so a declaration is resolved against the scope
+-- that stands where it is written and not against one scope for the file.
+-- 'scopedDecls' is the walk that pairs the two.
 resolveAll
   :: [Grammar] -> [RawDecl]
   -> Either RuleFileError
@@ -2897,12 +2964,21 @@ resolveAll gs raws =
     ([], [])     -> Right (sigs, fns, ok)
     (res, valid) -> Left (RuleIllFormed (res ++ valid))
   where
-    (ruleErrs, ok)  = partitionEithers [ resolveRule gs r | DeclRule r <- raws ]
+    -- **Each declaration beside the scope it was written in.** An @open@ is not
+    -- a declaration to resolve, so it does not appear here — what it says is
+    -- already in the reading beside everything under it.
+    decls = scopedDecls gs raws
+
+    (ruleErrs, ok)  =
+      partitionEithers [ resolveRule rd r | (rd, DeclRule r) <- decls ]
     -- **A function is validated like any rule**, because it is one
     -- ('Thena.Rules.resolveFunction').
-    (fnErrs, fns)   = partitionEithers [ resolveFunction gs f | DeclFunction f <- raws ]
+    (fnErrs, fns)   =
+      partitionEithers [ resolveFunction rd f | (rd, DeclFunction f) <- decls ]
+    -- **A signature needs no scope**: @instral@'s types are its own words, and
+    -- a tag never appears in one.
     (sigErrs, sigs) =
-      partitionEithers [ resolveSignature g | DeclSignature g <- raws ]
+      partitionEithers [ resolveSignature g | (_, DeclSignature g) <- decls ]
     -- **A name may not be a rule and a function at one arity** (MS5, reviewed
     -- 2026-09-12). They would become two clauses of one callable — 'clauses'
     -- searches 'Thena.Rules.allCallable' — so the function would join the rule's
@@ -3027,7 +3103,7 @@ loadReadBases s = go []
     -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then
     -- dropped, and a 'RuleBase' has no field for them. (Until MS6 phase 106 the
     -- reason was also that a block needed every base's MS5 languages.)
-    blocksOf b = case surfaceBlocks (grammars (sessionMachine s)) (rootName (baseName b))
+    blocksOf b = case surfaceBlocks (rootReading (grammars (sessionMachine s))) (rootName (baseName b))
                             (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
       Left errs -> Left (basePath b, errs)
       Right bs  -> case concatMap validate bs of

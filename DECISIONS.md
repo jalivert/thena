@@ -553,6 +553,48 @@ Without `public`, you don't — if A consults X and B imports A, B's own proofs 
 not see X's rules, and B asking for them is one explicit line that fails loudly if
 it is missing.
 
+### A rule file writes its own `open` lines
+
+*Decided 2026-11-03, built the same day. The piece of the decision above that
+MS10 could not ship without.*
+
+A `language` block may live inside a `namespace`, so its tag is a qualified name
+— and a rule file had no way to shorten one. It writes an `open` of its own now,
+in the same five forms a surface file writes:
+
+```
+rule base inspecting where
+
+open Stlc.Syntax
+
+rule describe LC[var]`${s}` :- do
+  say (concat "a variable called " s)
+```
+
+Without the `open` the tag is `Stlc.Syntax.LC[var]`, which still works and
+always will: **a name written whole resolves under any scope.**
+
+**What an `open` reaches in a rule file is the tags**, because a tag is the only
+thing in one that is resolved against what the session declared. Every other
+name in a rule file is a literal — `split-all core`v` Vec.Vec` names `Vec.Vec`
+because that is the name, not because anything looked it up — and it has to be:
+a rule base is read before the prelude has declared anything, so there is
+nothing to resolve a name against.
+
+**Two opened namespaces answering one tag is refused, and both are named.**
+Either would parse, so choosing one would be the system deciding what you did
+not write; the repair is the path, or `open … renaming`.
+
+**`open X in` covers one declaration**, and in a rule file a signature and the
+rules under it are separate declarations — so it covers the one it is written
+above and no more. That is a real difference from a surface file, where a
+signature and its equation are one declaration.
+
+**`import` is not this, and is not built.** This is the half that needed no way
+to find a file on disc. A rule file still relies on the session having loaded
+the surface file that declares the language; stating that dependency is
+`import`'s job and waits for it.
+
 ### Consults are a STACK, and clauses are a queue
 
 *Decided 2026-11-03. Not built — MS11.*

@@ -53,6 +53,8 @@ import Thena.Core.Level (Level, Normal (..), levelVarName, normalise)
 import Thena.Core.Term (GlobalName (..), Literal (..), Var, nameDotted)
 import Thena.Instral.Concrete
   ( RawDecl (..)
+  , RawOpen (..)
+  , RawOpenSpec (..)
   , RawFunction (..)
   , RawRule (..)
   , RawSignature (..)
@@ -388,6 +390,11 @@ rawDecl d = case d of
   DeclRule (RawRule n ps ts is) ->
     ("rule " ++ n ++ concatMap ((" " ++) . rawPattern) ps ++ " :-" ++ whens ts ++ " do")
       : map (("  " ++) . rawInstruction) is
+  -- **An @open@ line, as written** (MS10 phase 267). @open X in ‹d›@ is one
+  -- line and then the declaration it reaches, indented under it, so a
+  -- declaration that is several lines keeps its shape.
+  DeclOpen o -> [rawOpen o]
+  DeclOpenIn o inner -> (rawOpen o ++ " in") : map ("  " ++) (rawDecl inner)
   where
     header lhs b = case b of
       BodyRhs r    -> [lhs ++ " = " ++ rawRhs r]
@@ -403,6 +410,23 @@ rawDecl d = case d of
     -- grammar's own distinction (@Test@), not a choice about spacing.
     test (RawTest w []) = w
     test (RawTest w as) = "(" ++ w ++ " " ++ unwords (map rawOperand as) ++ ")"
+
+-- | An @open@ line, less the @in@ that may follow it (MS10 phase 267).
+--
+-- **The written form and not the resolved one**, because this is the printer
+-- the parser inverts: @open X Y Z@ is one line here exactly as the author wrote
+-- it, where resolution has already split it into one 'Thena.Core.Term.Opened'
+-- per namespace and could not put it back.
+rawOpen :: RawOpen -> String
+rawOpen (RawOpen ns spec) = "open " ++ unwords (map dotted ns) ++ said spec
+  where
+    dotted (ps, w) = intercalate "." (ps ++ [w])
+
+    said RawOpenWhole         = ""
+    said (RawOpenOnly ws)     = " ( " ++ unwords ws ++ " )"
+    said (RawOpenHiding ws)   = " hiding ( " ++ unwords ws ++ " )"
+    said (RawOpenRenaming rs) =
+      " renaming ( " ++ unwords [ a ++ " -> " ++ b | (a, b) <- rs ] ++ " )"
 
 -- | A whole rule file: its docstring, its header, and its declarations.
 printRuleFile :: String -> Maybe String -> [RawDecl] -> String

@@ -43,7 +43,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -94,6 +94,13 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   elim    { Located _ TElim }
   trusted { Located _ TTrusted }
   where   { Located _ TWhere }
+  -- **The three words an @open@ line is written with** (MS10 phase 267). They
+  -- are already reserved project-wide — the lexer is one lexer, and phases 247
+  -- and 254 reserved them for the surface language — so a rule file gaining
+  -- @open@ narrows no identifier that was not narrowed already.
+  open    { Located _ TOpen }
+  hiding  { Located _ THiding }
+  renaming { Located _ TRenaming }
   rule    { Located _ TRule }
   do      { Located _ TDo }
   when    { Located _ TWhen }
@@ -208,6 +215,44 @@ Decl :: { RawDecl }
   : Rule                                   { DeclRule $1 }
   | Signature                              { DeclSignature $1 }
   | Function                               { DeclFunction $1 }
+  -- **A rule file writes its own @open@ lines** (MS10 phase 267), in the five
+  -- forms his ruling of 2026-10-30 gives the surface language. A declaration
+  -- and not a layout block, for the same reason it is one there: it names a
+  -- namespace and says how far its effect reaches.
+  | open OpenHead                          { DeclOpen (uncurry RawOpen $2) }
+  | open OpenHead in Decl                  { DeclOpenIn (uncurry RawOpen $2) $4 }
+
+-- | What an @open@ opens, and what it says about which names it brings in
+-- (MS10 phase 267). The surface language's 'Thena.Surface.Parser' has the same
+-- four alternatives: each concrete syntax reads its own text, and what they
+-- share is the 'Thena.Core.Term.Opened' resolution builds from it.
+OpenHead :: { ([([String], String)], RawOpenSpec) }
+  : QNames                                 { (reverse $1, RawOpenWhole) }
+  | QName '(' Words ')'                    { ([$1], RawOpenOnly (reverse $3)) }
+  | QName hiding '(' Words ')'             { ([$1], RawOpenHiding (reverse $4)) }
+  | QName renaming '(' Renamings ')'       { ([$1], RawOpenRenaming (reverse $4)) }
+
+-- | One or more, for @open X Y Z@. Reversed by its caller.
+QNames :: { [([String], String)] }
+  : QName                                  { [$1] }
+  | QNames QName                           { $2 : $1 }
+
+-- | The words an @open@ selects, hides, or renames from. **Words and not
+-- names**: a namespace is a prefix, so what a line can speak about is the step
+-- that follows it.
+Words :: { [String] }
+  : ident                                  { [$1] }
+  | Words ident                            { $2 : $1 }
+
+Renamings :: { [(String, String)] }
+  : Renaming                               { [$1] }
+  | Renamings Renaming                     { $2 : $1 }
+
+-- **@-\>@ and not @→@**, which is a legal identifier character: making the
+-- glyph a token would narrow what a name may contain, and that is a decision
+-- about identifiers and not about @open@.
+Renaming :: { (String, String) }
+  : ident '->' ident                       { ($1, $3) }
 
 Rule :: { RawRule }
   : rule ident Params ':-' Tests do Block    { RawRule $2 (reverse $3) $5 (reverse $7) }

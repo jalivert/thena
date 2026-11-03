@@ -23,6 +23,8 @@
 -- "Thena.Rules".
 module Thena.Instral.Concrete
   ( RawDecl (..)
+  , RawOpen (..)
+  , RawOpenSpec (..)
   , RawFunction (..)
   , RawRhs (..)
   , RawBody (..)
@@ -95,10 +97,43 @@ data RawPattern
 -- his choice, 2026-09-12. It has to be: a callable has several clauses and one
 -- type, so a type written on a clause would be written once and read as
 -- belonging to all of them, or written on each and able to disagree.
+-- **An @open@ is a declaration here too** (MS10 phase 267), which is the
+-- pulled-forward piece of @\`~jmw4k\`@: a rule file that talks about a language
+-- living inside a namespace had no way to name it short, and no way to name it
+-- at all once the generated spelling of a tag was the namespace's. It is the
+-- same five forms the surface language has and it is read the same way — what
+-- the line says becomes a 'Thena.Core.Term.Opened' at resolution, and the walk
+-- that answers a tag is the one a surface term already uses.
 data RawDecl
   = DeclRule RawRule
   | DeclSignature RawSignature
   | DeclFunction RawFunction
+  | DeclOpen RawOpen
+    -- ^ @open X@ — in force from here to the end of the file
+  | DeclOpenIn RawOpen RawDecl
+    -- ^ @open X in ‹declaration›@ — in force for that declaration alone
+  deriving (Eq, Show)
+
+-- | What an @open@ line in a rule file said: the namespaces it names, and what
+-- it brings in from them (MS10 phase 267).
+--
+-- **The written form, and the surface language has its own**
+-- ('Thena.Surface.Concrete.SurfaceOpenSpec'). The two concrete syntaxes keep
+-- their own as-written types throughout — @RawData@ beside @SurfaceData@ — and
+-- what they share is the resolved form, 'Thena.Core.Term.Opened', which is the
+-- mechanism. This module imports nothing, which is the other reason.
+data RawOpen = RawOpen [([String], String)] RawOpenSpec
+  deriving (Eq, Show)
+
+-- | The four things a line may say about which words it brings in (MS10 phase
+-- 267). **Several namespaces only in the plain form**, for the surface's
+-- reason: a selection speaks about one namespace's words, so naming two would
+-- not say whose they are.
+data RawOpenSpec
+  = RawOpenWhole                        -- ^ @open X@, and @open X Y Z@
+  | RawOpenOnly [String]                -- ^ @open X ( a b )@
+  | RawOpenHiding [String]              -- ^ @open X hiding ( a b )@
+  | RawOpenRenaming [(String, String)]  -- ^ @open X renaming ( e -> c )@
   deriving (Eq, Show)
 
 -- | @‹name› ‹params› = ‹expression›@ — a global function (MS5 phase 68a).

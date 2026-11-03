@@ -34,6 +34,8 @@ module Thena.Rules
   , writtenPositions
 
     -- * Written rules (§8, phase 21)
+  , Reading (..)
+  , rootReading
   , opWords
   , resolveFunction
   , resolveRule
@@ -52,14 +54,15 @@ module Thena.Rules
   ) where
 
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, nameFromText, rootName)
+import Thena.Core.Term
+  (Core (..), GlobalName (..), InScope, nameDotted, rootName, rootScope)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor (Cursor, Focus (..), context, expectedType, focus)
 import Thena.Global.Env (GlobalEnv)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Build (skeletonOf)
 import Thena.Language.Grammar
-  (GProduction (..), Grammar (..), builtInTags, earleyRules)
+  (GProduction (..), Grammar (..), builtInTags, earleyRules, grammarForTag)
 import qualified Thena.Instral.Ops as Op
 import Thena.Instral.Ops
   ( AnswerKind (..)
@@ -571,6 +574,13 @@ data RuleError
     -- ^ @tag\`…\`@ where no parser answers to @tag@ (MS5 phase 61b). The two
     -- built-in ones are @surface@ and @core@; every installed grammar brings its
     -- own (MS6 phase 104c).
+  | AmbiguousTag      GlobalName Int String [GlobalName]
+    -- ^ **a tag that two opened namespaces both answer** (MS10 phase 267): the
+    -- rule, the instruction, the word as written, and every grammar it reaches.
+    -- Refused and not chosen, which is 'Thena.Core.Term.globalUnder'\'s own
+    -- answer — either would parse, so picking one would be the system deciding
+    -- what the author did not write. The repair is the path, or an
+    -- @open … renaming@.
   | BadRegion         GlobalName Int String SyntaxError
     -- **The three below are an OBJECT language's region** (MS6 phase 104c):
     -- the rule, the instruction, the language, and what went wrong. They are
@@ -956,6 +966,33 @@ validateBase = concatMap validate . baseRules
 -- Written rules (§8, phase 21)
 -- --------------------------------------------------------------------------
 
+-- | **What a written rule is read against** (MS10 phase 267): the grammars the
+-- session has installed, and the scope the text stands in.
+--
+-- **It replaced a bare @[Grammar]@ threaded through every resolve function**,
+-- and that is why it is a record rather than a second parameter: the scope is
+-- needed at exactly the places the grammars are, and a type the compiler
+-- checks is what makes every one of those places move at once. Phase 258's
+-- hazard is the reason — a scoping change touches sites that no failing test
+-- can find.
+--
+-- **The scope of a rule file is its own @open@ lines, and nothing else.** A
+-- rule file is not read in the session's scope, which is his ruling of
+-- 2026-11-02 (@RULINGS.md@, phase 260): a base's meaning may not depend on
+-- what happened to be open when it was loaded. What phase 267 changes is that
+-- the file may now say so itself.
+data Reading = Reading
+  { readingGrammars :: [Grammar]
+    -- ^ every installed grammar, which is what the Earley parser needs
+  , readingScope    :: InScope
+    -- ^ where the text stands, which is what a tag is resolved against
+  }
+  deriving (Eq, Show)
+
+-- | A reading with nothing open — what a text written in no scope gets.
+rootReading :: [Grammar] -> Reading
+rootReading gs = Reading gs rootScope
+
 -- | A parsed rule, resolved against the base into the very value a Haskell
 -- literal would give.
 --
@@ -976,16 +1013,16 @@ validateBase = concatMap validate . baseRules
 -- the same one — @resolveBlock@\'s own comment says /nothing about a block is a
 -- second dialect/ — and phase 77\'s annotation pairing landed in one of them.
 -- A rule body silently ignored every @n : Ty@ it was given.
-resolveRule :: [Grammar] -> RawRule -> Either [RuleError] Rule
-resolveRule gs (RawRule nm ps ts body) =
-  case (patErrs, headErrs, resolveBlock gs g (concatMap patternBinds qs) body) of
+resolveRule :: Reading -> RawRule -> Either [RuleError] Rule
+resolveRule rd (RawRule nm ps ts body) =
+  case (patErrs, headErrs, resolveBlock rd g (concatMap patternBinds qs) body) of
     ([], [], Right instrs) -> Right (Rule g qs tests instrs)
     (_,  _,  Right _)      -> Left (patErrs ++ headErrs)
     (_,  _,  Left bodyErrs) -> Left (patErrs ++ headErrs ++ bodyErrs)
   where
     g = rootName nm
 
-    (patErrs, qs) = partitionEithers (map (resolvePattern gs g) ps)
+    (patErrs, qs) = partitionEithers (map (resolvePattern rd g) ps)
 
     (headErrs, tests) = partitionEithers (map test ts)
     test (RawTest w os) = case traverse headOperand os of
@@ -1063,10 +1100,10 @@ builtInTypes =
 --
 -- **A function must produce.** @f x = say "hi"@ is refused here rather than by
 -- 'validate', which would report it against a binding the author never wrote.
-resolveFunction :: [Grammar] -> RawFunction -> Either [RuleError] Rule
-resolveFunction gs (RawFunction nm ps body) =
-  case partitionEithers (map (resolvePattern gs g) ps) of
-    ([], qs) -> Rule g qs [] <$> bodyInstrs gs g nm (concatMap patternBinds qs) body
+resolveFunction :: Reading -> RawFunction -> Either [RuleError] Rule
+resolveFunction rd (RawFunction nm ps body) =
+  case partitionEithers (map (resolvePattern rd g) ps) of
+    ([], qs) -> Rule g qs [] <$> bodyInstrs rd g nm (concatMap patternBinds qs) body
     (es, _)  -> Left es
   where
     g = rootName nm
@@ -1088,16 +1125,16 @@ resolveFunction gs (RawFunction nm ps body) =
 -- at all. Both are reported against the name rather than against a binding the
 -- author never wrote.
 bodyInstrs
-  :: [Grammar] -> GlobalName -> String -> [Name] -> RawBody
+  :: Reading -> GlobalName -> String -> [Name] -> RawBody
   -> Either [RuleError] [Instr]
-bodyInstrs gs g nm bound body = case body of
+bodyInstrs rd g nm bound body = case body of
   BodyRhs rhs -> do
-    is <- resolveBlock gs g bound [RawBind (RawPWord lambdaResult) rhs]
+    is <- resolveBlock rd g bound [RawBind (RawPWord lambdaResult) rhs]
     case [ () | Bind p _ o <- is, p == PVar lambdaResult, not (produces o) ] of
       _ : _ -> Left [FunctionLeavesNothing nm]
       []    -> Right (is ++ [Do (Return (Ref lambdaResult))])
   BodyBlock raws -> do
-    is <- resolveBlock gs g bound raws
+    is <- resolveBlock rd g bound raws
     if any returns is then Right is else Left [FunctionLeavesNothing nm]
   where
     returns i = case i of
@@ -1118,9 +1155,9 @@ bodyInstrs gs g nm bound body = case body of
 -- 77): @n : Ty@ is about the @n = …@ that follows it, so this walks the written
 -- list in pairs rather than mapping over it. Everything else is unchanged.
 resolveBlock
-  :: [Grammar] -> GlobalName -> [Name] -> [RawInstr]
+  :: Reading -> GlobalName -> [Name] -> [RawInstr]
   -> Either [RuleError] [Instr]
-resolveBlock gs g bound0 body = case partitionEithers (walk 0 bound0 body) of
+resolveBlock rd g bound0 body = case partitionEithers (walk 0 bound0 body) of
   ([], instrs) -> Right (concat instrs)
   (errs, _)    -> Left errs
   where
@@ -1134,11 +1171,11 @@ resolveBlock gs g bound0 body = case partitionEithers (walk 0 bound0 body) of
     -- is a real option and is @ms5\/CLOSEOUT.md@ 39.
     walk i bound (RawAnnot n t : rest) = case rest of
       RawBind (RawPWord m) r : more | m == n ->
-        annotated i n t (instruction gs g bound (i + 1) (RawBind (RawPWord m) r))
+        annotated i n t (instruction rd g bound (i + 1) (RawBind (RawPWord m) r))
           : walk (i + 2) (m : bound) more
       _ -> [Left (AnnotationWithoutBinding g i n)]
     walk i bound (ri : rest) =
-      instruction gs g bound i ri : walk (i + 1) (binds ri ++ bound) rest
+      instruction rd g bound i ri : walk (i + 1) (binds ri ++ bound) rest
 
     -- **What is in scope for the NEXT instruction**, which is the one thing
     -- 'instruction' could not work out for itself (MS5 phase 82). A body is a
@@ -1147,7 +1184,7 @@ resolveBlock gs g bound0 body = case partitionEithers (walk 0 bound0 body) of
     -- one pass earlier, because the decision it feeds — /is this bare word a
     -- value or a call?/ — has to be made while the 'Op' is built.
     binds ri = case ri of
-      RawBind p _ -> either (const []) patternBinds (resolvePattern gs g p)
+      RawBind p _ -> either (const []) patternBinds (resolvePattern rd g p)
       _           -> []
 
     -- The annotation lands on the instruction that binds the name, which is the
@@ -1177,14 +1214,14 @@ resolveBlock gs g bound0 body = case partitionEithers (walk 0 bound0 body) of
 -- line the author can see — so the instruction numbers in a message still count
 -- what was written and not what it expanded to.
 instruction
-  :: [Grammar] -> GlobalName -> [Name] -> Int -> RawInstr
+  :: Reading -> GlobalName -> [Name] -> Int -> RawInstr
   -> Either RuleError [Instr]
-instruction gs g bound i ri = case ri of
+instruction rd g bound i ri = case ri of
   -- **The left is resolved first** (MS5 phase 84), so that every binding clause
   -- below works with a 'Pattern' and none of them repeats the question. A
   -- pattern over @instral@'s own data mentions no op word and no tag, so this
   -- cannot fail for any reason the clauses care about.
-  RawBind p rhs -> resolvePattern gs g p >>= \q -> bound' q rhs
+  RawBind p rhs -> resolvePattern rd g p >>= \q -> bound' q rhs
   -- **@x = true@ is the literal, not a call to a rule called @true@** (MS5
   -- phase 73). @true@ and @false@ are read as values wherever an /operand/ is
   -- read (phase 64), and the right of an @=@ is the one place a bare word goes
@@ -1198,7 +1235,7 @@ instruction gs g bound i ri = case ri of
   where
    bound' n rhs = case rhs of
     RhsOp (RawOp w []) | w `elem` reservedNames ->
-      pure . Bind n Nothing . Op.Value <$> operandOf gs g i "=" (RawRef w)
+      pure . Bind n Nothing . Op.Value <$> operandOf rd g i "=" (RawRef w)
   -- **@x = y@ where @y@ is a LOCAL is that value, not a call to a rule called
   -- @y@** (MS5 phase 82) — the same defect one guard over, and phase 73's
   -- comment above is its own best statement: the right of an @=@ is the one
@@ -1215,32 +1252,32 @@ instruction gs g bound i ri = case ri of
   -- **An op word still wins**, because 'operation' is not reached: a word that
   -- names an op never gets here, exactly as @true@ does not.
     RhsOp (RawOp w []) | w `elem` bound, not (isOpWord w) ->
-      pure . Bind n Nothing . Op.Value <$> operandOf gs g i "=" (RawRef w)
+      pure . Bind n Nothing . Op.Value <$> operandOf rd g i "=" (RawRef w)
     RhsOp o    -> lift (Bind n Nothing) o
   -- **A value on the right of an @=@** (MS5 phase 68a) — @x = [1, 2]@. Its
   -- nested calls are lifted exactly as an op's arguments are, and the value
   -- itself becomes a 'Thena.Instral.Ops.Value', which is the op with no written form.
   -- **A lambda binds directly**, without going through 'Op.Value': it is
   -- already an op, and wrapping it would build the closure and then copy it.
-    RhsValue (RawLambda ps b) -> pure . Bind n Nothing <$> closure gs g i ps b
+    RhsValue (RawLambda ps b) -> pure . Bind n Nothing <$> closure rd g i ps b
     RhsValue o ->
       let (bs, o') = hoistedOne i o
-       in (++) <$> traverse (hoistedBind gs g i) bs
-                <*> (pure . Bind n Nothing . Op.Value <$> operandOf gs g i "=" o')
+       in (++) <$> traverse (hoistedBind rd g i) bs
+                <*> (pure . Bind n Nothing . Op.Value <$> operandOf rd g i "=" o')
 
    lift f (RawOp w as) =
       let (binds, as') = hoisted i as
-       in (++) <$> traverse (hoistedBind gs g i) binds
-                <*> (pure . f <$> operation gs g i (RawOp w as'))
+       in (++) <$> traverse (hoistedBind rd g i) binds
+                <*> (pure . f <$> operation rd g i (RawOp w as'))
 
 -- | One binding 'hoisted' lifted out — a nested call or a lambda.
-hoistedBind :: [Grammar] -> GlobalName -> Int -> (Name, RawRhs) -> Either RuleError Instr
+hoistedBind :: Reading -> GlobalName -> Int -> (Name, RawRhs) -> Either RuleError Instr
 -- **A generated name, so a plain 'PVar'** (MS5 phase 84): a hoisted binding is
 -- machinery and never destructures.
-hoistedBind gs g i (n, r) = case r of
-  RhsOp o                     -> Bind (PVar n) Nothing <$> operation gs g i o
-  RhsValue (RawLambda ps b)   -> Bind (PVar n) Nothing <$> closure gs g i ps b
-  RhsValue o                  -> Bind (PVar n) Nothing . Op.Value <$> operandOf gs g i "=" o
+hoistedBind rd g i (n, r) = case r of
+  RhsOp o                     -> Bind (PVar n) Nothing <$> operation rd g i o
+  RhsValue (RawLambda ps b)   -> Bind (PVar n) Nothing <$> closure rd g i ps b
+  RhsValue o                  -> Bind (PVar n) Nothing . Op.Value <$> operandOf rd g i "=" o
 
 -- | Turn a written parameter into a 'Pattern' (MS5 phase 82).
 --
@@ -1258,8 +1295,8 @@ hoistedBind gs g i (n, r) = case r of
 -- **Linearity is NOT checked here** — 'validate' does it, with every other
 -- name question about a rule, so that a function and a rule get the same answer
 -- and the message carries the rule\'s name.
-resolvePattern :: [Grammar] -> GlobalName -> RawPattern -> Either RuleError Pattern
-resolvePattern gs g = go
+resolvePattern :: Reading -> GlobalName -> RawPattern -> Either RuleError Pattern
+resolvePattern rd g = go
   where
     go rp = case rp of
       RawPWord "_"     -> Right PWild
@@ -1282,13 +1319,14 @@ resolvePattern gs g = go
       -- 104c): the same notation an operand uses, with @${x}@ binding where
       -- it would supply. The grammar is consulted here and nowhere later —
       -- what a clause keeps is the skeleton.
-      RawPObject tag prod src -> case objectGrammar gs tag of
-        Nothing -> Left (NoSuchTag g 0 tag)
-        Just gr -> case prod of
+      RawPObject tag prod src -> case objectGrammar rd tag of
+        Left []  -> Left (NoSuchTag g 0 tag)
+        Left amb -> Left (AmbiguousTag g 0 tag amb)
+        Right gr -> case prod of
           Just w | w `notElem` productionsOf gr -> Left (NoObjectProduction g 0 tag w)
-          _ -> case Earley.parse (earleyRules gs) (startAt gr tag prod) pieces of
+          _ -> case Earley.parse (earleyRules (readingGrammars rd)) (startAt gr tag prod) pieces of
             Left why -> Left (ObjectRegionUnparsed g 0 tag src why)
-            Right tree -> case skeletonOf gs (map PVar names) tree of
+            Right tree -> case skeletonOf (readingGrammars rd) (map PVar names) tree of
               Left e   -> Left (ObjectRegionNotATerm g 0 tag e)
               Right sk -> Right (PObject sk)
         where (pieces, names) = regionPieces src
@@ -1298,12 +1336,12 @@ resolvePattern gs g = go
 -- **The same compilation as 'resolveFunction'**, deliberately — §1.1 says a
 -- function is a rule with one clause and no head, and a lambda is that function
 -- without a name, so there is one way to build a body and not two.
-closure :: [Grammar] -> GlobalName -> Int -> [RawPattern] -> RawBody -> Either RuleError Op
-closure gs g i ps b = case traverse (resolvePattern gs g) ps of
+closure :: Reading -> GlobalName -> Int -> [RawPattern] -> RawBody -> Either RuleError Op
+closure rd g i ps b = case traverse (resolvePattern rd g) ps of
   Left e   -> Left e
   -- **A lambda's own parameters are in scope in its body**, which is what makes
   -- @\\ x -> x@ read as the identity rather than as a call (MS5 phase 82).
-  Right qs -> case bodyInstrs gs g "λ" (concatMap patternBinds qs) b of
+  Right qs -> case bodyInstrs rd g "λ" (concatMap patternBinds qs) b of
     Left (e : _) -> Left e
     Left []      -> Left (BadOperands g i "λ")
     Right is     -> Right (Op.Lambda qs is)
@@ -1370,8 +1408,8 @@ hoistedOne i a = case hoisted i [a] of
 --
 -- The three arguments before the operand are only for errors: which rule, which
 -- instruction, and the word that wanted it.
-operandOf :: [Grammar] -> GlobalName -> Int -> String -> RawOperand -> Either RuleError Operand
-operandOf gs g i w o = case o of
+operandOf :: Reading -> GlobalName -> Int -> String -> RawOperand -> Either RuleError Operand
+operandOf rd g i w o = case o of
   -- **Cannot arise**, for 'RawNested'\'s reason: 'hoisted' lifts every lambda
   -- into a binding of its own before this runs (MS5 phase 68b).
   RawLambda _ _ -> Left (BadOperands g i w)
@@ -1399,8 +1437,8 @@ operandOf gs g i w o = case o of
   -- it wanted a term fails with 'Thena.Errors.ExpectedTerm', and saying so
   -- earlier is the type system's job (@ms2\/CLOSEOUT.md@ 4b, phase 66).
   RawPos k  -> Right (Lit (VInt k))
-  RawList os    -> ListOf <$> traverse (operandOf gs g i w) os
-  RawPairOf a b -> PairOf <$> operandOf gs g i w a <*> operandOf gs g i w b
+  RawList os    -> ListOf <$> traverse (operandOf rd g i w) os
+  RawPairOf a b -> PairOf <$> operandOf rd g i w a <*> operandOf rd g i w b
   -- **A tagged region is parsed here, at load** (MS5 phase 61b, §6.0.1), so
   -- that a syntax error in an embedded term arrives with every other syntax
   -- error rather than when a rule happens to run.
@@ -1421,18 +1459,24 @@ operandOf gs g i w o = case o of
   -- **With no splices it is a value and becomes one now**; with splices it is a
   -- small expression, exactly as a list literal is, and is assembled when the
   -- operand is read.
-  RawRegion tag prod src | Just gr <- objectGrammar gs tag ->
+  RawRegion tag prod src | Right gr <- objectGrammar rd tag ->
     case prod of
       Just prod' | prod' `notElem` productionsOf gr -> Left (NoObjectProduction g i tag prod')
-      _ -> case Earley.parse (earleyRules gs) (startAt gr tag prod) pieces of
+      _ -> case Earley.parse (earleyRules (readingGrammars rd)) (startAt gr tag prod) pieces of
         Left why -> Left (ObjectRegionUnparsed g i tag src why)
-        Right tree -> case skeletonOf gs (map Ref names) tree of
+        Right tree -> case skeletonOf (readingGrammars rd) (map Ref names) tree of
           Left e -> Left (ObjectRegionNotATerm g i tag e)
           -- **With no splices the term is known now**, so it is a value and
           -- not an expression — the same line 'ListOf' draws.
           Right sk | null names -> Lit . VTerm <$> assembled g i tag sk
                    | otherwise  -> Right (Op.ObjectOf sk)
     where (pieces, names) = regionPieces src
+  -- **Two grammars answering one word is a refusal**, and it is said here
+  -- rather than left to fall through to the built-in tags below: @core@ and
+  -- @surface@ are reserved words, so no grammar can be called either, and a
+  -- word that two namespaces answer is not one of them (MS10 phase 267).
+  RawRegion tag _ _ | Left amb@(_ : _) <- objectGrammar rd tag ->
+    Left (AmbiguousTag g i tag amb)
   RawRegion tag (Just _) _ -> Left (NoSuchTag g i tag)
   RawRegion tag _ src -> case tag of
     "surface" -> case parseSurfaceText src of
@@ -1456,24 +1500,22 @@ assembled g i tag sk = case sk of
   SLit l        -> Right (Primitive l)
   SHole _ _     -> Left (ObjectRegionNotATerm g i tag (Incomplete tag))
 
--- | The installed grammar a tag names, if it names one (MS6 phase 104c).
+-- | The installed grammar a tag names, resolved by the walk (MS6 phase 104c).
 --
--- **A RULE FILE IS NOT READ IN A SCOPE, SO A TAG THERE IS WRITTEN IN FULL**
--- (MS10 phase 260). His ruling of 2026-10-30 is that a tag resolves like any
--- other name, and in a rule file every other name is written whole — a rule
--- calls @Vec.Vec@ and matches @LC.var@, because there is no @module@ clause and
--- no @open@ for a word to be resolved against. **So the tag goes through
--- 'Thena.Core.Term.nameFromText' and not @rootName@**: @A.Ty@ is a path, which
--- is the one thing that was missing, and a bare word still names a root-level
--- grammar. The two readers that /do/ stand in a scope — a development-calculus
--- term and a surface term — use 'Thena.Language.Grammar.grammarForTag'
--- instead. When `~jmw4k` gives a rule base imports, this is where the scope
--- arrives.
-objectGrammar :: [Grammar] -> String -> Maybe Grammar
-objectGrammar gs tag =
-  case [ gr | gr <- gs, nameFromText tag == grammarName gr ] of
-    gr : _ -> Just gr
-    []     -> Nothing
+-- **THE SCOPE ARRIVED HERE** (MS10 phase 267), which is what phase 260's note
+-- above this function said would happen. A tag resolves like any other name —
+-- his ruling of 2026-10-30 — and this is now the same walk every other reader
+-- uses, 'Thena.Language.Grammar.grammarForTag', so there is one answer to
+-- /which grammar does this word name/ and not two.
+--
+-- **The path always works, which is what keeps every file that exists
+-- reading.** A written whole name resolves under any scope, so a rule file
+-- that opens nothing behaves exactly as it did when the tag had to be whole.
+--
+-- **Two grammars answering one word is a refusal and names both**, which is
+-- the walk's own answer and not a rule of this function's.
+objectGrammar :: Reading -> String -> Either [GlobalName] Grammar
+objectGrammar rd = grammarForTag (readingScope rd) (readingGrammars rd)
 
 -- | **By the word a user writes** (MS10 phase 248): the fence already said
 -- @LC@, so the bracket is a lookup inside it. 'startAt' turns the word back
@@ -1644,7 +1686,7 @@ opArities w =
   , any resolves [ as | as <- samples k, length as == k ]
   ]
   where
-    resolves as = case operation [] (rootName "") 0 (RawOp w as) of
+    resolves as = case operation (rootReading []) (rootName "") 0 (RawOp w as) of
       Right (Call _ _) -> False
       Right _          -> True
       Left _           -> False
@@ -1669,8 +1711,8 @@ opWords =
   where
     sample = Lit (VText "x")
 
-operation :: [Grammar] -> GlobalName -> Int -> RawOp -> Either RuleError Op
-operation gs g i (RawOp w as)
+operation :: Reading -> GlobalName -> Int -> RawOp -> Either RuleError Op
+operation rd g i (RawOp w as)
   -- The field words come first: @arg@ is one of them and also the only word
   -- that reads a position, so a general arity table could not describe it.
   | w `elem` partWords = case as of
@@ -1762,7 +1804,7 @@ operation gs g i (RawOp w as)
     -- kind of value fails at run time with 'Thena.Errors.ExpectedTerm', and
     -- "when the instruction language gets a type system that check moves
     -- there". A grammar that policed it here would be that type system, badly.
-    ref     = operandOf gs g i w
+    ref     = operandOf rd g i w
 
 
 -- | What @ask@'s second word may be — 'AnswerKind', spelled.
@@ -2036,22 +2078,28 @@ everyTest =
 -- answer is known before the machine starts, which is what lets a block be
 -- validated and typed like any other body (@ms5\/CLOSEOUT.md@ 20).
 --
+-- **AND THE SAME SCOPE, WHICH IS NONE** (MS10 phase 267). That twinning is what
+-- decides it: this reader has the rule file's scope and @Play@ has the
+-- session's, so the only scope both can be given is the empty one, and a tag in
+-- a played block is written whole. Every caller passes 'rootReading'
+-- deliberately — see 'Thena.Driver.checkSurfaceBlocks'.
+--
 -- **It recurses**, because a block\'s own instructions may hold another surface
 -- literal holding another block.
 --
 -- The name each block is given is the enclosing rule\'s with an index, so an
 -- error in one says which block of which rule it was in.
 surfaceBlocks
-  :: [Grammar] -> GlobalName -> [Instr]
+  :: Reading -> GlobalName -> [Instr]
   -> Either [RuleError] [Rule]
-surfaceBlocks gs g is = concat <$> traverse one (zip [0 :: Int ..] (blocksUnder is))
+surfaceBlocks rd g is = concat <$> traverse one (zip [0 :: Int ..] (blocksUnder is))
   where
     one (k, raws) = do
-      body <- resolveBlock gs nm [] raws
+      body <- resolveBlock rd nm [] raws
       case [ ReturnInSurfaceBlock nm i | (i, instr) <- zip (writtenPositions body) body, returns instr ] of
         e : es -> Left (e : es)
         []     -> do
-          inner <- surfaceBlocks gs nm body
+          inner <- surfaceBlocks rd nm body
           Right (Rule nm [] [] body : inner)
       where
         nm = rootName (unGlobal g ++ ", do block " ++ show (k + 1))

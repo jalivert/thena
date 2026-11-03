@@ -47,6 +47,7 @@ tests =
     testGroup
       "object terms in instral (\167\&8)"
       [ testGroup "a rule file sees a grammar loaded before it" (reading io)
+      , testGroup "a rule file writes its own open lines" opening
       , testGroup "what a pattern matches" (matching io)
       , testGroup "what an operand builds" (building io)
       ]
@@ -135,12 +136,14 @@ reading io =
         BasesIllTyped (_ : _) -> pure ()
         other -> assertFailure (show other)
 
-    -- **A RULE FILE IS NOT READ IN A SCOPE, SO A TAG THERE IS WRITTEN IN FULL**
-    -- (MS10 phase 260, `~zjkvd`). His ruling is that a tag resolves like any
-    -- other name, and in a rule file every other name is written whole \u2014 there
-    -- is no @module@ clause and no @open@ for a word to resolve against. So a
-    -- language in a namespace is reached by its path, and the pattern's shape
-    -- carries the production's whole name as it always did.
+    -- **A TAG RESOLVES LIKE ANY OTHER NAME** (MS10 phase 260, `~zjkvd`), so a
+    -- language in a namespace is reached by its path and the pattern's shape
+    -- carries the production's whole name.
+    --
+    -- **This is the one that must not move when a scope arrives** (MS10 phase
+    -- 267): a written whole name resolves under any scope, so a rule file that
+    -- opens nothing reads exactly as it did when a tag had to be whole. The
+    -- @open@ forms are in 'opening' below.
   , testCase "a rule file reaches a namespaced language by its path" $ do
       (s0, _) <- startingSession
       shipped <- rulesPath >>= readFile
@@ -185,6 +188,138 @@ reading io =
         RuleFileRefused _ _ -> pure ()
         other -> assertFailure (show other)
   ]
+
+-- ---------------------------------------------------------------------------
+
+-- | **A rule file writes its own @open@ lines** (MS10 phase 267), which is the
+-- piece of `~jmw4k` his decision of 2026-11-03 pulled forward into MS10.
+--
+-- **Every test here is a pair**: the short spelling under an @open@, and the
+-- same text without it. That is deliberate — a test that only shows the short
+-- spelling working cannot tell a scope that was honoured from a word that
+-- happened to resolve anyway.
+--
+-- The fixture is its own, and not 'loadedModule''s: what the phase is for is a
+-- language that lives inside a @namespace@, and @Lang@ declares one at the root.
+opening :: [TestTree]
+opening =
+  [ testCase "open A reaches a language declared inside A" $ do
+      r <- inNamespaces oneNamespace
+             [ "open A", "", "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
+      shapeOf r @?= Right (SNode (named "A.LC.app")
+                             [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ])
+
+    -- **The pair.** Nothing else changes, so what the test above measures is
+    -- the @open@ and not the tag.
+  , testCase "and without the open the same word reaches nothing" $ do
+      r <- inNamespaces oneNamespace
+             [ "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
+      refusal r
+
+  , testCase "open A renaming ( LC -> L ) renames the tag" $ do
+      r <- inNamespaces oneNamespace
+             [ "open A renaming ( LC -> L )", ""
+             , "rule swap L[app]`( ${f} ${a} )` :- do say \"x\"" ]
+      shapeOf r @?= Right (SNode (named "A.LC.app")
+                             [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ])
+
+  , testCase "and the word it was renamed from no longer reaches it" $ do
+      r <- inNamespaces oneNamespace
+             [ "open A renaming ( LC -> L )", ""
+             , "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
+      refusal r
+
+  , testCase "open A ( LC ) selects the language" $ do
+      r <- inNamespaces oneNamespace
+             [ "open A ( LC )", ""
+             , "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
+      shapeOf r @?= Right (SNode (named "A.LC.app")
+                             [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ])
+
+  , testCase "and open A hiding ( LC ) keeps it out" $ do
+      r <- inNamespaces oneNamespace
+             [ "open A hiding ( LC )", ""
+             , "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
+      refusal r
+
+    -- **Two namespaces answering one word is refused and not chosen**, which
+    -- is 'Thena.Core.Term.globalUnder''s own answer: either would parse, so
+    -- picking one would be the system deciding what the author did not write.
+  , testCase "two opened namespaces answering one tag is refused" $ do
+      r <- inNamespaces twoNamespaces
+             [ "open A", "open B", ""
+             , "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
+      refusal r
+
+  , testCase "and the path still says which was meant" $ do
+      r <- inNamespaces twoNamespaces
+             [ "open A", "open B", ""
+             , "rule swap B.LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
+      shapeOf r @?= Right (SNode (named "B.LC.app")
+                             [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ])
+
+    -- **@open X in ‹declaration›@ reaches that declaration and stops**, which
+    -- is the fifth of the forms his ruling of 2026-10-30 gave the surface
+    -- language. A rule file's declarations are independent, so what it covers
+    -- is one rule.
+  , testCase "open A in reaches the declaration under it" $ do
+      r <- inNamespaces oneNamespace
+             [ "open A in"
+             , "  rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
+      shapeOf r @?= Right (SNode (named "A.LC.app")
+                             [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ])
+
+  , testCase "and not the declaration after it" $ do
+      r <- inNamespaces oneNamespace
+             [ "open A in"
+             , "  rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
+             , "rule other LC[app]`( ${f} ${a} )` :- do say \"y\"" ]
+      refusal r
+  ]
+  where
+    shapeOf r = case r of
+      Right (x : _) -> case ruleParams x of
+        PObject sk : _ -> Right sk
+        ps             -> Left ("the rule's parameters were " ++ show ps)
+      Right []   -> Left "the base declared no rule"
+      Left other -> Left (show other)
+
+    refusal r = case r of
+      Left (RuleFileRefused _ _) -> pure ()
+      Left other -> assertFailure (show other)
+      Right _    -> assertFailure "it loaded, and should not have"
+
+-- | One namespace holding one language, which is the shape the phase exists for.
+oneNamespace :: [String]
+oneNamespace = inside "A"
+
+-- | Two, so that one word can be reached from both.
+twoNamespaces :: [String]
+twoNamespaces = inside "A" ++ inside "B"
+
+inside :: String -> [String]
+inside ns =
+  [ "namespace " ++ ns ++ " where"
+  , "  x : Token String"
+  , "  x = /[a-z]+/"
+  , ""
+  , "  language LC, M, N where"
+  , "    var : x as occurrence -> x"
+  , "    app                   -> ( M N )"
+  , ""
+  , "  open LC"
+  , ""
+  ]
+
+-- | Load a module of namespaced languages, then a rule base written against it.
+inNamespaces :: [String] -> [String] -> IO (Either Response [Rule])
+inNamespaces decls body = do
+  (s0, _) <- startingSession
+  shipped <- rulesPath >>= readFile
+  case loadProofSource s0 (unlines ("module Nested where" : "" : decls)) of
+    (s1, ProofLoaded {}) ->
+      withRules (pure (s1, shipped)) ("rule base mine where\n\n" ++ unlines body)
+    (_, other) -> assertFailure (show other)
 
 -- ---------------------------------------------------------------------------
 

@@ -161,7 +161,7 @@ import Thena.Tactics.Recurse (resolveRecursion)
 import Thena.Tactics.Specialise
   (Binder (..), Specialisation (..), specialise, survivingEquations)
 import Thena.Rules
-  (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
+  (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock, rootReading)
 import Thena.Syntax.Lexer (isIdentifier)
 import Thena.Surface.Zipper (SurfaceZipper)
 import qualified Thena.Surface.Zipper as Zipper
@@ -2180,7 +2180,16 @@ perform instr rest m = case operation instr of
   Op.Play x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceDo body) ->
-      case resolveBlock (grammars m) (rootName "do") [] body of
+      -- **In no scope, which is what it was read in** (MS10 phase 267, and it
+      -- is unchanged). A block played here is the load-time twin of
+      -- 'Thena.Rules.surfaceBlocks', and the two must answer the same: this one
+      -- has the session's scope and that one has the file's, so the only scope
+      -- both can agree on is none. A tag in a played block is therefore written
+      -- whole. The seam is older and wider than this phase — the surface
+      -- literal around the block already resolves its own tags under
+      -- @scope m@ — and closing it is `~jmw4k`'s, which is where a rule base
+      -- stating its own dependencies belongs.
+      case resolveBlock (rootReading (grammars m)) (rootName "do") [] body of
         Left errs -> failure (blockFailureOf errs) m
         Right is  -> Playing is (advance m)
     Right _ -> failure (ExpectedSurfaceShape "a do block") m

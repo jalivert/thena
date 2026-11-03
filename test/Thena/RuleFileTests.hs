@@ -14,6 +14,12 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (rootName, nameDotted)
+import Thena.Instral.Concrete
+  ( RawDecl (..)
+  , RawOpen (..)
+  , RawOpenSpec (..)
+  )
+import Thena.Syntax.Print (printRuleFile)
 import Thena.Driver
   ( CommandError (..)
   , Stop (..)
@@ -25,6 +31,7 @@ import Thena.Driver
   , loadRuleBases
   , newSession
   , baseHead
+  , rawRuleDecls
   )
 import Thena.Engine (Machine (rules))
 import qualified Thena.Engine as Engine
@@ -37,7 +44,82 @@ tests :: TestTree
 tests =
   testGroup
     "rule files (§8)"
-    [headers, loading, ordering, refusals, commands, argumentHeads, returning, primitives, walking]
+    [headers, opens, loading, ordering, refusals, commands, argumentHeads, returning, primitives, walking]
+
+-- --------------------------------------------------------------------------
+-- An @open@ line, as written
+-- --------------------------------------------------------------------------
+
+-- | **The five forms a rule file may write** (MS10 phase 267), read without a
+-- session: what each line parses to, and that the printer writes it back.
+--
+-- What the lines /mean/ is "Thena.ObjectTermTests"' — these say only that the
+-- grammar reads each form and keeps what it said, which is what the printer
+-- needs to be able to invert.
+opens :: TestTree
+opens =
+  testGroup
+    "an open line in a rule file (MS10 phase 267)"
+    [ testCase "open X" $
+        decls ["open A"] @?= Right [DeclOpen (RawOpen [([], "A")] RawOpenWhole)]
+
+      -- **Several namespaces, and only in the plain form**: a selection speaks
+      -- about one namespace's words, so naming two would not say whose.
+    , testCase "open X Y Z is one line and three namespaces" $
+        decls ["open A B.C D"]
+          @?= Right [ DeclOpen (RawOpen [([], "A"), (["B"], "C"), ([], "D")]
+                                  RawOpenWhole) ]
+
+    , testCase "open X ( a b )" $
+        decls ["open A ( LC Ty )"]
+          @?= Right [DeclOpen (RawOpen [([], "A")] (RawOpenOnly ["LC", "Ty"]))]
+
+    , testCase "open X hiding ( a )" $
+        decls ["open A hiding ( LC )"]
+          @?= Right [DeclOpen (RawOpen [([], "A")] (RawOpenHiding ["LC"]))]
+
+    , testCase "open X renaming ( a -> b )" $
+        decls ["open A renaming ( LC -> L )"]
+          @?= Right [DeclOpen (RawOpen [([], "A")] (RawOpenRenaming [("LC", "L")]))]
+
+      -- **The one that covers a declaration rather than the rest of the file**,
+      -- and the declaration it covers is nested inside it.
+    , testCase "open X in a declaration holds that declaration" $
+        decls ["open A in", "  r : Core"]
+          @?= Right [ DeclOpenIn (RawOpen [([], "A")] RawOpenWhole)
+                        (DeclSignature (signatureOf "r")) ]
+
+      -- **A path is written where a word is**, since a namespace may be nested.
+    , testCase "the namespace may be a path" $
+        decls ["open A.B.C"]
+          @?= Right [DeclOpen (RawOpen [(["A", "B"], "C")] RawOpenWhole)]
+
+      -- **Printed back and read again gives the same lines**, which is what
+      -- says the written form kept everything the line said.
+    , testCase "every form survives being printed and read again" $ do
+        let written = [ "open A"
+                      , "open A B.C D"
+                      , "open A ( LC Ty )"
+                      , "open A hiding ( LC )"
+                      , "open A renaming ( LC -> L )"
+                      ]
+        case decls written of
+          Left e   -> assertFailure e
+          Right ds -> decls' (printRuleFile "mine" Nothing ds) @?= Right ds
+    ]
+  where
+    decls ls = decls' (unlines ("rule base mine where" : "" : ls))
+
+    decls' src = case rawRuleDecls src of
+      Right (_, _, ds) -> Right ds
+      Left e           -> Left (show e)
+
+    -- The signature @r : Core@ as the parser builds it, reached by parsing it
+    -- rather than written out: 'RawTy' is a type this module has no other
+    -- reason to import.
+    signatureOf n = case decls [n ++ " : Core"] of
+      Right [DeclSignature g] -> g
+      other -> error ("the fixture signature did not parse: " ++ show other)
 
 -- --------------------------------------------------------------------------
 -- The header

@@ -2331,6 +2331,7 @@ whereRuleError ren e = case e of
   RepeatedInPattern g _   -> inName g
   BadOperands g i _       -> inRule g i
   NoSuchTag g i _         -> inRule g i
+  AmbiguousTag g i _ _    -> inRule g i
   BadRegion g i _ _       -> inRule g i
   -- The signature ren errors (MS5 phase 67) name a signature ren and not a rule: they
   -- are found before anything is resolved into a 'Thena.Instral.Ops.Rule' at all.
@@ -2381,6 +2382,11 @@ whatRuleError e = case e of
   BadOperands _ _ w       -> w ++ " was written with the wrong arguments"
   NoSuchTag _ _ tag       ->
     "no language is called " ++ tag ++ " — the built-in tags are surface and core"
+  -- **Both are named, and in full** (MS10 phase 267): their short spellings are
+  -- the one word that is the problem, so the path is the whole of the answer.
+  AmbiguousTag _ _ tag ls ->
+    tag ++ " could be " ++ intercalate " or " (map nameDotted ls)
+      ++ ", so it is ambiguous here"
   BadRegion _ _ tag why   ->
     "this " ++ tag ++ " term did not parse: " ++ renderSyntaxError why
   UnknownType _ w         -> w ++ " is not a type"
