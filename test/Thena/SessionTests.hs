@@ -18,7 +18,7 @@ import Test.Tasty.QuickCheck
 import Thena.Core.Term (Ident (..), rootName, nameDotted)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
-import Thena.Declared (natDecl)
+import Thena.Declared (declaredAs, named, natDecl)
 import Thena.Standard (withRules)
 import Thena.Instral.Infer (InstralTypeError (..), Site (..))
 import Thena.Instral.Type (Ty (..))
@@ -35,7 +35,7 @@ import Thena.Driver
   , loadSource
   )
 import Thena.Engine (Machine (..), Development, flatten)
-import Thena.Errors (FailReason (..), MoveError (..))
+import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..), Warning (..))
 import Thena.Global.Env (Definition (..), GlobalEnv, lookupDefinition)
 
 tests :: TestTree
@@ -352,6 +352,48 @@ sessionTests =
     -- through a declaration, and what replaces it is his.
   , ok "a theorem may take the word a datatype's namespace uses"
       ["data " ++ natDecl, "open Nat", ":theorem Nat : Type₀"]
+    -- **AND IT SAYS SO, AT @:theorem@ AND NOT AT @qed@** (MS10 phase 264). His
+    -- ruling of 2026-11-03 accepted the shadowing, which leaves his second
+    -- principle of 2026-09-01 to say what happens instead of a refusal: the
+    -- action is allowed and the UI shows what it will cause. Here is the one
+    -- moment that costs the user nothing — the proof does not exist yet, so
+    -- renaming the theorem is free, where renaming it after a @qed@ is the
+    -- proof again.
+  , testCase "and says so while renaming the theorem is still free" $
+      warningsAfter ["data " ++ natDecl, ":theorem Nat : Type₀"]
+        @?= [ProofShadows (rootName "Nat") (declaredAs "Nat")]
+    -- **The @open@ makes no difference**, which is the point of asking
+    -- 'Thena.Core.Term.globalUnder' rather than the environment: the word
+    -- reaches the datatype either way, by the alias with nothing open and by
+    -- the alias under the prefix with @Nat@ open.
+  , testCase "and says the same with the namespace open" $
+      warningsAfter ["data " ++ natDecl, "open Nat", ":theorem Nat : Type₀"]
+        @?= [ProofShadows (rootName "Nat") (declaredAs "Nat")]
+    -- A name nothing answered takes no word, so there is nothing to say.
+  , testCase "a theorem whose word reaches nothing says nothing" $
+      warningsAfter ["data " ++ natDecl, ":theorem t : Type₀"] @?= []
+    -- **The other door, and the fact rather than the forecast**: a definition
+    -- written whole is in the environment the moment it lands, so what it says
+    -- is what has happened. This is also the door a theorem in a /file/ comes
+    -- in by.
+  , testCase "a definition written whole says so as it lands" $
+      warningsAfter ["data " ++ natDecl, "declare Nat : Type₁ ; Nat = Type₀"]
+        @?= [NameShadows (rootName "Nat") (declaredAs "Nat")]
+    -- **THE PROMPT REFUSES A CONSTRUCTOR A MODULE ACCEPTS, AND THE REFUSAL NOW
+    -- NAMES BOTH SPELLINGS** (MS10 phase 264). A @data@ LINE resolves its
+    -- constructors against the environment, where @Foo@ is the definition, so
+    -- the target is that definition and not the family — while a module's
+    -- @data@ BLOCK answers the same word with the family being declared and
+    -- loads, which "Thena.LoadTests" pins. **Pinned as measured, and the
+    -- divergence is an item of its own**; what this phase fixed is the words,
+    -- which used to say /ff must produce the datatype being declared/ and
+    -- blamed the constructor for a collision one line up.
+  , testCase "the prompt refuses a constructor a module accepts" $
+      case reverse (loadedResponses (run [ "declare Foo : Type₁ ; Foo = Type₀"
+                                         , "data Foo : Type₀ where { ff : Foo }" ])) of
+        Failed (ResolveFailed e) : _ ->
+          e @?= TargetIsNotTheDatatype "ff" (Just (rootName "Foo")) (named "Foo.Foo")
+        other -> assertFailure ("expected a refusal: " ++ show (take 1 other))
   , testCase "a statement that is not a type is refused" $
       case reverse (loadedResponses (run [":theorem t : zero"])) of
         Failed _   : _ -> pure ()
@@ -888,6 +930,20 @@ run = loadSource withRules . unlines
 
 globalsAfter :: Loaded -> GlobalEnv
 globalsAfter = globals . machineOf . loadedSession
+
+-- | Every warning a script produced, from whichever response carried it.
+--
+-- **Three responses can carry one** (MS10 phase 264) and a test should not have
+-- to know which: @:theorem@ answers 'Proving', a line that ran answers 'Ran',
+-- and a module load answers 'ProofLoaded'.
+warningsAfter :: [String] -> [Warning]
+warningsAfter ls = concatMap carried (loadedResponses (run ls))
+  where
+    carried r = case r of
+      Proving _ _ ws       -> ws
+      Ran _ ws _           -> ws
+      ProofLoaded _ _ _ ws -> ws
+      _                    -> []
 
 developmentAfter :: Loaded -> Development
 developmentAfter = development . machineOf . loadedSession

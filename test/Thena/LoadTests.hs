@@ -21,7 +21,7 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (Core (..), rootName)
-import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..))
+import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..), Warning (..))
 import Thena.Declared (declaredAs, named)
 import Thena.Driver
   ( LoadError (..)
@@ -76,6 +76,7 @@ tests =
     , testGroup "MS4 tier 0 (phase 43)" tierTests
     , testGroup "a namespace block (MS10 phase 254)" namespaceTests
     , testGroup "the five forms of open (MS10 phase 254)" openTests
+    , testGroup "shadowing is announced (MS10 phase 264)" shadowingTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -302,6 +303,103 @@ namespaceTests =
       \\n\
       \escaped : Leaf.Leaf\n\
       \escaped = Leaf.leaf\n"
+
+-- --------------------------------------------------------------------------
+-- Shadowing (MS10 phase 264)
+-- --------------------------------------------------------------------------
+
+-- | A word that changes what it means, and the module door it changes at.
+--
+-- **His ruling of 2026-11-03 accepted the shadowing**, so what is asserted here
+-- is the announcement rather than a refusal: both names, written in full,
+-- because in the case that matters their short spellings are the same word.
+--
+-- **A module is where the @data@ door can be reached at all**, which is why
+-- these are here and not in "Thena.SessionTests": a datatype's name is a bare
+-- word at the @data@ line, so only a @namespace@ can put one at a path that
+-- another declaration's name can take.
+shadowingTests :: [TestTree]
+shadowingTests =
+  [ -- @Nat.zero@ is the inner datatype's alias until @data Nat@ declares a
+    -- constructor of exactly that name. **The former can never do this** —
+    -- everything a @data@ block declares lands inside its own namespace — so a
+    -- constructor is the only name at this door that can take a word.
+    testCase "a constructor that takes a datatype's word says so" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 constructorTakesTheWord of
+        (_, ProofLoaded _ _ _ ws) ->
+          ws @?= [NameShadows (named "Nat.zero") (named "Nat.zero.zero")]
+        (_, other) -> assertFailure (show other)
+
+  , -- **Once, not twice**: a constructor is installed as the constant it is and
+    -- again as the wrapper its name means when written, so the keys the
+    -- environment gained name it twice and the word it took is one word.
+    testCase "and says it once, however many keys the name added" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 constructorTakesTheWord of
+        (_, ProofLoaded _ _ _ ws) -> length ws @?= 1
+        (_, other) -> assertFailure (show other)
+
+  , -- A module's theorem comes in by the definition door, not by @:theorem@,
+    -- so this is the half 'Thena.SessionTests' cannot reach.
+    testCase "a theorem in a module says so as it lands" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 theoremTakesTheWord of
+        (_, ProofLoaded _ _ _ ws) ->
+          ws @?= [NameShadows (named "Nat") (named "Nat.Nat")]
+        (_, other) -> assertFailure (show other)
+
+  , -- **The other direction says nothing, and it is right not to**: a @data@
+    -- block puts everything it declares inside its own namespace, so a
+    -- datatype arriving under a word a definition already holds takes no word
+    -- from anyone — @Foo@ is still the definition and the datatype is
+    -- @Foo.Foo@, which is how the load reports it.
+    --
+    -- **What this pins is that the block answers its OWN word with the
+    -- datatype being declared**: @ff : Foo@ is written where a definition
+    -- called @Foo@ is in scope, and it still means the datatype. **The @data@
+    -- LINE at the prompt refuses the same text** — "Thena.SessionTests",
+    -- /the prompt refuses a constructor a module accepts/, has that divergence
+    -- and the item it is written in.
+    testCase "a data block answers its own word with the datatype, not a definition" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 datatypeUnderATakenWord of
+        (s1, ProofLoaded _ _ _ ws) -> do
+          let env = globals (machineOf s1)
+          -- The declaration was accepted at all, which 'targetIndices' only
+          -- permits when the constructor's target IS the family being
+          -- declared, so this is the whole of the claim.
+          isDeclared (named "Foo.Foo") env @?= True
+          isDeclared (named "Foo.ff") env @?= True
+          isJust (lookupDefinition (named "Foo") env) @?= True
+          ws @?= []
+        (_, other) -> assertFailure (show other)
+  ]
+  where
+    constructorTakesTheWord =
+      "module Shadow where\n\
+      \namespace Nat where\n\
+      \  data zero : Type\8320 where\n\
+      \    z : zero\n\
+      \\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n"
+
+    theoremTakesTheWord =
+      "module Shadow where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \\n\
+      \Nat : Type\8321\n\
+      \Nat = Type\8320\n"
+
+    datatypeUnderATakenWord =
+      "module Shadow where\n\
+      \Foo : Type\8321\n\
+      \Foo = Type\8320\n\
+      \\n\
+      \data Foo : Type\8320 where\n\
+      \  ff : Foo\n"
 
 -- --------------------------------------------------------------------------
 -- The prelude

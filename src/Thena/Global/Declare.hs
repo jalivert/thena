@@ -775,7 +775,7 @@ targetIndices
   :: GlobalName -> Context -> Int -> String -> Core
   -> Either ResolveError [Core]
 targetIndices dn params want cn t = case applied t of
-  Nothing -> Left (TargetIsNotTheDatatype cn)
+  Nothing -> Left (TargetIsNotTheDatatype cn (headName t) dn)
   Just as
     | length as /= length params + want ->
         Left (TargetArgumentCount cn (length params + want) (length as))
@@ -810,6 +810,16 @@ targetIndices dn params want cn t = case applied t of
       (Global g _, as)        | g == dn -> Just as
       (Canonical g _ as, [])  | g == dn -> Just as
       _                                 -> Nothing
+
+    -- | The name the target does produce, where it produces a name at all.
+    --
+    -- **It is the shadowing case that makes this worth saying** (MS10 phase
+    -- 264): the head is a perfectly good global whose word is the one the
+    -- author wrote, so the refusal has to name it or it names nothing.
+    headName u = case fst (spine u) of
+      Global g _      -> Just g
+      Canonical g _ _ -> Just g
+      _               -> Nothing
 
     passed [] _ = Right ()
     passed (p : more) (a : as)

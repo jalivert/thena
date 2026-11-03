@@ -87,7 +87,7 @@ import Thena.Language.Regex
   , star
   )
 import Data.Char (isSpace)
-import Data.List (intercalate, dropWhileEnd, isSuffixOf, nub, stripPrefix)
+import Data.List ((\\), intercalate, dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
@@ -124,6 +124,9 @@ import Thena.Errors
   , Warning (..)
   )
 import Thena.Development.Validate (revalidate)
+-- | Qualified for one name: 'Env.declaredNames' is the environment's keys and
+-- the 'declaredNames' below is an item's, and the two are different questions.
+import qualified Thena.Global.Env as Env (declaredNames)
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..), declare)
 
 import Thena.Kernel (certify)
@@ -623,7 +626,13 @@ data Response
     -- ^ @:revalidate@ — 'Nothing' if the development is a valid state (§5.3,
     -- thesis §2.3)
   | Extracted Core
-  | Proving GlobalName Core   -- ^ @:theorem@ — a proof is now current
+  | Proving GlobalName Core [Warning]
+    -- ^ @:theorem@ — a proof is now current, and what its name costs.
+    --
+    -- **The warning is in the response and not only in the printed line**
+    -- (MS10 phase 264): a frontend that builds its own text from a
+    -- 'Response' has to be able to see it, and a 'ProofShadows' computed in
+    -- the printer would reach the terminal and nothing else.
   | Proved GlobalName [LevelVar] [Obligation] Core [TrustClaim]
     -- ^ @qed@ — admitted, and the proof is closed. The levels are the scheme
     -- generalisation produced (MS3 phase 33b), not anything that was written,
@@ -2172,12 +2181,19 @@ dispatch s name arg = case name of
               (Right _, _, n2) -> started g ty n2
           where g = rootName x
 
+    -- **The forecast is asked here and not at @qed@** (MS10 phase 264): the
+    -- name is not in the environment yet, so what the word
+    -- reaches is still the old answer, and saying so now is the one moment the
+    -- repair is free — renaming the theorem before the proof exists costs
+    -- nothing. His second principle of 2026-09-01 is the whole warrant: the
+    -- action is allowed, and the UI's job is to show what it will cause.
     started g ty n =
       let (dev, n1) = newDevelopmentNamed g ty n
        in ( s { sessionMachine = atRest machine { development = dev, names = n1 }
               , sessionWork    = Attempting (Attempt g ty [])
               }
-          , Proving g ty
+          , Proving g ty [ ProofShadows g hid
+                         | Just hid <- [shadowed (globals machine) (scope machine) g] ]
           )
 
     -- | @qed@ — certify what the development built, admit it, and close.
@@ -3297,6 +3313,36 @@ stopped resp = case resp of
 -- hand back a 'Paused' in place of their own answer, so they are unbounded by
 -- construction — see @ms7\/CLOSEOUT.md@ 24, since a long load is therefore
 -- still something a frontend waits out.
+-- | __What the word a name takes used to reach, if anything else did.__
+--
+-- The resolution question itself, asked of the environment /before/ the name
+-- went in: 'globalUnder' with the name exactly as it stands answers the alias
+-- or the @open@ that the word reached, and anything other than the name itself
+-- is a shadowing (MS10 phase 264).
+--
+-- **It asks 'globalUnder' rather than reasoning about it**, for
+-- 'Thena.Core.Term.shortestEnding''s reason: the announcement cannot then drift
+-- from what the reader does, and a word two namespaces would answer is an
+-- ambiguity rather than a shadowing, which the resolver already says.
+shadowed :: GlobalEnv -> InScope -> GlobalName -> Maybe GlobalName
+shadowed before sc g = case globalUnder (knownIn before) sc g of
+  Right g' | g' /= g -> Just g'
+  _                  -> Nothing
+
+-- | Every word a step's new names took, said as warnings.
+--
+-- **One question at every door into the environment**, so that no door has to
+-- know whether its own names are the kind that can shadow: @data@, a
+-- definition written whole, and a primitive all call this, and @:theorem@ asks
+-- 'shadowed' directly because its name has not entered yet.
+-- **The names are deduplicated, and a @data@ declaration is why**: a
+-- constructor is installed twice over, as the constant it is and as the §3.3.1
+-- wrapper that is what its name means when written, so the keys the environment
+-- gained name it twice and the word it takes is one word.
+shadowings :: GlobalEnv -> InScope -> [GlobalName] -> [Warning]
+shadowings before sc gs =
+  [ NameShadows g hid | g <- nub gs, Just hid <- [shadowed before sc g] ]
+
 progress :: Maybe Int -> Session -> [Message] -> [Warning] -> (Session, Response)
 progress fuel = spending fuel 0
 
@@ -3335,10 +3381,18 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   Engine.Declaring d m -> case declare (globals m) (names m) d of
     Left e -> stop (load [] m) msgs warns (Refused e)
     Right (g, n1)
-      | exhausted -> stop installed msgs warns (Paused spent)
-      | otherwise -> spending fuel spent s { sessionMachine = installed } msgs warns
+      | exhausted -> stop installed msgs took (Paused spent)
+      | otherwise -> spending fuel spent s { sessionMachine = installed } msgs took
       where
         installed = m { globals = g, names = n1 }
+        -- **Every name the declaration added is asked, not just the former's**
+        -- (MS10 phase 264): a @data@ block's names all land inside its own
+        -- namespace, so the /former/ can never take a word — but a constructor
+        -- can, if a datatype is declared at exactly that path, and the door
+        -- should not have to know which of its names is the dangerous one.
+        took = shadowings (globals m) (Engine.scope m)
+                          (Env.declaredNames g \\ Env.declaredNames (globals m))
+                 ++ warns
   -- The kernel runs here, outside the machine, for 'Declaring'\'s reason: it is
   -- policy, and §7.5 has the driver own policy. On refusal the rest of the
   -- program is dropped.
@@ -3424,11 +3478,15 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
                                   then signatures m
                                   else (nm, ps) : signatures m
                  }
+          -- **The word this definition takes, if it takes one** (MS10 phase
+          -- 264): this is the door a theorem in a file comes in by, and the
+          -- door @declare@ comes in by, so it is where the fact is said.
+          took = shadowings (globals m) (Engine.scope m) [nm] ++ warns
          in if not (null (unmet (trustLevel m) claims))
               then stop (load [] mw) msgs warns (Untrusted (trustLevel m) claims)
               else if exhausted
-                then stop m' msgs warns (Paused spent)
-                else spending fuel spent s { sessionMachine = m' } msgs warns
+                then stop m' msgs took (Paused spent)
+                else spending fuel spent s { sessionMachine = m' } msgs took
 
   -- **A primitive is installed only if the system can reduce it** (MS6 phase
   -- 97b). Two checks, and both are the reason @primitive@ is not a postulate:
@@ -3550,9 +3608,10 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
     Left e   -> stop (load [] m) msgs warns (Refused e)
     Right () ->
       let m' = m { globals = addPrimitive nm ty (globals m) }
+          took = shadowings (globals m) (Engine.scope m) [nm] ++ warns
        in if exhausted
-            then stop m' msgs warns (Paused spent)
-            else spending fuel spent s { sessionMachine = m' } msgs warns
+            then stop m' msgs took (Paused spent)
+            else spending fuel spent s { sessionMachine = m' } msgs took
 
   Engine.Certifying t ty m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs warns (Uncertified e)

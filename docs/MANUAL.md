@@ -301,6 +301,19 @@ type anyway, because a declaration's short name is derived from the environment;
 `zero` and `succ` without the prefix. `DECISIONS.md`, *Modules and namespaces*,
 has the whole of it — the other four forms of `open`, and `namespace` in a file.
 
+**A later declaration may take that short name, and it is allowed to.** Prove a
+theorem called `Nat` and the word `Nat` means the theorem from the `qed` on; the
+datatype is still there and is still `Nat.Nat`, which is how you write it. You
+are told before it costs you anything — `:theorem Nat : Type₁` answers
+
+> warning: the name Nat reaches Nat.Nat here, so proving it shadows that one —
+> it is then reached by writing it in full
+
+so that renaming the theorem is still free. The same warning, in the past tense,
+comes from `declare` and from a loaded file, where the name is in the
+environment the moment the line lands. Nothing is lost either way: both names
+exist, and a path always reaches what it names.
+
 Now the three commands of the last chapter have something to look at:
 
 ```

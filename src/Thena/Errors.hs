@@ -112,6 +112,27 @@ data Warning
     -- since the last piece of `~g4k5g`, so @x : Token String@ in another
     -- namespace leaves @x@ a perfectly good terminal and the notation reads the
     -- letter as text. Told rather than prevented, for the reason that one is.
+  | NameShadows GlobalName GlobalName
+    -- ^ a name that has just entered the environment, and the name its word
+    -- reached before it did (MS10 phase 264). **Shadowing is
+    -- accepted** — his ruling of 2026-11-03 — so this is the second
+    -- principle's own answer to it: the action is allowed and the UI carries
+    -- the warning. 'Thena.Core.Term.globalUnder' answers a name written exactly
+    -- before it tries any alias, so a declaration whose name /is/ @Nat@ beats
+    -- the alias that merely derives @Nat@ from @Nat.Nat@, and the word changes
+    -- what it means with nothing broken: both names are still there, and the
+    -- repair is writing the shadowed one in full.
+  | ProofShadows GlobalName GlobalName
+    -- ^ the name a proof is being opened under, and what that word reaches
+    -- /now/ (MS10 phase 264). **The same fact one step earlier, and it is a
+    -- separate case because it is a separate statement**: at @:theorem@ nothing
+    -- has entered the environment yet, so the word still means the old name and
+    -- what the warning says is what the proof /will/ cost. His second principle
+    -- of 2026-09-01 is why it is said here at all \8212 the UI's job is to show
+    -- what an action will cause \8212 and saying it here is also where the
+    -- repair is cheap, since renaming the theorem before @qed@ costs nothing
+    -- and renaming it after costs the proof. @qed@ is silent for that reason:
+    -- the forecast was given when the proof opened.
   | UnprimeableClass BlockKind String String
     -- ^ the block, the language's name, and its identifier class's name — a class no
     -- single character extends, so a generated @L.fresh-\8249k\8250@ cannot rename a
@@ -927,8 +948,18 @@ data ResolveError
     -- ^ a development-only form written where a term goes
   | NotAUniverse String
     -- ^ the datatype's declared type does not end in @Type_l@
-  | TargetIsNotTheDatatype String
-    -- ^ this constructor's result type is not the family being declared
+  | TargetIsNotTheDatatype String (Maybe GlobalName) GlobalName
+    -- ^ this constructor's result type is not the family being declared: the
+    -- constructor, the name its target /does/ produce where it produces one,
+    -- and the family being declared.
+    --
+    -- **The head is carried since MS10 phase 264, and shadowing is why.** A
+    -- declaration whose own word is taken — @data Foo@ where a theorem @Foo@
+    -- is already proved — reaches this with a target that /is/ a name, just
+    -- not this one, and the old words (/this constructor must produce the
+    -- datatype being declared/) blamed the constructor for a collision one
+    -- line up. Naming both spellings is the whole of the fix: @Foo@ against
+    -- @Foo.Foo@ says what happened, and writing the path is the repair.
   | TargetArgumentCount String Int Int
     -- ^ constructor, arguments its target should have, arguments it has
   | ParameterNotPassedThrough String Ident

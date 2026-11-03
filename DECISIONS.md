@@ -349,6 +349,17 @@ two : Nat
 two = succ (succ zero)
 ```
 
+**A DECLARATION CAN change one, and that is allowed.** A declaration's short
+name is derived rather than recorded, so the word `Nat` reaches the datatype
+`Nat.Nat` only as long as nothing holds that word exactly — and a theorem,
+a `declare` or a constructor may take it, after which `Nat` is that one and the
+datatype is written `Nat.Nat`. **It is not prevented**, because forbidding it
+would mean refusing a perfectly good name on account of a word it merely
+resembles, and nothing is lost: both names are there and a path always reaches
+what it names. **It is announced instead**, naming the shadowed name in full,
+because that spelling is the repair; at `:theorem` it is announced before the
+proof exists, which is while renaming it is still free.
+
 **An `open` can only add a way for a name to resolve, never change one.** A name
 that already denotes something is taken as written, so an `open` is safe to put
 above code that was already working. If two open namespaces both answer a word

@@ -270,7 +270,12 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   Revalidated Nothing  -> ["valid"]
   Revalidated (Just e) -> renderKernelError ren e
   Extracted t          -> [renderCore ren [] t]
-  Proving g ty  -> ["proving " ++ nameString ren g ++ " : " ++ renderCore ren [] ty]
+  -- **The warning comes under the line, as a load's warnings come under what
+  -- it installed** (MS10 phase 264): the proof is open either way, and what
+  -- the name will cost is a footnote to that.
+  Proving g ty ws ->
+    ("proving " ++ nameString ren g ++ " : " ++ renderCore ren [] ty)
+      : map renderWarning ws
   -- **The report comes after the ∎ and only when there is one** (MS8 phase
   -- 151), so a proof that rests on nothing prints exactly the line it always
   -- did. @qed@ reports rather than refusing at the most relaxed rung — his
@@ -474,7 +479,12 @@ renderSyntaxError e = case e of
     s ++ " is bound here, and only a definition has level parameters"
   ResolveFailed (NotAUniverse d)    ->
     d ++ " must be declared at a universe, as in \": Type\8320\""
-  ResolveFailed (TargetIsNotTheDatatype c) ->
+  -- **Both names are written in full** (MS10 phase 264), because the shadowing
+  -- case is exactly the one where their short spellings are the same word.
+  ResolveFailed (TargetIsNotTheDatatype c (Just g) dn) ->
+    c ++ " produces " ++ nameDotted g ++ ", not the datatype " ++ nameDotted dn
+      ++ " being declared"
+  ResolveFailed (TargetIsNotTheDatatype c Nothing _) ->
     c ++ " must produce the datatype being declared"
   ResolveFailed (TargetArgumentCount c want got) ->
     c
@@ -1820,6 +1830,21 @@ renderWarning w = "warning: " ++ case w of
       ++ " It is the token class " ++ c ++ ", which is not in scope here"
   -- **What is lost is printing, and only printing** — so the line says that
   -- rather than sounding like a refusal (MS6 closeout 23, phase 146).
+  -- **It names the shadowed one in full, because that spelling is the repair**
+  -- (MS10 phase 264): nothing is lost, and writing the path reaches
+  -- it again. The shadowing name is written in full too — inside a namespace
+  -- the word a user typed is only its ending, and the whole path is the one
+  -- spelling that cannot be mistaken for the other.
+  NameShadows g hid ->
+    "the name " ++ nameDotted g ++ " shadows " ++ nameDotted hid
+      ++ ", which is reached by writing it in full from here"
+  -- **The same thing said before it happens**, which is what @:theorem@ can do
+  -- and the other doors cannot: the proof has not been admitted, so renaming it
+  -- now costs nothing.
+  ProofShadows g hid ->
+    "the name " ++ nameDotted g ++ " reaches " ++ nameDotted hid
+      ++ " here, so proving it shadows that one — it is then reached by writing"
+      ++ " it in full"
   UnprimeableClass k g cls ->
     blockAt k g ++ ": no character may be appended to every name " ++ cls
       ++ " accepts, so a binder renamed to avoid capture will not print in this"
