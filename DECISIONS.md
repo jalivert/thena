@@ -574,6 +574,13 @@ out of the stack rather than being a rule of its own. **A consult reaches to the
 of the block it is written in**, so the one in that `do` block applies there and
 nowhere else.
 
+**It is *stack-like* rather than exactly a stack**, in one respect: consulting a file
+that published its own dependencies with `public consult` pushes all of them as a
+single group, in the order that file wrote them, at the position of the line that
+brought them in. And consulting the same base twice really does push it twice — the
+upper copy can go out of scope while the lower one is still in force, so the earlier
+push cannot be dropped or moved.
+
 **This is the order the engine tries rules in when no name is given** — you at a
 hole, `:matches`, `prove`. A rule called *by name* is found by the ordinary name
 walk, and since rules are not open to extension there is only ever one rule of a
