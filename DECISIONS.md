@@ -137,6 +137,14 @@ surface`e`             the same thing, and the one that stays
 and nothing new in the system points at them. They are to be replaced one for one and
 removed.
 
+**The replacement is one-for-one in every position, as of 2026-11-03.** It was not
+before: `` core`t` `` was refused inside a development-calculus term, where `⌜ t ⌝`
+worked, because a tagged literal is resolved by asking which *declared* object language
+the tag names — and `core` and `surface` are declared by nothing, the words being
+reserved so that no `language` block can take them. The two built-in tags are now tags
+at that door as well, so `` core`t` `` is the term written inside it, and
+`` surface`e` `` there says what is wrong instead of claiming no such language exists.
+
 **Why, and it is not tidiness.** These are the last places where *which language this text
 is in* is decided by the punctuation you reached for rather than by a tag naming the
 language. Thena's whole embedding story is the tag: one notation, any language, including
@@ -2811,12 +2819,17 @@ in `Type₀`, so inheriting would pin the whole thing a level too low.
 
 The concrete syntax is the one a Π already had, and a leading `∀` run in a
 development reads as components — exactly as a leading `λ` run does. So a
-development whose *trailing term* is a bare Π needs corners:
+development whose *trailing term* is a bare Π has to be quoted:
 
 ```
-:dev ∀ (A : Type₀) -> A        two links and a trailing A
-:dev ⌜ ∀ (A : Type₀) -> A ⌝    one trailing Π
+:dev ∀ (A : Type₀) -> A              two links and a trailing A
+:dev ⌜ ∀ (A : Type₀) -> A ⌝          one trailing Π
+:dev core`∀ (A : Type₀) -> A`       the same, in the notation that stays
 ```
+
+**And the printer writes the quotes, which it did not until 2026-11-03.** It quoted a
+trailing `λ` and a trailing `let` and not a trailing `∀`, so one printed back as two
+links and a variable — a different development, printed identically.
 
 ### A name you write is the name you get, even if something else has it
 

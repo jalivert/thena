@@ -31,6 +31,7 @@ import Thena.Engine (Development, Machine (..), Question (..), globals, developm
 import Thena.Errors (FailReason (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Global.Env (GlobalEnv, isDeclared)
+import Thena.Render (renderResponse)
 import Thena.Repl (entriesOf, unclosedEntry)
 
 -- | The names in a 'Fitting' listing, for the tests below.
@@ -409,6 +410,47 @@ tests =
             case snd (say ["assume \"A\" ⌜ Type₀ ⌝", ":core A"]) of
               Rendered _ -> pure ()
               other      -> assertFailure ("expected Rendered, got " ++ show other)
+          -- **THE TWO BUILT-IN TAGS ARE TAGS IN A TERM TOO** (MS10 phase 266).
+          -- @core`t`@ was refused here while @⌜ t ⌝@ worked, because a
+          -- tagged literal is resolved by asking which /declared/ object
+          -- language the tag names and @core@ is declared by nothing — the
+          -- word is reserved so no @language@ block can take it.
+          -- 'Thena.Rules' had the branch for an operand's region; the term's
+          -- reader never got it, so the two notations looked complementary
+          -- rather than one being unfinished. **Compared against the corners
+          -- rather than pinned to a string**, which is the property that
+          -- matters: they are one notation written two ways.
+        , testCase "a core region is a term, and the same term the corners are" $
+            map (unwords . renderResponse withRules . snd)
+                [ command withRules ":core ⌜ λ (A : Type₀) -> A ⌝"
+                , command withRules ":core core`λ (A : Type₀) -> A`"
+                ] @?= replicate 2 "λ (A : Type₀) -> A"
+          -- **And it stops the spine, which came for free**: 'RawObject'
+          -- matches none of 'Thena.Syntax.Resolve.partial''s binder cases, so
+          -- it falls to that function's trailing case exactly as 'RawQuote'
+          -- does. A bare λ there is a chain link instead, which is what the
+          -- quoting exists to prevent — see 'Thena.Render.trailing'.
+        , testCase "a core region stops the spine, as the corners do" $
+            map (unwords . renderResponse withRules . snd)
+                [ command withRules ":dev ⌜ λ (A : Type₀) -> A ⌝"
+                , command withRules ":dev core`λ (A : Type₀) -> A`"
+                ] @?= replicate 2 "⌜ λ (A : Type₀) -> A ⌝"
+          -- **@surface@ is the other built-in tag and names no term here**, so
+          -- it is refused — and the refusal used to say *no language called
+          -- surface has been declared*, which is the opposite of the truth.
+        , testCase "a surface region in a term says which tag does work" $
+            unwords (renderResponse withRules (snd (command withRules ":core surface`Type₀`")))
+              @?= "surface`…` is not a term of the development calculus, so it"
+                    ++ " cannot be written here — only core`…` can"
+          -- **An escape has to survive being written back out**, because the
+          -- region is handed to the parser as text and there is no printer for
+          -- a 'Thena.Syntax.Concrete.Raw'. A bare word does; an application
+          -- does not, and that is the restriction an operand's region has
+          -- always had.
+        , testCase "an escape in a core region holds a name and nothing else" $
+            unwords (renderResponse withRules (snd (command withRules ":core core`${f x}`")))
+              @?= "in core`…`: an escape here holds a name and nothing else,"
+                    ++ " so write ${x} and apply it outside the region"
         , testCase ":dev resolves a development" $
             case snd (command withRules ":dev let ? h : Type₀ in h") of
               RenderedDev _ -> pure ()

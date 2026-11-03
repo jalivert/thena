@@ -24,7 +24,7 @@ thena spine> :dev ∀ (A : Type₀) -> A
 ∀ (A : Type₀) ->
 A
 thena spine> :dev ⌜ ∀ (A : Type₀) -> A ⌝
-∀ (A : Type₀) -> A
+⌜ ∀ (A : Type₀) -> A ⌝
 thena spine> :theorem pi : Type₁
 proving pi : Type₁
 thena spine> elaborate ⟨ forall (A : Type₀) -> A ⟩

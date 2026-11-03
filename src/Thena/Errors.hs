@@ -930,6 +930,26 @@ data ObjectError
     -- is the same parser.
   | ObjectNotATerm String BuildError
     -- ^ it parsed, and the reading does not denote a term.
+  | BuiltInTagNotATerm String
+    -- ^ __a built-in tag that names no term of the development calculus__
+    -- (MS10 phase 266) — @surface\`…\`@ written where a term is wanted. The
+    -- two built-in tags are tags wherever a tag may be written, and only
+    -- @core@ denotes a term here: a surface term has not been elaborated, and
+    -- there is no component that holds an unelaborated one. **Its own case,
+    -- because 'NoSuchObjectLanguage' said the opposite of the truth** — the
+    -- word is reserved precisely so that no @language@ block can declare it.
+  | CoreRegionUnread String SyntaxError
+    -- ^ @core\`…\`@ whose text the development calculus's own lexer or parser
+    -- refused (MS10 phase 266). The tag, then why — the same two failures
+    -- a rule base's @core@ region reports, from the same two functions.
+  | RegionSpliceNotAName String
+    -- ^ __an escape holding more than a name__ (MS10 phase 266), in a built-in
+    -- region. The tag. @core\`${x}\`@ is read by reassembling the region's
+    -- text and handing it to the development calculus's parser, which reads
+    -- the escape itself — so what the escape holds has to survive being
+    -- written back out, and only a bare word does. It is the same restriction
+    -- an operand's region has always had, where the scanner never offered
+    -- more.
   deriving (Eq, Show)
 
 data ResolveError

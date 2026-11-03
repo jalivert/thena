@@ -1102,11 +1102,20 @@ partWord p = case p of
 -- | A 'Trailing' term that is itself a binder would re-read as another chain
 -- link, so it is quoted. This is longest prefix's escape hatch, and it is what
 -- keeps print-then-read stable (§2.7).
+-- **A Π is one of them, and was missing until MS10 phase 266.** A leading @∀@
+-- run is components exactly as a leading @λ@ run is (MS4 phase 41f), so a bare
+-- trailing Π re-read as a quantify link and a trailing variable — a different
+-- development, printed identically. `DECISIONS.md` has said since then that a
+-- development whose trailing term is a bare Π needs corners to be *written*;
+-- the printer was not writing them.
 trailing :: Rendering -> Env -> Core -> String
 trailing ren env t = case t of
-  Lam {} -> "⌜ " ++ go ren env AtTop t ++ " ⌝"
-  Let {} -> "⌜ " ++ go ren env AtTop t ++ " ⌝"
+  Lam {} -> quoted
+  Pi {}  -> quoted
+  Let {} -> quoted
   _      -> go ren env AtTop t
+  where
+    quoted = "⌜ " ++ go ren env AtTop t ++ " ⌝"
 
 -- | The one fragment change, named for what was crossed into.
 crossingWord :: Crossing -> String
@@ -2543,6 +2552,15 @@ renderObjectError e = case e of
     NoSuchProduction n -> n ++ " is not a production of any language"
     Incomplete x -> "the " ++ x ++ " is missing, and a constructor has no missing argument"
     NotForSlot n x -> n ++ " cannot take " ++ x ++ " there"
+  -- **It says which tag does work here**, because the two are written the same
+  -- way and the writer has reached for the wrong one (MS10 phase 266).
+  BuiltInTagNotATerm tag ->
+    tag ++ "`\8230` is not a term of the development calculus, so it cannot be"
+        ++ " written here \8212 only core`\8230` can"
+  CoreRegionUnread tag why -> "in " ++ tag ++ "`\8230`: " ++ renderSyntaxError why
+  RegionSpliceNotAName tag ->
+    "in " ++ tag ++ "`\8230`: an escape here holds a name and nothing else,"
+          ++ " so write ${x} and apply it outside the region"
 
 -- | Why an object term did not parse, in @ms6\/SPEC.md@ §7.5's form: the
 -- language and the text first, as a tagged literal would be written.

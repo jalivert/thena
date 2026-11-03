@@ -28,7 +28,7 @@ import Thena.Core.Term
    )
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Partial (..))
-import Thena.Errors (DevForm (..), ObjectError (..), ResolveError (..))
+import Thena.Errors (DevForm (..), ObjectError (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Declare (targetIndices)
 import Thena.Global.Env
   ( ArgRole (..)
@@ -51,7 +51,7 @@ import Thena.Language.Build
   , productionNames
   , productionRule
   )
-import Thena.Language.Grammar (Grammar, earleyRules, grammarForTag, grammarKey)
+import Thena.Language.Grammar (Grammar, builtInTags, earleyRules, grammarForTag, grammarKey)
 import Thena.Syntax.Concrete
   ( Raw (..)
   , RawPiece (..)
@@ -61,6 +61,8 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
+import Thena.Syntax.Lexer (lexTokens)
+import Thena.Syntax.Parser (parseTerm)
 
 
 -- | Names bound locally, innermost first.
@@ -191,6 +193,51 @@ core gr env gs sp ctx local n raw = case raw of
   -- 2026-10-30): the written word reaches a grammar wherever its namespace is
   -- open, exactly as the datatype's name does, and the /key/ the parser wants
   -- comes off the grammar it found rather than off what was written.
+  -- **THE TWO BUILT-IN TAGS ARE TAGS HERE TOO** (MS10 phase 266). A tagged
+  -- literal is resolved by asking which /declared/ object language the tag
+  -- names, and @core@ and @surface@ are declared by nothing — the words are
+  -- reserved so that no @language@ block can take them
+  -- ('Thena.Language.Grammar.builtInTags', refused as @BuiltInTag@). So the
+  -- walk below answers nothing for them, and a reader that stops there says
+  -- @no language called core has been declared@, which is the opposite of the
+  -- truth. **'Thena.Rules' has always had this branch** for an operand's
+  -- region; the term's reader never got it, so @core`t`@ was refused where
+  -- @\8988 t \8989@ worked and the two notations looked complementary rather
+  -- than one of them being unfinished.
+  --
+  -- **@core`t`@ is the term written inside it, exactly as the corners are** —
+  -- transparent here, and stopping the spine in 'partial' for free, since a
+  -- 'RawObject' matches none of that function's binder cases and falls to its
+  -- trailing case just as 'RawQuote' does.
+  RawObject tag prod ps | tag `elem` builtInTags -> case prod of
+    -- A built-in tag has no productions to start at, so @core[var]`…`@ is the
+    -- same mistake as a declared language's unknown production and says so.
+    Just w  -> Left (NotAnObjectTerm (NoSuchObjectProduction tag w))
+    Nothing
+      | tag /= "core" -> Left (NotAnObjectTerm (BuiltInTagNotATerm tag))
+      | otherwise -> do
+          src <- regionSource
+          inner <- case lexTokens src of
+            Left why -> Left (NotAnObjectTerm (CoreRegionUnread tag (LexFailed why)))
+            Right ts -> case parseTerm ts of
+              Left why -> Left (NotAnObjectTerm (CoreRegionUnread tag (ParseFailed why)))
+              Right t -> Right t
+          core gr env gs sp ctx local n inner
+   where
+    -- **The region is handed back to the parser as text**, which is what the
+    -- development calculus's own lexer and parser take and what a rule base's
+    -- @core@ region has always been. An escape was split out by the region
+    -- scanner and is put back verbatim: the parser reads @${x}@ itself, as an
+    -- atom, so this is a reader for what the scanner produced and not a second
+    -- meaning. **Only a bare word survives the round trip** — there is no
+    -- printer for a 'Raw', which is also why 'Thena.Render' prints an
+    -- unresolved term as its shape.
+    regionSource = concat <$> traverse back ps
+    back pc = case pc of
+      RawChunk txt            -> Right txt
+      RawSpliced (RawName [] x) -> Right ("$" ++ ['{'] ++ x ++ ['}'])
+      RawSpliced _            -> Left (NotAnObjectTerm (RegionSpliceNotAName tag))
+
   RawObject lang prod ps -> case grammarForTag (scopeIn gs) gr lang of
     Left []  -> Left (NotAnObjectTerm (NoSuchObjectLanguage lang))
     Left amb -> Left (NotAnObjectTerm (ObjectLanguageAmbiguous lang (map nameDotted amb)))

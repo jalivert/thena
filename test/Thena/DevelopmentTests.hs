@@ -22,6 +22,7 @@ import Thena.Fixtures
   , idMidway
   , shadowedBinders
   , trailingLam
+  , trailingPi
   , withConstraint
   )
 import Thena.Render
@@ -364,6 +365,7 @@ roundTripTests =
       , ("shadowed binders", shadowedBinders)
       , ("a guess shadowing its hole", guessShadowing)
       , ("a trailing binder", trailingLam)
+      , ("a trailing Π", trailingPi)
       ]
   ]
 
