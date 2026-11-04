@@ -51,6 +51,11 @@ module Thena.Driver
   , InstralTypeError
   , loadRuleBases
   , consultRuleBases
+  , ModuleName
+  , moduleName
+  , moduleText
+  , moduleFile
+  , moduleOfFile
   , loadRuleDecls
   , ruleBaseOfDecls
   , baseHead
@@ -87,7 +92,7 @@ import Thena.Language.Regex
   , singleChar
   , star
   )
-import Data.Char (isSpace)
+import Data.Char (isAlpha, isAlphaNum, isSpace)
 import Data.List ((\\), intercalate, dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -2761,6 +2766,80 @@ kindOf p
   | ruleExtension   `isSuffixOf` p = LoadRules
   | scriptExtension `isSuffixOf` p = LoadScript
   | otherwise                      = LoadProof
+
+-- | What a file is called, as @import@ and @consult@ write it.
+--
+-- **A module name is not a 'GlobalName' and the two are deliberately different
+-- types** — his model of 2026-10-29: a file is the unit of import and a
+-- namespace is a prefix on a name, and a file may declare names in any
+-- namespace at all. Matching the two is convention. Sharing a type would say
+-- they were one thing.
+--
+-- The steps are the directories and the last is the file: @Stlc.Terms@ is
+-- @Stlc\/Terms@ under the project's source root. **There is no relative form
+-- and no @..@**, which costs nothing to enforce because a module name has no
+-- spelling for either.
+newtype ModuleName = ModuleName [String]
+  deriving (Eq, Ord, Show)
+
+-- | A dotted name, if every step of it is a word (MS11 phase 272).
+--
+-- **A step is a word and a word may hold no dot** (his, 2026-10-30), so this is
+-- where @01-stlc-syntax@ is refused: a step begins with a letter and goes on
+-- with letters, digits, @'@ and @_@. An empty step — a leading, trailing or
+-- doubled dot — is refused with it.
+moduleName :: String -> Maybe ModuleName
+moduleName t
+  | null ws || not (all word ws) = Nothing
+  | otherwise                    = Just (ModuleName ws)
+  where
+    ws = steps t
+    steps u = case break (== '.') u of
+      (a, '.' : b) -> a : steps b
+      (a, _)       -> [a]
+    word w = case w of
+      c : cs -> isAlpha c && all (\x -> isAlphaNum x || x == '\'' || x == '_') cs
+      []     -> False
+
+-- | How the name is written back — the inverse of 'moduleName'.
+moduleText :: ModuleName -> String
+moduleText (ModuleName ws) = intercalate "." ws
+
+-- | Where to look for it, **relative to the project's source root and never to
+-- the file doing the importing** (his, recalled from Lean 4 and recorded in
+-- @~5x7f9@).
+--
+-- **The kind supplies the extension, and the act supplies the kind**: @import@
+-- reaches a surface module and @consult@ a rule base, so nothing has to guess.
+-- **The root itself is not the engine's** — §12 invariant 4 — so this answers a
+-- relative path and the frontend resolves it.
+moduleFile :: LoadKind -> ModuleName -> FilePath
+moduleFile k (ModuleName ws) = intercalate "/" ws ++ extensionOf k
+
+-- | The same journey backwards: what a path would have to be imported as.
+--
+-- **This is what a header-against-path check needs** and is why it exists
+-- before anything calls it. 'Nothing' for a path no module name could produce —
+-- an absolute one, one that climbs with @..@, or one whose steps are not words,
+-- which today is every numbered file in @examples\/@.
+moduleOfFile :: FilePath -> Maybe ModuleName
+moduleOfFile p = case stripSuffix (extensionOf (kindOf p)) p of
+  Nothing   -> Nothing
+  Just stem -> moduleName (map dotted stem)
+  where
+    dotted c = if c == '/' then '.' else c
+    stripSuffix sfx xs =
+      let n = length xs - length sfx
+       in if n > 0 && drop n xs == sfx then Just (take n xs) else Nothing
+
+extensionOf :: LoadKind -> String
+extensionOf k = case k of
+  LoadRules  -> ruleExtension
+  LoadScript -> scriptExtension
+  LoadProof  -> proofExtension
+
+proofExtension :: String
+proofExtension = ".thena"
 
 ruleExtension :: String
 ruleExtension = ".thena.rules"
