@@ -3259,7 +3259,14 @@ data LoadError
   | NestedLoad Int
     -- ^ @:load@ inside a loaded file. Refused in MS1 rather than followed:
     -- following it needs IO from a pure function, and a file that loads itself
-    -- would not terminate
+    -- would not terminate.
+    --
+    -- **All three kinds of load, which was not so until MS10 phase 268**: the
+    -- case matched 'LoadRequested' alone, so a @:load@ naming a script said
+    -- this while one naming a proof module or a rule base was recorded in the
+    -- responses and silently dropped. The refusal is about following a load
+    -- from a pure function and no kind of load escapes that \8212 a reader of
+    -- the one message cannot tell which kind of file it named either
   | UnansweredQuestion Int
     -- ^ the file ended while an op was still asking (§7.5). The line is the one
     -- that asked
@@ -3320,7 +3327,13 @@ loadSource s0 = go s0 1 [] . lines
       let (s', resp) = oneLine s l
           acc'       = resp : acc
        in case resp of
-            LoadRequested _ -> finished s acc (Just (NestedLoad n))
+            -- **The three a caller would have to follow with IO**, which is
+            -- exactly 'Thena.Files.following's list \8212 kept here as a match
+            -- rather than by asking that function, because this module is
+            -- below it.
+            LoadRequested _  -> finished s acc (Just (NestedLoad n))
+            ProofRequested _ -> finished s acc (Just (NestedLoad n))
+            RulesRequested _ -> finished s acc (Just (NestedLoad n))
             Quit            -> finished s' acc' Nothing
             _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
               | otherwise    -> go s' (n + 1) acc' ls

@@ -754,7 +754,7 @@ go :: Rendering -> Env -> Prec -> Core -> String
 --
 -- **A literal is atomic**, so it needs no parentheses at any precedence.
 go ren@(Rendering gs _ _ _) env _ term
-  | Just txt <- printTerm gs (go ren env AtTop) term = txt
+  | Just txt <- printTerm gs (renderingScope ren) (go ren env AtTop) term = txt
 go ren@(Rendering _ n _ _) env prec term = case term of
   Bound i               -> "‹bound " ++ show i ++ "›"
   Free v                -> nameOf v env

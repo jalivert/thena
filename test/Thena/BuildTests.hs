@@ -20,7 +20,7 @@ import Test.Tasty.QuickCheck
 import Thena.Core.Context (entryType)
 import Thena.Declared (declaredAs, named)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), Literal (..), rootName, nameDotted)
+import Thena.Core.Term (Core (..), Literal (..), rootName, rootScope, nameDotted)
 import Thena.Core.Typing (infer)
 import Thena.Driver
   ( Response (..)
@@ -199,21 +199,21 @@ terms =
         (Left e, _, _) -> assertFailure (show e)
   , testCase "the term prints as the text" $ do
       (_, gs) <- loaded
-      printRegion gs host identity @?= Just "( \955 x : \953 . x )"
+      printRegion gs rootScope host identity @?= Just "( \955 x : \953 . x )"
   , testCase "a name written twice is one argument, and prints twice" $ do
       (_, gs) <- loaded
       let t = con "LC.twice" [con "LC.var" [Primitive (LString "a")]]
-      (readTerm gs "{ a a }", printRegion gs host t) @?= (Right t, Just "{ a a }")
+      (readTerm gs "{ a a }", printRegion gs rootScope host t) @?= (Right t, Just "{ a a }")
   , testCase "a placeholder is not a term" $ do
       (_, gs) <- loaded
       readTerm gs "( \955 \9608 : \953 . x )" @?= Left (Incomplete "x")
   , testCase "a name the class would not read back is spliced instead" $ do
       (_, gs) <- loaded
-      printRegion gs host (con "LC.var" [Primitive (LString "a b")])
+      printRegion gs rootScope host (con "LC.var" [Primitive (LString "a b")])
         @?= Just "${\"a b\"}"
   , testCase "nor does a term that is not a constructor of a grammar" $ do
       (_, gs) <- loaded
-      printRegion gs host (Primitive (LString "x")) @?= Nothing
+      printRegion gs rootScope host (Primitive (LString "x")) @?= Nothing
   ]
 
 -- ---------------------------------------------------------------------------
@@ -259,7 +259,7 @@ literals =
   , testCase "and it prints back as the text it was written as" $ do
       (_, gs) <- loaded
       r <- elaboratedTerm ("LC" ++ region "( \955 x : \953 . x )")
-      fmap (printRegion gs host) r @?= Right (Just "( \955 x : \953 . x )")
+      fmap (printRegion gs rootScope host) r @?= Right (Just "( \955 x : \953 . x )")
     -- **The reader the phase nearly missed — MS7 phase 127.** A tagged term
     -- literal in a surface module reaches the parser through
     -- 'Thena.Language.Build.objectInput', which built its pieces with
@@ -371,6 +371,6 @@ roundTrip =
     testProperty "printed and read back, a term is itself" $
       withNumTests 200 $ forAll genTerm $ \t -> ioProperty $ do
         (_, gs) <- io
-        pure $ case printRegion gs host t of
+        pure $ case printRegion gs rootScope host t of
           Nothing -> counterexample "it did not print" (property False)
           Just src -> counterexample src (readTerm gs src === Right t)

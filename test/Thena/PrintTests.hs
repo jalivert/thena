@@ -19,7 +19,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
   (Gen, counterexample, elements, forAll, ioProperty, oneof, property, sized, testProperty, withNumTests, (===))
 
-import Thena.Core.Term (Core (..), Literal (..), rootName)
+import Thena.Core.Term (Core (..), InScope, Literal (..), rootName, rootScope)
 import Thena.Driver
   ( Response (..)
   , machineOf
@@ -44,6 +44,7 @@ tests =
     [ testGroup "notation, and what cannot be written in it" notation
     , testGroup "fences, where the grammar leaves a term ambiguous" fences
     , testGroup "the development calculus reads a region back" reading
+    , testGroup "a tag is a spelling, so it shortens" inside
     , roundTrip
     ]
 
@@ -119,7 +120,7 @@ host :: Core -> String
 host = renderCore (rendering [] 0) []
 
 printed :: [Grammar] -> Core -> IO String
-printed gs t = maybe (assertFailure "it did not print") pure (printTerm gs host t)
+printed gs t = maybe (assertFailure "it did not print") pure (printTerm gs rootScope host t)
 
 -- ---------------------------------------------------------------------------
 
@@ -154,7 +155,7 @@ notation =
       t @?= "LC`${\"a b\"}`"
   , testCase "a term of no language does not print" $ do
       (_, gs) <- loaded
-      printTerm gs host (str "x") @?= Nothing
+      printTerm gs rootScope host (str "x") @?= Nothing
   ]
 
 fences :: [TestTree]
@@ -249,6 +250,69 @@ roundTrip =
     testProperty "printed and read back by the DC reader, a term is itself" $
       withNumTests 200 $ forAll genEx $ \t -> ioProperty $ do
         (env, gs) <- io
-        pure $ case printTerm gs host t of
+        pure $ case printTerm gs (opensIn env) host t of
           Nothing -> counterexample "it did not print" (property False)
           Just src -> counterexample src (fmap fst (parseCore gs env (opensIn env) [] 0 src) === Right t)
+
+-- ---------------------------------------------------------------------------
+
+-- | **A TAG SHORTENS LIKE EVERY OTHER NAME** (MS10 phase 268, `~txbz5`, his
+-- ruling of 2026-11-04).
+--
+-- A printed name is the shortest ending that still means it where the reader
+-- stands (phase 254), and a tag /resolves/ by that same walk (phase 260,
+-- `~zjkvd`). Before this the printer wrote a tag whole whatever the reader had
+-- open, so one line could carry both spellings of one name.
+--
+-- **The pair is the test**: the same term, printed in a scope that has the
+-- namespace open and in one that has nothing open. A case that showed only the
+-- short spelling could not tell a scope that was honoured from a word that
+-- resolved anyway.
+inside :: [TestTree]
+inside =
+  [ testCase "the namespace is open, so the tag is the word" $ do
+      (_, gs, sc) <- insideLoaded
+      printTerm gs sc host jux @?= Just "LC`f x`"
+  , testCase "and nothing is open, so the tag is the whole path" $ do
+      (_, gs, _) <- insideLoaded
+      printTerm gs rootScope host jux @?= Just "A.LC`f x`"
+    -- **A fence writes a tag too**, and it is the same question one level
+    -- down: 'Thena.Language.Build.laid' spells the fence it writes, so a
+    -- nested literal cannot come out in the other spelling.
+  , testCase "a fence inside the region shortens with it" $ do
+      (_, gs, sc) <- insideLoaded
+      printTerm gs sc host nested @?= Just "LC`${LC`f x`} y`"
+  , testCase "and the same fence writes the path with nothing open" $ do
+      (_, gs, _) <- insideLoaded
+      printTerm gs rootScope host nested @?= Just "A.LC`${A.LC`f x`} y`"
+  ]
+  where
+    jux = con "A.LC.jux" [con "A.LC.var" [str "f"], con "A.LC.var" [str "x"]]
+    nested = con "A.LC.jux" [jux, con "A.LC.var" [str "y"]]
+
+-- | A language inside a namespace, with the namespace opened beside the block
+-- — so one fixture gives both halves of the pair, the scope coming from the
+-- session rather than being hand-built.
+insideSource :: String
+insideSource =
+  unlines
+    [ "module PrintingInside where"
+    , ""
+    , "w : Token String"
+    , "w = /[a-z][a-zA-Z0-9']*/"
+    , ""
+    , "namespace A where"
+    , "  language LC, M, N where"
+    , "    var : w as occurrence -> w"
+    , "    jux                   -> M N"
+    , ""
+    , "open A"
+    ]
+
+insideLoaded :: IO (GlobalEnv, [Grammar], InScope)
+insideLoaded = do
+  (s0, _) <- startingSession
+  case loadProofSource s0 insideSource of
+    (s1, ProofLoaded {}) ->
+      let m = machineOf s1 in pure (globals m, grammars m, scope m)
+    (_, other) -> assertFailure (show other)

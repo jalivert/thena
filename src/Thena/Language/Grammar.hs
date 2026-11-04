@@ -35,6 +35,7 @@ module Thena.Language.Grammar
   , grammarWritten
   , classWord
   , grammarForTag
+  , tagText
   , sortType
   , notationInto
   , constructorProductions
@@ -78,7 +79,7 @@ import Data.Maybe (isJust, isNothing, listToMaybe)
 
 import Thena.Core.Level (Normal (..), normalise)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), Opened (..), declarationNamed, globalUnder, inDeclarationOf, innermostOf, nameDotted, nameFromText, rootName, Ident (..), Literal (..), instantiate, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), Opened (..), declarationNamed, globalUnder, inDeclarationOf, innermostOf, nameDotted, shortestEnding, nameFromText, rootName, Ident (..), Literal (..), instantiate, tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Regex (Regex, andThen, fromRanges, matches, oneOf, parseRegex, primingChar, singleChar, star)
@@ -830,14 +831,35 @@ grammarWritten = rootName . grammarWord
 -- **The tag is taken as WRITTEN**, through 'Thena.Core.Term.nameFromText' and
 -- never @rootName@ — a qualified tag is a path and not a word holding dots.
 grammarForTag :: InScope -> [Grammar] -> String -> Either [GlobalName] Grammar
-grammarForTag sc gs tag = case globalUnder isGrammar sc (nameFromText tag) of
+grammarForTag sc gs tag = case globalUnder (isGrammar gs) sc (nameFromText tag) of
   Right c  -> case [ g | g <- gs, grammarName g == c ] of
     g : _ -> Right g
     -- Cannot arise: the predicate is what the walk answered by.
     []    -> Left []
   Left amb -> Left amb
-  where
-    isGrammar c = any ((== c) . grammarName) gs
+
+-- | __How a tag is WRITTEN here: the shortest ending that still reaches this
+-- grammar__ (MS10 phase 268, `~txbz5`).
+--
+-- **The inverse of 'grammarForTag', asking the same predicate rather than
+-- reasoning about it** \8212 'Thena.Core.Term.shortestEnding' is
+-- 'Thena.Core.Term.globalUnder' run backwards, so a printed tag is exactly
+-- what a reader standing here resolves back to this grammar, and an ending two
+-- opened namespaces would both answer is rejected for free.
+--
+-- **A tag is a SPELLING and not the parser's key** (MS10 phase 258): the key
+-- stays dotted \8212 'Thena.Language.Build.settled' hands 'Earley.StartAt' a
+-- 'grammarKey' \8212 where the tag a user reads shortens like every other name
+-- (phase 254). Before this, one line could carry both spellings of one name:
+-- with @open Ctx@ in force, @:show Ctx.extend-in.extend-in@ printed the
+-- heading @extend-in@ beside a tag @Ctx.extend-in@.
+tagText :: [Grammar] -> InScope -> GlobalName -> String
+tagText gs = shortestEnding (isGrammar gs)
+
+-- | What the walk answers a tag by, and what the printer shortens against:
+-- **one predicate, so the two cannot drift.**
+isGrammar :: [Grammar] -> GlobalName -> Bool
+isGrammar gs c = any ((== c) . grammarName) gs
 
 -- | __A token class's name as a generated name's SUFFIX — the word.__
 --

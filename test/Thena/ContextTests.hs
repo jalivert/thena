@@ -15,7 +15,7 @@ module Thena.ContextTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), Literal (..))
+import Thena.Core.Term (Core (..), Literal (..), rootScope)
 import Thena.Declared (named)
 import Thena.Driver
   ( Response (..)
@@ -279,16 +279,21 @@ said s line = let (s', r) = command s line in renderResponse s' r
 
 declared :: [TestTree]
 declared =
+    -- **The heading and the tag are in one spelling** (MS10 phase 268,
+    -- `~txbz5`): with @open Ctx@ in force the heading says @extend-in@, and
+    -- before the tag shortened the constructors beside it said
+    -- @Ctx.extend-in@ — one line carrying both spellings of one name. This is
+    -- the transcript the item was written from.
   [ testCase ":show prints the relation and both constructors" $ do
       s <- loaded header
       said s ":show extend-in" @?=
         [ "data extend-in : String -> Ty -> Ctx -> Type₀ where"
         , "  { extend-here : ∀ (Γ : Ctx) (x : String) (T : Ty)"
-            ++ " -> Ctx.extend-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
+            ++ " -> extend-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
         , "  ; extend-there-extend : ∀ (Γ : Ctx) (x : String) (T : Ty)"
             ++ " (x' : String) (T' : Ty)"
             ++ " -> (Eq {0} String x x' -> Empty {0})"
-            ++ " -> Ctx.extend-in`${x} : ${T} ∈ ${Γ}` -> Ctx.extend-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }"
+            ++ " -> extend-in`${x} : ${T} ∈ ${Γ}` -> extend-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }"
         ]
   ]
 
@@ -306,7 +311,7 @@ notation =
   , testCase "and prints back as the text it was read from" $ do
       s <- loaded header
       let m = machineOf s
-      printRegion (grammars m) (renderCore (rendering [] 0) [])
+      printRegion (grammars m) rootScope (renderCore (rendering [] 0) [])
           (apps "Ctx.extend-in.extend-in"
             [ str "x", con "Ty.base"
             , apps "Ctx.extend" [con "Ctx.empty", str "x", con "Ty.base"] ])

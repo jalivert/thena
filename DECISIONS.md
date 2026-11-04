@@ -291,6 +291,8 @@ qualified = A.LC`( f g )`     -- the path always works, brackets included:
   *Ty could be B.Ty or A.Ty, so it is ambiguous here*. Write the path.
 - **`LC[var]` names the production inside the tag's language**, so the bracket is a
   lookup in whatever the tag resolved to and never a global one.
+- **A printed tag shortens by this same walk** — *A name is written the shortest
+  way that still means it*, below, has it.
 - **A rule file writes its own `open` lines to shorten a tag**, and the session's
   `open`s do not reach it. Without one, the tag is written whole there — `A.LC[app]`,
   exactly as a rule already calls `Vec.Vec`. *A rule file writes its own `open`
@@ -416,6 +418,15 @@ as **the shortest ending of its path that resolves back to it where you are
 standing**. With nothing open, `Nat.Nat` is `Nat` and `Nat.zero` is `Nat.zero`;
 after `open Nat`, that constructor is `zero`; inside `namespace A`, `A.one` is
 `one`.
+
+**A term literal's tag is a name, so it shortens with everything else**
+(*decided 2026-11-04*). A context's lookup relation lives in the context's
+namespace, so with `open Ctx` in force it is written `` extend-in`x : T ∈ Γ` ``
+and with nothing open `` Ctx.extend-in`x : T ∈ Γ` `` — where before, the tag
+alone was written whole whatever you had open, and one line of `:show` could
+carry both spellings of one name. **The dotted path survives where it is a key
+and not a spelling**: the parser's start symbol for a language is the whole
+path, which is what keeps an `A.Ty` and a `B.Ty` apart, and nobody reads it.
 
 **It is the reader's own answer and not a second rule.** The printer asks the
 resolver whether a candidate ending comes back as the name it started from, so

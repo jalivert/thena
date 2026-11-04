@@ -41,6 +41,7 @@ import Thena.Core.Term
   , Spelling
   , nameDotted
   , spelledIn
+  , spellingScope
   , Ident (..)
   , Literal (..)
   , Var
@@ -55,6 +56,7 @@ import Thena.Language.Grammar
   , Grammar
   , Item (..)
   , Sort (..)
+  , tagText
   )
 import Thena.View.Address (Address, Move (..), extend)
 import Thena.Syntax.Print
@@ -262,9 +264,11 @@ displayCore spelling grammars budget env binders counter here term =
     -- the same argument that moved the written-name walk into
     -- 'Thena.Core.Term.globalUnder'.
     --
-    -- **The object term's own tag is NOT this** (below, in 'fromDraft'): a
-    -- fence is written whole by 'Thena.Language.Build.printTerm' too, and the
-    -- two printers agreeing is the point.
+    -- **The object term's own tag asks the same question of a different
+    -- predicate** (below, in 'fromDraft'): a tag resolves against the
+    -- installed grammars rather than the environment, so it shortens through
+    -- 'Thena.Language.Grammar.tagText' (MS10 phase 268, `~txbz5`). Both
+    -- printers shortening, and by the same scope, is the point.
     named = spelledIn spelling
 
     -- **Tried first, at every node, not only at the top of the call** — a
@@ -297,7 +301,7 @@ displayCore spelling grammars budget env binders counter here term =
       DNode p g children _ -> do
         args <- argsAt at t
         items <- objectItems b e bs n p args children
-        let lang = nameDotted (g)
+        let lang = tagText grammars (spellingScope spelling) g
             prod = nameDotted (gproductionName p)
         Just (AnObjectTerm lang prod items)
       _ -> Nothing -- a fenced or foreign draft has no shape of its own here;

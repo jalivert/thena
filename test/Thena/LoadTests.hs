@@ -588,6 +588,24 @@ failureTests =
             -- what ran before it still ran
             declared "A0" l @?= True
 
+    -- **AND THE OTHER TWO KINDS, WHICH WERE SILENTLY DROPPED** (MS10 phase
+    -- 268). The case matched a script alone, so a @:load@ naming a proof
+    -- module or a rule base ran to a response nothing followed: the line did
+    -- nothing, said nothing, and the load went on. Found while measuring
+    -- `~txbz5` through a script, where a @:load@ of an example looked like a
+    -- printer ignoring its scope.
+  , testCase "a nested :load of a proof module is refused too" $
+      let l = source ["data A0 : Type\8320 where { a0 : A0 }", ":load somewhere.thena"]
+       in do
+            loadedError l @?= Just (NestedLoad 2)
+            declared "A0" l @?= True
+
+  , testCase "and one of a rule base" $
+      let l = source ["data A0 : Type\8320 where { a0 : A0 }", ":load somewhere.thena.rules"]
+       in do
+            loadedError l @?= Just (NestedLoad 2)
+            declared "A0" l @?= True
+
   , testCase "a file that ends while something is asking says so" $
       loadedError (sourceWithRules ["assume ⌜ Type₀ ⌝"]) @?= Just (UnansweredQuestion 1)
 

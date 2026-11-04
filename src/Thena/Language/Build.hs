@@ -40,7 +40,7 @@ module Thena.Language.Build
 import Data.List (elemIndex, intercalate)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (Core (..), GlobalName (..), nameDotted, nameFromText, rootName, Literal (..))
+import Thena.Core.Term (Core (..), GlobalName (..), InScope, nameDotted, nameFromText, rootName, rootScope, Literal (..))
 import Thena.Errors (BuildError (..))
 import Thena.Language.Earley (Piece (..), Tree (..), placeholderChar)
 import qualified Thena.Language.Earley as Earley
@@ -53,6 +53,7 @@ import Thena.Language.Grammar
   , Item (..)
   , Sort (..)
   , earleyRules
+  , tagText
   )
 import Thena.Core.Level (levelOfNat)
 import Thena.Syntax.Lexer (rawEscapes)
@@ -233,16 +234,16 @@ shapeOf tree = case tree of
 --
 -- @render@ prints what the notation cannot — it is the host's own printer, and
 -- what it returns stands inside a splice.
-printTerm :: [Grammar] -> (Core -> String) -> Core -> Maybe String
-printTerm gs render t = do
+printTerm :: [Grammar] -> InScope -> (Core -> String) -> Core -> Maybe String
+printTerm gs sc render t = do
   d <- draft gs t
-  txt <- settle gs render d
-  let lang = nameDotted (draftLanguage d)
+  txt <- settle gs sc render d
+  let lang = tagText gs sc (draftLanguage d)
   pure (lang ++ "`" ++ txt ++ "`")
 
 -- | What stands inside the region, without the tag and the backticks.
-printRegion :: [Grammar] -> (Core -> String) -> Core -> Maybe String
-printRegion gs render t = settle gs render =<< draft gs t
+printRegion :: [Grammar] -> InScope -> (Core -> String) -> Core -> Maybe String
+printRegion gs sc render t = settle gs sc render =<< draft gs t
 
 -- | **The paper's form: no tag, no backticks, and no @${\8230}@ round a splice**
 -- (MS8 phase 174).
@@ -355,10 +356,10 @@ grammarOf gs name =
 --
 -- 'Nothing' when fencing everything still does not read back. The caller then
 -- prints the term in the host's syntax, which always reads.
-settle :: [Grammar] -> (Core -> String) -> Draft -> Maybe String
-settle gs render d = do
+settle :: [Grammar] -> InScope -> (Core -> String) -> Draft -> Maybe String
+settle gs sc render d = do
   d' <- settled gs render d
-  let (chunks, _, _) = laid gs render d'
+  let (chunks, _, _) = laid gs sc render d'
   pure (concatMap escaped chunks)
 
 -- | The fencing loop alone, stopping at the draft rather than its text (MS7
@@ -368,8 +369,14 @@ settled :: [Grammar] -> (Core -> String) -> Draft -> Maybe Draft
 settled gs render = go
   where
     rules = earleyRules gs
+    -- **The scope is 'rootScope' and nothing is lost by that**: a tag's
+    -- spelling reaches the chunks only, and the chunks are what this discards.
+    -- A fenced subterm is one opaque 'Earley.Splice' in the input and a
+    -- 'SpliceOf' in the tree, so no spelling can change which fences the round
+    -- trip settles on (MS10 phase 268) \8212 the same reason a stub renderer is
+    -- exact here.
     go d =
-      let (_, input, tree) = laid gs render d
+      let (_, input, tree) = laid gs rootScope render d
           lang = nameDotted (draftLanguage d)
        in if Earley.parse rules (Earley.StartAt lang) input == Right tree
             then Just d
@@ -404,14 +411,14 @@ escaped c = case c of
 
 -- | The text, the input the parser is given for it, and the tree it must come
 -- back as. One traversal, because the splice indices have to agree.
-laid :: [Grammar] -> (Core -> String) -> Draft -> ([Chunk], [Piece], Tree)
-laid gs render d0 = let (cs, ps, tr, _) = go 0 d0 in (cs, ps, tr)
+laid :: [Grammar] -> InScope -> (Core -> String) -> Draft -> ([Chunk], [Piece], Tree)
+laid gs sc render d0 = let (cs, ps, tr, _) = go 0 d0 in (cs, ps, tr)
   where
     go k d = case d of
       DToken s   -> ([Written s], map Char s, Token s, k)
       DForeign c -> splice k (render c)
-      DFenced langName c inner -> case settle gs render inner of
-        Just txt -> splice k (nameDotted langName ++ "`" ++ txt ++ "`")
+      DFenced langName c inner -> case settle gs sc render inner of
+        Just txt -> splice k (tagText gs sc langName ++ "`" ++ txt ++ "`")
         Nothing  -> splice k (render c)
       DNode p _ children _ ->
         let step (cs, ps, trs, k1, rest) i = case i of
