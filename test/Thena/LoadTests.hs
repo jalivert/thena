@@ -28,6 +28,7 @@ import Thena.Driver
   , Loaded (..)
   , LoadKind (..)
   , Response (..)
+  , RuleFileError (..)
   , Session
   , machineOf
   , pendingQuestion
@@ -60,7 +61,7 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Global.Declare (DeclareError (..))
-import Thena.Files (Trouble (..), loadProofFile, startingSession)
+import Thena.Files (Trouble (..), consultRuleFiles, loadProofFile, startingSession)
 import Thena.Render
   ( rendering
   ,renderTrouble, renderResponse, renderCore, renderEliminator)
@@ -85,6 +86,7 @@ tests =
     , testGroup "the five forms of open (MS10 phase 254)" openTests
     , testGroup "shadowing is announced (MS10 phase 264)" shadowingTests
     , testGroup "an import graph (MS11 phase 274)" importTests
+    , testGroup "a rule base states what it depends on (MS11 phase 276)" baseImportTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -188,6 +190,82 @@ openTests =
              \one = succ zero\n\
              \after : Nat.Nat\n\
              \after = succ Nat.zero\n"
+
+-- --------------------------------------------------------------------------
+-- A rule base's own imports (MS11 phase 276)
+-- --------------------------------------------------------------------------
+
+-- | @import ‹module›@ in a rule file, which is what closes the hack his ruling
+-- of 2026-11-03 named: a base that talks about a language used to rely on the
+-- session having loaded it first.
+--
+-- **Every case here is a PAIR with @Unstated@**, the same base without the
+-- import line. A test that only showed the import working could not tell a
+-- dependency that was stated from one the session happened to satisfy — and
+-- before this phase the session always did, because the fixture loaded the
+-- module itself.
+baseImportTests :: [TestTree]
+baseImportTests =
+  [ testCase "the base's own import is what makes its tag resolve" $ do
+      (s0, _) <- startingSession
+      (s1, out, trouble) <- consultRuleFiles s0 ["test/modules/Inspecting.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Lang"]
+      assertBool "the base went in" (not (null [ () | BasesLoaded _ <- out ]))
+      assertBool "and the module is in the session"
+                 (moduleLoaded (importNamed "test.modules.Lang") s1)
+
+  , -- **The pair**, and the only difference between the two files is the line.
+    testCase "and the same base without it is refused" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <- consultRuleFiles s0 ["test/modules/Unstated.thena.rules"]
+      case trouble of
+        [Unloadable p (RuleFileRefused _ (RuleIllFormed _))] ->
+          p @?= "test/modules/Unstated.thena.rules"
+        other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- A dependency asks that the module BE there, not that this act load it.
+    testCase "a module already in the session is not loaded again" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (_, out, trouble) <- consultRuleFiles s1 ["test/modules/Inspecting.thena.rules"]
+      assertBool (show (map (renderTrouble s1) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= []
+
+  , testCase "an import that is not on disc installs nothing" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- consultRuleFiles s0 ["test/modules/Absentee.thena.rules"]
+      out @?= []
+      case trouble of
+        [Unreadable p _] -> p @?= "test/modules/Nowhere.thena"
+        other            -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- **The modules a base brought in are the base's**, so a base that will not
+    -- install does not leave them behind. Asked of the environment, because the
+    -- response is a refusal either way.
+    testCase "a base that is refused takes what it imported back with it" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- consultRuleFiles s0 ["test/modules/BadRule.thena.rules"]
+      assertBool "it refused" (not (null trouble))
+      assertBool "the language went back"
+                 (not (isDeclared (declaredAs "A.LC") (globals (machineOf s1))))
+      assertBool "and so did the record of the module"
+                 (not (moduleLoaded (importNamed "test.modules.Lang") s1))
+
+  , -- 'ImportsUnread''s counterpart for a base, and the refusal names only what
+    -- is missing.
+    testCase "the door with no IO refuses a base that imports" $ do
+      (s0, _) <- startingSession
+      src <- readFile "test/modules/Inspecting.thena.rules"
+      case loadRuleBases s0 [("test/modules/Inspecting.thena.rules", src)] of
+        (_, RuleFileRefused _ (RuleImportsUnread ms)) ->
+          map moduleText ms @?= ["test.modules.Lang"]
+        (_, other) -> assertFailure (show other)
+  ]
+  where
+    importNamed t = case moduleName t of
+      Just m  -> m
+      Nothing -> error ("not a module name: " ++ t)
 
 -- --------------------------------------------------------------------------
 -- The import graph (MS11 phase 274)

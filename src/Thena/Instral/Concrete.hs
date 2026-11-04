@@ -112,6 +112,19 @@ data RawDecl
     -- ^ @open X@ — in force from here to the end of the file
   | DeclOpenIn RawOpen RawDecl
     -- ^ @open X in ‹declaration›@ — in force for that declaration alone
+  | DeclImport [String] String
+    -- ^ @import ‹module›@ — **a surface module this base depends on** (MS11
+    -- phase 276, his ruling of 2026-11-03).
+    --
+    -- The steps and the last word of a /file's/ name, 'RawOpen'\'s shape and not
+    -- its meaning: there the steps are a namespace's, here they are
+    -- directories. **This module imports nothing**, which is why the name is
+    -- not @Thena.Driver.ModuleName@ here and is built into one at the door.
+    --
+    -- **It resolves to nothing and declares nothing.** What it does happens
+    -- before the base is read: whoever has the disc loads the module it names,
+    -- so the grammars this file's tags are resolved against are there because
+    -- the file said so and not because the session happened to hold them.
   deriving (Eq, Show)
 
 -- | What an @open@ line in a rule file said: the namespaces it names, and what

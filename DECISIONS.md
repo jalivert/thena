@@ -648,10 +648,28 @@ rules under it are separate declarations — so it covers the one it is written
 above and no more. That is a real difference from a surface file, where a
 signature and its equation are one declaration.
 
-**`import` is not this, and is not built.** This is the half that needed no way
-to find a file on disc. A rule file still relies on the session having loaded
-the surface file that declares the language; stating that dependency is
-`import`'s job and waits for it.
+**And it writes its own `import` lines too — MS11 phase 276**, which is what makes
+the `open` above honest: the base says which surface module declares the language,
+instead of hoping the session loaded it.
+
+```
+rule base inspecting where
+
+import Stlc.Syntax
+
+open Stlc.Syntax
+
+rule describe LC[var]`${s}` :- do
+  say (concat "a variable called " s)
+```
+
+**Consulting that base loads `Stlc/Syntax.thena` first**, and reports it, because the
+base cannot be read before the language it talks about exists. **The module stays in
+your session** — unlike a surface file's consults, which are that file's alone: the
+base's rules run in your session later and need the language there. **A module you
+already have is not loaded again**, so the dependency asks that the module *be*
+there, not that consulting be what brought it. And a base that will not install takes
+back whatever it brought in: you never end up with half of it.
 
 ### Consults are a STACK, and clauses are a queue
 

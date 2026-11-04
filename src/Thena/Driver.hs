@@ -58,6 +58,8 @@ module Thena.Driver
   , InstralTypeError
   , loadRuleBases
   , consultRuleBases
+  , ruleBaseImports
+  , rolledBack
   , ModuleName
   , moduleName
   , moduleText
@@ -3086,6 +3088,13 @@ data RuleFileError
     -- line: the header is blanked rather than dropped so that nothing shifts
   | RuleIllFormed [RuleError]
     -- ^ it parsed, and one or more rules did not resolve or did not validate
+  | RuleImportsUnread [ModuleName]
+    -- ^ **it imports these and nobody read them** (MS11 phase 276).
+    -- 'ConsultsUnread'\'s counterpart for a rule base: a base is resolved
+    -- against the session's grammars the moment it is read, so a base that
+    -- states a dependency cannot be read before that dependency is in. This
+    -- door has no disc (§12 invariant 4); "Thena.Files" loads the modules and
+    -- then reads the base, so a frontend going through it never sees this
   deriving (Eq, Show)
 
 -- | The head of a rule-base file: an optional @\"\"\"…\"\"\"@ description, then
@@ -3273,6 +3282,10 @@ scopedDecls gs = go rootScope
       -- inner one may be another @open … in@, which is why it goes back
       -- through this walk rather than being paired here.
       DeclOpenIn o cov  -> go (brings o sc) [cov] ++ go sc rest
+      -- **An import is not a declaration to resolve either** (MS11 phase 276):
+      -- what it does is make the grammars in @gs@ be there at all, and that
+      -- happened before this walk started.
+      DeclImport _ _    -> go sc rest
       _                 -> (Reading gs sc, d) : go sc rest
 
     brings o sc = sc { scopeOpens = openedOf o ++ scopeOpens sc }
@@ -3403,7 +3416,7 @@ resolveAll gs raws =
 -- place, so a session never ends up searching half of what was asked for.
 loadRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
 loadRuleBases s ps =
-  loadReadBases s [(path, readRuleBase gs path src) | (path, src) <- ps]
+  loadReadBases s [(path, readStated s gs path src) | (path, src) <- ps]
   where
     gs = grammars (sessionMachine s)
 
@@ -3411,9 +3424,56 @@ loadRuleBases s ps =
 -- top of the pool instead of replacing it (MS11 phase 271).
 consultRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
 consultRuleBases s ps =
-  consultReadBases s [(path, readRuleBase gs path src) | (path, src) <- ps]
+  consultReadBases s [(path, readStated s gs path src) | (path, src) <- ps]
   where
     gs = grammars (sessionMachine s)
+
+-- | 'readRuleBase', refusing a base whose dependencies are not in (MS11 phase
+-- 276).
+--
+-- **Refused rather than read anyway**, which is the whole protection and the
+-- same bargain 'loadProofItems' makes for a surface module: a base is resolved
+-- against the session's grammars as it is read, so reading one that states a
+-- dependency before that dependency is loaded would resolve its tags against
+-- whatever the session happened to hold — the exact failure his ruling of
+-- 2026-11-03 is about. The caller with the disc is "Thena.Files".
+-- **A dependency already in the session is satisfied**, which is 'gather''s own
+-- rule one level up: what a statement of dependency asks for is that the module
+-- /be there/, not that this act be the one that loaded it. So the refusal names
+-- only what is missing, and a base consulted twice is read twice without
+-- reloading anything.
+readStated
+  :: Session -> [Grammar] -> FilePath -> String
+  -> Either RuleFileError RuleBase
+readStated s gs path src = case fmap missing (ruleBaseImports src) of
+  Right ms@(_ : _) -> Left (RuleImportsUnread ms)
+  -- Either everything it imports is in, or it does not parse — and
+  -- 'readRuleBase' is what says the second properly, with the position in it.
+  _                -> readRuleBase gs path src
+  where
+    missing = filter (\m -> not (moduleLoaded m s))
+
+-- | Every surface module a rule file imports, in written order (MS11 phase
+-- 276).
+--
+-- **Parsed and not resolved**, which is what 'rawRuleDecls' is for: the
+-- dependency has to be known /before/ there is anything to resolve against.
+ruleBaseImports :: String -> Either RuleFileError [ModuleName]
+ruleBaseImports src = do
+  (_, _, raws) <- rawRuleDecls src
+  Right (rawImports raws)
+
+-- | The same, off declarations somebody already has (MS11 phase 276).
+--
+-- **An @open … in@ is walked into**, because the declaration it covers may be
+-- an import; nothing else nests.
+rawImports :: [RawDecl] -> [ModuleName]
+rawImports = concatMap go
+  where
+    go d = case d of
+      DeclImport ps x -> [moduleFromSteps ps x]
+      DeclOpenIn _ cov -> go cov
+      _                -> []
 
 -- | The same, for bases whose declarations were stored rather than written.
 --
@@ -3424,9 +3484,14 @@ consultRuleBases s ps =
 -- happen once and identically whichever door a base came in by.
 loadRuleDecls :: Session -> [(FilePath, String, Maybe String, [RawDecl])] -> (Session, Response)
 loadRuleDecls s ps =
-  loadReadBases s [(path, ruleBaseOfDecls gs path nm desc ds) | (path, nm, desc, ds) <- ps]
+  loadReadBases s [(path, stated path nm desc ds) | (path, nm, desc, ds) <- ps]
   where
     gs = grammars (sessionMachine s)
+    -- 'readStated''s bargain, for the door that joins after parsing (MS11
+    -- phase 276).
+    stated path nm desc ds = case filter (\m -> not (moduleLoaded m s)) (rawImports ds) of
+      ms@(_ : _) -> Left (RuleImportsUnread ms)
+      []         -> ruleBaseOfDecls gs path nm desc ds
 
 -- | Install bases that have already been built, or none of them.
 --

@@ -51,7 +51,7 @@ tests :: TestTree
 tests =
   testGroup
     "rule files (§8)"
-    [headers, opens, loading, ordering, theStack, consulting, refusals, commands, argumentHeads, returning, primitives, walking]
+    [headers, opens, imports, loading, ordering, theStack, consulting, refusals, commands, argumentHeads, returning, primitives, walking]
 
 -- --------------------------------------------------------------------------
 -- An @open@ line, as written
@@ -127,6 +127,39 @@ opens =
     signatureOf n = case decls [n ++ " : Core"] of
       Right [DeclSignature g] -> g
       other -> error ("the fixture signature did not parse: " ++ show other)
+
+-- | **An `import` line in a rule file** (MS11 phase 276), read without a
+-- session: what the line parses to, and that the printer writes it back.
+--
+-- What it /does/ is 'Thena.LoadTests'' — it needs the disc — and these say only
+-- that the grammar reads it and keeps the name, which is what the printer has to
+-- be able to invert. **A base printed without its imports would read back and
+-- then be refused.**
+imports :: TestTree
+imports =
+  testGroup
+    "an import line in a rule file (MS11 phase 276)"
+    [ testCase "import X" $
+        decls ["import Stlc"] @?= Right [DeclImport [] "Stlc"]
+
+      -- **The steps are directories**, which is what makes this a file's name
+      -- and not a namespace's — the same spelling meaning something else.
+    , testCase "and the module name is a path" $
+        decls ["import Stlc.Syntax.Terms"]
+          @?= Right [DeclImport ["Stlc", "Syntax"] "Terms"]
+
+    , testCase "it survives being printed and read again" $ do
+        let written = ["import Stlc", "import Stlc.Syntax.Terms", "open Stlc"]
+        case decls written of
+          Left e   -> assertFailure e
+          Right ds -> decls' (printRuleFile "mine" Nothing ds) @?= Right ds
+    ]
+  where
+    decls ls = decls' (unlines ("rule base mine where" : "" : ls))
+
+    decls' src = case rawRuleDecls src of
+      Right (_, _, ds) -> Right ds
+      Left e           -> Left (show e)
 
 -- --------------------------------------------------------------------------
 -- The header

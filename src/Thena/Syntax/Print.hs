@@ -407,6 +407,10 @@ rawDecl d = case d of
   -- declaration that is several lines keeps its shape.
   DeclOpen o -> [rawOpen o]
   DeclOpenIn o inner -> (rawOpen o ++ " in") : map ("  " ++) (rawDecl inner)
+  -- **An @import@ line, as written** (MS11 phase 276). A base printed without
+  -- it would read back and then be refused, because what it depends on would no
+  -- longer be stated.
+  DeclImport ps x -> ["import " ++ intercalate "." (ps ++ [x])]
   where
     header lhs b = case b of
       BodyRhs r    -> [lhs ++ " = " ++ rawRhs r]

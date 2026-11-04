@@ -99,6 +99,10 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   open    { Located _ TOpen }
   hiding  { Located _ THiding }
   renaming { Located _ TRenaming }
+  -- **And the word a dependency is stated with** (MS11 phase 276), reserved
+  -- project-wide by phase 274 for the surface language, the lexer being one
+  -- lexer.
+  import  { Located _ TImport }
   rule    { Located _ TRule }
   do      { Located _ TDo }
   when    { Located _ TWhen }
@@ -219,6 +223,10 @@ Decl :: { RawDecl }
   -- namespace and says how far its effect reaches.
   | open OpenHead                          { DeclOpen (uncurry RawOpen $2) }
   | open OpenHead in Decl                  { DeclOpenIn (uncurry RawOpen $2) $4 }
+  -- **What this base depends on** (MS11 phase 276, his ruling of 2026-11-03: a
+  -- file states what it refers to and never relies on the session). A @QName@
+  -- whose steps are directories, as the surface language's @import@ is.
+  | import QName                           { DeclImport (fst $2) (snd $2) }
 
 -- | What an @open@ opens, and what it says about which names it brings in
 -- (MS10 phase 267). The surface language's 'Thena.Surface.Parser' has the same

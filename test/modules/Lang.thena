@@ -1,0 +1,11 @@
+module Lang where
+
+namespace A where
+  x : Token String
+  x = /[a-z]+/
+
+  language LC, M, N where
+    var : x as occurrence -> x
+    app                   -> ( M N )
+
+  open LC

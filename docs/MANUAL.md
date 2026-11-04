@@ -1455,6 +1455,26 @@ makes a file that works on its own work for whoever imports it.
 > which names a file *offers* — an `exporting` list on the header, and
 > `public import` for passing a dependency on — is designed and not built.
 
+**A rule file states its dependencies the same way.** A base that talks about a
+language imports the module declaring it:
+
+```
+rule base inspecting where
+
+import Stlc.Syntax
+
+open Stlc.Syntax
+
+rule describe LC[var]`${s}` :- do
+  say (concat "a variable called " s)
+```
+
+Consulting that base loads `Stlc/Syntax.thena` first and tells you it did, because a
+base cannot be read before the language it mentions exists. **The module stays in
+your session**, unlike a surface file's consults — the base's rules run in your
+session later and need the language there. A module you already have is not loaded
+again, and a base that will not install takes back whatever it brought in.
+
 `examples/determinacy-tactics.thena.script` is the acceptance test for the whole first
 milestone. It declares the language of chapter 3 of Pierce's *Types and
 Programming Languages* — a seven-constructor term language, a numeric-value

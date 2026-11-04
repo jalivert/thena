@@ -1,0 +1,8 @@
+rule base badrule where
+
+import test.modules.Lang
+
+open A
+
+rule describe LC[nosuch]`${f}` :- do
+  say "x"

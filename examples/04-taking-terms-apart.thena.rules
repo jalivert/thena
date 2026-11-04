@@ -9,7 +9,11 @@ rule base inspecting where
 --   :load rules rules/standard.thena.rules examples/04-taking-terms-apart.thena.rules
 --
 -- A rule file is read with the grammars the session already has, which is why
--- the module declaring LC comes first.
+-- the module declaring LC comes first. **That is the old way, and it is not the
+-- design**: since MS11 a rule file writes `import ‹module›` and states the
+-- dependency itself. This file cannot yet — a module is named by its path, and
+-- `01-stlc-syntax` is not a name any path can give — so it waits for the corpus
+-- to be renamed.
 --
 -- In a rule an object term is a Core value, like any other term. Written in a
 -- pattern it MATCHES, and ${…} binds what stands in that slot; written in an

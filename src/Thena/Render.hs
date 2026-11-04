@@ -2340,6 +2340,12 @@ renderRuleFileError ren path e = case e of
     [ path ++ ": needs a header line — rule base \8249name\8250 \8249description\8250 where" ]
   RuleSyntaxError se -> [path ++ ": " ++ renderSyntaxError se]
   RuleIllFormed es   -> map ((path ++ ": ") ++) (map (renderRuleError ren) es)
+  -- **A caller's mistake, said plainly** (MS11 phase 276), the twin of
+  -- 'ConsultsUnread': a base that states a dependency reached a door that
+  -- cannot read a file.
+  RuleImportsUnread ms ->
+    [ path ++ ": imports " ++ intercalate ", " (map moduleText ms)
+        ++ ", and they were not read" ]
 
 renderRuleError :: Rendering -> RuleError -> String
 renderRuleError ren e = whereRuleError ren e ++ whatRuleError e

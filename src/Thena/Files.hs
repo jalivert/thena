@@ -42,6 +42,9 @@ import Thena.Driver
   , Session
   , loadProofSource
   , loadProofModules
+  , readModulePath
+  , ruleBaseImports
+  , rolledBack
   , moduleConsults
   , moduleImports
   , moduleFile
@@ -150,29 +153,63 @@ consultRuleFiles :: Session -> [FilePath] -> IO (Session, [Response], [Trouble])
 consultRuleFiles = ruleFilesWith consultRuleBases
 
 -- | What the two share: read every path, or install nothing.
+--
+-- **A base's own @import@ lines are loaded first** (MS11 phase 276). A base is
+-- resolved against the session's grammars as it is read, so the surface modules
+-- it names have to be in before reading begins — which is why they are loaded
+-- here and why 'Thena.Driver.loadRuleBases' refuses a base that imports.
+-- **Unlike a surface file's consults, they stay**: the base's rules run in the
+-- session later and need the language there.
 ruleFilesWith
   :: (Session -> [(FilePath, String)] -> (Session, Response))
   -> Session -> [FilePath] -> IO (Session, [Response], [Trouble])
 ruleFilesWith install s paths = do
   reads' <- mapM (\p -> fmap ((,) p) (try (readFile p))) paths
-  pure $ case [ (p, e) | (p, Left e) <- reads' ] of
-    (p, e) : _ -> (s, [], [Unreadable p e])
-    [] ->
+  case [ (p, e) | (p, Left e) <- reads' ] of
+    (p, e) : _ -> pure (s, [], [Unreadable p e])
+    [] -> do
       let contents = [ (p, c) | (p, Right c) <- reads' ]
-          (s', resp) = install s contents
-          -- The path a refusal is about. 'RuleFileRefused' names its own;
-          -- 'BasesIllTyped' is about the whole ordered list at once (MS5 phase
-          -- 66c), so it is filed under the first file read.
-          about = case paths of { p : _ -> p ; [] -> "" }
+      brought <- imported s contents
+      pure $ case brought of
+        Left t -> (s, [], [t])
+        Right (s1, got) -> installing s s1 got (install s1 contents)
+  where
+    -- The install's own answer, read as it always was — with whatever the
+    -- imported modules had to say in front of it, and with the session put back
+    -- if the install refuses: **the modules a base brought in are the base's,
+    -- so they do not land without it.**
+    installing s0 s1 got (s', resp) =
+      let about = case paths of { p : _ -> p ; [] -> "" }
+          refused t = (rolledBack s0 s1, [], [t])
        in case resp of
-            -- A refusal is trouble and not output: the whole load was
-            -- abandoned, so there is nothing to report as having happened.
-            RuleFileRefused p _ -> (s, [], [Unloadable p resp])
-            -- **The same bargain one step later** (MS5 phase 66c): the files
-            -- all read and parsed, and the program they make does not type
-            -- check, so nothing was installed and nothing happened to report.
-            BasesIllTyped _     -> (s, [], [Unloadable about resp])
-            _                   -> (s', [resp], [])
+            RuleFileRefused p _ -> refused (Unloadable p resp)
+            BasesIllTyped _     -> refused (Unloadable about resp)
+            _                   -> (s', got ++ [resp], [])
+
+-- | Load every surface module these rule files import (MS11 phase 276).
+--
+-- **One load for all of them**, so the all-or-nothing reaches across the whole
+-- group: two bases named in one @:consult@ either both get what they depend on
+-- or neither does. A module already in is skipped, 'gather''s own rule.
+imported
+  :: Session -> [(FilePath, String)]
+  -> IO (Either Trouble (Session, [Response]))
+imported s contents = go [] contents
+  where
+    go done [] = pure $ case loadProofModules s done of
+      (s', Right rs)      -> Right (s', rs)
+      -- A module nobody named: the path is the only thing that says which it
+      -- was (MS11 phase 275).
+      (_, Left (m, bad))  -> Left (Unloadable (readModulePath m) bad)
+    go done ((_, src) : rest) = case ruleBaseImports src of
+      -- It did not parse. **Said by the read and not here**, so the position is
+      -- in the message: this hands the file on untouched.
+      Left _   -> go done rest
+      Right ms -> do
+        walked <- imports s [] done ms
+        case walked of
+          Left t      -> pure (Left t)
+          Right done' -> go done' rest
 
 -- | Read a file and run it: the session after, **what its lines said**, and
 -- **what went wrong**, kept apart because the two callers want different halves.
