@@ -291,9 +291,10 @@ qualified = A.LC`( f g )`     -- the path always works, brackets included:
   *Ty could be B.Ty or A.Ty, so it is ambiguous here*. Write the path.
 - **`LC[var]` names the production inside the tag's language**, so the bracket is a
   lookup in whatever the tag resolved to and never a global one.
-- **In a rule file a tag is written in full**, because a rule file is not read in a
-  scope: it has no `module` clause and no `open`, so every name in one is written
-  whole — `A.LC[app]` there, exactly as a rule already calls `Vec.Vec`.
+- **A rule file writes its own `open` lines to shorten a tag**, and the session's
+  `open`s do not reach it. Without one, the tag is written whole there — `A.LC[app]`,
+  exactly as a rule already calls `Vec.Vec`. *A rule file writes its own `open`
+  lines*, below, has it.
 
 A global name carries its module path, and it carries it all the way down: the
 qualified name is what the core term holds, not a flat name that something
@@ -427,9 +428,10 @@ back.
 draws from — not only the lines a terminal prints — carry the same ending, so
 the same term reads the same whichever you are looking at it through. Two
 exceptions, and both are because nothing is standing anywhere: a *pattern* in a
-rule is written whole, since a rule file is not read in a scope, and a *name
-used as a value* is written whole, since a name on its own has no term around it
-to be standing in.
+rule is written whole, since what the printer writes is read back outside the file
+that wrote it — so a pattern written `LC[var]` under an `open` still prints
+`Inner.LC.var(${s})` — and a *name used as a value* is written whole, since a name
+on its own has no term around it to be standing in.
 
 ### `open` has five forms, and one of them lasts one declaration
 

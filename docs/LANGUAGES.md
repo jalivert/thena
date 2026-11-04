@@ -288,8 +288,20 @@ language LC, M, N, E where
   reached by its word wherever that namespace is open — inside the block, or
   after an `open` — and by its path always: `` A.LC`( f g )` ``, brackets
   included. `open … renaming` renames a tag as it renames anything else, and two
-  opened namespaces offering one tag is refused rather than chosen. **In a rule
-  file a tag is written in full**, since a rule file is not read in a scope.
+  opened namespaces offering one tag is refused rather than chosen.
+- **A rule file writes its own `open` lines for this**, in the same five forms,
+  and the session's own `open`s do not reach it — a rule base means the same thing
+  whatever happened to be open when it was loaded. Without one, write the tag
+  whole, which always works:
+
+  ```
+  rule base inspecting where
+
+  open Stlc.Syntax
+
+  rule describe LC[var]`${s}` :- do
+    say (concat "a variable called " s)
+  ```
 
 **A metavariable belongs to its language.** `M`, `N` and `E` above are `LC`'s,
 and nothing outside `LC`'s namespace sees them until it is opened — so two
