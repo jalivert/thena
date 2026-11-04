@@ -132,7 +132,6 @@ keyboard:
 | `≐` | `≈` |
 | `⊢` | `\|-` |
 | `▸` | `\|>` |
-| `⌜ ⌝` | `[\| \|]` |
 
 ```
 thena spine> :core \ (A : Type0) -> A
@@ -164,7 +163,7 @@ serve every level.
 `Type₁` is wanted:
 
 ```
-thena spine> :infer ⌜ (\ (A : Type₁) -> A) Type₀ ⌝
+thena spine> :infer core`(\ (A : Type₁) -> A) Type₀`
 (λ (A : Type₁) -> A) Type₀ : Type₁
 ```
 
@@ -202,9 +201,9 @@ Written in the development calculus they are explicit, and **prenex** — a use
 writes all of them or none:
 
 ```
-thena spine> :infer ⌜ refl {1} ⌝
+thena spine> :infer core`refl {1}`
 refl {1} : ∀ (A : Type₁) (a : A) -> Eq {1} A a a
-thena spine> :infer ⌜ refl {1 0} ⌝
+thena spine> :infer core`refl {1 0}`
 refl has 1 level parameter, and was given 2 level arguments
 its level parameters are prenex, so a use writes every one of them
 ```
@@ -464,7 +463,7 @@ type
 `solve`-ing each guess as you go, and finish:
 
 ```
-thena spine> try-core ⌜ _ ⌝
+thena spine> try-core core`_`
 thena spine> solve
 thena spine> back
 thena spine> back
@@ -489,7 +488,7 @@ unknown becomes a parameter:
 ```
 thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
 proving idPoly : ∀ (A : Type (?ℓ5790)) -> A -> A
-thena spine> try-core ⌜ \ (A : Type) (a : A) -> a ⌝
+thena spine> try-core core`\ (A : Type) (a : A) -> a`
 thena spine> solve
 thena spine> qed
 idPoly {ℓ₅₈₀₂} : ∀ (A : Type (ℓ₅₈₀₂)) -> A -> A   ∎
@@ -502,7 +501,7 @@ before a `⊢`:
 ```
 thena spine> :theorem lift : Type -> Type
 proving lift : Type (?ℓ5804) -> Type (?ℓ5805)
-thena spine> try-core ⌜ \ (x : Type) -> x ⌝
+thena spine> try-core core`\ (x : Type) -> x`
 thena spine> solve
 thena spine> qed
 lift {ℓ₅₈₁₃ ℓ₅₈₁₄} : (ℓ₅₈₁₃ ≤ ℓ₅₈₁₄) ⊢ Type (ℓ₅₈₁₃) -> Type (ℓ₅₈₁₄)   ∎
@@ -519,7 +518,7 @@ collected by the kernel, not at the moment you type the term** — `:infer` and
 ```
 thena spine> :theorem bad : Type₁ -> Type₀
 proving bad : Type₁ -> Type₀
-thena spine> try-core ⌜ lift {1 0} ⌝
+thena spine> try-core core`lift {1 0}`
 thena spine> solve
 thena spine> qed
 the kernel refused it
@@ -540,13 +539,13 @@ until you do, `:theorem` will tell you there is one in progress.
 |---|---|
 | `attack` | turn the focused hole into a guess, ready to be built |
 | `intro` | move one `∀` binder from the goal into the guess body |
-| `try-core ⌜ term ⌝` | propose a term for the focused hole |
+| `` try-core core`term` `` | propose a term for the focused hole |
 | `solve` | accept the focused guess — it becomes a definition |
 | `regret` | throw away a guess's body, back to a plain hole |
 | `abandon` | remove the focused hole entirely |
-| `assume "‹x›" ⌜‹S›⌝` | add a hypothesis above the focus |
-| `claim "‹x›" ⌜‹S›⌝` | add a new hole above the focus |
-| `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve holes by unification |
+| `` assume "‹x›" core`‹S›` `` | add a hypothesis above the focus |
+| `` claim "‹x›" core`‹S›` `` | add a new hole above the focus |
+| `` unify core`‹t›` core`‹u›` `` | solve holes by unification |
 | `reduce` | reduce the focused term one step, in place |
 
 `reduce` acts on whatever term the cursor is standing on, and the change is
@@ -555,7 +554,7 @@ committed to the development:
 ```
 thena spine> :theorem two : Nat
 proving two : Nat
-thena spine> try-core ⌜ (\ (x : Nat) -> succ x) zero ⌝
+thena spine> try-core core`(\ (x : Nat) -> succ x) zero`
 thena spine> into
 thena core> :show
   let ? two : Nat ≐ (
@@ -574,7 +573,7 @@ thena core> :show
 asked on its own line, and your answer is read at the `>` prompt:
 
 ```
-thena core> claim ⌜ Nat ⌝
+thena core> claim core`Nat`
 name for the new hole?
 > k
 claimed k
@@ -643,7 +642,7 @@ amounts to starting over. Handy for scratch work.
 
 ## 7. Proof by induction
 
-`eliminate-core ⌜ target ⌝` is the induction tactic. It builds the motive, works out
+`` eliminate-core core`target` `` is the induction tactic. It builds the motive, works out
 what each case has to prove, and posts one hole per case.
 
 The example needs `Nat`, addition, and congruence of `succ`.
@@ -675,7 +674,7 @@ thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
-thena spine> eliminate-core ⌜ n ⌝
+thena spine> eliminate-core core`n`
 subgoals: zeroMethod, succMethod
 ```
 
@@ -702,10 +701,10 @@ finish:
 ```
 thena spine> back
 thena spine> back
-thena spine> try-core ⌜ refl {0} Nat zero ⌝
+thena spine> try-core core`refl {0} Nat zero`
 thena spine> solve
 thena spine> along
-thena spine> try-core ⌜ \ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc {0 0} (plus x zero) x ih ⌝
+thena spine> try-core core`\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc {0 0} (plus x zero) x ih`
 thena spine> solve
 thena spine> along
 thena spine> solve
@@ -718,14 +717,13 @@ thena spine> qed
 plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n   ∎
 ```
 
-**A core tactic's argument is written in corners**, `⌜ … ⌝`. A command line is
-a run of operands, exactly as it would be inside a rule body, so
-`try-core refl {0} Nat zero` would be four arguments and is refused — the
-corners say where the term begins and ends, and inside them nothing needs
-parenthesising.
+**A core tactic's argument is written in a fence**, `` core`…` ``. A command
+line is a run of operands, exactly as it would be inside a rule body, so
+`try-core refl {0} Nat zero` would be four arguments and is refused — the fence
+says where the term begins and ends, and inside it nothing needs parenthesising.
 
-**A surface term is written in angle brackets**, `⟨ … ⟩`, the same way — so
-`elaborate ⟨ succ zero ⟩`. Every embedded term is written in the fence its
+**A surface term is written the same way**, `` surface`…` `` — so
+`` elaborate surface`succ zero` ``. Every embedded term is written in the fence its
 language is entitled to, and an argument in no fence is neither language: it is
 a name, a number or a string, read exactly as a rule body reads one. That is why
 `goto-named` takes `goto-named "h"` and not `goto-named h` — the second is a
@@ -763,9 +761,6 @@ is the next section.
 driven by hand. It posts one hole per case, and each hole is *inside* that
 case's own binders, with the equations the split stated already discharged. So
 you write the body of the arm and nothing else.
-
-(`core`…`` and `⌜ … ⌝` are the same fence, spelled two ways; the corners are on
-their way out.)
 
 ```
 thena spine> :theorem plusZeroAgain : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
@@ -1106,7 +1101,7 @@ The kernel is an independent check. It does not trust the machine.
 | | |
 |---|---|
 | `:extract` | read the finished term off the development |
-| `certify ⌜‹type›⌝` | check the extracted term really has that type |
+| `` certify core`‹type›` `` | check the extracted term really has that type |
 | `:revalidate` | re-derive the whole development's well-formedness from scratch |
 
 *From a fresh session.*
@@ -1119,13 +1114,13 @@ opened Nat
 thena spine> :goal Nat
 ▶ let ? goal : Nat in
   goal
-thena spine> try-core ⌜ zero ⌝
+thena spine> try-core core`zero`
 thena spine> solve
 thena spine> :extract
 let goal = zero : Nat in goal
-thena spine> certify ⌜ Nat ⌝
+thena spine> certify core`Nat`
 certified
-thena spine> certify ⌜ Nat -> Nat ⌝
+thena spine> certify core`Nat -> Nat`
 the kernel refused it
 in the term:
   let goal = zero : Nat in goal has type Nat
@@ -1137,7 +1132,7 @@ An unfinished proof cannot be extracted, and the message says exactly what is
 still open:
 
 ```
-thena spine> claim "k" ⌜ Nat ⌝
+thena spine> claim "k" core`Nat`
 thena spine> :extract
 stuck: not finished: the hole k is still open, so there is no term yet
 ```
@@ -1225,7 +1220,7 @@ thena spine> :theorem reckless : Eq {0} Nat zero (succ zero)
 proving reckless : Eq {0} Nat zero (succ zero)
 thena spine> attack
 thena spine> into
-thena spine> try-core ⌜ liar {0} ⌝
+thena spine> try-core core`liar {0}`
 thena spine> solve
 thena spine> back
 thena spine> solve
@@ -1278,7 +1273,7 @@ thena spine> :theorem decides : Dec {0 0} (Eq {0} String "x" "x")
 proving decides : Dec {0 0} (Eq {0} String "x" "x")
 thena spine> attack
 thena spine> into
-thena spine> try-core ⌜ String.dec "x" "x" ⌝
+thena spine> try-core core`String.dec "x" "x"`
 thena spine> solve
 thena spine> back
 thena spine> solve
@@ -1397,7 +1392,7 @@ plus one one : Nat
 
 `:infer` takes a **surface** term and elaborates it where you are asking, then
 puts the development back exactly as it was. A development-calculus term goes in
-corners instead: `:infer ⌜ succ zero ⌝`.
+a `core` fence instead: `` :infer core`succ zero` ``.
 
 A comment is `--` followed by a space, running to the end of the line, and it
 works the same way in all three kinds of file. Without the space it is not a
@@ -1499,7 +1494,8 @@ language and elaborated on load.
   unification, and only the elaboration rule that made those holes knows what
   they stand for. A simple `let n = succ zero in n` needs no annotation.
 - **A development-calculus term writes its level arguments.**
-  `⌜ congSucc {0 0} a b e ⌝`, never `⌜ congSucc a b e ⌝`. A **surface** term has
+  `` core`congSucc {0 0} a b e` ``, never `` core`congSucc a b e` ``. A
+  **surface** term has
   them inferred, which is most of the difference between the two versions of the
   determinacy proof.
 - **No automation beyond the rule base.** There is no `auto`, no simplifier, no
@@ -1519,15 +1515,15 @@ language and elaborated on load.
 | | |
 |---|---|
 | `attack` `intro` `solve` `regret` `abandon` | the hole operations |
-| `try-core ⌜ term ⌝` | propose a term for the focused hole |
-| `apply-core ⌜ f ⌝` / `unify-refine-core ⌜ t ⌝` | apply a function / refine by unification |
+| `` try-core core`term` `` | propose a term for the focused hole |
+| `` apply-core core`f` `` / `` unify-refine-core core`t` `` | apply a function / refine by unification |
 | `goto-named "‹name›"` | move to a hole by name |
 | `goto-root` | move to the root of the development |
-| `assume "‹x›" ⌜‹S›⌝` / `claim "‹x›" ⌜‹S›⌝` | add a hypothesis / a hole above the focus |
-| `assume ⌜‹S›⌝` / `claim ⌜‹S›⌝` | the same, asking for the name |
-| `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve by unification |
-| `eliminate-core ⌜ target ⌝` | induction |
-| `eliminate-generalising-core ⌜ target ⌝` | the same, and it generalises the premises the target's indices mention |
+| `` assume "‹x›" core`‹S›` `` / `` claim "‹x›" core`‹S›` `` | add a hypothesis / a hole above the focus |
+| `` assume core`‹S›` `` / `` claim core`‹S›` `` | the same, asking for the name |
+| `` unify core`‹t›` core`‹u›` `` | solve by unification |
+| `` eliminate-core core`target` `` | induction |
+| `` eliminate-generalising-core core`target` `` | the same, and it generalises the premises the target's indices mention |
 | `induction-core core`target`` | the split: one hole per case, inside that case's own binders |
 | `case-core core`target`` | the same without the induction hypotheses |
 | `reduce` | reduce the focused term in place |
@@ -1539,10 +1535,10 @@ language and elaborated on load.
 | `retry` / `retry ‹n›` | backtrack to a choice point |
 | `data ‹D› … where { … }` | declare an inductive family |
 | `declare ‹sig› ; ‹equation›` | elaborate a surface declaration |
-| `quantify "‹x›" ⌜‹S›⌝` | add a ∀-binder above the focus |
+| `` quantify "‹x›" core`‹S›` `` | add a ∀-binder above the focus |
 | `do { ‹instruction› ; … }` | play a block of instructions here |
 | `yield` | hand control back to a rule that yielded |
-| `certify ⌜‹type›⌝` | ask the kernel |
+| `` certify core`‹type›` `` | ask the kernel |
 | `qed` | certify and admit the finished proof |
 
 **Colon commands look.**

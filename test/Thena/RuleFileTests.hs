@@ -381,9 +381,9 @@ argumentHeads =
   testGroup
     "a loaded head may ask about its argument"
     [ testCase "a name takes the clause that asks for one" $
-        said "pick \10216 foo \10217" @?= Just "that is a name"
+        said "pick surface`foo`" @?= Just "that is a name"
     , testCase "and anything else falls through to the other" $
-        said "pick \10216 Type\8320 -> Type\8320 \10217" @?= Just "that is not a name"
+        said "pick surface`Type\8320 -> Type\8320`" @?= Just "that is not a name"
     ]
   where
     picking =

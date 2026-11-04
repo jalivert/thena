@@ -81,14 +81,12 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '▸'     { Located _ TPending }
   '⊢'     { Located _ TTurnstile }
   '≟'     { Located _ TEquate }
-  '[|'    { Located _ TOpenQuote }
   '${'    { Located _ TEscapeOpen }
   '}$'    { Located _ TEscapeClose }
   tagopen  { Located _ (TTagOpen $$) }
   tagat    { Located _ (TTagOpenAt _ _) }
   raw      { Located _ (TRaw $$) }
   tagclose { Located _ TTagClose }
-  '|]'    { Located _ TCloseQuote }
   let     { Located _ TLet }
   in      { Located _ TIn }
   elim    { Located _ TElim }
@@ -503,7 +501,6 @@ ValueOperand :: { RawOperand }
   | '[' ']'                                { RawList [] }
   | '[' Elements ']'                       { RawList (reverse $2) }
   | '(' Operand ',' Operand ')'            { RawPairOf $2 $4 }
-  | '[|' Term '|]'                         { RawQuoted $2 }
   -- **A region's text is reassembled, escapes and all** (MS5 phase 81). The
   -- scanner splits @${x}@ out so that a fence inside an escape cannot end the
   -- region early; this puts it back, because what a region /is/ is text for an
@@ -548,12 +545,6 @@ QName :: { ([String], String) }
 
 Atom :: { Raw }
   : QName                                  { RawName (fst $1) (snd $1) }
-  -- **The corners are an atom, not a term** (phase 38). They were a @Term@
-  -- production, so @⌜ t ⌝@ could not appear in an atom run — and phase 38's
-  -- REPL writes every core argument of a rule exactly there. Moving it is
-  -- strictly more permissive: every place it parsed before still reaches it
-  -- through @Term -> App -> Atom@.
-  | '[|' Term '|]'                         { RawQuote $2 }
   -- **A splice is an atom** (MS5 phase 81) — it stands where a term stands, so
   -- it belongs exactly where a name does and needs no precedence of its own.
   -- The closing brace is its own token: the region scanner emits

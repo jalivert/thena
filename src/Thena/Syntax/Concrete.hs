@@ -63,7 +63,6 @@ data Raw
   | RawClaim RawIdent Raw Raw    -- ^ @let ? x : S in p@
   | RawGuess RawIdent Raw Raw Raw -- ^ @let ? x : S ≐ (g) in p@
   | RawPending RawConstraint Raw -- ^ @κ ▸ p@
-  | RawQuote Raw                 -- ^ @⌜ t ⌝@
   | RawSplice String
     -- ^ **@${x}@ — a hole in a written term, filled from the binding @x@ when
     -- the instruction runs** (MS5 phase 81, his design).
@@ -198,7 +197,6 @@ splices t = case t of
   RawClaim n ty p    -> named n ++ splices ty ++ splices p
   RawGuess n ty g p  -> named n ++ splices ty ++ splices g ++ splices p
   RawPending _ p     -> splices p
-  RawQuote q         -> splices q
   RawElim _ d _ ps m ms is tg ->
     named d ++ concatMap splices ps ++ splices m ++ concatMap splices ms
       ++ concatMap splices is ++ splices tg

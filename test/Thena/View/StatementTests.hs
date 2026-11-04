@@ -192,7 +192,7 @@ nestedLiteral = do
 
 -- | The @:@-commands whose argument is a term now offer one. **Which language is
 -- the dispatch arm's**: @:core@ reads a development-calculus term, @:infer@ a
--- surface one, or a cornered core one.
+-- surface one, or a @core@-fenced development-calculus one.
 commandTerms :: IO ()
 commandTerms = do
   s <- withLC
@@ -200,9 +200,11 @@ commandTerms = do
   ANonterminalSymbol "core term" `elem` o ":core " @?= True
   ANonterminalSymbol "surface term" `elem` o ":infer " @?= True
   ANonterminalSymbol "core term" `elem` o ":convert " @?= True
-  -- **Corners are not offered anywhere** — his instruction, 2026-10-01. The
-  -- cornered @:infer@ still runs; it is not advertised, so nothing new points at
-  -- a notation that is going away (@AGENDA.md@ 98).
+  -- **Corners are not offered anywhere, and now there is nothing to offer** —
+  -- his instruction of 2026-10-01 took the description out, and MS10 phase 269
+  -- took the notation (`~3t63k`). **Kept as a guard**: the two spellings are
+  -- dead and an offer naming one would be a frontend teaching a notation the
+  -- parser no longer has.
   [ l | l <- [":infer ", ":core ", "fill ", "fill core`"]
       , ALiteralSymbol "⌜" `elem` o l || ALiteralSymbol "[|" `elem` o l ] @?= []
 

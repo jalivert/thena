@@ -623,7 +623,7 @@ flexFlexTests =
 -- nothing left to solve (MS4 phase 41g).
 directedTests :: [TestTree]
 directedTests =
-  [ -- The defect this phase exists for: @try-core ⌜ Nat ⌝@ at a claim of
+  [ -- The defect this phase exists for: @try-core core`Nat`@ at a claim of
     -- @Type₁@ succeeded and @elaborate Nat@ did not.
     testCase "a smaller universe fits a larger one" $
       intoResultOf [] "Type\8320" "Type\8321" "Type\8322" `isSolved` 0

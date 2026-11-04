@@ -36,6 +36,7 @@ module Thena.Syntax.Print
   , tick
   , escapeString
   , escapeChar
+  , escapeRaw
     -- * Naming and levels, shared by both printers and by the display builder
   , Env
   , nameOf
@@ -172,10 +173,6 @@ rawOperand a = case a of
   -- the embedded term as the author wrote it.
   RawRegion tag prod src ->
     tag ++ maybe "" (\w -> "[" ++ w ++ "]") prod ++ [tick] ++ src ++ [tick]
-  -- The same gap 'renderValue' has for a 'Thena.Instral.Ops.VRaw': there is no
-  -- printer for written syntax, so this says what it is rather than what it
-  -- contains (§7b's register).
-  RawQuoted _       -> "⌜…⌝"
   -- A nested call, written back as it was written (MS5 phase 63). This is
   -- the one place a rule listing shows the /written/ form rather than the
   -- resolved one — resolution lifts it into a binding of its own.
@@ -277,6 +274,11 @@ objectPiece pc = case pc of
 -- The region scanner reads a backslash before any of these as the
 -- character itself, so writing them this way is what makes the printer's
 -- output readable again.
+--
+-- **The three are 'Thena.Syntax.Lexer.rawEscapes'**, which held a fourth —
+-- @⟩@ — until the @⟨ … ⟩@ alias went (MS10 phase 269). Every printer that
+-- writes a region's text goes through this, including the two in
+-- 'Thena.Render' that write a @core@ region.
 escapeRaw :: Char -> String
 escapeRaw c
   | c `elem` [tick, '\\', '$'] = ['\\', c]

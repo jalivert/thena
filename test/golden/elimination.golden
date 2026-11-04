@@ -14,9 +14,9 @@ thena spine> intro
 thena spine> into
 thena spine> along
 thena spine> along
-thena spine> eliminate-core ⌜ i ⌝
+thena spine> eliminate-core core`i`
 stuck: eliminating at indices needs Eq.Eq, which is not declared
-thena spine> eliminate-core ⌜ n ⌝
+thena spine> eliminate-core core`n`
 subgoals: zeroMethod, succMethod
 thena spine> :abandon
 abandoned noEq
@@ -160,11 +160,11 @@ elaborate ‹t›
 run-block ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
-thena spine> eliminate-core ⌜ Type₀ ⌝
+thena spine> eliminate-core core`Type₀`
 stuck: Type₀ is not a target: its type is Type₁, not a fully applied datatype
-thena spine> eliminate-core ⌜ succ ⌝
+thena spine> eliminate-core core`succ`
 stuck: succ is not a target: its type is Nat -> Nat, not a fully applied datatype
-thena spine> eliminate-core ⌜ b ⌝
+thena spine> eliminate-core core`b`
 subgoals: bzMethod, bsMethod
 thena spine> :where
 focus
@@ -181,7 +181,7 @@ type
   Nat
 thena spine> attack
 stuck: no clause of attack applies here
-thena spine> eliminate-core ⌜ n ⌝
+thena spine> eliminate-core core`n`
 stuck: no clause of eliminate-core applies here
 thena spine> :abandon
 abandoned probe
@@ -193,7 +193,7 @@ thena spine> intro
 thena spine> into
 thena spine> along
 thena spine> along
-thena spine> eliminate-core ⌜ b ⌝
+thena spine> eliminate-core core`b`
 subgoals: bzMethod, bsMethod
 thena spine> :where
 focus
@@ -222,6 +222,6 @@ thena spine> into
 thena spine> along
 thena core> along
 stuck: that move is for the chain, and the focus is a core term
-thena core> eliminate-core ⌜ c ⌝
+thena core> eliminate-core core`c`
 stuck: not in scope: c
 thena core> :quit

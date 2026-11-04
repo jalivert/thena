@@ -32,7 +32,7 @@ thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
-thena spine> eliminate-core ⌜ p ⌝
+thena spine> eliminate-core core`p`
 subgoals: evZeroMethod, evSSMethod
 thena spine> :where
 focus
@@ -47,10 +47,10 @@ type
   Empty {0}
 thena spine> back
 thena spine> back
-thena spine> try-core ⌜ \ (q : Eq {0} Nat zero (succ zero)) -> Nat.lemmata.noConfusion zero (succ zero) q ⌝
+thena spine> try-core core`\ (q : Eq {0} Nat zero (succ zero)) -> Nat.lemmata.noConfusion zero (succ zero) q`
 thena spine> solve
 thena spine> along
-thena spine> try-core ⌜ \ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> Nat.lemmata.noConfusion (succ n) zero (Nat.lemmata.noConfusion (succ (succ n)) (succ zero) q) ⌝
+thena spine> try-core core`\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> Nat.lemmata.noConfusion (succ n) zero (Nat.lemmata.noConfusion (succ (succ n)) (succ zero) q)`
 thena spine> solve
 thena spine> along
 thena spine> solve

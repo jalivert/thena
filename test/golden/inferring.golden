@@ -8,9 +8,9 @@ thena spine> open Maybe
 opened Maybe
 thena spine> :theorem g : Maybe Bool
 proving g : Maybe Bool
-thena spine> claim "T" ⌜ Type₀ ⌝
-thena spine> claim "b" ⌜ T ⌝
-thena spine> unify-refine-core ⌜ Just T b ⌝
+thena spine> claim "T" core`Type₀`
+thena spine> claim "b" core`T`
+thena spine> unify-refine-core core`Just T b`
 solved: T
 thena spine> :show
   let T = Bool : Type₀ in
@@ -28,7 +28,7 @@ context
   T = Bool : Type₀
 type
   T
-thena spine> unify-refine-core ⌜ true ⌝
+thena spine> unify-refine-core core`true`
 already equal
 thena spine> :show
   let T = Bool : Type₀ in

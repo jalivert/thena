@@ -156,6 +156,7 @@ import Thena.Language.Regex (RegexError (..))
 import Thena.Syntax.Print
   ( Env
   , escapeChar
+  , escapeRaw
   , escapeString
   , freshen
   , levelArgs
@@ -552,8 +553,6 @@ describe t = case t of
   TPending    -> "▸"
   TTurnstile  -> "⊢"
   TEquate     -> "≟"
-  TOpenQuote  -> "⌜"
-  TCloseQuote -> "⌝"
   TLet        -> "let"
   TIn         -> "in"
   TElim       -> "elim"
@@ -1115,7 +1114,20 @@ trailing ren env t = case t of
   Let {} -> quoted
   _      -> go ren env AtTop t
   where
-    quoted = "⌜ " ++ go ren env AtTop t ++ " ⌝"
+    quoted = coreRegion (go ren env AtTop t)
+
+-- | __A core term written as a term of the @core@ language__ (MS10 phase 269,
+-- `~3t63k`), which is the one spelling there is: @⌜ t ⌝@ was the other and is
+-- gone.
+--
+-- **The text is escaped, which corners did not have to be.** A region ends at
+-- the first unescaped backtick, and a printed core term holds backticks
+-- whenever it holds a tagged literal — so @core\`LC\\\`x\\\`\`@ is what a
+-- development whose trailing term is an object term prints as, and it reads
+-- back. 'Thena.Syntax.Print.escapeRaw' is the lexer's own list, so the printer
+-- cannot drift from the scanner.
+coreRegion :: String -> String
+coreRegion src = "core" ++ [tick] ++ concatMap escapeRaw src ++ [tick]
 
 -- | The one fragment change, named for what was crossed into.
 crossingWord :: Crossing -> String
@@ -1302,7 +1314,11 @@ renderValue ren ctx v = case v of
   -- is the printer a scheme ren already uses — so @0@, @ℓ₇@ and @?ℓ12@ all read as
   -- they do everywhere else.
   VLevel l           -> renderLevel l
-  VTerm t            -> "⌜" ++ renderCore ren ctx t ++ "⌝"
+  -- **A resolved term is a @core@ region** (MS10 phase 269, `~3t63k`): it was
+  -- written in corners, which were the same thing spelled twice. The text is
+  -- escaped because a region ends at a backtick, and a printed term holds one
+  -- whenever it holds a tagged literal of its own.
+  VTerm t            -> coreRegion (renderCore ren ctx t)
   -- **A pattern prints as it was written** (MS9 phase 183), which is what
   -- 'Thena.Syntax.Print.surfacePattern' is for — and the printer is the parser's
   -- inverse here, so what a user sees is what they typed.

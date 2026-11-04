@@ -145,7 +145,7 @@ rule fit-core f :- when focus-is-hole
 -- was focus-is-component, written first to keep these out of the core
 -- fragment's match list — and it is FALSE: the ops insert above the focus
 -- through Cursor.insertAbove, which works from inside a core term too, so
--- `claim "k" ⌜ Nat ⌝` succeeds there. A head that refused what the op it wraps
+-- claim "k" core`Nat` succeeds there. A head that refused what the op it wraps
 -- allows would make the two clauses of one word disagree about where the word
 -- applies. The enter-binders lesson (MS4 phase 49c) is that a head must be
 -- TRUE, not that every rule must have one.

@@ -13,9 +13,11 @@
 -- having to work out which is which.
 --
 -- **It imports nothing, and must keep importing nothing** (@.claude\/spec\/interface.md@
--- §2.5): "Thena.Syntax.Lexer" and "Thena.Syntax.Parser" sit beside @Core@ and
--- between them import only the concrete-syntax modules, which is what keeps
--- "Thena.Errors"' /nothing above Core/ rule true.
+-- §2.5) \8212 and from MS10 phase 269 that is true of the file and not only of
+-- the rule: the one import left was @Raw@, for the corner operand that
+-- `~3t63k` deleted. "Thena.Syntax.Lexer" and "Thena.Syntax.Parser" sit beside
+-- @Core@ and between them import only the concrete-syntax modules, which is
+-- what keeps "Thena.Errors"' /nothing above Core/ rule true.
 --
 -- The constructors keep their @Raw@ prefix. It no longer names the type they
 -- used to live beside; it says /named and unresolved/, which is what they are —
@@ -37,8 +39,6 @@ module Thena.Instral.Concrete
   , RawOperand (..)
   , RawTest (..)
   ) where
-
-import Thena.Syntax.Concrete (Raw)
 
 -- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› do ‹body›@.
 --
@@ -160,7 +160,7 @@ data RawFunction = RawFunction String [RawPattern] RawBody
 -- waits for this phase).
 data RawRhs
   = RhsOp RawOp        -- ^ @concat x x@ — an op or a call
-  | RhsValue RawOperand -- ^ @[1, 2]@, @(a, b)@, @42@, @⌜ t ⌝@
+  | RhsValue RawOperand -- ^ @[1, 2]@, @(a, b)@, @42@, @core\`t\`@
   deriving (Eq, Show)
 
 -- | What stands right of a function's @=@ or a lambda's @->@ (MS5 phase 75b).
@@ -270,16 +270,12 @@ data RawTest = RawTest String [RawOperand]
 -- 'RawText' arrives at phase 22b, at the user's instruction: *"Rules absolutely
 -- need a string literal."* Without it @say@, @ask@ and @concat@ had keywords
 -- that resolved and no way to be given anything to say.
+-- **A core term is a region like any other, and was two things until MS10
+-- phase 269** (`~3t63k`): @⌜ t ⌝@ held a parsed 'Raw' and @core\`t\`@ holds
+-- text, and they denoted the same operand. The corners are gone, so a written
+-- term reaches here one way.
 data RawOperand
-  = RawQuoted Raw
-    -- ^ @⌜ t ⌝@ — **a core term written in corners** (MS5 phase 62).
-    --
-    -- The same operand a @core@ region denotes, by the other spelling. It holds
-    -- a parsed tree rather than raw text because **Core shares Thena's lexer**:
-    -- a region carries text so that a /foreign/ language may keep its own
-    -- lexical rules, and Core has no need of that
-    -- (@discussion\/the-five-languages.md@ §7b, the permanent entry).
-  | RawRegion String (Maybe String) String
+  = RawRegion String (Maybe String) String
     -- ^ @tag\`…\`@ — a **tagged region** (MS5 phase 61b): the tag, and the raw
     -- text between the fences. Which language the text is in is the tag's to
     -- say, and the text is parsed by that tag's parser during resolution.

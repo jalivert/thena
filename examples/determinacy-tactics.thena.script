@@ -5,7 +5,7 @@ open NV
 data Step : Term -> Term -> Type₀ where { eIfTrue : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 ; eIfFalse : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3 ; eIf : ∀ (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') -> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3) ; eSucc : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (succ t1) (succ t1') ; ePredZero : Step (pred zero) zero ; ePredSucc : ∀ (v : Term) (nv : NV v) -> Step (pred (succ v)) v ; ePred : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (pred t1) (pred t1') ; eIsZeroZero : Step (iszero zero) true ; eIsZeroSucc : ∀ (v : Term) (nv : NV v) -> Step (iszero (succ v)) false ; eIsZero : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (iszero t1) (iszero t1') }
 open Step
 :theorem absurd : ∀ (C : Type₀) (e : Empty {0}) -> C
-try-core ⌜ \ (C : Type₀) (e : Empty {0}) -> elim Empty {0} () (\ (t : Empty {0}) -> C) () () e ⌝
+try-core core`\ (C : Type₀) (e : Empty {0}) -> elim Empty {0} () (\ (t : Empty {0}) -> C) () () e`
 solve
 qed
 :theorem sym : ∀ (A : Type₀) (a : A) (b : A) (e : Eq {0} A a b) -> Eq {0} A b a
@@ -19,9 +19,9 @@ along
 along
 along
 along
-eliminate-core ⌜ e ⌝
+eliminate-core core`e`
 back
-try-core ⌜ \ (c : A) -> refl {0} A c ⌝
+try-core core`\ (c : A) -> refl {0} A c`
 solve
 along
 solve
@@ -46,9 +46,9 @@ along
 along
 along
 along
-eliminate-core ⌜ e ⌝
+eliminate-core core`e`
 back
-try-core ⌜ \ (c : A) (h : P c) -> h ⌝
+try-core core`\ (c : A) (h : P c) -> h`
 solve
 along
 solve
@@ -76,9 +76,9 @@ along
 along
 along
 along
-eliminate-core ⌜ e ⌝
+eliminate-core core`e`
 back
-try-core ⌜ \ (c : A) -> refl {0} B (f c) ⌝
+try-core core`\ (c : A) -> refl {0} B (f c)`
 solve
 along
 solve
@@ -105,9 +105,9 @@ along
 along
 along
 along
-eliminate-core ⌜ e ⌝
+eliminate-core core`e`
 back
-try-core ⌜ \ (z : A) (h : Eq {0} A z c) -> h ⌝
+try-core core`\ (z : A) (h : Eq {0} A z c) -> h`
 solve
 along
 solve
@@ -127,7 +127,7 @@ intro
 into
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -138,34 +138,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen true c1 c2) true q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen true c1 c2) true q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen false c1 c2) true q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen false c1 c2) true q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen c1 c3 c4) true q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen c1 c3 c4) true q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (succ c1) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (succ c1) true q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (succ c1) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (succ c1) true q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred zero) true q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred zero) true q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred (succ c1)) true q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred (succ c1)) true q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (pred c1) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred c1) true q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (pred c1) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred c1) true q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero zero) true q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero zero) true q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero (succ c1)) true q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero (succ c1)) true q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (iszero c1) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero c1) true q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (iszero c1) true) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero c1) true q)`
 solve
 along
 solve
@@ -191,7 +191,7 @@ intro
 into
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -202,34 +202,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen true c1 c2) false q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen true c1 c2) false q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen false c1 c2) false q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen false c1 c2) false q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen c1 c3 c4) false q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen c1 c3 c4) false q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (succ c1) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (succ c1) false q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (succ c1) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (succ c1) false q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred zero) false q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred zero) false q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred (succ c1)) false q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred (succ c1)) false q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (pred c1) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred c1) false q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (pred c1) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred c1) false q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero zero) false q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero zero) false q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero (succ c1)) false q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero (succ c1)) false q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (iszero c1) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero c1) false q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (iszero c1) false) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero c1) false q)`
 solve
 along
 solve
@@ -255,7 +255,7 @@ intro
 into
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -266,34 +266,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen true c1 c2) zero q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen true c1 c2) zero q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen false c1 c2) zero q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen false c1 c2) zero q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen c1 c3 c4) zero q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen c1 c3 c4) zero q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (succ c1) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (succ c1) zero q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (succ c1) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (succ c1) zero q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred zero) zero q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred zero) zero q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred (succ c1)) zero q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred (succ c1)) zero q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (pred c1) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred c1) zero q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (pred c1) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred c1) zero q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero zero) zero q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero zero) zero q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero (succ c1)) zero q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero (succ c1)) zero q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (iszero c1) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero c1) zero q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (iszero c1) zero) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero c1) zero q)`
 solve
 along
 solve
@@ -323,7 +323,7 @@ along
 along
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -334,34 +334,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen true c1 c2) (succ w) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen true c1 c2) (succ w) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen false c1 c2) (succ w) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen false c1 c2) (succ w) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (succ w) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (succ w) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (succ c1) (succ w)) -> (\ (nc2 : Eq {0} Term c1 w) -> (\ (e1 : Eq {0} Term c1 w) -> ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 w (e1) (sr))) (nc2)) (Term.lemmata.noConfusion (succ c1) (succ w) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (succ c1) (succ w)) -> (\ (nc2 : Eq {0} Term c1 w) -> (\ (e1 : Eq {0} Term c1 w) -> ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 w (e1) (sr))) (nc2)) (Term.lemmata.noConfusion (succ c1) (succ w) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred zero) (succ w) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred zero) (succ w) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred (succ c1)) (succ w) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred (succ c1)) (succ w) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (pred c1) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred c1) (succ w) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (pred c1) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (pred c1) (succ w) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero zero) (succ w) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero zero) (succ w) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero (succ c1)) (succ w) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero (succ c1)) (succ w) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (iszero c1) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero c1) (succ w) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (iszero c1) (succ w)) -> absurd (Empty {0}) (Term.lemmata.noConfusion (iszero c1) (succ w) q)`
 solve
 along
 solve
@@ -389,13 +389,13 @@ intro
 into
 along
 along
-eliminate-core ⌜ nv ⌝
+eliminate-core core`nv`
 back
 back
-try-core ⌜ \ (u : Term) (s : Step zero u) -> zeroNoStep u s ⌝
+try-core core`\ (u : Term) (s : Step zero u) -> zeroNoStep u s`
 solve
 along
-try-core ⌜ \ (c1 : Term) (n : NV c1) (ih : ∀ (u : Term) -> Step c1 u -> Empty {0}) (u : Term) (s : Step (succ c1) u) -> succNoStep c1 ih u s ⌝
+try-core core`\ (c1 : Term) (n : NV c1) (ih : ∀ (u : Term) -> Step c1 u -> Empty {0}) (u : Term) (s : Step (succ c1) u) -> succNoStep c1 ih u s`
 solve
 along
 solve
@@ -417,7 +417,7 @@ along
 along
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -428,34 +428,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (ifthen true a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true true) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> sym Term c1 a e2) (andLeft {0 0} (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen true c1 c2) (ifthen true a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (ifthen true a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true true) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> sym Term c1 a e2) (andLeft {0 0} (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen true c1 c2) (ifthen true a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (ifthen true a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false true) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term a c2) (Term.lemmata.noConfusion false true e1)) (andLeft {0 0} (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen false c1 c2) (ifthen true a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (ifthen true a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false true) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term a c2) (Term.lemmata.noConfusion false true e1)) (andLeft {0 0} (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen false c1 c2) (ifthen true a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen true a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 true) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> absurd (Eq {0} Term a (ifthen c2 c3 c4)) (trueNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 true (e1) (sr)))) (andLeft {0 0} (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (ifthen true a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen true a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 true) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> absurd (Eq {0} Term a (ifthen c2 c3 c4)) (trueNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 true (e1) (sr)))) (andLeft {0 0} (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (ifthen true a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (succ c1) (ifthen true a b)) -> absurd (Eq {0} Term a (succ c2)) (Term.lemmata.noConfusion (succ c1) (ifthen true a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (succ c1) (ifthen true a b)) -> absurd (Eq {0} Term a (succ c2)) (Term.lemmata.noConfusion (succ c1) (ifthen true a b) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (ifthen true a b)) -> absurd (Eq {0} Term a zero) (Term.lemmata.noConfusion (pred zero) (ifthen true a b) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (ifthen true a b)) -> absurd (Eq {0} Term a zero) (Term.lemmata.noConfusion (pred zero) (ifthen true a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (ifthen true a b)) -> absurd (Eq {0} Term a c1) (Term.lemmata.noConfusion (pred (succ c1)) (ifthen true a b) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (ifthen true a b)) -> absurd (Eq {0} Term a c1) (Term.lemmata.noConfusion (pred (succ c1)) (ifthen true a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (pred c1) (ifthen true a b)) -> absurd (Eq {0} Term a (pred c2)) (Term.lemmata.noConfusion (pred c1) (ifthen true a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (pred c1) (ifthen true a b)) -> absurd (Eq {0} Term a (pred c2)) (Term.lemmata.noConfusion (pred c1) (ifthen true a b) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (ifthen true a b)) -> absurd (Eq {0} Term a true) (Term.lemmata.noConfusion (iszero zero) (ifthen true a b) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (ifthen true a b)) -> absurd (Eq {0} Term a true) (Term.lemmata.noConfusion (iszero zero) (ifthen true a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (ifthen true a b)) -> absurd (Eq {0} Term a false) (Term.lemmata.noConfusion (iszero (succ c1)) (ifthen true a b) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (ifthen true a b)) -> absurd (Eq {0} Term a false) (Term.lemmata.noConfusion (iszero (succ c1)) (ifthen true a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (iszero c1) (ifthen true a b)) -> absurd (Eq {0} Term a (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (ifthen true a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (iszero c1) (ifthen true a b)) -> absurd (Eq {0} Term a (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (ifthen true a b) q)`
 solve
 along
 solve
@@ -487,7 +487,7 @@ along
 along
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -498,34 +498,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (ifthen false a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true false) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term b c1) (Term.lemmata.noConfusion true false e1)) (andLeft {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen true c1 c2) (ifthen false a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (ifthen false a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true false) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term b c1) (Term.lemmata.noConfusion true false e1)) (andLeft {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen true c1 c2) (ifthen false a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (ifthen false a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false false) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> sym Term c2 b e3) (andLeft {0 0} (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen false c1 c2) (ifthen false a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (ifthen false a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false false) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> sym Term c2 b e3) (andLeft {0 0} (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen false c1 c2) (ifthen false a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen false a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 false) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> absurd (Eq {0} Term b (ifthen c2 c3 c4)) (falseNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 false (e1) (sr)))) (andLeft {0 0} (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (ifthen false a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen false a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 false) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> absurd (Eq {0} Term b (ifthen c2 c3 c4)) (falseNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 false (e1) (sr)))) (andLeft {0 0} (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (ifthen false a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (succ c1) (ifthen false a b)) -> absurd (Eq {0} Term b (succ c2)) (Term.lemmata.noConfusion (succ c1) (ifthen false a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (succ c1) (ifthen false a b)) -> absurd (Eq {0} Term b (succ c2)) (Term.lemmata.noConfusion (succ c1) (ifthen false a b) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (ifthen false a b)) -> absurd (Eq {0} Term b zero) (Term.lemmata.noConfusion (pred zero) (ifthen false a b) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (ifthen false a b)) -> absurd (Eq {0} Term b zero) (Term.lemmata.noConfusion (pred zero) (ifthen false a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (ifthen false a b)) -> absurd (Eq {0} Term b c1) (Term.lemmata.noConfusion (pred (succ c1)) (ifthen false a b) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (ifthen false a b)) -> absurd (Eq {0} Term b c1) (Term.lemmata.noConfusion (pred (succ c1)) (ifthen false a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (pred c1) (ifthen false a b)) -> absurd (Eq {0} Term b (pred c2)) (Term.lemmata.noConfusion (pred c1) (ifthen false a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (pred c1) (ifthen false a b)) -> absurd (Eq {0} Term b (pred c2)) (Term.lemmata.noConfusion (pred c1) (ifthen false a b) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (ifthen false a b)) -> absurd (Eq {0} Term b true) (Term.lemmata.noConfusion (iszero zero) (ifthen false a b) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (ifthen false a b)) -> absurd (Eq {0} Term b true) (Term.lemmata.noConfusion (iszero zero) (ifthen false a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (ifthen false a b)) -> absurd (Eq {0} Term b false) (Term.lemmata.noConfusion (iszero (succ c1)) (ifthen false a b) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (ifthen false a b)) -> absurd (Eq {0} Term b false) (Term.lemmata.noConfusion (iszero (succ c1)) (ifthen false a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (iszero c1) (ifthen false a b)) -> absurd (Eq {0} Term b (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (ifthen false a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (iszero c1) (ifthen false a b)) -> absurd (Eq {0} Term b (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (ifthen false a b) q)`
 solve
 along
 solve
@@ -565,7 +565,7 @@ along
 along
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -576,34 +576,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true p) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term (ifthen p' a b) c1) (trueNoStep p' (subst Term (\ (x : Term) -> Step x p') p true (sym Term true p e1) (s0)))) (andLeft {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen true c1 c2) (ifthen p a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true p) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term (ifthen p' a b) c1) (trueNoStep p' (subst Term (\ (x : Term) -> Step x p') p true (sym Term true p e1) (s0)))) (andLeft {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen true c1 c2) (ifthen p a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false p) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term (ifthen p' a b) c2) (falseNoStep p' (subst Term (\ (x : Term) -> Step x p') p false (sym Term false p e1) (s0)))) (andLeft {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen false c1 c2) (ifthen p a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false p) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term (ifthen p' a b) c2) (falseNoStep p' (subst Term (\ (x : Term) -> Step x p') p false (sym Term false p e1) (s0)))) (andLeft {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen false c1 c2) (ifthen p a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 p) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> trans Term (ifthen p' a b) (ifthen c2 a b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen x a b) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (trans Term (ifthen c2 a b) (ifthen c2 c3 b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen c2 x b) a c3 (sym Term c3 a e2)) (cong Term Term (\ (x : Term) -> ifthen c2 c3 x) b c4 (sym Term c4 b e3)))) (andLeft {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (ifthen p a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 p) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> trans Term (ifthen p' a b) (ifthen c2 a b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen x a b) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (trans Term (ifthen c2 a b) (ifthen c2 c3 b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen c2 x b) a c3 (sym Term c3 a e2)) (cong Term Term (\ (x : Term) -> ifthen c2 c3 x) b c4 (sym Term c4 b e3)))) (andLeft {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (ifthen p a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (succ c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (succ c2)) (Term.lemmata.noConfusion (succ c1) (ifthen p a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (succ c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (succ c2)) (Term.lemmata.noConfusion (succ c1) (ifthen p a b) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) zero) (Term.lemmata.noConfusion (pred zero) (ifthen p a b) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) zero) (Term.lemmata.noConfusion (pred zero) (ifthen p a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) c1) (Term.lemmata.noConfusion (pred (succ c1)) (ifthen p a b) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) c1) (Term.lemmata.noConfusion (pred (succ c1)) (ifthen p a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (pred c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (pred c2)) (Term.lemmata.noConfusion (pred c1) (ifthen p a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (pred c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (pred c2)) (Term.lemmata.noConfusion (pred c1) (ifthen p a b) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) true) (Term.lemmata.noConfusion (iszero zero) (ifthen p a b) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) true) (Term.lemmata.noConfusion (iszero zero) (ifthen p a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) false) (Term.lemmata.noConfusion (iszero (succ c1)) (ifthen p a b) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) false) (Term.lemmata.noConfusion (iszero (succ c1)) (ifthen p a b) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (iszero c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (ifthen p a b) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (iszero c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (ifthen p a b) q)`
 solve
 along
 solve
@@ -643,7 +643,7 @@ along
 along
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -654,34 +654,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (succ p)) -> absurd (Eq {0} Term (succ p') c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (succ p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (succ p)) -> absurd (Eq {0} Term (succ p') c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (succ p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (succ p)) -> absurd (Eq {0} Term (succ p') c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (succ p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (succ p)) -> absurd (Eq {0} Term (succ p') c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (succ p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (succ p)) -> absurd (Eq {0} Term (succ p') (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (succ p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (succ p)) -> absurd (Eq {0} Term (succ p') (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (succ p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (succ c1) (succ p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> succ x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (succ c1) (succ p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (succ c1) (succ p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> succ x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (succ c1) (succ p) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (succ p)) -> absurd (Eq {0} Term (succ p') zero) (Term.lemmata.noConfusion (pred zero) (succ p) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (succ p)) -> absurd (Eq {0} Term (succ p') zero) (Term.lemmata.noConfusion (pred zero) (succ p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (succ p)) -> absurd (Eq {0} Term (succ p') c1) (Term.lemmata.noConfusion (pred (succ c1)) (succ p) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (succ p)) -> absurd (Eq {0} Term (succ p') c1) (Term.lemmata.noConfusion (pred (succ c1)) (succ p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (pred c1) (succ p)) -> absurd (Eq {0} Term (succ p') (pred c2)) (Term.lemmata.noConfusion (pred c1) (succ p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (pred c1) (succ p)) -> absurd (Eq {0} Term (succ p') (pred c2)) (Term.lemmata.noConfusion (pred c1) (succ p) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (succ p)) -> absurd (Eq {0} Term (succ p') true) (Term.lemmata.noConfusion (iszero zero) (succ p) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (succ p)) -> absurd (Eq {0} Term (succ p') true) (Term.lemmata.noConfusion (iszero zero) (succ p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (succ p)) -> absurd (Eq {0} Term (succ p') false) (Term.lemmata.noConfusion (iszero (succ c1)) (succ p) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (succ p)) -> absurd (Eq {0} Term (succ p') false) (Term.lemmata.noConfusion (iszero (succ c1)) (succ p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (iszero c1) (succ p)) -> absurd (Eq {0} Term (succ p') (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (succ p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (iszero c1) (succ p)) -> absurd (Eq {0} Term (succ p') (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (succ p) q)`
 solve
 along
 solve
@@ -711,7 +711,7 @@ intro
 into
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -722,34 +722,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (pred zero)) -> absurd (Eq {0} Term zero c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (pred zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (pred zero)) -> absurd (Eq {0} Term zero c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (pred zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (pred zero)) -> absurd (Eq {0} Term zero c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (pred zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (pred zero)) -> absurd (Eq {0} Term zero c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (pred zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (ifthen c1 c3 c4) (pred zero)) -> absurd (Eq {0} Term zero (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (pred zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (ifthen c1 c3 c4) (pred zero)) -> absurd (Eq {0} Term zero (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (pred zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (succ c1) (pred zero)) -> absurd (Eq {0} Term zero (succ c2)) (Term.lemmata.noConfusion (succ c1) (pred zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (succ c1) (pred zero)) -> absurd (Eq {0} Term zero (succ c2)) (Term.lemmata.noConfusion (succ c1) (pred zero) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (pred zero)) -> (\ (nc2 : Eq {0} Term zero zero) -> (\ (e1 : Eq {0} Term zero zero) -> refl {0} Term zero) (nc2)) (Term.lemmata.noConfusion (pred zero) (pred zero) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (pred zero)) -> (\ (nc2 : Eq {0} Term zero zero) -> (\ (e1 : Eq {0} Term zero zero) -> refl {0} Term zero) (nc2)) (Term.lemmata.noConfusion (pred zero) (pred zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (pred zero)) -> (\ (nc2 : Eq {0} Term (succ c1) zero) -> (\ (e1 : Eq {0} Term (succ c1) zero) -> absurd (Eq {0} Term zero c1) (Term.lemmata.noConfusion (succ c1) zero e1)) (nc2)) (Term.lemmata.noConfusion (pred (succ c1)) (pred zero) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (pred zero)) -> (\ (nc2 : Eq {0} Term (succ c1) zero) -> (\ (e1 : Eq {0} Term (succ c1) zero) -> absurd (Eq {0} Term zero c1) (Term.lemmata.noConfusion (succ c1) zero e1)) (nc2)) (Term.lemmata.noConfusion (pred (succ c1)) (pred zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (pred c1) (pred zero)) -> (\ (nc2 : Eq {0} Term c1 zero) -> (\ (e1 : Eq {0} Term c1 zero) -> absurd (Eq {0} Term zero (pred c2)) (zeroNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 zero (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (pred c1) (pred zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (pred c1) (pred zero)) -> (\ (nc2 : Eq {0} Term c1 zero) -> (\ (e1 : Eq {0} Term c1 zero) -> absurd (Eq {0} Term zero (pred c2)) (zeroNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 zero (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (pred c1) (pred zero) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (pred zero)) -> absurd (Eq {0} Term zero true) (Term.lemmata.noConfusion (iszero zero) (pred zero) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (pred zero)) -> absurd (Eq {0} Term zero true) (Term.lemmata.noConfusion (iszero zero) (pred zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (pred zero)) -> absurd (Eq {0} Term zero false) (Term.lemmata.noConfusion (iszero (succ c1)) (pred zero) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (pred zero)) -> absurd (Eq {0} Term zero false) (Term.lemmata.noConfusion (iszero (succ c1)) (pred zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (iszero c1) (pred zero)) -> absurd (Eq {0} Term zero (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (pred zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (iszero c1) (pred zero)) -> absurd (Eq {0} Term zero (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (pred zero) q)`
 solve
 along
 solve
@@ -779,7 +779,7 @@ along
 along
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -790,34 +790,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (pred (succ v))) -> absurd (Eq {0} Term v c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (pred (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (pred (succ v))) -> absurd (Eq {0} Term v c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (pred (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (pred (succ v))) -> absurd (Eq {0} Term v c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (pred (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (pred (succ v))) -> absurd (Eq {0} Term v c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (pred (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (ifthen c1 c3 c4) (pred (succ v))) -> absurd (Eq {0} Term v (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (pred (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (ifthen c1 c3 c4) (pred (succ v))) -> absurd (Eq {0} Term v (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (pred (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (succ c1) (pred (succ v))) -> absurd (Eq {0} Term v (succ c2)) (Term.lemmata.noConfusion (succ c1) (pred (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (succ c1) (pred (succ v))) -> absurd (Eq {0} Term v (succ c2)) (Term.lemmata.noConfusion (succ c1) (pred (succ v)) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (pred (succ v))) -> (\ (nc2 : Eq {0} Term zero (succ v)) -> (\ (e1 : Eq {0} Term zero (succ v)) -> absurd (Eq {0} Term v zero) (Term.lemmata.noConfusion zero (succ v) e1)) (nc2)) (Term.lemmata.noConfusion (pred zero) (pred (succ v)) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (pred (succ v))) -> (\ (nc2 : Eq {0} Term zero (succ v)) -> (\ (e1 : Eq {0} Term zero (succ v)) -> absurd (Eq {0} Term v zero) (Term.lemmata.noConfusion zero (succ v) e1)) (nc2)) (Term.lemmata.noConfusion (pred zero) (pred (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (pred (succ v))) -> (\ (nc2 : Eq {0} Term (succ c1) (succ v)) -> (\ (e1 : Eq {0} Term (succ c1) (succ v)) -> (\ (nc4 : Eq {0} Term c1 v) -> (\ (e3 : Eq {0} Term c1 v) -> sym Term c1 v e3) (nc4)) (Term.lemmata.noConfusion (succ c1) (succ v) e1)) (nc2)) (Term.lemmata.noConfusion (pred (succ c1)) (pred (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (pred (succ v))) -> (\ (nc2 : Eq {0} Term (succ c1) (succ v)) -> (\ (e1 : Eq {0} Term (succ c1) (succ v)) -> (\ (nc4 : Eq {0} Term c1 v) -> (\ (e3 : Eq {0} Term c1 v) -> sym Term c1 v e3) (nc4)) (Term.lemmata.noConfusion (succ c1) (succ v) e1)) (nc2)) (Term.lemmata.noConfusion (pred (succ c1)) (pred (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (pred c1) (pred (succ v))) -> (\ (nc2 : Eq {0} Term c1 (succ v)) -> (\ (e1 : Eq {0} Term c1 (succ v)) -> absurd (Eq {0} Term v (pred c2)) (nvNoStep (succ v) (nvSucc v nv) c2 (subst Term (\ (x : Term) -> Step x c2) c1 (succ v) (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (pred c1) (pred (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (pred c1) (pred (succ v))) -> (\ (nc2 : Eq {0} Term c1 (succ v)) -> (\ (e1 : Eq {0} Term c1 (succ v)) -> absurd (Eq {0} Term v (pred c2)) (nvNoStep (succ v) (nvSucc v nv) c2 (subst Term (\ (x : Term) -> Step x c2) c1 (succ v) (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (pred c1) (pred (succ v)) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (pred (succ v))) -> absurd (Eq {0} Term v true) (Term.lemmata.noConfusion (iszero zero) (pred (succ v)) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (pred (succ v))) -> absurd (Eq {0} Term v true) (Term.lemmata.noConfusion (iszero zero) (pred (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (pred (succ v))) -> absurd (Eq {0} Term v false) (Term.lemmata.noConfusion (iszero (succ c1)) (pred (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (pred (succ v))) -> absurd (Eq {0} Term v false) (Term.lemmata.noConfusion (iszero (succ c1)) (pred (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (iszero c1) (pred (succ v))) -> absurd (Eq {0} Term v (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (pred (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (iszero c1) (pred (succ v))) -> absurd (Eq {0} Term v (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (pred (succ v)) q)`
 solve
 along
 solve
@@ -853,7 +853,7 @@ along
 along
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -864,34 +864,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (pred p)) -> absurd (Eq {0} Term (pred p') c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (pred p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (pred p)) -> absurd (Eq {0} Term (pred p') c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (pred p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (pred p)) -> absurd (Eq {0} Term (pred p') c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (pred p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (pred p)) -> absurd (Eq {0} Term (pred p') c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (pred p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (pred p)) -> absurd (Eq {0} Term (pred p') (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (pred p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (pred p)) -> absurd (Eq {0} Term (pred p') (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (pred p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (succ c1) (pred p)) -> absurd (Eq {0} Term (pred p') (succ c2)) (Term.lemmata.noConfusion (succ c1) (pred p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (succ c1) (pred p)) -> absurd (Eq {0} Term (pred p') (succ c2)) (Term.lemmata.noConfusion (succ c1) (pred p) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (pred p)) -> (\ (nc2 : Eq {0} Term zero p) -> (\ (e1 : Eq {0} Term zero p) -> absurd (Eq {0} Term (pred p') zero) (zeroNoStep p' (subst Term (\ (x : Term) -> Step x p') p zero (sym Term zero p e1) (s0)))) (nc2)) (Term.lemmata.noConfusion (pred zero) (pred p) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (pred p)) -> (\ (nc2 : Eq {0} Term zero p) -> (\ (e1 : Eq {0} Term zero p) -> absurd (Eq {0} Term (pred p') zero) (zeroNoStep p' (subst Term (\ (x : Term) -> Step x p') p zero (sym Term zero p e1) (s0)))) (nc2)) (Term.lemmata.noConfusion (pred zero) (pred p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (pred p)) -> (\ (nc2 : Eq {0} Term (succ c1) p) -> (\ (e1 : Eq {0} Term (succ c1) p) -> absurd (Eq {0} Term (pred p') c1) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (subst Term (\ (x : Term) -> Step x p') p (succ c1) (sym Term (succ c1) p e1) (s0)))) (nc2)) (Term.lemmata.noConfusion (pred (succ c1)) (pred p) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (pred p)) -> (\ (nc2 : Eq {0} Term (succ c1) p) -> (\ (e1 : Eq {0} Term (succ c1) p) -> absurd (Eq {0} Term (pred p') c1) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (subst Term (\ (x : Term) -> Step x p') p (succ c1) (sym Term (succ c1) p e1) (s0)))) (nc2)) (Term.lemmata.noConfusion (pred (succ c1)) (pred p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (pred c1) (pred p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> pred x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (pred c1) (pred p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (pred c1) (pred p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> pred x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (pred c1) (pred p) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (pred p)) -> absurd (Eq {0} Term (pred p') true) (Term.lemmata.noConfusion (iszero zero) (pred p) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (pred p)) -> absurd (Eq {0} Term (pred p') true) (Term.lemmata.noConfusion (iszero zero) (pred p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (pred p)) -> absurd (Eq {0} Term (pred p') false) (Term.lemmata.noConfusion (iszero (succ c1)) (pred p) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (pred p)) -> absurd (Eq {0} Term (pred p') false) (Term.lemmata.noConfusion (iszero (succ c1)) (pred p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (iszero c1) (pred p)) -> absurd (Eq {0} Term (pred p') (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (pred p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (iszero c1) (pred p)) -> absurd (Eq {0} Term (pred p') (iszero c2)) (Term.lemmata.noConfusion (iszero c1) (pred p) q)`
 solve
 along
 solve
@@ -921,7 +921,7 @@ intro
 into
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -932,34 +932,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (iszero zero)) -> absurd (Eq {0} Term true c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (iszero zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (iszero zero)) -> absurd (Eq {0} Term true c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (iszero zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (iszero zero)) -> absurd (Eq {0} Term true c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (iszero zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (iszero zero)) -> absurd (Eq {0} Term true c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (iszero zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero zero)) -> absurd (Eq {0} Term true (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (iszero zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero zero)) -> absurd (Eq {0} Term true (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (iszero zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (succ c1) (iszero zero)) -> absurd (Eq {0} Term true (succ c2)) (Term.lemmata.noConfusion (succ c1) (iszero zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (succ c1) (iszero zero)) -> absurd (Eq {0} Term true (succ c2)) (Term.lemmata.noConfusion (succ c1) (iszero zero) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (iszero zero)) -> absurd (Eq {0} Term true zero) (Term.lemmata.noConfusion (pred zero) (iszero zero) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (iszero zero)) -> absurd (Eq {0} Term true zero) (Term.lemmata.noConfusion (pred zero) (iszero zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (iszero zero)) -> absurd (Eq {0} Term true c1) (Term.lemmata.noConfusion (pred (succ c1)) (iszero zero) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (iszero zero)) -> absurd (Eq {0} Term true c1) (Term.lemmata.noConfusion (pred (succ c1)) (iszero zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (pred c1) (iszero zero)) -> absurd (Eq {0} Term true (pred c2)) (Term.lemmata.noConfusion (pred c1) (iszero zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (pred c1) (iszero zero)) -> absurd (Eq {0} Term true (pred c2)) (Term.lemmata.noConfusion (pred c1) (iszero zero) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (iszero zero)) -> (\ (nc2 : Eq {0} Term zero zero) -> (\ (e1 : Eq {0} Term zero zero) -> refl {0} Term true) (nc2)) (Term.lemmata.noConfusion (iszero zero) (iszero zero) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (iszero zero)) -> (\ (nc2 : Eq {0} Term zero zero) -> (\ (e1 : Eq {0} Term zero zero) -> refl {0} Term true) (nc2)) (Term.lemmata.noConfusion (iszero zero) (iszero zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (iszero zero)) -> (\ (nc2 : Eq {0} Term (succ c1) zero) -> (\ (e1 : Eq {0} Term (succ c1) zero) -> absurd (Eq {0} Term true false) (Term.lemmata.noConfusion (succ c1) zero e1)) (nc2)) (Term.lemmata.noConfusion (iszero (succ c1)) (iszero zero) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (iszero zero)) -> (\ (nc2 : Eq {0} Term (succ c1) zero) -> (\ (e1 : Eq {0} Term (succ c1) zero) -> absurd (Eq {0} Term true false) (Term.lemmata.noConfusion (succ c1) zero e1)) (nc2)) (Term.lemmata.noConfusion (iszero (succ c1)) (iszero zero) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (iszero c1) (iszero zero)) -> (\ (nc2 : Eq {0} Term c1 zero) -> (\ (e1 : Eq {0} Term c1 zero) -> absurd (Eq {0} Term true (iszero c2)) (zeroNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 zero (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (iszero c1) (iszero zero) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (iszero c1) (iszero zero)) -> (\ (nc2 : Eq {0} Term c1 zero) -> (\ (e1 : Eq {0} Term c1 zero) -> absurd (Eq {0} Term true (iszero c2)) (zeroNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 zero (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (iszero c1) (iszero zero) q)`
 solve
 along
 solve
@@ -989,7 +989,7 @@ along
 along
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -1000,34 +1000,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (iszero (succ v))) -> absurd (Eq {0} Term false c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (iszero (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (iszero (succ v))) -> absurd (Eq {0} Term false c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (iszero (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (iszero (succ v))) -> absurd (Eq {0} Term false c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (iszero (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (iszero (succ v))) -> absurd (Eq {0} Term false c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (iszero (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero (succ v))) -> absurd (Eq {0} Term false (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (iszero (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero (succ v))) -> absurd (Eq {0} Term false (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (iszero (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (succ c1) (iszero (succ v))) -> absurd (Eq {0} Term false (succ c2)) (Term.lemmata.noConfusion (succ c1) (iszero (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (succ c1) (iszero (succ v))) -> absurd (Eq {0} Term false (succ c2)) (Term.lemmata.noConfusion (succ c1) (iszero (succ v)) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (iszero (succ v))) -> absurd (Eq {0} Term false zero) (Term.lemmata.noConfusion (pred zero) (iszero (succ v)) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (iszero (succ v))) -> absurd (Eq {0} Term false zero) (Term.lemmata.noConfusion (pred zero) (iszero (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (iszero (succ v))) -> absurd (Eq {0} Term false c1) (Term.lemmata.noConfusion (pred (succ c1)) (iszero (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (iszero (succ v))) -> absurd (Eq {0} Term false c1) (Term.lemmata.noConfusion (pred (succ c1)) (iszero (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (pred c1) (iszero (succ v))) -> absurd (Eq {0} Term false (pred c2)) (Term.lemmata.noConfusion (pred c1) (iszero (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (pred c1) (iszero (succ v))) -> absurd (Eq {0} Term false (pred c2)) (Term.lemmata.noConfusion (pred c1) (iszero (succ v)) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (iszero (succ v))) -> (\ (nc2 : Eq {0} Term zero (succ v)) -> (\ (e1 : Eq {0} Term zero (succ v)) -> absurd (Eq {0} Term false true) (Term.lemmata.noConfusion zero (succ v) e1)) (nc2)) (Term.lemmata.noConfusion (iszero zero) (iszero (succ v)) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (iszero (succ v))) -> (\ (nc2 : Eq {0} Term zero (succ v)) -> (\ (e1 : Eq {0} Term zero (succ v)) -> absurd (Eq {0} Term false true) (Term.lemmata.noConfusion zero (succ v) e1)) (nc2)) (Term.lemmata.noConfusion (iszero zero) (iszero (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (iszero (succ v))) -> (\ (nc2 : Eq {0} Term (succ c1) (succ v)) -> (\ (e1 : Eq {0} Term (succ c1) (succ v)) -> (\ (nc4 : Eq {0} Term c1 v) -> (\ (e3 : Eq {0} Term c1 v) -> refl {0} Term false) (nc4)) (Term.lemmata.noConfusion (succ c1) (succ v) e1)) (nc2)) (Term.lemmata.noConfusion (iszero (succ c1)) (iszero (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (iszero (succ v))) -> (\ (nc2 : Eq {0} Term (succ c1) (succ v)) -> (\ (e1 : Eq {0} Term (succ c1) (succ v)) -> (\ (nc4 : Eq {0} Term c1 v) -> (\ (e3 : Eq {0} Term c1 v) -> refl {0} Term false) (nc4)) (Term.lemmata.noConfusion (succ c1) (succ v) e1)) (nc2)) (Term.lemmata.noConfusion (iszero (succ c1)) (iszero (succ v)) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (iszero c1) (iszero (succ v))) -> (\ (nc2 : Eq {0} Term c1 (succ v)) -> (\ (e1 : Eq {0} Term c1 (succ v)) -> absurd (Eq {0} Term false (iszero c2)) (nvNoStep (succ v) (nvSucc v nv) c2 (subst Term (\ (x : Term) -> Step x c2) c1 (succ v) (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (iszero c1) (iszero (succ v)) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (iszero c1) (iszero (succ v))) -> (\ (nc2 : Eq {0} Term c1 (succ v)) -> (\ (e1 : Eq {0} Term c1 (succ v)) -> absurd (Eq {0} Term false (iszero c2)) (nvNoStep (succ v) (nvSucc v nv) c2 (subst Term (\ (x : Term) -> Step x c2) c1 (succ v) (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (iszero c1) (iszero (succ v)) q)`
 solve
 along
 solve
@@ -1063,7 +1063,7 @@ along
 along
 along
 along
-eliminate-core ⌜ s ⌝
+eliminate-core core`s`
 back
 back
 back
@@ -1074,34 +1074,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (iszero p)) -> absurd (Eq {0} Term (iszero p') c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (iszero p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (iszero p)) -> absurd (Eq {0} Term (iszero p') c1) (Term.lemmata.noConfusion (ifthen true c1 c2) (iszero p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (iszero p)) -> absurd (Eq {0} Term (iszero p') c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (iszero p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (iszero p)) -> absurd (Eq {0} Term (iszero p') c2) (Term.lemmata.noConfusion (ifthen false c1 c2) (iszero p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero p)) -> absurd (Eq {0} Term (iszero p') (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (iszero p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero p)) -> absurd (Eq {0} Term (iszero p') (ifthen c2 c3 c4)) (Term.lemmata.noConfusion (ifthen c1 c3 c4) (iszero p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (succ c1) (iszero p)) -> absurd (Eq {0} Term (iszero p') (succ c2)) (Term.lemmata.noConfusion (succ c1) (iszero p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (succ c1) (iszero p)) -> absurd (Eq {0} Term (iszero p') (succ c2)) (Term.lemmata.noConfusion (succ c1) (iszero p) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (pred zero) (iszero p)) -> absurd (Eq {0} Term (iszero p') zero) (Term.lemmata.noConfusion (pred zero) (iszero p) q) ⌝
+try-core core`\ (q : Eq {0} Term (pred zero) (iszero p)) -> absurd (Eq {0} Term (iszero p') zero) (Term.lemmata.noConfusion (pred zero) (iszero p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (iszero p)) -> absurd (Eq {0} Term (iszero p') c1) (Term.lemmata.noConfusion (pred (succ c1)) (iszero p) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (iszero p)) -> absurd (Eq {0} Term (iszero p') c1) (Term.lemmata.noConfusion (pred (succ c1)) (iszero p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (pred c1) (iszero p)) -> absurd (Eq {0} Term (iszero p') (pred c2)) (Term.lemmata.noConfusion (pred c1) (iszero p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (pred c1) (iszero p)) -> absurd (Eq {0} Term (iszero p') (pred c2)) (Term.lemmata.noConfusion (pred c1) (iszero p) q)`
 solve
 along
-try-core ⌜ \ (q : Eq {0} Term (iszero zero) (iszero p)) -> (\ (nc2 : Eq {0} Term zero p) -> (\ (e1 : Eq {0} Term zero p) -> absurd (Eq {0} Term (iszero p') true) (zeroNoStep p' (subst Term (\ (x : Term) -> Step x p') p zero (sym Term zero p e1) (s0)))) (nc2)) (Term.lemmata.noConfusion (iszero zero) (iszero p) q) ⌝
+try-core core`\ (q : Eq {0} Term (iszero zero) (iszero p)) -> (\ (nc2 : Eq {0} Term zero p) -> (\ (e1 : Eq {0} Term zero p) -> absurd (Eq {0} Term (iszero p') true) (zeroNoStep p' (subst Term (\ (x : Term) -> Step x p') p zero (sym Term zero p e1) (s0)))) (nc2)) (Term.lemmata.noConfusion (iszero zero) (iszero p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (iszero p)) -> (\ (nc2 : Eq {0} Term (succ c1) p) -> (\ (e1 : Eq {0} Term (succ c1) p) -> absurd (Eq {0} Term (iszero p') false) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (subst Term (\ (x : Term) -> Step x p') p (succ c1) (sym Term (succ c1) p e1) (s0)))) (nc2)) (Term.lemmata.noConfusion (iszero (succ c1)) (iszero p) q) ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (iszero p)) -> (\ (nc2 : Eq {0} Term (succ c1) p) -> (\ (e1 : Eq {0} Term (succ c1) p) -> absurd (Eq {0} Term (iszero p') false) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (subst Term (\ (x : Term) -> Step x p') p (succ c1) (sym Term (succ c1) p e1) (s0)))) (nc2)) (Term.lemmata.noConfusion (iszero (succ c1)) (iszero p) q)`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (iszero c1) (iszero p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> iszero x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (iszero c1) (iszero p) q) ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (iszero c1) (iszero p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> iszero x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (Term.lemmata.noConfusion (iszero c1) (iszero p) q)`
 solve
 along
 solve
@@ -1133,7 +1133,7 @@ into
 along
 along
 along
-eliminate-core ⌜ s1 ⌝
+eliminate-core core`s1`
 back
 back
 back
@@ -1144,34 +1144,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (u : Term) (s : Step (ifthen true c1 c2) u) -> invIfTrue c1 c2 u s ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (u : Term) (s : Step (ifthen true c1 c2) u) -> invIfTrue c1 c2 u s`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (u : Term) (s : Step (ifthen false c1 c2) u) -> invIfFalse c1 c2 u s ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (u : Term) (s : Step (ifthen false c1 c2) u) -> invIfFalse c1 c2 u s`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (ifthen c1 c3 c4) u) -> invIf c1 c2 c3 c4 sr ih u s ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (ifthen c1 c3 c4) u) -> invIf c1 c2 c3 c4 sr ih u s`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (succ c1) u) -> invSucc c1 c2 sr ih u s ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (succ c1) u) -> invSucc c1 c2 sr ih u s`
 solve
 along
-try-core ⌜ \ (u : Term) (s : Step (pred zero) u) -> invPredZero u s ⌝
+try-core core`\ (u : Term) (s : Step (pred zero) u) -> invPredZero u s`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (u : Term) (s : Step (pred (succ c1)) u) -> invPredSucc c1 nv1 u s ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (u : Term) (s : Step (pred (succ c1)) u) -> invPredSucc c1 nv1 u s`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (pred c1) u) -> invPred c1 c2 sr ih u s ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (pred c1) u) -> invPred c1 c2 sr ih u s`
 solve
 along
-try-core ⌜ \ (u : Term) (s : Step (iszero zero) u) -> invIsZeroZero u s ⌝
+try-core core`\ (u : Term) (s : Step (iszero zero) u) -> invIsZeroZero u s`
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (u : Term) (s : Step (iszero (succ c1)) u) -> invIsZeroSucc c1 nv1 u s ⌝
+try-core core`\ (c1 : Term) (nv1 : NV c1) (u : Term) (s : Step (iszero (succ c1)) u) -> invIsZeroSucc c1 nv1 u s`
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (iszero c1) u) -> invIsZero c1 c2 sr ih u s ⌝
+try-core core`\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (iszero c1) u) -> invIsZero c1 c2 sr ih u s`
 solve
 along
 solve

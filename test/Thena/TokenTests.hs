@@ -58,12 +58,12 @@ tests =
 prompt :: [String]
 prompt =
   [ ":theorem d : Token Char"
-  , "fill \8988 /[a-z]+/ Char \8989"
+  , "fill core`/[a-z]+/ Char`"
   , "solve"
   , "qed"
   , ":abandon"
   , ":theorem e : Token Char"
-  , "fill \8988 /[a-z]/ Char \8989"
+  , "fill core`/[a-z]/ Char`"
   , "solve"
   , "qed"
   , ":show e"

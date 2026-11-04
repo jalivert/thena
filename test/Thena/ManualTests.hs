@@ -51,7 +51,11 @@ summaryWords =
   | entry <- map fst commandSummary
   , w <- words entry
   , w /= "/"
-  , not (any (`elem` w) ("‹⌜\"[{" :: String))
+    -- A placeholder, a string, a brace or a region's fence: the word is an
+    -- argument's shape and not a command. **The corner left this list at MS10
+    -- phase 269** with the notation, and the backtick is what stands for a
+    -- written term now.
+  , not (any (`elem` w) ("‹`\"[{" :: String))
   , any (`elem` (':' : ['a' .. 'z'])) w
   ]
 

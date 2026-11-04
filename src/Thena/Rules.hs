@@ -1070,7 +1070,6 @@ headOperand o = case o of
   -- applies. His ruling, 2026-09-11: heads stay a restricted fragment, and
   -- pattern matching is the only thing they are to gain.
   RawRegion {} -> Nothing
-  RawQuoted _   -> Nothing
   -- **A head may not run code** (§1.1): 'holds' builds the match list without
   -- effects, and a nested call is a call (MS5 phase 63).
   RawNested _ _ -> Nothing
@@ -1450,7 +1449,6 @@ operandOf rd g i w o = case o of
   -- Corners are the other spelling of a @core@ region, and land in the
   -- same place: unresolved, because a rule base is read before there is
   -- anything to resolve against.
-  RawQuoted r -> Right (Lit (VRaw r))
   -- **A term of a declared object language** (MS6 phase 104c). Parsed here,
   -- where every other region is parsed, and built into the constructor
   -- application it denotes — an ordinary 'Thena.Core.Term.Core', because that

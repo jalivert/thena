@@ -51,10 +51,11 @@
 -- * **no splices** — @surface\`${t}\`@ is a parse error today, and a @core@
 --   splice lexes only inside a region, so one rule set cannot describe it
 --   honestly. @AGENDA.md@ 96;
--- * **no corners and no @⟨…⟩@** — both are tagged term literals written another
---   way and are being removed. **HIS instruction, 2026-10-01**: take the
---   description out now rather than leave it for the removal to find.
---   @AGENDA.md@ 98;
+-- * **no term literal of another language in an operand** — @core\`t\`@ and
+--   @surface\`t\`@ stand where a value stands, and this grammar describes the
+--   values. **It was two gaps until MS10 phase 269** (`~3t63k`), corners and
+--   the @⟨…⟩@ alias each being the same thing written a third and a fourth
+--   way; there is one spelling to describe now, which is the item's point;
 -- * **narrower lexemes** — "Thena.Language.Lexemes" says why.
 --
 -- __Every head is a phrase, and the separator is a space.__ A head is

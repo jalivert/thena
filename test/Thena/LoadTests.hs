@@ -488,7 +488,7 @@ scriptTests =
     -- an op that asks is answered by the next line of the file, exactly as it
     -- would be by the next line typed (§7.5).
   , testCase "a question is answered by the next line" $
-      let l = sourceWithRules ["assume ⌜ Type₀ ⌝", "A"]
+      let l = sourceWithRules ["assume core`Type₀`", "A"]
        in do
             loadedError l @?= Nothing
             length (loadedResponses l) @?= 2
@@ -568,11 +568,11 @@ failureTests =
   , testCase "a qed the kernel refuses stops it" $
       let l = sourceWithRules
                 [ ":theorem lift : ∀ (A : Type) -> Type"
-                , "try-core ⌜ \\ (A : Type) -> A ⌝"
+                , "try-core core`\\ (A : Type) -> A`"
                 , "solve"
                 , "qed"
                 , ":theorem bad : Type₁ -> Type₀"
-                , "try-core ⌜ lift {1 0} ⌝"
+                , "try-core core`lift {1 0}`"
                 , "solve"
                 , "qed"
                 , "data A0 : Type₀ where { a0 : A0 }"
@@ -607,7 +607,7 @@ failureTests =
             declared "A0" l @?= True
 
   , testCase "a file that ends while something is asking says so" $
-      loadedError (sourceWithRules ["assume ⌜ Type₀ ⌝"]) @?= Just (UnansweredQuestion 1)
+      loadedError (sourceWithRules ["assume core`Type₀`"]) @?= Just (UnansweredQuestion 1)
 
     -- **And it does not leave the session waiting** (MS7 phase 123). The
     -- pending question used to be an argument the caller threaded, and the
@@ -616,7 +616,7 @@ failureTests =
     -- next line typed at the prompt would be read as the answer to a question
     -- nobody was shown.
   , testCase "and the session it hands back is not still asking" $
-      pendingQuestion (loadedSession (sourceWithRules ["assume ⌜ Type₀ ⌝"])) @?= Nothing
+      pendingQuestion (loadedSession (sourceWithRules ["assume core`Type₀`"])) @?= Nothing
 
     -- **The ruling this phase rests on, asserted** — HIS, 2026-09-28: /"Feels
     -- like a question and answer is an atomic unit."/ So 'pendingQuestion' is
@@ -627,7 +627,7 @@ failureTests =
     -- clears the question as it finishes (the test above) and a mid-file
     -- state is exactly what this needs to see.
   , testCase "asking lives on the session, and one :undo takes back the pair" $ do
-      let (s1, _) = oneLine withRules "assume ⌜ Type₀ ⌝"
+      let (s1, _) = oneLine withRules "assume core`Type₀`"
           (s2, _) = oneLine s1 "x"
           (s3, _) = oneLine s2 ":undo"
       isJust (pendingQuestion s1) @?= True   -- the line asked, and the session says so
@@ -651,7 +651,7 @@ source = loadSource newSession . unlines
 
 -- | The same, with the standard base installed.
 --
--- **The asking form of @assume@ needs it** (MS5 phase 62b): @assume ⌜ T ⌝@ is a
+-- **The asking form of @assume@ needs it** (MS5 phase 62b): @assume core`T`@ is a
 -- rule now, not a shape the driver recognised, so a session with no base has
 -- nothing to call — the same as for @attack@ or @intro@ since phase 23b.
 sourceWithRules :: [String] -> Loaded

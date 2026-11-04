@@ -234,7 +234,7 @@ dependentMotives =
               ++ replicate intros "intro"
               ++ ["into"]
               ++ replicate intros "along"
-              ++ ["eliminate-core ⌜ x ⌝", ":revalidate"]
+              ++ ["eliminate-core core`x`", ":revalidate"]
           l = loadSource withRules (unlines script)
        in case loadedError l of
             Just e -> assertFailure (unlines script ++ "\n  " ++ show e)
@@ -755,7 +755,7 @@ unfoldedGoal =
       let said = snd (foldl step (s1, [])
             [ ":theorem r : \8704 (s : List {0} String) (c : Comparison) -> Same" ++ levels ++ " s"
             , "attack", "intro", "intro", "intro"
-            , "goto-named \"r1\"", "eliminate-core \8988 c \8989", ":revalidate" ])
+            , "goto-named \"r1\"", "eliminate-core core`c`", ":revalidate" ])
           step (s, out) line = let (s', r) = command s line in (s', out ++ renderResponse s' r)
       if "subgoals: sameMethod, differentMethod" `elem` said && any ("valid" `isInfixOf`) said
         then pure ()

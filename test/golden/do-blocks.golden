@@ -8,7 +8,7 @@ thena spine> open Nat
 opened Nat
 thena spine> :theorem t : Nat
 proving t : Nat
-thena spine> elaborate ⟨ do { attack ; prove } ⟩
+thena spine> elaborate surface`do { attack ; prove }`
 chose 18: solve
 backtracking to 18: regret
 chose 19: attack
@@ -22,6 +22,6 @@ thena spine> :abandon
 abandoned t
 thena spine> :theorem u : Nat
 proving u : Nat
-thena spine> elaborate ⟨ do { say } ⟩
+thena spine> elaborate surface`do { say }`
 do block 1, instruction 1: say takes 1 argument, not 0 arguments
 thena spine> :quit

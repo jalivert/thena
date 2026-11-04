@@ -29,7 +29,18 @@ $upper  = [A-Z]
 -- namespace path: @.@ now separates a path's steps, so it cannot also be an
 -- ordinary character inside one. @List.map@ was a single identifier before this
 -- and is a qualified name now — see @\@qualified@ below.
-$reserved = [\( \) \{ \} \[ \] \; \, \" \` \. ⟨ ⟩ λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
+--
+-- **@⟨ ⟩@ LEFT THE SET AT MS10 PHASE 269** (`~3t63k`), with the @⟨ … ⟩@ alias
+-- that was the only thing they spelled. **Reserving a character narrows every
+-- name in every language at once**, so a character that spells nothing does not
+-- stay reserved — @.claude\/spec\/interface.md@ said this set would have to
+-- shrink when the alias went, and this is it shrinking.
+--
+-- **@⌜ ⌝@ spell nothing either and DO stay**, which is the one exception and it
+-- is load-bearing: @Thena.Driver.resolving@ hoists a written core term into a
+-- binding it names @⌜1⌝@, and that name is safe only because no identifier may
+-- hold a corner. The notation they used to spell is gone with the alias.
+$reserved = [\( \) \{ \} \[ \] \; \, \" \` \. λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
 
 -- A name starts with a letter — ASCII, or any non-reserved character above the
 -- ASCII range — and continues with anything that is neither reserved nor
@@ -127,7 +138,6 @@ tokens :-
   "▸"           { keyword TPending }
   "|-"          { keyword TTurnstile }
   "⊢"           { keyword TTurnstile }
-  "[|"          { keyword TOpenQuote }
   -- **@...@ is a token and reserves nothing** (MS5 phase 82). @.@ is an
   -- @$idchar@ but not an @$idstart@, so no identifier has ever begun with one
   -- and @...rest@ lexes as this token and then a name. An identifier that
@@ -142,9 +152,6 @@ tokens :-
   "["           { keyword TLBracket }
   "]"           { keyword TRBracket }
   ","           { keyword TComma }
-  "⌜"           { keyword TOpenQuote }
-  "|]"          { keyword TCloseQuote }
-  "⌝"           { keyword TCloseQuote }
   "forall"      { keyword TForall }
   "let"         { keyword TLet }
   "in"          { keyword TIn }
@@ -258,7 +265,6 @@ tokens :-
   -- identifier contains one and this rule cannot take a longer name apart.
   @ident \[ @ident \] \` { \p str -> Located (posOf p) (tagAt (init str)) }
   @qualified \[ @ident \] \` { \p str -> Located (posOf p) (tagAt (init str)) }
-  "⟨"           { keyword (TTagOpen "surface") }
   @qualified    { \p s -> Located (posOf p) (TQIdent (steps s)) }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
 
@@ -311,8 +317,6 @@ data Token
   | TPending
   | TTurnstile
   | TEquate
-  | TOpenQuote
-  | TCloseQuote
   | TLet
   | TIn
   | TElim
@@ -523,12 +527,11 @@ loop blocks modes inp@(pos, _, _, str) = case modes of
               (Spanned lp TEscapeClose matched :) <$> loop blocks outer inp'
             (Esc d : outer, TRBrace) -> (t :) <$> loop blocks (Esc (d - 1) : outer) inp'
             (Esc d : outer, TLBrace) -> (t :) <$> loop blocks (Esc (d + 1) : outer) inp'
-            -- Which character closes the region depends on how it was opened:
-            -- a tag's own backtick, or the ⟩ that closes the ⟨ alias.
-            (_, TTagOpen _)
-              | take 1 matched == "⟨" -> (t :) <$> loop blocks (Raw '⟩' : modes) inp'
-              | otherwise                    -> (t :) <$> loop blocks (Raw '`' : modes) inp'
-            (_, TTagOpenAt _ _)              -> (t :) <$> loop blocks (Raw '`' : modes) inp'
+            -- **A region is closed by the tag's own backtick, and by nothing
+            -- else** (MS10 phase 269): the @⟨ … ⟩@ alias opened a @surface@
+            -- region that @⟩@ closed instead, which is why this had two cases.
+            (_, TTagOpen _)     -> (t :) <$> loop blocks (Raw '`' : modes) inp'
+            (_, TTagOpenAt _ _) -> (t :) <$> loop blocks (Raw '`' : modes) inp'
             _                        -> (t :) <$> loop blocks modes inp'
   where
     firstOf cs = case cs of
@@ -542,8 +545,13 @@ loop blocks modes inp@(pos, _, _, str) = case modes of
 -- backslash escapes a backtick, a backslash, and a dollar, so a region can
 -- carry all three literally.
 -- | What a backslash may escape inside raw text.
+--
+-- **@⟩@ left the list at MS10 phase 269**, with the @⟨ … ⟩@ alias that made it
+-- a fence. It is three characters now and the same three
+-- 'Thena.Syntax.Print.escapeRaw' writes, which were two lists that could
+-- disagree.
 rawEscapes :: String
-rawEscapes = ['`', '\\', '$', '⟩']
+rawEscapes = ['`', '\\', '$']
 
 -- | The two characters that open an escape, written without a literal brace
 -- because Alex counts braces inside a code fragment and would end this one.

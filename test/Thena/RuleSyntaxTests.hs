@@ -580,15 +580,14 @@ regions =
         case errs ("say " ++ tagged "surface" "") of
           Just [BadRegion (GlobalName [] "r") 0 "surface" _] -> pure ()
           other -> assertFailure ("expected a BadRegion, got " ++ show other)
-    , testCase "corners are the other spelling of a core region" $ do
-        b <- bodyOf "t = resolve-core \8988 Type\8320 \8989"
+    -- **THE THREE SPELLINGS THAT USED TO STAND HERE ARE GONE** (MS10 phase
+    -- 269, `~3t63k`): @\8988 t \8989@, @[| t |]@ and @\10216 t \10217@ said
+    -- what @core\`t\`@ and @surface\`t\`@ say, and the cases asserting they
+    -- were the other spelling went with them. What is left is that a region
+    -- reaches the op — @core\`t\`@ below, and the @surface@ cases above.
+    , testCase "a core region is an operand of the op that resolves one" $ do
+        b <- bodyOf "t = resolve-core core`Type\8320`"
         map opWord b @?= ["resolve-core"]
-    , testCase "and the ASCII corners are too" $ do
-        b <- bodyOf "t = resolve-core [| Type\8320 |]"
-        map opWord b @?= ["resolve-core"]
-    , testCase "angle brackets are the other spelling of a surface region" $ do
-        b <- bodyOf "elaborate \10216f x\10217"
-        map opWord b @?= ["call"]
     , testCase "a tag no language answers to is refused at load" $
         errs ("elaborate " ++ tagged "agda" "f x")
           @?= Just [NoSuchTag (rootName "r") 0 "agda"]

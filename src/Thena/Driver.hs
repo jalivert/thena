@@ -218,7 +218,7 @@ import Thena.Instral.Concrete
   , RawOperand (..)
   , RawPattern (..)
   )
-import Thena.Syntax.Lexer (BlockKind (..), Located (..), Token (..), lexModule, lexTokens)
+import Thena.Syntax.Lexer (BlockKind (..), Located (..), Token (..), lexModule, lexTokens, rawEscapes)
 import Thena.Language.Reader (Block (..), readBlock)
 import Thena.Language.Grammar
   ( Argument (..)
@@ -1038,8 +1038,8 @@ instralEntry gs bases src = do
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
   where
-    -- Written core terms are hoisted per instruction — @try ⌜ x ⌝@ is
-    -- @⌜1⌝ = resolve-core ⌜ x ⌝ ; try ⌜1⌝@, which is what a rule body writes by
+    -- Written core terms are hoisted per instruction — @try core\`x\`@ is
+    -- @⌜1⌝ = resolve-core core\`x\` ; try ⌜1⌝@, which is what a rule body writes by
     -- hand (MS5 phase 61b).
     hoist i = case i of
       RawDo (RawOp w os)   -> let (bs, os') = resolving w os
@@ -1071,8 +1071,9 @@ entryBindings gs bases src = case instralEntry gs bases src of
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
--- @try ⌜ x ⌝@ is compiled to @⌜1⌝ = resolve-core ⌜ x ⌝ ; try ⌜1⌝@, which is what
--- a rule body writes by hand. The op needs a term and @⌜ … ⌝@ is a 'VRaw' — a
+-- @try core\`x\`@ is compiled to @⌜1⌝ = resolve-core core\`x\` ; try ⌜1⌝@, which
+-- is what a rule body writes by hand. The op needs a term and a @core@ region
+-- is a 'VRaw' — a
 -- tree that has been parsed and not resolved — so something has to resolve it,
 -- and phase 61b decided deliberately that an operand does not do it quietly:
 -- /"the same written term resolves differently at two different focuses, and a
@@ -1084,8 +1085,11 @@ entryBindings gs bases src = case instralEntry gs bases src of
 -- names. @parseEquated@\'s comment about resolving two terms /in one continuous
 -- supply/ is satisfied by the sequence rather than by an argument.
 --
--- **The binding names cannot collide with a rule's own**, because @⌜@ is a token
--- and no identifier may contain one. That matters while the machine is yielding:
+-- **The binding names cannot collide with a rule's own**, because @⌜@ is a
+-- reserved character and no identifier may contain one. **It stopped being a
+-- token at MS10 phase 269** and stayed reserved for exactly this, so a name
+-- written here is still one a user cannot write.
+-- That matters while the machine is yielding:
 -- @env@ is the suspended rule's and a name it chose must not be shadowed.
 --
 -- The one word that is not rewritten is 'Thena.Instral.Ops.ResolveCore'\'s own: it
@@ -1107,9 +1111,8 @@ resolving w os
            in (bs, o : rest')
 
     written o = case o of
-      RawQuoted _        -> True
       RawRegion "core" _ _ -> True
-      _                  -> False
+      _                    -> False
 
 parseWith
   :: [Grammar]
@@ -1842,14 +1845,14 @@ dispatch s name arg = case name of
     _  -> view s (\e -> parseCore (grammars machine) e (scope machine)) (Rendered . whnf (globals machine) ctx) arg
   -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
   -- argument it is the core focus, with one it is a term the user writes.
-  -- **A bare argument is a surface term; corners are a core one** (MS4 phase
-  -- 43), which is the rule everywhere else an argument is written. With no
-  -- argument it is still the core focus.
+  -- **A bare argument is a surface term; a @core@ fence is a core one** (MS4
+  -- phase 43), which is the rule everywhere else an argument is written. With
+  -- no argument it is still the core focus.
   ":infer" -> case arg of
     "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> inferred t (names machine)
       _            -> (s, Rejected (NotThere NotInCore))
-    _ | Just inner <- cornered arg ->
+    _ | Just inner <- coreFenced arg ->
           case parseCore (grammars machine) (globals machine) (scope machine) ctx (names machine) inner of
             Left e        -> (s, Failed e)
             Right (t, n1) -> inferred t n1
@@ -2021,7 +2024,8 @@ dispatch s name arg = case name of
     --
     -- Arguments are a **run of operands**, as a rule body writes them: a name,
     -- a number, a string, a term in corners, or a tagged region. A term is
-    -- written @⌜ … ⌝@ for Core and @⟨ … ⟩@ for Surface (MS5 phase 62a) — a bare
+    -- written @core\`…\`@ and @surface\`…\`@ (MS5 phase 62a; the corner and
+    -- angle spellings went at MS10 phase 269) — a bare
     -- argument is no longer a surface term, which is the asymmetry §6.3 of
     -- @discussion\/the-five-languages.md@ rejects.
     -- A colon word is the driver's own and is never a rule: §2.4's split says
@@ -2439,7 +2443,8 @@ dispatch s name arg = case name of
                     -- **whnf'd, and that is not cosmetic.** The type is read
                     -- off the hole the elaboration solved, so without reducing
                     -- it prints as @Tinfer@ — the hole's own variable — and says
-                    -- nothing. It therefore reduces further than @:infer ⌜t⌝@
+                    -- nothing. It therefore reduces further than
+                    -- @:infer core\`t\`@
                     -- does: a saturated former where that stops at the wrapper.
                     -- **The two agree up to conversion, not syntactically**, and
                     -- they print the same.
@@ -2587,7 +2592,7 @@ dispatch s name arg = case name of
 -- table-driven 'dispatch'. Neither is this phase's.
 --
 -- **The spellings moved with the phase**: an argument is an operand now, so it
--- is @claim \"h\" ⌜Nat⌝@ and not @claim h : Nat@. The one-argument forms that
+-- is @claim \"h\" core\`Nat\`@ and not @claim h : Nat@. The one-argument forms that
 -- ask for a name are **rules**, in @rules\/standard.thena.rules@, and are
 -- absent for the paragraph above's reason.
 --
@@ -2601,9 +2606,9 @@ dispatch s name arg = case name of
 -- @DriverTests@ mirrors had the same gaps, so they could not have caught it.
 commandSummary :: [(String, String)]
 commandSummary =
-  [ ("assume \"‹x›\" ⌜‹S›⌝",       "add a hypothesis above the focus")
-  , ("claim \"‹x›\" ⌜‹S›⌝",        "add a hole above the focus")
-  , ("unify ⌜‹t›⌝ ⌜‹u›⌝",        "solve the focus by unification")
+  [ ("assume \"‹x›\" core`‹S›`",    "add a hypothesis above the focus")
+  , ("claim \"‹x›\" core`‹S›`",     "add a hole above the focus")
+  , ("unify core`‹t›` core`‹u›`",  "solve the focus by unification")
   , ("do { ‹instruction› ; … }", "play a block of instructions here")
   , ("yield",                    "hand control back to a rule that yielded")
   , ("retry / retry ‹n›",        "backtrack to a choice point")
@@ -2614,11 +2619,11 @@ commandSummary =
   , ("goto-named \"‹hole›\"",      "move to a hole by name")
   , ("goto-root",                "move to the root of the development")
   , ("reduce",                   "reduce the focused term in place")
-  , ("quantify \"‹x›\" ⌜‹S›⌝",     "add a ∀-binder above the focus")
+  , ("quantify \"‹x›\" core`‹S›`",  "add a ∀-binder above the focus")
   , ("data ‹D› … where { … }",   "declare an inductive family")
   , ("open ‹namespace›",         "bring a namespace into view for the rest of the session")
   , ("declare ‹sig› ; ‹equation›", "elaborate a surface declaration")
-  , ("certify ⌜‹type›⌝",         "ask the kernel about the development")
+  , ("certify core`‹type›`",      "ask the kernel about the development")
   , ("qed",                      "certify and admit the finished proof")
   , (":show / :show ‹name›",     "the development / a global")
   , (":where",                   "focus, path, context, expected type")
@@ -2670,22 +2675,34 @@ commandSummary =
 
 -- | @:load@\'s argument, split on spaces and commas. **Both separators** —
 -- the user asked for "comma or space separated (or both)", 2026-08-25.
--- | An argument written in corners, with them stripped (MS4 phase 43).
+-- | An argument written as a @core@ region, with the fence stripped and its
+-- escapes undone (MS4 phase 43; **the corners it used to look for went at MS10
+-- phase 269**, `~3t63k`).
 --
 -- **The same split 'groups' makes, for a command that takes one argument
 -- rather than a run of them.** A command word decides which vocabulary it is
--- reading, and this is how it asks: corners are the development calculus, a
--- bare argument is the surface language.
+-- reading, and this is how it asks: a @core@ fence is the development
+-- calculus, a bare argument is the surface language.
 --
 -- Textual rather than a lex-and-inspect, because it is answering a question
 -- about how the argument was /written/ — and being wrong is a parse error in
--- the grammar the user did not mean, not a silent misreading.
-cornered :: String -> Maybe String
-cornered src = case dropWhile (== ' ') src of
-  '\8988' : rest -> case break (== '\8989') rest of
-    (inner, '\8989' : after) | all (== ' ') after -> Just inner
-    _                                              -> Nothing
+-- the grammar the user did not mean, not a silent misreading. **The escapes
+-- are undone here for the same reason the region scanner undoes them**: what
+-- is between the fences is raw text, so a term holding a backtick reaches the
+-- parser as the author wrote it. 'Thena.Syntax.Lexer.rawEscapes' is that
+-- list, so this cannot drift from the scanner.
+coreFenced :: String -> Maybe String
+coreFenced src = case dropWhile (== ' ') src of
+  'c' : 'o' : 'r' : 'e' : '`' : rest -> unfenced rest ""
   _ -> Nothing
+  where
+    unfenced cs acc = case cs of
+      '\\' : c : more
+        | c `elem` rawEscapes -> unfenced more (c : acc)
+      c : more
+        | c == '`' -> if all (== ' ') more then Just (reverse acc) else Nothing
+        | otherwise -> unfenced more (c : acc)
+      [] -> Nothing
 
 pathsOf :: String -> [FilePath]
 pathsOf = words . map (\c -> if c == ',' then ' ' else c)

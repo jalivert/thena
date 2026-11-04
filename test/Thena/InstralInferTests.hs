@@ -803,7 +803,7 @@ spliceTemplates =
       -- @ms5\/CLOSEOUT.md@ 22, not one more. Pinned because it works, and
       -- untested working behaviour is what this project keeps being bitten by.
     , testCase "and the two core spellings agree" $ do
-        a <- builtBy "ar = resolve-core \8988 ${d} -> ${c} \8989"
+        a <- builtBy "ar = resolve-core core`${d} -> ${c}`"
         b <- builtBy "ar = resolve-core core`${d} -> ${c}`"
         a @?= b
 
@@ -829,7 +829,7 @@ spliceTemplates =
         "n = fresh-name \"z\" ; d = goal ; t = resolve-core core`let ${n} = ${d} : ${d} in ${d}`"
 
     , loadsWith "…and the corner spelling agrees"
-        "n = fresh-name \"z\" ; d = goal ; t = resolve-core \8988 \955 (${n} : ${d}) -> ${d} \8989"
+        "n = fresh-name \"z\" ; d = goal ; t = resolve-core core`\955 (${n} : ${d}) -> ${d}`"
 
       -- **THE POSITION DECIDES THE TYPE, and these two are what says so.**
       -- Nothing is annotated: the same @${x}@ demands a @Core@ in one place and

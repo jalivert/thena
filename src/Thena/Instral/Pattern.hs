@@ -39,7 +39,8 @@ type Name = String
 -- rather than values a user can shadow. It is paid at stage b and c, which are
 -- not built.
 --
--- **This stage is @instral@'s own data only.** A Surface pattern (@⟨ a -> b ⟩@)
+-- **This stage is @instral@'s own data only.** A Surface pattern
+-- (@surface\`a -> b\`@)
 -- and a Core one are stages b and c of that document, and c waits on the two
 -- decisions §4 records as open.
 data Pattern

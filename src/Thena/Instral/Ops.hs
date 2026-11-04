@@ -477,7 +477,7 @@ data Op
     -- that unification there is a /solver/: @fill@ runs @prim-try@ right after,
     -- which is @check@, which subsumes — so the relation is enforced one
     -- instruction later with the right variance, and @unify@ was refusing where
-    -- it merely had nothing to solve. Before it, @try-core ⌜ Nat ⌝@ at a claim
+    -- it merely had nothing to solve. Before it, @try-core core\`Nat\`@ at a claim
     -- of @Type₁@ succeeded and @elaborate Nat@ did not: the elaborator was
     -- strictly weaker than the core it elaborates into.
     --

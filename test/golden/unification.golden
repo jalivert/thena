@@ -2,24 +2,24 @@ thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
 thena spine> open Nat
 opened Nat
-thena spine> claim "h" ⌜ Nat ⌝
-thena spine> unify ⌜ succ h ⌝ ⌜ succ (succ zero) ⌝
+thena spine> claim "h" core`Nat`
+thena spine> unify core`succ h` core`succ (succ zero)`
 solved: h
 thena spine> :show
   let h = succ zero : Nat in
 ▶ let ? goal : Type₀ in
   goal
-thena spine> claim "f" ⌜ Nat -> Nat ⌝
-thena spine> unify ⌜ \ (x : Nat) -> f x ⌝ ⌜ \ (x : Nat) -> succ x ⌝
+thena spine> claim "f" core`Nat -> Nat`
+thena spine> unify core`\ (x : Nat) -> f x` core`\ (x : Nat) -> succ x`
 solved: f
 thena spine> :show
   let h = succ zero : Nat in
   let f = λ (x : Nat) -> succ x : Nat -> Nat in
 ▶ let ? goal : Type₀ in
   goal
-thena spine> claim "a" ⌜ Nat ⌝
-thena spine> claim "b" ⌜ Nat ⌝
-thena spine> unify ⌜ a ⌝ ⌜ b ⌝
+thena spine> claim "a" core`Nat`
+thena spine> claim "b" core`Nat`
+thena spine> unify core`a` core`b`
 solved: b
 thena spine> :show
   let h = succ zero : Nat in
@@ -28,7 +28,7 @@ thena spine> :show
   let b = a : Nat in
 ▶ let ? goal : Type₀ in
   goal
-thena spine> unify ⌜ b ⌝ ⌜ zero ⌝
+thena spine> unify core`b` core`zero`
 solved: a
 thena spine> :show
   let h = succ zero : Nat in
@@ -37,9 +37,9 @@ thena spine> :show
   let b = a : Nat in
 ▶ let ? goal : Type₀ in
   goal
-thena spine> claim "c" ⌜ Nat ⌝
-thena spine> unify ⌜ c ⌝ ⌜ succ c ⌝
+thena spine> claim "c" core`Nat`
+thena spine> unify core`c` core`succ c`
 stuck: solving c with succ c would define it in terms of itself
-thena spine> unify ⌜ zero ⌝ ⌜ succ zero ⌝
+thena spine> unify core`zero` core`succ zero`
 stuck: zero and succ zero cannot be made equal
 thena spine> :quit

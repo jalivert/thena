@@ -128,7 +128,7 @@ elaborate ‹t›
 run-block ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
-thena spine> elaborate ⟨ a ⟩
+thena spine> elaborate surface`a`
 already equal
 thena spine> :show
   let ? const : ∀ (A : Type₀) -> A -> A ≐ (
@@ -157,9 +157,9 @@ thena spine> intro
 thena spine> into
 thena spine> along
 thena spine> along
-thena spine> elaborate ⟨ b ⟩
+thena spine> elaborate surface`b`
 stuck: not in scope: b
-thena spine> elaborate ⟨ a a ⟩
+thena spine> elaborate surface`a a`
 stuck: that head does not take that many arguments
 thena spine> :abandon
 abandoned again
@@ -172,7 +172,7 @@ thena spine> into
 thena spine> along
 thena spine> along
 thena spine> :step on
-thena spine> elaborate ⟨ a ⟩
+thena spine> elaborate surface`a`
 pc
   0  w = surface-name t
   1  x = resolve-name w
@@ -203,7 +203,7 @@ pc
   0  call fill x
   1  call solve
 env
-  x = ⌜a⌝
+  x = core`a`
   w = a
   t = ‹a›
 stack
@@ -220,7 +220,7 @@ pc
   4  unify-into s g
   5  prim-try x
 env
-  t = ⌜a⌝
+  t = core`a`
 stack
   call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
@@ -236,7 +236,7 @@ pc
   4  prim-try x
 env
   n = refined
-  t = ⌜a⌝
+  t = core`a`
 stack
   call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
@@ -250,9 +250,9 @@ pc
   2  unify-into s g
   3  prim-try x
 env
-  x = ⌜a⌝
+  x = core`a`
   n = refined
-  t = ⌜a⌝
+  t = core`a`
 stack
   call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume

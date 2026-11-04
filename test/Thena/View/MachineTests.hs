@@ -161,6 +161,6 @@ redrawValue v = case v of
   ValSome u -> "some " <> redrawValue u
   ValPair a b -> "(" <> redrawValue a <> ", " <> redrawValue b <> ")"
   ValLevel l -> l
-  ValTerm d -> "\8988" <> redraw d <> "\8989"
+  ValTerm d -> "core`" <> redraw d <> "`"
   ValSurface sh -> "\8249" <> redrawSurface sh <> "\8250"
   ValOpaque other -> "\8249" <> other <> "\8250"

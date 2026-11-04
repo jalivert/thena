@@ -132,7 +132,7 @@ redrawValue v = case v of
   -- 'Thena.Render.renderValue's own corners for a term operand, matched
   -- exactly rather than approximated — the one place this crossing compares
   -- a term's own text byte for byte.
-  ValTerm d -> "\8988" <> redraw d <> "\8989"
+  ValTerm d -> "core`" <> redraw d <> "`"
   -- 115h gave 'ValSurface' a real display; crossed the same way 'ValTerm'
   -- already is, against 'Thena.Render.renderValue's own corner for it.
   ValSurface sh -> "\8249" <> redrawSurface sh <> "\8250"

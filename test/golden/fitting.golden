@@ -8,7 +8,7 @@ thena spine> open P
 opened P
 thena spine> :theorem t0 : Nat -> Nat
 proving t0 : Nat -> Nat
-thena spine> fit-core ⌜ succ ⌝
+thena spine> fit-core core`succ`
 chose 31: fit-core
 already equal
 thena spine> :show
@@ -20,14 +20,14 @@ thena spine> :choices
 thena spine> :undo
 ▶ let ? t0 : Nat -> Nat in
   t0
-thena spine> apply-core ⌜ succ ⌝
+thena spine> apply-core core`succ`
 stuck: Nat and Nat -> Nat cannot be made equal
   they differ by one argument, which the shorter side has to take first: Nat
 thena spine> :abandon
 abandoned t0
 thena spine> :theorem t1 : Nat
 proving t1 : Nat
-thena spine> fit-core ⌜ succ ⌝
+thena spine> fit-core core`succ`
 chose 38: fit-core
 backtracking to 38: fit-core
 chose 42: fit-core
@@ -41,7 +41,7 @@ thena spine> :abandon
 abandoned t1
 thena spine> :theorem t2 : P
 proving t2 : P
-thena spine> fit-core ⌜ mk ⌝
+thena spine> fit-core core`mk`
 chose 46: fit-core
 backtracking to 46: fit-core
 chose 51: fit-core
@@ -67,7 +67,7 @@ opened Maybe
 thena spine> :goal ∀ (b : Bool) -> Maybe Bool
 ▶ let ? goal : Bool -> Maybe Bool in
   goal
-thena spine> fit-core ⌜ Just ⌝
+thena spine> fit-core core`Just`
 chose 86: fit-core
 backtracking to 86: fit-core
 chose 91: fit-core

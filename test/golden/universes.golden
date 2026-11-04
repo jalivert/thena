@@ -28,7 +28,7 @@ thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
-thena spine> eliminate-core ⌜ b ⌝
+thena spine> eliminate-core core`b`
 subgoals: box1Method
 thena spine> :abandon
 abandoned probe
@@ -40,9 +40,9 @@ thena spine> :show N
 data N {ℓ₅₁₆} : Type (ℓ₅₁₆) where
   { z : N {ℓ₅₁₆}
   ; s : N {ℓ₅₁₆} -> N {ℓ₅₁₆} }
-thena spine> :infer ⌜ s {0} ⌝
+thena spine> :infer core`s {0}`
 s {0} : N {0} -> N {0}
-thena spine> :infer ⌜ s {1} (z {1}) ⌝
+thena spine> :infer core`s {1} (z {1})`
 s {1} z {1} : N {1}
 thena spine> data E : Type where { k : Eq {1} Type Nat Nat -> E }
 declared E

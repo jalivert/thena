@@ -4,13 +4,13 @@ thena spine> open Nat
 opened Nat
 thena spine> :theorem t : Nat
 proving t : Nat
-thena spine> elaborate ⟨ do { h = here ; yield "look at this" ; goto h ; prove } ⟩
+thena spine> elaborate surface`do { h = here ; yield "look at this" ; goto h ; prove }`
 look at this
 (yield to hand control back)
 thena spine> :show
 ▶ let ? t : Nat in
   t
-thena spine> assume "w" ⌜ Nat ⌝
+thena spine> assume "w" core`Nat`
 look at this
 (yield to hand control back)
 thena spine> :show

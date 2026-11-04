@@ -164,7 +164,8 @@ resolveWith gr sp env sc ctx = core gr env (globalsOf env sc) sp ctx []
 
 -- | Resolve a raw tree as a development, taking the LONGEST PREFIX (§2.7):
 -- every leading binder becomes a chain link, so 'Trailing' ends up holding
--- something that is not a binder unless @⌜ ⌝@ says otherwise.
+-- something that is not a binder, and a @core@ region is the way to say so
+-- for a term that is one.
 resolvePartial
   :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> Raw
   -> Either ResolveError (Partial, Int)
@@ -348,12 +349,6 @@ core gr env gs sp ctx local n raw = case raw of
     (b', n4)   <- core gr env gs sp ctx ((x, v) : local) n3 b
     Right (Let (Ident x) val' ty' (close v b'), n4)
 
-  -- Transparent here: the corners only say something in a development
-  -- position, where they stop the spine. A no-op rather than an error, because
-  -- rejecting them would make the printer's own output fail to re-read in a
-  -- nested position.
-  RawQuote t -> core gr env gs sp ctx local n t
-
   -- Phase 7: no concrete syntax existed for 'Eliminate' before this. Checked
   -- against the datatype's own record, exactly as a constructor's target is
   -- (below) — this is the same "what you wrote does not fit the form" shape
@@ -495,8 +490,10 @@ partial gr env gs sp ctx local n raw = case raw of
   -- what the DC's syntax owes it — no token, no production.
   --
   -- It costs what the @λ@ case has always cost: a development whose trailing
-  -- term is a bare Π cannot be written without corners. @⌜ ∀ (x : A) -> B ⌝@
-  -- is the escape, and 'RawQuote' below is where it stops the spine.
+  -- term is a bare Π cannot be written as itself. @core\`∀ (x : A) -> B\`@ is
+  -- the escape, and it stops the spine by being no binder at all \8212 the
+  -- fall-through at the end of this function is what takes it (MS10 phase 269;
+  -- until then the escape was @⌜ … ⌝@ and had a case of its own here).
   RawPi bs b -> binderLinks gr env gs sp Quantify ctx local n bs b
 
   RawLet i val ty b -> do
@@ -528,11 +525,6 @@ partial gr env gs sp ctx local n raw = case raw of
     (k', n1) <- constraint gr env gs sp ctx local n k
     (b', n2) <- partial gr env gs sp ctx local n1 b
     Right (Pending k' b', n2)
-
-  -- The corners stop the spine: what is inside is a term, not a chain.
-  RawQuote t -> do
-    (t', n1) <- core gr env gs sp ctx local n t
-    Right (Trailing t', n1)
 
   -- Everything else is the trailing term. This is the whole of longest prefix:
   -- the binder cases above consume as much as they can, and this catches the

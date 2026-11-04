@@ -6,8 +6,8 @@ own — you should not have to read anything else to know where a term goes.
 
 | | what it is | where you write it |
 |---|---|---|
-| **Surface** | the language you write proofs in — binders, applications, `let`, `data` | `.thena` proof modules; inside `⟨ … ⟩` |
-| **Core** | what the kernel checks — no sugar, no implicits | inside `⌜ … ⌝`; built by ops |
+| **Surface** | the language you write proofs in — binders, applications, `let`, `data` | `.thena` proof modules; inside `` surface`…` `` |
+| **Core** | what the kernel checks — no sugar, no implicits | inside `` core`…` ``; built by ops |
 | **development calculus** (DC) | the half-built proof itself: holes, guesses, hypotheses | built by tactics; printed by `:show` |
 | **`instral`** | the instruction language — rules, functions, and what you type at the prompt | `.thena.rules` files; `do { … }` blocks; REPL entries |
 
@@ -34,8 +34,8 @@ one variable; without them nobody can tell one argument from two.
 ## 2. Every other language is written in a fence
 
 ```
-⟨ \ A a -> a ⟩             -- Surface
-⌜ succ zero ⌝              -- Core
+surface`\ A a -> a`        -- Surface
+core`succ zero`            -- Core
 LC`( M N )`                -- an object language you declared
 ```
 
@@ -46,16 +46,17 @@ rule runs, so a syntax error inside one arrives with every other syntax error.
 ```
 thena spine> :theorem id : ∀ (A : Type₀) (a : A) -> A
 proving id : ∀ (A : Type₀) -> A -> A
-thena spine> elaborate ⟨ \ A a -> a ⟩
+thena spine> elaborate surface`\ A a -> a`
 already equal
 thena spine> qed
 id : ∀ (A : Type₀) -> A -> A   ∎
 ```
 
-**A written core term is resolved by a visible step.** `try-core ⌜ x ⌝` compiles
-to `⌜1⌝ = resolve-core ⌜ x ⌝ ; try-core ⌜1⌝`, because the same term written in
+**A written core term is resolved by a visible step.** `` try-core core`x` `` compiles
+to `` ⌜1⌝ = resolve-core core`x` ; try-core ⌜1⌝ ``, because the same term written in
 two places may resolve to two different things and you should be able to see
-which one you got.
+which one you got. The name on the left is one you cannot write yourself, which
+is what keeps it from colliding with a binding of your own.
 
 ## 3. `instral`: declarations
 
@@ -184,7 +185,7 @@ onetwo
 dies with it:
 
 ```
-thena spine> h = here ; claim "k" ⌜ Type₀ ⌝ ; goto h
+thena spine> h = here ; claim "k" core`Type₀` ; goto h
 ```
 
 An entry may span lines. Open it with `:{` and close it with `:}`, each alone
@@ -194,7 +195,7 @@ rule, so they need no `;`:
 ```
 thena spine> :{
          ... h = here
-         ... claim "k" ⌜ Type₀ ⌝
+         ... claim "k" core`Type₀`
          ... goto h
          ... :}
 ```

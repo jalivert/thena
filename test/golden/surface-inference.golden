@@ -9,7 +9,7 @@ thena spine> :show
   t
 thena spine> :infer succ zero
 succ zero : Nat
-thena spine> :infer ⌜ succ zero ⌝
+thena spine> :infer core`succ zero`
 succ zero : Nat
 thena spine> :show
 ▶ let ? t : Nat in

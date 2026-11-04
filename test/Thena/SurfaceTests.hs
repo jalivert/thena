@@ -29,7 +29,6 @@ import Thena.Driver
   , parseSurfaceModule
   , parseSurfaceTerm
   )
-import Thena.Syntax.Concrete (Raw (..))
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Surface.Layout (layout)
 import Thena.Instral.Concrete
@@ -986,15 +985,15 @@ blockTests =
       RawPairOf{}  -> Just "(1, y)"
       RawNested{}  -> Just "(concat y y)"
       RawLambda{}  -> Just "(\\ z -> concat z z)"
+      -- **AND A CORE TERM IS ONE OF THESE NOW** (MS10 phase 269, `~3t63k`).
+      -- Corners were the one form a @do@ block could not write: @⌜ t ⌝@
+      -- carried a parsed 'Thena.Syntax.Concrete.Raw' through a production of
+      -- its own, so the surface grammar would have needed the whole
+      -- development-calculus term grammar as a third copy. @core\`t\`@ is a
+      -- region like any other and goes through this same case, which is what
+      -- deleting the spelling bought — @ms5\/CLOSEOUT.md@ 22 is answered
+      -- rather than accepted.
       RawRegion{}  -> Just "surface`\\ x -> x`"
-      -- **Corners are the one form a @do@ block cannot write, and levelling
-      -- them is a decision rather than a line** (@ms5\/CLOSEOUT.md@ 22).
-      -- @⌜ t ⌝@ carries a parsed 'Thena.Syntax.Concrete.Raw', so the production
-      -- is @'[|' Term '|]'@ and the surface grammar would need the whole
-      -- development-calculus term grammar as a third copy. A @core@ region says
-      -- the same thing — 'Thena.Rules.operandOf' sends both to @VRaw@ — so
-      -- nothing is unsayable, only unsayable in that spelling.
-      RawQuoted{}  -> Nothing
 
     -- One value per constructor, to apply 'spellingFor' to. It is a mirror, and
     -- the exhaustive case above is what stops it going quietly out of date.
@@ -1010,7 +1009,7 @@ blockTests =
       , RawNested "concat" []
       , RawLambda [] (BodyRhs (RhsOp (RawOp "concat" [])))
       , RawRegion "surface" Nothing "x"
-      , RawQuoted (RawName [] "x")
+      , RawRegion "core" Nothing "x"
       ]
 
     writableOperands :: [String]

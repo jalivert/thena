@@ -269,7 +269,8 @@ renderTests =
           , "x"
           ]
   , testCase "a trailing binder is quoted, or it would re-read as a link" $
-      renderPartial (rendering [] 500) [] trailingLam @?= "⌜ λ (A : Type₀) -> A ⌝"
+      renderPartial (rendering [] 500) [] trailingLam
+        @?= "core`λ (A : Type₀) -> A`"
   ]
 
 -- | 'unlines' appends a trailing newline; 'renderPartial' does not emit one.
@@ -287,12 +288,12 @@ prefixTests =
       fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "λ (A : Type₀) -> A")
         @?= Right (Under (Assume vA (Ident "A") type0) (Trailing (Free vA)))
   , testCase "corners stop the spine" $
-      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "[| λ (A : Type₀) -> A |]")
+      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "core`λ (A : Type₀) -> A`")
         @?= Right (Trailing (Lam (Ident "A") type0 (close vA (Free vA))))
   , testCase "and those two are genuinely different developments" $
       assertBool "chain link and trailing Lam must differ" $
         fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "λ (A : Type₀) -> A")
-          /= fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "[| λ (A : Type₀) -> A |]")
+          /= fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "core`λ (A : Type₀) -> A`")
   , testCase "a leading let becomes a Define link" $
       fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "let d = Type₀ : Type₁ in d")
         @?= Right (Under (Define vA (Ident "d") type0 (Universe (levelOfNat 1)))
@@ -312,7 +313,7 @@ prefixTests =
     -- And the same escape the λ case has: corners stop the spine, so a
     -- trailing Π is still writable.
   , testCase "corners keep a ∀ in the trailing term" $
-      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "[| ∀ (A : Type₀) -> A |]")
+      fmap fst (parseDevelopment [] emptyGlobals (opensIn emptyGlobals) [] 0 "core`∀ (A : Type₀) -> A`")
         @?= Right (Trailing (Pi (Ident "A") type0 (close vA (Free vA))))
   ]
   where

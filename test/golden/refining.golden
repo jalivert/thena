@@ -8,7 +8,7 @@ thena spine> open Eq
 opened Eq
 thena spine> :theorem id0 : ∀ (A : Type₀) -> A -> A
 proving id0 : ∀ (A : Type₀) -> A -> A
-thena spine> unify-refine-core ⌜ \ (A : Type₀) (a : A) -> a ⌝
+thena spine> unify-refine-core core`\ (A : Type₀) (a : A) -> a`
 already equal
 thena spine> :show
   let refined = λ (A : Type₀) (a : A) -> a : ∀ (A : Type₀) -> A -> A in
@@ -16,17 +16,17 @@ thena spine> :show
   id0
 thena spine> qed
 id0 : ∀ (A : Type₀) -> A -> A   ∎
-thena spine> unify-into ⌜ ∀ (x : Type₀) -> Type₀ ⌝ ⌜ ∀ (y : Type₁) -> Type₀ ⌝
+thena spine> unify-into core`∀ (x : Type₀) -> Type₀` core`∀ (y : Type₁) -> Type₀`
 stuck: Type₀ and Type₁ are different universes
-thena spine> unify-into ⌜ ∀ (x : Type₀) -> Type₀ ⌝ ⌜ ∀ (y : Type₀) -> Type₁ ⌝
+thena spine> unify-into core`∀ (x : Type₀) -> Type₀` core`∀ (y : Type₀) -> Type₁`
 already equal
-thena spine> unify-into ⌜ \ (x : Nat) -> Type₀ ⌝ ⌜ \ (x : Nat) -> Type₁ ⌝
+thena spine> unify-into core`\ (x : Nat) -> Type₀` core`\ (x : Nat) -> Type₁`
 stuck: Type₀ and Type₁ are different universes
 thena spine> :theorem refl0 : Eq {0} Nat zero zero
 proving refl0 : Eq {0} Nat zero zero
-thena spine> claim "A" ⌜ Type₀ ⌝
-thena spine> claim "a" ⌜ A ⌝
-thena spine> unify-refine-core ⌜ refl {0} A a ⌝
+thena spine> claim "A" core`Type₀`
+thena spine> claim "a" core`A`
+thena spine> unify-refine-core core`refl {0} A a`
 solved: A, a
 thena spine> :show
   let A = Nat : Type₀ in
@@ -41,7 +41,7 @@ refl0 : Eq {0} Nat zero zero
 refl0 = let A = Nat : Type₀ in let a = zero : A in let refined = refl {0} A a : Eq {0} A a a in let refl0 = refined : Eq {0} Nat zero zero in refl0
 thena spine> :theorem wrong : Eq {0} Nat zero (succ zero)
 proving wrong : Eq {0} Nat zero (succ zero)
-thena spine> unify-refine-core ⌜ refl {0} Nat zero ⌝
+thena spine> unify-refine-core core`refl {0} Nat zero`
 stuck: zero and succ zero cannot be made equal
 thena spine> :show
 ▶ let ? wrong : Eq {0} Nat zero (succ zero) in
@@ -50,7 +50,7 @@ thena spine> :abandon
 abandoned wrong
 thena spine> :theorem split : ∀ (A : Type₀) -> A -> A
 proving split : ∀ (A : Type₀) -> A -> A
-thena spine> fill ⌜ \ (A : Type₀) (a : A) -> a ⌝
+thena spine> fill core`\ (A : Type₀) (a : A) -> a`
 already equal
 thena spine> :show
   let refined = λ (A : Type₀) (a : A) -> a : ∀ (A : Type₀) -> A -> A in
@@ -63,7 +63,7 @@ thena spine> qed
 split : ∀ (A : Type₀) -> A -> A   ∎
 thena spine> :theorem lower : Type₂
 proving lower : Type₂
-thena spine> unify-refine-core ⌜ Type₀ ⌝
+thena spine> unify-refine-core core`Type₀`
 already equal
 thena spine> :show
   let refined = Type₀ : Type₁ in

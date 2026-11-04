@@ -335,9 +335,9 @@ literalProductions gs types =
       [ tagRule t "core" Builtin.coreHead | t <- coreish ]
 
     -- **Corners are not offered, and the phase's own test is why** (@AGENDA.md@
-    -- 56). @⌜ t ⌝@ is an operand in @Thena.Syntax.Parser@ and **is not one in
+    -- 56). A @core@ region is an operand in @Thena.Syntax.Parser@ and **is not one in
     -- @Thena.Surface.Parser@** — the two instral grammars differ in exactly this
-    -- place — so offering them put @do { prim-try ⌜ x ⌝ }@ in reach of a surface
+    -- place — so offering them put @do { prim-try core\`x\` }@ in reach of a surface
     -- @do@ block, which Happy refuses. @neverWiderSurface@ caught it. @core\`t\`@
     -- is the spelling both grammars accept and says the same thing, which is
     -- item 56's own conclusion, so nothing a user needs is lost by leaving the

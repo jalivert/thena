@@ -26,7 +26,7 @@ thena spine> open Bool
 opened Bool
 thena spine> :theorem one : Nat
 proving one : Nat
-thena spine> try-core ⌜ zero ⌝
+thena spine> try-core core`zero`
 thena spine> solve
 thena spine> qed
 one : Nat   ∎
@@ -34,7 +34,7 @@ thena spine> :resume two
 resumed two
 thena spine> :core true
 true
-thena spine> try-core ⌜ succ (succ zero) ⌝
+thena spine> try-core core`succ (succ zero)`
 thena spine> solve
 thena spine> qed
 two : Nat   ∎

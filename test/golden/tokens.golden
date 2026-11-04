@@ -51,7 +51,7 @@ solved: T
 refused: in the token class n: /[a-z]+/ accepts "a", which is not an Int
 thena spine> :theorem d : Token Char
 proving d : Token Char
-thena spine> fill ⌜ /[a-z]+/ Char ⌝
+thena spine> fill core`/[a-z]+/ Char`
 already equal
 thena spine> solve
 thena spine> qed
@@ -61,7 +61,7 @@ thena spine> :abandon
 abandoned d
 thena spine> :theorem e : Token Char
 proving e : Token Char
-thena spine> fill ⌜ /[a-z]/ Char ⌝
+thena spine> fill core`/[a-z]/ Char`
 already equal
 thena spine> solve
 thena spine> qed

@@ -120,7 +120,7 @@ elaborate ‹t›
 run-block ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
-thena spine> apply-core ⌜ Just ⌝
+thena spine> apply-core core`Just`
 solved: A
 thena spine> :show
   let A = Bool : Type₀ in
@@ -129,7 +129,7 @@ thena spine> :show
 ▶ let g = refined : Maybe Bool in
   g
 thena spine> goto-named "a"
-thena spine> apply-core ⌜ true ⌝
+thena spine> apply-core core`true`
 already equal
 thena spine> :show
   let A = Bool : Type₀ in
@@ -153,7 +153,7 @@ thena spine> into
 thena spine> along
 thena spine> along
 thena spine> along
-thena spine> apply-core ⌜ f ⌝
+thena spine> apply-core core`f`
 already equal
 thena spine> :show
   let ? ap2 : ∀ (A : Type₀) -> (A -> A -> A) -> A -> A ≐ (
@@ -183,21 +183,21 @@ thena spine> :abandon
 abandoned ap2
 thena spine> :theorem bad : Bool
 proving bad : Bool
-thena spine> apply-core ⌜ Just ⌝
+thena spine> apply-core core`Just`
 stuck: Maybe A and Bool cannot be made equal
 thena spine> :show
 ▶ let ? bad : Bool in
   bad
 thena spine> :undo
 nothing to undo
-thena spine> apply-core ⌜ true ⌝
+thena spine> apply-core core`true`
 already equal
 thena spine> qed
 bad : Bool   ∎
 thena spine> :goal Maybe Bool
 ▶ let ? goal : Maybe Bool in
   goal
-thena spine> apply-core ⌜ Just ⌝
+thena spine> apply-core core`Just`
 solved: A
 thena spine> :show
   let A = Bool : Type₀ in
@@ -205,7 +205,7 @@ thena spine> :show
   let refined = Just A a : Maybe A in
 ▶ let goal = refined : Maybe Bool in
   goal
-thena spine> apply-core ⌜ Nothing ⌝
+thena spine> apply-core core`Nothing`
 stuck: no clause of apply-core applies here
 thena spine> :show
   let A = Bool : Type₀ in
@@ -225,7 +225,7 @@ thena spine> :undo
 thena spine> :goal ∀ (b : Bool) -> Maybe Bool
 ▶ let ? goal : Bool -> Maybe Bool in
   goal
-thena spine> apply-core ⌜ Just ⌝
+thena spine> apply-core core`Just`
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
   they differ by one argument, which the shorter side has to take first: Bool
 thena spine> :show
@@ -233,11 +233,11 @@ thena spine> :show
   goal
 thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
 proving h : Bool -> Maybe Bool
-thena spine> apply-core ⌜ Just ⌝
+thena spine> apply-core core`Just`
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
   they differ by one argument, which the shorter side has to take first: Bool
-thena spine> assume "q" ⌜ Bool ⌝
-thena spine> apply-core ⌜ Just ⌝
+thena spine> assume "q" core`Bool`
+thena spine> apply-core core`Just`
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
   they differ by one argument, which the shorter side has to take first: Bool
 thena spine> :abandon
@@ -257,10 +257,10 @@ context
   b : Bool
 type
   Maybe Bool
-thena spine> apply-core ⌜ Just ⌝
+thena spine> apply-core core`Just`
 solved: A
 thena spine> goto-named "a"
-thena spine> apply-core ⌜ b ⌝
+thena spine> apply-core core`b`
 already equal
 thena spine> goto-named "h"
 thena spine> solve
@@ -272,7 +272,7 @@ h = let h = λ (b : Bool) -> let A = Bool : Type₀ in let refined1 = b : Bool i
 thena spine> :theorem guessed : Bool
 proving guessed : Bool
 thena spine> attack
-thena spine> apply-core ⌜ true ⌝
+thena spine> apply-core core`true`
 stuck: no clause of apply-core applies here
 thena spine> :abandon
 abandoned guessed

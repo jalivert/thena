@@ -39,12 +39,20 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | | |
 |---|---|
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` `.` |
-| operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
+| operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` |
+| a tagged literal's fence | `` ` `` |
+| spell nothing, and stay reserved | `⌜` `⌝` |
 | whitespace | |
 | keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
+
+**The corners are reserved and spell nothing**, which is the one oddity in the
+table: they were the old notation for an embedded core term, removed on
+2026-11-04, and they stay out of names because the system hoists a written term
+into a binding it calls `⌜1⌝` — a name you cannot write and so cannot collide
+with.
 
 **The dot is the one character reserved for a structural reason**, and it is the
 namespace separator: `List.map` is the name `map` in `List`, and a name may not
@@ -70,7 +78,7 @@ x: S         two tokens: the identifier "x:" and then S
 **Ascription must be spaced on its left.** In practice, space both sides and
 you will never think about it again.
 
-**ASCII digraphs need a space before them** — `->`, `:-`, `|>`, `[|` — for the
+**ASCII digraphs need a space before them** — `->`, `:-`, `|>` — for the
 same reason:
 
 ```
@@ -119,31 +127,41 @@ Perl or POSIX would find out much later. Refusing them also means `\s`, `{n}`
 or POSIX classes can be added later without changing what any accepted
 expression means.
 
-### Corners and `⟨…⟩` are on their way out, in favour of tagged term literals
+### Corners and `⟨…⟩` are gone: a term of another language is written with a tag
 
-*Decided 2026-10-01.*
+*Decided 2026-10-01, removed 2026-11-04.*
 
-Two older notations say exactly what a tagged term literal says:
+Two older notations said exactly what a tagged term literal says, and **neither
+exists any more**:
 
 ```
-⌜ t ⌝   [| t |]        a core term, inside an instruction
-core`t`                the same thing, and the one that stays
+⌜ t ⌝   [| t |]        was: a core term, inside an instruction
+core`t`                is: the same thing, and the only spelling
 
-⟨ e ⟩                  a surface term — the lexer turns ⟨ into the tag `surface`
-surface`e`             the same thing, and the one that stays
+⟨ e ⟩                  was: a surface term — ⟨ was lexed as the tag `surface`
+surface`e`             is: the same thing, and the only spelling
 ```
 
-**Both still work and neither is offered any more.** Completion will not suggest them,
-and nothing new in the system points at them. They are to be replaced one for one and
-removed.
+**Writing one now is a syntax error.** `⌜` and `⌝` are still reserved characters, so
+a corner is refused by the lexer; `⟨` and `⟩` are ordinary name characters again, so
+`⟨ e ⟩` is read as names and refused for not being in scope. There is nothing to
+migrate — a term of any language, Thena's own two included, is written `tag`text``.
 
-**The replacement is one-for-one in every position, as of 2026-11-03.** It was not
-before: `` core`t` `` was refused inside a development-calculus term, where `⌜ t ⌝`
-worked, because a tagged literal is resolved by asking which *declared* object language
-the tag names — and `core` and `surface` are declared by nothing, the words being
-reserved so that no `language` block can take them. The two built-in tags are now tags
-at that door as well, so `` core`t` `` is the term written inside it, and
-`` surface`e` `` there says what is wrong instead of claiming no such language exists.
+**The replacement became one-for-one on 2026-11-03, which is what made the removal
+possible.** It was not before: `` core`t` `` was refused inside a
+development-calculus term, where `⌜ t ⌝` worked, because a tagged literal is resolved
+by asking which *declared* object language the tag names — and `core` and `surface`
+are declared by nothing, the words being reserved so that no `language` block can
+take them. The two built-in tags are tags at that door as well now, so
+`` core`t` `` is the term written inside it. **The last door was `:infer`**, which
+chose between its two readings by looking for corners and looks for a `core` fence
+now.
+
+**The printer writes the fence, and escapes what is inside it.** A development whose
+trailing term is a λ, a Π or a `let` prints as `` core`λ (A : Type₀) -> A` `` — the
+fence is what stops that term being re-read as another link of the chain. A region
+ends at the first unescaped backtick, so a term holding a tagged literal of its own
+comes out as `` core`LC\`x\`` ``, which corners never had to do.
 
 **Why, and it is not tidiness.** These are the last places where *which language this text
 is in* is decided by the punctuation you reached for rather than by a tag naming the
@@ -851,9 +869,9 @@ is nothing to default to, and nothing is guessed.
 literals are ordinary terms:
 
 ```
-thena spine> :infer ⌜ "hello" ⌝
+thena spine> :infer core`"hello"`
 "hello" : String
-thena spine> :infer ⌜ 42 ⌝
+thena spine> :infer core`42`
 42 : Int
 ```
 
@@ -875,7 +893,7 @@ Two literals of a primitive type are compared with `String.eq`, `Char.eq` or
 and compute only on literals:
 
 ```
-thena spine> :whnf ⌜ String.eq "a" "b" ⌝
+thena spine> :whnf core`String.eq "a" "b"`
 different
 ```
 
@@ -905,7 +923,7 @@ the same terms, and follows its `String.dec` decisions case by case.
 
 **It is proved twice.** `examples/08-preservation-by-tactics.thena.script`
 proves every lemma again by tactics — `:theorem`, `attack`, `intro`,
-`eliminate-core` for each induction and case split, `elaborate ⟨ … ⟩` for each
+`eliminate-core` for each induction and case split, `` elaborate surface`…` `` for each
 case — and reaches the same statement as `preservation-tactics`.
 
 **`07` is stated for closed terms**, as Software Foundations states it. The
@@ -1070,7 +1088,7 @@ typing rule checks the body *against* the stored type rather than inferring and
 comparing, which is what keeps the stored field honest:
 
 ```
-thena spine> :infer ⌜ trusted (Eq {0} Nat zero zero) (Eq {0} Nat zero (succ zero)) (refl {0} Nat zero) ⌝
+thena spine> :infer core`trusted (Eq {0} Nat zero zero) (Eq {0} Nat zero (succ zero)) (refl {0} Nat zero)`
 refl {0} Nat zero has type Eq {0} Nat zero zero
   but Eq {0} Nat zero (succ zero) was expected
   in argument 3 of Eq, succ and zero are different names
@@ -1084,7 +1102,7 @@ conversion — a term usable at `Type₀` is usable at `Type₁` — so a stored
 *above* the body's own is accepted:
 
 ```
-thena spine> :infer ⌜ trusted Type₀ Type₂ Type₀ ⌝
+thena spine> :infer core`trusted Type₀ Type₂ Type₀`
 trusted Type₀ Type₂ Type₀ : Type₀
 ```
 
@@ -1948,7 +1966,7 @@ because the two occurrences must read the same.
 So a term of an object language is an ordinary term:
 
 ```
-thena spine> :infer ⌜ abs "x" base (var "x") ⌝
+thena spine> :infer core`abs "x" base (var "x")`
 abs "x" base (var "x") : LC
 ```
 
@@ -2969,7 +2987,7 @@ development whose *trailing term* is a bare Π has to be quoted:
 
 ```
 :dev ∀ (A : Type₀) -> A              two links and a trailing A
-:dev ⌜ ∀ (A : Type₀) -> A ⌝          one trailing Π
+:dev core`∀ (A : Type₀) -> A`          one trailing Π
 :dev core`∀ (A : Type₀) -> A`       the same, in the notation that stays
 ```
 
@@ -3053,7 +3071,7 @@ rule fill t :- when focus-is-hole
 rule unify-refine-core t :- when focus-is-hole do fill t ; solve
 ```
 
-`fill ⌜ t ⌝` parks `t` in a `=`-binding, unifies its type with the goal's
+`` fill core`t` `` parks `t` in a `=`-binding, unifies its type with the goal's
 and attaches it as a **guess**; `solve` discharges the guess. Both are callable
 on their own, which is the point — elaboration has to get in between the two to
 elaborate a term's parts once its shape is known.
@@ -3071,7 +3089,7 @@ to ask `unify`, so cumulativity now reaches the hand-driven tactic:
 
 ```
 thena spine> :theorem lower : Type₂
-thena spine> unify-refine-core ⌜ Type₀ ⌝
+thena spine> unify-refine-core core`Type₀`
 already equal
 ```
 
@@ -3665,7 +3683,7 @@ elaboration showing through the surface, not a way to write proofs.
 *Decided 2026-10-22, built 2026-10-26.*
 
 The motive above is built by one function, and the surface's `induction … of` is not its
-only caller: `eliminate-core ⌜ t ⌝` at the prompt reaches the same construction and hands
+only caller: `` eliminate-core core`t` `` at the prompt reaches the same construction and hands
 you one hole per case to fill in by hand. **A copy is free only where something solves
 it.** Elaborating a split runs `specialise` over every method, which solves each copy and
 drops its binder, so the arm never sees one. Driving the tactic by hand there is no
@@ -3675,8 +3693,8 @@ later widening of *what a split generalises* lands on the proof scripts again.
 So there are two tactics, and the plain word is the plain construction:
 
 ```
-eliminate-core ⌜ t ⌝                -- §3.7: the target and its indices, premises fixed
-eliminate-generalising-core ⌜ t ⌝   -- … and a fresh copy of the premises the indices mention
+eliminate-core core`t`                -- §3.7: the target and its indices, premises fixed
+eliminate-generalising-core core`t`   -- … and a fresh copy of the premises the indices mention
 ```
 
 **Two rules and not one with a flag.** A rule says only what it is about, and these are
@@ -4211,7 +4229,7 @@ lists only what takes a variable.
 An entry is an `instral` block, so assignment and sequencing work at the prompt:
 
 ```
-thena spine> h = here ; claim "k" ⌜ Type₀ ⌝ ; goto h
+thena spine> h = here ; claim "k" core`Type₀` ; goto h
 thena spine> n = 42 ; say "ok"
 ```
 
@@ -4225,7 +4243,7 @@ indented**, the same rule a rule file uses for declarations:
 
 ```
 thena spine> h = here ;
-         ...   claim "k" ⌜ Type₀ ⌝ ;
+         ...   claim "k" core`Type₀` ;
          ...   goto h
 ```
 
@@ -4277,7 +4295,7 @@ fine. A production may not begin with the language itself, and may not be empty.
 **The name must be free — as a tag AND as a type.** A declared language is
 looked up before the built-ins in both places, so `language String where { … }`
 would have made `String` in every signature mean the grammar, and
-`language surface where { … }` would have replaced the `⟨ … ⟩` fence. Both are
+`language surface where { … }` would have taken the `surface` tag. Both are
 refused, and so are two grammars under one name:
 
 ```
@@ -5026,11 +5044,11 @@ applies is not something a head may do.
 *Decided 2026-09-11.*
 
 ```
-try-core ⌜ zero ⌝              -- a core term, in corners
-elaborate ⟨ succ zero ⟩        -- a surface term, in angle brackets
-claim "h" ⌜ Nat ⌝              -- a string, and a core term
-goto "h"                       -- a string: the hole's name
-goto h                         -- a REFERENCE, to whatever h is bound to
+try-core core`zero`           -- a core term, in its fence
+elaborate surface`succ zero`  -- a surface term, in its own
+claim "h" core`Nat`           -- a string, and a core term
+goto "h"                      -- a string: the hole's name
+goto h                        -- a REFERENCE, to whatever h is bound to
 ```
 
 **An argument written in no fence is neither language.** It is an `instral`
@@ -5044,7 +5062,7 @@ So there is now one reading of a line, wherever you type it: the word names an
 **op** if one bears that word, and a **rule** otherwise; its arguments are
 operands. That was already true inside a rule body and inside `do { … }`.
 
-What this costs you is explicitness — `unify ⌜ a ⌝ ⌜ b ⌝` where it used to be
+What this costs you is explicitness — `` unify core`a` core`b` `` where it used to be
 `unify a ≟ b` — and what it buys is that a line means the same thing in all
 three places.
 
@@ -5053,8 +5071,8 @@ three places.
 *Decided 2026-09-11.*
 
 ```
-claim "h" ⌜ Nat ⌝     -- two arguments: the op
-claim ⌜ Nat ⌝         -- one argument: a rule, which asks you for the name
+claim "h" core`Nat`     -- two arguments: the op
+claim core`Nat`         -- one argument: a rule, which asks you for the name
 ```
 
 A word names an **op at the arities that op has, and a rule at every other
@@ -5062,7 +5080,7 @@ arity**. Rules already worked this way — clauses of one name are selected by
 name *and* number of arguments, so they need not agree about how many they take
 — and ops now agree with them instead of being a separate question.
 
-This is what lets `claim ⌜ Nat ⌝` be an ordinary rule in the rule base rather
+This is what lets `` claim core`Nat` `` be an ordinary rule in the rule base rather
 than a shape the REPL recognises. You can write your own clause of any op's name
 at an arity the op does not have, and it will be found.
 
@@ -5131,10 +5149,10 @@ Haskell does not make `=` a layout keyword either.
 
 ```
 :infer succ zero          -- a surface term: elaborated
-:infer ⌜ succ zero ⌝      -- a development-calculus term: resolved
+:infer core`succ zero`      -- a development-calculus term: resolved
 ```
 
-This is the rule everywhere an argument is written — `try-core ⌜ x ⌝` against
+This is the rule everywhere an argument is written — `` try-core core`x` `` against
 `try x` — now applied to the one command that had been core-only.
 
 `:infer ‹surface›` answers *if this term were put here, what would its type be?*
@@ -5142,7 +5160,7 @@ It elaborates into a fresh hole at the focus, reads the type off, rechecks the
 development, and then **puts the development back exactly as it was**. Nothing
 it built survives the line, so it is a look despite doing real work.
 
-The type it prints is reduced further than `:infer ⌜t⌝`'s — it has to be, to see
+The type it prints is reduced further than `` :infer core`t` ``'s — it has to be, to see
 past the hole the elaboration solved. The two agree up to conversion, and print
 the same.
 
@@ -5241,7 +5259,7 @@ the file loads — what each hole wants is known from where it sits, and a splic
 that is not a term, or that names nothing, is refused then. The values are
 filled in when the instruction runs, which is when they exist.
 
-Both core spellings take one: `` core`${d} -> ${c}` `` and `⌜ ${d} -> ${c} ⌝`.
+A core region takes one: `` core`${d} -> ${c}` ``.
 
 **A splice is closed**, so a binder above it does not capture it — the same
 weakening every term built under a binder gets.
@@ -5313,7 +5331,7 @@ more argument and tries again.
 
 ```
 thena spine> :theorem t2 : P                  -- mk : Nat -> Nat -> P
-thena spine> fit-core ⌜ mk ⌝
+thena spine> fit-core core`mk`
 chose 34: fit-core
 backtracking to 34: fit-core
 chose 39: fit-core
@@ -5328,8 +5346,8 @@ nothing at all:
 
 ```
 thena spine> :theorem t0 : Nat -> Nat
-thena spine> fit-core ⌜ succ ⌝                -- fits as it stands
-thena spine> apply-core ⌜ succ ⌝              -- saturates, lands on Nat
+thena spine> fit-core core`succ`                -- fits as it stands
+thena spine> apply-core core`succ`              -- saturates, lands on Nat
 stuck: Nat and Nat -> Nat cannot be made equal
 ```
 
@@ -5393,7 +5411,7 @@ read — in a rule file, at the prompt, in a module, in a `declare`. A mistake i
 one is reported before anything is elaborated, so nothing is half-built:
 
 ```
-thena spine> elaborate ⟨ do { say 3 } ⟩
+thena spine> elaborate surface`do { say 3 }`
 do block 1, instruction 1: wanted String, got Int
 ```
 
@@ -5455,7 +5473,7 @@ with `:}`, each alone on its line:
 ```
 thena spine> :{
          ... h = here
-         ... claim "k" ⌜ Type₀ ⌝
+         ... claim "k" core`Type₀`
          ... goto h
          ... :}
 ```
@@ -5568,7 +5586,6 @@ operations wearing one name. Its spelling is unchanged.
 ```
 core`${d} -> ${d}`                  a term
 core`λ (${n} : ${d}) -> ${d}`       a NAME, and a term
-⌜ λ (${n} : ${d}) -> ${d} ⌝          the same, in corners
 ```
 
 **The position decides what the binding must hold** — a term position wants a

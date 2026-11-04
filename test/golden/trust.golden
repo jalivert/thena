@@ -67,7 +67,7 @@ thena spine> :theorem viaHonest : Eq {0} Nat zero zero
 proving viaHonest : Eq {0} Nat zero zero
 thena spine> attack
 thena spine> into
-thena spine> try-core ⌜ honest {0} ⌝
+thena spine> try-core core`honest {0}`
 thena spine> solve
 thena spine> back
 thena spine> solve
@@ -85,7 +85,7 @@ thena spine> :theorem viaLiar : Eq {0} Nat zero (succ zero)
 proving viaLiar : Eq {0} Nat zero (succ zero)
 thena spine> attack
 thena spine> into
-thena spine> try-core ⌜ liar {0} ⌝
+thena spine> try-core core`liar {0}`
 thena spine> solve
 thena spine> back
 thena spine> solve

@@ -41,7 +41,7 @@ thena spine> data Bad : Type₀ where { bad : (Bad -> Bad) -> Bad }
 refused: the argument x of Bad.bad puts the datatype to the left of an arrow
 thena spine> :show nowhere
 nothing named nowhere has been declared
-thena spine> assume "n" ⌜ Nat ⌝
+thena spine> assume "n" core`Nat`
 thena spine> :show
   λ (n : Nat) ->
 ▶ let ? goal : Type₀ in

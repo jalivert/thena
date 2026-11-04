@@ -272,7 +272,7 @@ tests =
         -- body like any other now: resolved, validated and typed when the term
         -- it sits in is read.
         [ testCase "a mistake in one is refused" $
-            case snd (say [":theorem t : Type\8320", "elaborate \10216 do { say 3 } \10217"]) of
+            case snd (say [":theorem t : Type\8320", "elaborate surface`do { say 3 }`"]) of
               EntryMistyped (_ : _) -> pure ()
               other -> assertFailure ("expected a type error, got " ++ show other)
 
@@ -281,7 +281,7 @@ tests =
         , testCase "and nothing of the term was elaborated" $
             let before = devOf (fst (say [":theorem t : Type\8320"]))
                 after  = devOf (fst (say [":theorem t : Type\8320"
-                                         , "elaborate \10216 do { say 3 } \10217"]))
+                                         , "elaborate surface`do { say 3 }`"]))
              in after @?= before
 
           -- **A @return@ has nothing to answer.** A block in a surface term is
@@ -290,7 +290,7 @@ tests =
           -- this check a @return@ there quietly abandoned the elaboration.
         , testCase "a return in one is refused" $
             case snd (say [":theorem t : Type\8320"
-                          , "elaborate \10216 do { u = fresh-universe ; return u } \10217"]) of
+                          , "elaborate surface`do { u = fresh-universe ; return u }`"]) of
               LineRefused (_ : _) -> pure ()
               other -> assertFailure ("expected a refusal, got " ++ show other)
 
@@ -298,7 +298,7 @@ tests =
           -- not break: the block fills the hole it stands in.
         , testCase "a good one still runs" $
             case snd (say [":theorem t : Type\8320"
-                          , "elaborate \10216 let x : Type\8320 = do { u = fresh-universe ; fill u ; solve } in x \10217"]) of
+                          , "elaborate surface`let x : Type\8320 = do { u = fresh-universe ; fill u ; solve } in x`"]) of
               Ran _ _ Completed -> pure ()
               other -> assertFailure ("expected it to run, got " ++ show other)
         ]
@@ -407,11 +407,11 @@ tests =
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase ":core sees what the development binds" $
             -- The whole reason a view command takes the development's context.
-            case snd (say ["assume \"A\" ⌜ Type₀ ⌝", ":core A"]) of
+            case snd (say ["assume \"A\" core`Type₀`", ":core A"]) of
               Rendered _ -> pure ()
               other      -> assertFailure ("expected Rendered, got " ++ show other)
           -- **THE TWO BUILT-IN TAGS ARE TAGS IN A TERM TOO** (MS10 phase 266).
-          -- @core`t`@ was refused here while @⌜ t ⌝@ worked, because a
+          -- @core`t`@ was refused here while @core`t`@ worked, because a
           -- tagged literal is resolved by asking which /declared/ object
           -- language the tag names and @core@ is declared by nothing — the
           -- word is reserved so no @language@ block can take it.
@@ -422,7 +422,7 @@ tests =
           -- matters: they are one notation written two ways.
         , testCase "a core region is a term, and the same term the corners are" $
             map (unwords . renderResponse withRules . snd)
-                [ command withRules ":core ⌜ λ (A : Type₀) -> A ⌝"
+                [ command withRules ":core core`λ (A : Type₀) -> A`"
                 , command withRules ":core core`λ (A : Type₀) -> A`"
                 ] @?= replicate 2 "λ (A : Type₀) -> A"
           -- **And it stops the spine, which came for free**: 'RawObject'
@@ -432,9 +432,9 @@ tests =
           -- quoting exists to prevent — see 'Thena.Render.trailing'.
         , testCase "a core region stops the spine, as the corners do" $
             map (unwords . renderResponse withRules . snd)
-                [ command withRules ":dev ⌜ λ (A : Type₀) -> A ⌝"
+                [ command withRules ":dev core`λ (A : Type₀) -> A`"
                 , command withRules ":dev core`λ (A : Type₀) -> A`"
-                ] @?= replicate 2 "⌜ λ (A : Type₀) -> A ⌝"
+                ] @?= replicate 2 "core`λ (A : Type₀) -> A`"
           -- **@surface@ is the other built-in tag and names no term here**, so
           -- it is refused — and the refusal used to say *no language called
           -- surface has been declared*, which is the opposite of the truth.
@@ -460,14 +460,14 @@ tests =
               Failed _ -> pure ()
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase ":show renders the development the machine holds" $
-            case snd (say ["assume \"A\" ⌜ Type₀ ⌝", ":show"]) of
+            case snd (say ["assume \"A\" core`Type₀`", ":show"]) of
               Shown c | Under (Assume _ (Ident "A") _) _ <- rebuild c -> pure ()
               other -> assertFailure ("expected the assumption, got " ++ show other)
         ]
     , testGroup
         "commands that run"
         [ testCase "assume changes the development, through the machine" $
-            case devOf (fst (say ["assume \"A\" ⌜ Type₀ ⌝"])) of
+            case devOf (fst (say ["assume \"A\" core`Type₀`"])) of
               Under (Assume _ (Ident "A") _) (Under Claim {} (Trailing _)) -> pure ()
               other -> assertFailure ("wrong shape: " ++ show other)
         , -- **And says nothing** (MS5 phase 62b). @assume@ is an op and an op is
@@ -476,26 +476,26 @@ tests =
           -- built a @Say@ after the op because it was building the program by
           -- hand; there is no such place any more.
           testCase "and says nothing, as every other tactic does" $
-            snd (say ["assume \"A\" ⌜ Type₀ ⌝"]) @?= Ran [] [] Completed
+            snd (say ["assume \"A\" core`Type₀`"]) @?= Ran [] [] Completed
         , -- **The asking form is a rule now** — @rule assume ty@ in the base —
           -- so this is one clause of @assume@ picked by arity, not a second
           -- instruction sequence chosen by the driver. It still says what it
           -- did, because the rule's body ends in a @say@.
           testCase "a nameless assume asks for the name" $
-            case snd (say ["assume ⌜ Type₀ ⌝"]) of
+            case snd (say ["assume core`Type₀`"]) of
               Ran [] _ (Waiting (Question p k)) ->
                 (p, k) @?= ("name for the assumption?", AName)
               other -> assertFailure ("expected a question, got " ++ show other)
         , testCase "the answer is used, and the message is built from it" $
-            let (s, _) = say ["assume ⌜ Type₀ ⌝"]
+            let (s, _) = say ["assume core`Type₀`"]
              in snd (answer s "B") @?= Ran ["assumed B"] [] Completed
         , testCase "and the binder carries the answered name" $
-            let (s, _) = say ["assume ⌜ Type₀ ⌝"]
+            let (s, _) = say ["assume core`Type₀`"]
              in case devOf (fst (answer s "B")) of
                   Under (Assume _ (Ident "B") _) _ -> pure ()
                   other -> assertFailure ("wrong shape: " ++ show other)
         , testCase "an answer that is not a name gets stuck, and keeps the machine" $
-            let (s, _) = say ["assume ⌜ Type₀ ⌝"]
+            let (s, _) = say ["assume core`Type₀`"]
              in snd (answer s "let") @?= Ran [] [] (Halted (NotAnIdentifier "let"))
         , testCase "answering when nothing was asked is refused" $
             snd (answer newSession "B") @?= Rejected NotAsking
@@ -507,14 +507,14 @@ tests =
             snd (command withRules "assume")
               @?= EntryMistyped [Undefined (InBody (rootName "entry") 0) "assume" 0 [1, 2]]
         , testCase "assume resolves its type in the development's context" $
-            case snd (say ["assume \"A\" ⌜ Type₀ ⌝", "assume \"x\" ⌜ A ⌝"]) of
+            case snd (say ["assume \"A\" core`Type₀`", "assume \"x\" core`A`"]) of
               Ran [] _ Completed -> pure ()
               other -> assertFailure ("expected success, got " ++ show other)
         ]
     , testGroup
         "the goal"
         [ testCase ":goal claims a new one, in context" $
-            case snd (say ["assume \"A\" ⌜ Type₀ ⌝", ":goal A -> A"]) of
+            case snd (say ["assume \"A\" core`Type₀`", ":goal A -> A"]) of
               Shown c
                 | Under Assume {} (Under (Claim _ (Ident "goal") _) (Trailing _)) <-
                     rebuild c -> pure ()
@@ -524,7 +524,7 @@ tests =
               Under (Claim _ _ ty) (Trailing _) -> ty @?= Universe (levelOfNat 1)
               other -> assertFailure ("wrong shape: " ++ show other)
         , testCase "an assumption made later still lands outside the goal" $
-            case devOf (fst (say [":goal Type₀", "assume \"A\" ⌜ Type₀ ⌝"])) of
+            case devOf (fst (say [":goal Type₀", "assume \"A\" core`Type₀`"])) of
               Under Assume {} (Under Claim {} (Trailing _)) -> pure ()
               other -> assertFailure ("wrong shape: " ++ show other)
         ]
@@ -545,9 +545,9 @@ tests =
           -- one is read off the hole the elaboration solved, so it is whnf\'d to
           -- see past the hole\'s own variable and comes back as the saturated
           -- former where the core path stops at the wrapper. Both print @Nat@.
-        , testCase "a bare argument is surface, corners are core" $
+        , testCase "a bare argument is surface, a core fence is a core term" $
             case ( snd (say [natCommand, "open Nat", ":infer succ zero"])
-                 , snd (say [natCommand, "open Nat", ":infer ⌜ succ zero ⌝"])
+                 , snd (say [natCommand, "open Nat", ":infer core`succ zero`"])
                  ) of
               (InferredSurface _ a, Inferred _ b) ->
                 case convert (globals (machineOf (fst (say [natCommand])))) [] 0 a b of
@@ -597,7 +597,7 @@ tests =
               Rendered _ -> pure ()
               other      -> assertFailure ("expected Rendered, got " ++ show other)
         , testCase "and can be assumed at" $
-            snd (say [natCommand, "assume \"n\" ⌜ Nat ⌝"]) @?= Ran [] [] Completed
+            snd (say [natCommand, "assume \"n\" core`Nat`"]) @?= Ran [] [] Completed
         , testCase "stepping installs the declaration before it pauses" $
             let s' = fst (say [":step on", natCommand])
              in declaredIn s' "Nat.Nat" @?= True
@@ -607,30 +607,30 @@ tests =
     , testGroup
         "stepping"
         [ -- **A line with a written term is two instructions now** (MS5 phase
-          -- 62b): @assume "A" ⌜ Type₀ ⌝@ compiles to
-          -- @⌜1⌝ = resolve-core ⌜ Type₀ ⌝ ; assume "A" ⌜1⌝@, which is what a
+          -- 62b): @assume "A" core`Type₀`@ compiles to
+          -- @core`1` = resolve-core core`Type₀` ; assume "A" core`1`@, which is what a
           -- rule body writes by hand. So the first pause is before the
           -- resolution and the second before the op — and that is the point of
           -- compiling the step in rather than resolving quietly in the driver
           -- (phase 61b: /a reader should be able to see which one it got/).
           testCase ":step on makes a command stop after one instruction" $
-            case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝"]) of
+            case snd (say [":step on", "assume \"A\" core`Type₀`"]) of
               Ran [] _ (Paused 1) -> pure ()
               other         -> assertFailure ("expected Paused, got " ++ show other)
         , testCase "and :step takes the next one" $
-            case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":step"]) of
+            case snd (say [":step on", "assume \"A\" core`Type₀`", ":step"]) of
               Ran [] _ (Paused 1) -> pure ()
               other -> assertFailure ("expected a second pause, got " ++ show other)
         , testCase "and the one after that finishes it" $
-            case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":step", ":step"]) of
+            case snd (say [":step on", "assume \"A\" core`Type₀`", ":step", ":step"]) of
               Ran [] _ Completed -> pure ()
               other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase ":run finishes the program whatever the mode" $
-            case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":run"]) of
+            case snd (say [":step on", "assume \"A\" core`Type₀`", ":run"]) of
               Ran [] _ Completed -> pure ()
               other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase ":step off puts it back" $
-            case snd (say [":step on", ":step off", "assume \"A\" ⌜ Type₀ ⌝"]) of
+            case snd (say [":step on", ":step off", "assume \"A\" core`Type₀`"]) of
               Ran [] _ Completed -> pure ()
               other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase "stepping is a session setting and does not touch the machine" $
@@ -651,7 +651,7 @@ tests =
               Ran _ _ (Paused 2) -> pure ()
               other -> assertFailure ("expected Paused 2, got " ++ show other)
         , testCase ":run ‹n› spends a budget without setting one" $
-            case say [":step off", "assume \"A\" ⌜ Type₀ ⌝", ":run 1"] of
+            case say [":step off", "assume \"A\" core`Type₀`", ":run 1"] of
               (s', Ran _ _ Completed) -> fuelOf s' @?= Nothing
               (_, other) -> assertFailure ("expected Completed, got " ++ show other)
         , -- A slice of a job, and the reason @:run ‹n›@ exists: the program is
