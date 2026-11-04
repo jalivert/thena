@@ -35,13 +35,18 @@ import qualified Paths_thena
 import Thena.Driver
   ( LoadError
   , Loaded (..)
+  , Item
+  , ModuleName
+  , ReadModule (..)
   , Response (..)
   , Session
   , loadProofSource
-  , loadProofItems
-  , loadProofItemsConsulting
+  , loadProofModules
   , moduleConsults
+  , moduleImports
   , moduleFile
+  , moduleLoaded
+  , moduleOfFile
   , LoadKind (..)
   , parseSurfaceModule
   , loadRuleBases
@@ -49,6 +54,7 @@ import Thena.Driver
   , loadSource
   , newSession
   )
+import Thena.Rules (RuleBase)
 
 -- | What went wrong to a file, with nothing rendered.
 --
@@ -183,41 +189,118 @@ loadFile s path = do
           s' = loadedSession l
        in (s', loadedResponses l, map (Stopped path) (maybe [] pure (loadedError l)))
 
--- | Read a proof module and elaborate it (MS4 phase 43).
+-- | Read a proof module, **and everything it imports**, and elaborate the lot
+-- (MS4 phase 43; the import graph at MS11 phase 274).
 --
--- Simpler than 'loadFile' because a module is not a sequence of lines: the
--- whole file is one program, so there is one response and no line to name when
--- it stops. What went wrong is in that response, which renders like any other.
--- **A module that consults rule bases is read in two steps** (MS11 phase 273),
--- and both of them are here because both need the disk. The module is parsed,
--- every base it consults is read, and only then is it elaborated — against a
--- pool that is the module's for the length of the load and the session's again
--- afterwards. **Nothing is installed if a base will not read**, the same
--- all-or-nothing 'loadRuleFiles' promises.
+-- Simpler than 'loadFile' because a module is not a sequence of lines: each
+-- file is one program, so there is one response per module and no line to name
+-- when one stops. What went wrong is in that response, which renders like any
+-- other.
+--
+-- **A module that names anything on disc is read in two steps** (MS11 phases
+-- 273 and 274), and both steps are here because both need the disk: the module
+-- is parsed, its imports are walked and its consults are read, and only then is
+-- anything elaborated. **Nothing is installed if any of it will not read**, the
+-- same all-or-nothing 'loadRuleFiles' promises, and 'Thena.Driver.loadProofModules'
+-- carries that promise across the whole closure.
 loadProofFile :: Session -> FilePath -> IO (Session, [Response], [Trouble])
 loadProofFile s path = do
   contents <- try (readFile path)
   case contents of
     Left e  -> pure (s, [], [Unreadable path e])
     Right c -> case parseSurfaceModule c of
+      -- **The file the user named answers with a response, as it always has.**
+      -- The line they typed is what failed and the path is in front of them; an
+      -- imported file is the case that needs its path said, and 'gather' says it.
       Left e -> pure (s, [Failed e], [])
-      Right (nm, items) -> case moduleConsults items of
-        -- Nothing to read: the one-step door, and the pool is the session's.
-        [] -> pure (let (s', r) = loadProofItems s nm items in (s', [r], []))
-        ms -> do
-          let paths = map (moduleFile LoadRules) ms
-          reads' <- mapM (\p -> fmap ((,) p) (try (readFile p))) paths
-          pure $ case [ (p, e) | (p, Left e) <- reads' ] of
-            (p, e) : _ -> (s, [], [Unreadable p e])
-            [] ->
-              -- 'consultRuleBases' is reused for the reading, the
-              -- all-or-nothing and the inference; the session it answers with
-              -- is dropped and only the pool is kept, because a surface file's
-              -- consults are not the session's (his ruling, 2026-11-03).
-              case consultRuleBases s [ (p, c') | (p, Right c') <- reads' ] of
-                (_, BasesLoaded pool) ->
-                  let (s', r) = loadProofItemsConsulting pool s nm items in (s', [r], [])
-                (_, bad) -> (s, [], [Unloadable (headOr path paths) bad])
+      Right (nm, items) -> do
+        gathered <- assemble s [] [] (moduleOfFile path) path nm items
+        pure $ case gathered of
+          Left t   -> (s, [], [t])
+          Right ms -> let (s', rs) = loadProofModules s ms in (s', rs, [])
+
+-- | Read a module an @import@ named, and everything it imports (MS11 phase
+-- 274).
+--
+-- **Trouble and not a response**, unlike the file the user named: nobody typed
+-- this path, so a refusal that did not say which file it was about would be
+-- unreadable.
+gather
+  :: Session -> [ModuleName] -> [ReadModule] -> ModuleName
+  -> IO (Either Trouble [ReadModule])
+gather s stack done m = do
+  contents <- try (readFile path)
+  case contents of
+    Left e  -> pure (Left (Unreadable path e))
+    Right c -> case parseSurfaceModule c of
+      Left e            -> pure (Left (Unloadable path (Failed e)))
+      Right (nm, items) -> assemble s stack done (Just m) path nm items
+  where
+    path = moduleFile LoadProof m
+
+-- | **The imports first, then the consults, then the module itself** (MS11 phase
+-- 274) — which is what puts the list in dependency order: a module is appended
+-- after everything it imports, and the one the user asked for is last.
+--
+-- That order is the whole of what @import@ does today. **Which of an imported
+-- module's names the importer may then write is not settled** — that is
+-- @exporting ( … )@ and @public import@, and until they are built everything an
+-- imported module declared is reachable.
+--
+-- @stack@ is the modules on the path from the root, innermost first; @done@ is
+-- what has been gathered so far.
+assemble
+  :: Session -> [ModuleName] -> [ReadModule] -> Maybe ModuleName -> FilePath
+  -> String -> [Item] -> IO (Either Trouble [ReadModule])
+assemble s stack done as path nm items = do
+  walked <- imports s (maybe stack (: stack) as) done (moduleImports items)
+  case walked of
+    Left t      -> pure (Left t)
+    Right done' -> do
+      pool <- consulted s path (moduleConsults items)
+      pure (fmap (\p -> done' ++ [ReadModule as nm p items]) pool)
+
+-- | One module's imports, each walked in turn (MS11 phase 274).
+--
+-- **A module already gathered, or already in the session, is skipped**: a
+-- diamond in the graph reaches the same module twice and elaborating it twice
+-- would collide with its own declarations.
+imports
+  :: Session -> [ModuleName] -> [ReadModule] -> [ModuleName]
+  -> IO (Either Trouble [ReadModule])
+imports _ _ done [] = pure (Right done)
+imports s stack done (m : rest)
+  -- **The cycle is named in the order the walk met it**, the module that closed
+  -- the loop last, so the list reads as the path that was taken.
+  | m `elem` stack =
+      pure (Left (Unloadable (moduleFile LoadProof m)
+                             (ImportCycle (reverse stack ++ [m]))))
+  | moduleLoaded m s || any ((== Just m) . readModuleName) done =
+      imports s stack done rest
+  | otherwise = do
+      walked <- gather s stack done m
+      case walked of
+        Left t      -> pure (Left t)
+        Right done' -> imports s stack done' rest
+
+-- | The bases a module consults, read (MS11 phase 273), or 'Nothing' where it
+-- consults none and is therefore elaborated against the session's own pool.
+--
+-- 'consultRuleBases' is reused for the reading, the all-or-nothing and the
+-- inference; the session it answers with is dropped and only the pool is kept,
+-- because **a surface file's consults are not the session's** (his ruling,
+-- 2026-11-03).
+consulted
+  :: Session -> FilePath -> [ModuleName] -> IO (Either Trouble (Maybe [RuleBase]))
+consulted _ _ [] = pure (Right Nothing)
+consulted s about ms = do
+  let paths = map (moduleFile LoadRules) ms
+  reads' <- mapM (\p -> fmap ((,) p) (try (readFile p))) paths
+  pure $ case [ (p, e) | (p, Left e) <- reads' ] of
+    (p, e) : _ -> Left (Unreadable p e)
+    [] -> case consultRuleBases s [ (p, c') | (p, Right c') <- reads' ] of
+      (_, BasesLoaded pool) -> Right (Just pool)
+      (_, bad)              -> Left (Unloadable (headOr about paths) bad)
   where
     headOr d xs = case xs of { x : _ -> x ; [] -> d }
 

@@ -1,0 +1,3 @@
+module Absent where
+
+import test.modules.Nowhere

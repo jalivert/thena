@@ -48,7 +48,12 @@ module Thena.Driver
   , loadProofSource
   , loadProofItems
   , loadProofItemsConsulting
+  , loadProofModules
+  , ReadModule (..)
   , moduleConsults
+  , moduleImports
+  , moduleLoaded
+  , modulesLoaded
   , RuleFileError (..)
   , InstralTypeError
   , loadRuleBases
@@ -358,6 +363,22 @@ data Session = Session
     -- out: a pending question routes the next line to 'answer', so @:undo@ at
     -- a prompt is read as the answer (@ms7\/CLOSEOUT.md@ 16). One @:undo@
     -- takes back the asking and the answering together.
+  , sessionLoaded    :: [ModuleName]
+    -- ^ **which surface modules are in, by the name they are reached by** (MS11
+    -- phase 274), most recently loaded first.
+    --
+    -- It exists so that an @import@ of a module already in does nothing: a
+    -- diamond in the import graph reaches the same module twice, and
+    -- re-elaborating it would collide with its own declarations. **Keyed by the
+    -- module name and not by the header's**, because the name is what an
+    -- @import@ writes and a header's is only a claim about where the file sits;
+    -- a file loaded by a path that is no module name — every numbered example —
+    -- adds nothing here and is simply never deduplicated against.
+    --
+    -- **Not in a 'Snapshot'**, the same partition @globals@ sits in (§7.7): the
+    -- environment only grows and this is a record of what is in it. A load that
+    -- fails takes it back with everything else, because 'rolledBack' restores
+    -- the session as it stood.
   }
   deriving (Eq, Show)
 
@@ -591,6 +612,7 @@ newSession = Session
   , sessionFuel      = Nothing
   , sessionParsing   = Nothing
   , sessionAsking    = Nothing
+  , sessionLoaded    = []
   }
   where
     (ps, n) = newDevelopment 0
@@ -727,6 +749,20 @@ data Response
     -- no way to read a file. "Thena.Files" reads them and goes through
     -- 'loadProofItemsConsulting' instead, so a frontend that loads modules
     -- through that module never sees this.
+  | ImportsUnread [ModuleName]
+    -- ^ **this module imports these and nobody read them** (MS11 phase 274).
+    -- 'ConsultsUnread'\'s twin, one step further out: a module cannot be
+    -- elaborated at all before the modules it depends on are, and this door has
+    -- no way to read a file. "Thena.Files" walks the import graph and goes
+    -- through 'loadProofModules' instead.
+  | ImportCycle [ModuleName]
+    -- ^ **these modules import each other** (MS11 phase 274), in the order the
+    -- walk met them, the module that closed the loop last.
+    --
+    -- A refusal about the /program/ and not about a file: every file read, and
+    -- there is no order to elaborate them in. Produced by whoever walks the
+    -- graph, which is "Thena.Files", and carried like any other response
+    -- because the driver's vocabulary is where a refusal is said (§12).
   | ConsultRequested [FilePath]
     -- ^ @:consult@ on one or more rule-base paths (MS11 phase 271). Like
     -- 'RulesRequested' it only names them — reading is "Thena.Files"'s (§12
@@ -1280,6 +1316,13 @@ data Item
     -- It declares nothing and runs nothing, so 'surfaceProgram' emits no
     -- instruction for it: what it does happens before the program does, when
     -- the load collects every one of them and says which files it needs.
+  | ItemImport ModuleName
+    -- ^ @import ‹module›@ (MS11 phase 274) — **a surface module this one depends
+    -- on**, named as a file and not as a namespace.
+    --
+    -- 'ItemConsult'\'s twin, and like it, it declares nothing and runs nothing:
+    -- what it does happens before this module\'s program does, when the load
+    -- collects every one of them and elaborates each named module first.
   | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
     -- resolves it while the file is being read, so a block with bad operands is
@@ -1326,6 +1369,8 @@ regroup = go
     -- **A file's name, not a namespace's** — the shape is 'SurfaceOpen'\'s and
     -- the meaning is not: the steps are directories (MS11 phase 273).
     one (SurfaceConsult ps x : rest) = Right ([ItemConsult (moduleFromSteps ps x)], rest)
+    -- A file's name again, and the steps are directories again (MS11 phase 274).
+    one (SurfaceImport ps x : rest) = Right ([ItemImport (moduleFromSteps ps x)], rest)
     one (SurfaceNamespace ps x ds : rest) = do
       inner <- go ds
       Right ([ItemNamespace (GlobalName ps x) inner], rest)
@@ -1382,6 +1427,10 @@ surfaceProgram n0 items = foldl (item []) ([], n0) items
   -- that is settled before the program starts — 'moduleConsults' collects them
   -- and 'loadProofItems' asks for the files.
   item _ acc (ItemConsult _) = acc
+  -- **An import emits nothing either** (MS11 phase 274), and for the same
+  -- reason one step further out: it says which /modules/ run before this one,
+  -- so by the time this program starts they are already in the environment.
+  item _ acc (ItemImport _) = acc
   -- **A top-level block is a call to a rule** (MS6 phase 104b), and the rule is
   -- @run-block@ in the shipped base, whose whole body is @play t@. So how a
   -- module\'s blocks are treated is written in user space and a user may
@@ -1676,15 +1725,20 @@ loadProofSource s src = case parseSurfaceModule src of
 -- the only stored form (his ruling, 2026-09-27), and the JSON went with the
 -- project manifest; see "Thena.View.Source".
 loadProofItems :: Session -> String -> [Item] -> (Session, Response)
-loadProofItems s nm items = case moduleConsults items of
-  [] -> loadProofItemsConsulting (rules (sessionMachine s)) s nm items
-  -- **Refused rather than ignored** (MS11 phase 273). This door has no way to
-  -- read a file (§12 invariant 4), so a module that consults something cannot
-  -- be elaborated through it — and silently elaborating it against the
-  -- session's bases is the exact failure a consult exists to prevent. The
-  -- caller that has IO is "Thena.Files", and 'loadProofItemsConsulting' is the
-  -- door it uses.
-  ms -> (s, ConsultsUnread ms)
+loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
+  ([], []) -> loadProofItemsConsulting (rules (sessionMachine s)) s nm items
+  -- **Refused rather than ignored** (MS11 phases 273 and 274). This door has no
+  -- way to read a file (§12 invariant 4), so a module that names anything on
+  -- disc cannot be elaborated through it — and silently elaborating it against
+  -- whatever the session happens to hold is the exact failure both acts exist
+  -- to prevent. The caller that has IO is "Thena.Files", and
+  -- 'loadProofModules' is the door it uses.
+  --
+  -- **The imports are said first where a module has both**, because they are
+  -- the stronger refusal: an unread consult would elaborate against the wrong
+  -- pool, an unread import would not elaborate at all.
+  (is@(_ : _), _) -> (s, ImportsUnread is)
+  ([], ms)        -> (s, ConsultsUnread ms)
 
 -- | The same, against a pool the caller has already read (MS11 phase 273).
 --
@@ -1739,6 +1793,76 @@ loadProofItemsConsulting pool s nm items =
           -- running, so resuming is as safe as it ever was.
           (s', other)           -> (rolledBack s s', other)
 
+-- | **A module and everything it imports, as one load** (MS11 phase 274).
+--
+-- The list is in dependency order — every module after the ones it imports, the
+-- one the user asked for last — and whoever walked the graph built it, because
+-- walking it needs the disk. Each element carries the pool its own @consult@
+-- lines name, so his ruling of 2026-11-03 holds module by module.
+--
+-- **All of them or none.** A module whose import fails to elaborate declares
+-- nothing, which is 'loadProofItemsConsulting'\'s own bargain widened to the
+-- closure: the alternative is a session holding half an import graph, where
+-- fixing the file that failed means first taking back by hand what the files
+-- above it left. The counter goes forward anyway, for 'rolledBack'\'s reason.
+--
+-- **One response per module, in the order they went in**, rather than one for
+-- the closure: each names what it declared and carries its own warnings, and a
+-- module that landed because something imported it is still something the user's
+-- environment now holds.
+loadProofModules :: Session -> [ReadModule] -> (Session, [Response])
+loadProofModules s0 = go s0 []
+  where
+    go s acc [] = (s, reverse acc)
+    go s acc (m : rest) =
+      let pool = maybe (rules (sessionMachine s)) id (readModulePool m)
+       in case loadProofItemsConsulting pool s (readModuleHeader m)
+                                        (readModuleItems m) of
+        (s', r@(ProofLoaded {})) -> go (marked (readModuleName m) s') (r : acc) rest
+        -- 'loadProofItemsConsulting' has already put this module's own
+        -- declarations back; this takes the closure's with them.
+        (s', bad)                -> (rolledBack s0 s', [bad])
+
+    marked Nothing s = s
+    marked (Just n) s
+      | moduleLoaded n s = s
+      | otherwise        = s { sessionLoaded = n : sessionLoaded s }
+
+-- | A module read off the disc and ready to elaborate (MS11 phase 274).
+--
+-- **A record and not a tuple** because three of the four fields answer a
+-- question a reader will ask — which name reaches it, which bases it consults,
+-- and what the header called it — and a four-tuple would answer none of them.
+data ReadModule = ReadModule
+  { readModuleName   :: Maybe ModuleName
+    -- ^ the name an @import@ reaches it by, where it has one. 'Nothing' for a
+    -- file loaded by a path no module name could produce, which today is every
+    -- numbered example; such a file is simply never deduplicated against.
+  , readModuleHeader :: String
+    -- ^ what the file's own header called it, for 'ProofLoaded'. **A claim and
+    -- not an identity** — that the two must agree is ruled and not built.
+  , readModulePool   :: Maybe [RuleBase]
+    -- ^ the bases its own @consult@ lines name, already read — or 'Nothing'
+    -- where it consults nothing, which is elaborated against **the session's
+    -- own pool as it stands**. Said as an absence rather than by handing the
+    -- session's list back in, so that nothing above this module has to reach
+    -- into the machine to answer a question about a file.
+  , readModuleItems  :: [Item]
+  }
+  deriving (Eq, Show)
+
+-- | Whether that module is already in (MS11 phase 274) — what makes an @import@
+-- of it a no-op rather than a collision with its own declarations.
+moduleLoaded :: ModuleName -> Session -> Bool
+moduleLoaded n s = n `elem` sessionLoaded s
+
+-- | Which modules are in, most recently loaded first (MS11 phase 274).
+--
+-- **A file loaded by a path that is no module name is not in this list**, and
+-- there is nothing to put in it: nothing can import such a file.
+modulesLoaded :: Session -> [ModuleName]
+modulesLoaded = sessionLoaded
+
 -- | Put the session back as it was, carrying the fresh counter forward.
 --
 -- The counter is the one thing that must not go back — see 'loadProofItems'.
@@ -1787,6 +1911,22 @@ moduleConsults = concatMap go
       ItemOpenIn _ is    -> moduleConsults is
       _                  -> []
 
+-- | Every surface module this one imports, in written order (MS11 phase 274).
+--
+-- **'moduleConsults'\' walk, for 'moduleConsults'\' reason**: an @import@ inside
+-- a @namespace@ block is the module's, because what an import says is which
+-- modules this one depends on and a namespace does not change that. Where one
+-- written inside a block stops being in force is `~c2smp` and is not answered
+-- here.
+moduleImports :: [Item] -> [ModuleName]
+moduleImports = concatMap go
+  where
+    go i = case i of
+      ItemImport m       -> [m]
+      ItemNamespace _ is -> moduleImports is
+      ItemOpenIn _ is    -> moduleImports is
+      _                  -> []
+
 -- | The one name an item declares, where it declares exactly one.
 declaredName :: Item -> Maybe String
 declaredName i = case i of
@@ -1807,6 +1947,9 @@ declaredName i = case i of
   -- **A consult declares nothing either** (MS11 phase 273) — it says what the
   -- module's proofs are searched against, which adds no key to the environment.
   ItemConsult _     -> Nothing
+  -- **Nor an import** (MS11 phase 274): the names it makes reachable are the
+  -- imported module's own, and that module's load named them.
+  ItemImport _      -> Nothing
   -- The language's name. Until phase 103 generates its datatype, what it
   -- declares is the grammar alone — the metavariables and the notation.
   -- **A @notation@ block declares nothing at all** (MS8 phase 158, §4.8): the

@@ -1,0 +1,9 @@
+module Both where
+
+import test.modules.Bit
+import test.modules.Pair
+
+open Bit
+
+second : Bit.Bit
+second = on

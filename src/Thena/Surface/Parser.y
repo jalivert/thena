@@ -84,6 +84,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   '.'     { Located _ TDot }
   open    { Located _ TOpen }
   consult { Located _ TConsult }
+  import  { Located _ TImport }
   namespace { Located _ TNamespace }
   hiding  { Located _ THiding }
   renaming { Located _ TRenaming }
@@ -319,6 +320,10 @@ Decl :: { SurfaceDecl }
   -- of 2026-11-03). It names a /file/ and not a namespace, which is why it takes
   -- a @QName@ and means something else by it: the steps are directories.
   | consult QName                          { SurfaceConsult (fst $2) (snd $2) }
+  -- **Which surface modules this file depends on** (MS11 phase 274, his ruling
+  -- of 2026-11-03). A @QName@ again, and the steps are directories again: a
+  -- file states what it refers to and never relies on the session.
+  | import QName                           { SurfaceImport (fst $2) (snd $2) }
   -- **A layout block, where @open@ is a line** (MS10 phase 254): a namespace
   -- says which declarations are in it, so it has to hold them. Nesting is a
   -- longer prefix and costs no mechanism, and @namespace A.B where { … }@ is

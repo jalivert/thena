@@ -312,6 +312,15 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   ConsultsUnread ms ->
     [ "this module consults " ++ intercalate ", " (map moduleText ms)
         ++ ", and they were not read" ]
+  -- Its twin (MS11 phase 274), and the same mistake one step further out.
+  ImportsUnread ms ->
+    [ "this module imports " ++ intercalate ", " (map moduleText ms)
+        ++ ", and they were not read" ]
+  -- **The path the walk took, so the loop is readable** (MS11 phase 274): the
+  -- module that closed it is named twice, once at each end.
+  ImportCycle ms ->
+    [ "these modules import each other: "
+        ++ intercalate " imports " (map moduleText ms) ]
   BasesLoaded bs   -> map loadedLine bs
   BasesListed bs   -> renderBases bs
   RulesListed bs   -> renderRuleBases ren bs
@@ -528,6 +537,7 @@ describe t = case t of
   TLambda     -> "λ"
   TOpen       -> "open"
   TConsult    -> "consult"
+  TImport     -> "import"
   TNamespace  -> "namespace"
   THiding     -> "hiding"
   TRenaming   -> "renaming"

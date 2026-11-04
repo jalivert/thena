@@ -174,6 +174,7 @@ kindOf t = case t of
   TOpen         -> AKeyword
   -- MS11 phase 273: and so is @consult@.
   TConsult      -> AKeyword
+  TImport       -> AKeyword
   TNamespace    -> AKeyword
   THiding       -> AKeyword
   TRenaming     -> AKeyword

@@ -1,0 +1,8 @@
+module Broken where
+
+import test.modules.Bit
+
+open Bit
+
+wrong : Bit.Bit
+wrong = nonesuch

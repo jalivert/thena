@@ -208,10 +208,15 @@ tokens :-
   -- the word (/"surface files are imported and instral files are consulted"/),
   -- and reserving it is what choosing it costs: it is a declaration keyword
   -- like @data@, @module@ and @open@, so it is reserved for their reason.
-  -- **The eighth word to narrow identifiers project-wide, and @import@ will be
-  -- the ninth** — the note under @renaming@ saying the module system wanted no
-  -- more was written before partition four and is wrong.
+  -- **The eighth word to narrow identifiers project-wide** — the note under
+  -- @renaming@ saying the module system wanted no more was written before
+  -- partition four and is wrong.
   "consult"     { keyword TConsult }
+  -- **Reserved at MS11 phase 274**, for @import ‹module›@ — a file saying which
+  -- surface modules it depends on. The ninth and, with @consult@, the pair his
+  -- ruling of 2026-11-03 chose; @~wpwz3@ on the closeout list is what taking the
+  -- two costs and is his.
+  "import"      { keyword TImport }
   -- **Reserved at MS10 phase 254**, for @namespace ‹name› where { … }@ — the
   -- fifth word to narrow identifiers project-wide. His ruling of 2026-10-30
   -- costed it with the partition and took it: a namespace that is declared,
@@ -341,6 +346,7 @@ data Token
   | TData
   | TOpen        -- ^ @open@, the declaration that brings a namespace into view (MS10 phase 247)
   | TConsult     -- ^ @consult@, the declaration that names a rule base (MS11 phase 273)
+  | TImport      -- ^ @import@, the declaration that names a surface module (MS11 phase 274)
   | TNamespace   -- ^ @namespace ‹name› where { … }@ (MS10 phase 254)
   | THiding      -- ^ @open X hiding ( … )@ (MS10 phase 254)
   | TRenaming    -- ^ @open X renaming ( e -> c )@ (MS10 phase 254)

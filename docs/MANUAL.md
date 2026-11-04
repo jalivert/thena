@@ -1420,6 +1420,41 @@ A comment is `--` followed by a space, running to the end of the line, and it
 works the same way in all three kinds of file. Without the space it is not a
 comment, so `-->` is still yours to use.
 
+### `import` says which modules a file stands on
+
+A module names the other surface modules it depends on, at the top, and **what it
+names is loaded first**:
+
+```
+module Both where
+
+import Stlc.Terms
+import Stlc.Lemmata
+
+open Stlc
+```
+
+**A module name is a path, dotted**, under the directory you started `thena` in:
+`Stlc.Terms` is `Stlc/Terms.thena`, and `consult Stlc.Tactics` is
+`Stlc/Tactics.thena.rules` — the word you write says which kind of file it is, so
+the extension is never written. Every step is an ordinary word, so there is no
+`..` and no way to name a file whose stem is not one.
+
+Loading one file therefore loads a graph, and you see a report for each module as
+it goes in, the one you asked for last. **A module is loaded once however many
+files reach it**, so two files importing the same third costs nothing. **A cycle is
+refused**, and says which path it took. And **a load is all or nothing across the
+graph**: if the file you asked for does not go in, nothing it pulled in stays
+either, so you fix one file rather than unpicking a half-loaded session.
+
+What a file imports is the file's own business, and so is what it consults: a
+module you import is elaborated against *its* rule bases, not yours, which is what
+makes a file that works on its own work for whoever imports it.
+
+> **Not narrowed yet.** Everything an imported module declared is reachable. Saying
+> which names a file *offers* — an `exporting` list on the header, and
+> `public import` for passing a dependency on — is designed and not built.
+
 `examples/determinacy-tactics.thena.script` is the acceptance test for the whole first
 milestone. It declares the language of chapter 3 of Pierce's *Types and
 Programming Languages* — a seven-constructor term language, a numeric-value

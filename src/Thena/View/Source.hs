@@ -56,6 +56,9 @@ printItem i = case i of
   -- declares nothing, so a file printed without it would read back and then be
   -- searched against the wrong bases.
   ItemConsult m -> ["consult " ++ moduleText m]
+  -- **The same, for the same reason** (MS11 phase 274): a file printed without
+  -- its imports would read back and then not elaborate at all.
+  ItemImport m -> ["import " ++ moduleText m]
   -- **The block, indented, with its items a blank line apart** — the layout the
   -- parser reads back (MS10 phase 254). The name is written as it was: a
   -- namespace's path is relative to the one it sits in, so what the item holds

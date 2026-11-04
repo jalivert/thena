@@ -1,0 +1,8 @@
+module Pair where
+
+import test.modules.Bit
+
+open Bit
+
+first : Bit.Bit
+first = off

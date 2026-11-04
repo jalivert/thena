@@ -1,0 +1,4 @@
+module Unnameable where
+
+data Three : Type₀ where
+  only : Three

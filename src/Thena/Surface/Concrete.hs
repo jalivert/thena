@@ -396,6 +396,21 @@ data SurfaceDecl
     -- whenever this module is elaborated and does not leak to whoever loaded
     -- it, which is what makes a module that type-checks in isolation type-check
     -- for whoever imports it.
+  | SurfaceImport [String] String
+    -- ^ @import ‹module›@ — **which surface modules this file depends on**
+    -- (MS11 phase 274, his ruling of 2026-11-03).
+    --
+    -- 'SurfaceConsult'\'s shape and 'SurfaceConsult'\'s meaning of it: the steps
+    -- are directories, so @import Stlc.Terms@ reaches @Stlc\/Terms.thena@ — the
+    -- act supplies the extension, which is the only thing that tells the two
+    -- apart on disk.
+    --
+    -- **What it does is load**, and that is all it does today: the module it
+    -- names is elaborated before this one, so a file states what it refers to
+    -- rather than relying on the session having loaded it. **Which of the
+    -- module's names the importer may then write is not settled** — that is
+    -- @exporting ( … )@ and @public import@, and until they are built
+    -- everything the imported module declared is reachable.
   | SurfaceNamespace [String] String [SurfaceDecl]
     -- ^ @namespace ‹name› where { … }@ — **declare a namespace and put these
     -- declarations in it** (MS10 phase 254).

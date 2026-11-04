@@ -37,8 +37,15 @@ import Thena.Driver
   , loadProofSource
   , loadRuleBases
   , loadSource
+  , moduleImports
+  , moduleLoaded
+  , moduleName
+  , moduleOfFile
+  , modulesLoaded
+  , moduleText
   , newSession
   , oneLine
+  , parseSurfaceModule
   )
 import Thena.Engine (Development, Machine (..), development)
 import Thena.Files (rulesPath)
@@ -53,7 +60,7 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Global.Declare (DeclareError (..))
-import Thena.Files (loadProofFile, startingSession)
+import Thena.Files (Trouble (..), loadProofFile, startingSession)
 import Thena.Render
   ( rendering
   ,renderTrouble, renderResponse, renderCore, renderEliminator)
@@ -77,6 +84,7 @@ tests =
     , testGroup "a namespace block (MS10 phase 254)" namespaceTests
     , testGroup "the five forms of open (MS10 phase 254)" openTests
     , testGroup "shadowing is announced (MS10 phase 264)" shadowingTests
+    , testGroup "an import graph (MS11 phase 274)" importTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -180,6 +188,123 @@ openTests =
              \one = succ zero\n\
              \after : Nat.Nat\n\
              \after = succ Nat.zero\n"
+
+-- --------------------------------------------------------------------------
+-- The import graph (MS11 phase 274)
+-- --------------------------------------------------------------------------
+
+-- | @import ‹module›@, and what loading one costs.
+--
+-- **The modules are on disc, in @test\/modules@, and are reached by NAME** —
+-- that is the thing under test. A module name is a path under the source root
+-- (@Thena.Driver.moduleFile@), the root is the process\'s working directory, so
+-- @test.modules.Bit@ is @test\/modules\/Bit.thena@. A fixture written as a
+-- string could not exercise any of this.
+--
+-- **Each case says what it would look like if the mechanism were absent**,
+-- because most of them pass trivially otherwise: a diamond that loaded its
+-- shared module twice would collide, and a closure that landed half of itself
+-- would leave the environment holding declarations no file asked for.
+importTests :: [TestTree]
+importTests =
+  [ testCase "a module is elaborated after the ones it imports" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/Pair.thena"
+      assertBool (show (map (renderResponse s0) out)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Bit", "Pair"]
+
+  , -- **The diamond is the case that cannot be got right by accident**:
+    -- @Both@ imports @Bit@ and @Pair@, and @Pair@ imports @Bit@ too, so a walk
+    -- that did not remember what it had gathered would elaborate @Bit@ twice
+    -- and the second one would collide with the first one's @Bit.Bit@.
+    testCase "a diamond reaches the shared module once" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/Both.thena"
+      assertBool (show (map (renderResponse s0) out)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Bit", "Pair", "Both"]
+
+  , -- The same memory, across two commands rather than inside one walk.
+    testCase "and a module the session already loaded is not loaded again" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
+      assertBool "Bit is in" (moduleLoaded (named' "test.modules.Bit") s1)
+      (_, out, trouble) <- loadProofFile s1 "test/modules/Pair.thena"
+      assertBool (show (map (renderResponse s1) out)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Pair"]
+
+  , -- **Loaded by a path that is no module name, so there is nothing to
+    -- remember.** @0unnameable@ begins with a digit, so it is no step of a
+    -- module name — which is the case every numbered example is in, and the
+    -- reason the field is a 'Maybe' rather than a name invented from the path.
+    -- Such a file loads, and nothing can import it.
+    testCase "a file whose path is no module name is remembered by nothing" $ do
+      (s0, _) <- startingSession
+      (s1, out, _) <- loadProofFile s0 "test/modules/0unnameable.thena"
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Unnameable"]
+      moduleOfFile "test/modules/0unnameable.thena" @?= Nothing
+      assertBool "nothing to remember" (null (modulesLoaded s1))
+
+  , testCase "a cycle is refused, and names the path the walk took" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <- loadProofFile s0 "test/modules/LoopA.thena"
+      case trouble of
+        [Unloadable _ (ImportCycle ms)] ->
+          map moduleText ms
+            @?= ["test.modules.LoopA", "test.modules.LoopB", "test.modules.LoopA"]
+        other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , testCase "an import that is not on disc names the file it looked for" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <- loadProofFile s0 "test/modules/Absent.thena"
+      case trouble of
+        [Unreadable p _] -> p @?= "test/modules/Nowhere.thena"
+        other            -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- **All or none across the whole closure**, which is
+    -- 'loadProofItemsConsulting''s own bargain widened: @Broken@ imports @Bit@
+    -- and then fails, and what must not survive is @Bit@.
+    testCase "a closure whose last module fails declares nothing at all" $ do
+      (s0, _) <- startingSession
+      (s1, out, _) <- loadProofFile s0 "test/modules/Broken.thena"
+      assertBool ("it loaded: " ++ show (map (renderResponse s1) out))
+                 (null [ () | ProofLoaded {} <- out ])
+      assertBool "Bit went back with it"
+                 (not (isDeclared (declaredAs "Bit") (globals (machineOf s1))))
+      assertBool "and so did the record of it"
+                 (not (moduleLoaded (named' "test.modules.Bit") s1))
+
+  , -- 'ConsultsUnread''s twin: the pure door cannot read a file, so it refuses
+    -- rather than elaborating a module whose dependencies are not in.
+    testCase "the door with no IO refuses a module that imports" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (unlines ["module M where", "import test.modules.Bit"]) of
+        (_, ImportsUnread ms) -> map moduleText ms @?= ["test.modules.Bit"]
+        (_, other)            -> assertFailure (show other)
+
+  , -- **Written inside a block and still the module's**, for 'moduleConsults''
+    -- reason: what an import says is which modules this one depends on, and a
+    -- namespace does not change that.
+    testCase "an import inside a namespace block is still the module's" $
+      importsOf (unlines [ "module M where"
+                         , "namespace A where"
+                         , "  import test.modules.Bit" ])
+        @?= ["test.modules.Bit"]
+
+  , testCase "and the written order is kept" $
+      importsOf (unlines [ "module M where"
+                         , "import test.modules.Bit"
+                         , "import test.modules.Pair" ])
+        @?= ["test.modules.Bit", "test.modules.Pair"]
+  ]
+  where
+    -- A module name from text, for a test that knows the text is one.
+    named' t = case moduleName t of
+      Just m  -> m
+      Nothing -> error ("not a module name: " ++ t)
+
+    importsOf src = case parseSurfaceModule src of
+      Right (_, items) -> map moduleText (moduleImports items)
+      Left e           -> error (show e)
 
 -- --------------------------------------------------------------------------
 -- @namespace@ (MS10 phase 254)

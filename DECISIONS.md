@@ -43,7 +43,7 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | a tagged literal's fence | `` ` `` |
 | spell nothing, and stay reserved | `⌜` `⌝` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -555,7 +555,9 @@ warning: in the grammar of LC, production abs: T is read as a terminal.
 
 ### Surface files are imported; rule bases are consulted
 
-*Decided 2026-11-03. Not built — MS11, with one piece pulled into MS10.*
+*Decided 2026-11-03. `consult` is built — MS11 phases 271 and 273 — and `import`
+loads what it names, MS11 phase 274. What an importer may then **write** is not
+settled: see `exporting` and `public` below.*
 
 Two acts, and which one you write depends on what you are reaching for, not on
 which language you are writing in. **Both are writable in a surface file, in an
@@ -583,6 +585,31 @@ republish what they bring in: *you get whatever the thing you imported got.*
 Without `public`, you don't — if A consults X and B imports A, B's own proofs do
 not see X's rules, and B asking for them is one explicit line that fails loudly if
 it is missing.
+
+**What `import` does today is load.** The module it names is elaborated before the
+file that imports it, so a file states its dependencies instead of relying on the
+session having loaded them in the right order:
+
+```
+module Both where
+
+import Stlc.Terms        -- elaborated first, and once however often it is reached
+import Stlc.Lemmata
+
+open Stlc
+```
+
+**A module is loaded once however many files reach it**, so a diamond costs
+nothing, and **a cycle is refused** and names the path the walk took. **A load is
+all or nothing across the whole graph**: if the file you asked for fails, the
+modules it pulled in go back with it, so a failed load never leaves you holding
+half an import graph.
+
+**Which of an imported module's names you may then write is not narrowed yet.**
+Everything an imported module declared is reachable, because visibility —
+`exporting ( … )` on the header, `private` per declaration, and `public import` for
+transitivity — is one mechanism and none of it is built. **So an import today is
+wide**, and the narrowing is scheduled rather than decided afresh.
 
 ### A rule file writes its own `open` lines
 
