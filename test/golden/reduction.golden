@@ -1,9 +1,11 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> :whnf succ zero
 succ zero
-thena spine> claim "h" ⌜ Nat ⌝
-thena spine> claim "g" ⌜ (\ (_ : Nat) -> Nat) h ⌝
+thena spine> claim "h" core`Nat`
+thena spine> claim "g" core`(\ (_ : Nat) -> Nat) h`
 thena spine> back
 thena spine> cross type
 thena core> :where
@@ -31,7 +33,7 @@ thena core> :show
   goal
 thena core> back
 thena spine> back
-thena spine> claim "n" ⌜ Nat ⌝
+thena spine> claim "n" core`Nat`
 thena spine> :whnf elim Nat () (\ (_ : Nat) -> Nat) (zero succ) () n
 elim Nat () (λ (_ : Nat) -> Nat) (zero succ) () n
 thena spine> :whnf elim Nat () (\ (_ : Nat) -> Nat) (zero) () n

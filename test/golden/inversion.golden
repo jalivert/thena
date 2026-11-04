@@ -1,18 +1,30 @@
 thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
+thena spine> open Eq
+opened Eq
 thena spine> data Unit : Type where { unit : Unit }
 declared Unit
+thena spine> open Unit
+opened Unit
 thena spine> data Empty : Type where { }
 declared Empty
+thena spine> open Empty
+opened Empty
 thena spine> data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }
 declared And
+thena spine> open And
+opened And
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> data Ev : Nat -> Type₀ where { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }
 declared Ev
-thena spine> :whnf NoConfusionNat zero (succ zero)
+thena spine> open Ev
+opened Ev
+thena spine> :whnf Nat.lemmata.NoConfusion zero (succ zero)
 Empty {0}
-thena spine> :whnf NoConfusionNat (succ (succ zero)) (succ zero)
+thena spine> :whnf Nat.lemmata.NoConfusion (succ (succ zero)) (succ zero)
 Eq {0} Nat (succ zero) zero
 thena spine> :theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty {0}
 proving oneNotEven : Ev (succ zero) -> Empty {0}
@@ -20,7 +32,7 @@ thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
-thena spine> eliminate-core ⌜ p ⌝
+thena spine> eliminate-core core`p`
 subgoals: evZeroMethod, evSSMethod
 thena spine> :where
 focus
@@ -35,10 +47,10 @@ type
   Empty {0}
 thena spine> back
 thena spine> back
-thena spine> try-core ⌜ \ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q ⌝
+thena spine> try-core core`\ (q : Eq {0} Nat zero (succ zero)) -> Nat.lemmata.noConfusion zero (succ zero) q`
 thena spine> solve
 thena spine> along
-thena spine> try-core ⌜ \ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q) ⌝
+thena spine> try-core core`\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> Nat.lemmata.noConfusion (succ n) zero (Nat.lemmata.noConfusion (succ (succ n)) (succ zero) q)`
 thena spine> solve
 thena spine> along
 thena spine> solve
@@ -51,5 +63,5 @@ thena spine> qed
 oneNotEven : Ev (succ zero) -> Empty {0}   ∎
 thena spine> :show oneNotEven
 oneNotEven : Ev (succ zero) -> Empty {0}
-oneNotEven = let oneNotEven = λ (p : Ev (succ zero)) -> let evZeroMethod = λ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q : Eq {0} Nat zero (succ zero) -> Empty {0} in let evSSMethod = λ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q) : ∀ (n : Nat) -> Ev n -> (Eq {0} Nat n (succ zero) -> Empty {0}) -> Eq {0} Nat (succ (succ n)) (succ zero) -> Empty {0} in let oneNotEven1 = (elim Ev () (λ (x : Nat) (target : Ev x) -> Eq {0} Nat x (succ zero) -> Empty {0}) (evZeroMethod evSSMethod) ((succ zero)) p) (refl {0} Nat (succ zero)) : Empty {0} in oneNotEven1 : Ev (succ zero) -> Empty {0} in oneNotEven
+oneNotEven = let oneNotEven = λ (p : Ev (succ zero)) -> let evZeroMethod = λ (q : Eq {0} Nat zero (succ zero)) -> Nat.lemmata.noConfusion zero (succ zero) q : Eq {0} Nat zero (succ zero) -> Empty {0} in let evSSMethod = λ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> Nat.lemmata.noConfusion (succ n) zero (Nat.lemmata.noConfusion (succ (succ n)) (succ zero) q) : ∀ (n : Nat) -> Ev n -> (Eq {0} Nat n (succ zero) -> Empty {0}) -> Eq {0} Nat (succ (succ n)) (succ zero) -> Empty {0} in let oneNotEven1 = (elim Ev () (λ (x : Nat) (target : Ev x) -> Eq {0} Nat x (succ zero) -> Empty {0}) (evZeroMethod evSSMethod) ((succ zero)) p) (refl {0} Nat (succ zero)) : Empty {0} in oneNotEven1 : Ev (succ zero) -> Empty {0} in oneNotEven
 thena spine> :quit

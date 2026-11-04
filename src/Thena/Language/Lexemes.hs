@@ -15,6 +15,7 @@
 -- "Thena.Language.BuiltinTests" re-run, not rewritten.
 module Thena.Language.Lexemes
   ( identRegex
+  , qualifiedIdentRegex
   , numberRegex
   , stringRegex
   , charRegex
@@ -26,6 +27,16 @@ import Thena.Language.Regex (Regex, parseRegex)
 
 identRegex :: Regex
 identRegex = regex "[a-zA-Z_][a-zA-Z0-9_'-]*"
+
+-- | A qualified name (MS10) — @Nat.elim@, @A.B.c@, and a bare word too.
+--
+-- **One scan and not an 'identRegex' with a @lit \".\"@ between two of them**,
+-- because the path is __glued__: the running lexer makes @Nat.elim@ a single
+-- token, so @x . x@ is not a name there, and a grammar that spelled the dot as
+-- a literal would accept it — an advising grammar wider than the parser that
+-- runs, which is the one thing @.claude\/RULINGS.md@ forbids of these.
+qualifiedIdentRegex :: Regex
+qualifiedIdentRegex = regex "[a-zA-Z_][a-zA-Z0-9_'-]*(\\.[a-zA-Z_][a-zA-Z0-9_'-]*)*"
 
 numberRegex :: Regex
 numberRegex = regex "-?[0-9]+"

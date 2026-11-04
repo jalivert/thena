@@ -20,8 +20,9 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
-import Thena.Core.Term (GlobalName (..))
-import Thena.Errors (FailReason (..))
+import Thena.Core.Term (Core (..), rootName)
+import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..), Warning (..))
+import Thena.Declared (declaredAs, named)
 import Thena.Driver
   ( LoadError (..)
   , Loaded (..)
@@ -41,7 +42,7 @@ import Thena.Driver
   )
 import Thena.Engine (Development, Machine (..), development)
 import Thena.Files (rulesPath)
-import Thena.Core.Term (Core, substLevelsIn)
+import Thena.Core.Term (substLevelsIn)
 import Thena.Global.Env
   ( Definition (..)
   , lookupDefinition
@@ -51,8 +52,10 @@ import Thena.Global.Env
   , isDeclared
   , lookupInductive
   )
+import Thena.Global.Declare (DeclareError (..))
 import Thena.Files (loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderTrouble, renderResponse, renderCore, renderEliminator)
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
@@ -71,7 +74,332 @@ tests =
     , testGroup "three kinds behind one word (phase 43)" kindTests
     , testGroup "a proof module (phase 43)" moduleTests
     , testGroup "MS4 tier 0 (phase 43)" tierTests
+    , testGroup "a namespace block (MS10 phase 254)" namespaceTests
+    , testGroup "the five forms of open (MS10 phase 254)" openTests
+    , testGroup "shadowing is announced (MS10 phase 264)" shadowingTests
     ]
+
+-- --------------------------------------------------------------------------
+-- The forms of @open@ (MS10 phase 254)
+-- --------------------------------------------------------------------------
+
+-- | His ruling of 2026-10-30 gives five, and each is asserted by what it keeps
+-- OUT as well as by what it lets in.
+--
+-- **A form that let everything in would pass a test that only checked what it
+-- admits**, which is the whole risk here: @open X ( a )@ and @open X@ differ
+-- only in what they refuse.
+openTests :: [TestTree]
+openTests =
+  [ testCase "open X Y Z opens each of them" $ loads twoNamespaces
+
+  , testCase "open X ( a b ) admits those words" $ loads selective
+  , testCase "and keeps the others out" $ notInScope selectiveMisses "succ"
+
+  , testCase "open X hiding ( a ) admits the rest" $ loads hidingSome
+  , testCase "and keeps that one out" $ notInScope hidingMisses "succ"
+
+  , testCase "open X renaming ( a -> b ) admits it as b" $ loads renamingOne
+  , -- **The old spelling goes**, as Agda's renaming does — which is what makes
+    -- it the tie-break for two languages sharing a letter rather than a second
+    -- way in.
+    testCase "and the word it renamed is no longer in scope" $
+      notInScope renamingMisses "succ"
+
+  , -- **One declaration is the signature and the equation**, because that is
+    -- what a declaration is in this language.
+    testCase "open X in reaches the declaration under it, pair and all" $
+      loads localOpen
+  , testCase "and stops at the end of it" $ notInScope localOpenEnds "succ"
+  ]
+  where
+    loads src = do
+      (s0, _) <- startingSession
+      case loadProofSource s0 src of
+        (_, ProofLoaded {}) -> pure ()
+        (_, other)          -> assertFailure (show other)
+
+    notInScope src w = do
+      (s0, _) <- startingSession
+      case loadProofSource s0 src of
+        (_, Ran _ _ (Halted (CannotRead (ResolveFailed (NotInScope x)))))
+          | x == w -> pure ()
+        (_, Ran _ _ (Halted r)) -> assertFailure (show r)
+        (_, other)              -> assertFailure (show other)
+
+    nat =
+      "data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \  succ : Nat -> Nat\n"
+
+    header o = "module O where\n" ++ nat ++ o
+
+    twoNamespaces =
+      header "data Bit : Type\8320 where\n\
+             \  off : Bit\n\
+             \open Nat Bit\n\
+             \both : Bit.Bit\n\
+             \both = off\n"
+
+    selective =
+      header "open Nat ( zero )\n\
+             \only : Nat.Nat\n\
+             \only = zero\n"
+
+    selectiveMisses =
+      header "open Nat ( zero )\n\
+             \bad : Nat.Nat\n\
+             \bad = succ zero\n"
+
+    hidingSome =
+      header "open Nat hiding ( succ )\n\
+             \only : Nat.Nat\n\
+             \only = zero\n"
+
+    hidingMisses =
+      header "open Nat hiding ( succ )\n\
+             \bad : Nat.Nat\n\
+             \bad = succ zero\n"
+
+    renamingOne =
+      header "open Nat renaming ( succ -> s )\n\
+             \good : Nat.Nat\n\
+             \good = s Nat.zero\n"
+
+    renamingMisses =
+      header "open Nat renaming ( succ -> s )\n\
+             \bad : Nat.Nat\n\
+             \bad = succ Nat.zero\n"
+
+    localOpen =
+      header "open Nat in one : Nat.Nat\n\
+             \one = succ zero\n"
+
+    localOpenEnds =
+      header "open Nat in one : Nat.Nat\n\
+             \one = succ zero\n\
+             \after : Nat.Nat\n\
+             \after = succ Nat.zero\n"
+
+-- --------------------------------------------------------------------------
+-- @namespace@ (MS10 phase 254)
+-- --------------------------------------------------------------------------
+
+-- | A namespace is a prefix, and the walk out of one.
+--
+-- **Both halves are asserted on the same module**, because they are two sides
+-- of one thing: a declaration goes inside the namespace, and a name written
+-- inside it is looked for there first. A module that declared correctly but
+-- resolved at the root would not load at all, and one that resolved correctly
+-- while declaring at the root would load and declare the wrong keys — so each
+-- test says which it is checking.
+namespaceTests :: [TestTree]
+namespaceTests =
+  [ testCase "it puts what it declares inside itself" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 namespacedModule of
+        (s1, ProofLoaded {}) -> do
+          let env = globals (machineOf s1)
+          isDeclared (named "A.Nat.Nat") env @?= True
+          isDeclared (named "A.Nat.zero") env @?= True
+          isJust (lookupDefinition (named "A.one") env) @?= True
+          -- **Nothing lands at the root**, which is the half a module that
+          -- resolved correctly would still get wrong.
+          isDeclared (named "Nat.Nat") env @?= False
+        (_, other) -> assertFailure (show other)
+
+  , -- @one = Nat.succ Nat.zero@ is written inside @A@ with no @open@, so it
+    -- loads only because the walk tried @A.Nat.succ@.
+    testCase "and a name written inside it is tried there first" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 namespacedModule of
+        (_, ProofLoaded _ ds _ _) -> ds @?= ["A.Nat", "A.one", "A.two"]
+        (_, other) -> assertFailure (show other)
+
+  , testCase "nesting is a longer prefix and needs nothing of its own" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 nestedModule of
+        (s1, ProofLoaded {}) -> do
+          let env = globals (machineOf s1)
+          isDeclared (named "A.B.Leaf.Leaf") env @?= True
+          isJust (lookupDefinition (named "A.B.inner") env) @?= True
+          isJust (lookupDefinition (named "A.outer") env) @?= True
+        (_, other) -> assertFailure (show other)
+
+  , -- **The whole point of the walk being ordered**: @Nat.Nat@ is a name at the
+    -- root /and/ inside @A@, and inside @A@ it means the inner one. His ruling
+    -- of 2026-10-30 — nearer wins outright, where two @open@s would be refused.
+    testCase "a nearer namespace wins over the root outright" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 shadowingModule of
+        (s1, ProofLoaded {}) -> do
+          let env = globals (machineOf s1)
+          -- @inner@'s type is written @Nat.Nat@ inside @A@, so it is @A@'s.
+          case lookupDefinition (named "A.inner") env of
+            Just d  -> definitionType d @?= Canonical (named "A.Nat.Nat") [] []
+            Nothing -> assertFailure "A.inner was not declared"
+          -- The same text outside the block is the root's, unchanged.
+          case lookupDefinition (named "outer") env of
+            Just d  -> definitionType d @?= Canonical (named "Nat.Nat") [] []
+            Nothing -> assertFailure "outer was not declared"
+        (_, other) -> assertFailure (show other)
+
+  , -- A namespace's effect ends with its block, which is what makes it a
+    -- declaration rather than a mode: the word after it is at the root again.
+    testCase "and the block is where its effect ends" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 escapingModule of
+        (_, Ran _ _ (Halted (CannotRead _))) -> pure ()
+        (_, other) -> assertFailure (show other)
+  ]
+  where
+    namespacedModule =
+      "module NS where\n\
+      \namespace A where\n\
+      \  data Nat : Type\8320 where\n\
+      \    zero : Nat\n\
+      \    succ : Nat -> Nat\n\
+      \\n\
+      \  one : Nat.Nat\n\
+      \  one = Nat.succ Nat.zero\n\
+      \\n\
+      \  two : A.Nat.Nat\n\
+      \  two = Nat.succ one\n"
+
+    nestedModule =
+      "module NS where\n\
+      \namespace A where\n\
+      \  namespace B where\n\
+      \    data Leaf : Type\8320 where\n\
+      \      leaf : Leaf\n\
+      \\n\
+      \    inner : Leaf.Leaf\n\
+      \    inner = Leaf.leaf\n\
+      \\n\
+      \  outer : B.Leaf.Leaf\n\
+      \  outer = B.Leaf.leaf\n"
+
+    shadowingModule =
+      "module NS where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \\n\
+      \namespace A where\n\
+      \  data Nat : Type\8320 where\n\
+      \    one : Nat\n\
+      \\n\
+      \  inner : Nat.Nat\n\
+      \  inner = Nat.one\n\
+      \\n\
+      \outer : Nat.Nat\n\
+      \outer = Nat.zero\n"
+
+    -- @A@'s @only@ is reached from inside the block and not from after it.
+    escapingModule =
+      "module NS where\n\
+      \namespace A where\n\
+      \  data Leaf : Type\8320 where\n\
+      \    leaf : Leaf\n\
+      \\n\
+      \escaped : Leaf.Leaf\n\
+      \escaped = Leaf.leaf\n"
+
+-- --------------------------------------------------------------------------
+-- Shadowing (MS10 phase 264)
+-- --------------------------------------------------------------------------
+
+-- | A word that changes what it means, and the module door it changes at.
+--
+-- **His ruling of 2026-11-03 accepted the shadowing**, so what is asserted here
+-- is the announcement rather than a refusal: both names, written in full,
+-- because in the case that matters their short spellings are the same word.
+--
+-- **A module is where the @data@ door can be reached at all**, which is why
+-- these are here and not in "Thena.SessionTests": a datatype's name is a bare
+-- word at the @data@ line, so only a @namespace@ can put one at a path that
+-- another declaration's name can take.
+shadowingTests :: [TestTree]
+shadowingTests =
+  [ -- @Nat.zero@ is the inner datatype's alias until @data Nat@ declares a
+    -- constructor of exactly that name. **The former can never do this** —
+    -- everything a @data@ block declares lands inside its own namespace — so a
+    -- constructor is the only name at this door that can take a word.
+    testCase "a constructor that takes a datatype's word says so" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 constructorTakesTheWord of
+        (_, ProofLoaded _ _ _ ws) ->
+          ws @?= [NameShadows (named "Nat.zero") (named "Nat.zero.zero")]
+        (_, other) -> assertFailure (show other)
+
+  , -- **Once, not twice**: a constructor is installed as the constant it is and
+    -- again as the wrapper its name means when written, so the keys the
+    -- environment gained name it twice and the word it took is one word.
+    testCase "and says it once, however many keys the name added" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 constructorTakesTheWord of
+        (_, ProofLoaded _ _ _ ws) -> length ws @?= 1
+        (_, other) -> assertFailure (show other)
+
+  , -- A module's theorem comes in by the definition door, not by @:theorem@,
+    -- so this is the half 'Thena.SessionTests' cannot reach.
+    testCase "a theorem in a module says so as it lands" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 theoremTakesTheWord of
+        (_, ProofLoaded _ _ _ ws) ->
+          ws @?= [NameShadows (named "Nat") (named "Nat.Nat")]
+        (_, other) -> assertFailure (show other)
+
+  , -- **The other direction says nothing, and it is right not to**: a @data@
+    -- block puts everything it declares inside its own namespace, so a
+    -- datatype arriving under a word a definition already holds takes no word
+    -- from anyone — @Foo@ is still the definition and the datatype is
+    -- @Foo.Foo@, which is how the load reports it.
+    --
+    -- **What this pins is that the block answers its OWN word with the
+    -- datatype being declared**: @ff : Foo@ is written where a definition
+    -- called @Foo@ is in scope, and it still means the datatype. **The @data@
+    -- LINE at the prompt refuses the same text** — "Thena.SessionTests",
+    -- /the prompt refuses a constructor a module accepts/, has that divergence
+    -- and the item it is written in.
+    testCase "a data block answers its own word with the datatype, not a definition" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 datatypeUnderATakenWord of
+        (s1, ProofLoaded _ _ _ ws) -> do
+          let env = globals (machineOf s1)
+          -- The declaration was accepted at all, which 'targetIndices' only
+          -- permits when the constructor's target IS the family being
+          -- declared, so this is the whole of the claim.
+          isDeclared (named "Foo.Foo") env @?= True
+          isDeclared (named "Foo.ff") env @?= True
+          isJust (lookupDefinition (named "Foo") env) @?= True
+          ws @?= []
+        (_, other) -> assertFailure (show other)
+  ]
+  where
+    constructorTakesTheWord =
+      "module Shadow where\n\
+      \namespace Nat where\n\
+      \  data zero : Type\8320 where\n\
+      \    z : zero\n\
+      \\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n"
+
+    theoremTakesTheWord =
+      "module Shadow where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \\n\
+      \Nat : Type\8321\n\
+      \Nat = Type\8320\n"
+
+    datatypeUnderATakenWord =
+      "module Shadow where\n\
+      \Foo : Type\8321\n\
+      \Foo = Type\8320\n\
+      \\n\
+      \data Foo : Type\8320 where\n\
+      \  ff : Foo\n"
 
 -- --------------------------------------------------------------------------
 -- The prelude
@@ -87,8 +415,8 @@ preludeTests =
       (s, _) <- startingSession
       let env = globals (machineOf s)
       sequence_
-        [ assertBool (n ++ " is not declared") (isDeclared (GlobalName n) env)
-        | n <- ["Eq", "refl", "Unit", "unit", "Empty"]
+        [ assertBool (n ++ " is not declared") (isDeclared (named n) env)
+        | n <- ["Eq.Eq", "Eq.refl", "Unit.Unit", "Unit.unit", "Empty.Empty"]
         ]
 
     -- §9's phase-11 deliverable, in full: "Eq's generated eliminator is J and
@@ -97,7 +425,7 @@ preludeTests =
       (s, _) <- startingSession
       let env = globals (machineOf s)
           n0  = names (machineOf s)
-      case lookupInductive (GlobalName "Eq") env of
+      case lookupInductive (declaredAs "Eq") env of
         Nothing -> assertFailure "Eq is not declared"
         Just d  ->
           -- **The indices are @_@ and not @x@** (MS4 phase 54): the prelude is
@@ -110,10 +438,10 @@ preludeTests =
           -- eliminator is a scheme now, and what a use site sees is the
           -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
           -- which is a counter value and no business of this assertion.
-          renderEliminator (Rendering [] n0) (GlobalName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
-            @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq {0} A _ _1 -> Type₀) \
-                  \-> (∀ (a : A) -> P a a (refl {0} A a)) \
-                  \-> ∀ (_ : A) (_1 : A) (target : Eq {0} A _ _1) -> P _ _1 target"
+          renderEliminator (rendering [] n0) (declaredAs "Eq") (atZero d (fst (eliminatorType d LZero n0)))
+            @?= [ "elim Eq.Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq.Eq {0} A _ _1 -> Type₀) \
+                  \-> (∀ (a : A) -> P a a (Eq.refl {0} A a)) \
+                  \-> ∀ (_ : A) (_1 : A) (target : Eq.Eq {0} A _ _1) -> P _ _1 target"
                 ]
 
     -- "and can be used": eliminating a 'refl' must actually fire. The motive is
@@ -127,7 +455,7 @@ preludeTests =
         ]
         (\l -> do
             loadedError l @?= Nothing
-            renderedLast l @?= Just "unit {0}")
+            renderedLast l @?= Just "Unit.unit {0}")
 
     -- The real @repl@ has the prelude in scope and 'transcript' does not; this
     -- is the difference, made visible.
@@ -160,7 +488,7 @@ scriptTests =
     -- an op that asks is answered by the next line of the file, exactly as it
     -- would be by the next line typed (§7.5).
   , testCase "a question is answered by the next line" $
-      let l = sourceWithRules ["assume ⌜ Type₀ ⌝", "A"]
+      let l = sourceWithRules ["assume core`Type₀`", "A"]
        in do
             loadedError l @?= Nothing
             length (loadedResponses l) @?= 2
@@ -240,11 +568,11 @@ failureTests =
   , testCase "a qed the kernel refuses stops it" $
       let l = sourceWithRules
                 [ ":theorem lift : ∀ (A : Type) -> Type"
-                , "try-core ⌜ \\ (A : Type) -> A ⌝"
+                , "try-core core`\\ (A : Type) -> A`"
                 , "solve"
                 , "qed"
                 , ":theorem bad : Type₁ -> Type₀"
-                , "try-core ⌜ lift {1 0} ⌝"
+                , "try-core core`lift {1 0}`"
                 , "solve"
                 , "qed"
                 , "data A0 : Type₀ where { a0 : A0 }"
@@ -260,8 +588,26 @@ failureTests =
             -- what ran before it still ran
             declared "A0" l @?= True
 
+    -- **AND THE OTHER TWO KINDS, WHICH WERE SILENTLY DROPPED** (MS10 phase
+    -- 268). The case matched a script alone, so a @:load@ naming a proof
+    -- module or a rule base ran to a response nothing followed: the line did
+    -- nothing, said nothing, and the load went on. Found while measuring
+    -- `~txbz5` through a script, where a @:load@ of an example looked like a
+    -- printer ignoring its scope.
+  , testCase "a nested :load of a proof module is refused too" $
+      let l = source ["data A0 : Type\8320 where { a0 : A0 }", ":load somewhere.thena"]
+       in do
+            loadedError l @?= Just (NestedLoad 2)
+            declared "A0" l @?= True
+
+  , testCase "and one of a rule base" $
+      let l = source ["data A0 : Type\8320 where { a0 : A0 }", ":load somewhere.thena.rules"]
+       in do
+            loadedError l @?= Just (NestedLoad 2)
+            declared "A0" l @?= True
+
   , testCase "a file that ends while something is asking says so" $
-      loadedError (sourceWithRules ["assume ⌜ Type₀ ⌝"]) @?= Just (UnansweredQuestion 1)
+      loadedError (sourceWithRules ["assume core`Type₀`"]) @?= Just (UnansweredQuestion 1)
 
     -- **And it does not leave the session waiting** (MS7 phase 123). The
     -- pending question used to be an argument the caller threaded, and the
@@ -270,7 +616,7 @@ failureTests =
     -- next line typed at the prompt would be read as the answer to a question
     -- nobody was shown.
   , testCase "and the session it hands back is not still asking" $
-      pendingQuestion (loadedSession (sourceWithRules ["assume ⌜ Type₀ ⌝"])) @?= Nothing
+      pendingQuestion (loadedSession (sourceWithRules ["assume core`Type₀`"])) @?= Nothing
 
     -- **The ruling this phase rests on, asserted** — HIS, 2026-09-28: /"Feels
     -- like a question and answer is an atomic unit."/ So 'pendingQuestion' is
@@ -281,7 +627,7 @@ failureTests =
     -- clears the question as it finishes (the test above) and a mid-file
     -- state is exactly what this needs to see.
   , testCase "asking lives on the session, and one :undo takes back the pair" $ do
-      let (s1, _) = oneLine withRules "assume ⌜ Type₀ ⌝"
+      let (s1, _) = oneLine withRules "assume core`Type₀`"
           (s2, _) = oneLine s1 "x"
           (s3, _) = oneLine s2 ":undo"
       isJust (pendingQuestion s1) @?= True   -- the line asked, and the session says so
@@ -305,7 +651,7 @@ source = loadSource newSession . unlines
 
 -- | The same, with the standard base installed.
 --
--- **The asking form of @assume@ needs it** (MS5 phase 62b): @assume ⌜ T ⌝@ is a
+-- **The asking form of @assume@ needs it** (MS5 phase 62b): @assume core`T`@ is a
 -- rule now, not a shape the driver recognised, so a session with no base has
 -- nothing to call — the same as for @attack@ or @intro@ since phase 23b.
 sourceWithRules :: [String] -> Loaded
@@ -315,8 +661,12 @@ sourceWithRules = loadSource withRules . unlines
 afterLines :: Session -> [String] -> (Loaded -> IO ()) -> IO ()
 afterLines s ls k = k (loadSource s (unlines ls))
 
+-- | Is this DATATYPE declared — every caller below asks about one, and a
+-- datatype is @D.D@ since MS10 phase 243, so the lookup is 'declaredAs' and not
+-- the root word. Asking at the root answers 'False' for a datatype that is
+-- perfectly well declared, which reads as a load that did nothing.
 declared :: String -> Loaded -> Bool
-declared n l = isDeclared (GlobalName n) (globals (machineOf (loadedSession l)))
+declared n l = isDeclared (declaredAs n) (globals (machineOf (loadedSession l)))
 
 -- | The last line's rendered term, printed as the REPL would print it.
 --
@@ -326,7 +676,7 @@ declared n l = isDeclared (GlobalName n) (globals (machineOf (loadedSession l)))
 -- claims is that J computes, and the printed answer is the honest witness.
 renderedLast :: Loaded -> Maybe String
 renderedLast l = case reverse (loadedResponses l) of
-  Rendered t : _ -> Just (renderCore (Rendering [] (names (machineOf (loadedSession l)))) [] t)
+  Rendered t : _ -> Just (renderCore (rendering [] (names (machineOf (loadedSession l)))) [] t)
   _              -> Nothing
 
 -- | A datatype's own level parameters, all instantiated at zero.
@@ -395,6 +745,7 @@ dependentModule =
     , ""
     , "data Chain (A : Type\8320) : A -> A -> Type\8320 where"
     , "  link : forall (x : A) (y : A) (z : A) (p : Chain A x y) (q : Chain A y z) -> Chain A x z"
+    , "open Chain"
     ]
 
 moduleTests :: [TestTree]
@@ -423,8 +774,8 @@ moduleTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 dependentModule
           g = globals (machineOf s1)
-      map (\n -> isDeclared (GlobalName n) g)
-          ["Chain", "NoConfusionChain", "noConfusionChain"]
+      map (\n -> isDeclared (named n) g)
+          ["Chain.Chain", "Chain.lemmata.NoConfusion", "Chain.lemmata.noConfusion"]
         @?= [True, True, True]
 
   , testCase "a load with nothing to say warns about nothing" $ do
@@ -437,8 +788,26 @@ moduleTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 natModule
           g = globals (machineOf s1)
-      map (\n -> isDeclared (GlobalName n) g) ["Nat", "zero", "succ", "one"]
+      map (\n -> isDeclared (named n) g)
+          ["Nat.Nat", "Nat.zero", "Nat.succ", "one"]
         @?= [True, True, True, True]
+
+  , -- **A declaration named with a path is admitted into that namespace**
+    -- (MS10 phase 243), which is what the generated substitution family needs:
+    -- it is written as surface source and goes through this very path.
+    testCase "a declaration written with a path declares into that namespace" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 qualifiedModule of
+        (_, ProofLoaded nm ds _ _) -> (nm, ds) @?= ("Q", ["Nat", "Nat.one", "two"])
+        (_, other) -> assertFailure (show other)
+
+  , -- **The base word is not also declared.** @define-global@ read its name as
+    -- text and rooted it until this phase, so a path was silently dropped.
+    testCase "and only the qualified name is in the environment" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 qualifiedModule
+          g = globals (machineOf s1)
+      map (\n -> isDeclared (named n) g) ["Nat.one", "one"] @?= [True, False]
 
   , -- **Quiet on success, loud on failure** — his call, 2026-09-02. The success
     -- case above carries no op messages at all; this one keeps them, because
@@ -480,7 +849,7 @@ moduleTests =
   , testCase "and what it declared is really there" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 blockModule
-      isDeclared (GlobalName "one") (globals (machineOf s1)) @?= True
+      isDeclared (rootName "one") (globals (machineOf s1)) @?= True
 
   , -- **Resolution happens where the block runs** (MS6 phase 104b), so a block
     -- whose op is given the wrong operands stops the run rather than refusing
@@ -522,7 +891,29 @@ moduleTests =
     testCase "and the module it had already declared is rolled back" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 mistypedBlockModule
-      isDeclared (GlobalName "Nat") (globals (machineOf s1)) @?= False
+      isDeclared (rootName "Nat") (globals (machineOf s1)) @?= False
+
+  , -- **A module that redeclares a name is refused for the name.**
+    -- It is the first thing a newcomer does — write @data Nat@, or copy an
+    -- @Eq@ out of an example — and until this was fixed what came back was a
+    -- sentence about a constructor's target, because the elaborated target of
+    -- an already-declared datatype is a saturated @Canonical@ former and
+    -- 'Thena.Global.Declare.targetIndices' read only the @Global@ spine.
+    testCase "a module redeclaring a prelude datatype is refused for the name" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 redeclaringModule of
+        (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= declaredAs "Unit"
+        (_, other) -> assertFailure (show other)
+
+  , -- **And the same holds with no prelude in it**: one module declaring the
+    -- same datatype twice. The second is refused for its name, which is what
+    -- says the first fix is about the shape of the target and not about where
+    -- the clashing declaration came from.
+    testCase "and the same datatype twice in one module is refused the same way" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 twiceDeclaredModule of
+        (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= declaredAs "Widget"
+        (_, other) -> assertFailure (show other)
 
   , -- **Everything goes back except the fresh counter**, which must go forward
     -- or a name the user has seen would be reissued (MS2 closeout 4f) — and a
@@ -586,11 +977,28 @@ moduleTests =
         (_, other)    -> assertFailure (show other)
   ]
   where
+    -- **@two@ names @Nat.one@ to reach it**, so this module says both halves:
+    -- a qualified declaration is installed, and a qualified name written in a
+    -- term afterwards finds it (phase 241).
+    qualifiedModule =
+      "module Q where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \  succ : Nat -> Nat\n\
+      \open Nat\n\
+      \\n\
+      \Nat.one : Nat\n\
+      \Nat.one = succ zero\n\
+      \\n\
+      \two : Nat\n\
+      \two = succ Nat.one\n"
+
     natModule =
       "module M where\n\
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \  succ : Nat -> Nat\n\
+      \open Nat\n\
       \\n\
       \one : Nat\n\
       \one = succ zero\n"
@@ -603,6 +1011,7 @@ moduleTests =
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \  succ : Nat -> Nat      -- successor\n\
+      \open Nat\n\
       \\n\
       \one : Nat\n\
       \one = succ zero\n"
@@ -612,6 +1021,7 @@ moduleTests =
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \  succ : Nat -> Nat\n\
+      \open Nat\n\
       \\n\
       \do\n\
       \  say \"here\"\n\
@@ -641,6 +1051,19 @@ moduleTests =
       \\n\
       \do\n\
       \  prim-try 3\n"
+
+    redeclaringModule =
+      "module M where\n\
+      \data Unit : Type\8320 where\n\
+      \  unit : Unit\n"
+
+    twiceDeclaredModule =
+      "module M where\n\
+      \data Widget : Type\8320 where\n\
+      \  mk : Widget\n\
+      \\n\
+      \data Widget : Type\8320 where\n\
+      \  mk2 : Widget\n"
 
     twoBlockModule =
       "module M where\n\
@@ -706,8 +1129,8 @@ tierTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 bothSpellings
           m = machineOf s1
-      case ( lookupDefinition (GlobalName "oneExplicit") (globals m)
-           , lookupDefinition (GlobalName "oneImplicit") (globals m)
+      case ( lookupDefinition (rootName "oneExplicit") (globals m)
+           , lookupDefinition (rootName "oneImplicit") (globals m)
            ) of
         (Just a, Just b) ->
           case convert (globals m) [] 0 (definitionBody a) (definitionBody b) of
@@ -716,8 +1139,8 @@ tierTests =
         _ -> assertFailure "one of the two was not admitted"
   ]
   where
-    renderResponse' s g = case lookupDefinition (GlobalName g) (globals (machineOf s)) of
-      Just d  -> [g ++ " = " ++ renderCore (Rendering [] 0) [] (definitionBody d)]
+    renderResponse' s g = case lookupDefinition (rootName g) (globals (machineOf s)) of
+      Just d  -> [g ++ " = " ++ renderCore (rendering [] 0) [] (definitionBody d)]
       Nothing -> [g ++ " is missing"]
 
     bothSpellings =
@@ -725,6 +1148,7 @@ tierTests =
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \  succ : Nat -> Nat\n\
+      \open Nat\n\
       \\n\
       \idE : forall (A : Type\8320) -> A -> A\n\
       \idE = \\ A x -> x\n\

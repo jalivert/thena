@@ -1,5 +1,7 @@
 declared Nat
+opened Nat
 declared Even
+opened Even
 Unit {0}
 Empty {0}
 Eq {0} Nat zero (succ zero)

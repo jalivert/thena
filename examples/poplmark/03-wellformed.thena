@@ -19,7 +19,7 @@
 -- **The inversion lemmas carry the result.** Eight of the proofs here invert a
 -- lookup or a `#` against one shape of context, and each used to eliminate the
 -- derivation under a motive taking an `Eq Ctx` that pinned the index, then
--- apply `noConfusionCtx` in every arm to get the equations back out.
+-- apply `Ctx.lemmata.noConfusion` in every arm to get the equations back out.
 -- `bindTyInBindTm` was eleven lines of that; it is now
 --
 --     case i of { bindTy-there-bindTm G0 W S0 w' S' p -> p }
@@ -57,6 +57,8 @@ data Or (A : Type₀) (B : Type₀) : Type₀ where
   orLeft  : forall (a : A) -> Or A B
   orRight : forall (b : B) -> Or A B
 
+open Or
+
 
 
 -- A type variable is not declared in Γ. Written by hand rather than as a
@@ -74,6 +76,8 @@ data notIn : String -> Ctx -> Type₀ where
   NI-bindTy : forall (X : String) (G : Ctx) (Y : String) (T : Ty)
                 (ne : Eq String X Y -> Empty) (p : notIn X G)
                 -> notIn X (bindTy G Y T)
+
+open notIn
 
 notation notIn (v : X) G -> v # G where
 
@@ -99,6 +103,8 @@ judgment ty = Γ ⊢ T ty where
              -------------------------------------------------------
              Γ ⊢ ( ∀ X <: T1 . T2 ) ty
 
+open ty
+
 -- A well-formed context: each entry's type is well-formed in what comes before
 -- it, and a type binding declares a name not already declared. No forward
 -- reference falls out of the first clause with no negation anywhere, because a
@@ -116,18 +122,20 @@ judgment ok = ⊢ Γ ok where
              -------------------------------------
              ⊢ Γ , X <: T ok
 
+open ok
+
 
 -- ---------------------------------------------------------------------------
--- Two literals differ, with no axiom: eqString computes on them and Eq carries
+-- Two literals differ, with no axiom: String.eq computes on them and Eq carries
 -- the fact from one name to the other. One per pair, because the proof needs
--- eqString to REDUCE — a version quantified over two names would be claiming
+-- String.eq to REDUCE — a version quantified over two names would be claiming
 -- that any two names differ.
 
 yNotX : Eq String "Y" "X" -> Empty
-yNotX = \ q -> substEq String (\ z -> isSame (eqString "Y" z)) "Y" "X" q unit
+yNotX = \ q -> substEq String (\ z -> isSame (String.eq "Y" z)) "Y" "X" q unit
 
 xNotY : Eq String "X" "Y" -> Empty
-xNotY = \ q -> substEq String (\ z -> isSame (eqString "X" z)) "X" "Y" q unit
+xNotY = \ q -> substEq String (\ z -> isSame (String.eq "X" z)) "X" "Y" q unit
 
 -- ---------------------------------------------------------------------------
 -- Derivations.

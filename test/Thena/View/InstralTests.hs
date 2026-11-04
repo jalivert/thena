@@ -19,6 +19,7 @@ import Thena.Driver
   )
 import Thena.Engine (Machine (..))
 import Thena.Instral.Ops (Instr, Rule (..))
+import Thena.Core.Term (wholePath)
 import Thena.View.Address (Address (..))
 import Thena.View.Core (Budget (..))
 import Thena.View.Instral
@@ -31,7 +32,8 @@ import Thena.View.Instral
   )
 import Thena.View.Redraw (redraw, redrawSurface)
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderInstr)
 import Thena.Rules (allRules)
 
@@ -64,8 +66,8 @@ mismatch instr
   | shown == drawn = Nothing
   | otherwise = Just ("printed: " <> shown <> "\n  drawn:   " <> drawn)
   where
-    shown = renderInstr (Rendering [] 500) [] instr
-    drawn = case displayBlock [] (Budget 200) [] [] 500 (Address []) Nothing [instr] of
+    shown = renderInstr (rendering [] 500) [] instr
+    drawn = case displayBlock wholePath [] (Budget 200) [] [] 500 (Address []) Nothing [instr] of
       [v] -> redrawStatement v
       vs  -> "wrong count: " <> show (length vs)
 
@@ -114,6 +116,10 @@ redrawSkeleton at sk = case sk of
 redrawValue :: ValueView -> String
 redrawValue v = case v of
   ValText s -> s
+  -- **A name redraws bare, where text redraws as what was inside the quotes**
+  -- (MS10). 'Thena.Render.renderValue' quotes a string and prints a name as its
+  -- dotted path, and this walker is what checks the two agree.
+  ValName s -> s
   ValInt k -> show k
   ValChar t -> t
   ValBool True -> "true"
@@ -126,7 +132,7 @@ redrawValue v = case v of
   -- 'Thena.Render.renderValue's own corners for a term operand, matched
   -- exactly rather than approximated — the one place this crossing compares
   -- a term's own text byte for byte.
-  ValTerm d -> "\8988" <> redraw d <> "\8989"
+  ValTerm d -> "core`" <> redraw d <> "`"
   -- 115h gave 'ValSurface' a real display; crossed the same way 'ValTerm'
   -- already is, against 'Thena.Render.renderValue's own corner for it.
   ValSurface sh -> "\8249" <> redrawSurface sh <> "\8250"

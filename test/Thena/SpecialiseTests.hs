@@ -7,9 +7,9 @@
 --
 -- @
 -- (elim Vec (A) (λ x t -> Eq Nat x (succ n) -> Vec A n)
---    ( (λ q -> absurdly (Vec A n) (noConfusionNat zero (succ n) q))
+--    ( (λ q -> absurdly (Vec A n) (Nat.lemmata.noConfusion zero (succ n) q))
 --      (λ n1 a v1 ih q ->
---         transport Nat (λ k -> Vec A k) n1 n (noConfusionNat (succ n1) (succ n) q) v1) )
+--         transport Nat (λ k -> Vec A k) n1 n (Nat.lemmata.noConfusion (succ n1) (succ n) q) v1) )
 --    ((succ n)) v) (refl Nat (succ n))
 -- @
 --
@@ -32,9 +32,11 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar)
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh, freeVars)
+import Thena.Core.Term (Core, Ident (..), fresh, freeVars)
 import Thena.Declared
-  ( eqNat
+  ( opensIn
+  , named
+  , eqNat
   , eqNatCounter
   , eqNatFinPack
   , eqNatFinPackCounter
@@ -62,7 +64,7 @@ import Thena.Global.Env
   , recursiveArgument
   )
 import Thena.Files (loadProofFile, startingSession)
-import Thena.Render (Rendering (..), renderCore, renderResponse)
+import Thena.Render (rendering, renderCore, renderResponse)
 import Thena.Tactics.Eliminate
   ( Elimination (..)
   , MethodShape (..)
@@ -114,13 +116,11 @@ vtailTests =
     -- The methods as the user is handed them, so that what the two cases below
     -- change is visible here rather than taken on trust.
   , testCase "nil's method, before: an equation that cannot hold" $
-      shown vecContext (methodOf 0) @?= "Eq {0} Nat zero (succ n) -> Vec A n"
+      shown vecContext (methodOf 0) @?= "Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ n) -> Vec.Vec A n"
 
   , testCase "cons's, before: a binder, a vector at it, and an equation" $
       shown vecContext (methodOf 1)
-        @?= "\8704 (n1 : Nat) -> A -> Vec A n1 -> \
-            \(Eq {0} Nat n1 (succ n) -> Vec A n) \
-            \-> Eq {0} Nat (succ n1) (succ n) -> Vec A n"
+        @?= "\8704 (n1 : Nat.Nat) -> A -> Vec.Vec A n1 -> (Eq.Eq {0} Nat.Nat n1 (Nat.succ n) -> Vec.Vec A n) -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n) -> Vec.Vec A n"
 
     -- **AND IT GENERALISES NOTHING, WHICH IS WHY THE TWO ABOVE READ AS THEY
     -- DID BEFORE MS9 PHASE 191.** A copy is demanded only where a rule's own
@@ -135,23 +135,24 @@ vtailTests =
     -- __The impossible case vanishes.__ @zero@ against @succ n@ is a conflict,
     -- so there is no subgoal at all and nothing is left for the user to close.
   , testCase "nil's method, after: no subgoal at all" $
-      vecGoal "nil" (methodOf 0) @?= Nothing
+      vecGoal "Vec.nil" (methodOf 0) @?= Nothing
 
     -- __And the determined binder goes.__ @succ n1 ≃ succ n@ is injectivity and
     -- then solution, so @n1@ is gone, @as@ is a @Vec A n@ rather than a
     -- @Vec A n1@ — which is exactly the transport the user writes today — and
     -- the induction hypothesis follows it.
   , testCase "cons's method, after: n1 is solved and the vector is at n" $
-      vecGoal "cons" (methodOf 1)
+      vecGoal "Vec.cons" (methodOf 1)
         @?= Just ( "consCase"
-                 , "A -> Vec A n -> \
-                   \(Eq {0} Nat n (succ n) -> Vec A n) -> Vec A n" )
+                 , "A -> Vec.Vec A n -> \
+                   \(Eq.Eq {0} Nat.Nat n (Nat.succ n) -> Vec.Vec A n) \
+                   \-> Vec.Vec A n" )
 
     -- __Which argument went, and what it went to__ (MS9 phase 185). @cons@
     -- takes three and the subgoal binds two, and this is the only thing that
     -- says which two: @n1@ is the first and it was solved to @n@.
   , testCase "cons's method, after: the first argument is forced to n" $
-      vecForced "cons" (methodOf 1) @?= [Just "n", Nothing, Nothing]
+      vecForced "Vec.cons" (methodOf 1) @?= [Just "n", Nothing, Nothing]
 
     -- __And it is written in the AMBIENT context__, which is the one thing the
     -- design left unmeasured: @n@ is a variable of the context the elimination
@@ -159,13 +160,13 @@ vtailTests =
     -- caller may bind it with @define@ there. A term mentioning a binder of the
     -- method would not be.
   , testCase "and the term it was forced to is ambient, not a method binder" $
-      forcedVarsIn vecContext "cons" (methodOf 1) @?= [["n"]]
+      forcedVarsIn vecContext "Vec.cons" (methodOf 1) @?= [["n"]]
 
     -- A method that vanished still answers. Nothing claims a subgoal, so
     -- nothing reads this, but a conflict after a solution has one and the shape
     -- does not depend on which case it is.
   , testCase "nil's method, after: nothing was forced before the conflict" $
-      vecForced "nil" (methodOf 0) @?= []
+      vecForced "Vec.nil" (methodOf 0) @?= []
 
     -- __AND THIS IS THE WHOLE REPORT__ (MS9 phase 192), which is what the three
     -- lists above are three views of. One entry per binder of the method, in
@@ -183,7 +184,7 @@ vtailTests =
     -- does that, and this is here so that @binder-name@ is total.
   , testCase "cons's method: the report says what each binder is" $
       reportOf vecContext (run' eqNatVec vecContext vecCounter
-                                "cons" vecShape (methodOf 1))
+                                "Vec.cons" vecShape (methodOf 1))
         @?= [ ("argument n", Just "n")
             , ("argument a",  Nothing)
             , ("argument as", Nothing)
@@ -235,60 +236,60 @@ transitionTests :: [TestTree]
 transitionTests =
   [ -- __deletion.__ The equation holds by @refl@ and constrains nothing, so its
     -- binder is dropped and nothing else moves.
-    specialises "deletion: an equation of a term with itself" "succ" 1
+    specialises "deletion: an equation of a term with itself" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat zero zero -> Eq {0} Nat m k"
-      (Just "\8704 (m : Nat) -> Nat -> Eq {0} Nat m k")
+      (Just "\8704 (m : Nat.Nat) -> Nat.Nat -> Eq.Eq {0} Nat.Nat m k")
 
     -- __conflict.__ Nothing is claimed; the method is closed outright.
-  , specialises "conflict: two different constructors" "succ" 1
+  , specialises "conflict: two different constructors" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat zero (succ k) -> Eq {0} Nat m k"
       Nothing
 
     -- __injectivity.__ The equation is replaced by the one its arguments imply.
     -- No further transition applies to that one: @j@ and @k@ are both ambient,
     -- so both are rigid.
-  , specialises "injectivity: the same constructor over two rigid arguments" "succ" 1
+  , specialises "injectivity: the same constructor over two rigid arguments" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat (succ j) (succ k) -> Eq {0} Nat m k"
-      (Just "\8704 (m : Nat) -> Nat -> Eq {0} Nat j k -> Eq {0} Nat m k")
+      (Just "\8704 (m : Nat.Nat) -> Nat.Nat -> Eq.Eq {0} Nat.Nat j k -> Eq.Eq {0} Nat.Nat m k")
 
     -- __solution, with the binder on the left__, which is the orientation
     -- @vtail@ meets. Everything to the right of @m@ is substituted, the goal
     -- included, and the binder goes.
-  , specialises "solution: the binder on the left of the equation" "succ" 1
+  , specialises "solution: the binder on the left of the equation" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat m k -> Eq {0} Nat m k"
-      (Just "Nat -> Eq {0} Nat k k")
+      (Just "Nat.Nat -> Eq.Eq {0} Nat.Nat k k")
 
     -- __and on the right__, which is the orientation the paper writes. The same
     -- answer, by the other branch of the coercion's motive.
-  , specialises "solution: and on the right" "succ" 1
+  , specialises "solution: and on the right" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat k m -> Eq {0} Nat m k"
-      (Just "Nat -> Eq {0} Nat k k")
+      (Just "Nat.Nat -> Eq.Eq {0} Nat.Nat k k")
 
     -- __Two transitions, cascading__: injectivity exposes an equation solution
     -- then fires on. This is the composition @vtail@ needs, and the only case
     -- that tests the recursion threading a coercion through another
     -- transition's term.
-  , specialises "injectivity then solution" "succ" 1
+  , specialises "injectivity then solution" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat (succ m) (succ k) -> Eq {0} Nat m k"
-      (Just "Nat -> Eq {0} Nat k k")
+      (Just "Nat.Nat -> Eq.Eq {0} Nat.Nat k k")
 
     -- __cycle.__ @m@ is inside @succ m@, so nothing inhabits the equation and
     -- the method is closed outright, exactly as a conflict closes one. __This
     -- is the case the user correctly omitted__, and it is the last of
     -- @eliminating.pdf@'s five (MS9 phase 221).
-  , specialises "cycle: a term against its own successor" "succ" 1
+  , specialises "cycle: a term against its own successor" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat m (succ m) -> Eq {0} Nat m k"
       Nothing
 
     -- __and the other way round__, which the chain states through the
     -- symmetric equation rather than through a second construction.
-  , specialises "cycle: and with the successor on the left" "succ" 1
+  , specialises "cycle: and with the successor on the left" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat (succ m) m -> Eq {0} Nat m k"
       Nothing
 
     -- __Two constructors down.__ The tuple nests, so the search goes into a
     -- sub-tuple before it crosses to the @≢@ half.
-  , specialises "cycle: two constructors deep" "succ" 1
+  , specialises "cycle: two constructors deep" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat m (succ (succ m)) -> Eq {0} Nat m k"
       Nothing
 
@@ -296,7 +297,7 @@ transitionTests =
     -- may not move a rigid binding (§6.2), but @j ≃ succ j@ is unsatisfiable
     -- whoever bound @j@ — @noCycle‹D›@ quantifies the side that occurs, so
     -- nothing in the construction asks whether it is a pattern variable.
-  , specialises "cycle: on a rigid variable" "succ" 1
+  , specialises "cycle: on a rigid variable" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat j (succ j) -> Eq {0} Nat m k"
       Nothing
   ]
@@ -324,9 +325,11 @@ omittedTests =
         , "data N : Type\8320 where"
         , "  z : N"
         , "  s : N -> N"
+        , "open N"
         , ""
         , "data Step : N -> N -> Type\8320 where"
         , "  down : \8704 (n : N) -> Step (s n) n"
+        , "open Step"
         , ""
         , "noSelf : \8704 (n : N) (st : Step n n) -> Empty"
         , "noSelf = \\ n st -> case st of { }"
@@ -341,9 +344,11 @@ omittedTests =
         , "data N : Type\8320 where"
         , "  z : N"
         , "  s : N -> N"
+        , "open N"
         , ""
         , "data Skip : N -> N -> Type\8320 where"
         , "  over : \8704 (n : N) -> Skip (s (s n)) n"
+        , "open Skip"
         , ""
         , "noSkip : \8704 (n : N) (sk : Skip n n) -> Empty"
         , "noSkip = \\ n sk -> case sk of { }"
@@ -358,9 +363,11 @@ omittedTests =
         , "data Tree : Type\8320 where"
         , "  leaf : Tree"
         , "  node : Tree -> Tree -> Tree"
+        , "open Tree"
         , ""
         , "data Sub : Tree -> Tree -> Type\8320 where"
         , "  onRight : \8704 (l : Tree) (r : Tree) -> Sub r (node l r)"
+        , "open Sub"
         , ""
         , "noSub : \8704 (t : Tree) (sb : Sub t t) -> Empty"
         , "noSub = \\ t sb -> case sb of { }"
@@ -375,9 +382,11 @@ omittedTests =
         , "data Lst (A : Type\8320) : Type\8320 where"
         , "  lnil : Lst A"
         , "  lcons : \8704 (a : A) (as : Lst A) -> Lst A"
+        , "open Lst"
         , ""
         , "data Tail (A : Type\8320) : Lst A -> Lst A -> Type\8320 where"
         , "  tl : \8704 (a : A) (as : Lst A) -> Tail A as (lcons A a as)"
+        , "open Tail"
         , ""
         , "noTail : \8704 (A : Type\8320) (xs : Lst A) (t : Tail A xs xs) -> Empty"
         , "noTail = \\ A xs t -> case t of { }"
@@ -405,9 +414,11 @@ omittedTests =
         , "data N : Type\8320 where"
         , "  z : N"
         , "  s : N -> N"
+        , "open N"
         , ""
         , "data Step : N -> N -> Type\8320 where"
         , "  down : \8704 (n : N) -> Step (s n) n"
+        , "open Step"
         , ""
         , "bogus : \8704 (n : N) (st : Step (s n) n) -> Empty"
         , "bogus = \\ n st -> case st of { }"
@@ -449,15 +460,15 @@ residualTests =
   [ -- Two ambient variables: neither is a binder of this method, so neither may
     -- be solved. §6.2's note is the reason — moving a declaration leftwards is
     -- @raise@, and @raise@ is deliberately not in the op vocabulary at all.
-    specialises "two ambient variables are both rigid" "succ" 1
+    specialises "two ambient variables are both rigid" "Nat.succ" 1
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat j k -> Eq {0} Nat m k"
-      (Just "\8704 (m : Nat) -> Nat -> Eq {0} Nat j k -> Eq {0} Nat m k")
+      (Just "\8704 (m : Nat.Nat) -> Nat.Nat -> Eq.Eq {0} Nat.Nat j k -> Eq.Eq {0} Nat.Nat m k")
 
     -- No equations at all, which is every method of a family with no indices:
     -- the method comes back as it went in and nothing is built.
-  , specialises "no equations: the method is handed straight back" "succ" 0
+  , specialises "no equations: the method is handed straight back" "Nat.succ" 0
       "\8704 (m : Nat) -> Nat -> Eq {0} Nat m k"
-      (Just "\8704 (m : Nat) -> Nat -> Eq {0} Nat m k")
+      (Just "\8704 (m : Nat.Nat) -> Nat.Nat -> Eq.Eq {0} Nat.Nat m k")
   ]
 
 -- --------------------------------------------------------------------------
@@ -469,18 +480,18 @@ residualTests =
 refusalTests :: [TestTree]
 refusalTests =
   [ testCase "a name that is not a constructor" $
-      refused "Nat" 1 "\8704 (m : Nat) -> Eq {0} Nat m k"
-        @?= Just (NotThatConstructor (GlobalName "Nat"))
+      refused "Nat.Nat" 1 "\8704 (m : Nat) -> Eq {0} Nat m k"
+        @?= Just (NotThatConstructor (named "Nat.Nat"))
 
     -- @succ@'s method binds its argument and its induction hypothesis, so two
     -- binders and an equation is three — and a type with one Π is not it.
   , testCase "fewer binders than the constructor's telescope needs" $
-      case refused "succ" 1 "\8704 (m : Nat) -> Nat" of
+      case refused "Nat.succ" 1 "\8704 (m : Nat) -> Nat" of
         Just (MethodNotShaped 2 1 _) -> pure ()
         other -> assertFailure ("expected a mis-shaped method, got " ++ show other)
 
   , testCase "a binder in the equation block that is not an equation" $
-      case refused "succ" 1 "\8704 (m : Nat) -> Nat -> Nat -> Nat" of
+      case refused "Nat.succ" 1 "\8704 (m : Nat) -> Nat -> Nat -> Nat" of
         Just (NotAnEquation [_]) -> pure ()
         other -> assertFailure ("expected one non-equation, got " ++ show other)
 
@@ -496,7 +507,7 @@ refusalTests =
     -- Each equation below mentions @q@ in its /carrier/, which is the cheapest
     -- shape with the dependency; a generated one mentions it inside a J.
   , testCase "a deletion whose proof a later equation names" $
-      case refused "succ" 2
+      case refused "Nat.succ" 2
              "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat k k) \
              \-> Eq {0} (Eq {0} Nat k k) q q -> Nat" of
         Just (TransportedEquation ByDeletion 1 _) -> pure ()
@@ -509,7 +520,7 @@ refusalTests =
     -- variable to rebuild from. The equation is kept, which is the same answer
     -- as before the transition existed.
   , testCase "an injectivity over a constructor of two arguments" $
-      case refused "succ" 2
+      case refused "Nat.succ" 2
              "\8704 (m : Nat) (ih : Nat) \
              \(q : Eq {0} (And {0 0} Nat Nat) (both {0 0} Nat Nat m k) (both {0 0} Nat Nat k m)) \
              \-> Eq {0} (Eq {0} (And {0 0} Nat Nat) (both {0 0} Nat Nat m k) (both {0 0} Nat Nat k m)) q q \
@@ -541,28 +552,28 @@ refusalTests =
 chainTests :: [TestTree]
 chainTests =
   [ specialises "solving an equation a later one names carries the chain"
-      "succ" 2
+      "Nat.succ" 2
       "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat m k) \
       \-> Eq {0} (Eq {0} Nat m k) q q -> Nat"
-      (Just "Nat -> Nat")
+      (Just "Nat.Nat -> Nat.Nat")
 
     -- __AND INJECTIVITY CARRIES ONE TOO — MS9, `~rqs39`.__ The same fixture with
     -- the equation's two sides made applications of @succ@, so injectivity fires
     -- where solution did above. It replaces the proof with one about @succ@'s
     -- argument and drops its binder, the later equation is restated along
-    -- @noConfusionNatInv@ of the new proof, and @isLeftInvNat@ carries the method
+    -- @Nat.lemmata.noConfusionInv@ of the new proof, and @Nat.lemmata.isLeftInv@ carries the method
     -- back from the rebuilt proof to the one it was given. Both binders go, so
     -- the method is left with the induction hypothesis alone — the same answer
     -- solution reaches, by the other transition. This was refused by name until
     -- the backwards half was generated.
   , specialises "injectivity over an equation a later one names carries it too"
-      "succ" 2
+      "Nat.succ" 2
       "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat (succ m) (succ k)) \
       \-> Eq {0} (Eq {0} Nat (succ m) (succ k)) q q -> Nat"
-      (Just "Nat -> Nat")
+      (Just "Nat.Nat -> Nat.Nat")
 
     -- __AND THE CHAIN A CONSTRUCTOR'S OWN TELESCOPE MAKES — MS9 phase 215.__
-    -- @pack@'s second argument is typed by its first, so @noConfusionPack@
+    -- @pack@'s second argument is typed by its first, so @Pack.lemmata.noConfusion@
     -- answers with a @DPair@ whose second equation is stated about the first
     -- one's /proof/: it is @i@ transported along it, not @i@. Injectivity used
     -- to decline such a constructor outright and the equation was kept; it now
@@ -580,23 +591,23 @@ chainTests =
     -- equation — and there the proof is rebuilt from @unit@ alone, with the
     -- @Unit@ elimination standing in for the η it does not have. **No step is
     -- UIP**: nothing claims the proof is @refl@, it is carried along
-    -- @isLeftInvNat@.
+    -- @Nat.lemmata.isLeftInv@.
     --
     -- Both equations go, and __both of the method's own binders stay__: the
     -- two sides here are closed, so nothing is solved and @m@ and @ih@ are
     -- still the method's to bind. That is the one difference from the two
     -- fixtures above, where solving @m := k@ removed one.
   , specialises "a deletion a later equation names is crossed by injectivity"
-      "succ" 2
+      "Nat.succ" 2
       "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat (succ zero) (succ zero)) \
       \-> Eq {0} (Eq {0} Nat (succ zero) (succ zero)) q q -> Nat"
-      (Just "Nat -> Nat -> Nat")
+      (Just "Nat.Nat -> Nat.Nat -> Nat.Nat")
 
   , specialisesIn eqNatFinPack packContext packCounter
       "injectivity over a dependent argument telescope reads the chain apart"
-      "pack" 1
+      "Pack.pack" 1
       "\8704 (n1 : Nat) (i1 : Fin n1) -> Eq {0} Pack (pack n1 i1) (pack j jj) -> Nat"
-      (Just "Nat")
+      (Just "Nat.Nat")
   ]
 
 -- | @j : Nat@, @jj : Fin j@ — the ambient, rigid pair the equation above is
@@ -629,13 +640,13 @@ engineTests =
     -- one run says both things — and the walk reached each hole by the
     -- /variable/ @prim-eliminate@ handed back.
     testCase "the rule walks the constructors and specialises every method" $
-      splits "split-all core`v` \"Vec\"" ["no subgoals", "subgoals: consCase"]
+      splits "split-all core`v` Vec.Vec" ["no subgoals", "subgoals: consCase"]
 
     -- __Pins the ORDER__, which the walk above cannot: the shape phase
     -- 177 had. Kept because it is the one case that pins the /order/: the
     -- second method's hole is the second element of the list.
   , testCase "and the second hole in the list is the second constructor's" $
-      splits "split-second core`v` \"cons\"" ["subgoals: consCase"]
+      splits "split-second core`v` Vec.cons" ["subgoals: consCase"]
   ]
   where
     splits call wants = case loadedError loaded of
@@ -664,11 +675,17 @@ engineTests =
 declarations :: [String]
 declarations =
   [ "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (x : A) -> Eq A x x }"
+  , "open Eq"
   , "data Unit : Type where { unit : Unit }"
+  , "open Unit"
   , "data Empty : Type where { }"
+  , "open Empty"
   , "data And (A : Type) (B : Type) : Type where { both : \8704 (a : A) (b : B) -> And A B }"
+  , "open And"
   , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+  , "open Nat"
   , "data Vec (A : Type\8320) : Nat -> Type\8320 where { nil : Vec A zero ; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
+  , "open Vec"
   ]
 
 -- | An elimination and a specialisation of /every/ method, as a rule.
@@ -761,7 +778,7 @@ specialisesIn env ctx n what c k src want = testCase what $
 -- | The refusal, for a fixture that is meant to be refused.
 refused :: String -> Int -> String -> Maybe SpecialiseError
 refused c k src =
-  case fst (specialise eqNat natContext natCounter (GlobalName c)
+  case fst (specialise eqNat natContext natCounter (named c)
               (hypsOf eqNat c) (plainShape k)
               (term eqNat natContext natCounter src)) of
     Left e  -> Just e
@@ -771,7 +788,7 @@ refused c k src =
 -- fixture, not a test result.
 run' :: GlobalEnv -> Context -> Int -> String -> MethodShape -> Core -> Specialisation
 run' env ctx n c shape mty =
-  case fst (specialise env ctx n (GlobalName c) (hypsOf env c) shape mty) of
+  case fst (specialise env ctx n (named c) (hypsOf env c) shape mty) of
   Right s -> s
   Left e  -> error (c ++ ": " ++ show e)
 
@@ -788,9 +805,9 @@ plainShape k = MethodShape [] k [] [] [] []
 -- **Every fixture here is an INDUCTIVE method**, so the count that
 -- "Thena.Tactics.Specialise" used to read off the declaration is read off it
 -- here instead. It stopped doing that at phase 188 because it was assuming the
--- caller's scheme, and @caseD@'s methods carry none.
+-- caller's scheme, and @D.case@'s methods carry none.
 hypsOf :: GlobalEnv -> String -> [Ident]
-hypsOf env c = case lookupConstructor (GlobalName c) env of
+hypsOf env c = case lookupConstructor (named c) env of
   Nothing     -> []
   Just (d, k) ->
     [ entryIdent e
@@ -823,7 +840,7 @@ goalIn ctx s = case specialisedGoal s of
   _                  -> Nothing
 
 shown :: Context -> Core -> String
-shown ctx = unwords . words . renderCore (Rendering [] 0) ctx
+shown ctx = unwords . words . renderCore (rendering [] 0) ctx
 
 -- | Build a context by parsing each entry's type against what precedes it, so
 -- that a dependent context reads as the user would type it —
@@ -831,22 +848,22 @@ shown ctx = unwords . words . renderCore (Rendering [] 0) ctx
 contextOf :: GlobalEnv -> Int -> [(String, String)] -> (Context, Int)
 contextOf env n0 = foldl one ([], n0)
   where
-    one (ctx, n) (name, src) = case parseCore [] env ctx n src of
+    one (ctx, n) (name, src) = case parseCore [] env (opensIn env) ctx n src of
       Left e -> error ("fixture does not parse: " ++ show e)
       Right (ty, n1) ->
         let (v, n2) = fresh n1
          in (ctx ++ [Hypothesis v (Ident name) ty], n2)
 
 term :: GlobalEnv -> Context -> Int -> String -> Core
-term env ctx n src = case parseCore [] env ctx n src of
+term env ctx n src = case parseCore [] env (opensIn env) ctx n src of
   Left e       -> error ("fixture does not parse: " ++ show e)
   Right (t, _) -> t
 
 -- | Run the elimination tactic and insist it worked.
 run :: String -> GlobalEnv -> Context -> Int -> String -> String -> Elimination
-run label env ctx n goal tgt = case parseCore [] env ctx n goal of
+run label env ctx n goal tgt = case parseCore [] env (opensIn env) ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
-  Right (g, n1) -> case parseCore [] env ctx n1 tgt of
+  Right (g, n1) -> case parseCore [] env (opensIn env) ctx n1 tgt of
     Left e -> error ("fixture does not parse: " ++ show e)
     Right (t, n2) -> case fst (eliminate env ctx Inductive Generalised n2 g t) of
       Right el -> el

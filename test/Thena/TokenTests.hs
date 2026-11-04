@@ -17,7 +17,8 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
+import Thena.Core.Term (Core (..), Literal (..), rootName)
+import Thena.Declared (named)
 import Thena.Driver
   ( Response (..)
   , machineOf
@@ -57,12 +58,12 @@ tests =
 prompt :: [String]
 prompt =
   [ ":theorem d : Token Char"
-  , "fill \8988 /[a-z]+/ Char \8989"
+  , "fill core`/[a-z]+/ Char`"
   , "solve"
   , "qed"
   , ":abandon"
   , ":theorem e : Token Char"
-  , "fill \8988 /[a-z]/ Char \8989"
+  , "fill core`/[a-z]/ Char`"
   , "solve"
   , "qed"
   , ":show e"
@@ -132,17 +133,17 @@ accepted =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 (snd good)
           env = globals (machineOf s1)
-          value g = whnf env [] . definitionBody <$> lookupDefinition (GlobalName g) env
+          value g = whnf env [] . definitionBody <$> lookupDefinition (rootName g) env
       map value ["ident", "digit", "numeral", "again"]
         @?= map Just
-          [ App (Primitive (LRegex "[a-z][a-zA-Z0-9']*")) (named "String")
-          , App (Primitive (LRegex "[0-9]")) (named "Char")
-          , App (Primitive (LRegex "-?[1-9][0-9]*|0")) (named "Int")
-          , App (Primitive (LRegex "[a-z][a-zA-Z0-9']*")) (named "String")
+          [ App (Primitive (LRegex "[a-z][a-zA-Z0-9']*")) (rooted "String")
+          , App (Primitive (LRegex "[0-9]")) (rooted "Char")
+          , App (Primitive (LRegex "-?[1-9][0-9]*|0")) (rooted "Int")
+          , App (Primitive (LRegex "[a-z][a-zA-Z0-9']*")) (rooted "String")
           ]
   ]
   where
-    named g = Global (GlobalName g) []
+    rooted g = Global (rootName g) []
 
 -- ---------------------------------------------------------------------------
 
@@ -160,7 +161,7 @@ refused =
       , "t : Token Bool"
       , "t = /x/"
       ]
-      (TokenClassRefused (GlobalName "t") (TokenTypeUnsupported (Canonical (GlobalName "Bool") [] [])))
+      (TokenClassRefused (rootName "t") (TokenTypeUnsupported (Canonical (named "Bool.Bool") [] [])))
   , klass "the regex does not parse: a stray metacharacter"
       ["f : Token String", "f = /a{3}/"]
       (refusedRegex "f" "a{3}" (RegexUnexpected 1 '{'))
@@ -175,17 +176,17 @@ refused =
       (refusedRegex "d" "[z-a]" (RegexReversedRange 3 'z' 'a'))
   , klass "it matches the empty string"
       ["b : Token String", "b = /a*/"]
-      (TokenClassRefused (GlobalName "b") (TokenMatchesEmpty "a*"))
+      (TokenClassRefused (rootName "b") (TokenMatchesEmpty "a*"))
   , klass "it accepts something that is not a Char"
       ["e : Token Char", "e = /ab|c/"]
-      (TokenClassRefused (GlobalName "e") (TokenNotIncluded "ab|c" (GlobalName "Char") "ab"))
+      (TokenClassRefused (rootName "e") (TokenNotIncluded "ab|c" (rootName "Char") "ab"))
   , klass "it accepts something that is not an Int, and says the shortest"
       ["n : Token Int", "n = /[a-z]+/"]
-      (TokenClassRefused (GlobalName "n") (TokenNotIncluded "[a-z]+" (GlobalName "Int") "a"))
+      (TokenClassRefused (rootName "n") (TokenNotIncluded "[a-z]+" (rootName "Int") "a"))
   ]
   where
     klass title body e = ((title, unlines ("module M where" : "" : body)), e)
-    refusedRegex g src r = TokenClassRefused (GlobalName g) (TokenRegexRefused src r)
+    refusedRegex g src r = TokenClassRefused (rootName g) (TokenRegexRefused src r)
 
 refusals :: [TestTree]
 refusals =

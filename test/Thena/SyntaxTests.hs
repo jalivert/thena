@@ -15,20 +15,24 @@ import Test.Tasty.QuickCheck
 import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
+  , GlobalName (..)
   , Ident (..)
   , close
   , fresh
+  , globalsIn
   )
 import Thena.Driver
   ( parseCore
   , parseDeclaration
   )
 import Thena.Global.Declare (declare)
-import Thena.Global.Env (GlobalEnv, emptyGlobals)
-import Thena.Render ( Rendering (..)
+import Thena.Global.Env (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
+import Thena.Render
+  ( rendering
   ,renderCore)
 import Thena.Syntax.Concrete (Raw (..), RawBinder (..), RawIdent (..))
 import Thena.Syntax.Resolve (resolve)
+import Thena.Declared (opensIn)
 
 -- | The environment the generator resolves against.
 --
@@ -38,7 +42,7 @@ import Thena.Syntax.Resolve (resolve)
 -- to generate one against an empty environment. Nothing else changes — the
 -- generator's own names are 'namePool', which shares nothing with @Nat@'s.
 natEnv :: GlobalEnv
-natEnv = case parseDeclaration [] emptyGlobals 0 decl of
+natEnv = case parseDeclaration [] emptyGlobals (opensIn emptyGlobals) 0 decl of
   Left e -> error ("generator fixture does not parse: " ++ show e)
   Right (d, n) -> case declare emptyGlobals n d of
     Left e            -> error ("generator fixture refused: " ++ show e)
@@ -48,7 +52,7 @@ natEnv = case parseDeclaration [] emptyGlobals 0 decl of
 
 -- | Resolve, render, re-resolve. The property everything else supports.
 roundTrips :: Core -> Int -> Bool
-roundTrips t n = case parseCore [] natEnv [] n (renderCore (Rendering [] n) [] t) of
+roundTrips t n = case parseCore [] natEnv (opensIn natEnv) [] n (renderCore (rendering [] n) [] t) of
   Right (t', _) -> t' == t
   Left _        -> False
 
@@ -83,7 +87,7 @@ genRaw = sized . go
     leaf scope =
       oneof $
         (RawUniverse <$> elements [0, 1])
-          : [RawName <$> elements scope | not (null scope)]
+          : [RawName [] <$> elements scope | not (null scope)]
 
     node scope n =
       oneof
@@ -99,7 +103,7 @@ genRaw = sized . go
             pure (RawLet (RawWord x) v ty b)
         , -- Nat has no parameters, no indices, and two constructors, so the
           -- shape is fixed: () motive (mz ms) ().
-          RawElim (RawWord "Nat") [] [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
+          RawElim [] (RawWord "Nat") [] [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
                               <*> pure [] <*> half
           -- MS8 phase 150, and it is what makes the round trip a statement about
           -- the trusted node rather than a comment: the printer parenthesises its
@@ -120,7 +124,7 @@ genRaw = sized . go
 genClosed :: Gen Core
 genClosed = do
   raw <- genRaw []
-  case resolve [] natEnv [] 0 raw of
+  case resolve [] natEnv (opensIn natEnv) [] 0 raw of
     Right (t, _) -> pure t
     Left e       -> error ("generator produced an unresolvable term: " ++ show e)
 
@@ -134,6 +138,7 @@ tests =
     , testGroup "rendering" renderTests
     , testGroup "input spellings" inputTests
     , testGroup "errors" errorTests
+    , testGroup "a qualified name" qualifiedTests
     , testGroup "shadowing" shadowTests
     , testGroup "resolution" resolveTests
     , testGroup "a bare Type mints a level meta" openUniverseTests
@@ -185,18 +190,60 @@ inputTests =
   , testCase "Type0 prints as Type₀" $
       render "Type0" @?= "Type₀"
   , testCase "ASCII and unicode agree" $
-      parseCore [] emptyGlobals [] 0 "\\ (x : Type0) -> x" @?= parseCore [] emptyGlobals [] 0 "λ (x : Type₀) -> x"
+      parseCore [] emptyGlobals (opensIn emptyGlobals) [] 0 "\\ (x : Type0) -> x" @?= parseCore [] emptyGlobals (opensIn emptyGlobals) [] 0 "λ (x : Type₀) -> x"
   ]
 
 errorTests :: [TestTree]
 errorTests =
   [ testCase "an unbound name is a scope error" $
-      isLeft (parseCore [] emptyGlobals [] 0 "y") @?= True
+      isLeft (parseCore [] emptyGlobals (opensIn emptyGlobals) [] 0 "y") @?= True
   , testCase "a λ with no body is a parse error" $
-      isLeft (parseCore [] emptyGlobals [] 0 "λ (x : Type₀)") @?= True
+      isLeft (parseCore [] emptyGlobals (opensIn emptyGlobals) [] 0 "λ (x : Type₀)") @?= True
   , testCase "a stray character is a lex error" $
-      isLeft (parseCore [] emptyGlobals [] 0 "x # y") @?= True
+      isLeft (parseCore [] emptyGlobals (opensIn emptyGlobals) [] 0 "x # y") @?= True
   ]
+
+-- | A qualified name reaches 'Core' as the path it was written with (MS10
+-- phase 240).
+--
+-- **The point is that no dotted string survives anywhere.** @Nat.elim@ is
+-- @GlobalName ["Nat"] "elim"@ and never @GlobalName [] "Nat.elim"@, so an
+-- environment holding the one does not answer for the other.
+qualifiedTests :: [TestTree]
+qualifiedTests =
+  [ testCase "a qualified name resolves to the global of that path" $
+      fmap fst (parseCore [] qualifiedGlobals (opensIn qualifiedGlobals) [] 0 "Nat.elim")
+        @?= Right (Global (GlobalName ["Nat"] "elim") [])
+  , testCase "and a deeper path too" $
+      fmap fst (parseCore [] qualifiedGlobals (opensIn qualifiedGlobals) [] 0 "A.B.c")
+        @?= Right (Global (GlobalName ["A", "B"] "c") [])
+  , -- **A binder cannot shadow it**: a binder has no path, so the two lookups a
+    -- bare name makes have nothing to find and are skipped. @map@ and not
+    -- @elim@ because @elim@ is a keyword and cannot be a binder at all.
+    testCase "a binder of the base word does not shadow it" $
+      fmap (globalsIn . fst)
+           (parseCore [] qualifiedGlobals (opensIn qualifiedGlobals) [] 0 "λ (map : Type₀) -> Nat.map")
+        @?= Right [GlobalName ["Nat"] "map"]
+  , -- **The same word at the root is a different name**, which is the whole
+    -- reason the path is structure and not spelling.
+    testCase "the base word alone is not in scope" $
+      isLeft (parseCore [] qualifiedGlobals (opensIn qualifiedGlobals) [] 0 "elim") @?= True
+  , -- A word may no longer contain a dot either, which is the other half of
+    -- reserving the character.
+    testCase "and the dot cannot be part of a word" $
+      isLeft (parseCore [] qualifiedGlobals (opensIn qualifiedGlobals) [] 0 "elim.") @?= True
+  ]
+
+-- | An environment holding @Nat.elim@, @Nat.map@ and @A.B.c@ as definitions.
+--
+-- **Definitions and not constants**, because 'Thena.Syntax.Resolve.globalsOf'
+-- deliberately leaves 'Thena.Global.Env.constants' out — a name there would
+-- resolve in term position, which is the trap that table exists to avoid.
+qualifiedGlobals :: GlobalEnv
+qualifiedGlobals =
+  foldr one emptyGlobals
+    [GlobalName ["Nat"] "elim", GlobalName ["Nat"] "map", GlobalName ["A", "B"] "c"]
+  where one g = addDefinition g (MkDefinition [] [] (Universe LZero) (Universe LZero))
 
 -- | The case that cannot be written in concrete syntax and must still print
 -- correctly: two nested binders with the same identifier, where the body refers
@@ -205,9 +252,9 @@ errorTests =
 shadowTests :: [TestTree]
 shadowTests =
   [ testCase "the inner binder is renamed, so the body still reparses" $
-      assertBool (renderCore (Rendering [] 500) [] shadowed) (roundTrips shadowed 500)
+      assertBool (renderCore (rendering [] 500) [] shadowed) (roundTrips shadowed 500)
   , testCase "and the two binders really do print differently" $
-      renderCore (Rendering [] 500) [] shadowed @?= "λ (x : Type₀) (x1 : Type₀) -> x"
+      renderCore (rendering [] 500) [] shadowed @?= "λ (x : Type₀) (x1 : Type₀) -> x"
   ]
 
 shadowed :: Core
@@ -222,7 +269,7 @@ shadowed =
 resolveTests :: [TestTree]
 resolveTests =
   [ testCase "an inner binder shadows an outer one of the same name" $
-      fmap fst (parseCore [] emptyGlobals [] 0 "λ (x : Type₀) -> λ (x : Type₁) -> x")
+      fmap fst (parseCore [] emptyGlobals (opensIn emptyGlobals) [] 0 "λ (x : Type₀) -> λ (x : Type₁) -> x")
         @?= Right (nestedLam Inner)
   , testCase "and that is not the same term as referring to the outer" $
       assertBool "inner and outer must differ" (nestedLam Inner /= nestedLam Outer)
@@ -234,11 +281,11 @@ resolveTests =
   -- could see it. Pinned here rather than left to the round trip for exactly
   -- that reason.
   , testCase "a binder shadowing a datatype's name shadows it for elim too" $
-      isLeft (parseCore [] natEnv [] 0
+      isLeft (parseCore [] natEnv (opensIn natEnv) [] 0
                 "λ (Nat : Type₀) -> elim Nat () zero (zero zero) () zero")
         @?= True
   , testCase "and unshadowed, the same elim resolves" $
-      isLeft (parseCore [] natEnv [] 0 "elim Nat () zero (zero zero) () zero")
+      isLeft (parseCore [] natEnv (opensIn natEnv) [] 0 "elim Nat () zero (zero zero) () zero")
         @?= False
   ]
 
@@ -252,27 +299,27 @@ resolveTests =
 openUniverseTests :: [TestTree]
 openUniverseTests =
   [ testCase "it resolves to a meta drawn from the counter it was given" $
-      parseCore [] emptyGlobals [] 40 "Type"
+      parseCore [] emptyGlobals (opensIn emptyGlobals) [] 40 "Type"
         @?= Right (Universe (LVar (LMeta 40)), 41)
 
   , -- Two universes written in one term are two unknowns, not one. Writing them
     -- equal is what the *checker* may conclude, never what the reader wrote.
     testCase "each one written is its own meta" $
-      fmap fst (parseCore [] emptyGlobals [] 40 "Type -> Type")
+      fmap fst (parseCore [] emptyGlobals (opensIn emptyGlobals) [] 40 "Type -> Type")
         @?= Right (arrowOf (Universe (LVar (LMeta 40))) (Universe (LVar (LMeta 41))))
 
   , testCase "and Typeₙ is still exactly the level written" $
-      fmap fst (parseCore [] emptyGlobals [] 40 "Type\8321")
+      fmap fst (parseCore [] emptyGlobals (opensIn emptyGlobals) [] 40 "Type\8321")
         @?= Right (Universe (levelOfNat 1))
 
   , -- A datatype's levels are stored and instantiated at every use, so a meta in
     -- one would be shared rather than solved. Phase 33c makes them inferred;
     -- until then a declaration says its level.
     testCase "a declaration may not write one" $
-      isLeft (parseDeclaration [] emptyGlobals 0 "data Box : Type where { }") @?= True
+      isLeft (parseDeclaration [] emptyGlobals (opensIn emptyGlobals) 0 "data Box : Type where { }") @?= True
 
   , testCase "not even in a parameter it never mentions again" $
-      isLeft (parseDeclaration [] emptyGlobals 0
+      isLeft (parseDeclaration [] emptyGlobals (opensIn emptyGlobals) 0
                 "data Box (A : Type) : Type\8320 where { }") @?= True
   ]
   where
@@ -293,8 +340,8 @@ nestedLam which =
         (close v1 (Lam (Ident "x") (Universe (levelOfNat 1)) (close v2 body)))
 
 render :: String -> String
-render src = case parseCore [] emptyGlobals [] 0 src of
-  Right (t, n) -> renderCore (Rendering [] n) [] t
+render src = case parseCore [] emptyGlobals (opensIn emptyGlobals) [] 0 src of
+  Right (t, n) -> renderCore (rendering [] n) [] t
   Left e       -> "ERROR: " ++ show e
 
 isLeft :: Either a b -> Bool

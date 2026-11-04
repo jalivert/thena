@@ -16,7 +16,8 @@ module Thena.View.CoreTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
+import Thena.Core.Term (Core (..), Literal (..), rootName, wholePath)
+import Thena.Declared (named)
 import Thena.Global.Env
   ( Constant (..)
   , Definition (..)
@@ -39,8 +40,12 @@ import Thena.View.Core
   )
 import Thena.View.Redraw (redraw)
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
-  ,renderCore)
+import Thena.Render
+  ( rendering
+  , renderCore
+  , renderingOf
+  )
+import Thena.View (sessionGrammars, sessionNames, spellingOf)
 
 tests :: TestTree
 tests =
@@ -50,7 +55,38 @@ tests =
     , testCase "and the corpus really holds terms" notVacuous
     , testGroup "a modelled language's notation (phase 115b)" objectCases
     , testGroup "where a tagged literal begins (phase 132)" regionCases
+    , testGroup "a name is spelled as the text printer spells it (`~fjrrr`)" spelled
     ]
+
+-- | __THE SHAPE AND THE TEXT SPELL ONE NAME ONE WAY__ (MS10 phase 256).
+--
+-- 'Thena.Render' has written the shortest ending that still resolves since
+-- phase 254 and the shapes wrote 'Thena.Core.Term.nameDotted', so the TUI
+-- showed @Nat.zero@ where the REPL showed @zero@ — one name with two spellings
+-- according to which door the reader came in by. **The assertion is the
+-- agreement and not the spelling**, so neither printer can be changed alone.
+spelled :: [TestTree]
+spelled =
+  [ testCase "with nothing open, both write the whole path" $
+      bothSay [] "Col.red"
+  , testCase "after open Col, both write the short word" $
+      bothSay ["", "open Col"] "red"
+  ]
+  where
+    bothSay extra want = do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (unlines
+             ([ "module Spelling where", ""
+              , "data Col : Type where"
+              , "  { red : Col }"
+              ] ++ extra)) of
+        (s1, ProofLoaded {}) -> do
+          let t = Global (named "Col.red") []
+              shape = redraw (displayCore (spellingOf s1) (sessionGrammars s1)
+                                (Budget 200) [] [] (sessionNames s1) (Address []) t)
+          shape @?= want
+          shape @?= renderCore (renderingOf s1) [] t
+        (_, other) -> assertFailure (show other)
 
 -- | Every term the prelude and the standard base leave in the environment.
 termsOf :: GlobalEnv -> [Core]
@@ -71,8 +107,8 @@ mismatch t
   | shown == drawn = Nothing
   | otherwise = Just ("printed: " <> shown <> "\n  drawn:   " <> drawn)
   where
-    shown = renderCore (Rendering [] 0) [] t
-    drawn = redraw (displayCore [] (Budget 200) [] [] 0 (Address []) t)
+    shown = renderCore (rendering [] 0) [] t
+    drawn = redraw (displayCore wholePath [] (Budget 200) [] [] 0 (Address []) t)
 
 -- | A green test over an empty corpus would prove nothing.
 notVacuous :: IO ()
@@ -103,20 +139,24 @@ source =
     , "language Ty, T, S where"
     , "  base  -> \953"
     , "  arrow -> ( T -> S )"
+    , "open Ty"
     , ""
     , "language LC, M, N, E where"
     , "  var : w as occurrence -> w"
     , "  abs : w as binder     -> ( \955 w : T . E[w] )"
     , "  app                   -> ( M N )"
+    , "open LC"
     , ""
     , "language Ex, U, V where"
     , "  ref  : w as occurrence -> w"
     , "  juxt                   -> U V"
+    , "open Ex"
     , ""
     , "language Coll, P, Q where"
     , "  cref  : c as occurrence -> c"
     , "  cjux                    -> P Q"
     , "  clet  : c as binder     -> l c = P i Q[c]"
+    , "open Coll"
     ]
 
 loaded :: IO [Grammar]
@@ -127,7 +167,9 @@ loaded = do
     (_, other) -> assertFailure (show other) >> pure []
 
 con :: String -> [Core] -> Core
-con name = foldl App (Global (GlobalName name) [])
+-- | **Named with its language's path** (MS10 phase 251): a production lives in
+-- the namespace its block opens.
+con name = foldl App (Global (named name) [])
 
 str :: String -> Core
 str = Primitive . LString
@@ -143,28 +185,28 @@ str = Primitive . LString
 objectCases :: [TestTree]
 objectCases =
   [ agree "a bracketed production needs no fence"
-      (con "abs" [str "x", con "base" [], con "var" [str "x"]])
+      (con "LC.abs" [str "x", con "Ty.base" [], con "LC.var" [str "x"]])
   , agree "bare juxtaposition, no brackets in the grammar"
-      (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
   , agree "what the notation cannot write is a foreign splice"
-      (con "app" [Global (GlobalName "twice") [], con "var" [str "y"]])
+      (con "LC.app" [Global (rootName "twice") [], con "LC.var" [str "y"]])
   , agree "a foreign splice that is itself a region"
-      (con "app" [con "var" [Global (GlobalName "nom") []], con "var" [str "y"]])
+      (con "LC.app" [con "LC.var" [Global (rootName "nom") []], con "LC.var" [str "y"]])
   , agree "a name the class would not read back is spliced"
-      (con "var" [str "a b"])
+      (con "LC.var" [str "a b"])
   , agree "the left operand of a juxtaposition is fenced"
-      (con "juxt" [con "juxt" [con "ref" [str "f"], con "ref" [str "a"]], con "ref" [str "b"]])
+      (con "Ex.juxt" [con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]], con "Ex.ref" [str "b"]])
   , agree "and the right operand, rather than both"
-      (con "juxt" [con "ref" [str "f"], con "juxt" [con "ref" [str "a"], con "ref" [str "b"]]])
+      (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.juxt" [con "Ex.ref" [str "a"], con "Ex.ref" [str "b"]]])
   , agree "a term the grammar reads one way is written flat"
-      (con "clet" [str "f", con "cjux" [con "cref" [str "a"], con "cref" [str "b"]], con "cref" [str "c"]])
+      (con "Coll.clet" [str "f", con "Coll.cjux" [con "Coll.cref" [str "a"], con "Coll.cref" [str "b"]], con "Coll.cref" [str "c"]])
   , agree "the same term with a variable spelled like a terminal is fenced"
-      (con "clet" [str "f", con "cjux" [con "cref" [str "a"], con "cref" [str "i"]], con "cref" [str "b"]])
+      (con "Coll.clet" [str "f", con "Coll.cjux" [con "Coll.cref" [str "a"], con "Coll.cref" [str "i"]], con "Coll.cref" [str "b"]])
   ]
   where
     agree name t = testCase name $ do
       gs <- loaded
-      redraw (displayCore gs (Budget 200) [] [] 0 (Address []) t) @?= renderCore (Rendering gs 0) [] t
+      redraw (displayCore wholePath gs (Budget 200) [] [] 0 (Address []) t) @?= renderCore (rendering gs 0) [] t
 
 -- ---------------------------------------------------------------------------
 -- Where a literal begins — MS7 phase 132
@@ -185,15 +227,15 @@ objectCases =
 regionCases :: [TestTree]
 regionCases =
   [ testCase "an object term reached from Core opens a literal" $ do
-      sh <- shapeOf (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      sh <- shapeOf (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
       case sh of
         ARegion inner -> case displayShape inner of
-          AnObjectTerm lang prod _ -> (lang, prod) @?= ("Ex", "juxt")
+          AnObjectTerm lang prod _ -> (lang, prod) @?= ("Ex", "Ex.juxt")
           other -> assertFailure ("ARegion wrapped " <> show other)
         other -> assertFailure ("not a region: " <> show other)
 
   , testCase "and an inline slot continues it rather than opening another" $ do
-      sh <- shapeOf (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      sh <- shapeOf (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
       case sh of
         ARegion inner -> case displayShape inner of
           AnObjectTerm _ _ items ->
@@ -202,7 +244,7 @@ regionCases =
         other -> assertFailure ("not a region: " <> show other)
 
   , testCase "and a nested one really is inline, so the check is not vacuous" $ do
-      sh <- shapeOf (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      sh <- shapeOf (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
       case sh of
         ARegion inner -> case displayShape inner of
           AnObjectTerm _ _ items ->
@@ -214,7 +256,7 @@ regionCases =
   , testCase "a splice holding a literal of its own opens a second one" $ do
       -- 'Thena.PrintTests' established this term's printed form: the splice's
       -- own argument is a region, so it is written @${LC`…`}@.
-      sh <- shapeOf (con "app" [con "var" [Global (GlobalName "nom") []], con "var" [str "y"]])
+      sh <- shapeOf (con "LC.app" [con "LC.var" [Global (rootName "nom") []], con "LC.var" [str "y"]])
       case sh of
         ARegion inner -> case displayShape inner of
           AnObjectTerm _ _ items ->
@@ -224,15 +266,15 @@ regionCases =
         other -> assertFailure ("not a region: " <> show other)
 
   , testCase "a term with no notation opens none" $ do
-      sh <- shapeOf (Global (GlobalName "twice") [])
+      sh <- shapeOf (Global (rootName "twice") [])
       case sh of
         ARegion {} -> assertFailure "a plain global was taken for a literal"
         _          -> pure ()
 
   , testCase "the seamless form is the expanded one without tag or fences" $ do
       gs <- loaded
-      let t = con "juxt" [con "ref" [str "f"], con "ref" [str "a"]]
-          d = displayCore gs (Budget 200) [] [] 0 (Address []) t
+      let t = con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]]
+          d = displayCore wholePath gs (Budget 200) [] [] 0 (Address []) t
       expanded <- pure (redraw d)
       case displayShape d of
         ARegion inner -> case displayShape inner of
@@ -247,4 +289,4 @@ regionCases =
   where
     shapeOf t = do
       gs <- loaded
-      pure (displayShape (displayCore gs (Budget 200) [] [] 0 (Address []) t))
+      pure (displayShape (displayCore wholePath gs (Budget 200) [] [] 0 (Address []) t))

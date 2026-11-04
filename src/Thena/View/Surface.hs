@@ -49,7 +49,7 @@ module Thena.View.Surface
 import Data.List (intercalate)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (Literal (..))
+import Thena.Core.Term (GlobalName (..), Literal (..), Spelling, spelledIn)
 import Thena.Surface.Concrete
   ( Analysis (..)
   , ObjectPiece (..)
@@ -153,41 +153,46 @@ data SurfacePieceView
   | ASurfacePieceSplice SurfaceShape
   deriving (Eq, Show)
 
-displaySurface :: Surface -> SurfaceShape
-displaySurface s = case s of
-  SurfaceName x -> ASurfaceName x
+-- __A NAME IS WRITTEN THE SHORTEST WAY THAT STILL MEANS IT HERE__ (MS10 phase
+-- 256, `~fjrrr`), as 'Thena.Render' has written one since phase 254. It was
+-- 'nameDotted', so a surface tree shown in the TUI spelled a name one way and
+-- the same tree printed by the REPL spelled it another.
+displaySurface :: Spelling -> Surface -> SurfaceShape
+displaySurface sp s = case s of
+  SurfaceName ps x -> ASurfaceName (spelledIn sp (GlobalName ps x))
   SurfaceUniverse l -> ASurfaceUniverse l
   SurfaceUniverseOpen -> ASurfaceUniverseOpen
   SurfaceLiteral l -> ASurfaceLiteral (literalText l)
   SurfacePlaceholder -> ASurfacePlaceholder
   SurfaceHole h -> ASurfaceHole h
   SurfaceObject lang prod ps -> ASurfaceObjectTerm lang prod (map piece ps)
-  SurfaceApp f as -> ASurfaceApplication (displaySurface f) (map arg (NE.toList as))
-  SurfaceLam bs b -> ASurfaceFunction (map binding (NE.toList bs)) (displaySurface b)
-  SurfacePi bs b -> ASurfaceQuantifier (map binding (NE.toList bs)) (displaySurface b)
-  SurfaceArrow a b -> ASurfaceArrow (displaySurface a) (displaySurface b)
-  SurfaceLet x ty v b -> ASurfaceLet x (fmap displaySurface ty) (displaySurface v) (displaySurface b)
-  SurfaceAnnot e ty -> ASurfaceAnnotation (displaySurface e) (displaySurface ty)
-  SurfaceTrusted ty e -> ASurfaceTrusted (displaySurface ty) (displaySurface e)
-  SurfaceElim d ps mot ms is tgt ->
-    ASurfaceElimination d (map displaySurface ps) (displaySurface mot)
-      (map displaySurface ms) (map displaySurface is) (displaySurface tgt)
+  SurfaceApp f as -> ASurfaceApplication (displaySurface sp f) (map arg (NE.toList as))
+  SurfaceLam bs b -> ASurfaceFunction (map binding (NE.toList bs)) (displaySurface sp b)
+  SurfacePi bs b -> ASurfaceQuantifier (map binding (NE.toList bs)) (displaySurface sp b)
+  SurfaceArrow a b -> ASurfaceArrow (displaySurface sp a) (displaySurface sp b)
+  SurfaceLet x ty v b -> ASurfaceLet x (fmap (displaySurface sp) ty) (displaySurface sp v) (displaySurface sp b)
+  SurfaceAnnot e ty -> ASurfaceAnnotation (displaySurface sp e) (displaySurface sp ty)
+  SurfaceTrusted ty e -> ASurfaceTrusted (displaySurface sp ty) (displaySurface sp e)
+  SurfaceElim dps d ps mot ms is tgt ->
+    ASurfaceElimination (spelledIn sp (GlobalName dps d))
+      (map (displaySurface sp) ps) (displaySurface sp mot)
+      (map (displaySurface sp) ms) (map (displaySurface sp) is) (displaySurface sp tgt)
   SurfaceSplit a tgt as ->
-    ASurfaceSplit a (displaySurface tgt)
-      [ SurfaceArmView (pattern_ pat) (fmap displaySurface b)
+    ASurfaceSplit a (displaySurface sp tgt)
+      [ SurfaceArmView (pattern_ pat) (fmap (displaySurface sp) b)
       | SurfaceArm pat b <- as
       ]
   SurfaceDo is -> ASurfaceDo (intercalate " ; " (map rawInstruction is))
   where
     piece p = case p of
       ObjectText t -> ASurfacePieceText t
-      ObjectSplice e -> ASurfacePieceSplice (displaySurface e)
+      ObjectSplice e -> ASurfacePieceSplice (displaySurface sp e)
     pattern_ pt = case pt of
       PatternWildcard  -> APatternWildcard
       PatternName x ps -> APatternName x (map pattern_ ps)
-      PatternDot e     -> APatternDot (displaySurface e)
-    arg (SurfaceArg pl t) = SurfaceArgView pl (displaySurface t)
-    binding (SurfaceBinder pl x ty) = SurfaceBinding pl x (fmap displaySurface ty)
+      PatternDot e     -> APatternDot (displaySurface sp e)
+    arg (SurfaceArg pl t) = SurfaceArgView pl (displaySurface sp t)
+    binding (SurfaceBinder pl x ty) = SurfaceBinding pl x (fmap (displaySurface sp) ty)
 
 -- | Mirrors 'Thena.View.Instral.literalText' exactly. Duplicated rather
 -- than shared: sharing it would make this module depend on

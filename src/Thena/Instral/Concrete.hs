@@ -13,9 +13,11 @@
 -- having to work out which is which.
 --
 -- **It imports nothing, and must keep importing nothing** (@.claude\/spec\/interface.md@
--- §2.5): "Thena.Syntax.Lexer" and "Thena.Syntax.Parser" sit beside @Core@ and
--- between them import only the concrete-syntax modules, which is what keeps
--- "Thena.Errors"' /nothing above Core/ rule true.
+-- §2.5) \8212 and from MS10 phase 269 that is true of the file and not only of
+-- the rule: the one import left was @Raw@, for the corner operand that
+-- `~3t63k` deleted. "Thena.Syntax.Lexer" and "Thena.Syntax.Parser" sit beside
+-- @Core@ and between them import only the concrete-syntax modules, which is
+-- what keeps "Thena.Errors"' /nothing above Core/ rule true.
 --
 -- The constructors keep their @Raw@ prefix. It no longer names the type they
 -- used to live beside; it says /named and unresolved/, which is what they are —
@@ -23,6 +25,8 @@
 -- "Thena.Rules".
 module Thena.Instral.Concrete
   ( RawDecl (..)
+  , RawOpen (..)
+  , RawOpenSpec (..)
   , RawFunction (..)
   , RawRhs (..)
   , RawBody (..)
@@ -35,8 +39,6 @@ module Thena.Instral.Concrete
   , RawOperand (..)
   , RawTest (..)
   ) where
-
-import Thena.Syntax.Concrete (Raw)
 
 -- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› do ‹body›@.
 --
@@ -95,10 +97,43 @@ data RawPattern
 -- his choice, 2026-09-12. It has to be: a callable has several clauses and one
 -- type, so a type written on a clause would be written once and read as
 -- belonging to all of them, or written on each and able to disagree.
+-- **An @open@ is a declaration here too** (MS10 phase 267), which is the
+-- pulled-forward piece of @\`~jmw4k\`@: a rule file that talks about a language
+-- living inside a namespace had no way to name it short, and no way to name it
+-- at all once the generated spelling of a tag was the namespace's. It is the
+-- same five forms the surface language has and it is read the same way — what
+-- the line says becomes a 'Thena.Core.Term.Opened' at resolution, and the walk
+-- that answers a tag is the one a surface term already uses.
 data RawDecl
   = DeclRule RawRule
   | DeclSignature RawSignature
   | DeclFunction RawFunction
+  | DeclOpen RawOpen
+    -- ^ @open X@ — in force from here to the end of the file
+  | DeclOpenIn RawOpen RawDecl
+    -- ^ @open X in ‹declaration›@ — in force for that declaration alone
+  deriving (Eq, Show)
+
+-- | What an @open@ line in a rule file said: the namespaces it names, and what
+-- it brings in from them (MS10 phase 267).
+--
+-- **The written form, and the surface language has its own**
+-- ('Thena.Surface.Concrete.SurfaceOpenSpec'). The two concrete syntaxes keep
+-- their own as-written types throughout — @RawData@ beside @SurfaceData@ — and
+-- what they share is the resolved form, 'Thena.Core.Term.Opened', which is the
+-- mechanism. This module imports nothing, which is the other reason.
+data RawOpen = RawOpen [([String], String)] RawOpenSpec
+  deriving (Eq, Show)
+
+-- | The four things a line may say about which words it brings in (MS10 phase
+-- 267). **Several namespaces only in the plain form**, for the surface's
+-- reason: a selection speaks about one namespace's words, so naming two would
+-- not say whose they are.
+data RawOpenSpec
+  = RawOpenWhole                        -- ^ @open X@, and @open X Y Z@
+  | RawOpenOnly [String]                -- ^ @open X ( a b )@
+  | RawOpenHiding [String]              -- ^ @open X hiding ( a b )@
+  | RawOpenRenaming [(String, String)]  -- ^ @open X renaming ( e -> c )@
   deriving (Eq, Show)
 
 -- | @‹name› ‹params› = ‹expression›@ — a global function (MS5 phase 68a).
@@ -125,7 +160,7 @@ data RawFunction = RawFunction String [RawPattern] RawBody
 -- waits for this phase).
 data RawRhs
   = RhsOp RawOp        -- ^ @concat x x@ — an op or a call
-  | RhsValue RawOperand -- ^ @[1, 2]@, @(a, b)@, @42@, @⌜ t ⌝@
+  | RhsValue RawOperand -- ^ @[1, 2]@, @(a, b)@, @42@, @core\`t\`@
   deriving (Eq, Show)
 
 -- | What stands right of a function's @=@ or a lambda's @->@ (MS5 phase 75b).
@@ -235,16 +270,12 @@ data RawTest = RawTest String [RawOperand]
 -- 'RawText' arrives at phase 22b, at the user's instruction: *"Rules absolutely
 -- need a string literal."* Without it @say@, @ask@ and @concat@ had keywords
 -- that resolved and no way to be given anything to say.
+-- **A core term is a region like any other, and was two things until MS10
+-- phase 269** (`~3t63k`): @⌜ t ⌝@ held a parsed 'Raw' and @core\`t\`@ holds
+-- text, and they denoted the same operand. The corners are gone, so a written
+-- term reaches here one way.
 data RawOperand
-  = RawQuoted Raw
-    -- ^ @⌜ t ⌝@ — **a core term written in corners** (MS5 phase 62).
-    --
-    -- The same operand a @core@ region denotes, by the other spelling. It holds
-    -- a parsed tree rather than raw text because **Core shares Thena's lexer**:
-    -- a region carries text so that a /foreign/ language may keep its own
-    -- lexical rules, and Core has no need of that
-    -- (@discussion\/the-five-languages.md@ §7b, the permanent entry).
-  | RawRegion String (Maybe String) String
+  = RawRegion String (Maybe String) String
     -- ^ @tag\`…\`@ — a **tagged region** (MS5 phase 61b): the tag, and the raw
     -- text between the fences. Which language the text is in is the tag's to
     -- say, and the text is parsed by that tag's parser during resolution.
@@ -275,6 +306,21 @@ data RawOperand
     -- is made in, which is a thing that happens at run time, so it cannot be a
     -- literal.
   | RawRef String
+  | RawGlobal [String] String
+    -- ^ @String.eq@ — **a global name written out**: its path's steps, then its
+    -- base word (MS10 phase 245).
+    --
+    -- **A dotted word is a literal where a bare one is a 'RawRef'**, and that
+    -- is not a special case: a binding in a body lives in the body's own scope,
+    -- which has no namespaces (§3.6), so only a /global/ name can have a path
+    -- at all. The dot is therefore the whole of what distinguishes them, and a
+    -- name with no path is still written as a string where a literal is wanted.
+    --
+    -- It exists because @declare-primitive@ and @define-global@ read their name
+    -- operand as a name, and until this phase the only two things writable
+    -- there were a bare word and a string literal — so a rule could not name
+    -- @String.eq@ at all, and the primitives could not move into their type's
+    -- namespace.
   | RawPos Int
     -- ^ a numeral. **It is a /position/ only where a field word wants one** —
     -- @arg 2@, @param 0@ — and an 'Thena.Instral.Ops.VInt' literal everywhere else (MS5

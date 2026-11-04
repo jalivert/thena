@@ -33,7 +33,8 @@ import Thena.Core.Convert (convert)
 import Thena.Core.Term (Core (..), Ident (..), Var, fresh)
 import Thena.Core.Typing (check)
 import Thena.Core.Unify (UnifyResult (..), blockers, constraintsOf, unify, unifyInto)
-import Thena.Declared (natVec, natVecCounter)
+import Thena.Declared ( opensIn
+  ,natVec, natVecCounter)
 import Thena.Development.Component (Component (..), forget)
 import Thena.Development.Cursor (Cursor, enter, rebuild)
 import Thena.Development.Partial (Partial (..))
@@ -288,7 +289,7 @@ devOf ds = Dev
                in (cs ++ [Guess v (Ident nm) (Trailing g) t], vs ++ [(nm, v)], k3)
 
 readIn :: Context -> Int -> String -> (Core, Int)
-readIn ctx n src = case parseCore [] natVec ctx n src of
+readIn ctx n src = case parseCore [] natVec (opensIn natVec) ctx n src of
   Left e  -> error ("fixture term does not resolve: " ++ show e)
   Right r -> r
 
@@ -622,7 +623,7 @@ flexFlexTests =
 -- nothing left to solve (MS4 phase 41g).
 directedTests :: [TestTree]
 directedTests =
-  [ -- The defect this phase exists for: @try-core ⌜ Nat ⌝@ at a claim of
+  [ -- The defect this phase exists for: @try-core core`Nat`@ at a claim of
     -- @Type₁@ succeeded and @elaborate Nat@ did not.
     testCase "a smaller universe fits a larger one" $
       intoResultOf [] "Type\8320" "Type\8321" "Type\8322" `isSolved` 0

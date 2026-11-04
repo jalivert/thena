@@ -95,9 +95,47 @@ data Warning
     -- ^ the block, the production, and a binder declared @as binders@ that no
     -- @[…]@ mentions (@ms6\/SPEC.md@ §4.5, MS6 phase 101). A vacuous binder is
     -- allowed — that is why it can be declared — and worth saying.
+  | MetavariableNotOpen BlockKind String String String String
+    -- ^ the block, the production, a word it reads as a /terminal/, and the
+    -- language whose metavariable that word is — which is not in scope here
+    -- (MS10 phase 255). **A metavariable is scoped to its language's
+    -- namespace** since his ruling of 2026-11-02, so a block that forgets the
+    -- @open@ does not get a refusal: §4.2 says a word that is no metavariable
+    -- is a terminal, and the notation quietly reads the letter as text. Nothing
+    -- is broken — a terminal @T@ is a perfectly good notation — so the author
+    -- is told rather than prevented, exactly as 'UnprimeableClass' tells them.
+  | TokenClassNotOpen BlockKind String String String String
+    -- ^ the block, the production, a word it reads as a /terminal/, and the
+    -- token class of that word, named in full — a class that is not in scope
+    -- here (MS10 phase 259). **The class twin of 'MetavariableNotOpen', and it
+    -- is the same silence**: a class is resolved in the scope its block sits in
+    -- since the last piece of `~g4k5g`, so @x : Token String@ in another
+    -- namespace leaves @x@ a perfectly good terminal and the notation reads the
+    -- letter as text. Told rather than prevented, for the reason that one is.
+  | NameShadows GlobalName GlobalName
+    -- ^ a name that has just entered the environment, and the name its word
+    -- reached before it did (MS10 phase 264). **Shadowing is
+    -- accepted** — his ruling of 2026-11-03 — so this is the second
+    -- principle's own answer to it: the action is allowed and the UI carries
+    -- the warning. 'Thena.Core.Term.globalUnder' answers a name written exactly
+    -- before it tries any alias, so a declaration whose name /is/ @Nat@ beats
+    -- the alias that merely derives @Nat@ from @Nat.Nat@, and the word changes
+    -- what it means with nothing broken: both names are still there, and the
+    -- repair is writing the shadowed one in full.
+  | ProofShadows GlobalName GlobalName
+    -- ^ the name a proof is being opened under, and what that word reaches
+    -- /now/ (MS10 phase 264). **The same fact one step earlier, and it is a
+    -- separate case because it is a separate statement**: at @:theorem@ nothing
+    -- has entered the environment yet, so the word still means the old name and
+    -- what the warning says is what the proof /will/ cost. His second principle
+    -- of 2026-09-01 is why it is said here at all \8212 the UI's job is to show
+    -- what an action will cause \8212 and saying it here is also where the
+    -- repair is cheap, since renaming the theorem before @qed@ costs nothing
+    -- and renaming it after costs the proof. @qed@ is silent for that reason:
+    -- the forecast was given when the proof opened.
   | UnprimeableClass BlockKind String String
     -- ^ the block, the language's name, and its identifier class's name — a class no
-    -- single character extends, so a generated @L-fresh@ cannot rename a
+    -- single character extends, so a generated @L.fresh-\8249k\8250@ cannot rename a
     -- captured binder to a name the language can write back (MS6 closeout 23,
     -- phase 146). **It is a warning and not a refusal**: the language works, its
     -- substitution is correct, and only printing a renamed binder is lost — so
@@ -209,6 +247,30 @@ data FailReason
     -- ^ an answer to an @AName@ question that cannot be a name
   | ExpectedText
     -- ^ an operand was not a @VText@
+  | ExpectedName
+    -- ^ an operand was not a name (MS10) — neither a @VName@ nor the string
+    -- literal that reads as one at the root.
+  | NoSuchNamespace String
+    -- ^ @open X@ where nothing at all is named @X.…@ (MS10 phase 247).
+    --
+    -- **A namespace is never declared**, so this is the only check @open@ can
+    -- make: a prefix nothing sits under is a typo or a file that was not
+    -- imported, and saying so once where it is written beats every later name
+    -- failing on its own.
+  | AmbiguousName String [String]
+    -- ^ a written name that two or more open namespaces answer (MS10 phase
+    -- 247): the name as written, then every qualified name it could mean.
+    --
+    -- **Refused rather than chosen.** Either would type-check, so picking one
+    -- would be the system deciding what the user did not write; the repair is
+    -- to write the path.
+  | DottedTextName String
+    -- ^ a string literal in a name position holds a dot (MS10 phase 245).
+    --
+    -- **A string literal reads as a name at the /root/**, so its whole text is
+    -- the base word — and a word may not hold a dot, because a path is
+    -- structure and not punctuation. Refused rather than split: a rule that
+    -- means a path writes a name literal, @String.eq@, which carries one.
   | ExpectedRaw
     -- ^ an op wanting an unresolved core term — a @core@ region — got something
     -- else (MS5 phase 61b).
@@ -853,6 +915,13 @@ data ObjectError
     -- when the literal is resolved or elaborated**, not when it is read: a
     -- module is parsed whole before its own block is installed, so this is the
     -- earliest the question can be asked.
+  | ObjectLanguageAmbiguous String [String]
+    -- ^ a bare tag that more than one namespace in scope answers, and the
+    -- grammars that answered (MS10 phase 260, `~zjkvd`). **A tag resolves like
+    -- any other name** — his ruling of 2026-10-30 — so two opened namespaces
+    -- each holding a @Ty@ leave @Ty\`…\`@ with two readings, and it is refused
+    -- rather than chosen, as every other two-answer lookup is. **The fix the
+    -- writer has is the path**, which is why the refusal names both in full.
   | NoSuchObjectProduction String String
     -- ^ @LC[nope]\`…\`@ — the language, and a production it does not have.
   | ObjectNotParsed String String ParseFailure
@@ -861,16 +930,56 @@ data ObjectError
     -- is the same parser.
   | ObjectNotATerm String BuildError
     -- ^ it parsed, and the reading does not denote a term.
+  | BuiltInTagNotATerm String
+    -- ^ __a built-in tag that names no term of the development calculus__
+    -- (MS10 phase 266) — @surface\`…\`@ written where a term is wanted. The
+    -- two built-in tags are tags wherever a tag may be written, and only
+    -- @core@ denotes a term here: a surface term has not been elaborated, and
+    -- there is no component that holds an unelaborated one. **Its own case,
+    -- because 'NoSuchObjectLanguage' said the opposite of the truth** — the
+    -- word is reserved precisely so that no @language@ block can declare it.
+  | CoreRegionUnread String SyntaxError
+    -- ^ @core\`…\`@ whose text the development calculus's own lexer or parser
+    -- refused (MS10 phase 266). The tag, then why — the same two failures
+    -- a rule base's @core@ region reports, from the same two functions.
+  | RegionSpliceNotAName String
+    -- ^ __an escape holding more than a name__ (MS10 phase 266), in a built-in
+    -- region. The tag. @core\`${x}\`@ is read by reassembling the region's
+    -- text and handing it to the development calculus's parser, which reads
+    -- the escape itself — so what the escape holds has to survive being
+    -- written back out, and only a bare word does. It is the same restriction
+    -- an operand's region has always had, where the scanner never offered
+    -- more.
   deriving (Eq, Show)
 
 data ResolveError
   = NotInScope String
+  | NameIsAmbiguous String [String]
+    -- ^ **two open namespaces answer one written word** (MS10 phase 249) — the
+    -- word as written, then every name that answers it. Refused and not chosen
+    -- (2026-10-30): either would type-check, so picking one would be the system
+    -- deciding what the user did not write.
+    --
+    -- It is 'Thena.Engine.AmbiguousName's twin at the other door, and both
+    -- are produced by the one walk in 'Thena.Core.Term.globalUnder' — a
+    -- command's argument and a surface term being elaborated refuse the same
+    -- word for the same reason and in the same words.
   | NotACoreTerm DevForm
     -- ^ a development-only form written where a term goes
   | NotAUniverse String
     -- ^ the datatype's declared type does not end in @Type_l@
-  | TargetIsNotTheDatatype String
-    -- ^ this constructor's result type is not the family being declared
+  | TargetIsNotTheDatatype String (Maybe GlobalName) GlobalName
+    -- ^ this constructor's result type is not the family being declared: the
+    -- constructor, the name its target /does/ produce where it produces one,
+    -- and the family being declared.
+    --
+    -- **The head is carried since MS10 phase 264, and shadowing is why.** A
+    -- declaration whose own word is taken — @data Foo@ where a theorem @Foo@
+    -- is already proved — reaches this with a target that /is/ a name, just
+    -- not this one, and the old words (/this constructor must produce the
+    -- datatype being declared/) blamed the constructor for a collision one
+    -- line up. Naming both spellings is the whole of the fix: @Foo@ against
+    -- @Foo.Foo@ says what happened, and writing the path is the repair.
   | TargetArgumentCount String Int Int
     -- ^ constructor, arguments its target should have, arguments it has
   | ParameterNotPassedThrough String Ident

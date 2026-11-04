@@ -33,9 +33,11 @@ import Thena.Core.Level
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Convert (convert)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, close, fresh, open)
+import Thena.Core.Term (Core (..), Ident (..), Var, close, fresh, open)
 import Thena.Core.Typing (check, infer)
-import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
+import Thena.Declared ( opensIn
+  , declaredAs
+  ,named, natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Errors (TypeError (..))
 import Thena.Core.Context (piOver)
@@ -102,7 +104,7 @@ recursiveFunctionTests =
 -- --------------------------------------------------------------------------
 
 termAt :: Int -> Context -> String -> Core
-termAt n ctx src = case parseCore [] natVec ctx n src of
+termAt n ctx src = case parseCore [] natVec (opensIn natVec) ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 
@@ -136,8 +138,6 @@ illTyped src = case typeOf src of
   Left _  -> pure ()
   Right t -> assertFailure ("expected a type error, got the type " ++ show t)
 
-named :: String -> GlobalName
-named = GlobalName
 
 -- --------------------------------------------------------------------------
 
@@ -266,7 +266,7 @@ eliminatorTypeTests =
   , testCase "Empty's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Empty" (LZero)
   ]
   where
-    wellFormed env n0 d l = case lookupInductive (named d) env of
+    wellFormed env n0 d l = case lookupInductive (declaredAs d) env of
       Nothing  -> assertFailure (d ++ " is not declared")
       Just def ->
         let (ty, n) = eliminatorType def l n0
@@ -341,12 +341,13 @@ errorTests =
         Left (NotAType _ _ _) -> pure ()
         other                 -> assertFailure (show other)
   , testCase "an unsaturated Canonical, which only a hand-built term can be" $
-      case verdict (infer natVec [] natVecCounter (Canonical (named "succ") [] [])) of
+      case verdict (infer natVec [] natVecCounter
+                  (Canonical (named "Nat.succ") [] [])) of
         Left (Unsaturated _ _) -> pure ()
         other                  -> assertFailure (show other)
   , testCase "an over-applied Canonical" $
       case verdict (infer natVec [] natVecCounter
-                  (Canonical (named "zero") [] [Canonical (named "zero") [] []])) of
+                  (Canonical (named "Nat.zero") [] [Canonical (named "Nat.zero") [] []])) of
         Left (OverApplied _) -> pure ()
         other                -> assertFailure (show other)
   , testCase "a loose de Bruijn index reaching the checker" $
@@ -391,7 +392,7 @@ schemeTests =
         @?= [AtMost (levelOfNat 0) (levelOfNat 1)]
 
   , testCase "a definition with no constraints owes nothing" $
-      owed (infer natVec [] natVecCounter (Global (named "succ") [])) @?= []
+      owed (infer natVec [] natVecCounter (Global (named "Nat.succ") [])) @?= []
   ]
   where
     owed (_, o, _) = o

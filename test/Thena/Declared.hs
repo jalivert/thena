@@ -13,6 +13,7 @@
 -- makes two suites pass about two different datatypes.
 module Thena.Declared
   ( natDecl
+  , opensIn
   , vecDecl
   , finDecl
   , packDecl
@@ -57,11 +58,16 @@ module Thena.Declared
   , eqStep
   , eqStepCounter
   , declared
+  , declaredAs
+  , named
   ) where
 
+import Data.List (nub)
+
+import Thena.Core.Term (GlobalName (..), InScope, nameFromText, nameSteps, openingOnly, rootScope)
 import Thena.Driver (parseDeclaration)
 import Thena.Global.Declare (declare)
-import Thena.Global.Env (GlobalEnv, emptyGlobals)
+import Thena.Global.Env (GlobalEnv, emptyGlobals, inductives)
 
 natDecl, vecDecl, finDecl, packDecl, spanDecl, emptyDecl :: String
 allDecl, afterDecl, beforeDecl, bothDecl, apartDecl :: String
@@ -123,7 +129,7 @@ spanDecl =
 -- for it is trivial and the nested J has nothing to cross; @acons@ has one, and
 -- its own argument @ps@ is what the acyclicity equipment is about. The package
 -- is @as; ps@ with @a@ interior to it, and before phase 223 that withheld
--- @noCycleAll@ and with it the cycle transition for every family of the shape.
+-- @All.lemmata.noCycle@ and with it the cycle transition for every family of the shape.
 allDecl =
   "All (A : Type\8320) : forall (n : Nat) -> Vec A n -> Type\8320 \
   \where { anil : All A zero (nil A) \
@@ -137,7 +143,7 @@ allDecl =
 -- to @as@, so the two travel packaged; @m@ is quantified after them and the
 -- element mentions it, so the package must be transported along @m@\'s equation
 -- when the element is read out of it and not before. Every family of this shape
--- had its declaration refused — @noConfusionAfter does not typecheck@ — until
+-- had its declaration refused — @After.lemmata.noConfusion does not typecheck@ — until
 -- the package was moved lazily, one component at a time.
 afterDecl =
   "After (A : Type\8320) : forall (n : Nat) -> Vec A n -> Nat -> Type\8320 \
@@ -214,7 +220,7 @@ dpairDecl =
 -- **@Eq@ first, then @DPair@, and @And@ after both**, because each one's own
 -- no-confusion needs what precedes it: @And@ states equations, so it needs the
 -- equality, and @both@ takes two arguments, so it needs the pair. The reverse
--- order costs @NoConfusionAnd@ silently.
+-- order costs @And.lemmata.NoConfusion@ silently.
 preludeDecls :: [String]
 preludeDecls = [eqDecl, dpairDecl, unitDecl, emptyDecl, andDecl]
 
@@ -251,14 +257,34 @@ stepDecl =
 -- | Declare a list of datatypes in order, threading the environment and the
 -- name counter. A refusal is a fixture bug, not a test result, so it errors
 -- loudly rather than quietly becoming an unrelated assertion failure.
+--
+-- __Each declaration is read with the ones before it OPEN__ (MS10 phase 249),
+-- which is what a surface module does: phase 248 put a datatype's constructors
+-- inside its own namespace, so @Nat.zero@ is the name, and 'stepDecl' writing
+-- @Term@ and @true@ short is a fixture that reads exactly like a @.thena@ file
+-- with @open Term@ after the block. Without it a fixture cannot even declare a
+-- relation over an earlier datatype. **The opens are derived from what has been
+-- declared and not listed**, so a fixture cannot drift from them, and
+-- 'opensIn' is the same walk for a test that resolves a term afterwards.
 declared :: [String] -> (GlobalEnv, Int)
-declared = foldl one (emptyGlobals, 0)
+declared srcs = let (env, n, _) = foldl one (emptyGlobals, 0, rootScope) srcs in (env, n)
   where
-    one (env, n) src = case parseDeclaration [] env n src of
+    one (env, n, opens) src = case parseDeclaration [] env opens n src of
       Left e -> error ("fixture does not parse: " ++ show e)
       Right (d, n1) -> case declare env n1 d of
-        Left e              -> error ("fixture refused: " ++ show e)
-        Right (env', n2)    -> (env', n2)
+        Left e           -> error ("fixture refused: " ++ show e)
+        Right (env', n2) -> (env', n2, opensIn env')
+
+-- | The namespaces every datatype in an environment opens, latest first.
+--
+-- __Derived, never listed__ — the same argument that kept a namespace table out
+-- of 'Thena.Global.Env' (his ruling, 2026-10-30): a list a fixture maintained by
+-- hand would be a second copy of what the environment's keys already say. A test
+-- that declares with 'declared' and then resolves a term written in short names
+-- passes @opensIn env@ where a REPL session passes @opened machine@ and a module
+-- passes the @open@s it has read.
+opensIn :: GlobalEnv -> InScope
+opensIn e = openingOnly (reverse (nub [ nameSteps g | (g, _) <- inductives e ]))
 
 nat, natVec, natFin :: GlobalEnv
 nat    = fst (declared [natDecl])
@@ -294,15 +320,15 @@ natAnd = fst (declared [natDecl, andDecl])
 natAndCounter :: Int
 natAndCounter = snd (declared [natDecl, andDecl])
 
--- | The prelude and then @Nat@ — so @Nat@ arrives with @NoConfusionNat@ and
--- @noConfusionNat@ beside it (phase 14).
+-- | The prelude and then @Nat@ — so @Nat@ arrives with @Nat.lemmata.NoConfusion@ and
+-- @Nat.lemmata.noConfusion@ beside it (phase 14).
 eqNat :: GlobalEnv
 eqNat = fst (declared (preludeDecls ++ [natDecl]))
 
 eqNatCounter :: Int
 eqNatCounter = snd (declared (preludeDecls ++ [natDecl]))
 
--- | The prelude, @Nat@ and @Vec@ — @noConfusionNat@ beside an indexed family
+-- | The prelude, @Nat@ and @Vec@ — @Nat.lemmata.noConfusion@ beside an indexed family
 -- whose index is a @Nat@, which is what specialisation by unification is worked
 -- on (MS9 phase 177).
 eqNatVec :: GlobalEnv
@@ -373,3 +399,23 @@ eqStep = fst (declared (preludeDecls ++ [taplDecl, stepDecl]))
 
 eqStepCounter :: Int
 eqStepCounter = snd (declared (preludeDecls ++ [taplDecl, stepDecl]))
+
+-- | Re-exported: a name written the way a user writes it, @Nat.elim@.
+--
+-- **The library owns the split** ('Thena.Core.Term.nameFromText') because a
+-- REPL command's argument needs it too; a test that wrote
+-- @rootName "Nat.elim"@ would be asserting about a name at the /root/ whose word
+-- holds a dot, which is the one shape §3.6 forbids.
+named :: String -> GlobalName
+named = nameFromText
+
+-- | The global a @data D@ declaration installs: @declaredAs "Nat"@ is @Nat.Nat@.
+--
+-- **A declaration lives in the namespace it opens** (MS10 phase 243), so a
+-- datatype's own name is its word twice over, and the short name a fixture
+-- writes is derived at resolution rather than recorded. A fixture that looks
+-- the datatype up by @rootName "Nat"@ asks for a name nothing declares and
+-- gets @Nothing@ — which reads as "not declared" and says nothing about the
+-- namespace, so the fact is spelled once here instead of at each lookup.
+declaredAs :: String -> GlobalName
+declaredAs d = GlobalName [d] d

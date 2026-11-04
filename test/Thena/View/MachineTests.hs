@@ -27,6 +27,7 @@ import Thena.Engine (Exec (..), Frame (..), Machine (..))
 import Thena.Instral.Ops (Instr (..), Op (Assume), Operand (..), Value (..))
 import Thena.Instral.Pattern (Pattern (..))
 import Thena.Language.Grammar (Grammar)
+import Thena.Core.Term (wholePath)
 import Thena.View.Address (Address (..))
 import Thena.View.Core (Budget (..))
 import Thena.View.Instral
@@ -39,7 +40,8 @@ import Thena.View.Instral
 import Thena.View.Machine (FrameView (..), MachineView (..), displayMachine)
 import Thena.View.Redraw (redraw, redrawSurface)
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderMachine)
 
 tests :: TestTree
@@ -85,8 +87,8 @@ mismatchMachine gs m
   | shown == drawn = pure ()
   | otherwise = assertFailure ("printed:\n" ++ unlines shown ++ "drawn:\n" ++ unlines drawn)
   where
-    shown = renderMachine (Rendering gs 500) [] m
-    drawn = redrawMachine (displayMachine gs (Budget 200) [] [] 500 (Address []) m)
+    shown = renderMachine (rendering gs 500) [] m
+    drawn = redrawMachine (displayMachine wholePath gs (Budget 200) [] [] 500 (Address []) m)
 
 -- ---------------------------------------------------------------------------
 -- What an editor is, for a machine
@@ -146,6 +148,10 @@ redrawSkeleton at sk = case sk of
 redrawValue :: ValueView -> String
 redrawValue v = case v of
   ValText s -> s
+  -- **A name redraws bare, where text redraws as what was inside the quotes**
+  -- (MS10). 'Thena.Render.renderValue' quotes a string and prints a name as its
+  -- dotted path, and this walker is what checks the two agree.
+  ValName s -> s
   ValInt k -> show k
   ValChar t -> t
   ValBool True -> "true"
@@ -155,6 +161,6 @@ redrawValue v = case v of
   ValSome u -> "some " <> redrawValue u
   ValPair a b -> "(" <> redrawValue a <> ", " <> redrawValue b <> ")"
   ValLevel l -> l
-  ValTerm d -> "\8988" <> redraw d <> "\8989"
+  ValTerm d -> "core`" <> redraw d <> "`"
   ValSurface sh -> "\8249" <> redrawSurface sh <> "\8250"
   ValOpaque other -> "\8249" <> other <> "\8250"

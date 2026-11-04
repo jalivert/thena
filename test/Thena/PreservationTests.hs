@@ -19,14 +19,15 @@ import Test.Tasty.HUnit (testCase, (@?=))
 
 import Data.List (isInfixOf, isPrefixOf)
 import Data.Maybe (isJust)
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore)
 
 target :: FilePath
@@ -39,14 +40,14 @@ tests =
     [ -- **The theorem.** Evaluation does not change a term's type.
       testCase "a step preserves the type" $ do
         st <- statementOf "preservation"
-        st @?= Just "∀ (t : Term) (t' : Term) -> Step t t' \
-                    \-> ∀ (U : Ty) -> HasType t U -> HasType t' U"
+        st @?= Just "∀ (t : Term.Term) (t' : Term.Term) -> Step.Step t t' \
+                    \-> ∀ (U : Ty.Ty) -> HasType.HasType t U -> HasType.HasType t' U"
 
       -- **Type safety is the pair**, and this asserts the other half is still
       -- the theorem it was two modules ago.
     , testCase "and progress is still there beside it" $ do
         st <- statementOf "progress"
-        st @?= Just "∀ (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)"
+        st @?= Just "∀ (t : Term.Term) (T : Ty.Ty) -> HasType.HasType t T -> Or.Or (Value.Value t) (Steps t)"
 
       -- **The nine lemmas the proof used to need.** Six took the derivation
       -- apart at a term shape; three more — @succAtNat@, @predAtNat@,
@@ -55,7 +56,7 @@ tests =
       -- equation itself, so none of them has anything left to do.
     , testCase "the nine inversion lemmas are gone" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (machineOf s)) . GlobalName)
+        map (isJust . flip lookupDefinition (globals (machineOf s)) . rootName)
             [ "ifGuard", "ifThen", "ifElse"
             , "succArg", "predArg", "isZeroArg"
             , "succAtNat", "predAtNat", "isZeroAtBool"
@@ -81,5 +82,5 @@ tests =
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore (Rendering [] (names (machineOf s))) [] . definitionType
-               <$> lookupDefinition (GlobalName n) (globals (machineOf s)) )
+      pure ( renderCore (rendering [] (names (machineOf s))) [] . definitionType
+               <$> lookupDefinition (rootName n) (globals (machineOf s)) )

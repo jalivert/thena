@@ -51,10 +51,11 @@
 -- * **no splices** — @surface\`${t}\`@ is a parse error today, and a @core@
 --   splice lexes only inside a region, so one rule set cannot describe it
 --   honestly. @AGENDA.md@ 96;
--- * **no corners and no @⟨…⟩@** — both are tagged term literals written another
---   way and are being removed. **HIS instruction, 2026-10-01**: take the
---   description out now rather than leave it for the removal to find.
---   @AGENDA.md@ 98;
+-- * **no term literal of another language in an operand** — @core\`t\`@ and
+--   @surface\`t\`@ stand where a value stands, and this grammar describes the
+--   values. **It was two gaps until MS10 phase 269** (`~3t63k`), corners and
+--   the @⟨…⟩@ alias each being the same thing written a third and a fourth
+--   way; there is one spelling to describe now, which is the item's point;
 -- * **narrower lexemes** — "Thena.Language.Lexemes" says why.
 --
 -- __Every head is a phrase, and the separator is a space.__ A head is
@@ -76,10 +77,17 @@ module Thena.Language.Builtin
   ) where
 
 import Thena.Language.Grammar (Grammar, productionBody)
-import Thena.Language.Build (languageNames, productionNames)
+import Thena.Language.Build (languageNames, productionNames, productionRule)
 import qualified Thena.Language.Earley as E
 import Thena.Language.Lexemes
-  (charRegex, identRegex, numberRegex, regexRegex, stringRegex, universeRegex)
+  ( charRegex
+  , identRegex
+  , numberRegex
+  , qualifiedIdentRegex
+  , regexRegex
+  , stringRegex
+  , universeRegex
+  )
 import Thena.Language.Regex (Regex)
 
 -- | The nonterminal a @surface@ region parses at.
@@ -126,7 +134,7 @@ coreHead = "core term"
 -- @surface@ region immediately, with nothing rebuilt.
 surfaceRules :: [Grammar] -> [E.Rule]
 surfaceRules gs = concat
-  [ term, atom, arguments, terms, binders, piBinders, names, bindings ]
+  [ term, atom, arguments, terms, binders, piBinders, name, names, bindings ]
   where
     t = surfaceHead
     atomH = surfaceAtomHead
@@ -135,6 +143,7 @@ surfaceRules gs = concat
     bindersH = "surface binders"
     piBindersH = "surface pi binders"
     namesH = "surface names"
+    nameH = "surface name"
     bindingsH = "surface bindings"
 
     -- | **A position where @Surface\/Parser.y@ writes @Term@ rather than
@@ -175,10 +184,13 @@ surfaceRules gs = concat
       [ rule "let" t [lit "let", lit "{", nt bindingsH, lit "}", lit "in", nt t] ]
 
     atom =
-      [ rule "name" atomH [scan "name" identRegex]
+      [ rule "name" atomH [nt nameH]
         -- **@?foo@ is two tokens and not one** — @?@ cannot start an identifier,
         -- so the lexer hands over @TQuery@ and then the name, and @? foo@ with a
         -- space is a surface hole too.
+        --
+        -- **A hole's name is not qualified**: it names a component of the
+        -- development, whose scope has no namespaces.
       , rule "hole" atomH [lit "?", scan "name" identRegex]
       , rule "universe" atomH [scan "universe" universeRegex]
       , rule "open universe" atomH [lit "Type"]
@@ -187,7 +199,7 @@ surfaceRules gs = concat
       , rule "int" atomH [scan "int" numberRegex]
       , rule "regex" atomH [scan "regex" regexRegex]
       , rule "eliminator" atomH
-          [ lit "elim", scan "name" identRegex, nt argumentsH, nt atomH
+          [ lit "elim", nt nameH, nt argumentsH, nt atomH
           , nt argumentsH, nt argumentsH, nt atomH
           ]
       ] ++
@@ -226,6 +238,11 @@ surfaceRules gs = concat
       [ [lit "{"] ++ body ++ [lit ":"] ++ asc ++ [lit "}"] | (body, asc) <- forms ]
       where forms = [ ([nt namesH], a) | a <- ascribed ]
 
+    -- **A name may be qualified** (MS10): the path's steps, glued by the
+    -- reserved dot. The binder positions below are deliberately not — a binder
+    -- is a word in the development's own scope, which has no namespaces.
+    name = [ rule "word" nameH [scan "name" qualifiedIdentRegex] ]
+
     names =
       [ rule "one" namesH [scan "name" identRegex]
       , rule "more" namesH [nt namesH, scan "name" identRegex]
@@ -246,7 +263,8 @@ surfaceRules gs = concat
 -- slots and for the parenthesised runs.
 coreRules :: [Grammar] -> [E.Rule]
 coreRules gs = concat
-  [ term, atom, atoms, arguments, binders, name, levels, levelArgs, constraint ]
+  [ term, atom, atoms, arguments, binders, name, qname, levels, levelArgs
+  , constraint ]
   where
     c = coreHead
     atomH = "core atom"
@@ -254,6 +272,7 @@ coreRules gs = concat
     argumentsH = "core arguments"
     bindersH = "core binders"
     nameH = "core name"
+    qnameH = "core qualified name"
     levelsH = "core levels"
     levelArgsH = "core level arguments"
     constraintH = "core constraint"
@@ -279,18 +298,18 @@ coreRules gs = concat
           ]
       , rule "pending" c [nt constraintH, lit "▸", nt c]
       , rule "eliminator" c
-          [ lit "elim", nt nameH, nt argumentsH, nt atomH
+          [ lit "elim", nt qnameH, nt argumentsH, nt atomH
           , nt argumentsH, nt argumentsH, nt atomH
           ]
       , rule "eliminator at" c
-          [ lit "elim", nt nameH, nt levelArgsH, nt argumentsH, nt atomH
+          [ lit "elim", nt qnameH, nt levelArgsH, nt argumentsH, nt atomH
           , nt argumentsH, nt argumentsH, nt atomH
           ]
       ]
 
     atom =
-      [ rule "name" atomH [scan "name" identRegex]
-      , rule "at level" atomH [scan "name" identRegex, nt levelArgsH]
+      [ rule "name" atomH [nt qnameH]
+      , rule "at level" atomH [nt qnameH, nt levelArgsH]
       , rule "universe" atomH [scan "universe" universeRegex]
       , rule "open universe" atomH [lit "Type"]
       , rule "string" atomH [scan "string" stringRegex]
@@ -318,7 +337,16 @@ coreRules gs = concat
     -- **No splice production**, and the phase's own test is why: @}$@ is emitted
     -- by the /region/ scanner, so a splice lexes inside @core\`…\`@ and not in a
     -- bare @:core@ argument, and one rule set serves both. @AGENDA.md@ 96.
+    -- **And a qualified one** (MS10), which is what a generated name now is:
+    -- @Nat.elim@, @Term.noConfusion@. The rule is left-recursive so a path of
+    -- any depth reads.
+    -- **A binder's name is a word; a reference's may be qualified** (MS10).
+    -- Two nonterminals, because the running parser draws the same line:
+    -- @let Nat.elim = …@ binds nothing, and an advising grammar that offered it
+    -- would be wider than the parser — the one thing these may never be.
     name = [ rule "word" nameH [scan "name" identRegex] ]
+
+    qname = [ rule "name" qnameH [scan "name" qualifiedIdentRegex] ]
 
     levels =
       [ rule "one" levelsH [scan "int" numberRegex]
@@ -348,13 +376,17 @@ coreRules gs = concat
 -- reason: a wrapper nonterminal would be a name this module invented, and
 -- reaching the whole language through it would accept terms the running parser
 -- refuses.
+--
+-- **The body is looked up by the production's full name** (MS10 phase 253) — see
+-- 'Thena.Language.Instral.literalProductions', which had the same stale lookup.
 literals :: String -> [Grammar] -> [E.Rule]
 literals head' gs = concat
   [ [ E.Rule (head' ++ " " ++ l) head' [E.Literal (l ++ "`"), E.Nonterminal l, fence] []
     , E.Rule (head' ++ " empty " ++ l) head' [E.Literal (l ++ "`"), fence] []
     ] ++
     [ E.Rule (head' ++ " " ++ l ++ " " ++ p) head'
-        (E.Literal (l ++ "[" ++ p ++ "]`") : productionBody gs p ++ [fence]) []
+        ( E.Literal (l ++ "[" ++ p ++ "]`")
+            : maybe [] (productionBody gs) (productionRule gs l p) ++ [fence] ) []
     | p <- productionNames gs l
     ]
   | l <- languageNames gs

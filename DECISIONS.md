@@ -27,7 +27,8 @@ one paragraph, not three; the full argument lives in the design notes.
 ### An identifier may contain almost anything
 
 *Decided 2026-08-25; consequences accepted 2026-08-29. The keyword list is
-reviewed whenever a word is reserved — most recently 2026-10-19.*
+reviewed whenever a word is reserved — most recently 2026-10-19. The dot was
+reserved on 2026-10-30, for namespaces.*
 
 Most languages reserve a generous set of punctuation and give you the rest.
 Thena does the opposite: it reserves as little as it can, so you can name things
@@ -37,13 +38,28 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 
 | | |
 |---|---|
-| brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` |
-| operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
+| brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` `.` |
+| operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` |
+| a tagged literal's fence | `` ` `` |
+| spell nothing, and stay reserved | `⌜` `⌝` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
+
+**The corners are reserved and spell nothing**, which is the one oddity in the
+table: they were the old notation for an embedded core term, removed on
+2026-11-04, and they stay out of names because the system hoists a written term
+into a binding it calls `⌜1⌝` — a name you cannot write and so cannot collide
+with.
+
+**The dot is the one character reserved for a structural reason**, and it is the
+namespace separator: `List.map` is the name `map` in `List`, and a name may not
+contain a dot of its own. **A qualified name is glued, with no spaces** — which
+is what tells it from the two other things a dot does: `...` is a list pattern's
+tail marker, and a lone `.` marks an inaccessible pattern and stands *before* a
+name. So `k.n` is a name in `k`, and `k .n` is a name and then a dot on another.
 
 **A keyword is a whole token, so a word that merely *contains* one is a name.**
 `caseNat` and `datatype-of` are each one identifier; the lexer takes the longest
@@ -62,7 +78,7 @@ x: S         two tokens: the identifier "x:" and then S
 **Ascription must be spaced on its left.** In practice, space both sides and
 you will never think about it again.
 
-**ASCII digraphs need a space before them** — `->`, `:-`, `|>`, `[|` — for the
+**ASCII digraphs need a space before them** — `->`, `:-`, `|>` — for the
 same reason:
 
 ```
@@ -111,23 +127,41 @@ Perl or POSIX would find out much later. Refusing them also means `\s`, `{n}`
 or POSIX classes can be added later without changing what any accepted
 expression means.
 
-### Corners and `⟨…⟩` are on their way out, in favour of tagged term literals
+### Corners and `⟨…⟩` are gone: a term of another language is written with a tag
 
-*Decided 2026-10-01.*
+*Decided 2026-10-01, removed 2026-11-04.*
 
-Two older notations say exactly what a tagged term literal says:
+Two older notations said exactly what a tagged term literal says, and **neither
+exists any more**:
 
 ```
-⌜ t ⌝   [| t |]        a core term, inside an instruction
-core`t`                the same thing, and the one that stays
+⌜ t ⌝   [| t |]        was: a core term, inside an instruction
+core`t`                is: the same thing, and the only spelling
 
-⟨ e ⟩                  a surface term — the lexer turns ⟨ into the tag `surface`
-surface`e`             the same thing, and the one that stays
+⟨ e ⟩                  was: a surface term — ⟨ was lexed as the tag `surface`
+surface`e`             is: the same thing, and the only spelling
 ```
 
-**Both still work and neither is offered any more.** Completion will not suggest them,
-and nothing new in the system points at them. They are to be replaced one for one and
-removed.
+**Writing one now is a syntax error.** `⌜` and `⌝` are still reserved characters, so
+a corner is refused by the lexer; `⟨` and `⟩` are ordinary name characters again, so
+`⟨ e ⟩` is read as names and refused for not being in scope. There is nothing to
+migrate — a term of any language, Thena's own two included, is written `tag`text``.
+
+**The replacement became one-for-one on 2026-11-03, which is what made the removal
+possible.** It was not before: `` core`t` `` was refused inside a
+development-calculus term, where `⌜ t ⌝` worked, because a tagged literal is resolved
+by asking which *declared* object language the tag names — and `core` and `surface`
+are declared by nothing, the words being reserved so that no `language` block can
+take them. The two built-in tags are tags at that door as well now, so
+`` core`t` `` is the term written inside it. **The last door was `:infer`**, which
+chose between its two readings by looking for corners and looks for a `core` fence
+now.
+
+**The printer writes the fence, and escapes what is inside it.** A development whose
+trailing term is a λ, a Π or a `let` prints as `` core`λ (A : Type₀) -> A` `` — the
+fence is what stops that term being re-read as another link of the chain. A region
+ends at the first unescaped backtick, so a term holding a tagged literal of its own
+comes out as `` core`LC\`x\`` ``, which corners never had to do.
 
 **Why, and it is not tidiness.** These are the last places where *which language this text
 is in* is decided by the punctuation you reached for rather than by a tag naming the
@@ -205,6 +239,452 @@ there is nothing for a brace to mean there. `\ A x -> x` is the spelling for a s
 written `∀ {A : Type₀} -> A -> A`.
 
 ---
+
+## Modules and namespaces
+
+### A name is qualified, and a `data` declaration opens a namespace of its own
+
+*Decided 2026-10-30. **Being built.** A name carries its path, the dot is
+reserved, and a qualified name can be written and resolved in a core term, in a
+term you are elaborating, and in a rule. **A `data` declaration's generated
+equipment is already in its namespace** — `Nat.elim` and `Nat.case` — so
+`:show Nat.case` is how you ask for one, and **the relations and proofs a
+declaration derives are one step deeper, in `Nat.lemmata`**:
+`Nat.lemmata.noConfusion`, `Nat.lemmata.Below` and the rest, reached short with
+`open Nat.lemmata`. **A language's generated substitution is too**, as `LC.fv-x`,
+`LC.subst-x`, `LC.subst-all` and `LC.fresh-x`, and **a declaration of your own
+may be written with a path**: `Ty.lemma : …` declares `lemma` in `Ty`. **The four
+primitive functions have moved in too** — `String.eq`, `Char.eq`, `Int.eq` and
+`String.append`, where they were `eqString`, `eqChar`, `eqInt` and `appendString` — **and so have the prelude's own nine theorems about them**, which
+are now `String.eqEqual`, `String.eqRefl` and `String.dec` with the matching `Char`
+and `Int` triples, written as a `namespace` block in `prelude/prelude.thena`. They
+were `eqStringEqual`, `eqStringRefl` and `decString`: a name is how you find a law,
+and the law about `String.eq` belongs where `String.eq` is.
+
+**A datatype's constructors and the type itself have moved in too**, so `data Nat` declares `Nat.Nat`, `Nat.zero` and `Nat.suc`, and a written
+`Nat` reaches the type because a declaration's short name is derived from the
+environment rather than recorded anywhere. **`namespace ‹name› where { … }` is
+built, and resolution walks outward through it. All five forms of `open` are
+built, and a name prints as the shortest ending that still means it.** **A `language`,
+`context`, `judgment` or `notation` block may be written inside a `namespace`
+block**, and what it declares and generates lands there: inside `namespace A`,
+`language Ty` is `A.Ty.Ty` with `A.Ty.base`, `A.Ty.subst-x` and the rest, and
+`open Ty` beside it brings them in — a namespace resolves by the same outward
+walk a name does, and **that includes a token class**, so `x : Token String` may
+be written inside the namespace with the block that reads it. A class carries
+its path like anything else, while **the name generated from it is suffixed with
+the class's word** — `A.LC.fv-x` for a class `A.x`, because a word holds no dot
+— so one language reaching two classes both written `x` is refused. **And a tag
+resolves like any other name**: see below.*
+
+**A TAG RESOLVES LIKE ANY OTHER NAME.** `` LC`( f g )` `` reaches `A.LC` wherever
+`A` is open — inside the `namespace` block itself, or after an `open A` — and the
+path may always be written instead:
+
+```
+namespace A where
+  language LC, M, N where
+    var : x as occurrence -> x
+    app                   -> ( M N )
+  open LC
+
+  bare : LC
+  bare = LC`( f g )`          -- inside the block, the word reaches it
+
+open A
+
+after : A.LC
+after = LC`( f g )`           -- A is open, so the word reaches it here too
+
+qualified : A.LC
+qualified = A.LC`( f g )`     -- the path always works, brackets included:
+                              -- A.LC[var]`f`
+```
+
+- **`open … renaming` reaches a tag too.** After `open A renaming ( LC -> Lam )`,
+  `` Lam`( f g )` `` is a term of `A.LC` and `LC` names nothing — a renaming
+  replaces the word rather than adding one, here as everywhere.
+- **Two opened namespaces offering one tag is refused, not chosen.** With an `A.Ty`
+  and a `B.Ty` both open, `` Ty`ι` `` answers
+  *Ty could be B.Ty or A.Ty, so it is ambiguous here*. Write the path.
+- **`LC[var]` names the production inside the tag's language**, so the bracket is a
+  lookup in whatever the tag resolved to and never a global one.
+- **A printed tag shortens by this same walk** — *A name is written the shortest
+  way that still means it*, below, has it.
+- **A rule file writes its own `open` lines to shorten a tag**, and the session's
+  `open`s do not reach it. Without one, the tag is written whole there — `A.LC[app]`,
+  exactly as a rule already calls `Vec.Vec`. *A rule file writes its own `open`
+  lines*, below, has it.
+
+A global name carries its module path, and it carries it all the way down: the
+qualified name is what the core term holds, not a flat name that something
+resolved it to. So a term on its own always says what its names mean, and a
+stored proof read later still names what it named.
+
+**A `data` declaration opens a namespace named after the datatype.** Its
+constructors and everything the declaration generates live inside it, and the
+type itself lives inside too, with a short name bound in the surrounding scope:
+
+```
+data Nat where
+  z : Nat
+  s : Nat -> Nat
+```
+
+gives you `Nat.z`, `Nat.s`, `Nat.elim`, `Nat.case`, the type as `Nat.Nat`, and
+`Nat` as a short name for it where you wrote the declaration. **The relations and
+proofs that come with a datatype sit under `Nat.lemmata`** — `Nat.lemmata.Below`,
+`Nat.lemmata.noConfusion` and the rest — so that **a datatype keeps every ordinary
+word available to it.** `data Below` and `data NoConfusion` declare like anything
+else: the derived name is `Below.lemmata.Below`, not a second `Below.Below`
+competing with the type. Write `open Nat.lemmata` to use them short. **So two object languages may both declare a production called
+`var`** — `LC.var` and `STLC.var` are different names — which is the collision
+this replaces. A grammar *is* a datatype here, so its productions are its
+constructors and they are scoped with it.
+
+**In a rule, a dotted word is the name itself.** A rule body's bare word is a
+reference to something bound earlier in the body, which is why a name used to be
+written as a string — and a string is a name at the *root*, so there was no way
+for a rule to name `String.eq` at all. A word with a path is not a reference,
+because a binding in a rule body has no path to have; so `String.eq` written
+where an operand goes *is* that name, and the prelude declares the primitives
+with it:
+
+```
+do declare-primitive String.eq (resolve-core core`String -> String -> Comparison`)
+```
+
+A string literal is still read as a name where one is wanted, and still means a
+name at the root — but **a string with a dot in it is now refused** rather than
+becoming a name whose single word contains dots. A path is structure, and
+nothing may hold it as spelling.
+
+**`open ‹namespace›` brings a namespace into view**, from where it is written to
+the end of the enclosing one — so an `open` inside a `namespace` block ends with
+that block, and a file's top level, having no enclosing namespace, keeps its
+`open`s for the rest of the session. That is what lets two namespaces in one
+file each declare a `language Ty` and open it beside itself. It is a declaration
+and not a block, so it sits beside your other declarations and the ones above it
+do not see it:
+
+```
+data Nat : Type where
+  zero : Nat
+  succ : Nat -> Nat
+
+open Nat
+
+two : Nat
+two = succ (succ zero)
+```
+
+**A DECLARATION CAN change one, and that is allowed.** A declaration's short
+name is derived rather than recorded, so the word `Nat` reaches the datatype
+`Nat.Nat` only as long as nothing holds that word exactly — and a theorem,
+a `declare` or a constructor may take it, after which `Nat` is that one and the
+datatype is written `Nat.Nat`. **It is not prevented**, because forbidding it
+would mean refusing a perfectly good name on account of a word it merely
+resembles, and nothing is lost: both names are there and a path always reaches
+what it names. **It is announced instead**, naming the shadowed name in full,
+because that spelling is the repair; at `:theorem` it is announced before the
+proof exists, which is while renaming it is still free.
+
+**An `open` can only add a way for a name to resolve, never change one.** A name
+that already denotes something is taken as written, so an `open` is safe to put
+above code that was already working. If two open namespaces both answer a word
+you wrote, that is **refused and not chosen** — either would type-check, so
+picking one would be the system deciding what you did not write, and the message
+names both so you can write the one you meant. And `open X` where nothing at all
+is named `X.…` is refused where you wrote it, rather than left to make every
+later name fail on its own; a namespace is never declared, so that is the only
+check there is.
+
+### A namespace is declared, nests, and is walked outward
+
+*Decided 2026-10-30, built 2026-11-02.* A namespace is a prefix and nothing
+more, so nesting one inside another is a longer prefix and `namespace A.B` says
+the same thing on one line:
+
+```
+namespace Stlc where
+
+  data Ty : Type where
+    base  : Ty
+    arrow : Ty -> Ty -> Ty
+
+  namespace Proofs where
+
+    arrowInjective : ∀ (a : Ty.Ty) -> …
+```
+
+That declares `Stlc.Ty.Ty`, `Stlc.Ty.base`, `Stlc.Ty.arrow` and
+`Stlc.Proofs.arrowInjective`.
+
+**Inside `A.B`, a name you write is tried in `A.B`, then in `A`, then at the
+root, and a nearer answer wins outright.** So `Ty.Ty` written inside
+`Stlc.Proofs` finds `Stlc.Ty.Ty` even when there is a different `Ty.Ty` at the
+root, and the whole name you wrote goes under each prefix — a path says what you
+meant, so writing `B.c` inside `A` tries `A.B.c` first. **The `open`s are tried
+only once that walk has failed**, which is what makes an `open` able to add a way
+to resolve and never change one.
+
+### A name is written the shortest way that still means it
+
+*Decided 2026-10-30, built 2026-11-02.* Everything Thena prints — a goal, a
+proof state, a refusal, `:show`, the text a module is saved as — writes each name
+as **the shortest ending of its path that resolves back to it where you are
+standing**. With nothing open, `Nat.Nat` is `Nat` and `Nat.zero` is `Nat.zero`;
+after `open Nat`, that constructor is `zero`; inside `namespace A`, `A.one` is
+`one`.
+
+**A term literal's tag is a name, so it shortens with everything else**
+(*decided 2026-11-04*). A context's lookup relation lives in the context's
+namespace, so with `open Ctx` in force it is written `` extend-in`x : T ∈ Γ` ``
+and with nothing open `` Ctx.extend-in`x : T ∈ Γ` `` — where before, the tag
+alone was written whole whatever you had open, and one line of `:show` could
+carry both spellings of one name. **The dotted path survives where it is a key
+and not a spelling**: the parser's start symbol for a language is the whole
+path, which is what keeps an `A.Ty` and a `B.Ty` apart, and nobody reads it.
+
+**It is the reader's own answer and not a second rule.** The printer asks the
+resolver whether a candidate ending comes back as the name it started from, so
+the two cannot drift, and **an ending two open namespaces would both answer is
+not short enough** — the resolver calls that ambiguous and refuses it, so the
+printer writes more of the path instead. What is printed can always be typed
+back.
+
+**A structured editor spells it the same way.** The shapes a graphical frontend
+draws from — not only the lines a terminal prints — carry the same ending, so
+the same term reads the same whichever you are looking at it through. Two
+exceptions, and both are because nothing is standing anywhere: a *pattern* in a
+rule is written whole, since what the printer writes is read back outside the file
+that wrote it — so a pattern written `LC[var]` under an `open` still prints
+`Inner.LC.var(${s})` — and a *name used as a value* is written whole, since a name
+on its own has no term around it to be standing in.
+
+### `open` has five forms, and one of them lasts one declaration
+
+*Decided 2026-10-30, built 2026-11-02.*
+
+```
+open Nat                          -- everything in Nat, to the end of the block
+open Nat Bit List                 -- three namespaces, one line
+open Nat ( zero succ )            -- only those words
+open Nat hiding ( succ )          -- everything but that one
+open Nat renaming ( succ -> s )   -- succ is written s, and succ is not in scope
+open Nat in two : Nat.Nat         -- just this declaration
+two = succ zero
+```
+
+**A selection speaks about words, not paths**, because a namespace is a prefix
+and the word is what follows it — so `open A ( B )` brings in `B.c` and nothing
+else of `A`'s. **A renaming replaces the word rather than adding one**, as
+Agda's does, which is what makes it the way to settle two namespaces that use
+the same word. And **the `in` form covers the declaration under it, signature
+and equation both**, because that is what one declaration is here.
+
+**Hiding is visibility and not opacity.** A name you hid is still a key in the
+environment and still what a term carries, so a hidden constructor can appear in
+a goal the system shows you. Making it genuinely opaque would mean the printer
+and the kernel respecting an `open`, which is a different feature.
+
+A file is the unit of import and is **not** a namespace: you import a file by
+its path, and what things are called comes from the `namespace` blocks they sit
+in. A namespace is open-ended, so several files may add to one. The short name a
+declaration binds is a resolution fact and not a definition — nothing is added to
+the environment, so there is nothing for the kernel to unfold.
+
+**Coming from Agda, Coq or Lean:** the namespace behaviour is Lean's, including
+constructors being scoped under their type. The export list on a file's `module`
+clause is Haskell's, and it is provisional — per-declaration visibility, as Lean
+and Idris do it, is the likely successor.
+
+### A metavariable belongs to its language, so two languages may both use `e`
+
+*Decided 2026-11-02, built the same day.*
+
+A `language` block's metavariables are scoped to the namespace its datatype
+opens, exactly as its productions are. So this is fine, and used to be refused:
+
+```
+language Expr, e where
+  lit  -> z
+  plus -> ( e₁ + e₂ )
+
+language Code, e where
+  push -> PUSH
+  seq  -> ( e₁ ; e₂ )
+```
+
+**A block that talks about several languages opens each of them**, and that is
+the ceremony this costs:
+
+```
+language Ty, T, S where
+  base  -> ι
+  arrow -> ( T -> S )
+
+open Ty
+
+language LC, M, N, E where
+  abs : x as binder -> ( λ x : T . E[x] )     -- T is Ty's, and Ty is open
+```
+
+Deriving those `open`s from the notation's own slots was considered and
+declined: what a block may write is what you can see above it, and nothing
+else. **A metavariable is never qualified** — nothing writes `LC.e`, because a
+letter is not a name you can refer to, only a rule for reading a word inside a
+fence. Two open languages that both use one letter is refused and not chosen,
+and `open Code renaming ( e -> c )` is what settles it.
+
+**A language's own name needs no `open`**, since `LC` reaches the datatype
+`LC.LC` wherever its short name does.
+
+**Inside a rule or a derivation you open nothing.** A slot carries its language
+from the declaration — `judgment typing = Γ ⊢ M : T` fixes which language each
+of the three is — so at a `Ty` position only `Ty`'s letters are read, and the
+same letter in two languages cannot be ambiguous there.
+
+**Forget an `open` and you get a warning, not a refusal**, because a word that
+is no metavariable is a terminal and that is a legitimate notation:
+
+```
+warning: in the grammar of LC, production abs: T is read as a terminal.
+         It is a metavariable of Ty, which is not open here
+```
+
+### Surface files are imported; rule bases are consulted
+
+*Decided 2026-11-03. Not built — MS11, with one piece pulled into MS10.*
+
+Two acts, and which one you write depends on what you are reaching for, not on
+which language you are writing in. **Both are writable in a surface file, in an
+instral rule file, and at the prompt.**
+
+```
+import Stlc          -- a SURFACE file: its definitions, datatypes, languages
+consult tactics      -- an INSTRAL file: its rules and its functions
+```
+
+`import` makes names reachable. `consult` makes a base's rules **and functions**
+callable — inside a surface `do` block, at the prompt, and from another rule file.
+Neither wraps what it brings in: a file is not a namespace, so `import Stlc` makes
+`Lang.LC` reachable as `Lang.LC`, and `open Lang` is what shortens it.
+
+**A file states what it refers to; it never relies on the session.** An instral rule
+file that talks about a language `import`s the surface file declaring it. Until this
+decision a rule file was read with whatever grammars the session happened to hold,
+which worked only because loading threw everything into one flat scope — so a rule
+file's meaning depended on what a considerate user had loaded first. No language
+works that way and Thena will not.
+
+**`public` is how a dependency travels.** `public import` and `public consult`
+republish what they bring in: *you get whatever the thing you imported got.*
+Without `public`, you don't — if A consults X and B imports A, B's own proofs do
+not see X's rules, and B asking for them is one explicit line that fails loudly if
+it is missing.
+
+### A rule file writes its own `open` lines
+
+*Decided 2026-11-03, built the same day. The piece of the decision above that
+MS10 could not ship without.*
+
+A `language` block may live inside a `namespace`, so its tag is a qualified name
+— and a rule file had no way to shorten one. It writes an `open` of its own now,
+in the same five forms a surface file writes:
+
+```
+rule base inspecting where
+
+open Stlc.Syntax
+
+rule describe LC[var]`${s}` :- do
+  say (concat "a variable called " s)
+```
+
+Without the `open` the tag is `Stlc.Syntax.LC[var]`, which still works and
+always will: **a name written whole resolves under any scope.**
+
+**What an `open` reaches in a rule file is the tags**, because a tag is the only
+thing in one that is resolved against what the session declared. Every other
+name in a rule file is a literal — `split-all core`v` Vec.Vec` names `Vec.Vec`
+because that is the name, not because anything looked it up — and it has to be:
+a rule base is read before the prelude has declared anything, so there is
+nothing to resolve a name against.
+
+**Two opened namespaces answering one tag is refused, and both are named.**
+Either would parse, so choosing one would be the system deciding what you did
+not write; the repair is the path, or `open … renaming`.
+
+**`open X in` covers one declaration**, and in a rule file a signature and the
+rules under it are separate declarations — so it covers the one it is written
+above and no more. That is a real difference from a surface file, where a
+signature and its equation are one declaration.
+
+**`import` is not this, and is not built.** This is the half that needed no way
+to find a file on disc. A rule file still relies on the session having loaded
+the surface file that declares the language; stating that dependency is
+`import`'s job and waits for it.
+
+### Consults are a STACK, and clauses are a queue
+
+*Decided 2026-11-03. Not built — MS11.*
+
+**The last thing you consulted is tried first.** That is the whole rule, and it does
+not matter how deep in a namespace you are standing:
+
+```
+consult broad-tactics        -- tried third
+consult sharper-tactics      -- tried second
+
+thm : …
+thm = do { consult crush-this-one ; … }   -- tried FIRST, and only in here
+```
+
+The shipped base is consulted for you before any of these, so it sits at the bottom
+of the stack and is tried last — which is *universal tactics at the bottom*, falling
+out of the stack rather than being a rule of its own. **A consult reaches to the end
+of the block it is written in**, so the one in that `do` block applies there and
+nowhere else.
+
+**It is *stack-like* rather than exactly a stack**, in one respect: consulting a file
+that published its own dependencies with `public consult` pushes all of them as a
+single group, in the order that file wrote them, at the position of the line that
+brought them in. And consulting the same base twice really does push it twice — the
+upper copy can go out of scope while the lower one is still in force, so the earlier
+push cannot be dropped or moved.
+
+**This is the order the engine tries rules in when no name is given** — you at a
+hole, `:matches`, `prove`. A rule called *by name* is found by the ordinary name
+walk, and since rules are not open to extension there is only ever one rule of a
+given name to find.
+
+**THE QUIRK, AND IT IS DELIBERATE.** Inside a rule base, the clauses of a rule are
+tried in **written order, top down** — a queue, as every rule language does it and
+as a paper's numbered cases read. Consults go the other way: **a stack, bottom up.**
+So reading one file, the consults at the top have the *lowest* priority while the
+clauses below them have the *highest*. Two directions, both called "written order".
+
+It is not an oversight and there is no good way around it. Clauses have to be a
+queue — the precedent is universal and the alternative is unreadable. But consults
+as a queue would prevent the thing Thena is for: **a specialised, single-use rule
+base written to crush one goal, brought in exactly where that goal is, and tried
+before anything general.** A queue would bury it under every library you had
+already consulted.
+
+### Rules are not open to extension
+
+*Decided 2026-10-30, reaffirmed 2026-11-03.*
+
+To add a case to `elaborate` you open the file that defines `elaborate` and edit it.
+No import or consult ever merges clauses into a predicate someone else owns, so
+there is no merge order to specify and no cross-file priority to invent.
+
+**This is deliberately the restrictive choice, and the reason is the order of
+events**: opening rules later, with a declared semantics for what an extension means
+and where it lands, stays available. Shipping them open now and discovering the
+semantics afterwards does not — it would mean changing the meaning of code people
+had already written. Expect this to be revisited once the system is stable.
 
 ## Universes and levels
 
@@ -389,9 +869,9 @@ is nothing to default to, and nothing is guessed.
 literals are ordinary terms:
 
 ```
-thena spine> :infer ⌜ "hello" ⌝
+thena spine> :infer core`"hello"`
 "hello" : String
-thena spine> :infer ⌜ 42 ⌝
+thena spine> :infer core`42`
 42 : Int
 ```
 
@@ -408,12 +888,12 @@ greeting : String
 greeting = "hello"
 ```
 
-Two literals of a primitive type are compared with `eqString`, `eqChar` or
-`eqInt`, which answer with the prelude's `Comparison` (`same` or `different`)
+Two literals of a primitive type are compared with `String.eq`, `Char.eq` or
+`Int.eq`, which answer with the prelude's `Comparison` (`same` or `different`)
 and compute only on literals:
 
 ```
-thena spine> :whnf ⌜ eqString "a" "b" ⌝
+thena spine> :whnf core`String.eq "a" "b"`
 different
 ```
 
@@ -437,19 +917,19 @@ preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 
 ```
 
 in the surface language, with `elim` and no proof sugar. **It is about the
-generated `LC-subst-all`**, not a substitution written for the proof: the
+generated `LC.subst-all`**, not a substitution written for the proof: the
 proof names the generated function's pieces, checks with `refl` that they are
-the same terms, and follows its `decString` decisions case by case.
+the same terms, and follows its `String.dec` decisions case by case.
 
 **It is proved twice.** `examples/08-preservation-by-tactics.thena.script`
 proves every lemma again by tactics — `:theorem`, `attack`, `intro`,
-`eliminate-core` for each induction and case split, `elaborate ⟨ … ⟩` for each
+`eliminate-core` for each induction and case split, `` elaborate surface`…` `` for each
 case — and reaches the same statement as `preservation-tactics`.
 
 **`07` is stated for closed terms**, as Software Foundations states it. The
 argument substituted in a β-step is then closed, so no binder is ever renamed.
 
-### And for any context, resting on three laws about `appendString`
+### And for any context, resting on three laws about `String.append`
 
 *Decided 2026-10-12; the trust narrowed to the three laws on 2026-10-16.*
 `examples/10-preservation-any-context.thena` proves the same theorem with no
@@ -465,22 +945,22 @@ renames the binder — `( λ y : ι . x )[x -> ( λ w : ι . y )]` is
 `( λ y' : ι . ( λ w : ι . y ) )`, which the file proves by `refl`. The proof then
 has to know the minted name really is fresh.
 
-**Three laws about `appendString` are trusted and everything else is proved**:
+**Three laws about `String.append` are trusted and everything else is proved**:
 
 ```
 appendAssoc      (a ++ b) ++ c  =  a ++ (b ++ c)
-primeDiffers     eqString a (a ++ "'")           is  different
-primeMoreDiffers eqString a ((a ++ "'") ++ b)    is  different
+primeDiffers     String.eq a (a ++ "'")           is  different
+primeMoreDiffers String.eq a ((a ++ "'") ++ b)    is  different
 ```
 
 Each is a fact about a primitive that computes only on two literals and goes
 neutral on anything else, which is the same position the prelude's
-`eqStringEqual` is in. On literals each one **discharges**: both sides reduce,
+`String.eqEqual` is in. On literals each one **discharges**: both sides reduce,
 claimed and actual become convertible, and the node contracts — `:whnf
 appendAssoc "a" "b" "c"` is its own body. They are pending exactly where they
 carry weight.
 
-**The name chooser's specification is a theorem.** `L-fresh-‹k› y avoid` is not
+**The name chooser's specification is a theorem.** `L.fresh-‹k› y avoid` is not
 in `avoid` — that used to be the trusted claim, and it is now derived from the
 three laws by the argument the generated code is built on: the candidates `y`,
 `y'`, `y''`, … are pairwise distinct, each rejection spends one name of the
@@ -497,13 +977,13 @@ induction over a length, and `length (a ++ b) = length a + length b` is a claim
 about open arguments like any other: adding `lengthString` and arithmetic would
 have traded one trusted law for two and widened the kernel permanently.
 
-### `decString` compares two strings and hands you the proof
+### `String.dec` compares two strings and hands you the proof
 
-*Decided 2026-09-21.* Beside `eqString`, `eqChar` and `eqInt`, the prelude
-declares `decString`, `decChar` and `decInt`:
+*Decided 2026-09-21.* Beside `String.eq`, `Char.eq` and `Int.eq`, the prelude
+declares `String.dec`, `Char.dec` and `Int.dec`:
 
 ```
-decString : ∀ (a : String) (b : String) -> Dec (Eq String a b)
+String.dec : ∀ (a : String) (b : String) -> Dec (Eq String a b)
 
 data Dec (A : Type) : Type where
   yes : forall (p : A) -> Dec A
@@ -513,20 +993,20 @@ data Dec (A : Type) : Type where
 On two literals it computes to `yes (refl String "a")`, or to `no ‹a
 refutation›` — a real proof of `Eq String "a" "b" -> Empty` that the kernel
 checks like any other. On a name you do not know it does not compute, and that
-is where it earns its place: **eliminating `decString y x` gives you
+is where it earns its place: **eliminating `String.dec y x` gives you
 `Eq String y x` in one branch and its refutation in the other**, where
-`eqString y x` tells you only which branch you are in. So a proof about a
+`String.eq y x` tells you only which branch you are in. So a proof about a
 name nobody knows can follow the decision:
 
 ```
 varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty)
-            -> Eq LC (LC-subst (var y) x N) (var y)
+            -> Eq LC (LC.subst-x (var y) x N) (var y)
 ```
 
-**Generated substitution decides with `decString`**, which is what lets a
-proof about `LC-subst` follow it at all. What is trusted is the same as for
-`eqString`: the verdict on two literals. The refutation it writes is built
-from `decString` itself and checked by the kernel.
+**Generated substitution decides with `String.dec`**, which is what lets a
+proof about `LC.subst-x` follow it at all. What is trusted is the same as for
+`String.eq`: the verdict on two literals. The refutation it writes is built
+from `String.dec` itself and checked by the kernel.
 
 ### Trust is a term, and it reduces away when it stops being needed
 
@@ -608,7 +1088,7 @@ typing rule checks the body *against* the stored type rather than inferring and
 comparing, which is what keeps the stored field honest:
 
 ```
-thena spine> :infer ⌜ trusted (Eq {0} Nat zero zero) (Eq {0} Nat zero (succ zero)) (refl {0} Nat zero) ⌝
+thena spine> :infer core`trusted (Eq {0} Nat zero zero) (Eq {0} Nat zero (succ zero)) (refl {0} Nat zero)`
 refl {0} Nat zero has type Eq {0} Nat zero zero
   but Eq {0} Nat zero (succ zero) was expected
   in argument 3 of Eq, succ and zero are different names
@@ -622,7 +1102,7 @@ conversion — a term usable at `Type₀` is usable at `Type₁` — so a stored
 *above* the body's own is accepted:
 
 ```
-thena spine> :infer ⌜ trusted Type₀ Type₂ Type₀ ⌝
+thena spine> :infer core`trusted Type₀ Type₂ Type₀`
 trusted Type₀ Type₂ Type₀ : Type₀
 ```
 
@@ -875,27 +1355,27 @@ true and unprovable in its own theory — and the cheap answer is to add a built
 function for each one, which is an escape hatch with no structure and nothing a
 user can inspect. Thena's answer is to split the two jobs a built-in was doing.
 
-Deciding whether two strings are equal is the case that forced it. `eqString`
+Deciding whether two strings are equal is the case that forced it. `String.eq`
 *computes*: on two literals it answers `same` or `different`, and nothing in the
 core term language can do that, so it stays a reduction rule. What it cannot do
-is tie that answer to the equality type — `eqString y x` says nothing about
+is tie that answer to the equality type — `String.eq y x` says nothing about
 `Eq String y x` for an unknown `y` — and that gap is a *typing* claim, so it is
 written as one:
 
 ```
-eqStringEqual : ∀ (a b : String) -> Eq Comparison (eqString a b) same -> Eq String a b
-eqStringRefl  : ∀ (a : String) -> Eq Comparison (eqString a a) same
+String.eqEqual : ∀ (a b : String) -> Eq Comparison (String.eq a b) same -> Eq String a b
+String.eqRefl  : ∀ (a : String) -> Eq Comparison (String.eq a a) same
 ```
 
 Both are definitions in the prelude whose bodies are `trusted` terms, and
-`decString`, which answers `yes` with a proof or `no` with a refutation, is an
+`String.dec`, which answers `yes` with a proof or `no` with a refutation, is an
 ordinary definition built on them — it eliminates the comparison with a motive
 that keeps the answer, so each branch is handed the evidence of which answer it
 is, and the refutation is *derived* rather than built by the implementation.
-`decString` itself trusts nothing.
+`String.dec` itself trusts nothing.
 
 **What this buys is that the trust is listed rather than built in.** A user who
-asks what a proof rests on is told `in decString · eqStringEqual`, with both the
+asks what a proof rests on is told `in String.dec · String.eqEqual`, with both the
 claimed type and the type the body really had, and can read the four lines of
 prelude that say it. Before, the same trust was sixty lines of Haskell that
 constructed the answer term, and no command could name it at all.
@@ -903,7 +1383,7 @@ constructed the answer term, and no command could name it at all.
 **It costs the strictest trust setting for these proofs, and that is stated
 rather than hidden.** The claims are read at their own definition's binders,
 where they are *pending* — so *no trust* will not close a proof that decides a
-literal equality, even though `decString "x" "x"` reduces to `refl String "x"`
+literal equality, even though `String.dec "x" "x"` reduces to `refl String "x"`
 with nothing trusted left in it. Finding out which claims survive reduction means
 reducing, which may diverge and has no business in `qed`'s path, so the strictest
 setting is a statement about what a proof reaches and not about what is left when
@@ -1188,14 +1668,14 @@ Generated substitution now writes the block a user would have written —
 
 ```
 notation LC where
-  LC-subst-x -> M [ x -> N ]
+  LC.subst-x -> M [ x -> N ]
 ```
 
 — as a surface item, checked the same way. Two things follow and both are gains.
 It **parses outside a rule**, so `` LC`x[x -> y]` `` is an ordinary term literal
 where it used to be a parse error; and it **prints back**, so a rule whose index
 substitutes reads ``sub`${Γ} [ ${X} -> ${T} ] ⊢ …` `` instead of splicing
-`${Ctx-subst-X Γ X T}`.
+`${Ctx.subst-X Γ X T}`.
 
 **The comma list stays sugar**, because `E[x -> M, y -> N]` builds a *list* per
 class and no object grammar spells a list. So the one-pair form is a production
@@ -1294,6 +1774,32 @@ notation notIn (v : X) G -> v # G where
 The ascription names the **class** and not the parameter, because that name is
 the word a rule writes where the slot is — F-sub's rules write `X # Γ`, as the
 paper does.
+
+**And it may name the class with a path**, like every other name:
+`notation notIn (v : Fsub.X) G -> v # G where` reaches the class `Fsub.X`
+wherever it is written, open or not. This is what lets a language reach a class
+in another namespace at all: a language gets a substitution family generated for
+every class it reaches, each generated as a `notation` block of its own, and
+those blocks name the class in full — so
+
+```
+namespace Source where
+  x : Token String
+  x = /[a-z][a-zA-Z0-9']*/
+  language LC, M, N where
+    var : x as occurrence -> x
+    app                   -> ( M N )
+
+open Source.LC                -- all that M needs, and all that is needed
+
+language Wrap, W where
+  box -> [ M ]                -- reaches Source.x through M, so Wrap.subst-x
+```
+
+works with no `open Source`. **The generated function's name is still suffixed
+with the class's *word*** — `Wrap.subst-x` for a class `Source.x` — because a
+word holds no dot, which is why two classes both written `x` still cannot both
+be reached.
 
 **What it buys is a refusal.** `#` is *this type variable is not declared in Γ*,
 and with the class in place a term variable cannot be written there:
@@ -1460,7 +1966,7 @@ because the two occurrences must read the same.
 So a term of an object language is an ordinary term:
 
 ```
-thena spine> :infer ⌜ abs "x" base (var "x") ⌝
+thena spine> :infer core`abs "x" base (var "x")`
 abs "x" base (var "x") : LC
 ```
 
@@ -1760,8 +2266,8 @@ the first premise continues the one above:
 
 A premise may be named, `d : Γ ⊢ M : T`; one that is
 not is `d1`, `d2`, … by position. A premise is never named like a
-metavariable, so `x : T ∈ Γ` is always the lookup. `E[x->N]` is `LC-subst E x
-N`; `E[x->M, y->N]` is `LC-subst-all`, simultaneous; `E[x->M][y->N]` is one
+metavariable, so `x : T ∈ Γ` is always the lookup. `E[x->N]` is `LC.subst-x E x
+N`; `E[x->M, y->N]` is `LC.subst-all`, simultaneous; `E[x->M][y->N]` is one
 after the other.
 
 **The annotated tier writes the quantification**, which fixes the argument
@@ -1817,6 +2323,16 @@ for `bindTy-in`. **The names come from the extension production, not the
 context**, because three names taken from the context alone would collide the
 moment there are two extensions.
 
+**AND THE WHOLE FAMILY LIVES IN THE CONTEXT'S NAMESPACE** — *decided 2026-11-03.*
+A `context Ctx` whose extension is `bind` declares the relation
+`Ctx.bind-in.bind-in`, with `Ctx.bind-in.bind-here` and
+`Ctx.bind-in.bind-there-bind` inside it; `open Ctx` reaches it as `bind-in`, and
+`open Ctx.bind-in` reaches the constructors by their own words. It is the same
+rule twice over — a declaration lives in the namespace it opens — and it is what
+lets **two contexts in one module each have an extension called `bind`**, where
+before both lookup relations wanted `bind-in` at the top level and the second was
+refused as already declared.
+
 **Its notation is the extension with the context taken out, then `∈` and the
 context**, and it is a grammar like any other: `` extend-in`x : ι ∈ ·, x : ι` ``
 is the type `extend-in "x" base (extend empty "x" base)`, `:parse extend-in …`
@@ -1826,14 +2342,14 @@ slots in order**, as a judgment's are, so the context comes last.
 
 **A later binding shadows an earlier one of the same name.** `extend-there-extend`
 asks for a proof that the two names differ. For two literals that proof needs no
-axiom; `eqString` and `Eq`'s eliminator give it:
+axiom; `String.eq` and `Eq`'s eliminator give it:
 
 ```
 xNotY : Eq String "x" "y" -> Empty
 xNotY = \ q ->
   elim Eq (String)
-    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
-                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (String.eq "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (String.eq "x" b))
     ((\ a d -> d))
     ("x" "y") q unit
 ```
@@ -1854,14 +2370,14 @@ kind of name its entries can hold, it gets the free-variables function and the
 substitution — so F-sub's Γ, whose entries hold types, gets:
 
 ```
-Ctx-fv-X     : Ctx -> List String
-Ctx-subst-X  : Ctx -> String -> Ty -> Ctx
-Ctx-subst-all : Ctx -> List (And String Ty) -> Ctx
+Ctx.fv-X     : Ctx -> List String
+Ctx.subst-X  : Ctx -> String -> Ty -> Ctx
+Ctx.subst-all : Ctx -> List (And String Ty) -> Ctx
 ```
 
-`Ctx-subst-X` is the `[X↦P]Δ` that System F's type-substitution lemma is written
+`Ctx.subst-X` is the `[X↦P]Δ` that System F's type-substitution lemma is written
 with, and a rule may write it in notation: `Γ[X -> T]` elaborates to
-`Ctx-subst-X Γ X T`.
+`Ctx.subst-X Γ X T`.
 
 It is a plain fold with **no capture avoidance and no renaming**, because a
 context's name slot is an ordinary name and not a binder: `Γ , x : T` has no body
@@ -1881,10 +2397,10 @@ for every kind of name it can contain, right after its datatype — here the one
 kind, `x`:
 
 ```
-LC-fresh-x   : String -> List String -> String
-LC-fv-x      : LC -> List String
-LC-subst-all : LC -> List (And String LC) -> LC     -- simultaneous
-LC-subst-x   : LC -> String -> LC -> LC             -- LC-subst-x E x N is E[x->N]
+LC.fresh-x   : String -> List String -> String
+LC.fv-x      : LC -> List String
+LC.subst-all : LC -> List (And String LC) -> LC     -- simultaneous
+LC.subst-x   : LC -> String -> LC -> LC             -- LC.subst-x E x N is E[x->N]
 ```
 
 **The kind is in the name even when there is only one**, because leaving it out
@@ -1895,7 +2411,7 @@ They are ordinary definitions, written by `elim` and elaborated like anything
 you write. They compute, so a substitution's answer is provable by `refl`:
 
 ```
-captured : Eq LC (LC-subst-x (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
+captured : Eq LC (LC.subst-x (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
 captured = refl LC (abs "y'" base (var "y"))
 ```
 
@@ -1909,7 +2425,7 @@ What it needs of the language, each refused at the block with a message: one
 variable production **per kind of name**, taking only its occurrence; and a
 binder free only in an argument of a language that reads names of that binder's
 kind — see the next entry. A language that can contain no name at all (`Ty` in
-the example above) gets nothing. The four names are yours to keep free — declaring `LC-fv` first
+the example above) gets nothing. The four names are yours to keep free — declaring `LC.fv-x` first
 is refused.
 
 A binder of one kind does not bind names of another: the kinds are separate
@@ -1918,9 +2434,9 @@ because nothing can ever occur at it.
 
 Two things arrived with it. **`List`, with `nil` and `cons`, is in the
 prelude**, so those names are taken from every object language until imports
-exist. **`appendString : String -> String -> String`** is the one way to build
+exist. **`String.append : String -> String -> String`** is the one way to build
 a `String`, and it computes only on two literals. The types that mention `List`
-carry a level parameter, `LC-fv {ℓ}`, because a list of names is a list at any
+carry a level parameter, `LC.fv-x {ℓ}`, because a list of names is a list at any
 level and nothing is defaulted.
 
 ### A binder may scope into another language, if that language reads that kind of name
@@ -1959,13 +2475,13 @@ way now is nothing.
 substitution for each:
 
 ```
-Tm-subst-x   : Tm -> String -> Tm -> Tm     -- a term for a term variable
-Tm-subst-X   : Tm -> String -> Ty -> Tm     -- a TYPE for a type variable
-Tm-subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
+Tm.subst-x   : Tm -> String -> Tm -> Tm     -- a term for a term variable
+Tm.subst-X   : Tm -> String -> Ty -> Tm     -- a TYPE for a type variable
+Tm.subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
 ```
 
 **A kind of name belongs to the language whose variable production reads it**, and
-that is what a substitution for it replaces a name *with* — so `Tm-subst-X` takes
+that is what a substitution for it replaces a name *with* — so `Tm.subst-X` takes
 a type. Two unrelated languages may both read `x : Token String`, each the owner
 for itself; what is refused is one language reaching two that read the same kind,
 where the substitution would have no single language to replace a name with.
@@ -2467,12 +2983,17 @@ in `Type₀`, so inheriting would pin the whole thing a level too low.
 
 The concrete syntax is the one a Π already had, and a leading `∀` run in a
 development reads as components — exactly as a leading `λ` run does. So a
-development whose *trailing term* is a bare Π needs corners:
+development whose *trailing term* is a bare Π has to be quoted:
 
 ```
-:dev ∀ (A : Type₀) -> A        two links and a trailing A
-:dev ⌜ ∀ (A : Type₀) -> A ⌝    one trailing Π
+:dev ∀ (A : Type₀) -> A              two links and a trailing A
+:dev core`∀ (A : Type₀) -> A`          one trailing Π
+:dev core`∀ (A : Type₀) -> A`       the same, in the notation that stays
 ```
+
+**And the printer writes the quotes, which it did not until 2026-11-03.** It quoted a
+trailing `λ` and a trailing `let` and not a trailing `∀`, so one printed back as two
+links and a variable — a different development, printed identically.
 
 ### A name you write is the name you get, even if something else has it
 
@@ -2550,7 +3071,7 @@ rule fill t :- when focus-is-hole
 rule unify-refine-core t :- when focus-is-hole do fill t ; solve
 ```
 
-`fill ⌜ t ⌝` parks `t` in a `=`-binding, unifies its type with the goal's
+`` fill core`t` `` parks `t` in a `=`-binding, unifies its type with the goal's
 and attaches it as a **guess**; `solve` discharges the guess. Both are callable
 on their own, which is the point — elaboration has to get in between the two to
 elaborate a term's parts once its shape is known.
@@ -2568,7 +3089,7 @@ to ask `unify`, so cumulativity now reaches the hand-driven tactic:
 
 ```
 thena spine> :theorem lower : Type₂
-thena spine> unify-refine-core ⌜ Type₀ ⌝
+thena spine> unify-refine-core core`Type₀`
 already equal
 ```
 
@@ -2751,13 +3272,13 @@ a function that is not injective, none of those applies and none ever could:
 
 ```
 data Cat : String -> Type₀ where
-  mk : forall (a : String) (b : String) -> Cat (appendString a b)
+  mk : forall (a : String) (b : String) -> Cat (String.append a b)
 
-pick : forall (x : String) (y : String) (p : Cat (appendString x y)) -> String
+pick : forall (x : String) (y : String) (p : Cat (String.append x y)) -> String
 pick = \ x y p -> case p of { mk a b -> a }
 ```
 
-`appendString a b` and `appendString x y` can be the same string without `a` and
+`String.append a b` and `String.append x y` can be the same string without `a` and
 `x` being the same — `"ab"` then `"c"` is `"a"` then `"bc"` — so nothing can
 conclude `a = x`.
 
@@ -2774,10 +3295,10 @@ keeps the equation where the standard presentation reports a failure. An arm tha
 does not take it is refused, and the refusal names the equation it owes:
 
 ```
-stuck: String and Eq {0} String (appendString a b) (appendString x y) -> String
+stuck: String and Eq {0} String (String.append a b) (String.append x y) -> String
        cannot be made equal
   they differ by one argument, which the shorter side has to take first:
-  Eq {0} String (appendString a b) (appendString x y)
+  Eq {0} String (String.append a b) (String.append x y)
 ```
 
 The second line is said of any two types that differ by one argument, so an
@@ -2790,7 +3311,7 @@ the refusal says what keeps it alive:
 ```
 pick = \ x y p -> case p of { }
   stuck: this case did not vanish: it keeps
-         Eq {0} String (appendString a b) (appendString x y),
+         Eq {0} String (String.append a b) (String.append x y),
          which no transition can discharge, so there is something to prove here
 ```
 
@@ -3162,7 +3683,7 @@ elaboration showing through the surface, not a way to write proofs.
 *Decided 2026-10-22, built 2026-10-26.*
 
 The motive above is built by one function, and the surface's `induction … of` is not its
-only caller: `eliminate-core ⌜ t ⌝` at the prompt reaches the same construction and hands
+only caller: `` eliminate-core core`t` `` at the prompt reaches the same construction and hands
 you one hole per case to fill in by hand. **A copy is free only where something solves
 it.** Elaborating a split runs `specialise` over every method, which solves each copy and
 drops its binder, so the arm never sees one. Driving the tactic by hand there is no
@@ -3172,8 +3693,8 @@ later widening of *what a split generalises* lands on the proof scripts again.
 So there are two tactics, and the plain word is the plain construction:
 
 ```
-eliminate-core ⌜ t ⌝                -- §3.7: the target and its indices, premises fixed
-eliminate-generalising-core ⌜ t ⌝   -- … and a fresh copy of the premises the indices mention
+eliminate-core core`t`                -- §3.7: the target and its indices, premises fixed
+eliminate-generalising-core core`t`   -- … and a fresh copy of the premises the indices mention
 ```
 
 **Two rules and not one with a flag.** A rule says only what it is about, and these are
@@ -3357,6 +3878,15 @@ the hole is already there and unification is expected to find it. A clause that
 does nothing and a clause that does not match are different answers, so the
 empty body is saying something. `do` is still required.
 
+**And since 2026-11-04 a surface term may write one too** — `do { }` and a block
+with a trailing `;`, which were writable in a rule file and syntax errors in a
+surface literal. **The block grammar is one grammar written twice** (Happy cannot
+share a nonterminal across the two parsers), and both of those alternatives had
+been added to one copy only. A block that fills no hole is not refused for it:
+`x = do { }` answers *not finished: the hole goal is still open, so there is no
+term yet*, which is the hole being visible rather than the writing being
+prevented.
+
 **A rule loops by recursing over the surface term.** The λ case needs one
 `prim-lambda` per binder of a group, and a rule body is a straight run of
 instructions with no iteration — so a helper peels one binder and calls itself
@@ -3535,12 +4065,12 @@ the whole type decides it. Ascribing the type
 pins it:
 
 ```
-eqStringEqual : ∀ (a : String) (b : String)
-  -> (Eq Comparison (eqString a b) same : Type₀) -> (Eq String a b : Type₀)
+String.eqEqual : ∀ (a : String) (b : String)
+  -> (Eq Comparison (String.eq a b) same : Type₀) -> (Eq String a b : Type₀)
 ```
 
 and the stored type is exactly what the development calculus wrote,
-`-> Eq {0} Comparison (eqString a b) same -> Eq {0} String a b`, with no
+`-> Eq {0} Comparison (String.eq a b) same -> Eq {0} String a b`, with no
 ascription left in it. **A body needs no such thing**: a level argument in a term
 is inserted at the use.
 
@@ -3708,7 +4238,7 @@ lists only what takes a variable.
 An entry is an `instral` block, so assignment and sequencing work at the prompt:
 
 ```
-thena spine> h = here ; claim "k" ⌜ Type₀ ⌝ ; goto h
+thena spine> h = here ; claim "k" core`Type₀` ; goto h
 thena spine> n = 42 ; say "ok"
 ```
 
@@ -3722,7 +4252,7 @@ indented**, the same rule a rule file uses for declarations:
 
 ```
 thena spine> h = here ;
-         ...   claim "k" ⌜ Type₀ ⌝ ;
+         ...   claim "k" core`Type₀` ;
          ...   goto h
 ```
 
@@ -3774,7 +4304,7 @@ fine. A production may not begin with the language itself, and may not be empty.
 **The name must be free — as a tag AND as a type.** A declared language is
 looked up before the built-ins in both places, so `language String where { … }`
 would have made `String` in every signature mean the grammar, and
-`language surface where { … }` would have replaced the `⟨ … ⟩` fence. Both are
+`language surface where { … }` would have taken the `surface` tag. Both are
 refused, and so are two grammars under one name:
 
 ```
@@ -4523,11 +5053,11 @@ applies is not something a head may do.
 *Decided 2026-09-11.*
 
 ```
-try-core ⌜ zero ⌝              -- a core term, in corners
-elaborate ⟨ succ zero ⟩        -- a surface term, in angle brackets
-claim "h" ⌜ Nat ⌝              -- a string, and a core term
-goto "h"                       -- a string: the hole's name
-goto h                         -- a REFERENCE, to whatever h is bound to
+try-core core`zero`           -- a core term, in its fence
+elaborate surface`succ zero`  -- a surface term, in its own
+claim "h" core`Nat`           -- a string, and a core term
+goto "h"                      -- a string: the hole's name
+goto h                        -- a REFERENCE, to whatever h is bound to
 ```
 
 **An argument written in no fence is neither language.** It is an `instral`
@@ -4541,7 +5071,7 @@ So there is now one reading of a line, wherever you type it: the word names an
 **op** if one bears that word, and a **rule** otherwise; its arguments are
 operands. That was already true inside a rule body and inside `do { … }`.
 
-What this costs you is explicitness — `unify ⌜ a ⌝ ⌜ b ⌝` where it used to be
+What this costs you is explicitness — `` unify core`a` core`b` `` where it used to be
 `unify a ≟ b` — and what it buys is that a line means the same thing in all
 three places.
 
@@ -4550,8 +5080,8 @@ three places.
 *Decided 2026-09-11.*
 
 ```
-claim "h" ⌜ Nat ⌝     -- two arguments: the op
-claim ⌜ Nat ⌝         -- one argument: a rule, which asks you for the name
+claim "h" core`Nat`     -- two arguments: the op
+claim core`Nat`         -- one argument: a rule, which asks you for the name
 ```
 
 A word names an **op at the arities that op has, and a rule at every other
@@ -4559,7 +5089,7 @@ arity**. Rules already worked this way — clauses of one name are selected by
 name *and* number of arguments, so they need not agree about how many they take
 — and ops now agree with them instead of being a separate question.
 
-This is what lets `claim ⌜ Nat ⌝` be an ordinary rule in the rule base rather
+This is what lets `` claim core`Nat` `` be an ordinary rule in the rule base rather
 than a shape the REPL recognises. You can write your own clause of any op's name
 at an arity the op does not have, and it will be found.
 
@@ -4628,10 +5158,10 @@ Haskell does not make `=` a layout keyword either.
 
 ```
 :infer succ zero          -- a surface term: elaborated
-:infer ⌜ succ zero ⌝      -- a development-calculus term: resolved
+:infer core`succ zero`      -- a development-calculus term: resolved
 ```
 
-This is the rule everywhere an argument is written — `try-core ⌜ x ⌝` against
+This is the rule everywhere an argument is written — `` try-core core`x` `` against
 `try x` — now applied to the one command that had been core-only.
 
 `:infer ‹surface›` answers *if this term were put here, what would its type be?*
@@ -4639,7 +5169,7 @@ It elaborates into a fresh hole at the focus, reads the type off, rechecks the
 development, and then **puts the development back exactly as it was**. Nothing
 it built survives the line, so it is a look despite doing real work.
 
-The type it prints is reduced further than `:infer ⌜t⌝`'s — it has to be, to see
+The type it prints is reduced further than `` :infer core`t` ``'s — it has to be, to see
 past the hole the elaboration solved. The two agree up to conversion, and print
 the same.
 
@@ -4738,7 +5268,7 @@ the file loads — what each hole wants is known from where it sits, and a splic
 that is not a term, or that names nothing, is refused then. The values are
 filled in when the instruction runs, which is when they exist.
 
-Both core spellings take one: `` core`${d} -> ${c}` `` and `⌜ ${d} -> ${c} ⌝`.
+A core region takes one: `` core`${d} -> ${c}` ``.
 
 **A splice is closed**, so a binder above it does not capture it — the same
 weakening every term built under a binder gets.
@@ -4810,7 +5340,7 @@ more argument and tries again.
 
 ```
 thena spine> :theorem t2 : P                  -- mk : Nat -> Nat -> P
-thena spine> fit-core ⌜ mk ⌝
+thena spine> fit-core core`mk`
 chose 34: fit-core
 backtracking to 34: fit-core
 chose 39: fit-core
@@ -4825,8 +5355,8 @@ nothing at all:
 
 ```
 thena spine> :theorem t0 : Nat -> Nat
-thena spine> fit-core ⌜ succ ⌝                -- fits as it stands
-thena spine> apply-core ⌜ succ ⌝              -- saturates, lands on Nat
+thena spine> fit-core core`succ`                -- fits as it stands
+thena spine> apply-core core`succ`              -- saturates, lands on Nat
 stuck: Nat and Nat -> Nat cannot be made equal
 ```
 
@@ -4890,7 +5420,7 @@ read — in a rule file, at the prompt, in a module, in a `declare`. A mistake i
 one is reported before anything is elaborated, so nothing is half-built:
 
 ```
-thena spine> elaborate ⟨ do { say 3 } ⟩
+thena spine> elaborate surface`do { say 3 }`
 do block 1, instruction 1: wanted String, got Int
 ```
 
@@ -4952,7 +5482,7 @@ with `:}`, each alone on its line:
 ```
 thena spine> :{
          ... h = here
-         ... claim "k" ⌜ Type₀ ⌝
+         ... claim "k" core`Type₀`
          ... goto h
          ... :}
 ```
@@ -5065,7 +5595,6 @@ operations wearing one name. Its spelling is unchanged.
 ```
 core`${d} -> ${d}`                  a term
 core`λ (${n} : ${d}) -> ${d}`       a NAME, and a term
-⌜ λ (${n} : ${d}) -> ${d} ⌝          the same, in corners
 ```
 
 **The position decides what the binding must hold** — a term position wants a

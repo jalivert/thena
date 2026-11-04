@@ -108,6 +108,7 @@ import Thena.Core.Context (Entry (..), entryType, entryVar, lamOver, piOver)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , inLemmataOf
   , Ident (..)
   , close
   , fresh
@@ -125,6 +126,8 @@ import Thena.Global.Env
   )
 import Thena.Global.Generate
   ( Chain (..)
+  , equalityName
+  , falsityName
   , Generated (..)
   , chainGoalType
   , chainProof
@@ -154,24 +157,25 @@ import Thena.Global.Generate
   )
 
 
--- | The two names a datatype generates: @NoConfusionNat@ and @noConfusionNat@.
+-- | The two names a datatype generates: @Nat.lemmata.NoConfusion@ and
+-- @Nat.lemmata.noConfusion@.
 --
 -- Concatenation, per §3.6's own example of the rule — @noConfusionTerm@ is a
 -- name the user could have written, and if they do, the declaration that would
 -- generate it is refused.
 noConfusionNames :: GlobalName -> (GlobalName, GlobalName)
-noConfusionNames (GlobalName d) =
-  (GlobalName ("NoConfusion" ++ d), GlobalName ("noConfusion" ++ d))
+noConfusionNames n =
+  (inLemmataOf n "NoConfusion", inLemmataOf n "noConfusion")
 
--- | The two names the backwards half generates: @noConfusionNatInv@ and
--- @isLeftInvNat@ — §3.5's @noConfD⁻¹@ and @isLeftInvD@.
+-- | The two names the backwards half generates: @Nat.lemmata.noConfusionInv@
+-- and @Nat.lemmata.isLeftInv@ — §3.5's @noConfD⁻¹@ and @isLeftInvD@.
 --
 -- **Named apart from 'noConfusionNames' because they are generated apart.** A
 -- datatype whose forward pair is declined has no inverse either, and a caller
 -- that only wants the forward lemma should not have to know these exist.
 noConfusionInverseNames :: GlobalName -> (GlobalName, GlobalName)
-noConfusionInverseNames (GlobalName d) =
-  (GlobalName ("noConfusion" ++ d ++ "Inv"), GlobalName ("isLeftInv" ++ d))
+noConfusionInverseNames n =
+  (inLemmataOf n "noConfusionInv", inLemmataOf n "isLeftInv")
 
 -- | Generate, check and admit all four definitions — or say why not.
 --
@@ -589,7 +593,7 @@ generateNoConfusion env n0 d
     -- @elim Empty ⟨λ _ . goal⟩ h@ — an impossible branch, discharged by name.
     absurdAt goal h n =
       let (tv, n1) = fresh n
-       in ( Eliminate (GlobalName "Empty") [dl] []
+       in ( Eliminate falsityName [dl] []
               (Lam (Ident "impossible") (emptyType dl) (close tv goal)) [] [] h
           , n1
           )
@@ -672,7 +676,7 @@ generateNoConfusion env n0 d
           dty       = familyAt (varsOf is)
           (mot, n5) = lawMotive is dty n4
           (mh,  n6) = lawMethod is dty n5
-          body      = Eliminate (GlobalName "Eq") [dl] [dty] mot [mh]
+          body      = Eliminate equalityName [dl] [dty] mot [mh]
                         [Free vx, Free vy] (Free vq)
        in ( lamOver ps (lamOver is
               (Lam (Ident "x") dty (close vx

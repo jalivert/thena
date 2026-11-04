@@ -32,7 +32,7 @@ import Thena.Instral.Ops
   , patternIrrefutable
   )
 import Thena.Render (renderPattern)
-import Thena.Rules (resolveRule, validate)
+import Thena.Rules (resolveRule, rootReading, validate)
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Surface.Layout (layout)
 import Thena.Syntax.Parser (parseRule)
@@ -91,7 +91,7 @@ readWhole text = case lexTokens text of
     Left e -> Left ("layout: " ++ show e)
     Right ts' -> case parseRule ts' of
       Left e -> Left ("parse: " ++ show e)
-      Right raw -> case resolveRule [] raw of
+      Right raw -> case resolveRule (rootReading []) raw of
         Left es -> Left ("resolve: " ++ show es)
         Right r -> Right r
 
@@ -109,7 +109,7 @@ readParams src = case lexTokens text of
     Left e -> Left ("layout: " ++ show e)
     Right ts' -> case parseRule ts' of
       Left e -> Left ("parse: " ++ show e)
-      Right raw -> case resolveRule [] raw of
+      Right raw -> case resolveRule (rootReading []) raw of
         Left es -> Left ("resolve: " ++ show es)
         Right r -> Right (ruleParams r)
   where
@@ -345,7 +345,7 @@ refusals =
         Left e -> Left ("layout: " ++ show e)
         Right ts' -> case parseRule ts' of
           Left e -> Left ("parse: " ++ show e)
-          Right raw -> case resolveRule [] raw of
+          Right raw -> case resolveRule (rootReading []) raw of
             Left es -> Left ("resolve: " ++ show es)
             Right r -> Right r
 

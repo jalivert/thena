@@ -29,6 +29,8 @@ judgment typing = Γ ⊢ M : T where
           --------------------------------
           Γ ⊢ ( M N ) : T
 
+open typing
+
 -- Each rule is a constructor, and `:show typing` prints them:
 --
 --   T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in x T Γ -> typing Γ (var x) T
@@ -42,7 +44,9 @@ judgment value = M value where
   V-abs:  ------------------------
           ( λ x : T . E ) value
 
--- Call by value. `E[x->N]` is the generated substitution, LC-subst-x E x N, so
+open value
+
+-- Call by value. `E[x->N]` is the generated substitution, LC.subst-x E x N, so
 -- a step computes its own right-hand side. A premise may be named, as `v` and
 -- `s` are in E-app2.
 judgment step = M --> N where
@@ -59,6 +63,8 @@ judgment step = M --> N where
            ----------------------------
            ( M N ) --> ( M N' )
 
+open step
+
 
 -- ---------------------------------------------------------------------------
 -- Typing derivations. A judgment is written in its own notation, like a term.
@@ -74,8 +80,8 @@ identityTyped =
 xNotY : Eq String "x" "y" -> Empty
 xNotY = \ q ->
   elim Eq (String)
-    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
-                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (String.eq "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (String.eq "x" b))
     ((\ a d -> d))
     ("x" "y") q unit
 
@@ -89,7 +95,7 @@ constTyped =
 
 -- ---------------------------------------------------------------------------
 -- Reduction steps. The right-hand side is checked by the kernel running
--- LC-subst-x, so each of these is a small test of substitution too.
+-- LC.subst-x, so each of these is a small test of substitution too.
 
 -- ( λ x : ι -> ι . x ) ( λ y : ι . y )  -->  λ y : ι . y
 betaStep : step`( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) ) --> ( λ y : ι . y )`

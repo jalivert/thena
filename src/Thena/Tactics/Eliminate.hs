@@ -118,6 +118,7 @@ import Thena.Core.Term
   )
 import Thena.Core.Typing (check, infer, sortOf)
 import Thena.Errors (ElimError (..))
+import Thena.Global.Generate (equalityName, reflexivityName)
 import Thena.Global.Env
   ( GlobalEnv
   , ConstructorDefinition (..)
@@ -603,9 +604,9 @@ eliminate env ctx sch prem n0 goal tgt =
             -- different question, and the answer is the same as for the target.
             --
             -- @\ a c dq q -> case q of { refl u -> … dq … }@ over
-            -- @dq : Eq Comparison (eqString a c) different@ is the case: nothing
+            -- @dq : Eq Comparison (String.eq a c) different@ is the case: nothing
             -- demands @a@ or @c@, because @refl@'s index is its own argument at
-            -- both positions, so @dq@ stayed at @eqString a c@ while the arm's
+            -- both positions, so @dq@ stayed at @String.eq a c@ while the arm's
             -- own subject is @u@ — @stuck: c and a cannot be made equal@, and
             -- the lemma cannot be written at all.
             --
@@ -1331,7 +1332,7 @@ eliminate env ctx sch prem n0 goal tgt =
           holes =
             [ (mv, Ident (cn ++ "Method"), mty)
             | (mv, mty, c) <- zip3 mvs methodTys (inductiveConstructors d)
-            , let GlobalName cn = constructorName c
+            , let cn = nameWord (constructorName c)
             ]
           methodEntries = [ Hypothesis mv i mty | (mv, i, mty) <- holes ]
 
@@ -1492,8 +1493,8 @@ eliminate env ctx sch prem n0 goal tgt =
     -- through__ (MS9 phase 208, @~5kcb4@).
     --
     -- Elaborating a name binds a copy of it, and a copy of a /compound/ term is
-    -- where this bites: @isSame (eqString a c)@ in an argument position arrives
-    -- as @a2 a3@ over @a3 := eqString a4 a5@, @a4 := a@ and @a5 := c@, so
+    -- where this bites: @isSame (String.eq a c)@ in an argument position arrives
+    -- as @a2 a3@ over @a3 := String.eq a4 a5@, @a4 := a@ and @a5 := c@, so
     -- neither index occurs in the goal at all and no amount of renaming reaches
     -- them. The set is therefore grown rather than walked: a definition is in it
     -- when its value mentions something already in it, starting from the target's
@@ -1555,10 +1556,10 @@ eliminate env ctx sch prem n0 goal tgt =
       Definition _ _ s t -> freeVars s ++ freeVars t
 
 equality :: GlobalName
-equality = GlobalName "Eq"
+equality = equalityName
 
 reflexivity :: GlobalName
-reflexivity = GlobalName "refl"
+reflexivity = reflexivityName
 
 -- | The head and arguments of a type former application.
 --

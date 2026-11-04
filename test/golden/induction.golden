@@ -1,10 +1,14 @@
 thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
+thena spine> open Eq
+opened Eq
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> :theorem plus : Nat -> Nat -> Nat
 proving plus : Nat -> Nat -> Nat
-thena spine> try-core ⌜ \ (n : Nat) (m : Nat) -> elim Nat () (\ (t : Nat) -> Nat) (m (\ (k : Nat) (ih : Nat) -> succ ih)) () n ⌝
+thena spine> try-core core`\ (n : Nat) (m : Nat) -> elim Nat () (\ (t : Nat) -> Nat) (m (\ (k : Nat) (ih : Nat) -> succ ih)) () n`
 thena spine> solve
 thena spine> qed
 plus : Nat -> Nat -> Nat   ∎
@@ -20,7 +24,7 @@ thena spine> into
 thena spine> along
 thena spine> along
 thena spine> along
-thena spine> eliminate-core ⌜ e ⌝
+thena spine> eliminate-core core`e`
 subgoals: reflMethod
 thena spine> back
 thena spine> :where
@@ -34,7 +38,7 @@ context
   e : Eq {0} Nat a b
 type
   ∀ (a1 : Nat) -> Eq {0} Nat (succ a1) (succ a1)
-thena spine> try-core ⌜ \ (c : Nat) -> refl {0} Nat (succ c) ⌝
+thena spine> try-core core`\ (c : Nat) -> refl {0} Nat (succ c)`
 thena spine> solve
 thena spine> along
 thena spine> solve
@@ -52,7 +56,7 @@ thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
-thena spine> eliminate-core ⌜ n ⌝
+thena spine> eliminate-core core`n`
 subgoals: zeroMethod, succMethod
 thena spine> :show
   let ? plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n ≐ (
@@ -67,10 +71,10 @@ thena spine> :show
   plusZero
 thena spine> back
 thena spine> back
-thena spine> try-core ⌜ refl {0} Nat zero ⌝
+thena spine> try-core core`refl {0} Nat zero`
 thena spine> solve
 thena spine> along
-thena spine> try-core ⌜ \ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih ⌝
+thena spine> try-core core`\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih`
 thena spine> solve
 thena spine> along
 thena spine> solve

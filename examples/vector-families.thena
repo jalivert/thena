@@ -18,7 +18,7 @@
 -- the suite has: `ps : All A P n as` reaches back past `pa`, so the chain's
 -- package holds `as; pa; ps` and `pa` is INTERIOR to it. The rest of the
 -- package is transported along `pa`'s own equation while nothing mentions `pa`
--- itself, and a `noConfusionAll` that predicted the pair from the telescope
+-- itself, and a `All.lemmata.noConfusion` that predicted the pair from the telescope
 -- left that proof free. See `dependent-argument-chain.thena` for the chain
 -- with no gap in it.
 --
@@ -31,9 +31,13 @@ data N : Type₀ where
   z : N
   s : N -> N
 
+open N
+
 data Vec (A : Type) : N -> Type where
   vnil : Vec A z
   vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n)
+
+open Vec
 
 -- `vnil` would need `z` to be `s m`, which conflict refuses, so the case
 -- vanishes and the arm has no body.
@@ -48,6 +52,8 @@ vtail = \ A m xs -> case xs of { vnil -> ; vcons n a as -> as }
 data All (A : Type₀) (P : A -> Type₀) : forall (n : N) -> Vec A n -> Type₀ where
   allNil : All A P z (vnil A)
   allCons : forall (n : N) (a : A) (as : Vec A n) (pa : P a) (ps : All A P n as) -> All A P (s n) (vcons A n a as)
+
+open All
 
 -- A recursion over the dependent index telescope: the split generalises both
 -- indices, the recursive call is at the shorter vector, and the induction
@@ -69,6 +75,8 @@ data Pairwise (A : Type₀) : forall (n : N) -> Vec A n -> Vec A n -> Type₀ wh
   pwNil : Pairwise A z (vnil A) (vnil A)
   pwCons : forall (n : N) (a : A) (b : A) (as : Vec A n) (bs : Vec A n) (ps : Pairwise A n as bs) -> Pairwise A (s n) (vcons A n a as) (vcons A n b bs)
 
+open Pairwise
+
 -- A recursion over it: the split generalises the length and both vectors, all
 -- three equations are discharged, and each arm binds the constructor's own
 -- arguments and nothing else.
@@ -85,6 +93,8 @@ pcount = \ A n as bs ps -> induction ps of { pwNil -> z ; pwCons k a b xs ys qs 
 -- parameters that "are different".
 data Only (A : Type) : forall (n : N) -> Vec A n -> Type where
   only : Only A z (vnil A)
+
+open Only
 
 -- And it reduces: one pair of elements, so `s z`.
 two : N

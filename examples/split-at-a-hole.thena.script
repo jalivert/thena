@@ -18,8 +18,11 @@
 -- `Eq {0} (Fin (succ m)) (fz m) (fz m)` and `refl` is the whole of the answer.
 
 data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+open Nat
 data Fin : Nat -> Type₀ where { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }
+open Fin
 data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }
+open Below
 
 -- `Below`'s index telescope is dependent — the second index is typed by the
 -- first — and both are plain variables at the scrutinee, so the split
@@ -67,7 +70,9 @@ qed
 -- own `n` is forced to the ambient `m` and is a definition rather than a
 -- binder, which is why only `a` and `as` are λ-bound.
 data N : Type₀ where { z : N ; s : N -> N }
+open N
 data Vec (A : Type₀) : forall (n : N) -> Type₀ where { vnil : Vec A z ; vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n) }
+open Vec
 
 :theorem vhead : ∀ (A : Type₀) (m : N) (xs : Vec A (s m)) -> A
 attack

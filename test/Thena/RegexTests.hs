@@ -55,7 +55,7 @@ tests =
 -- The priming character
 
 -- | 'primingChar' must return a character that extends **every** string the
--- class accepts — that is the property a generated @L-fresh@ relies on, and the
+-- class accepts — that is the property a generated @L.fresh-\8249k\8250@ relies on, and the
 -- reason MS6 closeout 23's renamed binders were unprintable was that @'@ was
 -- assumed to be one.
 priming :: [TestTree]

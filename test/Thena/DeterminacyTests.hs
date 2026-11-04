@@ -29,7 +29,7 @@
 -- pattern matching** (MS9), written by hand — and it exists to be read beside
 -- the generated one, which is why it is in the suite rather than in a report.
 -- **Every one of its eight lemmas is a split**: no @elim@ anywhere, and the
--- generated proof's 148 appeals to @noConfusionTerm@ become none.
+-- generated proof's 148 appeals to @Term.lemmata.noConfusion@ become none.
 --
 -- **EVERY ARM OF @determinacy@ IS INLINE, NOTHING TAKES AN INDUCTION HYPOTHESIS
 -- AS A PARAMETER, AND ALL TEN ARMS RECURSE THE SAME WAY.** A split that
@@ -58,14 +58,15 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=), assertBool)
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore, renderTrouble, renderResponse)
 
 -- | Relative to the package root, which is where the suite runs — the same
@@ -177,8 +178,9 @@ tests =
       _ : rest -> xs : tails' rest
 
     statementOf s' =
-      renderCore (Rendering [] (names (machineOf s'))) [] . definitionType
-        <$> lookupDefinition (GlobalName "determinacy") (globals (machineOf s'))
+      renderCore (rendering [] (names (machineOf s'))) [] . definitionType
+        <$> lookupDefinition (rootName "determinacy") (globals (machineOf s'))
 
-    theorem = "∀ (t : Term) (t1 : Term) -> Step t t1 \
-              \-> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2"
+    theorem = "∀ (t : Term.Term) (t1 : Term.Term) -> Step.Step t t1 \
+              \-> ∀ (t2 : Term.Term) -> Step.Step t t2 \
+              \-> Eq.Eq {0} Term.Term t1 t2"

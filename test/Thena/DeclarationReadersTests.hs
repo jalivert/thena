@@ -5,7 +5,7 @@
 -- has and what each one's arguments are called; `~kq4kc` cannot start without
 -- a way to ask.
 --
--- **Driven at the machine, like "Thena.EngineTests", and not through the
+-- **Driven at the machine, like "Thena" "EngineTests", and not through the
 -- REPL.** Two of the six answer with an 'Ops.VInt', and @say@ takes text — so a
 -- rule base cannot observe a count at all today. Running the op and reading
 -- @env@ tests the op; running it through a rule would only test the plumbing,
@@ -19,9 +19,11 @@ module Thena.DeclarationReadersTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core)
+import Thena.Core.Term (Core, nameDotted, rootScope)
 import Thena.Core.Trust (TrustLevel (..))
-import Thena.Declared (natVec, natVecCounter)
+import Thena.Declared ( opensIn
+  , named
+  ,natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Engine
   ( Exec (..)
@@ -40,7 +42,7 @@ import Thena.Standard (expectedBase)
 -- left behind.
 machine :: [Instr] -> Machine
 machine is =
-  load is (Machine (Exec [] [] []) ps [] natVec expectedBase [] [] n 0
+  load is (Machine (Exec [] [] []) ps [] natVec expectedBase [] [] rootScope n 0
                    NoUndischargeableTrust)
   where
     (ps, n) = newDevelopment natVecCounter
@@ -63,15 +65,19 @@ ran o = go (machine [Bind (PVar "it") Nothing o])
 
 -- | A core term, parsed in @natVec@ exactly as a user would write it.
 term :: String -> Core
-term src = case parseCore [] natVec [] natVecCounter src of
+term src = case parseCore [] natVec (opensIn natVec) [] natVecCounter src of
   Left e        -> error ("fixture does not parse: " ++ show e)
   Right (t, _)  -> t
 
 ty :: String -> Operand
 ty = Lit . VTerm . term
 
+-- | **A name operand, as phase 245's written form produces one**: a dotted word
+-- in an operand position IS the name, and 'Thena.Engine.operandName' roots a
+-- plain text instead — so a reader given the bare word @succ@ asks for a name
+-- nothing declares now that every name lives in its declaration's namespace.
 name :: String -> Operand
-name = Lit . VText
+name = Lit . VName . named
 
 -- | The names in a 'VList', or a failure saying what came back instead.
 nameList :: Either FailReason Value -> IO [String]
@@ -80,7 +86,7 @@ nameList r = case r of
   other            -> assertFailure ("expected a list of names, got " ++ show other)
   where
     one v = case v of
-      VText w -> pure w
+      VName g -> pure (nameDotted g)
       _       -> assertFailure ("expected a name in the list, got " ++ show v)
 
 tests :: TestTree
@@ -100,7 +106,7 @@ datatypeOf =
   testGroup
     "datatype-of"
     [ testCase "a bare datatype is its own head" $
-        ran (DatatypeOf (ty "Nat")) @?= Right (VText "Nat")
+        ran (DatatypeOf (ty "Nat")) @?= Right (VName (named "Nat.Nat"))
 
       -- **§12 invariant 6, and the case that makes this op non-trivial.** A
       -- user writes @Vec Nat zero@, which resolves to nested applications over
@@ -109,10 +115,10 @@ datatypeOf =
       -- datatype's name. Reading the written form alone answers /"that type is
       -- not a datatype"/ about a datatype.
     , testCase "a saturated family application reduces to its head" $
-        ran (DatatypeOf (ty "Vec Nat zero")) @?= Right (VText "Vec")
+        ran (DatatypeOf (ty "Vec Nat zero")) @?= Right (VName (named "Vec.Vec"))
 
     , testCase "and so does a partially applied one" $
-        ran (DatatypeOf (ty "Vec Nat")) @?= Right (VText "Vec")
+        ran (DatatypeOf (ty "Vec Nat")) @?= Right (VName (named "Vec.Vec"))
 
       -- A universe has a head and it is not a declared family.
     , testCase "a universe is refused, and named" $
@@ -127,20 +133,20 @@ counts =
   testGroup
     "the parameter and index counts"
     [ testCase "Vec has one parameter" $
-        ran (DatatypeParameters (name "Vec")) @?= Right (VInt 1)
+        ran (DatatypeParameters (name "Vec.Vec")) @?= Right (VInt 1)
 
     , testCase "and one index" $
-        ran (DatatypeIndices (name "Vec")) @?= Right (VInt 1)
+        ran (DatatypeIndices (name "Vec.Vec")) @?= Right (VInt 1)
 
       -- **The pair that would be wrong if the two ops were one accessor.**
       -- @Nat@ has neither, so a reader that answered with a telescope's length
       -- for the wrong half would still say @0@ here and only @Vec@ tells them
       -- apart.
     , testCase "Nat has no parameters" $
-        ran (DatatypeParameters (name "Nat")) @?= Right (VInt 0)
+        ran (DatatypeParameters (name "Nat.Nat")) @?= Right (VInt 0)
 
     , testCase "and no indices" $
-        ran (DatatypeIndices (name "Nat")) @?= Right (VInt 0)
+        ran (DatatypeIndices (name "Nat.Nat")) @?= Right (VInt 0)
     ]
 
 constructors :: TestTree
@@ -151,39 +157,39 @@ constructors =
       -- eliminator's methods are in, so a rule walking methods and a rule
       -- walking constructors agree without either being told.
       testCase "in declaration order" $ do
-        cs <- nameList (ran (ConstructorsOf (name "Nat")))
-        cs @?= ["zero", "succ"]
+        cs <- nameList (ran (ConstructorsOf (name "Nat.Nat")))
+        cs @?= ["Nat.zero", "Nat.succ"]
 
     , testCase "and for a family with a parameter" $ do
-        cs <- nameList (ran (ConstructorsOf (name "Vec")))
-        cs @?= ["nil", "cons"]
+        cs <- nameList (ran (ConstructorsOf (name "Vec.Vec")))
+        cs @?= ["Vec.nil", "Vec.cons"]
 
     , testCase "a constructor knows its datatype" $
-        ran (ConstructorDatatype (name "succ")) @?= Right (VText "Nat")
+        ran (ConstructorDatatype (name "Nat.succ")) @?= Right (VName (named "Nat.Nat"))
 
     , testCase "including one of a parameterised family" $
-        ran (ConstructorDatatype (name "cons")) @?= Right (VText "Vec")
+        ran (ConstructorDatatype (name "Vec.cons")) @?= Right (VName (named "Vec.Vec"))
 
       -- The argument names, which is what a split names its pattern variables
       -- after. **The parameter is not among them** — @A@ is @Vec@'s and not
       -- @cons@'s, which is §3.7's split showing up in the answer.
     , testCase "a constructor's arguments are named, parameters excluded" $ do
-        as <- nameList (ran (ConstructorArguments (name "cons")))
+        as <- nameList (ran (ConstructorArguments (name "Vec.cons")))
         as @?= ["n", "a", "as"]
 
     , testCase "a nullary constructor has none" $ do
-        as <- nameList (ran (ConstructorArguments (name "zero")))
+        as <- nameList (ran (ConstructorArguments (name "Nat.zero")))
         as @?= []
 
     , testCase "and so does nil, whose family has a parameter" $ do
-        as <- nameList (ran (ConstructorArguments (name "nil")))
+        as <- nameList (ran (ConstructorArguments (name "Vec.nil")))
         as @?= []
 
       -- @succ : Nat -> Nat@ is written as an arrow, so its one argument has no
       -- name in the source. **The count is still right**, which is what a
       -- pattern's arity is read from; what it is called is the resolver's.
     , testCase "an unnamed argument still counts" $ do
-        as <- nameList (ran (ConstructorArguments (name "succ")))
+        as <- nameList (ran (ConstructorArguments (name "Nat.succ")))
         length as @?= 1
     ]
 
@@ -196,20 +202,20 @@ refusals =
   testGroup
     "what each reader refuses"
     [ testCase "a datatype is not a constructor" $
-        ran (ConstructorDatatype (name "Nat"))
-          @?= Left (NotDeclaredAs "Nat" "a constructor")
+        ran (ConstructorDatatype (name "Nat.Nat"))
+          @?= Left (NotDeclaredAs "Nat.Nat" "a constructor")
 
     , testCase "nor are its arguments askable" $
-        ran (ConstructorArguments (name "Vec"))
-          @?= Left (NotDeclaredAs "Vec" "a constructor")
+        ran (ConstructorArguments (name "Vec.Vec"))
+          @?= Left (NotDeclaredAs "Vec.Vec" "a constructor")
 
     , testCase "a constructor is not a datatype" $
-        ran (ConstructorsOf (name "succ"))
-          @?= Left (NotDeclaredAs "succ" "a datatype")
+        ran (ConstructorsOf (name "Nat.succ"))
+          @?= Left (NotDeclaredAs "Nat.succ" "a datatype")
 
     , testCase "and neither are its parameters countable" $
-        ran (DatatypeParameters (name "succ"))
-          @?= Left (NotDeclaredAs "succ" "a datatype")
+        ran (DatatypeParameters (name "Nat.succ"))
+          @?= Left (NotDeclaredAs "Nat.succ" "a datatype")
 
     , testCase "a name nothing declared" $
         ran (ConstructorsOf (name "Nonesuch"))

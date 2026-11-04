@@ -57,7 +57,9 @@ data TokenKind
   | ACharacter      -- ^ a character literal, quotes included.
   | ARegexLiteral   -- ^ @\/…\/@, slashes included.
   | AHole
-    -- ^ @?@, @▸@ and @⌜⌝@ — the things that stand for what is not written yet.
+    -- ^ @?@ and @▸@ — the things that stand for what is not written yet.
+    -- **The corners were here too** and are gone with the notation (MS10
+    -- phase 269).
     -- **Its own kind rather than punctuation**, because it is the one a reader
     -- most wants to find, and a frontend that treats it as a bracket cannot.
   | ATag
@@ -93,9 +95,9 @@ data TokenView = TokenView
 -- state of a line the moment someone types @LC\`@. So a fence is appended and
 -- the lex retried, and the tokens the fence itself produced are dropped.
 --
--- **The two fences are the two the lexer has**: a backtick, which closes
--- @name\`…\`@, and @⟩@, which closes the @⟨@ surface alias. They are tried in
--- that order.
+-- **There is one fence, and it was two until MS10 phase 269**: a backtick,
+-- which closes @name\`…\`@. The other was @⟩@, closing the @⟨@ surface alias,
+-- and the alias is gone with the corners (`~3t63k`).
 --
 -- 'Left' is the position and offending character of a lex that fails for a
 -- reason a fence cannot mend — a genuinely bad character. A frontend may colour
@@ -135,7 +137,7 @@ offsetIn text (Pos l c) = lineStart + c - 1
 mendedTokens :: String -> Either Pos [Spanned]
 mendedTokens line = case attempt line of
   Right ts -> Right ts
-  Left e   -> case tryFences ["`", "⟩"] of
+  Left e   -> case tryFences ["`"] of
     Just ts -> Right ts
     Nothing -> Left (whereOf e)
   where
@@ -168,6 +170,11 @@ kindOf t = case t of
   TWhere        -> AKeyword
   TData         -> AKeyword
   TModule       -> AKeyword
+  -- MS10 phase 247: @open@ is a declaration, and a keyword like the rest.
+  TOpen         -> AKeyword
+  TNamespace    -> AKeyword
+  THiding       -> AKeyword
+  TRenaming     -> AKeyword
   TDo           -> AKeyword
   TRule         -> AKeyword
   TLanguage     -> AKeyword
@@ -182,6 +189,8 @@ kindOf t = case t of
   TPending      -> AHole
 
   TIdent _      -> AnIdentifier
+  -- A qualified name is an identifier with a path; nothing in it is a keyword.
+  TQIdent _     -> AnIdentifier
   TNumber _     -> ANumber
   TUniverse _   -> ANumber
   TUniverseOpen -> ANumber
@@ -217,8 +226,6 @@ kindOf t = case t of
   TEquals       -> APunctuation
   TTurnstile    -> APunctuation
   TEquate       -> APunctuation
-  TOpenQuote    -> APunctuation
-  TCloseQuote   -> APunctuation
   TNeck         -> APunctuation
   TSpread       -> APunctuation
   TDot          -> APunctuation

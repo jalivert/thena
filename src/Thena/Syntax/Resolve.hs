@@ -14,7 +14,13 @@ import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , declarationNamed
+  , globalUnder
+  , inDeclarationOf
+  , nameDotted
+  , rootName
   , Ident (..)
+  , InScope
   , Scope
   , Var
   , close
@@ -22,7 +28,7 @@ import Thena.Core.Term
    )
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Partial (..))
-import Thena.Errors (DevForm (..), ObjectError (..), ResolveError (..))
+import Thena.Errors (DevForm (..), ObjectError (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Declare (targetIndices)
 import Thena.Global.Env
   ( ArgRole (..)
@@ -40,12 +46,12 @@ import qualified Thena.Language.Earley as Earley
 import Thena.Language.Build
   ( atCharacters
   , buildCore
-  , languageNames
   , objectInput
   , objectText
   , productionNames
+  , productionRule
   )
-import Thena.Language.Grammar (Grammar, earleyRules)
+import Thena.Language.Grammar (Grammar, builtInTags, earleyRules, grammarForTag, grammarKey)
 import Thena.Syntax.Concrete
   ( Raw (..)
   , RawPiece (..)
@@ -55,6 +61,8 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
+import Thena.Syntax.Lexer (lexTokens)
+import Thena.Syntax.Parser (parseTerm)
 
 
 -- | Names bound locally, innermost first.
@@ -78,10 +86,26 @@ type Local = [(String, Var)]
 -- name resolution and an @elim@\'s shape check are different questions, and
 -- the self-reference above is exactly the case an @elim@ must NOT see, since
 -- 'lookupInductive' has nothing to find for a datatype mid-declaration.
-type Globals = [GlobalName]
+data Globals = Globals
+  { scopeNames :: [GlobalName]
+    -- ^ what answers to a written name directly
+  , scopeIn :: InScope
+    -- ^ where a written name is looked up from: the namespaces an @open@ has
+    -- brought into view, and the ones this point is inside
+    --
+    -- __It rides with the names and is not a parameter of its own__ (MS10
+    -- phase 249). It was absent, and 'plainAt' said so in a comment calling
+    -- the omission \"a seam and not an oversight\" on the grounds that this
+    -- resolver is handed no machine to read it from — which is a fact about a
+    -- signature and not a reason, and it was a live defect: after @open Ctx@ a
+    -- written @empty@ resolved in a surface term and not in @:theorem@'s type.
+    -- Carried here so that a caller saying what is in scope says it in full,
+    -- rather than every door having to remember a second argument.
+  }
 
-globalsOf :: GlobalEnv -> Globals
-globalsOf e = map fst (definitions e) ++ map fst (primitives e)
+globalsOf :: GlobalEnv -> InScope -> Globals
+globalsOf e sc =
+  Globals (map fst (definitions e) ++ map fst (primitives e)) sc
 
 -- | What a written term's @${x}@ holes are filled with (MS5 phase 81).
 --
@@ -121,8 +145,10 @@ nameOf sp i = case i of
 
 -- | Resolve a raw tree as a core gr term. Holes, guesses and constraints are
 -- rejected here: they live only in a development (§3.1).
-resolve :: [Grammar] -> GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Core, Int)
-resolve gr = resolveWith gr []
+resolve
+  :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> Raw
+  -> Either ResolveError (Core, Int)
+resolve gr env = resolveWith gr [] env
 
 -- | 'resolve', with the template's splices filled (MS5 phase 81).
 --
@@ -131,16 +157,19 @@ resolve gr = resolveWith gr []
 -- with no @${…}@ in it resolves identically either way, so nothing that existed
 -- before this phase can have changed meaning.
 resolveWith
-  :: [Grammar] -> Splices -> GlobalEnv -> Context -> Int -> Raw
+  :: [Grammar] -> Splices -> GlobalEnv -> InScope -> Context -> Int -> Raw
   -> Either ResolveError (Core, Int)
-resolveWith gr sp env ctx = core gr env (globalsOf env) sp ctx []
+resolveWith gr sp env sc ctx = core gr env (globalsOf env sc) sp ctx []
 
 
 -- | Resolve a raw tree as a development, taking the LONGEST PREFIX (§2.7):
 -- every leading binder becomes a chain link, so 'Trailing' ends up holding
--- something that is not a binder unless @⌜ ⌝@ says otherwise.
-resolvePartial :: [Grammar] -> GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Partial, Int)
-resolvePartial gr env ctx = partial gr env (globalsOf env) [] ctx []
+-- something that is not a binder, and a @core@ region is the way to say so
+-- for a term that is one.
+resolvePartial
+  :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> Raw
+  -> Either ResolveError (Partial, Int)
+resolvePartial gr env sc ctx = partial gr env (globalsOf env sc) [] ctx []
 
 -- --------------------------------------------------------------------------
 -- Core terms
@@ -161,17 +190,66 @@ core gr env gs sp ctx local n raw = case raw of
   -- **Its splices are ordinary terms of this language**, resolved here and
   -- passed to 'buildCore' in the order they were written, which is the order
   -- the parser numbers them in.
-  RawObject lang prod ps
-    | lang `notElem` languageNames gr ->
-        Left (NotAnObjectTerm (NoSuchObjectLanguage lang))
-    | Just w <- prod, w `notElem` productionNames gr lang ->
-        Left (NotAnObjectTerm (NoSuchObjectProduction lang w))
-    | otherwise -> do
+  -- **THE TAG RESOLVES BY THE WALK** (MS10 phase 260, `~zjkvd`, his ruling of
+  -- 2026-10-30): the written word reaches a grammar wherever its namespace is
+  -- open, exactly as the datatype's name does, and the /key/ the parser wants
+  -- comes off the grammar it found rather than off what was written.
+  -- **THE TWO BUILT-IN TAGS ARE TAGS HERE TOO** (MS10 phase 266). A tagged
+  -- literal is resolved by asking which /declared/ object language the tag
+  -- names, and @core@ and @surface@ are declared by nothing — the words are
+  -- reserved so that no @language@ block can take them
+  -- ('Thena.Language.Grammar.builtInTags', refused as @BuiltInTag@). So the
+  -- walk below answers nothing for them, and a reader that stops there says
+  -- @no language called core has been declared@, which is the opposite of the
+  -- truth. **'Thena.Rules' has always had this branch** for an operand's
+  -- region; the term's reader never got it, so @core`t`@ was refused where
+  -- @\8988 t \8989@ worked and the two notations looked complementary rather
+  -- than one of them being unfinished.
+  --
+  -- **@core`t`@ is the term written inside it, exactly as the corners are** —
+  -- transparent here, and stopping the spine in 'partial' for free, since a
+  -- 'RawObject' matches none of that function's binder cases and falls to its
+  -- trailing case just as 'RawQuote' does.
+  RawObject tag prod ps | tag `elem` builtInTags -> case prod of
+    -- A built-in tag has no productions to start at, so @core[var]`…`@ is the
+    -- same mistake as a declared language's unknown production and says so.
+    Just w  -> Left (NotAnObjectTerm (NoSuchObjectProduction tag w))
+    Nothing
+      | tag /= "core" -> Left (NotAnObjectTerm (BuiltInTagNotATerm tag))
+      | otherwise -> do
+          src <- regionSource
+          inner <- case lexTokens src of
+            Left why -> Left (NotAnObjectTerm (CoreRegionUnread tag (LexFailed why)))
+            Right ts -> case parseTerm ts of
+              Left why -> Left (NotAnObjectTerm (CoreRegionUnread tag (ParseFailed why)))
+              Right t -> Right t
+          core gr env gs sp ctx local n inner
+   where
+    -- **The region is handed back to the parser as text**, which is what the
+    -- development calculus's own lexer and parser take and what a rule base's
+    -- @core@ region has always been. An escape was split out by the region
+    -- scanner and is put back verbatim: the parser reads @${x}@ itself, as an
+    -- atom, so this is a reader for what the scanner produced and not a second
+    -- meaning. **Only a bare word survives the round trip** — there is no
+    -- printer for a 'Raw', which is also why 'Thena.Render' prints an
+    -- unresolved term as its shape.
+    regionSource = concat <$> traverse back ps
+    back pc = case pc of
+      RawChunk txt            -> Right txt
+      RawSpliced (RawName [] x) -> Right ("$" ++ ['{'] ++ x ++ ['}'])
+      RawSpliced _            -> Left (NotAnObjectTerm (RegionSpliceNotAName tag))
+
+  RawObject lang prod ps -> case grammarForTag (scopeIn gs) gr lang of
+    Left []  -> Left (NotAnObjectTerm (NoSuchObjectLanguage lang))
+    Left amb -> Left (NotAnObjectTerm (ObjectLanguageAmbiguous lang (map nameDotted amb)))
+    Right g | Just w <- prod, w `notElem` productionNames gr (grammarKey g) ->
+                Left (NotAnObjectTerm (NoSuchObjectProduction lang w))
+            | otherwise -> object (grammarKey g)
+   where
+      object key = do
         (ts, n1) <- spliced n ps
         let bits = [ either Left (const (Right ())) (piece pc) | pc <- ps ]
-        tree <- case Earley.parse (earleyRules gr)
-                       (maybe (Earley.StartAt lang) Earley.StartRule prod)
-                       (objectInput bits) of
+        tree <- case Earley.parse (earleyRules gr) (start' key) (objectInput bits) of
           Left why -> Left (NotAnObjectTerm
                               (ObjectNotParsed lang (objectText bits)
                                  (atCharacters bits why)))
@@ -179,7 +257,14 @@ core gr env gs sp ctx local n raw = case raw of
         case buildCore gr ts tree of
           Left why -> Left (NotAnObjectTerm (ObjectNotATerm lang why))
           Right t  -> Right (t, n1)
-    where
+      -- **The bracket is a word and the parser wants the rule's name** (MS10
+      -- phase 248), and the word is looked up in the grammar the tag resolved
+      -- to. The guard above has already refused a word it has no production
+      -- for, so the fallback cannot be reached.
+      start' key = maybe (Earley.StartAt key)
+                         (\w -> maybe (Earley.StartAt key) Earley.StartRule
+                                  (productionRule gr key w))
+                         prod
       piece pc = case pc of
         RawChunk txt -> Left txt
         RawSpliced e -> Right e
@@ -193,13 +278,16 @@ core gr env gs sp ctx local n raw = case raw of
   -- Local, then the ambient context, then the globals. A binder shadows a
   -- global of the same name, which is what one namespace (§3.6) requires: the
   -- names collide and the innermost wins.
-  RawName s -> case lookup s local of
+  -- **A qualified name is a global and nothing else** (MS10 phase 240): a
+  -- binder and a context entry have no path, so there is nothing for the two
+  -- lookups to find and nothing local can shadow @Nat.elim@.
+  RawName ps s | not (null ps) -> plain (GlobalName ps s)
+
+  RawName _ s -> case lookup s local of
     Just v  -> Right (Free v, n)
     Nothing -> case lookupEntry s ctx of
       Just v  -> Right (Free v, n)
-      Nothing
-        | GlobalName s `elem` gs -> Right (Global (GlobalName s) [], n)
-        | otherwise              -> Left (NotInScope s)
+      Nothing -> plain (rootName s)
 
   -- **A hole in the template, filled from the binding it names** (MS5 phase
   -- 81). The value arrived already resolved — it is a 'Core' the rule built —
@@ -230,15 +318,13 @@ core gr env gs sp ctx local n raw = case raw of
 
   -- @foo {ℓ 0}@ — a global at level arguments. **Refused on a local**: only a
   -- definition has level parameters, and a λ-bound name has none to give.
-  RawAt i rls -> nameOf sp i >>= \s -> case lookup s local of
-    Just _  -> Left (LevelArgumentsOnALocal s)
-    Nothing -> case lookupEntry s ctx of
-      Just _ -> Left (LevelArgumentsOnALocal s)
-      Nothing
-        | GlobalName s `elem` gs -> do
-            let args = map levelOfNat rls
-            Right (Global (GlobalName s) args, n)
-        | otherwise -> Left (NotInScope s)
+  RawAt ps i rls -> nameOf sp i >>= \s ->
+    let at g = plainAt g (map levelOfNat rls)
+     in if not (null ps) then at (GlobalName ps s) else case lookup s local of
+          Just _  -> Left (LevelArgumentsOnALocal s)
+          Nothing -> case lookupEntry s ctx of
+            Just _  -> Left (LevelArgumentsOnALocal s)
+            Nothing -> at (rootName s)
 
   RawApp f a -> do
     (f', n1) <- core gr env gs sp ctx local n f
@@ -263,12 +349,6 @@ core gr env gs sp ctx local n raw = case raw of
     (b', n4)   <- core gr env gs sp ctx ((x, v) : local) n3 b
     Right (Let (Ident x) val' ty' (close v b'), n4)
 
-  -- Transparent here: the corners only say something in a development
-  -- position, where they stop the spine. A no-op rather than an error, because
-  -- rejecting them would make the printer's own output fail to re-read in a
-  -- nested position.
-  RawQuote t -> core gr env gs sp ctx local n t
-
   -- Phase 7: no concrete syntax existed for 'Eliminate' before this. Checked
   -- against the datatype's own record, exactly as a constructor's target is
   -- (below) — this is the same "what you wrote does not fit the form" shape
@@ -283,9 +363,10 @@ core gr env gs sp ctx local n raw = case raw of
   -- §3.6's "one namespace, the innermost wins" that round-tripped perfectly
   -- and so was invisible to every test. Now a shadowed name resolves to the
   -- local and is refused, because a local is not a datatype.
-  RawElim di rls ps m ms is t -> do
-    d         <- nameOf sp di
-    dn        <- datatypeNamed gr env gs sp ctx local d
+  RawElim dps di rls ps m ms is t -> do
+    w         <- nameOf sp di
+    let d = nameDotted (GlobalName dps w)
+    dn        <- datatypeNamed gr env gs sp ctx local dps w
     def       <- maybe (Left (NotADatatype d)) Right (lookupInductive dn env)
     let dls = map levelOfNat rls
     (ps', n1) <- coreList gr env gs sp ctx local n ps
@@ -317,6 +398,31 @@ core gr env gs sp ctx local n raw = case raw of
   RawClaim {}   -> Left (NotACoreTerm AHole)
   RawGuess {}   -> Left (NotACoreTerm AGuess)
   RawPending {} -> Left (NotACoreTerm AConstraint)
+  where
+    -- | A global, at no level arguments, or the refusal that names it in full.
+    plain g = plainAt g []
+
+    -- | A global at level arguments. **The refusal prints the whole path**,
+    -- because that is what was written: @Nat.elim is not in scope@ and
+    -- @elim is not in scope@ are different reports (MS10 phase 240).
+    --
+    -- **A written word is also tried as a declaration's short name** (MS10
+    -- phase 248), so @Nat@ reaches the datatype @Nat.Nat@ — the alias a @data@
+    -- declaration mints. Nothing is in the environment under @Nat@, which is
+    -- what makes it an alias rather than a definition, so the probe is the only
+    -- way to find it. **The written name still wins**, as it does under an
+    -- @open@: an alias can add a way to resolve and never change one.
+    --
+    -- **The open namespaces are walked here too, through the one function
+    -- both doors call** (MS10 phase 249, repairing @~7zn7k@):
+    -- 'Thena.Core.Term.globalUnder' is shared with
+    -- 'Thena.Engine.globalNamed', so a written word cannot mean one thing in a
+    -- surface term and another in a command's argument. The alias above is
+    -- part of that walk, which is why it is no longer tried separately.
+    plainAt g args = case globalUnder (`elem` scopeNames gs) (scopeIn gs) g of
+      Right g'  -> Right (Global g' args, n)
+      Left []   -> Left (NotInScope (nameDotted g))
+      Left amb  -> Left (NameIsAmbiguous (nameDotted g) (map nameDotted amb))
 
 -- | Resolve @elim@\'s head through the ordinary scope chain, and insist it
 -- named a global.
@@ -334,11 +440,13 @@ core gr env gs sp ctx local n raw = case raw of
 -- type former exists but its eliminator does not, because the eliminator is
 -- generated from the completed declaration.
 datatypeNamed
-  :: [Grammar] -> GlobalEnv -> Globals -> Splices -> Context -> Local -> String
+  :: [Grammar] -> GlobalEnv -> Globals -> Splices -> Context -> Local
+  -> [String] -> String
   -> Either ResolveError GlobalName
-datatypeNamed gr env gs sp ctx local d = case core gr env gs sp ctx local 0 (RawName d) of
-  Right (Global g _, _) -> Right g
-  _                   -> Left (NotADatatype d)
+datatypeNamed gr env gs sp ctx local ps d =
+  case core gr env gs sp ctx local 0 (RawName ps d) of
+    Right (Global g _, _) -> Right g
+    _                     -> Left (NotADatatype (nameDotted (GlobalName ps d)))
 
 -- | A run of terms in the same local scope, left to right, threading the
 -- counter — what @elim@\'s three list-valued fields need (§2.6).
@@ -382,8 +490,10 @@ partial gr env gs sp ctx local n raw = case raw of
   -- what the DC's syntax owes it — no token, no production.
   --
   -- It costs what the @λ@ case has always cost: a development whose trailing
-  -- term is a bare Π cannot be written without corners. @⌜ ∀ (x : A) -> B ⌝@
-  -- is the escape, and 'RawQuote' below is where it stops the spine.
+  -- term is a bare Π cannot be written as itself. @core\`∀ (x : A) -> B\`@ is
+  -- the escape, and it stops the spine by being no binder at all \8212 the
+  -- fall-through at the end of this function is what takes it (MS10 phase 269;
+  -- until then the escape was @⌜ … ⌝@ and had a case of its own here).
   RawPi bs b -> binderLinks gr env gs sp Quantify ctx local n bs b
 
   RawLet i val ty b -> do
@@ -415,11 +525,6 @@ partial gr env gs sp ctx local n raw = case raw of
     (k', n1) <- constraint gr env gs sp ctx local n k
     (b', n2) <- partial gr env gs sp ctx local n1 b
     Right (Pending k' b', n2)
-
-  -- The corners stop the spine: what is inside is a term, not a chain.
-  RawQuote t -> do
-    (t', n1) <- core gr env gs sp ctx local n t
-    Right (Trailing t', n1)
 
   -- Everything else is the trailing term. This is the whole of longest prefix:
   -- the binder cases above consume as much as they can, and this catches the
@@ -472,9 +577,9 @@ constraint gr env gs sp ctx local n (RawConstraint bs s t ty) = do
 -- supplies its own index expressions and the record keeps those; the type
 -- former's index binders gr name positions, not values (§3.7).
 resolveData
-  :: [Grammar] -> GlobalEnv -> Int -> RawData
+  :: [Grammar] -> GlobalEnv -> InScope -> Int -> RawData
   -> Either ResolveError (InductiveDefinition, Int)
-resolveData gr env n (RawData name ps ty cs) = do
+resolveData gr env sc n (RawData name ps ty cs) = do
   -- **A declaration writes no level parameters** (MS3 phase 33c). It used to —
   -- @data D {ℓ}@, minted here as 'LRigid's and in scope throughout — and that
   -- was scaffolding, the only way to make a datatype polymorphic before metas
@@ -492,11 +597,19 @@ resolveData gr env n (RawData name ps ty cs) = do
   -- The datatype being declared joins 'Globals' here, and only here: a
   -- constructor may recursively mention it (@succ : Nat -> Nat@), and
   -- 'lookupInductive' would find nothing for it in @env@ mid-declaration.
-  (cs', n4) <- constructors gr env (dn : gs) dn params (length indices) afterParams n3 cs
+  (cs', n4) <- constructors gr env gs { scopeNames = dn : scopeNames gs } dn params (length indices) afterParams n3 cs
   Right (InductiveDefinition dn [] params indices level cs', n4)
   where
-    gs = globalsOf env
-    dn = GlobalName name
+    gs = globalsOf env sc
+    -- **The declaration lives in the namespace it opens** (MS10 phase 248), the
+    -- same placement 'Thena.Driver.datatypeProgram' gives a @data@ item in a
+    -- file: @data Nat@ typed at the REPL declares @Nat.Nat@, @Nat.zero@ and
+    -- @Nat.elim@. Rooting it here left @elim@ and @case@ at the root — a name
+    -- 'Thena.Global.Env.eliminatorName' derives from the datatype's, and
+    -- 'inDeclarationOf' of a root name is a root name — so the FIRST datatype a
+    -- session declared took the global @elim@ and the second was refused
+    -- @elim is already declared@.
+    dn = declarationNamed (rootName name)
 
 constructors
   :: [Grammar] -> GlobalEnv -> Globals -> GlobalName -> Context -> Int -> Local
@@ -508,7 +621,7 @@ constructors gr env gs dn params want local n (RawConstructor cn ty : rest) = do
   (tgt', n2)              <- core gr env gs [] [] inside n1 tgt
   ixs                     <- targetIndices dn params want cn tgt'
   (rest', n3)             <- constructors gr env gs dn params want local n2 rest
-  Right (ConstructorDefinition (GlobalName cn) args ixs (map (const Plain) args) : rest', n3)
+  Right (ConstructorDefinition (inDeclarationOf dn cn) args ixs (map (const Plain) args) : rest', n3)
 
 -- --------------------------------------------------------------------------
 -- Telescopes

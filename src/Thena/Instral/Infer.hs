@@ -37,7 +37,7 @@ import Data.Function (on)
 import Data.List (elemIndex, intercalate, nub, nubBy, sort, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (GlobalName (..), nameDotted, rootName)
 import Thena.Syntax.Concrete (Splice (..), splices)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
 import Thena.Rules (opArities, testTypes, writtenPositions)
@@ -120,13 +120,13 @@ data InstralTypeError
 
 renderSite :: Site -> String
 renderSite si = case si of
-  InHead (GlobalName n) i -> n ++ ", test " ++ show (i + 1)
-  InBody (GlobalName n) i -> n ++ ", instruction " ++ show (i + 1)
-  InSignature (GlobalName n) a -> "signature " ++ n ++ "/" ++ show a
+  InHead g i -> nameDotted g ++ ", test " ++ show (i + 1)
+  InBody g i -> nameDotted g ++ ", instruction " ++ show (i + 1)
+  InSignature g a -> "signature " ++ nameDotted g ++ "/" ++ show a
   -- **Counted from one, like a test and an instruction**, and named /parameter/
   -- rather than given a number alone: a clause's parameters are where the
   -- reader's eye goes last, so the word is worth the four characters.
-  InPattern (GlobalName n) i -> n ++ ", parameter " ++ show (i + 1)
+  InPattern g i -> nameDotted g ++ ", parameter " ++ show (i + 1)
 
 renderInstralTypeError :: InstralTypeError -> String
 renderInstralTypeError e = case e of
@@ -134,14 +134,14 @@ renderInstralTypeError e = case e of
     renderSite si ++ ": wanted " ++ renderTy want ++ ", got " ++ renderTy got
   Occurs si t ->
     renderSite si ++ ": " ++ renderTy t ++ " would have to contain itself"
-  BindsNothing si (GlobalName n) ->
+  BindsNothing si g | let n = nameDotted g ->
     renderSite si ++ ": no clause of " ++ n ++ " returns anything, so there is\
       \ nothing to bind"
   AnnotationTooGeneral si t ->
     renderSite si ++ ": the signature says any type here, but the body needs "
       ++ renderTy t
-  SignatureUnanswered (GlobalName n) a ->
-    "signature " ++ n ++ ": no rule of that name takes " ++ show a
+  SignatureUnanswered g a ->
+    "signature " ++ nameDotted g ++ ": no rule of that name takes " ++ show a
       ++ (if a == 1 then " argument" else " arguments")
   TextNotTextual si t ->
     renderSite si ++ ": a string literal is a String or a Name, not "
@@ -331,9 +331,9 @@ inferProgram sigs rs =
       -- own signature listing should read down the file.
       out       = [ (c, whatItIs st b) | c <- nub (map callableOf rs)
                   , Just b <- [lookup c env] ]
-      unanswered = [ SignatureUnanswered (GlobalName n) (length (sigParams t))
+      unanswered = [ SignatureUnanswered (rootName n) (length (sigParams t))
                    | (n, t) <- sigs
-                   , (GlobalName n, length (sigParams t)) `notElem` map fst env
+                   , (rootName n, length (sigParams t)) `notElem` map fst env
                    ]
    in (out, inFileOrder rs (stErrors st) ++ unanswered)
 
@@ -505,9 +505,9 @@ components rs = map flattenSCC (stronglyConnComp nodes)
     calledBy c =
       [ d
       | r <- rs, callableOf r == c
-      , (GlobalName m, _) <- callsIn (ruleBody r)
-      , d@(GlobalName m', _) <- defined
-      , m == m'
+      , (mn, _) <- callsIn (ruleBody r), let m = nameDotted mn
+      , d@(mn', _) <- defined
+      , m == nameDotted mn'
       ]
 
 -- | Every callable a body calls, descending into lambdas and blocks.
@@ -523,7 +523,7 @@ callsIn = concatMap one
       -- @Call@ carries only a word (MS5 phase 83). The boundary is one line and
       -- is the whole cost of the narrow rename; widening 'Thena.Instral.Ops.Rule''s own
       -- @ruleName@ is @ms5\/CLOSEOUT.md@ 38 and is not done here.
-      Call nm as  -> (GlobalName nm, length as) : concatMap inOperand as
+      Call nm as  -> (rootName nm, length as) : concatMap inOperand as
       Lambda _ b  -> callsIn b
       Block b     -> callsIn b
       _           -> concatMap inOperand (operandsOf o)
@@ -538,7 +538,7 @@ declareThese
   :: [(String, Signature)] -> [Rule] -> [Callable] -> (SigEnv, St) -> (SigEnv, St)
 declareThese sigs rs cs st0 = foldl one st0 cs
   where
-    one (env, st) c@(GlobalName n, k) = case declaredFor n k of
+    one (env, st) c@(cn, k) = case declaredFor (nameDotted cn) k of
       -- **A declared signature is taken as given**, and the body is checked
       -- against it rather than the other way round — which is the difference
       -- between an annotation and a comment.
@@ -774,8 +774,8 @@ body env r res ctx ps st (instr : rest) =
       -- ('Thena.Rules.BoundNonProducing'); a call passes that check because
       -- 'Thena.Instral.Ops.produces' cannot answer for one, and this pass can.
       bindsNothing s = case o of
-        Call nm as | notReturning (lookup (GlobalName nm, length as) env) ->
-          oops (BindsNothing si (GlobalName nm)) s
+        Call nm as | notReturning (lookup (rootName nm, length as) env) ->
+          oops (BindsNothing si (rootName nm)) s
         _ -> s
    in body env r res ctx' (drop 1 ps) st2 rest
 
@@ -820,7 +820,7 @@ operation env r res ctx si o st0 = case o of
 
   -- **A call is where the signature environment is read**, and the only place.
   Call nm as ->
-    case lookup (GlobalName nm, length as) env of
+    case lookup (rootName nm, length as) env of
       Nothing ->
         -- **Nothing defines it, and that is an error** — see the module header.
         -- Its arguments are still walked, so a mistake inside one is still
@@ -828,7 +828,7 @@ operation env r res ctx si o st0 = case o of
         -- name is reported once rather than again wherever its value goes.
         let st1 = foldl (\s a -> snd (operandType ctx si a s)) st0 as
             (t, st2) = fresh st1
-            others   = [ k | ((GlobalName m, k), _) <- env, m == nm ] ++ opArities nm
+            others   = [ k | ((mn, k), _) <- env, nameDotted mn == nm ] ++ opArities nm
          in (Just t, oops (Undefined si nm (length as) (nub others)) st2)
       Just (Inferred ps cres) ->
         ( cres
@@ -894,8 +894,8 @@ operandAgainst ctx si want o st = case o of
 slotType :: Slot -> Ty
 slotType slot = case slot of
   AtTerm                        -> TCore
-  AtPrimitive (GlobalName "Char") -> TChar
-  AtPrimitive (GlobalName "Int")  -> TInt
+  AtPrimitive (GlobalName [] "Char") -> TChar
+  AtPrimitive (GlobalName [] "Int")  -> TInt
   -- Every other token class is over @String@; §3 admits three primitive types
   -- and the check at declaration refuses the rest.
   AtPrimitive _                 -> TString
@@ -952,6 +952,10 @@ operandType ctx si o st = case o of
 valueType :: Site -> Value -> St -> (Ty, St)
 valueType si v st = case v of
   VText _    -> (TString, st)
+  -- **A name is a 'TName' and nothing decides it from the position** (MS10):
+  -- unlike a text literal, a name value has an introduction form of its own, so
+  -- there is nothing deferred about it.
+  VName _    -> (TName, st)
   VInt _     -> (TInt, st)
   VChar _    -> (TChar, st)
   VBool _    -> (TBool, st)

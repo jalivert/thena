@@ -30,6 +30,12 @@ module Thena.View.Redraw
 
 import Data.List (intercalate)
 
+-- **The printer's own escaper, not a copy of it** (MS10 phase 269): this
+-- module exists to rebuild 'Thena.Render''s text from a view tree, and it held
+-- a second list of the three characters a region escapes. One list cannot
+-- disagree with itself.
+import Thena.Syntax.Print (escapeRaw)
+
 import Thena.View.Address (Address)
 import Thena.View.Development (ConstraintView (..), LinkShape (..), LinkView (..))
 import Thena.View.Core
@@ -86,7 +92,7 @@ redraw = at Loose
       -- @(elim … tgt) arg@ drawn without the parentheses is @elim … tgt arg@,
       -- which the core grammar refuses outright. 'Thena.Render' has always
       -- parenthesised here; nothing in the prelude put an elimination in
-      -- function position until @decString@ became a definition.
+      -- function position until @String.dec@ became a definition.
       AnElimination d ls ps m ms is t ->
         paren (prec > Loose) $
           unwords
@@ -272,10 +278,6 @@ redrawSurface = surf SLoose
       ASurfacePieceText txt -> concatMap escapeRaw txt
       ASurfacePieceSplice e -> "$" ++ "{" ++ surf SLoose e ++ "}"
 
-    escapeRaw c
-      | c `elem` [tick, '\\', '$'] = ['\\', c]
-      | otherwise = [c]
-
     paren True t = "(" ++ t ++ ")"
     paren False t = t
 
@@ -298,6 +300,9 @@ redrawSurface = surf SLoose
 -- they differ in exactly that: 'Thena.Render.renderPartial' draws the chain,
 -- 'Thena.Render.renderCursor' draws it with a gutter. One layout, two joins —
 -- 'chainText' and 'markedChainText' below.
+coreRegion :: String -> String
+coreRegion src = "core`" ++ concatMap escapeRaw src ++ "`"
+
 redrawChain :: [LinkView] -> [(Bool, String)]
 redrawChain = go 0
   where
@@ -332,8 +337,12 @@ redrawChain = go 0
       -- carries — it is purely how *text* draws a shape that is otherwise
       -- unambiguous once structured.
       AResult t -> case displayShape t of
-        AnAbstraction {} -> [(marked, pad ind ++ "\8988 " ++ redraw t ++ " \8989")]
-        ALet {}          -> [(marked, pad ind ++ "\8988 " ++ redraw t ++ " \8989")]
+        -- **Escaped exactly as 'Thena.Render.coreRegion' escapes it** (MS10
+        -- phase 269): a region ends at a backtick, so a trailing term holding
+        -- a tagged literal of its own has to write @\\`@ — and this is the
+        -- mirror that would otherwise drift from the printer it checks.
+        AnAbstraction {} -> [(marked, pad ind ++ coreRegion (redraw t))]
+        ALet {}          -> [(marked, pad ind ++ coreRegion (redraw t))]
         _                -> [(marked, pad ind ++ redraw t)]
 
     group (name, ty) = "(" ++ name ++ " : " ++ redraw ty ++ ") "

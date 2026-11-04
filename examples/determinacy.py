@@ -115,7 +115,7 @@ SCRIPT_BASE = r'''data Term : Type₀ where { true : Term ; false : Term ; ifthe
 data NV : Term -> Type₀ where { nvZero : NV zero ; nvSucc : ∀ (t : Term) (n : NV t) -> NV (succ t) }
 data Step : Term -> Term -> Type₀ where { eIfTrue : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 ; eIfFalse : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3 ; eIf : ∀ (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') -> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3) ; eSucc : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (succ t1) (succ t1') ; ePredZero : Step (pred zero) zero ; ePredSucc : ∀ (v : Term) (nv : NV v) -> Step (pred (succ v)) v ; ePred : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (pred t1) (pred t1') ; eIsZeroZero : Step (iszero zero) true ; eIsZeroSucc : ∀ (v : Term) (nv : NV v) -> Step (iszero (succ v)) false ; eIsZero : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (iszero t1) (iszero t1') }
 :theorem absurd : ∀ (C : Type₀) (e : Empty {0}) -> C
-try-core ⌜ \ (C : Type₀) (e : Empty {0}) -> elim Empty {0} () (\ (t : Empty {0}) -> C) () () e ⌝
+try-core core`\ (C : Type₀) (e : Empty {0}) -> elim Empty {0} () (\ (t : Empty {0}) -> C) () () e`
 solve
 qed
 :theorem sym : ∀ (A : Type₀) (a : A) (b : A) (e : Eq {0} A a b) -> Eq {0} A b a
@@ -129,9 +129,9 @@ along
 along
 along
 along
-eliminate-core ⌜ e ⌝
+eliminate-core core`e`
 back
-try-core ⌜ \ (c : A) -> refl {0} A c ⌝
+try-core core`\ (c : A) -> refl {0} A c`
 solve
 along
 solve
@@ -156,9 +156,9 @@ along
 along
 along
 along
-eliminate-core ⌜ e ⌝
+eliminate-core core`e`
 back
-try-core ⌜ \ (c : A) (h : P c) -> h ⌝
+try-core core`\ (c : A) (h : P c) -> h`
 solve
 along
 solve
@@ -186,9 +186,9 @@ along
 along
 along
 along
-eliminate-core ⌜ e ⌝
+eliminate-core core`e`
 back
-try-core ⌜ \ (c : A) -> refl {0} B (f c) ⌝
+try-core core`\ (c : A) -> refl {0} B (f c)`
 solve
 along
 solve
@@ -215,9 +215,9 @@ along
 along
 along
 along
-eliminate-core ⌜ e ⌝
+eliminate-core core`e`
 back
-try-core ⌜ \ (z : A) (h : Eq {0} A z c) -> h ⌝
+try-core core`\ (z : A) (h : Eq {0} A z c) -> h`
 solve
 along
 solve
@@ -353,7 +353,7 @@ STEP = [
        lhs=C("iszero", V("c1")), rhs=C("iszero", V("c2")), rec=True),
 ]
 
-# The conjunction NoConfusionTerm builds for a constructor with several
+# The conjunction Term.lemmata.NoConfusion builds for a constructor with several
 # arguments: right-nested And, and Unit when there is nothing to conjoin.
 # Must agree with Thena.Global.NoConfusion.conjoin exactly.
 #
@@ -389,9 +389,9 @@ def decompose(a, b, q, goal, ctr):
         x, y, qq = work.pop(0)
         if x[0] == 'c' and y[0] == 'c':
             if x[1] != y[1]:
-                # NoConfusionTerm at two different formers computes to Empty {0},
+                # Term.lemmata.NoConfusion at two different formers computes to Empty {0},
                 # so discrimination is absurd rather than a continuation.
-                return (compose(ps, "absurd (%s) (noConfusionTerm %s %s %s)"
+                return (compose(ps, "absurd (%s) (Term.lemmata.noConfusion %s %s %s)"
                                     % (goal, pp(x,0), pp(y,0), qq)), None)
             if not x[2]: continue
             eqs, binders, sub = [], [], []
@@ -418,12 +418,12 @@ def decompose(a, b, q, goal, ctr):
             # unified into it — `a6 is not bound before X`. The types are
             # right here, so writing them costs nothing and reads better.
             if TARGET == 'script':
-                ps.append("(\\ (%s : %s) -> (\\ %s -> %%s) %s) (noConfusionTerm %s %s %s)"
+                ps.append("(\\ (%s : %s) -> (\\ %s -> %%s) %s) (Term.lemmata.noConfusion %s %s %s)"
                           % (nc, conj(eqs), " ".join(binders),
                              " ".join(projections(nc, eqs)),
                              pp(x,0), pp(y,0), qq))
             else:
-                binds = ["let %s : %s = noConfusionTerm %s %s %s in"
+                binds = ["let %s : %s = Term.lemmata.noConfusion %s %s %s in"
                          % (nc, conj(eqs), pp(x,0), pp(y,0), qq)]
                 binds += ["let %s : %s = %s in" % (b, ty, pr)
                           for b, ty, pr in zip(binders, eqs, projections(nc, eqs))]
@@ -665,10 +665,10 @@ def surface_proof(name, ty, intros, motive, indices, tgt, bodies, final=None):
 def proof(name, ty, intros, tgt, bodies):
     m, k = len(bodies), len(intros)
     out = [":theorem %s : %s" % (name, ty), "attack"]
-    out += ["intro"] * k + ["into"] + ["along"] * k + ["eliminate-core ⌜ " + tgt + " ⌝"]
+    out += ["intro"] * k + ["into"] + ["along"] * k + ["eliminate-core core`" + tgt + "`"]
     out += ["back"] * m
     for b in bodies:
-        out += ["try-core ⌜ " + b + " ⌝", "solve", "along"]
+        out += ["try-core core`" + b + "`", "solve", "along"]
     out += ["solve"] + ["back"] * (1 + k + m) + ["solve", "qed"]
     return out
 

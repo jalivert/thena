@@ -27,7 +27,7 @@ import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Instral (instralRules, operandHead, statementHead)
 import qualified Thena.Language.Earley as E
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Render (renderResponse)
 import Thena.Rules (RuleBase, baseSignatures, opWords, ruleBase)
 import Thena.View (sessionGrammars, sessionRules, statementOfferView)
@@ -53,6 +53,7 @@ tests =
     , testCase "and the arity comes from the signature" arity
     , testCase "a word that is no statement is stuck, not silent" stuck
     , testCase "a half-typed word completes to the words it begins" prefix
+    , testCase "an empty block is offerable, because it is writable" emptyBlock
     , testGroup "recovery (phase 138)"
         [ testCase "a tagged term literal alone on the line is helped" standalone
         , testCase "and one in a slot that wants something else is helped too" wrongSlot
@@ -81,7 +82,8 @@ tests =
         , testCase "no nonterminal this module invented reaches the frontend" noSynthetic
         , testCase "instral's own head cannot collide with a language's" headIsNamespaced
         , testCase "recovery keeps the cases the grammar cannot reach" recoveryRemains
-        , testCase "a production name is unique across every loaded grammar" productionNamesAreUnique
+        , testCase "two languages may share a production's word, and the tag says which"
+            productionsMayShareAWord
         , testCase "a recovered literal's span covers its tag and both fences" literalSpan
         , testCase "including a production-named tag" namedTagSpan
         , testCase "and the span counts from the start of the whole entry" spanShifts
@@ -180,6 +182,20 @@ coreTagOffered = do
   let o' = offeredOptions (offerIn s "fill core`let ")
   ALiteralSymbol "?" `elem` o' @?= True
 
+-- | **The brace that closes an empty block is offered** (MS10 phase 270,
+-- `~z4trb`).
+--
+-- @do { }@ became writable in a surface term in that phase — it had been
+-- writable in a rule file since MS4 phase 49 — and the advising grammar is a
+-- third copy of the block grammar, so it had to learn the shape or completion
+-- would have gone on hiding a form the parser accepts. **Written as a
+-- production with the braces in it**, because "Thena.Language.Earley" rests on
+-- no nonterminal being nullable.
+emptyBlock :: IO ()
+emptyBlock = do
+  s <- withLC
+  ALiteralSymbol "}" `elem` offeredOptions (offerIn s "elaborate surface`do { ") @?= True
+
 -- | **Three languages deep, through one chart**: a statement, a surface region
 -- inside its slot, an object literal inside that.
 nestedLiteral :: IO ()
@@ -191,7 +207,7 @@ nestedLiteral = do
 
 -- | The @:@-commands whose argument is a term now offer one. **Which language is
 -- the dispatch arm's**: @:core@ reads a development-calculus term, @:infer@ a
--- surface one, or a cornered core one.
+-- surface one, or a @core@-fenced development-calculus one.
 commandTerms :: IO ()
 commandTerms = do
   s <- withLC
@@ -199,9 +215,11 @@ commandTerms = do
   ANonterminalSymbol "core term" `elem` o ":core " @?= True
   ANonterminalSymbol "surface term" `elem` o ":infer " @?= True
   ANonterminalSymbol "core term" `elem` o ":convert " @?= True
-  -- **Corners are not offered anywhere** — his instruction, 2026-10-01. The
-  -- cornered @:infer@ still runs; it is not advertised, so nothing new points at
-  -- a notation that is going away (@AGENDA.md@ 98).
+  -- **Corners are not offered anywhere, and now there is nothing to offer** —
+  -- his instruction of 2026-10-01 took the description out, and MS10 phase 269
+  -- took the notation (`~3t63k`). **Kept as a guard**: the two spellings are
+  -- dead and an offer naming one would be a frontend teaching a notation the
+  -- parser no longer has.
   [ l | l <- [":infer ", ":core ", "fill ", "fill core`"]
       , ALiteralSymbol "⌜" `elem` o l || ALiteralSymbol "[|" `elem` o l ] @?= []
 
@@ -452,7 +470,7 @@ nameAnywhere = do
 fixture :: [(String, Signature)] -> [String] -> RuleBase
 fixture sigs names =
   ruleBase "fixture" Nothing "" sigs []
-    [ Rule (GlobalName nm) [PWild] [] [] | nm <- names ]
+    [ Rule (rootName nm) [PWild] [] [] | nm <- names ]
 
 askIn :: Session -> RuleBase -> String -> [SymbolView]
 askIn s b before =
@@ -662,26 +680,30 @@ recoveryRemains = do
   if ALiteralSymbol "\953" `elem` offeredOptions o then pure ()
     else assertFailure ("expected Ty's base type: " <> show (offeredOptions o))
 
--- | **The invariant @literalProductions@ rests on, pinned here because it is not
--- this module's to enforce.** A named production's body is found by searching every
--- loaded grammar for a rule of that name, with no language filter — which is right
--- only while a production name is unique across all of them. It is: each production
--- becomes a datatype constructor, and a second language declaring one of the same
--- name is refused as it loads.
+-- | **Two languages may both declare a production called @same@, and
+-- @A[same]\`@ still means @A@'s** (MS10 phase 253).
 --
--- If that ever relaxed, @LC[var]\`@ could be handed another language's @var@, and
--- silently — so the fixture is a pair of languages that both declare @same@, and
--- this asserts the load refuses it.
-productionNamesAreUnique :: IO ()
-productionNamesAreUnique = do
+-- This asserted the opposite until MS10: a named production's body was found by
+-- searching every loaded grammar for a rule of that word, with no language
+-- filter, so it was right only while the word was unique — and the load refused
+-- a second language that took one. **The milestone's whole point is that the
+-- refusal is gone**, so the invariant is kept by construction instead:
+-- 'Thena.Language.Build.productionRule' resolves the word inside the language
+-- written before the bracket, and the rule it names is @A.same@ or @B.same@.
+--
+-- The fixture's two @same@ productions have different bodies — @( a a )@ and
+-- @( b b b )@ — so the offer after each opening tag says which one was found.
+productionsMayShareAWord :: IO ()
+productionsMayShareAWord = do
   (s0, _) <- startingSession
   let (s1, r) = oneLine s0 ":load test/fixtures/two-languages-one-production.thena"
-  said <- case following s1 r of
-    Just io -> do (s2, rs, _) <- io; pure (unwords (concatMap (renderResponse s2) rs))
-    Nothing -> pure (unwords (renderResponse s1 r))
-  if "already declared" `isInfixOf` said then pure ()
-    else assertFailure
-      ("two languages declaring one production must be refused, got " <> show said)
+  s <- case following s1 r of
+    Just io -> do (s2, _, _) <- io; pure s2
+    Nothing -> pure s1
+  let opened l = [ w | ALiteralSymbol w <- offeredOptions (offerIn s ("fill " <> l)) ]
+  opened "A[same]`" @?= ["("]
+  opened "A[same]`( " @?= ["a"]
+  opened "B[same]`( " @?= ["b"]
 
 -- | Typing the colon alone already offers every command, because the unit is the
 -- colon and whatever follows it.

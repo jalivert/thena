@@ -18,12 +18,13 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
-import Thena.Core.Term (GlobalName (..), substLevelsIn)
+import Thena.Core.Term (substLevelsIn, rootName)
 import Thena.Driver (machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore, renderTrouble, renderResponse)
 
 target :: FilePath
@@ -44,14 +45,14 @@ tests =
       -- this before progress.
     , testCase "a well-typed boolean value is true or false" $ do
         st <- statementOf "canonicalBool"
-        st @?= Just (0, "∀ (v : Term) -> Value v -> HasType v bool \
-               \-> Or (Eq {0} Term v true) (Eq {0} Term v false)")
+        st @?= Just (0, "∀ (v : Term.Term) -> Value.Value v -> HasType.HasType v Ty.bool \
+               \-> Or.Or (Eq.Eq {0} Term.Term v Term.true) (Eq.Eq {0} Term.Term v Term.false)")
 
       -- **The nat half**, and it is the one that carries the numeric-value
       -- predicate the determinacy example already had.
     , testCase "and a well-typed numeric value really is one" $ do
         st <- statementOf "canonicalNat"
-        st @?= Just (0, "∀ (v : Term) -> Value v -> HasType v nat -> NV v")
+        st @?= Just (0, "∀ (v : Term.Term) -> Value.Value v -> HasType.HasType v Ty.nat -> NV.NV v")
 
       -- The inversion lemmas underneath them, stated so that a proof weakened
       -- into vacuity would show.
@@ -69,11 +70,11 @@ tests =
       -- pins the generality and the old monomorphic reading at once.
     , testCase "true is not a natural number, at any level" $ do
         st <- statementOf "trueNotNat"
-        st @?= Just (1, "HasType true nat -> Empty {0}")
+        st @?= Just (1, "HasType.HasType Term.true Ty.nat -> Empty.Empty {0}")
 
     , testCase "and a numeric value is not a boolean, at any level" $ do
         st <- statementOf "nvNotBool"
-        st @?= Just (1, "∀ (t : Term) -> NV t -> HasType t bool -> Empty {0}")
+        st @?= Just (1, "∀ (t : Term.Term) -> NV.NV t -> HasType.HasType t Ty.bool -> Empty.Empty {0}")
 
       -- **Nothing in the file appeals to @elim@ any more.** @absurd@'s own body
       -- was the last one, kept while @normal.thena@ and @preservation.thena@
@@ -93,12 +94,12 @@ tests =
       (s, _) <- startingSession
       (s', _, _) <- loadProofFile s target
       pure (atZero (machineOf s') <$>
-              lookupDefinition (GlobalName n) (globals (machineOf s')))
+              lookupDefinition (rootName n) (globals (machineOf s')))
 
     -- Every prenex level parameter read at 0, with how many there were.
     atZero m d =
       let ps  = definitionLevels d
           sub = maybe [] id (instantiateLevels ps (map (const LZero) ps))
        in ( length ps
-          , renderCore (Rendering [] (names m)) []
+          , renderCore (rendering [] (names m)) []
               (substLevelsIn sub (definitionType d)) )

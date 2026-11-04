@@ -19,7 +19,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
   (Gen, counterexample, elements, forAll, ioProperty, oneof, property, sized, testProperty, withNumTests, (===))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
+import Thena.Core.Term (Core (..), InScope, Literal (..), rootName, rootScope)
 import Thena.Driver
   ( Response (..)
   , machineOf
@@ -32,8 +32,10 @@ import Thena.Global.Env (GlobalEnv)
 import Thena.Language.Build (printTerm)
 import Thena.Language.Grammar (Grammar)
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
-  ,renderCore)
+import Thena.Render
+  ( rendering
+  , renderCore)
+import Thena.Declared (named, opensIn)
 
 tests :: TestTree
 tests =
@@ -42,6 +44,7 @@ tests =
     [ testGroup "notation, and what cannot be written in it" notation
     , testGroup "fences, where the grammar leaves a term ambiguous" fences
     , testGroup "the development calculus reads a region back" reading
+    , testGroup "a tag is a spelling, so it shortens" inside
     , roundTrip
     ]
 
@@ -70,15 +73,18 @@ source =
     , "language Ty, T, S where"
     , "  base  -> \953"
     , "  arrow -> ( T -> S )"
+    , "open Ty"
     , ""
     , "language LC, M, N, E where"
     , "  var : w as occurrence -> w"
     , "  abs : w as binder     -> ( \955 w : T . E[w] )"
     , "  app                   -> ( M N )"
+    , "open LC"
     , ""
     , "language Ex, U, V where"
     , "  ref  : w as occurrence -> w"
     , "  juxt                   -> U V"
+    , "open Ex"
     , ""
     , "judgment written = U ! where"
     , ""
@@ -89,6 +95,7 @@ source =
     , "  cref  : c as occurrence -> c"
     , "  cjux                    -> P Q"
     , "  clet  : c as binder     -> l c = P i Q[c]"
+    , "open Coll"
     ]
 
 loaded :: IO (GlobalEnv, [Grammar])
@@ -100,17 +107,20 @@ loaded = do
 
 -- | A constructor applied, as the reader leaves it.
 con :: String -> [Core] -> Core
-con name = foldl App (Global (GlobalName name) [])
+-- | **Named with its language's path** (MS10 phase 251): a production lives in
+-- the namespace its block opens, and a root-level name is one the grammar has
+-- no production for, so the term does not print at all.
+con name = foldl App (Global (named name) [])
 
 str :: String -> Core
 str = Primitive . LString
 
 -- | The host's printer, for what a splice holds.
 host :: Core -> String
-host = renderCore (Rendering [] 0) []
+host = renderCore (rendering [] 0) []
 
 printed :: [Grammar] -> Core -> IO String
-printed gs t = maybe (assertFailure "it did not print") pure (printTerm gs host t)
+printed gs t = maybe (assertFailure "it did not print") pure (printTerm gs rootScope host t)
 
 -- ---------------------------------------------------------------------------
 
@@ -118,17 +128,17 @@ notation :: [TestTree]
 notation =
   [ testCase "a bracketed grammar needs no fences" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "abs" [str "x", con "base" [], con "var" [str "x"]])
+      t <- printed gs (con "LC.abs" [str "x", con "Ty.base" [], con "LC.var" [str "x"]])
       t @?= "LC`( \955 x : \953 . x )`"
   , testCase "a term of one application, in a grammar that brackets nothing" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      t <- printed gs (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
       t @?= "Ex`f a`"
     -- The printer prints what is there: a global stands for itself rather than
     -- being unfolded into the term it is defined as.
   , testCase "what the notation cannot write goes in a splice" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "app" [Global (GlobalName "twice") [], con "var" [str "y"]])
+      t <- printed gs (con "LC.app" [Global (rootName "twice") [], con "LC.var" [str "y"]])
       t @?= "LC`( ${twice} y )`"
     -- A class prints its match only if the class would read it back.
     -- **A term whose own name is not object text nests a region inside a
@@ -137,15 +147,15 @@ notation =
     -- @nom@, and @nom@ is a 'String' where the grammar wants an @LC@.
   , testCase "a name that is not a literal makes a region inside a splice" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "app" [con "var" [Global (GlobalName "nom") []], con "var" [str "y"]])
+      t <- printed gs (con "LC.app" [con "LC.var" [Global (rootName "nom") []], con "LC.var" [str "y"]])
       t @?= "LC`( ${LC`${nom}`} y )`"
   , testCase "a name the class would not read back is spliced" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "var" [str "a b"])
+      t <- printed gs (con "LC.var" [str "a b"])
       t @?= "LC`${\"a b\"}`"
   , testCase "a term of no language does not print" $ do
       (_, gs) <- loaded
-      printTerm gs host (str "x") @?= Nothing
+      printTerm gs rootScope host (str "x") @?= Nothing
   ]
 
 fences :: [TestTree]
@@ -153,33 +163,33 @@ fences =
   [ -- @examples/05@ writes both of these by hand; the printer writes the same.
     testCase "the left operand of a juxtaposition is fenced" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "juxt" [con "juxt" [con "ref" [str "f"], con "ref" [str "a"]], con "ref" [str "b"]])
+      t <- printed gs (con "Ex.juxt" [con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]], con "Ex.ref" [str "b"]])
       t @?= "Ex`${Ex`f a`} b`"
     -- **The order of fencing is what this asserts.** Fencing the leftmost
     -- child first would settle it too, as @${Ex`f`} ${Ex`a b`}@ — correct, and
     -- not what anyone would write.
   , testCase "and the right operand, rather than both" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "juxt" [con "ref" [str "f"], con "juxt" [con "ref" [str "a"], con "ref" [str "b"]]])
+      t <- printed gs (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.juxt" [con "Ex.ref" [str "a"], con "Ex.ref" [str "b"]]])
       t @?= "Ex`f ${Ex`a b`}`"
     -- **Deepest first, which is what a judgment's argument shows.** Fencing
     -- the outermost subterm would settle this too, as @${Ex`${Ex`f a`} b`} !@:
     -- the whole argument wrapped for the sake of its left half.
   , testCase "a fence is as small as the disagreement, not as big as the slot" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "written"
-             [con "juxt" [con "juxt" [con "ref" [str "f"], con "ref" [str "a"]], con "ref" [str "b"]]])
+      t <- printed gs (con "written.written"
+             [con "Ex.juxt" [con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]], con "Ex.ref" [str "b"]]])
       t @?= "written`${Ex`f a`} b !`"
   , testCase "a term the grammar reads one way is written flat" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "clet" [str "f", con "cjux" [con "cref" [str "a"], con "cref" [str "b"]], con "cref" [str "c"]])
+      t <- printed gs (con "Coll.clet" [str "f", con "Coll.cjux" [con "Coll.cref" [str "a"], con "Coll.cref" [str "b"]], con "Coll.cref" [str "c"]])
       t @?= "Coll`l f = a b i c`"
     -- **The same position and the same child production, fenced** — because of
     -- the text, which no table over the grammar's shape could see: the bound
     -- occurrence is spelled like the keyword that ends the first slot.
   , testCase "the same term with a variable spelled like a terminal is fenced" $ do
       (_, gs) <- loaded
-      t <- printed gs (con "clet" [str "f", con "cjux" [con "cref" [str "a"], con "cref" [str "i"]], con "cref" [str "b"]])
+      t <- printed gs (con "Coll.clet" [str "f", con "Coll.cjux" [con "Coll.cref" [str "a"], con "Coll.cref" [str "i"]], con "Coll.cref" [str "b"]])
       t @?= "Coll`l f = ${Coll`a i`} i b`"
   ]
 
@@ -187,30 +197,30 @@ reading :: [TestTree]
 reading =
   [ testCase "what the printer wrote is what the reader reads" $ do
       (env, gs) <- loaded
-      let t = con "juxt" [con "ref" [str "f"], con "juxt" [con "ref" [str "a"], con "ref" [str "b"]]]
+      let t = con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.juxt" [con "Ex.ref" [str "a"], con "Ex.ref" [str "b"]]]
       src <- printed gs t
-      fmap fst (parseCore gs env [] 0 src) @?= Right t
+      fmap fst (parseCore gs env (opensIn env) [] 0 src) @?= Right t
   , testCase "including the fenced one, whose splices are regions again" $ do
       (env, gs) <- loaded
-      let t = con "clet" [str "f", con "cjux" [con "cref" [str "a"], con "cref" [str "i"]], con "cref" [str "b"]]
+      let t = con "Coll.clet" [str "f", con "Coll.cjux" [con "Coll.cref" [str "a"], con "Coll.cref" [str "i"]], con "Coll.cref" [str "b"]]
       src <- printed gs t
-      fmap fst (parseCore gs env [] 0 src) @?= Right t
+      fmap fst (parseCore gs env (opensIn env) [] 0 src) @?= Right t
   , testCase "a splice may hold any term, not only a region" $ do
       (env, gs) <- loaded
-      fmap fst (parseCore gs env [] 0 "LC`( ${app LC`x` LC`y`} z )`")
-        @?= Right (con "app" [ con "app" [con "var" [str "x"], con "var" [str "y"]]
-                             , con "var" [str "z"] ])
+      fmap fst (parseCore gs env (opensIn env) [] 0 "LC`( ${app LC`x` LC`y`} z )`")
+        @?= Right (con "LC.app" [ con "LC.app" [con "LC.var" [str "x"], con "LC.var" [str "y"]]
+                             , con "LC.var" [str "z"] ])
   , testCase "a tag naming no language is refused, as it is in the surface" $ do
       (env, gs) <- loaded
-      parseCore gs env [] 0 "Nope`x`"
+      parseCore gs env (opensIn env) [] 0 "Nope`x`"
         @?= Left (ResolveFailed (NotAnObjectTerm (NoSuchObjectLanguage "Nope")))
   , testCase "and a production the language does not have" $ do
       (env, gs) <- loaded
-      parseCore gs env [] 0 "LC[nope]`x`"
+      parseCore gs env (opensIn env) [] 0 "LC[nope]`x`"
         @?= Left (ResolveFailed (NotAnObjectTerm (NoSuchObjectProduction "LC" "nope")))
   , testCase "text that is not one term of the language says where it stuck" $ do
       (env, gs) <- loaded
-      case parseCore gs env [] 0 "LC`( )`" of
+      case parseCore gs env (opensIn env) [] 0 "LC`( )`" of
         Left (ResolveFailed (NotAnObjectTerm (ObjectNotParsed "LC" "( )" _))) -> pure ()
         other -> assertFailure (show (fmap fst other))
   ]
@@ -225,10 +235,10 @@ reading =
 genEx :: Gen Core
 genEx = sized go
   where
-    go 0 = (\x -> con "ref" [str x]) <$> name
+    go 0 = (\x -> con "Ex.ref" [str x]) <$> name
     go k = oneof
-      [ (\x -> con "ref" [str x]) <$> name
-      , (\a b -> con "juxt" [a, b]) <$> go (k `div` 2) <*> go (k `div` 2)
+      [ (\x -> con "Ex.ref" [str x]) <$> name
+      , (\a b -> con "Ex.juxt" [a, b]) <$> go (k `div` 2) <*> go (k `div` 2)
       ]
     name = elements ["f", "a", "b", "g"]
 
@@ -240,6 +250,69 @@ roundTrip =
     testProperty "printed and read back by the DC reader, a term is itself" $
       withNumTests 200 $ forAll genEx $ \t -> ioProperty $ do
         (env, gs) <- io
-        pure $ case printTerm gs host t of
+        pure $ case printTerm gs (opensIn env) host t of
           Nothing -> counterexample "it did not print" (property False)
-          Just src -> counterexample src (fmap fst (parseCore gs env [] 0 src) === Right t)
+          Just src -> counterexample src (fmap fst (parseCore gs env (opensIn env) [] 0 src) === Right t)
+
+-- ---------------------------------------------------------------------------
+
+-- | **A TAG SHORTENS LIKE EVERY OTHER NAME** (MS10 phase 268, `~txbz5`, his
+-- ruling of 2026-11-04).
+--
+-- A printed name is the shortest ending that still means it where the reader
+-- stands (phase 254), and a tag /resolves/ by that same walk (phase 260,
+-- `~zjkvd`). Before this the printer wrote a tag whole whatever the reader had
+-- open, so one line could carry both spellings of one name.
+--
+-- **The pair is the test**: the same term, printed in a scope that has the
+-- namespace open and in one that has nothing open. A case that showed only the
+-- short spelling could not tell a scope that was honoured from a word that
+-- resolved anyway.
+inside :: [TestTree]
+inside =
+  [ testCase "the namespace is open, so the tag is the word" $ do
+      (_, gs, sc) <- insideLoaded
+      printTerm gs sc host jux @?= Just "LC`f x`"
+  , testCase "and nothing is open, so the tag is the whole path" $ do
+      (_, gs, _) <- insideLoaded
+      printTerm gs rootScope host jux @?= Just "A.LC`f x`"
+    -- **A fence writes a tag too**, and it is the same question one level
+    -- down: 'Thena.Language.Build.laid' spells the fence it writes, so a
+    -- nested literal cannot come out in the other spelling.
+  , testCase "a fence inside the region shortens with it" $ do
+      (_, gs, sc) <- insideLoaded
+      printTerm gs sc host nested @?= Just "LC`${LC`f x`} y`"
+  , testCase "and the same fence writes the path with nothing open" $ do
+      (_, gs, _) <- insideLoaded
+      printTerm gs rootScope host nested @?= Just "A.LC`${A.LC`f x`} y`"
+  ]
+  where
+    jux = con "A.LC.jux" [con "A.LC.var" [str "f"], con "A.LC.var" [str "x"]]
+    nested = con "A.LC.jux" [jux, con "A.LC.var" [str "y"]]
+
+-- | A language inside a namespace, with the namespace opened beside the block
+-- — so one fixture gives both halves of the pair, the scope coming from the
+-- session rather than being hand-built.
+insideSource :: String
+insideSource =
+  unlines
+    [ "module PrintingInside where"
+    , ""
+    , "w : Token String"
+    , "w = /[a-z][a-zA-Z0-9']*/"
+    , ""
+    , "namespace A where"
+    , "  language LC, M, N where"
+    , "    var : w as occurrence -> w"
+    , "    jux                   -> M N"
+    , ""
+    , "open A"
+    ]
+
+insideLoaded :: IO (GlobalEnv, [Grammar], InScope)
+insideLoaded = do
+  (s0, _) <- startingSession
+  case loadProofSource s0 insideSource of
+    (s1, ProofLoaded {}) ->
+      let m = machineOf s1 in pure (globals m, grammars m, scope m)
+    (_, other) -> assertFailure (show other)

@@ -8,13 +8,13 @@
 -- examples/determinacy.py, because nobody would write it: each of its thirteen
 -- lemmas abstracts the goal over an equation `Eq Term x <the pattern I meant>`,
 -- writes out all ten methods of `elim Step` whether the case is possible or not,
--- and discharges the nine impossible ones by hand with `noConfusionTerm` — 148
+-- and discharges the nine impossible ones by hand with `Term.lemmata.noConfusion` — 148
 -- appeals to it in 278 lines.
 --
 -- WHAT THE SPLIT DOES INSTEAD. `case s of { … }` unifies each constructor's
 -- indices with the scrutinee's, and a method whose equations conflict is closed
 -- before the user sees it — so an impossible case is an arm NOT WRITTEN rather
--- than a line of `absurd (…) (noConfusionTerm … q)`. Where a rule's own index
+-- than a line of `absurd (…) (Term.lemmata.noConfusion … q)`. Where a rule's own index
 -- cannot be made to fit the scrutinee's by moving one of the RULE'S variables,
 -- the split generalises the ambient entry instead, quantifying a fresh copy of
 -- it: in `determinacy`'s `eIf` arm the inner `eIfTrue` case forces `p` to
@@ -50,9 +50,13 @@ data Term : Type₀ where
   pred : Term -> Term
   iszero : Term -> Term
 
+open Term
+
 data NV : Term -> Type₀ where
   nvZero : NV zero
   nvSucc : forall (t : Term) (n : NV t) -> NV (succ t)
+
+open NV
 
 data Step : Term -> Term -> Type₀ where
   eIfTrue : forall (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2
@@ -65,6 +69,8 @@ data Step : Term -> Term -> Type₀ where
   eIsZeroZero : Step (iszero zero) true
   eIsZeroSucc : forall (v : Term) (nv : NV v) -> Step (iszero (succ v)) false
   eIsZero : forall (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (iszero t1) (iszero t1')
+
+open Step
 
 -- The equipment, and all four of these are splits too. `Empty` has no
 -- constructors, so `absurd` has no arms. `Eq` has one, and its single arm

@@ -26,12 +26,18 @@ data N : Type₀ where
   z : N
   s : N -> N
 
+open N
+
 data Fin : N -> Type₀ where
   fz : forall (n : N) -> Fin (s n)
   fs : forall (n : N) (i : Fin n) -> Fin (s n)
 
+open Fin
+
 data Q : forall (n : N) -> Fin n -> Type₀ where
   mk : forall (n : N) (i : Fin n) -> Q n i
+
+open Q
 
 -- Both of the split's equations are discharged: the first solves `n`, which
 -- supplies `refl` for its own proof, and the second then reads `Eq (Fin (s m)) i
@@ -43,11 +49,13 @@ tied = \ m x -> case x of { mk n i -> m }
 -- to `s n`, so the first equation is `Eq N (s n) (s m)` — two applications of
 -- `s`, where `mk`'s above was a variable against a term. Injectivity replaces it
 -- with `Eq N n m` and drops its binder, so the second equation, which was stated
--- about that binder, is restated along `noConfusionNInv` of the new proof;
--- `isLeftInvN` is what makes the method's own type and the sub-problem's agree.
+-- about that binder, is restated along `N.lemmata.noConfusionInv` of the new proof;
+-- `N.lemmata.isLeftInv` is what makes the method's own type and the sub-problem's agree.
 -- Both equations are then discharged and the arm binds `n` alone.
 data Small : forall (n : N) -> Fin n -> Type₀ where
   isFz : forall (n : N) -> Small (s n) (fz n)
+
+open Small
 
 -- The arm answers with the constructor's own `n`, not with the ambient `m`, so
 -- reducing it at a known index is what tells the two apart.
@@ -68,9 +76,11 @@ twoFromArm = tiedTwo (s (s z)) (isFz (s (s z)))
 -- UIP. Injectivity applies to the very same equation, so it is offered that
 -- instead: the chain reads apart to `Eq N z z`, which reads apart again to
 -- `Unit`, where there is no argument left and the proof is rebuilt from `unit`
--- alone. `isLeftInvN` carries the method back at each step, and no step is K.
+-- alone. `N.lemmata.isLeftInv` carries the method back at each step, and no step is K.
 data T : Fin (s (s z)) -> Type₀ where
   mkT : forall (i : Fin (s z)) -> T (fs (s z) i)
+
+open T
 
 pinned : forall (x : T (fs (s z) (fz z))) -> Fin (s z)
 pinned = \ x -> case x of { mkT i -> i }

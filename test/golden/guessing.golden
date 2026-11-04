@@ -1,10 +1,14 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : ∀ (n : Nat) -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> data Bool : Type₀ where { true : Bool ; false : Bool }
 declared Bool
+thena spine> open Bool
+opened Bool
 thena spine> :theorem n : Nat
 proving n : Nat
-thena spine> try-core ⌜ true ⌝
+thena spine> try-core core`true`
 stuck: that term does not have the hole's type
   true has type Bool
     but Nat was expected
@@ -12,14 +16,14 @@ stuck: that term does not have the hole's type
 thena spine> :show
 ▶ let ? n : Nat in
   n
-thena spine> try-core ⌜ zero ⌝
+thena spine> try-core core`zero`
 thena spine> solve
 thena spine> qed
 n : Nat   ∎
 thena spine> :theorem m : Nat
 proving m : Nat
-thena spine> claim "h" ⌜ Nat ⌝
-thena spine> try-core ⌜ succ h ⌝
+thena spine> claim "h" core`Nat`
+thena spine> try-core core`succ h`
 thena spine> :show
   let ? h : Nat in
 ▶ let ? m : Nat ≐ (

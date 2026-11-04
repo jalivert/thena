@@ -43,7 +43,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -81,19 +81,24 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '▸'     { Located _ TPending }
   '⊢'     { Located _ TTurnstile }
   '≟'     { Located _ TEquate }
-  '[|'    { Located _ TOpenQuote }
   '${'    { Located _ TEscapeOpen }
   '}$'    { Located _ TEscapeClose }
   tagopen  { Located _ (TTagOpen $$) }
   tagat    { Located _ (TTagOpenAt _ _) }
   raw      { Located _ (TRaw $$) }
   tagclose { Located _ TTagClose }
-  '|]'    { Located _ TCloseQuote }
   let     { Located _ TLet }
   in      { Located _ TIn }
   elim    { Located _ TElim }
   trusted { Located _ TTrusted }
   where   { Located _ TWhere }
+  -- **The three words an @open@ line is written with** (MS10 phase 267). They
+  -- are already reserved project-wide — the lexer is one lexer, and phases 247
+  -- and 254 reserved them for the surface language — so a rule file gaining
+  -- @open@ narrows no identifier that was not narrowed already.
+  open    { Located _ TOpen }
+  hiding  { Located _ THiding }
+  renaming { Located _ TRenaming }
   rule    { Located _ TRule }
   do      { Located _ TDo }
   when    { Located _ TWhen }
@@ -109,6 +114,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   univ    { Located _ (TUniverse $$) }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
+  qident  { Located _ (TQIdent $$) }
 
 %right '->'
 
@@ -125,10 +131,10 @@ Term :: { Raw }
   -- **Level arguments are written or omitted** (MS3 phase 31c). Omitting them
   -- is the only spelling for a monomorphic family, which is every family
   -- written before this phase, so nothing existing moves.
-  | elim Ident '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
-      { RawElim $2 [] (reverse $4) $6 (reverse $8) (reverse $11) $13 }
-  | elim Ident LevelArgs '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
-      { RawElim $2 $3 (reverse $5) $7 (reverse $9) (reverse $12) $14 }
+  | elim ElimHead '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+      { RawElim (fst $2) (snd $2) [] (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+  | elim ElimHead LevelArgs '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+      { RawElim (fst $2) (snd $2) $3 (reverse $5) $7 (reverse $9) (reverse $12) $14 }
   | App '->' Term                                  { RawArrow $1 $3 }
   | App                                            { $1 }
 
@@ -207,6 +213,44 @@ Decl :: { RawDecl }
   : Rule                                   { DeclRule $1 }
   | Signature                              { DeclSignature $1 }
   | Function                               { DeclFunction $1 }
+  -- **A rule file writes its own @open@ lines** (MS10 phase 267), in the five
+  -- forms his ruling of 2026-10-30 gives the surface language. A declaration
+  -- and not a layout block, for the same reason it is one there: it names a
+  -- namespace and says how far its effect reaches.
+  | open OpenHead                          { DeclOpen (uncurry RawOpen $2) }
+  | open OpenHead in Decl                  { DeclOpenIn (uncurry RawOpen $2) $4 }
+
+-- | What an @open@ opens, and what it says about which names it brings in
+-- (MS10 phase 267). The surface language's 'Thena.Surface.Parser' has the same
+-- four alternatives: each concrete syntax reads its own text, and what they
+-- share is the 'Thena.Core.Term.Opened' resolution builds from it.
+OpenHead :: { ([([String], String)], RawOpenSpec) }
+  : QNames                                 { (reverse $1, RawOpenWhole) }
+  | QName '(' Words ')'                    { ([$1], RawOpenOnly (reverse $3)) }
+  | QName hiding '(' Words ')'             { ([$1], RawOpenHiding (reverse $4)) }
+  | QName renaming '(' Renamings ')'       { ([$1], RawOpenRenaming (reverse $4)) }
+
+-- | One or more, for @open X Y Z@. Reversed by its caller.
+QNames :: { [([String], String)] }
+  : QName                                  { [$1] }
+  | QNames QName                           { $2 : $1 }
+
+-- | The words an @open@ selects, hides, or renames from. **Words and not
+-- names**: a namespace is a prefix, so what a line can speak about is the step
+-- that follows it.
+Words :: { [String] }
+  : ident                                  { [$1] }
+  | Words ident                            { $2 : $1 }
+
+Renamings :: { [(String, String)] }
+  : Renaming                               { [$1] }
+  | Renamings Renaming                     { $2 : $1 }
+
+-- **@-\>@ and not @→@**, which is a legal identifier character: making the
+-- glyph a token would narrow what a name may contain, and that is a decision
+-- about identifiers and not about @open@.
+Renaming :: { (String, String) }
+  : ident '->' ident                       { ($1, $3) }
 
 Rule :: { RawRule }
   : rule ident Params ':-' Tests do Block    { RawRule $2 (reverse $3) $5 (reverse $7) }
@@ -438,6 +482,16 @@ Operand :: { RawOperand }
 -- of an @=@ can take one without @x = y@ becoming ambiguous — it is a call.
 ValueOperand :: { RawOperand }
   : '(' ident Operands ')'                 { RawNested $2 (reverse $3) }
+  -- **A dotted word is a name literal** (MS10 phase 245), where a bare one is a
+  -- reference to a binding: only a global name has a path, so the dot is the
+  -- whole of the distinction. It is what lets the prelude write
+  -- @declare-primitive String.eq@.
+  --
+  -- **It belongs here and not beside 'RawRef'**, so that it is also writable on
+  -- the right of an @=@. A bare word is excluded there because @x = y@ is a
+  -- /call/ of @y@; a qualified one cannot be, because an op word and a rule name
+  -- are both a single @ident@ — so there is nothing for it to be ambiguous with.
+  | qident                                 { RawGlobal (init $1) (last $1) }
   -- **A lambda in an argument takes parentheses**, like every other compound
   -- argument (§6.0.1); bare, it is what stands right of an @=@.
   | '(' Lambda ')'                         { $2 }
@@ -447,7 +501,6 @@ ValueOperand :: { RawOperand }
   | '[' ']'                                { RawList [] }
   | '[' Elements ']'                       { RawList (reverse $2) }
   | '(' Operand ',' Operand ')'            { RawPairOf $2 $4 }
-  | '[|' Term '|]'                         { RawQuoted $2 }
   -- **A region's text is reassembled, escapes and all** (MS5 phase 81). The
   -- scanner splits @${x}@ out so that a fence inside an escape cannot end the
   -- region early; this puts it back, because what a region /is/ is text for an
@@ -481,21 +534,24 @@ App :: { Raw }
   : App Atom                               { RawApp $1 $2 }
   | Atom                                   { $1 }
 
+-- | A name as written: its path's steps, then its base word (MS10 phase 240).
+--
+-- **One piece or several, and the shape is the same either way** — an
+-- unqualified name has no steps. The lexer has already cut a qualified one into
+-- its pieces, so there is no splitting here and no dotted string anywhere.
+QName :: { ([String], String) }
+  : ident                                  { ([], $1) }
+  | qident                                 { (init $1, last $1) }
+
 Atom :: { Raw }
-  : ident                                  { RawName $1 }
-  -- **The corners are an atom, not a term** (phase 38). They were a @Term@
-  -- production, so @⌜ t ⌝@ could not appear in an atom run — and phase 38's
-  -- REPL writes every core argument of a rule exactly there. Moving it is
-  -- strictly more permissive: every place it parsed before still reaches it
-  -- through @Term -> App -> Atom@.
-  | '[|' Term '|]'                         { RawQuote $2 }
+  : QName                                  { RawName (fst $1) (snd $1) }
   -- **A splice is an atom** (MS5 phase 81) — it stands where a term stands, so
   -- it belongs exactly where a name does and needs no precedence of its own.
   -- The closing brace is its own token: the region scanner emits
   -- 'Thena.Syntax.Lexer.TEscapeClose' for the one that ends an escape, so this
   -- cannot be confused with a level-argument brace.
   | '${' ident '}$'                        { RawSplice $2 }
-  | ident LevelArgs                        { RawAt (RawWord $1) $2 }
+  | QName LevelArgs                        { RawAt (fst $1) (RawWord (snd $1)) $2 }
   | univ                                   { RawUniverse $1 }
   | Type                                   { RawUniverseOpen }
   -- A literal of a primitive type is an atom, for a name's reason: it stands
@@ -571,6 +627,16 @@ Binders :: { [RawBinder] }
 Ident :: { RawIdent }
   : ident                                  { RawWord $1 }
   | '${' ident '}$'                        { RawIdentSplice $2 }
+
+-- | The datatype an @elim@ names, with its path's steps (MS10 phase 254).
+--
+-- **A reference position takes a path, and this was the last one that did
+-- not** — his ruling of 2026-11-02. The printer writes @elim Nat.Nat@ because
+-- the datatype /is/ @Nat.Nat@, so without this the round trip fails on every
+-- @elim@. A splice still stands here, and has no path: @${d}$@ supplies a word.
+ElimHead :: { ([String], RawIdent) }
+  : Ident                                  { ([], $1) }
+  | qident                                 { (init $1, RawWord (last $1)) }
 
 Binder :: { RawBinder }
   : '(' Ident ':' Term ')'                 { RawBinder $2 $4 }

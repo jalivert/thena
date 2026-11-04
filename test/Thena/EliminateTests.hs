@@ -29,13 +29,16 @@ import Thena.Standard (withRules)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Term
   ( Core (..)
-  , GlobalName (..)
+  
   , Ident (..)
   , fresh
   , instantiate
+  , rootName
   )
 import Thena.Declared
-  ( eqNat
+  ( opensIn
+  , named
+  , eqNat
   , eqNatCounter
   , eqStep
   , eqStepCounter
@@ -48,7 +51,8 @@ import Thena.Errors (ElimError (..))
 import Thena.Global.Env (GlobalEnv, Scheme (..))
 import Thena.Driver (Response (..), command, loadProofSource)
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore, renderResponse)
 import Thena.Tactics.Eliminate
   ( Elimination (..)
@@ -139,7 +143,7 @@ premisesTests =
 -- reads it.
 binders :: Core -> Int
 binders t = case t of
-  Pi _ _ sc -> 1 + binders (instantiate (Global (GlobalName "_") []) sc)
+  Pi _ _ sc -> 1 + binders (instantiate (Global (rootName "_") []) sc)
   _         -> 0
 
 -- --------------------------------------------------------------------------
@@ -216,14 +220,21 @@ dependentMotives =
     -- prelude type the goals need is declared here.
     eqDecl = "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (x : A) -> Eq A x x }"
 
+    -- **Each declaration is followed by an @open@ of what it declares** (MS10
+    -- phase 250): a constructor lives in its datatype's namespace, so a goal or
+    -- a later declaration writing @zero@ short needs the namespace in view. The
+    -- word is read off the line rather than listed, so a fixture cannot drift
+    -- from it.
+    opening d = [d, "open " ++ takeWhile (`notElem` " (:") (drop 5 d)]
+
     eliminates what decls goal intros = testCase what $
       let script =
-            eqDecl : decls
+            concatMap opening (eqDecl : decls)
               ++ [":theorem t : " ++ goal, "attack"]
               ++ replicate intros "intro"
               ++ ["into"]
               ++ replicate intros "along"
-              ++ ["eliminate-core ⌜ x ⌝", ":revalidate"]
+              ++ ["eliminate-core core`x`", ":revalidate"]
           l = loadSource withRules (unlines script)
        in case loadedError l of
             Just e -> assertFailure (unlines script ++ "\n  " ++ show e)
@@ -273,12 +284,12 @@ dependentMotives =
 workedTests :: [TestTree]
 workedTests =
   [ method "eIfTrue — §3.7's own displayed method" 0
-      "∀ (t21 : Term) (t31 : Term) -> Eq {0} Term (ifthen true t21 t31) (ifthen true t2 t3) \
-      \-> Eq {0} Term t2 t21"
+      "∀ (t21 : Term.Term) (t31 : Term.Term) -> Eq.Eq {0} Term.Term (Term.ifthen Term.true t21 t31) (Term.ifthen Term.true t2 t3) \
+      \-> Eq.Eq {0} Term.Term t2 t21"
 
   , method "eIfFalse — the branch ruled out by conflict on true/false" 1
-      "∀ (t21 : Term) (t31 : Term) -> Eq {0} Term (ifthen false t21 t31) (ifthen true t2 t3) \
-      \-> Eq {0} Term t2 t31"
+      "∀ (t21 : Term.Term) (t31 : Term.Term) -> Eq.Eq {0} Term.Term (Term.ifthen Term.false t21 t31) (Term.ifthen Term.true t2 t3) \
+      \-> Eq.Eq {0} Term.Term t2 t31"
 
     -- The inductive hypothesis is the motive at the recursive argument's own
     -- indices, so it carries its own copy of whatever the motive constrains.
@@ -287,10 +298,10 @@ workedTests =
     -- telling you anything. An inversion does not want the hypothesis, so this
     -- one is harmless; 'friendlyTests' is where it would not have been.
   , method "eIf — and its induction hypothesis is constrained too" 2
-      "∀ (t1 : Term) (t1' : Term) (t21 : Term) (t31 : Term) -> Step t1 t1' \
-      \-> (Eq {0} Term t1 (ifthen true t2 t3) -> Eq {0} Term t2 t1') \
-      \-> Eq {0} Term (ifthen t1 t21 t31) (ifthen true t2 t3) \
-      \-> Eq {0} Term t2 (ifthen t1' t21 t31)"
+      "∀ (t1 : Term.Term) (t1' : Term.Term) (t21 : Term.Term) (t31 : Term.Term) -> Step.Step t1 t1' \
+      \-> (Eq.Eq {0} Term.Term t1 (Term.ifthen Term.true t2 t3) -> Eq.Eq {0} Term.Term t2 t1') \
+      \-> Eq.Eq {0} Term.Term (Term.ifthen t1 t21 t31) (Term.ifthen Term.true t2 t3) \
+      \-> Eq.Eq {0} Term.Term t2 (Term.ifthen t1' t21 t31)"
 
   , testCase "one subgoal per constructor, in declaration order" $
       names worked
@@ -303,10 +314,10 @@ workedTests =
     -- the equations it states and the spine that discharges them.
   , testCase "the equations are discharged with refl {0} at the use site" $
       rendered (withMethods stepContext worked) (elimTerm worked)
-        @?= "(elim Step () (λ (x : Term) (x1 : Term) (target : Step x x1) \
-            \-> Eq {0} Term x (ifthen true t2 t3) -> Eq {0} Term t2 x1) \
-            \(eIfTrueMethod eIfFalseMethod eIfMethod) ((ifthen true t2 t3) u) d) \
-            \(refl {0} Term (ifthen true t2 t3))"
+        @?= "(elim Step.Step () (λ (x : Term.Term) (x1 : Term.Term) (target : Step.Step x x1) \
+            \-> Eq.Eq {0} Term.Term x (Term.ifthen Term.true t2 t3) -> Eq.Eq {0} Term.Term t2 x1) \
+            \(eIfTrueMethod eIfFalseMethod eIfMethod) ((Term.ifthen Term.true t2 t3) u) d) \
+            \(Eq.refl {0} Term.Term (Term.ifthen Term.true t2 t3))"
   ]
   where
     method label k want = testCase label $
@@ -347,19 +358,19 @@ simpleTests :: [TestTree]
 simpleTests =
   [ testCase "the target is abstracted in the goal" $
       map (rendered natContext . thirdOf) (elimMethods natEq)
-        @?= [ "Eq {0} Nat zero zero"
-            , "∀ (x : Nat) -> Eq {0} Nat x x -> Eq {0} Nat (succ x) (succ x)"
+        @?= [ "Eq.Eq {0} Nat.Nat Nat.zero Nat.zero"
+            , "∀ (x : Nat.Nat) -> Eq.Eq {0} Nat.Nat x x -> Eq.Eq {0} Nat.Nat (Nat.succ x) (Nat.succ x)"
             ]
 
   , testCase "a goal not mentioning the target gets a constant motive" $
       map (rendered natContext . thirdOf) (elimMethods natConst)
-        @?= [ "Eq {0} Nat m m"
-            , "Nat -> Eq {0} Nat m m -> Eq {0} Nat m m"
+        @?= [ "Eq.Eq {0} Nat.Nat m m"
+            , "Nat.Nat -> Eq.Eq {0} Nat.Nat m m -> Eq.Eq {0} Nat.Nat m m"
             ]
 
   , testCase "no indices, so nothing is applied to the elimination" $
       rendered (withMethods natContext natEq) (elimTerm natEq)
-        @?= "elim Nat () (λ (target : Nat) -> Eq {0} Nat target target) \
+        @?= "elim Nat.Nat () (λ (target : Nat.Nat) -> Eq.Eq {0} Nat.Nat target target) \
             \(zeroMethod succMethod) () n"
   ]
   where
@@ -395,17 +406,17 @@ friendlyTests :: [TestTree]
 friendlyTests =
   [ testCase "the induction hypothesis arrives unguarded" $
       map (rendered leContext . thirdOf') (elimMethods leWeaken)
-        @?= [ "∀ (n1 : Nat) -> Le zero (succ n1)"
-            , "∀ (m1 : Nat) (n1 : Nat) -> Le m1 n1 -> Le m1 (succ n1) \
-              \-> Le (succ m1) (succ (succ n1))"
+        @?= [ "∀ (n1 : Nat.Nat) -> Le.Le Nat.zero (Nat.succ n1)"
+            , "∀ (m1 : Nat.Nat) (n1 : Nat.Nat) -> Le.Le m1 n1 -> Le.Le m1 (Nat.succ n1) \
+              \-> Le.Le (Nat.succ m1) (Nat.succ (Nat.succ n1))"
             ]
 
     -- Nothing is applied to the elimination: both indices were abstracted, so
     -- there is no equation left to discharge reflexively.
   , testCase "and no refl {0} spine is needed at all" $
       rendered (withMethods leContext leWeaken) (elimTerm leWeaken)
-        @?= "elim Le () (λ (x : Nat) (x1 : Nat) (target : Le x x1) \
-            \-> Le x (succ x1)) (leZeroMethod leSuccMethod) (m n) p"
+        @?= "elim Le.Le () (λ (x : Nat.Nat) (x1 : Nat.Nat) (target : Le.Le x x1) \
+            \-> Le.Le x (Nat.succ x1)) (leZeroMethod leSuccMethod) (m n) p"
 
     -- Two abstractions would race for the same occurrences, and the second
     -- would find none left. @Eq {0} Nat a a@ is the case; it keeps both equations
@@ -414,7 +425,7 @@ friendlyTests =
       let (env, n0) = declared [eqDecl', natDecl]
           (ctx, n1) = contextOf env n0 [("a", "Nat"), ("e", "Eq {0} Nat a a")]
        in map (rendered ctx . thirdOf') (elimMethods (run "repeated" env ctx n1 "Eq {0} Nat a a" "e"))
-            @?= [ "∀ (a1 : Nat) -> Eq {0} Nat a1 a -> Eq {0} Nat a1 a -> Eq {0} Nat a1 a1" ]
+            @?= [ "∀ (a1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat a1 a -> Eq.Eq {0} Nat.Nat a1 a -> Eq.Eq {0} Nat.Nat a1 a1" ]
 
     -- Every premise of the goal stays fixed (§3.7), so a premise that still
     -- mentions the index is precisely the specificity the equation exists to
@@ -426,17 +437,17 @@ friendlyTests =
           (without, n2) = contextOf env n0 [("n", "Nat"), ("i", "Fin n")]
        in do
             map (rendered with . thirdOf') (elimMethods (run "tied" env with n1 "Eq {0} Nat n n" "i"))
-              @?= [ "∀ (n1 : Nat) (n2 : Nat) -> Eq {0} Nat n2 n2 \
-                    \-> Eq {0} Nat (succ n1) n2 -> Eq {0} Nat (succ n1) (succ n1)"
-                  , "∀ (n1 : Nat) -> Fin n1 \
-                    \-> (∀ (n2 : Nat) -> Eq {0} Nat n2 n2 \
-                    \-> Eq {0} Nat n1 n2 -> Eq {0} Nat n1 n1) \
-                    \-> ∀ (n2 : Nat) -> Eq {0} Nat n2 n2 \
-                    \-> Eq {0} Nat (succ n1) n2 -> Eq {0} Nat (succ n1) (succ n1)"
+              @?= [ "∀ (n1 : Nat.Nat) (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n2 n2 \
+                    \-> Eq.Eq {0} Nat.Nat (Nat.succ n1) n2 -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
+                  , "∀ (n1 : Nat.Nat) -> Fin.Fin n1 \
+                    \-> (∀ (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n2 n2 \
+                    \-> Eq.Eq {0} Nat.Nat n1 n2 -> Eq.Eq {0} Nat.Nat n1 n1) \
+                    \-> ∀ (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n2 n2 \
+                    \-> Eq.Eq {0} Nat.Nat (Nat.succ n1) n2 -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
                   ]
             map (rendered without . thirdOf') (elimMethods (run "free" env without n2 "Eq {0} Nat n n" "i"))
-              @?= [ "∀ (n1 : Nat) -> Eq {0} Nat (succ n1) (succ n1)"
-                  , "∀ (n1 : Nat) -> Fin n1 -> Eq {0} Nat n1 n1 -> Eq {0} Nat (succ n1) (succ n1)"
+              @?= [ "∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
+                  , "∀ (n1 : Nat.Nat) -> Fin.Fin n1 -> Eq.Eq {0} Nat.Nat n1 n1 -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
                   ]
 
     -- Phase 19. Both of @Below@'s indices are plain variables, so the second
@@ -444,10 +455,10 @@ friendlyTests =
     -- the first freely. Before phase 19 this whole family was refused.
   , testCase "a dependent index telescope is fine when the dependent index is friendly" $
       map (rendered belowContext . thirdOf') (elimMethods belowProbe)
-        @?= [ "∀ (m : Nat) (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat"
-            , "∀ (m : Nat) (j : Fin m) -> Below m j \
-              \-> (∀ (n1 : Nat) -> Eq {0} Nat m n1 -> Nat) \
-              \-> ∀ (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat"
+        @?= [ "∀ (m : Nat.Nat) (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ m) n1 -> Nat.Nat"
+            , "∀ (m : Nat.Nat) (j : Fin.Fin m) -> Below.Below m j \
+              \-> (∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat m n1 -> Nat.Nat) \
+              \-> ∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ m) n1 -> Nat.Nat"
             ]
 
     -- __MS9 phase 213, @~7gmvr@ step two, and this is the phase.__ Index 2 is
@@ -472,24 +483,24 @@ friendlyTests =
   , testCase "a tied dependent index states its equation transported" $
       let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl]
           (ctx, n1) = contextOf env n0
-            [("m", "Nat"), ("b", "Below (succ m) (fz m)")]
+            [("m", "Nat"), ("b", "Below.Below (succ m) (fz m)")]
        in map (rendered ctx . thirdOf') (elimMethods (run "tiedDep" env ctx n1 "Nat" "b"))
-            @?= [ "∀ (m1 : Nat) (q : Eq {0} Nat (succ m1) (succ m)) \
-                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
-                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
-                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
-                  \((succ m1) (succ m)) q) (fz m1)) (fz m) -> Nat"
-                , "∀ (m1 : Nat) (j : Fin m1) -> Below m1 j \
-                  \-> (∀ (q : Eq {0} Nat m1 (succ m)) \
-                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
-                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
-                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
-                  \(m1 (succ m)) q) j) (fz m) -> Nat) \
-                  \-> ∀ (q : Eq {0} Nat (succ m1) (succ m)) \
-                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
-                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
-                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
-                  \((succ m1) (succ m)) q) (fs m1 j)) (fz m) -> Nat"
+            @?= [ "∀ (m1 : Nat.Nat) (q : Eq.Eq {0} Nat.Nat (Nat.succ m1) (Nat.succ m)) \
+                  \-> Eq.Eq {0} (Fin.Fin (Nat.succ m)) ((elim Eq.Eq {0} (Nat.Nat) \
+                  \(λ (left : Nat.Nat) (right : Nat.Nat) (q1 : Eq.Eq {0} Nat.Nat left right) \
+                  \-> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) \
+                  \((Nat.succ m1) (Nat.succ m)) q) (Fin.fz m1)) (Fin.fz m) -> Nat.Nat"
+                , "∀ (m1 : Nat.Nat) (j : Fin.Fin m1) -> Below.Below m1 j \
+                  \-> (∀ (q : Eq.Eq {0} Nat.Nat m1 (Nat.succ m)) \
+                  \-> Eq.Eq {0} (Fin.Fin (Nat.succ m)) ((elim Eq.Eq {0} (Nat.Nat) \
+                  \(λ (left : Nat.Nat) (right : Nat.Nat) (q1 : Eq.Eq {0} Nat.Nat left right) \
+                  \-> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) \
+                  \(m1 (Nat.succ m)) q) j) (Fin.fz m) -> Nat.Nat) \
+                  \-> ∀ (q : Eq.Eq {0} Nat.Nat (Nat.succ m1) (Nat.succ m)) \
+                  \-> Eq.Eq {0} (Fin.Fin (Nat.succ m)) ((elim Eq.Eq {0} (Nat.Nat) \
+                  \(λ (left : Nat.Nat) (right : Nat.Nat) (q1 : Eq.Eq {0} Nat.Nat left right) \
+                  \-> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) \
+                  \((Nat.succ m1) (Nat.succ m)) q) (Fin.fs m1 j)) (Fin.fz m) -> Nat.Nat"
                 ]
 
     -- The load-bearing artifact of phase 19, and the thing @check@ alone would
@@ -498,9 +509,9 @@ friendlyTests =
     -- declaration, which is not in scope here at all.
   , testCase "and the motive's telescope carries the dependency" $
       rendered (withMethods belowContext belowProbe) (elimTerm belowProbe)
-        @?= "(elim Below () (λ (n1 : Nat) (i1 : Fin n1) (target : Below n1 i1) \
-            \-> ∀ (n2 : Nat) -> Eq {0} Nat n1 n2 -> Nat) (bzMethod bsMethod) (n i) b) \
-            \n (refl {0} Nat n)"
+        @?= "(elim Below.Below () (λ (n1 : Nat.Nat) (i1 : Fin.Fin n1) (target : Below.Below n1 i1) \
+            \-> ∀ (n2 : Nat.Nat) -> Eq.Eq {0} Nat.Nat n1 n2 -> Nat.Nat) (bzMethod bsMethod) (n i) b) \
+            \n (Eq.refl {0} Nat.Nat n)"
 
     -- A 'Definition' has a value as well as a type, and abstracting the
     -- variable would leave the value behind. Conservative on purpose: tying it
@@ -513,9 +524,9 @@ friendlyTests =
           defCtx      = [Definition dv (Ident "n") zeroV zeroT]
           (ctx,   n4) = contextOf' env defCtx n3 [("i", "Fin n")]
        in map (rendered ctx . thirdOf') (elimMethods (run "defined" env ctx n4 "Eq {0} Nat n n" "i"))
-            @?= [ "∀ (n1 : Nat) -> Eq {0} Nat (succ n1) n -> Eq {0} Nat (succ n1) (succ n1)"
-                , "∀ (n1 : Nat) -> Fin n1 -> (Eq {0} Nat n1 n -> Eq {0} Nat n1 n1) \
-                  \-> Eq {0} Nat (succ n1) n -> Eq {0} Nat (succ n1) (succ n1)"
+            @?= [ "∀ (n1 : Nat.Nat) -> Eq.Eq {0} Nat.Nat (Nat.succ n1) n -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
+                , "∀ (n1 : Nat.Nat) -> Fin.Fin n1 -> (Eq.Eq {0} Nat.Nat n1 n -> Eq.Eq {0} Nat.Nat n1 n1) \
+                  \-> Eq.Eq {0} Nat.Nat (Nat.succ n1) n -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n1)"
                 ]
   ]
   where
@@ -529,7 +540,7 @@ belowProbe :: Elimination
 (belowContext, belowProbe) =
   let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl]
       (ctx, n1) = contextOf env n0
-        [("n", "Nat"), ("i", "Fin n"), ("b", "Below n i")]
+        [("n", "Nat"), ("i", "Fin n"), ("b", "Below.Below n i")]
    in (ctx, run "below" env ctx n1 "Nat" "b")
 
 -- | @m n : Nat@, @p : Le m n@ — the state @weaken@ reaches after three
@@ -585,7 +596,7 @@ refusalTests =
       let (env, n0) = declared [natDecl, finDecl]
           (ctx, n1) = contextOf env n0 [("n", "Nat"), ("i", "Fin n")]
        in case fst (attempt env ctx n1 "Nat" "i") of
-            Left e  -> e @?= NoEquality (GlobalName "Eq")
+            Left e  -> e @?= NoEquality (named "Eq.Eq")
             Right _ -> assertFailure "expected a refusal"
 
     -- Thesis §3.5.2, \"what to fix, what to abstract\", arriving as a refusal.
@@ -639,8 +650,8 @@ vecDecl' =
 belowDecl :: String
 belowDecl =
   "Below : \8704 (n : Nat) (i : Fin n) -> Type\8320 \
-  \where { bz : \8704 (m : Nat) -> Below (succ m) (fz m) \
-  \; bs : \8704 (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
+  \where { bz : \8704 (m : Nat) -> Below.Below (succ m) (fz m) \
+  \; bs : \8704 (m : Nat) (j : Fin m) (b : Below.Below m j) -> Below.Below (succ m) (fs m j) }"
 
 -- | Three indices, the third typed by the first /two/ — the shape MS9 phase
 -- 213's transport chain cannot state, because @Fin n@ makes index 2 depend on
@@ -660,14 +671,14 @@ contextOf env = contextOf' env []
 contextOf' :: GlobalEnv -> Context -> Int -> [(String, String)] -> (Context, Int)
 contextOf' env ctx0 n0 = foldl one (ctx0, n0)
   where
-    one (ctx, n) (name, src) = case parseCore [] env ctx n src of
+    one (ctx, n) (name, src) = case parseCore [] env (opensIn env) ctx n src of
       Left e -> error ("fixture does not parse: " ++ show e)
       Right (ty, n1) ->
         let (v, n2) = fresh n1
          in (ctx ++ [Hypothesis v (Ident name) ty], n2)
 
 parsed :: GlobalEnv -> Context -> Int -> String -> (Core, Int)
-parsed env ctx n src = case parseCore [] env ctx n src of
+parsed env ctx n src = case parseCore [] env (opensIn env) ctx n src of
   Left e        -> error ("fixture does not parse: " ++ show e)
   Right (t, n1) -> (t, n1)
 
@@ -695,9 +706,9 @@ attemptFixed = attemptWith Fixed
 attemptWith
   :: Premises -> GlobalEnv -> Context -> Int -> String -> String
   -> (Either ElimError Elimination, Int)
-attemptWith prem env ctx n goal tgt = case parseCore [] env ctx n goal of
+attemptWith prem env ctx n goal tgt = case parseCore [] env (opensIn env) ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
-  Right (g, n1) -> case parseCore [] env ctx n1 tgt of
+  Right (g, n1) -> case parseCore [] env (opensIn env) ctx n1 tgt of
     Left e        -> error ("fixture does not parse: " ++ show e)
     Right (t, n2) -> eliminate env ctx Inductive prem n2 g t
 
@@ -710,7 +721,7 @@ withMethods ctx el =
 
 -- | One line, so that an exact-string case reads as one line.
 rendered :: Context -> Core -> String
-rendered ctx = unwords . words . renderCore (Rendering [] 0) ctx
+rendered ctx = unwords . words . renderCore (rendering [] 0) ctx
 
 
 -- --------------------------------------------------------------------------
@@ -744,7 +755,7 @@ unfoldedGoal =
       let said = snd (foldl step (s1, [])
             [ ":theorem r : \8704 (s : List {0} String) (c : Comparison) -> Same" ++ levels ++ " s"
             , "attack", "intro", "intro", "intro"
-            , "goto-named \"r1\"", "eliminate-core \8988 c \8989", ":revalidate" ])
+            , "goto-named \"r1\"", "eliminate-core core`c`", ":revalidate" ])
           step (s, out) line = let (s', r) = command s line in (s', out ++ renderResponse s' r)
       if "subgoals: sameMethod, differentMethod" `elem` said && any ("valid" `isInfixOf`) said
         then pure ()

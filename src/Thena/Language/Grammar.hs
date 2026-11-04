@@ -30,6 +30,13 @@ module Thena.Language.Grammar
   , RuleProblem (..)
   , checkGrammar
   , checkNotation
+  , grammarKey
+  , grammarWord
+  , grammarWritten
+  , classWord
+  , grammarForTag
+  , tagText
+  , sortType
   , notationInto
   , constructorProductions
   , typeFormerProductions
@@ -43,8 +50,15 @@ module Thena.Language.Grammar
   , typeReading
   , builtInTags
   , substitutionNames
+  , substitutionFamily
+  , freshOf
+  , fvOf
+  , substOf
+  , allOf
   , lookupNames
   , lookupNamesOf
+  , lookupPlaced
+  , lookupRelation
   , extensionsOf
   , isName
   , variableProductions
@@ -55,16 +69,17 @@ module Thena.Language.Grammar
   , classOwner
   , grammarsReached
   , tokenClassOf
+  , tokenClassAt
   , earleyRules
   , productionBody
   ) where
 
 import Data.List (nub, (\\))
-import Data.Maybe (isJust, listToMaybe)
+import Data.Maybe (isJust, isNothing, listToMaybe)
 
 import Thena.Core.Level (Normal (..), normalise)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Literal (..), instantiate, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), Opened (..), declarationNamed, globalUnder, inDeclarationOf, innermostOf, nameDotted, shortestEnding, nameFromText, rootName, Ident (..), Literal (..), instantiate, tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Regex (Regex, andThen, fromRanges, matches, oneOf, parseRegex, primingChar, singleChar, star)
@@ -77,6 +92,7 @@ import Thena.Global.Env
   , InductiveDefinition (..)
   , definitionBody
   , definitionType
+  , definitions
   , isDeclared
   , lookupDefinition
   , lookupInductive
@@ -184,8 +200,15 @@ data GrammarProblem
   = MetavariableRepeated String
     -- ^ written twice in the head
   | MetavariableTaken String
-    -- ^ already a metavariable of another grammar, or a token class — a name
-    -- in a production must mean one thing
+    -- ^ already a metavariable of another grammar **that is in scope here**, or
+    -- a token class — a name in a production must mean one thing
+  | MetavariableAmbiguous String [String]
+    -- ^ a letter, and the languages in scope that each declare it (MS10 phase
+    -- 255, HIS ruling of 2026-11-02). **A metavariable is scoped to its
+    -- language's namespace**, so two languages declaring @e@ is ordinary; what
+    -- cannot be read is a block with both of them open, where the letter has
+    -- two meanings and the block said nothing about which. @open … renaming@ is
+    -- what says it
   | NameTaken
     -- ^ the datatype's name is already declared
   | ConstructorTaken String
@@ -225,6 +248,15 @@ data GrammarProblem
     -- substituting for it is a map into that language's terms — reach two and
     -- neither is determined. Two /unrelated/ languages reading one token class
     -- is ordinary and not this
+  | ClassWordTwice String [GlobalName]
+    -- ^ the word, and two classes this grammar reaches that are both written it
+    -- (MS10 phase 259). **A class carries a path since this phase and a
+    -- generated name hangs off its WORD** — @LC.fv-x@ — because a word may hold
+    -- no dot (his ruling of 2026-10-30), so reaching @A.x@ and @B.x@ would mint
+    -- one @LC.fv-x@ for two classes. It is refused where 'ClassOwnedTwice' is,
+    -- and for the same kind of reason: the generator has one name and two things
+    -- to mean by it. **Two /unrelated/ languages each reading an @x@ of their
+    -- own is ordinary and not this**
   | NoSuchGrammar
     -- ^ §4.8: a @notation@ block naming no installed grammar. **The one block
     -- that does not declare its own name** — it adds productions to a grammar
@@ -379,10 +411,15 @@ data ProductionProblem
     -- modelled language is the @language@ block
   deriving (Eq, Show)
 
--- | Validate a block against the grammars already installed and the global
--- environment. The warnings are §4.5's vacuous binders.
-checkGrammar :: [Grammar] -> GlobalEnv -> Block -> Either GrammarError (Grammar, [Warning])
-checkGrammar installed env b = do
+-- | Validate a block against the grammars already installed, the global
+-- environment and **the scope the block is written in**. The warnings are
+-- §4.5's vacuous binders.
+--
+-- __The scope is what says which metavariables the block may write__ (MS10
+-- phase 255, `~g4k5g`): a letter belongs to its language's namespace, so a
+-- block reaches @LC@'s @e@ only where @LC@ is open. See 'metavarsElsewhere'.
+checkGrammar :: InScope -> [Grammar] -> GlobalEnv -> Block -> Either GrammarError (Grammar, [Warning])
+checkGrammar sc installed env b = do
   -- The block's own name first: a language named like something declared is
   -- that, before it is anything about metavariables.
   if taken name then refuse NameTaken else Right ()
@@ -390,7 +427,13 @@ checkGrammar installed env b = do
   case heads \\ nub heads of
     x : _ -> refuse (MetavariableRepeated x)
     [] -> Right ()
-  case [ x | x <- heads, isJust (lookup x metavarsElsewhere) || isJust (tokenClassOf env x) ] of
+  -- **Before this block's own letters, the ones the scope cannot read**: a
+  -- word two open languages both answer means nothing here, whether or not
+  -- this block goes on to write it.
+  case metavarsAmbiguous of
+    (x, ls) : _ -> refuse (MetavariableAmbiguous x ls)
+    [] -> Right ()
+  case [ x | x <- heads, isJust (lookup x metavarsElsewhere) || isJust (tokenClassOf sc env x) ] of
     x : _ -> refuse (MetavariableTaken x)
     [] -> Right ()
   -- A judgment's constructors are its rules; its one production is its
@@ -404,7 +447,7 @@ checkGrammar installed env b = do
     [] -> Right ()
   prods <- traverse (\p -> either (refuse . InProduction (productionName p)) Right (production p))
              (blockProductions b)
-  let g = Grammar kind (GlobalName name) heads (map fst prods)
+  let g = Grammar kind placed heads (map fst prods)
   if kind == ContextBlock && not (contextShaped heads g) then refuse ContextShape else Right ()
   case [ (nameOf (gproductionName e), xs)
        | kind == ContextBlock, e <- extensionsOf g
@@ -423,19 +466,74 @@ checkGrammar installed env b = do
   case [ f | f <- substitutionNames (installed ++ [g]) g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (FunctionTaken f)
     [] -> Right ()
-  Right (g, concatMap snd prods ++ unprimeable g)
+  Right (g, concatMap snd prods ++ unprimeable g ++ notOpen (map fst prods)
+                ++ classNotOpen (map fst prods))
   where
     kind = blockKind b
     name = blockName b
 
+    -- **The datatype this block declares, and the namespace its productions
+    -- live in** (MS10 phase 248). A @language LC@ block declares @LC.LC@ and
+    -- its productions are @LC.var@ and @LC.app@, which is what makes two
+    -- languages free to spell a production the same way — §1's collision, gone
+    -- with no mechanism of its own.
+    --
+    -- **A judgment's one production spells the datatype rather than a
+    -- constructor of it**, and the same placement gives it: its written word is
+    -- the block's own name, so it lands on @J.J@.
+    -- **PLACED IN THE NAMESPACE THE BLOCK IS WRITTEN IN** (MS10 phase 258),
+    -- which is the scope this check is handed — the same 'Thena.Core.Term.InScope'
+    -- the machine carries, so a block and an op cannot disagree about where a
+    -- declaration goes. At the root this is 'Thena.Core.Term.rootName' again, so
+    -- every name in the corpus is unchanged.
+    placed = GlobalName (innermostOf sc) name
+
+    datatype = declarationNamed placed
+
+    -- **A LETTER THAT IS A TERMINAL ONLY BECAUSE ITS LANGUAGE IS NOT OPEN**
+    -- (MS10 phase 255). §4.2 makes a word that is no metavariable a terminal,
+    -- so forgetting the @open@ is not a refusal: @( λ x : T . M )@ reads the
+    -- letter @T@ as the text @T@ and the notation works. **That is the one
+    -- silent thing the scoping introduced**, so the author is told — his second
+    -- principle, where the warning carries what a refusal would have prevented.
+    notOpen ps = nub
+      [ MetavariableNotOpen kind name (productionName' p) t (nameDotted l)
+      | p <- ps
+      , Terminal t <- gproductionItems p
+      , w <- nameBases t
+      , isNothing (lookup w metavarsElsewhere)
+      , l : _ <- [[ l' | (q, l') <- metavarKeys, nameWord q == w ]]
+      ]
+    productionName' = nameWord . gproductionName
+
+    -- **AND THE SAME FOR A TOKEN CLASS** (MS10 phase 259). A class is resolved
+    -- in scope now, so the silence §4.2 allows reaches it as well: @x : Token
+    -- String@ declared in another namespace makes @x@ a terminal here, and the
+    -- notation reads the letter as text. **The class is named in full**, since
+    -- its path is the thing the author has to act on.
+    --
+    -- **The words are filtered before any definition is reduced**, which is why
+    -- this costs nothing on a block with no unexplained terminal: a class is
+    -- confirmed by 'tokenClassOf' only for a word that is already a candidate.
+    classNotOpen ps = nub
+      [ TokenClassNotOpen kind name (productionName' p) t (nameDotted c)
+      | p <- ps
+      , Terminal t <- gproductionItems p
+      , w <- nameBases t
+      , isNothing (lookup w metavarsElsewhere)
+      , isNothing (tokenClassOf sc env w)
+      , c : _ <- [[ c' | (c', _) <- definitions env, classWord c' == w
+                       , isJust (tokenClassAt env c') ]]
+      ]
+
     -- **A language whose identifier class no character extends** (MS6 closeout
     -- 23, phase 146). 'Thena.Language.Regex.primingChar' decides it on the
-    -- automaton; when it answers 'Nothing' the generated @L-fresh@ falls back to
+    -- automaton; when it answers 'Nothing' the generated @L.fresh@ falls back to
     -- @'@ and a renamed binder is a name the notation cannot write. Said here
     -- because this is where an author finds out, and said rather than refused
     -- because nothing is actually broken but the printing.
     unprimeable gr =
-      [ UnprimeableClass kind name (nameOf cls)
+      [ UnprimeableClass kind name (classWord cls)
       | (cls, p) <- variableProductions gr
       , a <- gproductionArguments p
       , Occurrence cls' <- [argumentRole a]
@@ -443,7 +541,7 @@ checkGrammar installed env b = do
       , OfClass _ _ re <- [argumentSort a]
       , primingChar re == Nothing
       ]
-    nameOf (GlobalName x) = x
+    nameOf = nameDotted
     -- **A judgment's name is not a metavariable**: its header has none, and
     -- its notation's are the languages' (§6.1).
     heads
@@ -453,19 +551,65 @@ checkGrammar installed env b = do
     refuse :: GrammarProblem -> Either GrammarError a
     refuse = Left . GrammarError kind name
 
+    -- **A METAVARIABLE IS SCOPED TO ITS LANGUAGE'S NAMESPACE, AND A BLOCK THAT
+    -- TALKS ABOUT SEVERAL LANGUAGES WRITES AN @open@ FOR EACH** (MS10 phase
+    -- 255, HIS ruling of 2026-11-02, `~g4k5g`): /"It is explicit, direct,
+    -- obvious."/ The table was every installed grammar's letters, which is why
+    -- two object languages could not both use @e@ — the collision a student
+    -- meets first, and the one thing the datatype rule's namespaces did not
+    -- answer on their own.
+    --
+    -- **A letter is not a referable name** — nothing writes @LC.e@ — so what is
+    -- scoped is where it is /looked up/, and the key it is looked up under is
+    -- the name it would have had: @e@ in the namespace @LC@'s datatype opens.
+    -- 'Thena.Core.Term.globalUnder' then answers it exactly as it answers a
+    -- global, which is what keeps the enclosing walk, the @open@s, the
+    -- @renaming@ and the two-answers refusal from being written a second time
+    -- here.
+    metavarKeys =
+      [ (inDeclarationOf (declarationNamed (grammarName g)) m, grammarName g)
+      | g <- installed, m <- grammarMetavars g ]
+
+    -- **Every word that could be written here for one of them**: the letters
+    -- themselves, and whatever an @open … renaming@ spells one as — the
+    -- original is out of scope under a renaming, so the renamed word is the
+    -- only way in.
+    metavarWords =
+      nub (map (nameWord . fst) metavarKeys
+             ++ [ w | o <- scopeOpens sc, (_, w) <- openedRenaming o ])
+
+    metavarAnswer x = globalUnder (`elem` map fst metavarKeys) sc (rootName x)
+
     metavarsElsewhere =
-      [ (m, grammarName g) | g <- installed, m <- grammarMetavars g ]
+      [ (x, l)
+      | x <- metavarWords
+      , Right q <- [metavarAnswer x]
+      , Just l <- [lookup q metavarKeys] ]
+
+    -- **Refused and not chosen**, as every other two-answer lookup is: either
+    -- language would read, so taking one would be the system deciding what the
+    -- block did not say.
+    metavarsAmbiguous =
+      [ (x, nub [ nameDotted l | q <- qs, Just l <- [lookup q metavarKeys] ])
+      | x <- metavarWords
+      , Left qs <- [metavarAnswer x]
+      , length qs > 1 ]
 
     -- A global, or a name a grammar already installed will generate.
+    --
+    -- **Read as a name and not rooted** (MS10 phase 244): what is checked is a
+    -- written spelling, and a generated one is dotted — @L.fv-x@ is already
+    -- declared when the environment holds @fv-x@ in @L@, which a root-level
+    -- name whose word held the dots would never have matched.
     taken x =
-      isDeclared (GlobalName x) env
-        || GlobalName x `elem` concat
+      isDeclared (nameFromText x) env
+        || nameFromText x `elem` concat
              [ grammarName g : map gproductionName (grammarProductions g) | g <- installed ]
 
     -- **This block's metavariables first, then every other grammar's**, which
     -- is only an order because @MetavariableTaken@ has already refused a name
     -- that is both.
-    sortOf = sortIn env ([ (m, GlobalName name) | m <- heads ] ++ metavarsElsewhere)
+    sortOf = sortIn sc env ([ (m, placed) | m <- heads ] ++ metavarsElsewhere)
 
     -- **The shape is shared with 'checkNotation' since MS8 phase 160**, where a
     -- production may name a constructor of a hand-written datatype and carries
@@ -478,7 +622,7 @@ checkGrammar installed env b = do
       let pkind | kind == JudgmentBlock = TypeFormer
                 | otherwise = Constructor
           vacuous = [ VacuousBinder kind name (productionName p) x | x <- vacuousNames ]
-      Right (GProduction (GlobalName (productionName p)) items arguments pkind, vacuous)
+      Right (GProduction (inDeclarationOf datatype (productionName p)) items arguments pkind, vacuous)
 
 -- | **A production's items, its arguments and their roles** (§4.2, §4.3, §4.7) —
 -- everything about a production's /shape/, which is the same question whether a
@@ -560,7 +704,7 @@ constructorShape sortOf binds universes p = do
     withClass wrong x = (,) x <$> stringClass wrong x
 
     stringClass wrong x = case sortOf x of
-      Just (OfClass cls (GlobalName "String") _) -> Right cls
+      Just (OfClass cls (GlobalName [] "String") _) -> Right cls
       Just s -> Left (wrong x s)
       Nothing -> Left (NotAMetavariable x)
 
@@ -570,15 +714,15 @@ constructorShape sortOf binds universes p = do
 -- Lifted out of 'checkGrammar' at MS8 phase 158 so that 'checkNotation' asks
 -- the same question — a @notation@ block's slots are the grammar's own
 -- metavariables and nothing about resolving one differs there.
-sortIn :: GlobalEnv -> [(String, GlobalName)] -> String -> Maybe Sort
-sortIn env metavars x = case [ srt | b <- nameBases x, Just srt <- [exact b] ] of
+sortIn :: InScope -> GlobalEnv -> [(String, GlobalName)] -> String -> Maybe Sort
+sortIn sc env metavars x = case [ srt | b <- nameBases x, Just srt <- [exact b] ] of
   srt : _ -> Just srt
   []      -> Nothing
   where
     exact b
       | Just n <- universeWord b = Just (OfUniverse n)
       | Just g <- lookup b metavars = Just (OfLanguage g)
-      | Just (t, re) <- tokenClassOf env b = Just (OfClass (GlobalName b) t re)
+      | Just (cls, t, re) <- tokenClassOf sc env b = Just (OfClass cls t re)
       | otherwise = Nothing
 
 -- | A level as subscript digits, for a refusal that names the universe a slot
@@ -641,13 +785,130 @@ typeReading n children = case (words n, children) of
   (["a", "universe"], [Earley.Token u]) -> AtUniverse <$> universeWord u
   _ -> Nothing
 
+-- | __A grammar's name as the Earley parser's key — dotted, and unique.__
+--
+-- **This is what keeps two languages of one word apart** (MS10 phase 258): a
+-- @language Ty@ inside @namespace A@ and one inside @namespace B@ are the
+-- nonterminals @A.Ty@ and @B.Ty@, and nothing about parsing may collapse them.
+-- **A key turned back into a name goes through 'Thena.Core.Term.nameFromText'**,
+-- never @rootName@ — @rootName \"A.Ty\"@ is a root-level word holding dots,
+-- which resolves to nothing.
+grammarKey :: Grammar -> String
+grammarKey = nameDotted . grammarName
+
+-- | __A grammar's name as a user writes it — the word, with no path.__
+--
+-- **For a SURFACE SPELLING, where 'grammarKey' is for a parser key** (MS10
+-- phase 258). Everything generated from a block is written the way the author
+-- would have written it, in the scope the block sits in: @Ty@, not @A.Ty@. That
+-- is right exactly when the block is legal, because the word resolves by the
+-- outward walk precisely where the author could have written it.
+grammarWord :: Grammar -> String
+grammarWord = nameWord . grammarName
+
+-- | __A grammar's name for MINTING a generated declaration — relative.__
+--
+-- **'Thena.Engine.declaredIn' places what an op declares**, so a generated name
+-- minted absolutely would be placed twice: @A.Ty.fv-x@ becomes @A.A.Ty.fv-x@.
+-- So the generator mints @Ty.fv-x@ and the op supplies the @A@ — the same
+-- division 'Thena.Driver.datatypeProgram' already has for the datatype.
+grammarWritten :: Grammar -> GlobalName
+grammarWritten = rootName . grammarWord
+
+-- | __The grammar a TAG names, resolved by the one walk__ (MS10 phase 260,
+-- `~zjkvd`, HIS ruling of 2026-10-30: /"Ok, the first it is"/ — a tag resolves
+-- like any other name).
+--
+-- So @open A@ then @Ty`ι`@ reads a term of @A.Ty@, @open A renaming (Ty to T)@
+-- makes it @T`ι`@, and two opened namespaces both offering a @Ty@ is an
+-- ambiguity rather than a silent choice — none of which is written here:
+-- 'Thena.Core.Term.globalUnder' is the walk, and this is the predicate it asks.
+--
+-- **'Left' carries what the ambiguity was**, as
+-- 'Thena.Syntax.Resolve.plainAt' does for an ordinary name: @Left []@ is
+-- "nothing answers to it" and a longer list is "more than one does".
+--
+-- **The tag is taken as WRITTEN**, through 'Thena.Core.Term.nameFromText' and
+-- never @rootName@ — a qualified tag is a path and not a word holding dots.
+grammarForTag :: InScope -> [Grammar] -> String -> Either [GlobalName] Grammar
+grammarForTag sc gs tag = case globalUnder (isGrammar gs) sc (nameFromText tag) of
+  Right c  -> case [ g | g <- gs, grammarName g == c ] of
+    g : _ -> Right g
+    -- Cannot arise: the predicate is what the walk answered by.
+    []    -> Left []
+  Left amb -> Left amb
+
+-- | __How a tag is WRITTEN here: the shortest ending that still reaches this
+-- grammar__ (MS10 phase 268, `~txbz5`).
+--
+-- **The inverse of 'grammarForTag', asking the same predicate rather than
+-- reasoning about it** \8212 'Thena.Core.Term.shortestEnding' is
+-- 'Thena.Core.Term.globalUnder' run backwards, so a printed tag is exactly
+-- what a reader standing here resolves back to this grammar, and an ending two
+-- opened namespaces would both answer is rejected for free.
+--
+-- **A tag is a SPELLING and not the parser's key** (MS10 phase 258): the key
+-- stays dotted \8212 'Thena.Language.Build.settled' hands 'Earley.StartAt' a
+-- 'grammarKey' \8212 where the tag a user reads shortens like every other name
+-- (phase 254). Before this, one line could carry both spellings of one name:
+-- with @open Ctx@ in force, @:show Ctx.extend-in.extend-in@ printed the
+-- heading @extend-in@ beside a tag @Ctx.extend-in@.
+tagText :: [Grammar] -> InScope -> GlobalName -> String
+tagText gs = shortestEnding (isGrammar gs)
+
+-- | What the walk answers a tag by, and what the printer shortens against:
+-- **one predicate, so the two cannot drift.**
+isGrammar :: [Grammar] -> GlobalName -> Bool
+isGrammar gs c = any ((== c) . grammarName) gs
+
+-- | __A token class's name as a generated name's SUFFIX — the word.__
+--
+-- **The class's own name is what tells two classes apart** (MS10 phase 259):
+-- resolved in scope, @A.x@ and @B.x@ are two classes and the generators compare
+-- the names. **What a generated name hangs off is the word**, because
+-- @LC.fv-\8249k\8250@ is one word and a word may hold no dot — his ruling of
+-- 2026-10-30 — so a class @A.x@ gives @LC.fv-x@ and not @LC.fv-A.x@.
+--
+-- It is also the word a slot and a rule are WRITTEN with, which is the same
+-- fact: the author writes @x@ wherever the outward walk reaches the class.
+-- 'Thena.Language.Grammar.substitutable' refuses one grammar reaching two
+-- classes of one word, so within everything a grammar reaches this identifies a
+-- class as well as the name does.
+classWord :: GlobalName -> String
+classWord = nameWord
+
+-- | __The type a slot's sort is, as it is written into a generated type.__
+--
+-- **One definition, because three generators write it** (MS10 phase 258):
+-- 'Thena.Driver.grammarDatatype', 'Thena.Language.Lookup.relationOf' and
+-- 'Thena.Language.Judgment.judgmentDatatype' each had their own copy, and each
+-- had to be told the same thing when a grammar's name gained a path.
+--
+-- **A LANGUAGE IS ITS WORD; A CLASS'S TYPE IS ITS WHOLE NAME.** A language is a
+-- grammar, so it is written the way the author writes one — @Ty@, and the
+-- outward walk reaches @A.Ty@. A class's type is an ordinary global (@String@)
+-- with no namespace of its own to be relative to, so it keeps its path.
+sortType :: Sort -> String
+sortType srt = case srt of
+  OfLanguage l  -> nameWord l
+  OfClass _ t _ -> nameDotted t
+  -- A universe slot can only be written in a @notation@ block, which generates
+  -- no datatype; any other block's production carrying one is refused by
+  -- @UniverseSlot@ (MS8 phase 160). The spelling is what it would be named.
+  OfUniverse n  -> universeSpelling n
+
 -- | The rules of 'typeNT', which every parse has (MS8 phase 160).
 typeRules :: [Grammar] -> [Earley.Rule]
 typeRules gs =
   [ Earley.Rule "a type" typeNT [Earley.Nonterminal l] []
-  | g <- gs, not (null (typeFormerProductions g)), let GlobalName l = grammarName g ]
-    ++ [ Earley.Rule ("the type " ++ l) typeNT [Earley.Literal l] []
-       | g <- gs, let GlobalName l = grammarName g ]
+  | g <- gs, not (null (typeFormerProductions g)), let l = grammarKey g ]
+    -- **The NODE carries the key and the LITERAL is the word** (MS10 phase
+    -- 258). What the author writes where a type goes is @Ty@, in or out of a
+    -- namespace, so that is the literal; the node's name is what
+    -- 'Thena.Language.Build.typeOf' maps back to a grammar, and two languages
+    -- of one word in different namespaces must still be two nodes.
+    ++ [ Earley.Rule ("the type " ++ grammarKey g) typeNT [Earley.Literal (grammarWord g)] []
+       | g <- gs ]
     ++ [ Earley.Rule "a universe" typeNT [Earley.Scan "a universe" universeRegex] [] ]
 
 -- | A word, then the same word with its suffixes taken off, longest first
@@ -714,8 +975,8 @@ reservedScan x srt = case srt of
 -- **A binding form and @as@ metadata are refused.** Both say something about a
 -- constructor's arguments (§4.7) and a function has no constructor to say it
 -- of; an application binds nothing.
-checkNotation :: [Grammar] -> GlobalEnv -> Block -> Either GrammarError Grammar
-checkNotation installed env b = do
+checkNotation :: InScope -> [Grammar] -> GlobalEnv -> Block -> Either GrammarError Grammar
+checkNotation sc installed env b = do
   g <- maybe (refuse NoSuchGrammar) Right named
   case blockMetavars b of
     [] -> Right ()
@@ -727,10 +988,10 @@ checkNotation installed env b = do
   -- generated from. Said here, where the author can act on it.
   case [ c | not editing
            , any (isJust . productionMetadata) (blockProductions b)
-           , GlobalName c <- constructorsOf g
-           , GlobalName c `notElem` map gproductionName prods ] of
+           , c <- constructorsOf g
+           , c `notElem` map gproductionName prods ] of
     [] -> Right ()
-    cs -> refuse (ConstructorsUnspelled cs)
+    cs -> refuse (ConstructorsUnspelled (map nameDotted cs))
   Right (Grammar NotationBlock (grammarName g) (grammarMetavars g) prods)
   where
     name = blockName b
@@ -740,13 +1001,32 @@ checkNotation installed env b = do
     -- name is its metavariable** — which is what gives its slots their words,
     -- @Lam@ and @Lam₁@, since a type declared outside a block has none to
     -- declare (HIS ruling: subscripts are enough).
-    named = case [ g | g <- installed, grammarName g == GlobalName name ] of
+    -- **RESOLVED IN THE SCOPE THE BLOCK SITS IN** (MS10 phase 258), through
+    -- the one walk every door calls. It is forced rather than tidy: every
+    -- @language@ block generates a @notation@ block whose header is the
+    -- language's own word, and inside @namespace A@ the grammar it names is
+    -- @A.Ty@ — so a header matched against a root-level name would find nothing
+    -- and the generated notation would be refused.
+    resolved = case globalUnder isInstalled sc (nameFromText name) of
+      Right c -> [ g | g <- installed, grammarName g == c ]
+      Left _  -> []
+    isInstalled c = any ((== c) . grammarName) installed
+
+    named = case resolved of
       g : _ -> Just g
       []    -> fresh
-    fresh = case lookupInductive (GlobalName name) env of
-      Just _  -> Just (Grammar NotationBlock (GlobalName name) [name] [])
+    -- **The datatype is looked up by its real name** (MS10 phase 248) — a
+    -- written @notation Nat@ is about @Nat.Nat@ — while the grammar keeps the
+    -- written @Nat@, which is what every sort, tag and metavariable compares
+    -- against.
+    -- **A datatype with no grammar is placed where the block is written**, as
+    -- 'checkGrammar' places one (MS10 phase 258). Its own word stays its
+    -- metavariable, which is what gives its slots @Lam@ and @Lam\8321@.
+    fresh = case lookupInductive (declarationNamed hereNamed) env of
+      Just _  -> Just (Grammar NotationBlock hereNamed [name] [])
       Nothing -> Nothing
-    editing = any ((== GlobalName name) . grammarName) installed
+    hereNamed = GlobalName (innermostOf sc) name
+    editing = not (null resolved)
 
     refuse :: GrammarProblem -> Either GrammarError a
     refuse = Left . GrammarError NotationBlock name
@@ -776,13 +1056,32 @@ checkNotation installed env b = do
     -- scope — §4.8's refused inference was about choosing the production's /form/
     -- when the name might be a clash, and here the name must already be declared
     -- for the block to mean anything at all.
-    constructorsOf gr = case lookupInductive (grammarName gr) env of
+    constructorsOf gr = case lookupInductive (declarationNamed (grammarName gr)) env of
       Just d  -> map constructorName (inductiveConstructors d)
       Nothing -> []
 
+    -- **What the production's word spells, as a global** (MS10 phase 248).
+    -- The header spells the datatype and a constructor lives in its namespace,
+    -- so both are placed; anything else names a function, which is an ordinary
+    -- global and may have been written with a path of its own.
     production g p
-      | isHeader p || GlobalName (productionName p) `elem` constructorsOf g = declaring g p
-      | otherwise = applying g p
+      | isHeader p = declaring g p (datatypeOf g)
+      | placed g p `elem` constructorsOf g = declaring g p (placed g p)
+      | otherwise = applying g p (inScope (productionGlobal p))
+
+    -- **A FUNCTION A NOTATION NAMES RESOLVES IN SCOPE** (MS10 phase 258), by
+    -- the one walk. A @language@ block inside @namespace A@ declares
+    -- @A.LC.subst-x@ and generates a @notation@ production naming @LC.subst-x@,
+    -- because a generated declaration is written the way the author would have
+    -- written it — so the lookup has to be the one an author's own @notation@
+    -- block gets. **Unresolved is left as written**, so the refusal still names
+    -- what the block said rather than a prefix nobody wrote.
+    inScope f = case globalUnder (isJust . functionShape env) sc f of
+      Right c -> c
+      Left _  -> f
+
+    datatypeOf g = declarationNamed (grammarName g)
+    placed g p = inDeclarationOf (datatypeOf g) (productionName p)
 
     -- **A type former's or a constructor's spelling**: its shape is a
     -- @language@ block's — roles, binding forms and all, since there is a real
@@ -831,9 +1130,9 @@ checkNotation installed env b = do
     -- @d : typing G M T@ is a hole at @typing@, and which typing judgment it is
     -- comes from the declaration. The indices are the type checker's to verify.
     paramSort g q dom = case paramClass q of
-      Just cls -> case tokenClassOf env cls of
-        Just (t, re)
-          | typeNamed env dom == Just t -> Right (OfClass (GlobalName cls) t re)
+      Just cls -> case tokenClassOf sc env cls of
+        Just (c, t, re)
+          | typeNamed env dom == Just t -> Right (OfClass c t re)
           | otherwise -> Left (ParamNotReadable (paramName q) (whnf env [] dom))
         Nothing -> Left (NoSuchTokenClass cls)
       Nothing
@@ -842,13 +1141,18 @@ checkNotation installed env b = do
         -- for the slot words 'checkNotation' used to resolve: a block giving a
         -- datatype its first spelling is not in @installed@ yet, and @lmAbs@'s
         -- own @Lam@ argument has to be a slot in the very block that spells it.
+        -- **The head is the datatype's real name and the sort is the written
+        -- one** (MS10 phase 248): @typeHead@ answers @Lam.Lam@, and a 'Sort'
+        -- names a language the way every tag and metavariable does.
         | Just h <- typeHead env dom
-        , h `elem` (grammarName g : map grammarName installed) -> Right (OfLanguage h)
+        , l : _ <- [ grammarName k
+                   | k <- g : installed, declarationNamed (grammarName k) == h ]
+            -> Right (OfLanguage l)
         | otherwise -> Left (ParamNotReadable (paramName q) (whnf env [] dom))
 
     counted xs = [ (x, length [ () | y <- xs, y == x ]) | x <- nub xs ]
 
-    declaring g p = do
+    declaring g p f = do
       -- **Roles belong to the block that installs the grammar** — HIS ruling,
       -- 2026-10-11. A block editing a grammar whose substitution family is
       -- already declared cannot add to it, so saying so here is better than
@@ -856,7 +1160,6 @@ checkNotation installed env b = do
       case (productionMetadata p, editing) of
         (Just _, True) -> Left (RolesAfterTheGrammar (grammarName g))
         _ -> Right ()
-      let f = GlobalName (productionName p)
       if isHeader p then Right () else if taken f then Left FunctionHasNotation else Right ()
       (domains, kind') <-
         if isHeader p
@@ -865,20 +1168,19 @@ checkNotation installed env b = do
                  Nothing -> Left NotADeclaredFunction
           else do
             (ds, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
-            if typeHead env result == Just (grammarName g)
+            if typeHead env result == Just (datatypeOf g)
               then Right ()
               else Left (FunctionResult (whnf env [] result))
             Right (ds, Constructor)
       withParams g p domains kind' f
 
-    applying g p = do
+    applying g p f = do
       case productionMetadata p of
         Nothing -> Right ()
         Just _  -> Left FunctionMetadata
-      let f = GlobalName (productionName p)
       if taken f then Left FunctionHasNotation else Right ()
       (domains, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
-      if typeNamed env result == Just (grammarName g)
+      if typeNamed env result == Just (datatypeOf g)
         then Right ()
         else Left (FunctionResult (whnf env [] result))
       withParams g p domains Function f
@@ -940,7 +1242,7 @@ functionShape env f = peel . definitionType <$> lookupDefinition f env
     -- at all where that argument was: @nil@'s @List {\8467} A@ reached a refusal as
     -- @nil returns List {\8467} , not a Ctx@, trailing space and all. The brackets
     -- keep it unwritable, which is the whole point of the opacity.
-    opaque x = Global (GlobalName ("\8249" ++ x ++ "\8250")) []
+    opaque x = Global (rootName ("\8249" ++ x ++ "\8250")) []
 
 -- | **A @notation@ block's productions, in the grammar they are for** (MS8
 -- phase 158): the installed grammars with that one replaced.
@@ -1062,6 +1364,16 @@ substitutable gs g = do
   case [ (cls, hs) | cls <- classesReached gs g, let hs = owners cls, length hs > 1 ] of
     (cls, hs) : _ -> Left (ClassOwnedTwice cls hs)
     [] -> Right ()
+  -- **Two classes of one word, which the paths made possible** (MS10 phase
+  -- 259): the generated names are suffixed with a class's word, so this grammar
+  -- would declare one @fv-x@ meaning two things. Refused here rather than left
+  -- to collide at declaration, where the message would name a generated word
+  -- nobody wrote.
+  case [ (w, cs) | w <- nub (map classWord substituted)
+                 , let cs = [ c | c <- substituted, classWord c == w ]
+                 , length cs > 1 ] of
+    (w, cs) : _ -> Left (ClassWordTwice w cs)
+    [] -> Right ()
   case [ (p, a, l, cls)
        | p <- constructorProductions g
        , a <- gproductionArguments p
@@ -1084,41 +1396,78 @@ substitutable gs g = do
       a : _ | Binder cls <- argumentRole a -> Just cls
       _ -> Nothing
     reachedBy l = concat [ classesReached gs h | h <- gs, grammarName h == l ]
+    -- **Only the classes something is generated for.** A class no language owns
+    -- mints no name, so two of them sharing a word collides with nothing.
+    substituted = classesSubstituted gs g
     owners cls = [ grammarName h | h <- grammarsReached gs g, cls `elem` map fst (variableProductions h) ]
-    nameOf (GlobalName x) = x
-    inProduction p why = let GlobalName n = gproductionName p in Left (InProduction n why)
+    nameOf = nameDotted
+    inProduction p why = let n = nameDotted (gproductionName p) in Left (InProduction n why)
 
 -- | The functions generated substitution declares for a language (§4.7), in
 -- the order they are declared; none for a language that reaches no class with
 -- an owner.
 --
 -- **One per class, and the class is in the name — MS8 phase 155.** The names
--- used to come from the language alone (@LC-fv@, @LC-subst@), which two classes
+-- used to come from the language alone (@LC.fv@, @LC.subst@), which two classes
 -- collide on, and keeping the unsuffixed name when there happens to be one class
 -- would be a special case in the naming rule. His ruling on the context's lookup
 -- relation, 2026-10-04, settled the same question the same way and accepted the
 -- migration.
 --
--- * @L-fresh-‹k›@ for each class @L@ **owns**, because minting a name of a class
+-- * @L.fresh-‹k›@ for each class @L@ **owns**, because minting a name of a class
 --   belongs to the language whose notation can write one — so a grammar that
 --   reaches a class without owning it calls the owner's.
--- * @L-fv-‹k›@ and @L-subst-‹k›@ for each class @L@ **reaches**, owning it or
+-- * @L.fv-‹k›@ and @L.subst-‹k›@ for each class @L@ **reaches**, owning it or
 --   not: a class can occur free inside a slot of another language.
--- * one @L-subst-all@, taking one map per class reached. Simultaneous
+-- * one @L.subst-all@, taking one map per class reached. Simultaneous
 --   substitution is the primitive one, and now across classes too — renaming a
 --   binder of one class to avoid capture needs the map of every class.
-substitutionNames :: [Grammar] -> Grammar -> [String]
-substitutionNames gs g
+-- **They live in the LANGUAGE'S OWN NAMESPACE since MS10 phase 244** — @LC.fv-x@
+-- and not @LC.fv-x@ — through 'Thena.Core.Term.inDeclarationOf', the one helper
+-- every generated name is minted by, so none of these four decides a placement
+-- of its own.
+substitutionFamily :: [Grammar] -> Grammar -> [GlobalName]
+substitutionFamily gs g
   | null reached = []
   | otherwise =
-      [ n ++ "-fresh-" ++ k | k <- owned ]
-        ++ [ n ++ "-fv-" ++ k | k <- reached ]
-        ++ [ n ++ "-subst-all" ]
-        ++ [ n ++ "-subst-" ++ k | k <- reached ]
+      [ freshOf n k | k <- owned ]
+        ++ [ fvOf n k | k <- reached ]
+        ++ [ allOf n ]
+        ++ [ substOf n k | k <- reached ]
   where
-    GlobalName n = grammarName g
-    reached = [ k | GlobalName k <- classesSubstituted gs g ]
-    owned = [ k | GlobalName k <- map fst (variableProductions g) ]
+    n = grammarName g
+    reached = map classWord (classesSubstituted gs g)
+    owned = map (classWord . fst) (variableProductions g)
+
+-- | …and their spellings, which is what a clash is checked against: a written
+-- word is compared with the whole dotted name, so a production may no more be
+-- called @LC.fv-x@ than it could be called @LC.fv-x@ before.
+substitutionNames :: [Grammar] -> Grammar -> [String]
+substitutionNames gs g = map nameDotted (substitutionFamily gs g)
+
+-- | A production's name as written, **split on the reserved dot** (MS10 phase
+-- 244) — so a production may name something in a namespace, which is what
+-- generated substitution's own notation does: @LC.subst-x@ is the function
+-- @subst-x@ in @LC@ and not a root-level name with a dot in its word, the one
+-- shape his ruling of 2026-10-30 forbids.
+productionGlobal :: Production -> GlobalName
+productionGlobal = nameFromText . productionName
+
+-- | Where each of the four lives. **The language's declaration opens the
+-- namespace** (his ruling, 2026-10-30), so the word is what is left of the old
+-- name once the language's own prefix has become a step.
+--
+-- __Each takes the language as it was written and asks for its declaration__
+-- (MS10 phase 248): @grammarName@ is the written @LC@ and the datatype it
+-- declares is @LC.LC@, whose namespace is what these belong in. Said here, in
+-- the four, rather than at the dozen call sites that have a grammar in hand.
+freshOf, fvOf, substOf :: GlobalName -> String -> GlobalName
+freshOf l k = inDeclarationOf (declarationNamed l) ("fresh-" ++ k)
+fvOf l k = inDeclarationOf (declarationNamed l) ("fv-" ++ k)
+substOf l k = inDeclarationOf (declarationNamed l) ("subst-" ++ k)
+
+allOf :: GlobalName -> GlobalName
+allOf l = inDeclarationOf (declarationNamed l) "subst-all"
 
 -- | **Every occurrence class the language reads, with the production that
 -- reads it** — one entry per class, in declaration order (MS8 phase 153).
@@ -1234,7 +1583,7 @@ grammarsReached gs g = walk [] [g]
 --
 -- **A context as well as a language — MS8 phase 157, `~mnr39`.** It is the same
 -- question and the same answer: a context reaches the classes of the languages
--- in its slots, so F-sub's Γ reaches the type class and gets @Ctx-subst-X@,
+-- in its slots, so F-sub's Γ reaches the type class and gets @Ctx.subst-X@,
 -- which is the @[X↦P]Δ@ of the type-substitution lemma. Nothing special had to
 -- be written for it — a context simply /owns/ no class, so it generates no
 -- @fresh@, and its name slots are neither occurrences nor binders, so nothing in
@@ -1267,11 +1616,11 @@ classOwner gs g cls = case
     _ -> Nothing
 
 -- | **The regular expression of one of a language's occurrence classes** — the
--- class's own, so that a generated @L-fresh-‹k›@ mints names that class accepts
+-- class's own, so that a generated @L.fresh-‹k›@ mints names that class accepts
 -- (MS6 closeout 23, per class at MS8 phase 155).
 --
 -- 'Nothing' for a class this language reads no occurrence at, or one whose
--- occurrence is not at a class — neither has an @L-fresh-‹k›@ to name.
+-- occurrence is not at a class — neither has an @L.fresh-‹k›@ to name.
 variableRegex :: Grammar -> GlobalName -> Maybe Regex
 variableRegex g cls =
   listToMaybe [ re | (c, p) <- variableProductions g, c == cls
@@ -1294,13 +1643,50 @@ extensionsOf g
 -- | An argument that is a name: a @Token String@ class's match.
 isName :: Argument -> Bool
 isName a = case argumentSort a of
-  OfClass _ (GlobalName "String") _ -> True
+  OfClass _ (GlobalName [] "String") _ -> True
   _ -> False
 
 -- | Everything a context's lookup relations declare (§5.3), in order — one
 -- relation per extension production (MS8 phase 156).
+--
+-- **PLACED AND DOTTED SINCE MS10 PHASE 263, `~gkbgs`, HIS RULING OF 2026-11-03**,
+-- because that is what a clash is checked against and the family is no longer at
+-- the root: two contexts whose extension productions share a word used to collide
+-- here, where their namespaces tell them apart. 'lookupNamesOf' still gives the
+-- WORDS, which is what the relation's own declaration is written from.
 lookupNames :: Grammar -> [String]
-lookupNames g = concatMap (lookupNamesOf g) (extensionsOf g)
+lookupNames g = map nameDotted (lookupPlaced g)
+
+-- | __Where a context's lookup family lands — absolutely__ (MS10 phase 263).
+--
+-- **The relation lives in the CONTEXT'S namespace** and opens one of its own, so
+-- @context Ctx@ with an extension @bind@ gives the relation
+-- @Ctx.bind-in.bind-in@ and the constructors @Ctx.bind-in.bind-here@ and
+-- @Ctx.bind-in.bind-there-bind@. **No placement rule of its own**: it is
+-- 'Thena.Core.Term.inDeclarationOf' twice, once for the context's namespace and
+-- once for the relation's, exactly as a datatype's constructors are placed.
+--
+-- **Not @Ctx.lemmata.bind-in@.** 'Thena.Core.Term.inLemmataOf' is for material a
+-- user never wrote and rarely names; a lookup relation is what a @context@ block
+-- is /for/ — the author writes it, in its own notation.
+lookupPlaced :: Grammar -> [GlobalName]
+lookupPlaced g = concatMap placedFor (extensionsOf g)
+  where
+    placedFor e = case lookupNamesOf g e of
+      inN : cons ->
+        let rel = lookupRelation (grammarName g) inN
+         in declarationNamed rel : [ inDeclarationOf (declarationNamed rel) c | c <- cons ]
+      [] -> []
+
+-- | __The namespace one lookup relation opens__, from the context's name and the
+-- relation's word (MS10 phase 263).
+--
+-- **Takes the context's name as it is handed in**, so the caller decides whether
+-- it is absolute — for a clash check, which asks the environment — or the written
+-- word, for minting, where 'Thena.Engine.declaredIn' supplies the enclosing
+-- namespace. The same division 'grammarWritten' already draws.
+lookupRelation :: GlobalName -> String -> GlobalName
+lookupRelation ctx = inDeclarationOf (declarationNamed ctx)
 
 -- | What one extension's lookup relation declares, in order: the relation, its
 -- @here@, then one @there@ for each extension it may step over.
@@ -1312,13 +1698,20 @@ lookupNames g = concatMap (lookupNamesOf g) (extensionsOf g)
 -- special case in the naming rule, and he took the renaming instead when both
 -- were put to him. A production name is unique across every installed grammar
 -- (@ConstructorTaken@), so this cannot clash either.
+--
+-- __The production's WORD, not its full name__ (MS10 phase 248). A production
+-- is @Ctx.bind@ now, and a word with dots in it is the one shape his ruling of
+-- 2026-10-30 forbids — so the three words are @bind-in@, @bind-here@ and
+-- @bind-there-bind@. **Words, and where they LAND is 'lookupPlaced'** (MS10
+-- phase 263): the family is in the context's namespace, so two contexts sharing
+-- an extension word no longer collide.
 lookupNamesOf :: Grammar -> GProduction -> [String]
 lookupNamesOf g e =
   [ n ++ "-in", n ++ "-here" ]
     ++ [ n ++ "-there-" ++ named k | k <- extensionsOf g ]
   where
     n = named e
-    named p = let GlobalName x = gproductionName p in x
+    named = nameWord . gproductionName
 
 -- | §5.1: **one** production with no slot of the context's own sort — the empty
 -- context — and **at least one** with exactly one, each an extension. A
@@ -1334,14 +1727,40 @@ contextShaped own g =
     counts = map ownSlots (constructorProductions g)
     ownSlots p = length [ () | Slot x _ _ <- gproductionItems p, x `elem` own ]
 
--- | The @T@ of a token class, and its expression: a definition whose type
--- reduces to @Token T@ and whose value to a regex literal (MS6 phase 100
--- refused any other).
-tokenClassOf :: GlobalEnv -> String -> Maybe (GlobalName, Regex)
-tokenClassOf env x = do
-  d <- lookupDefinition (GlobalName x) env
+-- | **The class a word names, with its @T@ and its expression** — a definition
+-- whose type reduces to @Token T@ and whose value to a regex literal (MS6 phase
+-- 100 refused any other).
+--
+-- __RESOLVED IN THE SCOPE THE BLOCK SITS IN__ (MS10 phase 259, the last of
+-- `~g4k5g`), through the one walk every door calls — so a @language@ block
+-- written inside @namespace A@ reads the class @A.x@ by writing @x@, as it
+-- reads a metavariable and names a function. The class it answers with is
+-- __the name, not the word__: that is what keeps @A.x@ and @B.x@ two classes,
+-- and 'classWord' is what a generated name hangs off.
+--
+-- __THE SPELLING IS TAKEN AS WRITTEN__, through 'Thena.Core.Term.nameFromText'
+-- and never @rootName@ — so a qualified class is a path and not a word holding
+-- dots, exactly as a qualified tag is in 'grammarForTag'. A @language@ block's
+-- slot can only write the word, because there the class's word doubles as the
+-- argument's name; a @notation@ block's ascription is a field of its own and may
+-- write the path, which is what lets
+-- 'Thena.Language.Substitution.substitutionNotations' generate a block whose
+-- meaning does not depend on which @open@ the author happened to need.
+tokenClassOf :: InScope -> GlobalEnv -> String -> Maybe (GlobalName, GlobalName, Regex)
+tokenClassOf sc env x = do
+  cls <- either (const Nothing) Just
+           (globalUnder (isJust . tokenClassAt env) sc (nameFromText x))
+  (t, re) <- tokenClassAt env cls
+  Just (cls, t, re)
+
+-- | The same question of a name that is already resolved — what a class @IS@,
+-- with no walk — so that the walk above and anything enumerating the classes in
+-- an environment ask one function (MS10 phase 259).
+tokenClassAt :: GlobalEnv -> GlobalName -> Maybe (GlobalName, Regex)
+tokenClassAt env c = do
+  d <- lookupDefinition c env
   t <- case whnf env [] (definitionType d) of
-    App (Global g []) t | g == tokenName -> case whnf env [] t of
+    App (Global g []) t' | g == tokenName -> case whnf env [] t' of
       Global tn [] -> Just tn
       _ -> Nothing
     _ -> Nothing
@@ -1365,7 +1784,7 @@ earleyRules gs = typeRules gs ++
         same = [ (x, ps) | x <- nub slots, let ps = [ k | (y, k) <- zip slots [0 ..], y == x ], length ps > 1 ]
   ]
   where
-    nameOf (GlobalName n) = n
+    nameOf = nameDotted
     symbol i = case i of
       Terminal t -> Earley.Literal t
       -- **A class slot is labelled with its CLASS, not with the word that wrote
@@ -1375,7 +1794,11 @@ earleyRules gs = typeRules gs ++
       -- rule text to the metavariables named after this label. Labelling it @v@
       -- would make POPLMark's rules write @v # \915@ where they write @X # \915@,
       -- which is the class's own name standing as its metavariable.
-      Slot _ (OfClass cls _ re) _ -> Earley.Scan (nameOf cls) re
+      -- **The label is the class's WORD** (MS10 phase 259): it is what a
+      -- reader wrote, and 'Thena.Language.Judgment.narrow' turns it back into
+      -- the regex a rule's class slot reads — @metavariables ["A.x"]@ would
+      -- make a rule write the class's path where its name goes.
+      Slot _ (OfClass cls _ re) _ -> Earley.Scan (classWord cls) re
       Slot _ (OfLanguage h) _ -> Earley.Nonterminal (nameOf h)
       -- **Every universe reads the one nonterminal**, because which level a type
       -- spelling is at is not a syntactic question — @LC@ is at @Type\8320@ and

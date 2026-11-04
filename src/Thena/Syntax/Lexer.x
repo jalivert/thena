@@ -24,7 +24,23 @@ $lower  = [a-z]
 $upper  = [A-Z]
 -- Reserved characters: the brackets, the separators, and every character that
 -- spells an operator on its own. Nothing else is off limits inside a name.
-$reserved = [\( \) \{ \} \[ \] \; \, \" \` ⟨ ⟩ λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
+--
+-- **The dot joined them at MS10 phase 240**, when a global name gained a
+-- namespace path: @.@ now separates a path's steps, so it cannot also be an
+-- ordinary character inside one. @List.map@ was a single identifier before this
+-- and is a qualified name now — see @\@qualified@ below.
+--
+-- **@⟨ ⟩@ LEFT THE SET AT MS10 PHASE 269** (`~3t63k`), with the @⟨ … ⟩@ alias
+-- that was the only thing they spelled. **Reserving a character narrows every
+-- name in every language at once**, so a character that spells nothing does not
+-- stay reserved — @.claude\/spec\/interface.md@ said this set would have to
+-- shrink when the alias went, and this is it shrinking.
+--
+-- **@⌜ ⌝@ spell nothing either and DO stay**, which is the one exception and it
+-- is load-bearing: @Thena.Driver.resolving@ hoists a written core term into a
+-- binding it names @⌜1⌝@, and that name is safe only because no identifier may
+-- hold a corner. The notation they used to spell is gone with the alias.
+$reserved = [\( \) \{ \} \[ \] \; \, \" \` \. λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
 
 -- A name starts with a letter — ASCII, or any non-reserved character above the
 -- ASCII range — and continues with anything that is neither reserved nor
@@ -70,6 +86,15 @@ $rechar = [$printable \t] # [\/ \\]
 @regex  = \/ ($rechar | \\ [$printable \t])+ \/
 
 @ident    = $idstart $idchar*
+
+-- A qualified name: the path's steps and its base word, glued by dots.
+--
+-- **Glued, with no spaces, and that is what tells it from the two other things
+-- a dot does.** @...@ is 'TSpread' and a lone @.@ is 'TDot', the
+-- inaccessible-pattern marker (MS9 phase 228) — which stands /before/ a name,
+-- @.n@, where a step stands /after/ one. Alex takes the longest match, so
+-- @k .n@ is three tokens and @k.n@ is one, exactly as it reads.
+@qualified = @ident (\. @ident)+
 @universe = "Type" ($digit+ | $sub+)
 
 tokens :-
@@ -113,7 +138,6 @@ tokens :-
   "▸"           { keyword TPending }
   "|-"          { keyword TTurnstile }
   "⊢"           { keyword TTurnstile }
-  "[|"          { keyword TOpenQuote }
   -- **@...@ is a token and reserves nothing** (MS5 phase 82). @.@ is an
   -- @$idchar@ but not an @$idstart@, so no identifier has ever begun with one
   -- and @...rest@ lexes as this token and then a name. An identifier that
@@ -128,9 +152,6 @@ tokens :-
   "["           { keyword TLBracket }
   "]"           { keyword TRBracket }
   ","           { keyword TComma }
-  "⌜"           { keyword TOpenQuote }
-  "|]"          { keyword TCloseQuote }
-  "⌝"           { keyword TCloseQuote }
   "forall"      { keyword TForall }
   "let"         { keyword TLet }
   "in"          { keyword TIn }
@@ -174,9 +195,26 @@ tokens :-
   "module"      { keyword TModule }
   -- **Reserved at MS4 phase 45**, for a block of the instruction language
   -- inside a surface term or at the top of a module. The third word to narrow
-  -- identifiers project-wide, after @data@ and @module@, and the last the
-  -- surface language is expected to need.
+  -- identifiers project-wide, after @data@ and @module@.
   "do"          { keyword TDo }
+  -- **Reserved at MS10 phase 247**, for @open ‹namespace›@ — the fourth word to
+  -- narrow identifiers project-wide, and MS4's note that @do@ would be the last
+  -- did not survive the module system. It is a declaration keyword like @data@
+  -- and @module@ and is reserved for their reason: the header is real syntax
+  -- rather than a textual pre-pass.
+  "open"        { keyword TOpen }
+  -- **Reserved at MS10 phase 254**, for @namespace ‹name› where { … }@ — the
+  -- fifth word to narrow identifiers project-wide. His ruling of 2026-10-30
+  -- costed it with the partition and took it: a namespace that is declared,
+  -- rather than taken from the file's path, is what decouples the unit you
+  -- import from the scope a name lives in.
+  "namespace"   { keyword TNamespace }
+  -- **Reserved at MS10 phase 254**, for @open X hiding ( … )@ and
+  -- @open X renaming ( e -> c )@ — the sixth and seventh words to narrow
+  -- identifiers project-wide, and the last the module system needs. They are
+  -- part of a declaration's syntax, so they are reserved for @data@'s reason.
+  "hiding"      { keyword THiding }
+  "renaming"    { keyword TRenaming }
   -- **The escape opener is an ordinary token too** (MS5 phase 81). The region
   -- scanner emits one when it meets @${@ inside a tagged region; this is what
   -- lets the same spelling be read again when the region's text is lexed for
@@ -214,12 +252,20 @@ tokens :-
   "Type"        { \p _ -> Located (posOf p) TUniverseOpen }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
   @ident \`      { \p str -> Located (posOf p) (TTagOpen (init str)) }
+  -- **A TAG MAY BE QUALIFIED** (MS10 phase 260): a tag resolves like any other
+  -- name — his ruling of 2026-10-30 — so @A.Ty\`…\`@ has to be writable, the
+  -- way @A.Ty@ is writable as a name. **It needs a rule of its own because @.@
+  -- is reserved**: it stopped being an @$idchar@ at phase 240, so @\@ident@ cannot
+  -- reach past the first step and a qualified tag was *unexpected character
+  -- @\`@* until this line. The bare word still works and goes through the walk.
+  @qualified \`  { \p str -> Located (posOf p) (TTagOpen (init str)) }
   -- **A tag may name the production to start at** (MS6 phase 104,
   -- @ms6\/SPEC.md@ §8): @LC[var]\`…\`@ reads a variable occurrence where
   -- @LC\`…\`@ reads any term. The brackets are reserved characters, so no
   -- identifier contains one and this rule cannot take a longer name apart.
   @ident \[ @ident \] \` { \p str -> Located (posOf p) (tagAt (init str)) }
-  "⟨"           { keyword (TTagOpen "surface") }
+  @qualified \[ @ident \] \` { \p str -> Located (posOf p) (tagAt (init str)) }
+  @qualified    { \p s -> Located (posOf p) (TQIdent (steps s)) }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
 
 {
@@ -271,8 +317,6 @@ data Token
   | TPending
   | TTurnstile
   | TEquate
-  | TOpenQuote
-  | TCloseQuote
   | TLet
   | TIn
   | TElim
@@ -286,6 +330,10 @@ data Token
     -- (MS4 phase 43). No grammar uses it; it exists so that the lexer can say
     -- what it saw rather than failing, and so a later operator may claim it.
   | TData
+  | TOpen        -- ^ @open@, the declaration that brings a namespace into view (MS10 phase 247)
+  | TNamespace   -- ^ @namespace ‹name› where { … }@ (MS10 phase 254)
+  | THiding      -- ^ @open X hiding ( … )@ (MS10 phase 254)
+  | TRenaming    -- ^ @open X renaming ( e -> c )@ (MS10 phase 254)
   | TModule
   | TDo
   | TRule
@@ -311,6 +359,11 @@ data Token
   | TUniverse Int
   | TUniverseOpen
   | TIdent String
+  | TQIdent [String]
+    -- ^ @List.map@ — a qualified name, already in pieces: every step of the
+    -- path and then the base word, which is the last of them and is always
+    -- present (MS10 phase 240). Two or more pieces, since one piece is a
+    -- 'TIdent'.
     -- The tagged-region tokens (MS5 phase 60). A region is @name\`…\`@: the
     -- lexer finds its extent and hands over **raw text**, because an object
     -- language has its own lexical rules and tokenising it here would impose
@@ -344,6 +397,17 @@ tagAt :: String -> Token
 tagAt str = case break (== '[') str of
   (lang, _ : rest) -> TTagOpenAt lang (takeWhile (/= ']') rest)
   (lang, [])       -> TTagOpen lang
+
+-- | The pieces of a qualified name, in order: every step of the path, then the
+-- base word. @"List.map"@ is @["List","map"]@.
+--
+-- Total on what @\@qualified@ can match, which is the only thing that reaches
+-- it: that pattern has at least one dot, and a non-empty @\@ident@ on each side
+-- of every one.
+steps :: String -> [String]
+steps s = case break (== '.') s of
+  (piece, '.' : rest) -> piece : steps rest
+  (piece, _)          -> [piece]
 
 posOf :: AlexPosn -> Pos
 posOf (AlexPn _ line col) = Pos line col
@@ -445,14 +509,17 @@ loop blocks modes inp@(pos, _, _, str) = case modes of
             -- the layout pass then reports as closing a block nobody opened.
             -- NB: no literal braces in this comment — Alex counts them.
             -- **An object-language block is taken whole** (MS6 phase 101): its
-            -- keyword at column 1 of a module, outside every region. Its
+            -- keyword at any column, outside every region. **At any column
+            -- since MS10 phase 258**, so a block may be written inside a
+            -- @namespace@ block; the keyword's own column is what ends it, and
+            -- column 1 was the same rule with the margin as the only option. Its
             -- contents are an object language's notation, which Thena's
             -- lexer must not tokenise — @[@, @λ@ and a regex's characters are
             -- reserved here — so they are handed over as text, exactly as a
             -- tagged region's are.
             ([], _)
-              | blocks, Pos _ 1 <- lp, Just k <- blockKindOf tk ->
-                  let (body, inp'') = blockText inp'
+              | blocks, Just k <- blockKindOf tk, Pos _ col <- lp ->
+                  let (body, inp'') = blockText col inp'
                    in (Spanned lp (TBlock k body) body :) <$> loop blocks modes inp''
             (_, TEscapeOpen) -> (t :) <$> loop blocks (Esc 0 : modes) inp'
             -- The brace that closes the escape, rather than one its code wrote.
@@ -460,12 +527,11 @@ loop blocks modes inp@(pos, _, _, str) = case modes of
               (Spanned lp TEscapeClose matched :) <$> loop blocks outer inp'
             (Esc d : outer, TRBrace) -> (t :) <$> loop blocks (Esc (d - 1) : outer) inp'
             (Esc d : outer, TLBrace) -> (t :) <$> loop blocks (Esc (d + 1) : outer) inp'
-            -- Which character closes the region depends on how it was opened:
-            -- a tag's own backtick, or the ⟩ that closes the ⟨ alias.
-            (_, TTagOpen _)
-              | take 1 matched == "⟨" -> (t :) <$> loop blocks (Raw '⟩' : modes) inp'
-              | otherwise                    -> (t :) <$> loop blocks (Raw '`' : modes) inp'
-            (_, TTagOpenAt _ _)              -> (t :) <$> loop blocks (Raw '`' : modes) inp'
+            -- **A region is closed by the tag's own backtick, and by nothing
+            -- else** (MS10 phase 269): the @⟨ … ⟩@ alias opened a @surface@
+            -- region that @⟩@ closed instead, which is why this had two cases.
+            (_, TTagOpen _)     -> (t :) <$> loop blocks (Raw '`' : modes) inp'
+            (_, TTagOpenAt _ _) -> (t :) <$> loop blocks (Raw '`' : modes) inp'
             _                        -> (t :) <$> loop blocks modes inp'
   where
     firstOf cs = case cs of
@@ -479,8 +545,13 @@ loop blocks modes inp@(pos, _, _, str) = case modes of
 -- backslash escapes a backtick, a backslash, and a dollar, so a region can
 -- carry all three literally.
 -- | What a backslash may escape inside raw text.
+--
+-- **@⟩@ left the list at MS10 phase 269**, with the @⟨ … ⟩@ alias that made it
+-- a fence. It is three characters now and the same three
+-- 'Thena.Syntax.Print.escapeRaw' writes, which were two lists that could
+-- disagree.
 rawEscapes :: String
-rawEscapes = ['`', '\\', '$', '⟩']
+rawEscapes = ['`', '\\', '$']
 
 -- | The two characters that open an escape, written without a literal brace
 -- because Alex counts braces inside a code fragment and would end this one.
@@ -540,19 +611,30 @@ blockKindOf t = case t of
 -- | The rest of a block, from just after its keyword (@ms6\/SPEC.md@ §7.0):
 -- the rest of the keyword's line, then every line that is blank or indented.
 -- **The block ends at the first line indented no further than the keyword**,
--- and the keyword is at column 1, so that is the next line with anything in
--- column 1 — the next top-level item, or a comment at the margin.
-blockText :: AlexInput -> (String, AlexInput)
-blockText (p0, c0, _, s0) = go p0 c0 (takeLine s0)
+-- which is what the column is passed in for. Until MS10 phase 258 a keyword
+-- could only be at column 1, so this was written as /the next line with
+-- anything in column 1/ and needed no argument; **the general rule is the same
+-- rule**. Inside @namespace A where@ a @language@ at column 3 ends at the next
+-- line whose first character is at column 3 or before it — the namespace's next
+-- item, or anything back at the margin.
+blockText :: Int -> AlexInput -> (String, AlexInput)
+blockText col (p0, c0, _, s0) = go p0 c0 (takeLine s0)
   where
     go p c (line, rest) =
       let p' = foldl alexMove p line
           c' = if null line then c else last line
        in case rest of
-            (x : _) | x `notElem` " \t\n" -> (line, (p', c', [], rest))
             [] -> (line, (p', c', [], rest))
+            _ | dedented rest -> (line, (p', c', [], rest))
             _ -> let (more, inp) = go p' c' (takeLine rest)
                   in (line ++ more, inp)
+
+    -- **Is the next line's first character at the keyword's column or before
+    -- it?** That is what ends the block. A blank line has no first character,
+    -- so it never ends one — at any column, as it always was.
+    dedented s = case break (== '\n') s of
+      (l, _) | null (dropWhile (`elem` " \t") l) -> False
+             | otherwise -> length (takeWhile (`elem` " \t") l) + 1 <= col
     -- One line with its newline, if it has one.
     takeLine s = case break (== '\n') s of
       (l, '\n' : r) -> (l ++ "\n", r)

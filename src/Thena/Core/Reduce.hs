@@ -27,6 +27,7 @@ import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , rootName
   , Literal (..)
   , Var
   , beyond
@@ -223,10 +224,15 @@ whnf env ctx = go 0
 -- from it has no rule, so the driver refuses the declaration rather than
 -- installing a constant that would sit there as an axiom
 -- (@ms6\/SPEC.md@ §2.1).
+-- **Each one lives in its own type's namespace** (MS10 phase 246, his ruling of
+-- 2026-10-30), as every generated name has since phase 242. The /type/ stays at
+-- the root — @String@ is a primitive type and
+-- nothing declares it — so the step and the type that 'Comparing' names are the
+-- same word standing for different things, a namespace and a name.
 primitiveNames :: [(GlobalName, PrimitiveRule)]
 primitiveNames =
-  [ (GlobalName ("eq" ++ p), Comparing (GlobalName p)) | p <- ["String", "Char", "Int"] ]
-  ++ [ (GlobalName "appendString", Appending) ]
+  [ (GlobalName [p] "eq", Comparing (rootName p)) | p <- ["String", "Char", "Int"] ]
+  ++ [ (GlobalName ["String"] "append", Appending) ]
 
 -- | What a primitive computes, and so what type the driver will accept it at
 -- ('Thena.Driver.checkedPrimitive').
@@ -256,7 +262,7 @@ data PrimitiveRule
 -- without a second opinion.
 --
 -- **Both arguments are reduced before they are read** — @reduce@ is 'whnf' in
--- the caller's context. Matching them as they stood left @eqString a "x"@
+-- the caller's context. Matching them as they stood left @String.eq a "x"@
 -- stuck when @a@ is a definition of @"x"@, which is reduction incomplete on a
 -- closed term (found in phase 100, @ms6\/CLOSEOUT.md@ 7). They are reduced
 -- only once the head is known to be a primitive, so no other application pays.

@@ -13,7 +13,8 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, close, fresh)
+import Thena.Core.Term
+  (Core (..), GlobalName (..), Ident (..), Var, close, fresh, openedWhole, rootName, rootScope)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   (Cursor, Focus (..), along, context, enter, focus, identsIn, rebuild)
@@ -31,8 +32,10 @@ import Thena.Engine
   , splicing
   )
 import Thena.Errors (FailReason (..), MoveError (..))
-import Thena.Global.Env (GlobalEnv, emptyGlobals)
-import Thena.Declared (nat)
+import Thena.Global.Env
+  (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
+import Thena.Declared (nat, named)
+import Data.List (sort)
 import qualified Thena.Instral.Ops as Op
 import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Value (..))
 
@@ -57,7 +60,7 @@ machine = machineIn emptyGlobals
 
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env' [] [] [] 1000 0
+  load is (Machine (Exec [] [] []) (Development cur) [] env' [] [] [] rootScope 1000 0
                    NoUndischargeableTrust)
 
 -- | Run to a stop, and hand back the environment or the reason.
@@ -302,8 +305,8 @@ gotoTests =
                       ] of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m ->
-            let named = [ i | Ident i <- identsIn (cursor (development m)), i == "h" ]
-             in length named @?= 2
+            let hs = [ i | Ident i <- identsIn (cursor (development m)), i == "h" ]
+             in length hs @?= 2
 
     , testCase "and fresh-name is how a rule gets one that is not" $
         case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm type0)))
@@ -319,7 +322,7 @@ gotoTests =
     , testCase "fresh-name avoids the globals too" $
         case go (machineIn nat hole [Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "Nat")))]) of
           Left r  -> assertFailure ("did not run: " ++ show r)
-          Right m -> bound "n" m @?= Just (VText "Nat1")
+          Right m -> bound "n" m @?= Just (VName (rootName "Nat1"))
 
     , testCase "and attack's inner hole is not its outer one" $
         case run hole [Do Attack, Do Into] of
@@ -344,8 +347,8 @@ gotoTests =
         case run hole [ Bind (Op.PVar "h") Nothing (Claim (Lit (VText "h")) (Lit (VTerm type0)))
                       , Do (Op.GotoNamed (Ref "h"))
                       ] of
-          Left ExpectedText -> pure ()
-          other -> assertFailure ("expected ExpectedText, got " ++ show (fmap (const ()) other))
+          Left ExpectedName -> pure ()
+          other -> assertFailure ("expected ExpectedName, got " ++ show (fmap (const ()) other))
     ]
 
 -- --------------------------------------------------------------------------
@@ -406,9 +409,14 @@ resolveTests :: TestTree
 resolveTests =
   testGroup
     "resolve-name"
+      -- Written in full, because @nat@ opens nothing: the constructor is
+      -- @Nat.zero@ and the bare word reaches it only under an @open@, which the
+      -- case four below is about. A dotted /name/ and not dotted text —
+      -- 'operandName' refuses the latter.
     [ testCase "a declared constructor is a global" $ do
-        v <- expectBoundIn nat hole [Bind (Op.PVar "z") Nothing (ResolveName (Lit (VText "zero")))] "z"
-        v @?= VTerm (Global (GlobalName "zero") [])
+        v <- expectBoundIn nat hole
+               [Bind (Op.PVar "z") Nothing (ResolveName (Lit (VName (named "Nat.zero"))))] "z"
+        v @?= VTerm (Global (named "Nat.zero") [])
 
       -- §3.6's one namespace: a binder shadows a global of the same name, and
       -- this is the order "Thena.Syntax.Resolve" uses for the same reason. The
@@ -427,7 +435,121 @@ resolveTests =
         case runIn nat hole [Do (ResolveName (Lit (VText "nope")))] of
           Left (CannotRead _) -> pure ()
           other -> assertFailure ("expected CannotRead, got " ++ show (fmap (const ()) other))
+
+      -- **THE HALF THAT WAS MISSING UNTIL MS10**, and the measured defect: a
+      -- name arrived here as text, so @resolve-name@ built a name at the root
+      -- whose word was @"Ns.thing"@ and the environment — which holds
+      -- @GlobalName ["Ns"] "thing"@ — had nothing of that shape. A file
+      -- writing @String.append "a" "b"@ was refused /not in scope:
+      -- String.append/ with the lexer and the parser both working.
+    , testCase "a qualified name resolves to the global of that path" $ do
+        v <- expectBoundIn qualified hole
+               [ Bind (Op.PVar "v") Nothing
+                      (ResolveName (Lit (VName (GlobalName ["Ns"] "thing")))) ] "v"
+        v @?= VTerm (Global (GlobalName ["Ns"] "thing") [])
+
+      -- **A path is how the writer says they did not mean a local**, so Γ is
+      -- not consulted at all for a qualified name — only a root name can be
+      -- shadowed.
+    , testCase "an assumption of the base word does not shadow it" $ do
+        v <- expectBoundIn qualified hole
+               [ Do (Assume (Lit (VText "thing")) (Lit (VTerm type0)))
+               , Bind (Op.PVar "v") Nothing
+                      (ResolveName (Lit (VName (GlobalName ["Ns"] "thing")))) ] "v"
+        v @?= VTerm (Global (GlobalName ["Ns"] "thing") [])
+
+      -- **And the same word at the root is a different name**, which is why the
+      -- flattening was wrong and not merely untidy.
+    , testCase "the base word alone is not in scope" $
+        case runIn qualified hole [Do (ResolveName (Lit (VText "thing")))] of
+          Left (CannotRead _) -> pure ()
+          other -> assertFailure ("expected CannotRead, got " ++ show (fmap (const ()) other))
+
+      -- **…until the namespace is opened** (MS10 phase 247), which is the whole
+      -- of what @open@ does: the written name is tried under each open prefix.
+    , testCase "an open namespace is what makes the base word resolve" $ do
+        v <- expectBoundIn qualified hole
+               [ Do (Open (openedWhole ["Ns"]))
+               , Bind (Op.PVar "v") Nothing (ResolveName (Lit (VText "thing"))) ] "v"
+        v @?= VTerm (Global (GlobalName ["Ns"] "thing") [])
+
+      -- **A namespace nothing sits under is refused where it is written**, not
+      -- left to make every later name fail on its own.
+    , testCase "opening a namespace that holds nothing is refused" $
+        case runIn qualified hole [Do (Open (openedWhole ["Nope"]))] of
+          Left (NoSuchNamespace n) -> n @?= "Nope"
+          other -> assertFailure ("expected NoSuchNamespace, got " ++ show (fmap (const ()) other))
+
+      -- **Two namespaces answering one word is a refusal, not a choice**
+      -- (`~7x8rt`'s third situation): either would type-check, so choosing would
+      -- be the system deciding what the user did not write.
+    , testCase "two open namespaces answering one word is ambiguous" $
+        case runIn twoNamespaces hole
+               [ Do (Open (openedWhole ["Ns"]))
+               , Do (Open (openedWhole ["Other"]))
+               , Do (ResolveName (Lit (VText "thing"))) ] of
+          Left (AmbiguousName n gs) -> do
+            n @?= "thing"
+            sort gs @?= ["Ns.thing", "Other.thing"]
+          other -> assertFailure ("expected AmbiguousName, got " ++ show (fmap (const ()) other))
+
+      -- **The name as written wins outright**, so an @open@ can only ever add a
+      -- way to resolve and never change one that already worked.
+    , testCase "a name that already resolves is not reconsidered under an open" $ do
+        v <- expectBoundIn twoNamespaces hole
+               [ Do (Open (openedWhole ["Ns"]))
+               , Bind (Op.PVar "v") Nothing
+                      (ResolveName (Lit (VName (GlobalName ["Other"] "thing")))) ] "v"
+        v @?= VTerm (Global (GlobalName ["Other"] "thing") [])
+
+      -- **A dotted string literal is refused where it is read, not left to
+      -- fail to resolve** (MS10 phase 245). It used to be rooted and then not
+      -- found, which is the right answer by luck: @define-global@ took the same
+      -- operand and /installed/ the forbidden shape. The refusal is now the
+      -- reading itself, so every name operand gets it.
+    , testCase "a dotted string literal is not a name at all" $
+        case runIn qualified hole [Do (ResolveName (Lit (VText "Ns.thing")))] of
+          Left (DottedTextName w) -> w @?= "Ns.thing"
+          other -> assertFailure ("expected DottedTextName, got " ++ show (fmap (const ()) other))
+
+      -- **And it is refused where it would have been installed**, which is the
+      -- half that mattered: nothing else stood between a rule writing
+      -- @\"A.b\"@ and a global whose word held a dot.
+    , testCase "and a declaration cannot be named by one either" $
+        case runIn qualified hole
+               [ Do (DeclarePrimitive (Lit (VText "String.eq"))
+                                      (Lit (VTerm type0))) ] of
+          Left (DottedTextName w) -> w @?= "String.eq"
+          other -> assertFailure ("expected DottedTextName, got " ++ show (fmap (const ()) other))
+
+      -- **A name in the development's own scope may not have a path** — there
+      -- are no namespaces there for one to name anything in, so @assume@
+      -- refuses rather than dropping it.
+    , testCase "a component may not be named with a path" $
+        case runIn qualified hole
+               [ Do (Assume (Lit (VName (GlobalName ["Ns"] "thing")))
+                            (Lit (VTerm type0))) ] of
+          Left (NotAnIdentifier w) -> w @?= "Ns.thing"
+          other -> assertFailure ("expected NotAnIdentifier, got " ++ show (fmap (const ()) other))
     ]
+
+-- | An environment holding @Ns.thing@, and nothing at the root.
+--
+-- **A definition rather than a constant**, as 'Thena.SyntaxTests' explains: a
+-- constant does not resolve in term position.
+qualified :: GlobalEnv
+qualified =
+  addDefinition (GlobalName ["Ns"] "thing")
+                (MkDefinition [] [] type0 type0)
+                emptyGlobals
+
+-- | Two namespaces holding the same base word (MS10 phase 247), for the
+-- ambiguity an @open@ of both creates.
+twoNamespaces :: GlobalEnv
+twoNamespaces =
+  addDefinition (GlobalName ["Other"] "thing")
+                (MkDefinition [] [] type0 type0)
+                qualified
 
 runIn :: GlobalEnv -> Cursor -> [Instr] -> Either FailReason Machine
 runIn env' cur is = go (machineIn env' cur is)

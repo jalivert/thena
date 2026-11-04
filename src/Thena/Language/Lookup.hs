@@ -51,7 +51,7 @@ module Thena.Language.Lookup
 
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (declarationNamed, nameWord)
 import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
   ( Argument (..)
@@ -60,10 +60,12 @@ import Thena.Language.Grammar
   , Grammar (..)
   , Item (..)
   , Sort (..)
-  , universeSpelling
   , extensionsOf
+  , grammarWord
   , isName
   , lookupNamesOf
+  , lookupRelation
+  , sortType
   )
 import Thena.Surface.Concrete
   ( Plicity (..)
@@ -72,6 +74,7 @@ import Thena.Surface.Concrete
   , SurfaceBinder (..)
   , SurfaceConstructor (..)
   , SurfaceData (..)
+  , surfaceName
   )
 import Thena.Syntax.Lexer (BlockKind (..))
 
@@ -84,6 +87,7 @@ lookupGrammars g = [ lg | e <- extensionsOf g, Just lg <- [notationOf g e] ]
 notationOf :: Grammar -> GProduction -> Maybe Grammar
 notationOf g e = do
   inN : _ <- Just (lookupNamesOf g e)
+  let relation = lookupRelation (grammarName g) inN
   let (before, rest) = break own (gproductionItems e)
   (ctxSlot, after) <- case rest of
     s : more -> Just (s, more)
@@ -102,7 +106,21 @@ notationOf g e = do
   -- production carries is the relation's datatype, so @x : T ∈ Γ@ is a /type/.
   -- That kind is what admits it above a rule's bar, replacing the label this
   -- record used to be admitted by.
-  Just (Grammar JudgmentBlock (GlobalName inN) [inN] [GProduction (GlobalName inN) items args TypeFormer])
+  -- **The production is named after the DATATYPE the relation becomes**, which
+  -- is @extend-in.extend-in@ and not the root word (MS10 phase 252): a
+  -- declaration lives in the namespace it opens, so the type former's own
+  -- spelling has to carry that step or the printer cannot find the production
+  -- for a term whose head is the declared relation — and a constructor's type
+  -- then prints as an application where the notation should stand.
+  --
+  -- **AND THE RELATION IS IN THE CONTEXT'S NAMESPACE SINCE MS10 PHASE 263**
+  -- (`~gkbgs`, his ruling of 2026-11-03), so the grammar's name is
+  -- @A.Ctx.extend-in@ — **absolute, because a tag resolves against a grammar's
+  -- name by the walk** ('Thena.Language.Grammar.grammarForTag') and an installed
+  -- grammar has to carry where it is. What is MINTED from it is relative, and
+  -- that is 'relationOf''s business, not this one's.
+  Just (Grammar JudgmentBlock relation [inN]
+          [GProduction (declarationNamed relation) items args TypeFormer])
   where
     own i = case i of
       Slot _ srt _ -> srt == OfLanguage (grammarName g)
@@ -133,7 +151,8 @@ relationOf g e = do
   let -- Every binder is primed until it names no type the constructor
       -- mentions and nothing bound before it, as 'Thena.Driver.grammarDatatype'
       -- primes a constructor's.
-      taken = [inN, "Eq", "Empty", nm (grammarName g)] ++ map (typeName . argumentSort) indices
+      -- **Words, because a binder is a word** (MS10 phase 258).
+      taken = [inN, "Eq", "Empty", nameWord (grammarName g)] ++ map (typeName . argumentSort) indices
       fresh used x | x `elem` taken || x `elem` used = fresh used (x ++ "'")
                    | otherwise = x
       names used xs = foldl (\(ys, u) x -> let y = fresh u x in (ys ++ [y], y : u)) ([], used) xs
@@ -141,21 +160,31 @@ relationOf g e = do
       gamma = fresh [] (argumentName ctxArg)
       (outer, used1) = names [gamma] (map argumentName others)
 
-      ref = SurfaceName
+      ref = SurfaceName []
       binder x a = SurfaceBinder Explicit x (Just (typeOf a))
       -- An extension applied, with the context and the entry's own names.
-      extend k ctx entry = app (ref (nm (gproductionName k)))
+      -- **The production's own name, path and all** (MS10 phase 248): a
+      -- context's extensions are constructors of its datatype and live in its
+      -- namespace, so @ref@ on the dotted spelling would root them.
+      extend k ctx entry = app (surfaceName (gproductionName k))
         [ if argumentSort a == OfLanguage (grammarName g) then ref ctx
           else ref (lookupOr (argumentName a) entry)
         | a <- gproductionArguments k ]
       lookupOr x entry = case lookup x entry of
         Just y -> y
         Nothing -> x
+      -- **The BARE word, even though the relation is in the context's
+      -- namespace since MS10 phase 263.** A constructor's type is elaborated
+      -- with the datatype under an 'Thena.Instral.Ops.Assume' named after its
+      -- WORD ('Thena.Driver.datatypeProgram'), so the self-reference is a local
+      -- and not a global at all — writing @Ctx.extend-in@ here answered
+      -- /not in scope/, measured, because that path is only declared once
+      -- @MakeData@ has run.
       inRel entry ctx = app (ref inN) ([ ref y | (_, y) <- entry ] ++ [ctx])
       outerEntry = zip (map argumentName others) outer
       keyOf a entry = ref (lookupOr (argumentName a) entry)
 
-      here = SurfaceConstructor hereN $
+      here = SurfaceConstructor [] hereN $
         SurfacePi (NE.fromList (binder gamma ctxArg : zipWith binder outer others))
           (inRel outerEntry (extend e gamma outerEntry))
 
@@ -175,7 +204,7 @@ relationOf g e = do
                   (app (ref "Eq") [typeOf key, keyOf key outerEntry, keyOf a innerEntry]) (ref "Empty")))
               | a <- take 1 shadows ]
             iN = fresh (neN : used2) "i"
-         in ( SurfaceConstructor thereN $
+         in ( SurfaceConstructor [] thereN $
                 SurfacePi (NE.fromList
                   ( binder gamma ctxArg : zipWith binder outer others ++ zipWith binder inner kOthers
                     ++ premises
@@ -184,21 +213,19 @@ relationOf g e = do
             , replicate (2 + length others + length kOthers + length premises) Plain )
       theres = map stepping (zip thereNs (extensionsOf g))
       relType = foldr (SurfaceArrow . typeOf) (SurfaceUniverse 0) indices
-  Just ( SurfaceData inN [] relType (here : map fst theres)
+  -- **The context's WORD as the path, and nothing deeper** (MS10 phase 263):
+  -- 'Thena.Engine.declaredIn' supplies the enclosing namespace, so minting
+  -- @A.Ctx.extend-in@ here would place it twice.
+  Just ( SurfaceData [grammarWord g] inN [] relType (here : map fst theres)
        , replicate (1 + length others) Plain : map snd theres )
   where
     entryOf k = [ a | a <- gproductionArguments k, argumentSort a /= OfLanguage (grammarName g) ]
     classOf a = case argumentSort a of
       OfClass cls _ _ -> Just cls
       _ -> Nothing
-    nm (GlobalName n) = n
-    typeName srt = case srt of
-      OfLanguage l -> nm l
-      OfClass _ t _ -> nm t
-      -- A universe slot exists only in a @notation@ block, where no datatype is
-      -- generated; a @context@ production carrying one is refused by
-      -- @UniverseSlot@ (MS8 phase 160). The spelling is what it would be named.
-      OfUniverse n -> universeSpelling n
-    typeOf = SurfaceName . typeName . argumentSort
+    -- **'Thena.Language.Grammar.sortType' is the one definition** (MS10 phase
+    -- 258); this module had a third copy of it.
+    typeName = sortType
+    typeOf = SurfaceName [] . typeName . argumentSort
     app f [] = f
     app f xs = SurfaceApp f (NE.fromList (map (SurfaceArg Explicit) xs))

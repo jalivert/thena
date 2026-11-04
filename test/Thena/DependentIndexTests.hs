@@ -14,7 +14,7 @@
 -- is the one the unit suite cannot make: @Thena.EliminateTests@ pins the
 -- motive as a string, which says it has the shape intended, while @qed@ runs
 -- 'Thena.Kernel.certify' and says the kernel accepts the term built from it.
--- Same pattern as "Thena.DeterminacyTests", and for the same reason.
+-- Same pattern as "Thena" "DeterminacyTests", and for the same reason.
 --
 -- __And the tied case, which is the one that states an equation — MS9 phase
 -- 214, @~7gmvr@ step three.__ @examples\/tied-index-chain.thena@ declares
@@ -29,7 +29,7 @@
 -- MS9 phase 215.__ @examples\/dependent-argument-chain.thena@ declares
 -- @Pack@, whose one constructor's /own/ arguments are dependent — @i : Fin n@
 -- after @n : N@ — over a datatype with no indices at all. So the chain is in
--- @noConfusionPack@ rather than in the motive, and the transition that meets it
+-- @Pack.lemmata.noConfusion@ rather than in the motive, and the transition that meets it
 -- is injectivity rather than solution. Neither telescope is downstream of the
 -- other.
 --
@@ -45,14 +45,15 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=), assertBool)
 
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (Canonical), GlobalName (..))
+import Thena.Core.Term (Core (Canonical), GlobalName (..), rootName)
 import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore)
 
 -- | Relative to the package root, which is where the suite runs.
@@ -93,27 +94,27 @@ tests =
     , testCase "and the split's definition is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        case lookupDefinition (GlobalName "tied") (globals (machineOf s')) of
+        case lookupDefinition (rootName "tied") (globals (machineOf s')) of
           Nothing -> assertFailure "tied was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (m : N) -> Q (s m) (fz m) -> N"
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "\8704 (m : N.N) -> Q.Q (N.s m) (Fin.fz m) -> N.N"
 
       -- __AND THE SAME CHAIN CROSSED BY INJECTIVITY RATHER THAN BY SOLUTION —
       -- MS9, @~rqs39@.__ @isFz@'s target pins the first index to @s n@, so the
       -- first equation is between two applications of @s@ where @mk@'s was a
       -- variable against a term. Injectivity drops that equation's binder, and
       -- the second equation — stated about it — is restated along the proof
-      -- rebuilt by @noConfusionNInv@, with @isLeftInvN@ carrying the method
+      -- rebuilt by @N.lemmata.noConfusionInv@, with @N.lemmata.isLeftInv@ carrying the method
       -- back. Refused by name until the backwards half was generated.
     , testCase "and the split injectivity crosses is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        case lookupDefinition (GlobalName "tiedTwo") (globals (machineOf s')) of
+        case lookupDefinition (rootName "tiedTwo") (globals (machineOf s')) of
           Nothing -> assertFailure "tiedTwo was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (m : N) -> Small (s m) (fz m) -> N"
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "\8704 (m : N.N) -> Small.Small (N.s m) (Fin.fz m) -> N.N"
 
       -- __And the arm answers with its own binder.__ The ambient @m@ and the
       -- constructor's @n@ are the same number here, so the type says nothing
@@ -121,18 +122,7 @@ tests =
     , testCase "and the arm injectivity crossed computes from its own binder" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        let m = machineOf s'
-        case lookupDefinition (GlobalName "twoFromArm") (globals m) of
-          Nothing -> assertFailure "twoFromArm was not admitted"
-          Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName "s") _ [inner] ->
-              case whnf (globals m) [] inner of
-                Canonical (GlobalName "s") _ [innermost] ->
-                  case whnf (globals m) [] innermost of
-                    Canonical (GlobalName "z") _ [] -> pure ()
-                    other -> assertFailure ("s (s " ++ show other ++ ")")
-                other -> assertFailure ("s applied to " ++ show other)
-            other -> assertFailure ("not a successor: " ++ show other)
+        numeral (machineOf s') "twoFromArm" 2
 
       -- __AND THE SHAPE DELETION MATCHES FIRST — MS9 phase 234, @~pxgxw@.__
       -- @T@'s index pins @fs@'s first argument on both sides, so the chain's
@@ -145,11 +135,11 @@ tests =
     , testCase "and a chain deletion matched first is crossed by injectivity" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        case lookupDefinition (GlobalName "pinned") (globals (machineOf s')) of
+        case lookupDefinition (rootName "pinned") (globals (machineOf s')) of
           Nothing -> assertFailure "pinned was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "T (fs (s z) (fz z)) -> Fin (s z)"
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "T.T (Fin.fs (N.s N.z) (Fin.fz N.z)) -> Fin.Fin (N.s N.z)"
 
       -- __And that arm binds the constructor's argument too.__ The type says
       -- nothing about it — @Fin (s z)@ has more than one inhabitant here — so
@@ -158,12 +148,12 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
         let m = machineOf s'
-        case lookupDefinition (GlobalName "pinnedFromArm") (globals m) of
+        case lookupDefinition (rootName "pinnedFromArm") (globals m) of
           Nothing -> assertFailure "pinnedFromArm was not admitted"
           Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName "fz") _ [inner] ->
+            Canonical (GlobalName ["Fin"] "fz") _ [inner] ->
               case whnf (globals m) [] inner of
-                Canonical (GlobalName "z") _ [] -> pure ()
+                Canonical (GlobalName ["N"] "z") _ [] -> pure ()
                 other -> assertFailure ("fz applied to " ++ show other)
             other -> assertFailure ("not fz: " ++ show other)
 
@@ -185,11 +175,11 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s argumentTarget
         let m = machineOf s'
-        case lookupDefinition (GlobalName "depth") (globals m) of
+        case lookupDefinition (rootName "depth") (globals m) of
           Nothing -> assertFailure "depth was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names m)) [] (definitionType d)
-              @?= "\8704 (m : N) (j : Fin m) -> Holds (pack m j) -> N"
+            renderCore (rendering [] (names m)) [] (definitionType d)
+              @?= "\8704 (m : N.N) (j : Fin.Fin m) -> Holds.Holds (Pack.pack m j) -> N.N"
 
       -- __The @Vec@-style families, which the corpus had never had — MS9 phase
       -- 216.__ @examples\/vector-families.thena@ declares @Vec@ at a level
@@ -212,15 +202,7 @@ tests =
     , testCase "and the recursion over it computes" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
-        let m = machineOf s'
-        case lookupDefinition (GlobalName "one") (globals m) of
-          Nothing -> assertFailure "one was not admitted"
-          Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName "s") _ [inner] ->
-              case whnf (globals m) [] inner of
-                Canonical (GlobalName "z") _ [] -> pure ()
-                other -> assertFailure ("s applied to " ++ show other)
-            other -> assertFailure ("not a successor: " ++ show other)
+        numeral (machineOf s') "one" 1
 
       -- __Two indices reaching back to the same earlier one__ — both of
       -- @Pairwise@\'s vectors are @Vec A n@, which is the shape MS9 phase 226
@@ -232,15 +214,7 @@ tests =
     , testCase "and so does the recursion over two vectors of one length" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
-        let m = machineOf s'
-        case lookupDefinition (GlobalName "two") (globals m) of
-          Nothing -> assertFailure "two was not admitted"
-          Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName "s") _ [inner] ->
-              case whnf (globals m) [] inner of
-                Canonical (GlobalName "z") _ [] -> pure ()
-                other -> assertFailure ("s applied to " ++ show other)
-            other -> assertFailure ("not a successor: " ++ show other)
+        numeral (machineOf s') "two" 1
 
       -- __A PROJECTION AT A PINNED INDEX — MS9 phase 235, @~5hshj@.__ Not a
       -- recursion and not a variable index: @vcons A m a as@ pins @vcons@'s
@@ -253,11 +227,11 @@ tests =
     , testCase "and a projection at a pinned index is admitted" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
-        case lookupDefinition (GlobalName "headAll") (globals (machineOf s')) of
+        case lookupDefinition (rootName "headAll") (globals (machineOf s')) of
           Nothing -> assertFailure "headAll was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (A : Type\8320) (P : A -> Type\8320) (m : N) (a : A) (as : Vec {0} A m) -> All A P (s m) (vcons {0} A m a as) -> P a"
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "\8704 (A : Type\8320) (P : A -> Type\8320) (m : N.N) (a : A) (as : Vec.Vec {0} A m) -> All.All A P (N.s m) (Vec.vcons {0} A m a as) -> P a"
 
       -- __And the arm answers with the argument it bound__, which the type
       -- cannot say: @headTwo@ is the projection at a one-element @All@, and
@@ -266,18 +240,7 @@ tests =
     , testCase "and the arm of that projection computes" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
-        let m = machineOf s'
-        case lookupDefinition (GlobalName "headTwo") (globals m) of
-          Nothing -> assertFailure "headTwo was not admitted"
-          Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName "s") _ [inner] ->
-              case whnf (globals m) [] inner of
-                Canonical (GlobalName "s") _ [innermost] ->
-                  case whnf (globals m) [] innermost of
-                    Canonical (GlobalName "z") _ [] -> pure ()
-                    other -> assertFailure ("s (s " ++ show other ++ ")")
-                other -> assertFailure ("s applied to " ++ show other)
-            other -> assertFailure ("not a successor: " ++ show other)
+        numeral (machineOf s') "headTwo" 2
 
       -- __AND THE CHAINED TELESCOPE — MS9 phase 237, @~fq5gp@.__ @Chain@'s
       -- third index is tied and its type mentions BOTH earlier ones, while the
@@ -293,11 +256,11 @@ tests =
     , testCase "and the chained split is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s chainedTarget
-        case lookupDefinition (GlobalName "chained") (globals (machineOf s')) of
+        case lookupDefinition (rootName "chained") (globals (machineOf s')) of
           Nothing -> assertFailure "chained was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (m : N) -> Chain (s m) (fz m) (bz m) -> N"
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "\8704 (m : N.N) -> Chain.Chain (N.s m) (Fin.fz m) (Below.bz m) -> N.N"
 
       -- __And the arm answers with the constructor's own payload__, which the
       -- type cannot say. A split that typechecked and refined nothing would
@@ -332,29 +295,34 @@ tests =
     , testCase "and the theorem is a global with the statement it should have" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadFile s target
-        case lookupDefinition (GlobalName "belowRefl") (globals (machineOf s')) of
+        case lookupDefinition (rootName "belowRefl") (globals (machineOf s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d  ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "∀ (n : Nat) (i : Fin n) -> Below n i -> Eq {0} (Fin n) i i"
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "∀ (n : Nat.Nat) (i : Fin.Fin n) -> Below.Below n i -> Eq.Eq {0} (Fin.Fin n) i i"
     ]
 
 -- | A global that must reduce to a specific @N@ numeral.
 --
 -- The payload assertions want /the arm bound this argument and not another/,
--- and a numeral is how a term says so: @z@ and @s@ are the only two things it
--- can be built from, so reducing to the right depth cannot happen by accident.
+-- and a numeral is how a term says so: @N.z@ and @N.s@ are the only two things
+-- it can be built from, so reducing to the right depth cannot happen by
+-- accident.
+--
+-- **Every payload assertion in this file goes through it** (MS10 phase 253):
+-- four wrote the same walk out and each one named the constructors at the root,
+-- so the namespace move broke them one at a time.
 numeral :: Machine -> String -> Int -> Assertion
 numeral m name expected =
-  case lookupDefinition (GlobalName name) (globals m) of
+  case lookupDefinition (rootName name) (globals m) of
     Nothing -> assertFailure (name ++ " was not admitted")
     Just d  -> go expected (whnf (globals m) [] (definitionBody d))
   where
     go 0 t = case t of
-      Canonical (GlobalName "z") _ [] -> pure ()
+      Canonical (GlobalName ["N"] "z") _ [] -> pure ()
       other -> assertFailure (name ++ ": expected z, got " ++ show other)
     go k t = case t of
-      Canonical (GlobalName "s") _ [inner] ->
+      Canonical (GlobalName ["N"] "s") _ [inner] ->
         go (k - 1) (whnf (globals m) [] inner)
       other ->
         assertFailure (name ++ ": expected a successor, got " ++ show other)

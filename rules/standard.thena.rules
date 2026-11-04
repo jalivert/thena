@@ -145,7 +145,7 @@ rule fit-core f :- when focus-is-hole
 -- was focus-is-component, written first to keep these out of the core
 -- fragment's match list — and it is FALSE: the ops insert above the focus
 -- through Cursor.insertAbove, which works from inside a core term too, so
--- `claim "k" ⌜ Nat ⌝` succeeds there. A head that refused what the op it wraps
+-- claim "k" core`Nat` succeeds there. A head that refused what the op it wraps
 -- allows would make the two clauses of one word disagree about where the word
 -- applies. The enter-binders lesson (MS4 phase 49c) is that a head must be
 -- TRUE, not that every rule must have one.
@@ -784,7 +784,7 @@ rule arms-are-distinct t :- when (surface-is-split t) (split-has-arms t)
 --
 -- `specialise` IS TOLD WHICH HYPOTHESES THE METHOD CARRIES rather than reading
 -- them off the declaration, because the declaration cannot say which scheme was
--- asked for — `caseD`'s methods carry none, and counting them from the
+-- asked for — `D.case`'s methods carry none, and counting them from the
 -- constructor made `case … of` refuse its own methods.
 split-cases : Surface -> List Name -> List Core -> MethodShape -> ()
 rule split-cases t [] [] m :- do
@@ -808,13 +808,13 @@ rule split-over t cs (hs, m) :- do split-cases t cs hs m
 -- WHICH ELIMINATOR THE WRITTEN WORD ASKS FOR, and the only place the two
 -- differ before a method is in hand. `prim-eliminate` builds an Eliminate node
 -- whose methods carry their inductive hypotheses; `prim-case` applies the
--- generated caseD, whose methods are the same ones without them. Both answer
+-- generated D.case, whose methods are the same ones without them. Both answer
 -- the same pair — the method holes, and what the motive added to each — so all
 -- downstream is shared.
 --
 -- An arm-less split goes through here too, so `case e of { }` really applies
--- caseD and `induction e of { }` really eliminates. Nothing downstream can
--- tell, and neither can the kernel: caseD δ-unfolds to an elimination.
+-- D.case and `induction e of { }` really eliminates. Nothing downstream can
+-- tell, and neither can the kernel: D.case δ-unfolds to an elimination.
 split-claim : Surface -> Core -> (List Core, MethodShape)
 rule split-claim t x :- when (split-is-induction t)
   do r = prim-eliminate x
@@ -974,7 +974,7 @@ rule without-hypotheses [c, ...cs] :-
      ; return p
 
 -- The two tactics. `prim-eliminate` is the generalising construction and
--- `prim-case` applies the generated caseD — the same two `split-claim` reaches,
+-- `prim-case` applies the generated D.case — the same two `split-claim` reaches,
 -- and reached here directly because the word is the rule's name.
 --
 -- EACH ENDS WHERE IT WAS INVOKED, and that is deliberate: the author asked for a
@@ -1263,7 +1263,7 @@ rule elaborate t :- when focus-is-hole (surface-is-trusted t)
 -- E⟦elim D ⃗p P ⃗m ⃗i t⟧ — an ordinary application of the eliminator's wrapper.
 --
 -- §3.7 generates a global for the eliminator the way it does for every former
--- and constructor, so `elim Nat (…) P (…) (…) n` and `elimNat (…) P … n` are
+-- and constructor, so `elim Nat (…) P (…) (…) n` and `Nat.elim (…) P … n` are
 -- the same term and this clause is the rewriting of one into the other. There
 -- is nothing here about eliminations that is not about applications.
 rule elaborate t :- when focus-is-hole (surface-is-elim t)

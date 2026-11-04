@@ -22,7 +22,7 @@ import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (nameDotted, wholePath)
 import Thena.Instral.Ops (Rule (ruleBody, ruleHead), ruleName)
 import Thena.View.Type (displaySignature)
 import Thena.View (rulesView)
@@ -38,7 +38,9 @@ import Thena.View.Instral
 import Thena.View.Redraw (redraw, redrawSurface)
 import Thena.View.Rules (RuleView (..), TestView (..), displayRule)
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
+  , rendering
   ,renderInstr, renderMatches, renderOperand)
 import Thena.Rules (RuleBase (..), allRules, testOperands, testWord)
 
@@ -80,7 +82,7 @@ declaredTypes = do
     []    -> pure ()
     e : _ -> assertFailure e
   where
-    nameOf r = case ruleName r of GlobalName g -> g
+    nameOf = nameDotted . ruleName
 
 -- | A green 'declaredTypes' over a base that declares nothing would prove nothing.
 declaredTypesNotVacuous :: IO ()
@@ -120,15 +122,15 @@ mismatch r
             <> "\n  drawn head:   " <> unlines drawnHead
         )
   where
-    rv = displayRule [] (Budget 200) [] [] 500 (Address []) Nothing r
-    shownLine = case renderMatches [r] of
+    rv = displayRule wholePath [] (Budget 200) [] [] 500 (Address []) Nothing r
+    shownLine = case renderMatches (rendering [] 0) [r] of
       [line] -> line
       other  -> "wrong count: " <> show (length other)
     drawnLine = unwords (ruleViewName rv : ruleViewParams rv)
-    shownBody = map (renderInstr (Rendering [] 500) []) (ruleBody r)
+    shownBody = map (renderInstr (rendering [] 500) []) (ruleBody r)
     drawnBody = map redrawStatement (ruleViewBody rv)
     shownHead =
-      [ testWord t <> concatMap ((" " <>) . renderOperand (Rendering [] 500) []) (testOperands t)
+      [ testWord t <> concatMap ((" " <>) . renderOperand (rendering [] 500) []) (testOperands t)
       | t <- ruleHead r
       ]
     drawnHead = map redrawTest (ruleViewHead rv)
@@ -180,6 +182,10 @@ redrawSkeleton at sk = case sk of
 redrawValue :: ValueView -> String
 redrawValue v = case v of
   ValText s -> s
+  -- **A name redraws bare, where text redraws as what was inside the quotes**
+  -- (MS10). 'Thena.Render.renderValue' quotes a string and prints a name as its
+  -- dotted path, and this walker is what checks the two agree.
+  ValName s -> s
   ValInt k -> show k
   ValChar t -> t
   ValBool True -> "true"
@@ -189,6 +195,6 @@ redrawValue v = case v of
   ValSome u -> "some " <> redrawValue u
   ValPair a b -> "(" <> redrawValue a <> ", " <> redrawValue b <> ")"
   ValLevel l -> l
-  ValTerm d -> "\8988" <> redraw d <> "\8989"
+  ValTerm d -> "core`" <> redraw d <> "`"
   ValSurface sh -> "\8249" <> redrawSurface sh <> "\8250"
   ValOpaque other -> "\8249" <> other <> "\8250"

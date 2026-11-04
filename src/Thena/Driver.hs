@@ -69,7 +69,7 @@ import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, shortestEnding, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -87,7 +87,7 @@ import Thena.Language.Regex
   , star
   )
 import Data.Char (isSpace)
-import Data.List (dropWhileEnd, isSuffixOf, nub, stripPrefix)
+import Data.List ((\\), intercalate, dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
@@ -124,6 +124,9 @@ import Thena.Errors
   , Warning (..)
   )
 import Thena.Development.Validate (revalidate)
+-- | Qualified for one name: 'Env.declaredNames' is the environment's keys and
+-- the 'declaredNames' below is an item's, and the two are different questions.
+import qualified Thena.Global.Env as Env (declaredNames)
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..), declare)
 
 import Thena.Kernel (certify)
@@ -140,6 +143,7 @@ import Thena.Global.Env
   , emptyGlobals
   , inductiveName
   , isDeclared
+  , knownIn
   , lookupConstant
   , lookupDefinition
   , lookupInductive
@@ -172,6 +176,8 @@ import Thena.Rules
   ( RuleBase (..)
   , RuleError
   , RuleIter
+  , Reading (..)
+  , rootReading
   , matches
   , next
   , resolveRule
@@ -194,6 +200,7 @@ import Thena.Surface.Concrete
   , SurfaceConstructor (..)
   , SurfaceData (..)
   , SurfaceDecl (..)
+  , SurfaceOpenSpec (..)
   , SurfaceModule (..)
   , PairingError (..)
   )
@@ -203,25 +210,27 @@ import qualified Thena.Surface.Parser as Surface
 import Thena.Syntax.Concrete (Raw (..))
 import Thena.Instral.Concrete
   ( RawDecl (..)
+  , RawOpen (..)
+  , RawOpenSpec (..)
   , RawRhs (..)
   , RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
   , RawPattern (..)
   )
-import Thena.Syntax.Lexer (BlockKind (..), Located (..), Token (..), lexModule, lexTokens)
+import Thena.Syntax.Lexer (BlockKind (..), Located (..), Token (..), lexModule, lexTokens, rawEscapes)
 import Thena.Language.Reader (Block (..), readBlock)
 import Thena.Language.Grammar
   ( Argument (..)
   , GProduction (..)
   , Grammar (..)
-  , Sort (..)
   , checkGrammar
   , checkNotation
   , constructorProductions
-  , universeSpelling
   , earleyRules
   , notationInto
+  , grammarWord
+  , sortType
   )
 import qualified Thena.Language.Earley as Earley
 import Thena.Syntax.Parser
@@ -567,7 +576,7 @@ newSession = Session
   -- can never be met is refused and one merely unmet is not. It is deliberately
   -- not 'NoTrust', which is the guarantee a user steps /up/ to, and deliberately
   -- not 'AnyTrust', which reports and enforces nothing.
-  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] n 0 NoUndischargeableTrust
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] rootScope n 0 NoUndischargeableTrust
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
@@ -621,7 +630,13 @@ data Response
     -- ^ @:revalidate@ — 'Nothing' if the development is a valid state (§5.3,
     -- thesis §2.3)
   | Extracted Core
-  | Proving GlobalName Core   -- ^ @:theorem@ — a proof is now current
+  | Proving GlobalName Core [Warning]
+    -- ^ @:theorem@ — a proof is now current, and what its name costs.
+    --
+    -- **The warning is in the response and not only in the printed line**
+    -- (MS10 phase 264): a frontend that builds its own text from a
+    -- 'Response' has to be able to see it, and a 'ProofShadows' computed in
+    -- the printer would reach the terminal and nothing else.
   | Proved GlobalName [LevelVar] [Obligation] Core [TrustClaim]
     -- ^ @qed@ — admitted, and the proof is closed. The levels are the scheme
     -- generalisation produced (MS3 phase 33b), not anything that was written,
@@ -880,14 +895,17 @@ data CommandError
 -- --------------------------------------------------------------------------
 
 -- | Lex, parse, resolve as a core term, in the given environment and context.
-parseCore :: [Grammar] -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Core, Int)
-parseCore gr = parseWith gr resolve
+parseCore
+  :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> String
+  -> Either SyntaxError (Core, Int)
+parseCore gr env opens = parseWith gr (\g e -> resolve g e opens) env
 
 
 -- | Lex, parse, resolve as a development (§2.7's longest-prefix convention).
 parseDevelopment
-  :: [Grammar] -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Partial, Int)
-parseDevelopment gr = parseWith gr resolvePartial
+  :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> String
+  -> Either SyntaxError (Partial, Int)
+parseDevelopment gr env opens = parseWith gr (\g e -> resolvePartial g e opens) env
 
 -- | The arguments of a rule called by name at the REPL (phase 23b): a run of
 -- atoms, each resolved as a core term in the context at the focus.
@@ -934,8 +952,12 @@ data BlockProblem
 -- **The blocks are typed as extra bodies, not as callables.** Nothing can call
 -- one — it has no name a user could write — so it is handed to 'inferProgram'
 -- beside 'allCallable' rather than inside it.
+-- **In no scope** (MS10 phase 267): a block written inside a surface literal is
+-- resolved again when 'Thena.Instral.Ops.Play' runs it, and that reader has the
+-- session's scope where this one has the file's. The two must not disagree, so
+-- both read a tag whole — 'Thena.Engine' has the rest of why.
 checkSurfaceBlocks :: [Grammar] -> [RuleBase] -> GlobalName -> [Instr] -> Maybe BlockProblem
-checkSurfaceBlocks gs bases nm prog = case surfaceBlocks gs nm prog of
+checkSurfaceBlocks gs bases nm prog = case surfaceBlocks (rootReading gs) nm prog of
   Left errs -> Just (BlockIll errs)
   Right bs  -> case concatMap validate bs of
     e : es -> Just (BlockIll (e : es))
@@ -993,7 +1015,12 @@ instralEntry gs bases src = do
             -- environment, and that is the behaviour already recorded — the
             -- driver has only ever built literals, so a typed command names a
             -- hole and never a reference.
-            (resolveBlock gs (GlobalName "entry") []
+            -- **And in no scope** (MS10 phase 267). An @open@ is a declaration
+            -- of the file or the session that wrote it; nothing hands the
+            -- session's scope to @instral@ today, and a prompt entry has no
+            -- @open@ of its own to honour — a local one does not exist
+            -- (`~c2smp`).
+            (resolveBlock (rootReading gs) (rootName "entry") []
                (concatMap hoist (reverse is)))
   -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
   -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
@@ -1006,13 +1033,13 @@ instralEntry gs bases src = do
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts. All three checks are 'checkBlock' since phase 90.
-  case checkBlock gs bases [] (Rule (GlobalName "entry") [] [] prog) of
+  case checkBlock gs bases [] (Rule (rootName "entry") [] [] prog) of
     Just (BlockIll es)      -> Left (LineIllFormed es)
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
   where
-    -- Written core terms are hoisted per instruction — @try ⌜ x ⌝@ is
-    -- @⌜1⌝ = resolve-core ⌜ x ⌝ ; try ⌜1⌝@, which is what a rule body writes by
+    -- Written core terms are hoisted per instruction — @try core\`x\`@ is
+    -- @⌜1⌝ = resolve-core core\`x\` ; try ⌜1⌝@, which is what a rule body writes by
     -- hand (MS5 phase 61b).
     hoist i = case i of
       RawDo (RawOp w os)   -> let (bs, os') = resolving w os
@@ -1040,12 +1067,13 @@ entryBindings gs bases src = case instralEntry gs bases src of
   Left _     -> []
   Right prog ->
     boundBy (allSignatures bases) (allCallable bases)
-      (Rule (GlobalName "entry") [] [] prog)
+      (Rule (rootName "entry") [] [] prog)
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
--- @try ⌜ x ⌝@ is compiled to @⌜1⌝ = resolve-core ⌜ x ⌝ ; try ⌜1⌝@, which is what
--- a rule body writes by hand. The op needs a term and @⌜ … ⌝@ is a 'VRaw' — a
+-- @try core\`x\`@ is compiled to @⌜1⌝ = resolve-core core\`x\` ; try ⌜1⌝@, which
+-- is what a rule body writes by hand. The op needs a term and a @core@ region
+-- is a 'VRaw' — a
 -- tree that has been parsed and not resolved — so something has to resolve it,
 -- and phase 61b decided deliberately that an operand does not do it quietly:
 -- /"the same written term resolves differently at two different focuses, and a
@@ -1057,8 +1085,11 @@ entryBindings gs bases src = case instralEntry gs bases src of
 -- names. @parseEquated@\'s comment about resolving two terms /in one continuous
 -- supply/ is satisfied by the sequence rather than by an argument.
 --
--- **The binding names cannot collide with a rule's own**, because @⌜@ is a token
--- and no identifier may contain one. That matters while the machine is yielding:
+-- **The binding names cannot collide with a rule's own**, because @⌜@ is a
+-- reserved character and no identifier may contain one. **It stopped being a
+-- token at MS10 phase 269** and stayed reserved for exactly this, so a name
+-- written here is still one a user cannot write.
+-- That matters while the machine is yielding:
 -- @env@ is the suspended rule's and a name it chose must not be shadowed.
 --
 -- The one word that is not rewritten is 'Thena.Instral.Ops.ResolveCore'\'s own: it
@@ -1080,9 +1111,8 @@ resolving w os
            in (bs, o : rest')
 
     written o = case o of
-      RawQuoted _        -> True
       RawRegion "core" _ _ -> True
-      _                  -> False
+      _                    -> False
 
 parseWith
   :: [Grammar]
@@ -1100,11 +1130,12 @@ parseWith gr res env ctx n src = do
 -- is not a term: it has its own start symbol in the grammar and it is read in
 -- the empty context, never in the development's.
 parseDeclaration
-  :: [Grammar] -> GlobalEnv -> Int -> String -> Either SyntaxError (InductiveDefinition, Int)
-parseDeclaration gr env n src = do
+  :: [Grammar] -> GlobalEnv -> InScope -> Int -> String
+  -> Either SyntaxError (InductiveDefinition, Int)
+parseDeclaration gr env opens n src = do
   ts  <- tokensOf src
   raw <- mapLeft ParseFailed (parseData ts)
-  mapLeft ResolveFailed (resolveData gr env n raw)
+  mapLeft ResolveFailed (resolveData gr env opens n raw)
 
 -- | Lex, parse and resolve the two sides of @:convert t ≟ u@.
 --
@@ -1113,13 +1144,13 @@ parseDeclaration gr env n src = do
 -- the two are resolved in one continuous supply of names rather than two that
 -- overlap.
 parseEquated
-  :: [Grammar] -> GlobalEnv -> Context -> Int -> String
+  :: [Grammar] -> GlobalEnv -> InScope -> Context -> Int -> String
   -> Either SyntaxError ((Core, Core), Int)
-parseEquated gr env ctx n src = do
+parseEquated gr env opens ctx n src = do
   ts       <- tokensOf src
   (r1, r2) <- mapLeft ParseFailed (parseEquation ts)
-  (a, n1)  <- mapLeft ResolveFailed (resolve gr env ctx n r1)
-  (b, n2)  <- mapLeft ResolveFailed (resolve gr env ctx n1 r2)
+  (a, n1)  <- mapLeft ResolveFailed (resolve gr env opens ctx n r1)
+  (b, n2)  <- mapLeft ResolveFailed (resolve gr env opens ctx n1 r2)
   Right ((a, b), n2)
 
 -- | Lex, parse and resolve @‹name› : ‹type›@ for @:theorem@.
@@ -1128,12 +1159,12 @@ parseEquated gr env ctx n src = do
 -- (§5.3), and resolving it where a scratch @assume@ happens to be in scope
 -- would let one in.
 parseStatement
-  :: [Grammar] -> GlobalEnv -> Int -> String
+  :: [Grammar] -> GlobalEnv -> InScope -> Int -> String
   -> Either SyntaxError (Maybe String, (Core, Int))
-parseStatement gr env n src = do
+parseStatement gr env opens n src = do
   ts        <- tokensOf src
   (mx, raw) <- mapLeft ParseFailed (parseNameAndType ts)
-  r         <- mapLeft ResolveFailed (resolve gr env [] n raw)
+  r         <- mapLeft ResolveFailed (resolve gr env opens [] n raw)
   Right (mx, r)
 
 tokensOf :: String -> Either SyntaxError [Located Token]
@@ -1183,8 +1214,33 @@ blockProblem errs = case errs of
 -- already stopped saying what it meant.
 data Item
   = ItemData SurfaceData
-  | ItemTheorem String Surface Surface   -- ^ a signature and the equation after it
+  | ItemTheorem GlobalName Surface Surface
+    -- ^ a signature and the equation after it, under the name it declares —
+    -- **a path and a word** since MS10 phase 243, so a generated definition can
+    -- be admitted into its namespace by the ordinary declaration path
   | ItemBlock [RawInstr]
+  | ItemOpen Opened
+    -- ^ @open ‹namespace›@ (MS10 phase 247) — the namespace's whole path and
+    -- whatever the line said about which of its names it brings in (phase 254).
+    -- It declares nothing; it changes what the declarations after it can see.
+    --
+    -- **One per namespace**, so @open X Y Z@ regroups into three of these: the
+    -- plural is the line's, not the item's.
+  | ItemNamespace GlobalName [Item]
+    -- ^ @namespace ‹name› where { … }@ (MS10 phase 254) — the namespace, and
+    -- the items inside it.
+    --
+    -- **A tree and not a flattened list with markers**, because a module is
+    -- printed back from these items and the nesting is what it is written
+    -- with. The program 'surfaceProgram' builds /is/ flat: two ops around the
+    -- inner instructions, which is where the prefix comes from.
+  | ItemOpenIn [Opened] [Item]
+    -- ^ @open X in ‹one declaration›@ (MS10 phase 254) — the opens, and the
+    -- declaration they reach.
+    --
+    -- **A list of items because a declaration is one item here**, and the list
+    -- is what makes the shape the same as 'ItemNamespace'\'s: both are a scope
+    -- with contents, and 'surfaceProgram' treats them the same way.
   | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
     -- resolves it while the file is being read, so a block with bad operands is
@@ -1199,25 +1255,58 @@ data Item
 regroup :: [SurfaceDecl] -> Either SyntaxError [Item]
 regroup = go
   where
+    -- **What the line said, as one namespace's 'Opened'** (MS10 phase 254).
+    opened spec p = case spec of
+      OpenWhole        -> openedWhole p
+      OpenOnly ws      -> (openedWhole p) { openedOnly = Just ws }
+      OpenHiding ws    -> (openedWhole p) { openedHiding = ws }
+      OpenRenaming rs  -> (openedWhole p) { openedRenaming = rs }
+
     go [] = Right []
-    go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
+    go ds = do
+      (is, rest) <- one ds
+      (is ++) <$> go rest
+
+    -- | **One declaration, and what is left** (MS10 phase 254). It was a
+    -- straight list walk until @open X in ‹declaration›@ needed to know where
+    -- one declaration ends: a signature and its equation are two of these and
+    -- one declaration, so the open has to cover both, and only the pass that
+    -- pairs them can say so.
+    one [] = Right ([], [])
+    one (SurfaceDatatype d : rest) = Right ([ItemData d], rest)
+    one (SurfaceOpen ns spec : rest) =
+      Right ([ ItemOpen (opened spec (ps ++ [x])) | (ps, x) <- ns ], rest)
+    -- **The declaration it reaches is taken by this same function**, so
+    -- @open X in@ before a signature covers the equation under it too.
+    one (SurfaceOpenIn ns spec d : rest) = do
+      (is, rest') <- one (d : rest)
+      Right ([ItemOpenIn [ opened spec (ps ++ [x]) | (ps, x) <- ns ] is], rest')
+    -- **The declarations inside are regrouped by the same pass** (MS10 phase
+    -- 254), so a signature and its equation pair inside a namespace exactly as
+    -- they do outside one, and nesting needs nothing of its own.
+    one (SurfaceNamespace ps x ds : rest) = do
+      inner <- go ds
+      Right ([ItemNamespace (GlobalName ps x) inner], rest)
     -- **Read here, so an unreadable block is a syntax error** and the module
     -- stops before anything in it elaborates (MS6 phase 101). What its names
     -- mean is asked later, at its place in the load ('DeclaringGrammar').
-    go (SurfaceGrammar k l txt : rest) = case readBlock k l txt of
-      Right b -> (ItemGrammar b :) <$> go rest
+    one (SurfaceGrammar k l txt : rest) = case readBlock k l txt of
+      Right b -> Right ([ItemGrammar b], rest)
       Left e  -> Left (BlockUnreadable e)
     -- **Carried as it was written** (MS6 phase 104b). Resolving it here would
     -- ask what its words mean before the declarations above it have run — and
     -- a @language@ block above it is exactly such a declaration. It is
     -- resolved, checked and played where it stands, by @run-block@.
-    go (SurfaceBlock b : rest) = (ItemBlock b :) <$> go rest
-    go (SurfaceSignature x ty : SurfaceEquation y body : rest)
-      | x == y = (ItemTheorem x ty body :) <$> go rest
-    go (SurfaceSignature x _ : _) =
-      Left (DeclarationsUnpaired (SignatureWithNoEquation x))
-    go (SurfaceEquation x _ : _) =
-      Left (DeclarationsUnpaired (EquationWithNoSignature x))
+    one (SurfaceBlock b : rest) = Right ([ItemBlock b], rest)
+    -- **Paired on the whole name, path included** (MS10 phase 243): @Ty.fv-X@
+    -- and @fv-X@ are two names, so a signature written with a path wants its
+    -- equation written with the same one.
+    one (SurfaceSignature ps x ty : SurfaceEquation qs y body : rest)
+      | (ps, x) == (qs, y) = Right ([ItemTheorem (GlobalName ps x) ty body], rest)
+    one (SurfaceSignature ps x _ : _) =
+      Left (DeclarationsUnpaired (SignatureWithNoEquation (nameDotted (GlobalName ps x))))
+    one (SurfaceEquation ps x _ : _) =
+      Left (DeclarationsUnpaired (EquationWithNoSignature (nameDotted (GlobalName ps x))))
 
 -- --------------------------------------------------------------------------
 -- Surface declarations, as a program (MS4 phase 42; lifted here at 43)
@@ -1236,10 +1325,16 @@ regroup = go
 -- anything in Haskell.
 surfaceProgram
   :: Int -> [Item] -> ([Instr], Int)
-surfaceProgram n0 items = foldl item ([], n0) items
+surfaceProgram n0 items = foldl (item []) ([], n0) items
   where
-  item (acc, n) (ItemData d)       = let (is, n1) = datatypeProgram n d Nothing in (acc ++ is, n1)
-  item acc (ItemTheorem x ty body) = declaring acc (x, ty, body)
+  -- **@ns@ is the namespace the item is written in**, and only a @data@ item
+  -- needs it here: a theorem, a primitive and anything a rule declares take
+  -- their place from the machine instead, which 'Thena.Engine.declaredIn' does.
+  -- A datatype cannot, because its constructors are elaborated against its own
+  -- name before any of them is built — see 'Thena.Instral.Ops.MakeData'.
+  item ns (acc, n) (ItemData d) =
+    let (is, n1) = datatypeProgram ns n d Nothing in (acc ++ is, n1)
+  item _ acc (ItemTheorem x ty body) = declaring acc (x, ty, body)
   -- **A top-level block is a call to a rule** (MS6 phase 104b), and the rule is
   -- @run-block@ in the shipped base, whose whole body is @play t@. So how a
   -- module\'s blocks are treated is written in user space and a user may
@@ -1253,11 +1348,52 @@ surfaceProgram n0 items = foldl item ([], n0) items
   -- environment, so spliced blocks shared a scope at run time while
   -- @topLevelBlocks@ typed each in a scope of its own and refused the
   -- disagreement. The call\'s frame is what makes the scope real.
-  item (acc, n) (ItemBlock b) =
+  item _ (acc, n) (ItemBlock b) =
     (acc ++ [Do (Call "run-block" [Lit (VSurface (rootedAt (SurfaceDo b)))])], n)
   -- One instruction that yields the block to the driver, which checks it
   -- against what the module has declared so far (MS6 phase 101).
-  item (acc, n) (ItemGrammar b) = (acc ++ [Do (DeclareGrammar b)], n)
+  item _ (acc, n) (ItemGrammar b) = (acc ++ [Do (DeclareGrammar b)], n)
+  -- **One instruction, where it is written** (MS10 phase 247): the program is
+  -- played in order, so an @open@'s effect reaching only the declarations after
+  -- it falls out of the sequencing and needs nothing of its own.
+  item _ (acc, n) (ItemOpen o) = (acc ++ [Do (Open o)], n)
+  -- **The opens go on, the declaration runs, the opens come off** (MS10 phase
+  -- 254) — the same shape a @namespace@ block compiles to, which is what makes
+  -- @open X in@ need nothing of its own beyond the op that pops.
+  item ns (acc, n) (ItemOpenIn os is) =
+    let (inner, n1) = foldl (item ns) ([], n) is
+     in ( acc ++ [ Do (Open o) | o <- os ] ++ inner
+              ++ [ Do LeaveOpen | _ <- os ]
+        , n1 )
+  -- **Two ops around the items inside** (MS10 phase 254). Where a declaration
+  -- lands and what a written name may mean both come from the machine, so the
+  -- items inside need no rewriting here — and a nested namespace is the same
+  -- shape one level down.
+  --
+  -- **AND THE OPENS THE BLOCK ADDED COME OFF WITH IT — HIS RULING, 2026-11-03,
+  -- `~ckmsk`: AN @open@ REACHES TO THE END OF THE BLOCK IT IS WRITTEN IN.** A
+  -- @namespace@ block is a scope and everything else written in one is already
+  -- scoped to it, so a file-wide @open@ would be the special case; and since
+  -- phase 255 a @language@ block must be opened beside itself or its letters
+  -- stop being metavariables, which made the shape the system /requires/ the
+  -- one that leaked. Two namespaces could not both hold a @language Ty@ before
+  -- this: the second was refused 'MetavariableTaken'.
+  --
+  -- **A file's top level is not one of these blocks** and its @open@s are
+  -- unchanged — they join the session, which is what @examples/02@'s closing
+  -- @open Ctx@ is for and what `~7zn7k` settled.
+  --
+  -- **The count comes from the instructions, not from the items**, so a nested
+  -- @namespace@ and an @open … in@ need no case here: both balance their own
+  -- opens, so the difference is exactly what this block left pushed.
+  item ns (acc, n) (ItemNamespace g is) =
+    let inner' = ns ++ nameSteps g ++ [nameWord g]
+        (inner, n1) = foldl (item inner') ([], n) is
+        pushed = length [ () | Do (Open _) <- inner ]
+                   - length [ () | Do LeaveOpen <- inner ]
+     in ( acc ++ [Do (EnterNamespace (Lit (VName g)))] ++ inner
+              ++ [ Do LeaveOpen | _ <- [1 .. pushed] ] ++ [Do LeaveNamespace]
+        , n1 )
 
   -- | The plicity of each argument position a signature writes.
   --
@@ -1298,7 +1434,14 @@ surfaceProgram n0 items = foldl item ([], n0) items
               -- never mentions the name passes through untouched, so this is
               -- uniform rather than a mode — and @extract@ turns the
               -- assumption into the λ @tie-recursion@ expects either way.
-            , Do (Assume (Lit (VText x)) (Ref ("ty" ++ show n)))
+              --
+              -- **The assumption is the base word, because a local has no
+              -- path** (MS10 phase 243): the development's scope holds no
+              -- namespaces (§3.6), and a qualified name skips the context by
+              -- design (phase 241). So a generated body's self-recursive call
+              -- is written as the short word, which is what the namespace's
+              -- outward lookup gives it in any case.
+            , Do (Assume (Lit (VText (nameWord x))) (Ref ("ty" ++ show n)))
             , Do (Call "elaborate" [Lit (VSurface (rootedAt body))])
             , Bind (Ops.PVar ("abs" ++ show n)) Nothing PopDevelopment
             , Bind (Ops.PVar ("tm" ++ show n)) Nothing
@@ -1308,7 +1451,10 @@ surfaceProgram n0 items = foldl item ([], n0) items
               -- braces or not. That is the whole of the surface signature
               -- environment — where a binder was written, not what the type
               -- turned out to be.
-            , Do (DefineGlobal (plicitiesIn ty) (Lit (VText x))
+              -- **The name goes out whole, path and all** (MS10 phase 243):
+              -- @define-global@ takes a name and not the text of one, so a
+              -- declaration written @Ty.subst-X@ installs @Ty.subst-X@.
+            , Do (DefineGlobal (plicitiesIn ty) (Lit (VName x))
                     (Ref ("ty" ++ show n)) (Ref ("tm" ++ show n)))
             ]
         , n1 )
@@ -1352,10 +1498,21 @@ surfaceProgram n0 items = foldl item ([], n0) items
 -- **Lifted out of 'surfaceProgram' at MS6 phase 103**, because a @language@
 -- block generates a datatype too — with its grammar's roles (§4.7), where a
 -- written @data@ has none.
-datatypeProgram :: Int -> SurfaceData -> Maybe [[ArgRole]] -> ([Instr], Int)
-datatypeProgram n d roles =
+--
+-- __THE DECLARATION OPENS A NAMESPACE AND EVERYTHING IT PRODUCES GOES INSIDE,
+-- THE TYPE AMONG THEM__ (MS10 phase 248, HIS ruling of 2026-10-29). @data Nat@
+-- declares @Nat.Nat@ and @Nat.zero@, so the one name it adds to the enclosing
+-- scope is the namespace @Nat@ — and a written @Nat@ reaches the type by
+-- 'Thena.Core.Term.declarationNamed', a resolution fact with nothing in the
+-- environment to unfold. **This function is where both halves are minted**, so
+-- the equipment generated later needs nothing of its own: everything that mints
+-- a name from the datatype's goes through 'Thena.Core.Term.inDeclarationOf' and
+-- lands beside the constructors.
+datatypeProgram
+  :: [String] -> Int -> SurfaceData -> Maybe [[ArgRole]] -> ([Instr], Int)
+datatypeProgram ns n d roles =
   let nm      = surfaceDataName d
-      dn      = GlobalName nm
+      dn      = declarationNamed (GlobalName (ns ++ surfaceDataSteps d) nm)
       ps      = surfaceDataParameters d
       cs      = surfaceDataConstructors d
       (l, n1) = freshLevelMeta n
@@ -1378,10 +1535,15 @@ datatypeProgram n d roles =
                      (ApplyTo (Ref (conName k ++ "raw")) selfName)
                  , Bind (Ops.PVar (conName k)) Nothing (Expose (Ref (conName k ++ "app")))
                  ]
-               | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
+               | (k, SurfaceConstructor _ _ cty) <- zip [0 ..] cs
                ]
           ++ [ Do (MakeData dn (length ps)
-                     [ GlobalName cn | SurfaceConstructor cn _ <- cs ] roles
+                     -- **A constructor goes in the datatype's namespace** (MS10
+                     -- phase 248), and steps it was written with nest inside
+                     -- that: @data Nat where { Pos.one : Nat }@ is @Nat.Pos.one@.
+                     -- Nothing in the corpus writes one, and nesting is what a
+                     -- namespace already does, so no refusal had to be invented.
+                     [ GlobalName (nameSteps dn ++ cps) cn | SurfaceConstructor cps cn _ <- cs ] roles
                      (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
              ]
       , n1 )
@@ -1401,7 +1563,7 @@ datatypeProgram n d roles =
 -- read the binder where the datatype is meant.
 grammarDatatype :: Grammar -> (SurfaceData, [[ArgRole]])
 grammarDatatype g =
-  ( SurfaceData (plainName (grammarName g)) [] (SurfaceUniverse 0) (map constructor prods)
+  ( SurfaceData [] (grammarWord g) [] (SurfaceUniverse 0) (map constructor prods)
   , map (map argumentRole . gproductionArguments) prods
   )
   where
@@ -1409,22 +1571,23 @@ grammarDatatype g =
     -- production names a function that is already declared, so the datatype
     -- this generates is the one it would have generated without it.
     prods = constructorProductions g
-    plainName (GlobalName n) = n
 
-    constructor p = SurfaceConstructor (plainName (gproductionName p)) (typeOf p)
+    -- **The production's WORD, because placing it is 'datatypeProgram''s job**
+    -- (MS10 phase 248). A production already carries its full name — @LC.var@ —
+    -- and writing that as a surface constructor would mint a root-level name
+    -- whose word held the dots, the one shape his ruling of 2026-10-30 forbids.
+    -- The declaration is what decides where a constructor goes, here as for a
+    -- written @data@.
+    constructor p = SurfaceConstructor [] (nameWord (gproductionName p)) (typeOf p)
     typeOf p = case gproductionArguments p of
       [] -> self
       args -> SurfacePi (NE.fromList (map binder (renamed args))) self
-    self = SurfaceName (plainName (grammarName g))
+    self = SurfaceName [] (grammarWord g)
 
-    binder (x, srt) = SurfaceBinder Explicit x (Just (SurfaceName (typeName srt)))
-    typeName srt = case srt of
-      OfLanguage l -> plainName l
-      OfClass _ t _ -> plainName t
-      -- Only a @notation@ block may have a universe slot, and it generates no
-      -- datatype; a @language@ block's production carrying one is refused by
-      -- @UniverseSlot@ (MS8 phase 160).
-      OfUniverse n -> universeSpelling n
+    binder (x, srt) = SurfaceBinder Explicit x (Just (SurfaceName [] (typeName srt)))
+    -- **'Thena.Language.Grammar.sortType' is the one definition** (MS10 phase
+    -- 258); this was one of three copies of it.
+    typeName = sortType
 
     -- Primed until it shadows nothing the types name.
     renamed args = go [] args
@@ -1456,11 +1619,15 @@ loadProofSource s src = case parseSurfaceModule src of
 -- **Split out of 'loadProofSource' at MS7 phase 112b, and it is the seam the
 -- whole storage design rests on.** A module reaches the session as a name and a
 -- list of items; whether those items came from a text file through
--- 'parseSurfaceModule' or from a stored JSON tree is not something anything
--- below this line can tell. That is what makes loading **one pipeline with two
--- front doors** rather than two paths to keep in step
+-- 'parseSurfaceModule' or were handed over as items by a caller is not something
+-- anything below this line can tell. That is what makes loading **one pipeline
+-- with two front doors** rather than two paths to keep in step
 -- (@discussion\/editor-protocol.md@ §4 A2, @ms7\/MS7.md@), and it is only true
 -- because the stored form is the tree as written.
+--
+-- **The second door used to be a JSON spelling of the tree. It is not** — text is
+-- the only stored form (his ruling, 2026-09-27), and the JSON went with the
+-- project manifest; see "Thena.View.Source".
 loadProofItems :: Session -> String -> [Item] -> (Session, Response)
 loadProofItems s nm items =
     let machine  = sessionMachine s
@@ -1474,8 +1641,8 @@ loadProofItems s nm items =
      in case progress Nothing s { sessionMachine = load is machine { names = n1 } } [] [] of
           (s', Ran _ ws Completed) ->
             ( s'
-            , ProofLoaded nm [ n | Just n <- map declaredName items ]
-                             (length [ () | ItemBlock _ <- items ])
+            , ProofLoaded nm (concatMap declaredNames items)
+                             (sum (map blocksIn items))
                              ws
             )
           -- **A load that does not complete declares nothing** (MS6 closeout 15,
@@ -1511,14 +1678,46 @@ rolledBack before after =
                               { names = names (sessionMachine after) } }
 
 -- | What an item adds to the environment, for the summary line.
+--
+-- **A list and not a @Maybe@ since MS10 phase 254**, because a @namespace@
+-- block holds items of its own and the summary names what landed, wherever it
+-- was written.
+declaredNames :: Item -> [String]
+declaredNames = go []
+  where
+    -- **The namespace it was written in comes with it**, because @declared A.one@
+    -- is what landed and @declared one@ would name a key the environment has
+    -- not got.
+    go ns (ItemNamespace g is) =
+      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) is
+    go ns (ItemOpenIn _ is) = concatMap (go ns) is
+    go ns i = [ intercalate "." (ns ++ [n]) | Just n <- [declaredName i] ]
+
+-- | How many top-level blocks an item holds, for the summary's count.
+blocksIn :: Item -> Int
+blocksIn i = case i of
+  ItemBlock _        -> 1
+  ItemNamespace _ is -> sum (map blocksIn is)
+  ItemOpenIn _ is    -> sum (map blocksIn is)
+  _                  -> 0
+
+-- | The one name an item declares, where it declares exactly one.
 declaredName :: Item -> Maybe String
 declaredName i = case i of
-  ItemData d        -> Just (surfaceDataName d)
-  ItemTheorem x _ _ -> Just x
+  ItemData d        -> Just (nameDotted (GlobalName (surfaceDataSteps d) (surfaceDataName d)))
+  ItemTheorem x _ _ -> Just (nameDotted x)
   -- **A block declares nothing that can be read off the item.** What its
   -- instructions install is known only by running them, so it is counted rather
   -- than named — see 'ProofLoaded'.
   ItemBlock _       -> Nothing
+  -- **An @open@ declares nothing** — it changes what is in view and adds no key
+  -- to the environment (MS10 phase 247).
+  ItemOpen _        -> Nothing
+  -- **A namespace declares nothing of its own** (MS10 phase 254) — it is a
+  -- prefix, and what it holds is the items inside it, each of which is named in
+  -- the summary by its own entry. An @open … in@ is the same.
+  ItemNamespace _ _ -> Nothing
+  ItemOpenIn _ _    -> Nothing
   -- The language's name. Until phase 103 generates its datatype, what it
   -- declares is the grammar alone — the metavariables and the notation.
   -- **A @notation@ block declares nothing at all** (MS8 phase 158, §4.8): the
@@ -1573,7 +1772,7 @@ dispatch s name arg = case name of
   -- the rule base a second time.
   ":help"  -> noArgument (s, Helped commandSummary)
   ":quit"  -> noArgument (s, Quit)
-  ":core"  -> withArgument (view s (parseCore (grammars machine)) Rendered arg)
+  ":core"  -> withArgument (view s (\e -> parseCore (grammars machine) e (scope machine)) Rendered arg)
   -- | @:surface ‹term›@ — parse a **surface** term and print it back (phase
   -- 39). The analogue of @:core@, and for the same reason: it is the only way
   -- to see what the parser made of what you wrote, and until phase 41 it is the
@@ -1584,7 +1783,7 @@ dispatch s name arg = case name of
   ":surface" -> withArgument $ case parseSurfaceTerm arg of
     Left e  -> (s, Failed e)
     Right t -> (s, RenderedSurface t)
-  ":dev"   -> withArgument (view s (parseDevelopment (grammars machine)) RenderedDev arg)
+  ":dev"   -> withArgument (view s (\e -> parseDevelopment (grammars machine) e (scope machine)) RenderedDev arg)
   -- In @:parse@'s mode 'command' takes @:done@ before it gets here.
   ":done"  -> noArgument (s, Rejected NotParsing)
   -- | @:parse ‹Language› ‹text›@ — parse an object term with an installed
@@ -1595,7 +1794,7 @@ dispatch s name arg = case name of
   -- parser what fits there ("Thena.Repl").
   ":parse" -> withArgument $ case break (== ' ') arg of
     (lang, rest)
-      | GlobalName lang `notElem` map grammarName (grammars machine) ->
+      | rootName lang `notElem` map grammarName (grammars machine) ->
           (s, Rejected (NoSuchLanguage lang))
       | null (dropWhile (== ' ') rest) -> (s { sessionParsing = Just lang }, ParsingEntered lang)
       | otherwise -> (s, parseObject machine lang (dropWhile (== ' ') rest))
@@ -1643,18 +1842,18 @@ dispatch s name arg = case name of
     "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> (s, Rendered (whnf (globals machine) ctx t))
       _            -> (s, Rejected (NotThere NotInCore))
-    _  -> view s (parseCore (grammars machine)) (Rendered . whnf (globals machine) ctx) arg
+    _  -> view s (\e -> parseCore (grammars machine) e (scope machine)) (Rendered . whnf (globals machine) ctx) arg
   -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
   -- argument it is the core focus, with one it is a term the user writes.
-  -- **A bare argument is a surface term; corners are a core one** (MS4 phase
-  -- 43), which is the rule everywhere else an argument is written. With no
-  -- argument it is still the core focus.
+  -- **A bare argument is a surface term; a @core@ fence is a core one** (MS4
+  -- phase 43), which is the rule everywhere else an argument is written. With
+  -- no argument it is still the core focus.
   ":infer" -> case arg of
     "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> inferred t (names machine)
       _            -> (s, Rejected (NotThere NotInCore))
-    _ | Just inner <- cornered arg ->
-          case parseCore (grammars machine) (globals machine) ctx (names machine) inner of
+    _ | Just inner <- coreFenced arg ->
+          case parseCore (grammars machine) (globals machine) (scope machine) ctx (names machine) inner of
             Left e        -> (s, Failed e)
             Right (t, n1) -> inferred t n1
       | otherwise -> case parseSurfaceTerm arg of
@@ -1721,6 +1920,14 @@ dispatch s name arg = case name of
   ":step"  -> stepping
   ":run"   -> running
   "data"   -> declaration
+  -- **@open@ is a bare word, HIS RULING of 2026-11-01** (MS10 phase 249). It is a
+  -- declaration and it acts, which is 'Thena.Syntax.Lexer''s @TOpen@ and §2.4's
+  -- rule — @spec/interface.md@, /bare word acts, colon looks/, whose test is that
+  -- the bare words are the ones reading identically inside a rule body. @open@
+  -- already does: a file's @open@ compiles to @Do (Open …)@ and the machine runs
+  -- it, so this case plays the same instruction rather than inventing a second
+  -- mechanism. @:open@ was considered and refused, for that reason.
+  "open"   -> opening
   -- **A surface declaration** (MS4 phase 42) — a bare word, because it acts
   -- (§2.4). It compiles to instructions rather than being run here, so
   -- @:step@ can watch it and phase 49 can move the program into a rule body.
@@ -1766,9 +1973,9 @@ dispatch s name arg = case name of
     -- its value. Outside a yield 'load' clears the environment, and nothing is.
     Right (SurfaceDo body) ->
       let bound = if Engine.isYielding machine then env (exec machine) else []
-       in case resolveBlock (grammars machine) (GlobalName "entry") (map fst bound) body of
+       in case resolveBlock (rootReading (grammars machine)) (rootName "entry") (map fst bound) body of
         Left errs -> (s, Failed (blockProblem errs))
-        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (GlobalName "entry") [] [] is) of
+        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] [] is) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionFuel s)
@@ -1817,7 +2024,8 @@ dispatch s name arg = case name of
     --
     -- Arguments are a **run of operands**, as a rule body writes them: a name,
     -- a number, a string, a term in corners, or a tagged region. A term is
-    -- written @⌜ … ⌝@ for Core and @⟨ … ⟩@ for Surface (MS5 phase 62a) — a bare
+    -- written @core\`…\`@ and @surface\`…\`@ (MS5 phase 62a; the corner and
+    -- angle spellings went at MS10 phase 269) — a bare
     -- argument is no longer a surface term, which is the asymmetry §6.3 of
     -- @discussion\/the-five-languages.md@ rejects.
     -- A colon word is the driver's own and is never a rule: §2.4's split says
@@ -1893,21 +2101,49 @@ dispatch s name arg = case name of
       | null arg  = (s, Rejected (MissingArgument name))
       | otherwise = k
 
-    showRules what = case lookupInductive (GlobalName what) (globals machine) of
-      Just d  -> (s, ShownRules d)
-      Nothing -> (s, Rejected (NoSuchGlobal what))
+    -- | __What a command's argument names, under the session's @open@s__ (MS10
+    -- phase 249, repairing @~7zn7k@). It is
+    -- 'Thena.Core.Term.globalUnder' — the same walk a term goes through, so
+    -- @:show empty@ and @empty@ written in a type agree about what @empty@ is
+    -- after @open Ctx@. They did not: the commands looked the written text up
+    -- directly and found nothing.
+    --
+    -- The predicate is the caller's, because what counts as found differs:
+    -- @:show@ will take anything in any of the three tables, @:elim@ and
+    -- @:judgment@ want a datatype.
+    argumentNamed :: (GlobalName -> Bool) -> String -> Either [GlobalName] GlobalName
+    argumentNamed known what = globalUnder known (scope machine) (nameFromText what)
 
-    showGlobal what = case lookupInductive g (globals machine) of
-      Just d  -> (s, ShownData d)
-      Nothing -> case lookupDefinition g (globals machine) of
-        Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
-                         (fromMaybe [] (lookup g (signatures machine)))
-                                    (definitionType d) (Just (definitionBody d)))
-        Nothing -> case lookupConstant g (globals machine) of
-          Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
-          Nothing -> (s, Rejected (NoSuchGlobal what))
+    -- | A refusal for a command's argument, in the words a term would use.
+    noGlobal what amb
+      | null amb  = (s, Rejected (NoSuchGlobal what))
+      | otherwise = (s, Failed (ResolveFailed (NameIsAmbiguous what (map nameDotted amb))))
+
+    isInductive g = isJust (lookupInductive g (globals machine))
+
+    showRules what = case argumentNamed isInductive what of
+      Left amb -> noGlobal what amb
+      Right g  -> case lookupInductive g (globals machine) of
+        Just d  -> (s, ShownRules d)
+        Nothing -> (s, Rejected (NoSuchGlobal what))
+
+    showGlobal what = case argumentNamed anywhere what of
+      Left amb -> noGlobal what amb
+      Right g  -> case lookupInductive g (globals machine) of
+        Just d  -> (s, ShownData d)
+        Nothing -> case lookupDefinition g (globals machine) of
+          Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
+                           (fromMaybe [] (lookup g (signatures machine)))
+                                      (definitionType d) (Just (definitionBody d)))
+          Nothing -> case lookupConstant g (globals machine) of
+            Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
+            Nothing -> (s, Rejected (NoSuchGlobal what))
       where
-        g = GlobalName what
+        -- **Any of the three tables**, because @:show@ shows whatever it finds —
+        -- a datatype, a definition with a body, or a constant without one.
+        anywhere g = isInductive g
+          || isJust (lookupDefinition g (globals machine))
+          || isJust (lookupConstant g (globals machine))
 
     -- | @:elim ‹datatype›@, or @:elim ‹datatype› ‹universe›@.
     --
@@ -1918,14 +2154,17 @@ dispatch s name arg = case name of
     -- The level defaults to the datatype\'s own, which is the common case and
     -- nothing more — @Nat@\'s eliminator into @Type₀@. Writing @Type₁@ is how
     -- §3.7\'s universe trick is seen: the same datatype, a second rule.
-    eliminator what = case lookupInductive g (globals machine) of
-      Nothing -> (s, Failed (ResolveFailed (NotADatatype name')))
-      Just d  -> case level d (dropWhile (== ' ') rest) of
-        Left e  -> e
-        Right l -> (s, ShownEliminator g (fst (eliminatorType d l (names machine))))
+    eliminator what = case argumentNamed isInductive name' of
+      Left amb
+        | null amb  -> (s, Failed (ResolveFailed (NotADatatype name')))
+        | otherwise -> (s, Failed (ResolveFailed (NameIsAmbiguous name' (map nameDotted amb))))
+      Right g -> case lookupInductive g (globals machine) of
+        Nothing -> (s, Failed (ResolveFailed (NotADatatype name')))
+        Just d  -> case level d (dropWhile (== ' ') rest) of
+          Left e  -> e
+          Right l -> (s, ShownEliminator g (fst (eliminatorType d l (names machine))))
       where
         (name', rest) = break (== ' ') what
-        g             = GlobalName name'
 
     -- The universe is read with the ordinary term parser, in the empty
     -- context, so @:elim Nat Typ₀@ reports a lex error where it happened
@@ -1933,7 +2172,7 @@ dispatch s name arg = case name of
     level :: InductiveDefinition -> String -> Either (Session, Response) Level
     level d u
       | null u    = Right (inductiveLevel d)
-      | otherwise = case parseCore (grammars machine) (globals machine) [] (names machine) u of
+      | otherwise = case parseCore (grammars machine) (globals machine) (scope machine) [] (names machine) u of
           Left e                -> Left (s, Failed e)
           Right (Universe l, _) -> Right l
           Right _               -> Left (s, Rejected (LevelExpected u))
@@ -1944,7 +2183,7 @@ dispatch s name arg = case name of
     -- @:revalidate@: a proof of a non-type is not worth entering.
     theorem = case sessionWork s of
       Attempting att -> (s, Rejected (AlreadyProving (attemptName att)))
-      Scratch -> case parseStatement (grammars machine) (globals machine) (names machine) arg of
+      Scratch -> case parseStatement (grammars machine) (globals machine) (scope machine) (names machine) arg of
         Left e             -> (s, Failed e)
         Right (Nothing, _) -> (s, Rejected (MissingArgument ":theorem"))
         Right (Just x, (ty, n1))
@@ -1957,14 +2196,21 @@ dispatch s name arg = case name of
           | otherwise -> case sortOf (globals machine) [] n1 ty of
               (Left e,  _, _)  -> (s, IllTyped e)
               (Right _, _, n2) -> started g ty n2
-          where g = GlobalName x
+          where g = rootName x
 
+    -- **The forecast is asked here and not at @qed@** (MS10 phase 264): the
+    -- name is not in the environment yet, so what the word
+    -- reaches is still the old answer, and saying so now is the one moment the
+    -- repair is free — renaming the theorem before the proof exists costs
+    -- nothing. His second principle of 2026-09-01 is the whole warrant: the
+    -- action is allowed, and the UI's job is to show what it will cause.
     started g ty n =
       let (dev, n1) = newDevelopmentNamed g ty n
        in ( s { sessionMachine = atRest machine { development = dev, names = n1 }
               , sessionWork    = Attempting (Attempt g ty [])
               }
-          , Proving g ty
+          , Proving g ty [ ProofShadows g hid
+                         | Just hid <- [shadowed (globals machine) (scope machine) g] ]
           )
 
     -- | @qed@ — certify what the development built, admit it, and close.
@@ -2077,7 +2323,7 @@ dispatch s name arg = case name of
             }
 
     resume what =
-      case break ((== GlobalName what) . attemptName . parkedAttempt) (sessionSuspended s) of
+      case break ((== rootName what) . attemptName . parkedAttempt) (sessionSuspended s) of
         (_, [])          -> (s, Rejected (NoSuchProof what))
         (before, Parked att at : after)
           | Attempting cur <- sessionWork s ->
@@ -2100,11 +2346,11 @@ dispatch s name arg = case name of
         )
 
     declaration = withArgument $
-      case parseDeclaration (grammars machine) (globals machine) (names machine) arg of
+      case parseDeclaration (grammars machine) (globals machine) (scope machine) (names machine) arg of
         Left e -> (s, Failed e)
         Right (d, n1) ->
           let is = [ Do (DefineData d)
-                   , Do (Say (Lit (VText ("declared " ++ nameOf d))))
+                   , Do (Say (Lit (VText ("declared " ++ nameOf machine d))))
                    ]
            in progress
                 (sessionFuel s)
@@ -2112,7 +2358,33 @@ dispatch s name arg = case name of
                 []
                 []
 
-    goal = withArgument $ case parseCore (grammars machine) (globals machine) ctx (names machine) arg of
+    -- | @open ‹namespace›@ at the prompt (MS10 phase 249, his ruling the same
+    -- day; it closes the half of @~7zn7k@ that was not the resolver).
+    --
+    -- **The same instruction a file's @open@ compiles to**, so the refusal when
+    -- nothing is named @‹namespace›.…@ is the machine's and not a second copy, and
+    -- @:step@ can watch it as it watches @data@. The argument is raw text taken
+    -- from a line, which is 'Thena.Core.Term.nameFromText''s one job.
+    --
+    -- **Its effect runs to the end of the session** (phase 247) — @opened@ is not
+    -- backtrackable — so a prompt @open@ behaves as the last @open@ in a loaded
+    -- file does, and nothing distinguishes the two.
+    opening = withArgument $
+      let g  = nameFromText (dropWhile (== ' ') arg)
+          -- **It says so, as @data@ does.** A file's @open@ is silent because the
+          -- load reports per declaration; a line typed at the prompt that answered
+          -- nothing at all would leave the user unable to tell it took, and the
+          -- refusal path already speaks. The wording follows @declared ‹name›@.
+          is = [ Do (Open (openedWhole (nameSteps g ++ [nameWord g])))
+               , Do (Say (Lit (VText ("opened " ++ nameDotted g))))
+               ]
+       in progress
+            (sessionFuel s)
+            s { sessionMachine = load is machine }
+            []
+            []
+
+    goal = withArgument $ case parseCore (grammars machine) (globals machine) (scope machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (t, n1) -> case setGoal t machine { names = n1 } of
         Left e   -> (s, Rejected (NotThere e))
@@ -2171,7 +2443,8 @@ dispatch s name arg = case name of
                     -- **whnf'd, and that is not cosmetic.** The type is read
                     -- off the hole the elaboration solved, so without reducing
                     -- it prints as @Tinfer@ — the hole's own variable — and says
-                    -- nothing. It therefore reduces further than @:infer ⌜t⌝@
+                    -- nothing. It therefore reduces further than
+                    -- @:infer core\`t\`@
                     -- does: a saturated former where that stops at the wrapper.
                     -- **The two agree up to conversion, not syntactically**, and
                     -- they print the same.
@@ -2185,7 +2458,7 @@ dispatch s name arg = case name of
             (s', other) -> (s' { sessionMachine = restore before (sessionMachine s') }, other)
 
     conversion = withArgument $
-      case parseEquated (grammars machine) (globals machine) ctx (names machine) arg of
+      case parseEquated (grammars machine) (globals machine) (scope machine) ctx (names machine) arg of
         Left e -> (s, Failed e)
         Right ((a, b), n1) -> case convert (globals machine) ctx n1 a b of
           (why, owed, n2) -> (bump n2, Converted a b why owed)
@@ -2319,7 +2592,7 @@ dispatch s name arg = case name of
 -- table-driven 'dispatch'. Neither is this phase's.
 --
 -- **The spellings moved with the phase**: an argument is an operand now, so it
--- is @claim \"h\" ⌜Nat⌝@ and not @claim h : Nat@. The one-argument forms that
+-- is @claim \"h\" core\`Nat\`@ and not @claim h : Nat@. The one-argument forms that
 -- ask for a name are **rules**, in @rules\/standard.thena.rules@, and are
 -- absent for the paragraph above's reason.
 --
@@ -2333,9 +2606,9 @@ dispatch s name arg = case name of
 -- @DriverTests@ mirrors had the same gaps, so they could not have caught it.
 commandSummary :: [(String, String)]
 commandSummary =
-  [ ("assume \"‹x›\" ⌜‹S›⌝",       "add a hypothesis above the focus")
-  , ("claim \"‹x›\" ⌜‹S›⌝",        "add a hole above the focus")
-  , ("unify ⌜‹t›⌝ ⌜‹u›⌝",        "solve the focus by unification")
+  [ ("assume \"‹x›\" core`‹S›`",    "add a hypothesis above the focus")
+  , ("claim \"‹x›\" core`‹S›`",     "add a hole above the focus")
+  , ("unify core`‹t›` core`‹u›`",  "solve the focus by unification")
   , ("do { ‹instruction› ; … }", "play a block of instructions here")
   , ("yield",                    "hand control back to a rule that yielded")
   , ("retry / retry ‹n›",        "backtrack to a choice point")
@@ -2346,10 +2619,11 @@ commandSummary =
   , ("goto-named \"‹hole›\"",      "move to a hole by name")
   , ("goto-root",                "move to the root of the development")
   , ("reduce",                   "reduce the focused term in place")
-  , ("quantify \"‹x›\" ⌜‹S›⌝",     "add a ∀-binder above the focus")
+  , ("quantify \"‹x›\" core`‹S›`",  "add a ∀-binder above the focus")
   , ("data ‹D› … where { … }",   "declare an inductive family")
+  , ("open ‹namespace›",         "bring a namespace into view for the rest of the session")
   , ("declare ‹sig› ; ‹equation›", "elaborate a surface declaration")
-  , ("certify ⌜‹type›⌝",         "ask the kernel about the development")
+  , ("certify core`‹type›`",      "ask the kernel about the development")
   , ("qed",                      "certify and admit the finished proof")
   , (":show / :show ‹name›",     "the development / a global")
   , (":where",                   "focus, path, context, expected type")
@@ -2401,22 +2675,34 @@ commandSummary =
 
 -- | @:load@\'s argument, split on spaces and commas. **Both separators** —
 -- the user asked for "comma or space separated (or both)", 2026-08-25.
--- | An argument written in corners, with them stripped (MS4 phase 43).
+-- | An argument written as a @core@ region, with the fence stripped and its
+-- escapes undone (MS4 phase 43; **the corners it used to look for went at MS10
+-- phase 269**, `~3t63k`).
 --
 -- **The same split 'groups' makes, for a command that takes one argument
 -- rather than a run of them.** A command word decides which vocabulary it is
--- reading, and this is how it asks: corners are the development calculus, a
--- bare argument is the surface language.
+-- reading, and this is how it asks: a @core@ fence is the development
+-- calculus, a bare argument is the surface language.
 --
 -- Textual rather than a lex-and-inspect, because it is answering a question
 -- about how the argument was /written/ — and being wrong is a parse error in
--- the grammar the user did not mean, not a silent misreading.
-cornered :: String -> Maybe String
-cornered src = case dropWhile (== ' ') src of
-  '\8988' : rest -> case break (== '\8989') rest of
-    (inner, '\8989' : after) | all (== ' ') after -> Just inner
-    _                                              -> Nothing
+-- the grammar the user did not mean, not a silent misreading. **The escapes
+-- are undone here for the same reason the region scanner undoes them**: what
+-- is between the fences is raw text, so a term holding a backtick reaches the
+-- parser as the author wrote it. 'Thena.Syntax.Lexer.rawEscapes' is that
+-- list, so this cannot drift from the scanner.
+coreFenced :: String -> Maybe String
+coreFenced src = case dropWhile (== ' ') src of
+  'c' : 'o' : 'r' : 'e' : '`' : rest -> unfenced rest ""
   _ -> Nothing
+  where
+    unfenced cs acc = case cs of
+      '\\' : c : more
+        | c `elem` rawEscapes -> unfenced more (c : acc)
+      c : more
+        | c == '`' -> if all (== ' ') more then Just (reverse acc) else Nothing
+        | otherwise -> unfenced more (c : acc)
+      [] -> Nothing
 
 pathsOf :: String -> [FilePath]
 pathsOf = words . map (\c -> if c == ',' then ' ' else c)
@@ -2621,6 +2907,55 @@ parseInstralType src = do
     Right Nothing  -> Left (LineIllFormed [UnitInsideAType "a query"])
     Right (Just u) -> Right u
 
+-- | **Every declaration of a rule file beside the scope it stands in** (MS10
+-- phase 267).
+--
+-- The file's own @open@ lines are what build that scope, and they build it as
+-- the walk passes them: @open X@ is in force from its line to the end of the
+-- file, and @open X in ‹d›@ for @d@ alone. **That is the surface language's
+-- rule, not a second one** — his ruling of 2026-10-30 gave @open@ five forms
+-- and said what each reaches, and a rule file writes the same five.
+--
+-- **An @open@ itself is dropped**, because it declares nothing: what it said is
+-- in the 'Reading' beside every declaration under it.
+--
+-- **The namespace is taken as written and is not checked against anything.**
+-- The surface language's @Open@ op resolves the path against the environment
+-- first, so @open B@ inside @namespace A@ reaches @A.B@; here there is no
+-- enclosing namespace, and no environment either — the shipped base is read
+-- before the prelude declares its first name ('Thena.Files.startingSession').
+-- So a path that reaches nothing is simply an @open@ that brings nothing in,
+-- and what the author sees is the tag it failed to shorten.
+scopedDecls :: [Grammar] -> [RawDecl] -> [(Reading, RawDecl)]
+scopedDecls gs = go rootScope
+  where
+    go _ []  = []
+    go sc (d : rest) = case d of
+      DeclOpen o        -> go (brings o sc) rest
+      -- **One declaration, and then the file carries on without it.** The
+      -- inner one may be another @open … in@, which is why it goes back
+      -- through this walk rather than being paired here.
+      DeclOpenIn o cov  -> go (brings o sc) [cov] ++ go sc rest
+      _                 -> (Reading gs sc, d) : go sc rest
+
+    brings o sc = sc { scopeOpens = openedOf o ++ scopeOpens sc }
+
+-- | What an @open@ line in a rule file said, as one 'Opened' per namespace it
+-- named (MS10 phase 267).
+--
+-- **The twin of 'regroup''s @opened@**, which does this for the surface
+-- language's written form. Two readers, one resolved form — a line that names
+-- three namespaces is three of these, and only the plain form may name more
+-- than one.
+openedOf :: RawOpen -> [Opened]
+openedOf (RawOpen ns spec) = [ said (ps ++ [x]) | (ps, x) <- ns ]
+  where
+    said p = case spec of
+      RawOpenWhole        -> openedWhole p
+      RawOpenOnly ws      -> (openedWhole p) { openedOnly = Just ws }
+      RawOpenHiding ws    -> (openedWhole p) { openedHiding = ws }
+      RawOpenRenaming rs  -> (openedWhole p) { openedRenaming = rs }
+
 -- | Resolve every declaration, then validate every rule. Every error, not the
 -- first — 'validate'\'s reason.
 --
@@ -2629,6 +2964,11 @@ parseInstralType src = do
 -- questions about the whole program and belong to 'Thena.Instral.Infer'. What
 -- /is/ answered here is what one file can answer — that the type names a type,
 -- and that a callable has at most one signature.
+-- **AND AN @open@ IS READ IN ITS PLACE** (MS10 phase 267), which is the
+-- pulled-forward piece of `~jmw4k`: the file's own @open@ lines decide what a
+-- tag in it may be written as, so a declaration is resolved against the scope
+-- that stands where it is written and not against one scope for the file.
+-- 'scopedDecls' is the walk that pairs the two.
 resolveAll
   :: [Grammar] -> [RawDecl]
   -> Either RuleFileError
@@ -2641,12 +2981,21 @@ resolveAll gs raws =
     ([], [])     -> Right (sigs, fns, ok)
     (res, valid) -> Left (RuleIllFormed (res ++ valid))
   where
-    (ruleErrs, ok)  = partitionEithers [ resolveRule gs r | DeclRule r <- raws ]
+    -- **Each declaration beside the scope it was written in.** An @open@ is not
+    -- a declaration to resolve, so it does not appear here — what it says is
+    -- already in the reading beside everything under it.
+    decls = scopedDecls gs raws
+
+    (ruleErrs, ok)  =
+      partitionEithers [ resolveRule rd r | (rd, DeclRule r) <- decls ]
     -- **A function is validated like any rule**, because it is one
     -- ('Thena.Rules.resolveFunction').
-    (fnErrs, fns)   = partitionEithers [ resolveFunction gs f | DeclFunction f <- raws ]
+    (fnErrs, fns)   =
+      partitionEithers [ resolveFunction rd f | (rd, DeclFunction f) <- decls ]
+    -- **A signature needs no scope**: @instral@'s types are its own words, and
+    -- a tag never appears in one.
     (sigErrs, sigs) =
-      partitionEithers [ resolveSignature g | DeclSignature g <- raws ]
+      partitionEithers [ resolveSignature g | (_, DeclSignature g) <- decls ]
     -- **A name may not be a rule and a function at one arity** (MS5, reviewed
     -- 2026-09-12). They would become two clauses of one callable — 'clauses'
     -- searches 'Thena.Rules.allCallable' — so the function would join the rule's
@@ -2655,7 +3004,7 @@ resolveAll gs raws =
     collisions =
       [ RuleAndFunction n (length (ruleParams f))
       | f <- fns
-      , let GlobalName n = ruleName f
+      , let n = nameDotted (ruleName f)
       , any (\r -> ruleName r == ruleName f
                      && length (ruleParams r) == length (ruleParams f)) ok
       ]
@@ -2693,7 +3042,7 @@ resolveAll gs raws =
     overlapping =
       [ FunctionClauseUnreachable n (length (ruleParams f))
       | (i, f) <- zip [0 :: Int ..] fns
-      , let GlobalName n = ruleName f
+      , let n = nameDotted (ruleName f)
       , any (\g -> ruleName g == ruleName f
                      && length (ruleParams g) == length (ruleParams f)
                      && all Ops.patternIrrefutable (ruleParams g)) (take i fns)
@@ -2771,7 +3120,7 @@ loadReadBases s = go []
     -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then
     -- dropped, and a 'RuleBase' has no field for them. (Until MS6 phase 106 the
     -- reason was also that a block needed every base's MS5 languages.)
-    blocksOf b = case surfaceBlocks (grammars (sessionMachine s)) (GlobalName (baseName b))
+    blocksOf b = case surfaceBlocks (rootReading (grammars (sessionMachine s))) (rootName (baseName b))
                             (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
       Left errs -> Left (basePath b, errs)
       Right bs  -> case concatMap validate bs of
@@ -2927,7 +3276,14 @@ data LoadError
   | NestedLoad Int
     -- ^ @:load@ inside a loaded file. Refused in MS1 rather than followed:
     -- following it needs IO from a pure function, and a file that loads itself
-    -- would not terminate
+    -- would not terminate.
+    --
+    -- **All three kinds of load, which was not so until MS10 phase 268**: the
+    -- case matched 'LoadRequested' alone, so a @:load@ naming a script said
+    -- this while one naming a proof module or a rule base was recorded in the
+    -- responses and silently dropped. The refusal is about following a load
+    -- from a pure function and no kind of load escapes that \8212 a reader of
+    -- the one message cannot tell which kind of file it named either
   | UnansweredQuestion Int
     -- ^ the file ended while an op was still asking (§7.5). The line is the one
     -- that asked
@@ -2988,7 +3344,13 @@ loadSource s0 = go s0 1 [] . lines
       let (s', resp) = oneLine s l
           acc'       = resp : acc
        in case resp of
-            LoadRequested _ -> finished s acc (Just (NestedLoad n))
+            -- **The three a caller would have to follow with IO**, which is
+            -- exactly 'Thena.Files.following's list \8212 kept here as a match
+            -- rather than by asking that function, because this module is
+            -- below it.
+            LoadRequested _  -> finished s acc (Just (NestedLoad n))
+            ProofRequested _ -> finished s acc (Just (NestedLoad n))
+            RulesRequested _ -> finished s acc (Just (NestedLoad n))
             Quit            -> finished s' acc' Nothing
             _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
               | otherwise    -> go s' (n + 1) acc' ls
@@ -3057,6 +3419,36 @@ stopped resp = case resp of
 -- hand back a 'Paused' in place of their own answer, so they are unbounded by
 -- construction — see @ms7\/CLOSEOUT.md@ 24, since a long load is therefore
 -- still something a frontend waits out.
+-- | __What the word a name takes used to reach, if anything else did.__
+--
+-- The resolution question itself, asked of the environment /before/ the name
+-- went in: 'globalUnder' with the name exactly as it stands answers the alias
+-- or the @open@ that the word reached, and anything other than the name itself
+-- is a shadowing (MS10 phase 264).
+--
+-- **It asks 'globalUnder' rather than reasoning about it**, for
+-- 'Thena.Core.Term.shortestEnding''s reason: the announcement cannot then drift
+-- from what the reader does, and a word two namespaces would answer is an
+-- ambiguity rather than a shadowing, which the resolver already says.
+shadowed :: GlobalEnv -> InScope -> GlobalName -> Maybe GlobalName
+shadowed before sc g = case globalUnder (knownIn before) sc g of
+  Right g' | g' /= g -> Just g'
+  _                  -> Nothing
+
+-- | Every word a step's new names took, said as warnings.
+--
+-- **One question at every door into the environment**, so that no door has to
+-- know whether its own names are the kind that can shadow: @data@, a
+-- definition written whole, and a primitive all call this, and @:theorem@ asks
+-- 'shadowed' directly because its name has not entered yet.
+-- **The names are deduplicated, and a @data@ declaration is why**: a
+-- constructor is installed twice over, as the constant it is and as the §3.3.1
+-- wrapper that is what its name means when written, so the keys the environment
+-- gained name it twice and the word it takes is one word.
+shadowings :: GlobalEnv -> InScope -> [GlobalName] -> [Warning]
+shadowings before sc gs =
+  [ NameShadows g hid | g <- nub gs, Just hid <- [shadowed before sc g] ]
+
 progress :: Maybe Int -> Session -> [Message] -> [Warning] -> (Session, Response)
 progress fuel = spending fuel 0
 
@@ -3095,10 +3487,18 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   Engine.Declaring d m -> case declare (globals m) (names m) d of
     Left e -> stop (load [] m) msgs warns (Refused e)
     Right (g, n1)
-      | exhausted -> stop installed msgs warns (Paused spent)
-      | otherwise -> spending fuel spent s { sessionMachine = installed } msgs warns
+      | exhausted -> stop installed msgs took (Paused spent)
+      | otherwise -> spending fuel spent s { sessionMachine = installed } msgs took
       where
         installed = m { globals = g, names = n1 }
+        -- **Every name the declaration added is asked, not just the former's**
+        -- (MS10 phase 264): a @data@ block's names all land inside its own
+        -- namespace, so the /former/ can never take a word — but a constructor
+        -- can, if a datatype is declared at exactly that path, and the door
+        -- should not have to know which of its names is the dangerous one.
+        took = shadowings (globals m) (Engine.scope m)
+                          (Env.declaredNames g \\ Env.declaredNames (globals m))
+                 ++ warns
   -- The kernel runs here, outside the machine, for 'Declaring'\'s reason: it is
   -- policy, and §7.5 has the driver own policy. On refusal the rest of the
   -- program is dropped.
@@ -3184,11 +3584,15 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
                                   then signatures m
                                   else (nm, ps) : signatures m
                  }
+          -- **The word this definition takes, if it takes one** (MS10 phase
+          -- 264): this is the door a theorem in a file comes in by, and the
+          -- door @declare@ comes in by, so it is where the fact is said.
+          took = shadowings (globals m) (Engine.scope m) [nm] ++ warns
          in if not (null (unmet (trustLevel m) claims))
               then stop (load [] mw) msgs warns (Untrusted (trustLevel m) claims)
               else if exhausted
-                then stop m' msgs warns (Paused spent)
-                else spending fuel spent s { sessionMachine = m' } msgs warns
+                then stop m' msgs took (Paused spent)
+                else spending fuel spent s { sessionMachine = m' } msgs took
 
   -- **A primitive is installed only if the system can reduce it** (MS6 phase
   -- 97b). Two checks, and both are the reason @primitive@ is not a postulate:
@@ -3196,7 +3600,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- type must be the shape that rule reads — @P -> P -> B@ for the primitive's
   -- own @P@, with @B@ a datatype of two constructors that take nothing.
   --
-  -- A user may therefore write @primitive eqString : String -> String -> Bool@
+  -- A user may therefore write @primitive String.eq : String -> String -> Bool@
   -- and choose what @Bool@ is; they may not write @primitive myAxiom : Empty@.
   -- **A grammar is installed only if every check of §4.5 passes** (MS6 phase
   -- 101); its warnings join the load's, in source order.
@@ -3208,7 +3612,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- it is a separate block**: the function's type names the datatype the
   -- @language@ or @context@ block declares, so it cannot be written above it.
   Engine.DeclaringGrammar b m
-    | blockKind b == NotationBlock -> case checkNotation (grammars m) (globals m) b of
+    | blockKind b == NotationBlock -> case checkNotation (Engine.scope m) (grammars m) (globals m) b of
         Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
         Right delta ->
           -- **A @notation@ block that INSTALLS a grammar generates its
@@ -3237,7 +3641,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
                 then stop m' msgs warns (Paused spent)
                 else spending fuel spent s { sessionMachine = m' } msgs warns
 
-  Engine.DeclaringGrammar b m -> case checkGrammar (grammars m) (globals m) b of
+  Engine.DeclaringGrammar b m -> case checkGrammar (Engine.scope m) (grammars m) (globals m) b of
     Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
     -- **A judgment's datatype is its rules** (MS6 phase 108, §6.5), read with
     -- its own notation installed, since a rule may have a premise of the
@@ -3247,7 +3651,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
       case judgmentDatatype (g : grammars m) g (blockRules b) of
         Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
         Right (sd, roles) ->
-          let (is, n1) = datatypeProgram (names m) sd (Just roles)
+          let (is, n1) = datatypeProgram (innermostOf (Engine.scope m)) (names m) sd (Just roles)
               m' = (Engine.splicing is m) { grammars = g : grammars m, names = n1 }
            in if exhausted
                 then stop m' msgs (reverse ws ++ warns) (Paused spent)
@@ -3258,7 +3662,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
       -- that could only happen once the load reached it. So the instructions go
       -- in front of what is left of the program, and the datatype is elaborated
       -- and declared exactly as a written one is.
-      let (is, n1) = datatypeProgram (names m) sd (Just roles)
+      let (is, n1) = datatypeProgram (innermostOf (Engine.scope m)) (names m) sd (Just roles)
           (sd, roles) = grammarDatatype g
           -- **Then its substitution** (MS6 phase 105, §4.7): four ordinary
           -- definitions, elaborated by the same instructions a written one is,
@@ -3281,7 +3685,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
           -- two kinds of binding gets a lookup relation for each, and their
           -- instructions run in declaration order.
           (ls, n3) = foldl (\(is0, n) (ld, lroles) ->
-                              let (is1, n') = datatypeProgram n ld (Just lroles)
+                              let (is1, n') = datatypeProgram (innermostOf (Engine.scope m)) n ld (Just lroles)
                                in (is0 ++ is1, n'))
                            ([], n2) (lookupDatatypes g)
           installed = reverse (lookupGrammars g) ++ [g]
@@ -3297,7 +3701,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- itself declared above it, and a @language@ block is exactly such a thing.
   --
   -- **The same checker the prompt uses**, so the messages are unchanged.
-  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (GlobalName "do") [] [] is) of
+  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] [] is) of
     Just (BlockIll errs)      -> stop (load [] m) msgs warns (BlockRefused errs)
     Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
     Nothing ->
@@ -3310,9 +3714,10 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
     Left e   -> stop (load [] m) msgs warns (Refused e)
     Right () ->
       let m' = m { globals = addPrimitive nm ty (globals m) }
+          took = shadowings (globals m) (Engine.scope m) [nm] ++ warns
        in if exhausted
-            then stop m' msgs warns (Paused spent)
-            else spending fuel spent s { sessionMachine = m' } msgs warns
+            then stop m' msgs took (Paused spent)
+            else spending fuel spent s { sessionMachine = m' } msgs took
 
   Engine.Certifying t ty m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs warns (Uncertified e)
@@ -3346,9 +3751,9 @@ checkedPrimitive :: GlobalEnv -> GlobalName -> Core -> Either DeclareError ()
 checkedPrimitive env nm ty = case lookup nm primitiveNames of
   Nothing -> Left (NoSuchPrimitive nm)
   Just Appending -> case argumentsOf ty of
-    Just ([a, b], r) | all (== Global (GlobalName "String") []) [a, b, r] -> Right ()
+    Just ([a, b], r) | all (== Global (rootName "String") []) [a, b, r] -> Right ()
     _ -> wrong "at String -> String -> String"
-  Just (Comparing p@(GlobalName pn)) -> case argumentsOf ty of
+  Just (Comparing p) | let pn = nameDotted p -> case argumentsOf ty of
     Just ([a, b], Global d [])
       | a /= Global p [] || b /= Global p [] -> wrong ("with two arguments of type " ++ pn)
       | otherwise -> case lookupInductive d env of
@@ -3381,7 +3786,7 @@ checkedTokenClass env nm ty value = case whnf env [] ty of
   where
     classOf t = do
       (tn, allowed) <- case t of
-        Global g@(GlobalName n) [] | Just l <- lookup n tokenLanguages -> Right (g, l)
+        Global g [] | Just l <- lookup (nameDotted g) tokenLanguages -> Right (g, l)
         _ -> Left (TokenTypeUnsupported t)
       src <- case whnf env [] value of
         App (Primitive (LRegex s)) _ -> Right s
@@ -3433,8 +3838,19 @@ settled sub residue s = s { sessionWork = fmap' (sessionWork s) }
                , attemptResidue = residue
                }
 
-nameOf :: InductiveDefinition -> String
-nameOf d = case inductiveName d of GlobalName x -> x
+-- | **Written the way the reader of the line will write it** (MS10 phase 254),
+-- which is the shortest ending that still resolves: @data Nat@ answers
+-- @declared Nat@, and it answers @declared Nat.Nat@ only where a second @Nat@
+-- would make the short word mean something else.
+nameOf :: Machine -> InductiveDefinition -> String
+nameOf m d = shortestEnding known (scope m) g
+  where
+    g = inductiveName d
+    -- **The datatype counts as declared, because it is about to be** — the
+    -- message is built into the program before the declaration runs, and
+    -- @declared Nat.Nat@ where @declared Nat@ is what the user will write from
+    -- now on would be a stale answer rather than a careful one.
+    known h = h == g || knownIn (globals m) h
 
 -- | Why a datatype got no no-confusion (phase 14).
 --

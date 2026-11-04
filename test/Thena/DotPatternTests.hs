@@ -62,12 +62,12 @@ notationTests :: [TestTree]
 notationTests =
   [ testCase "a dot on a name" $
       armPattern "case v of { c .n a -> a }"
-        @?= Just (PatternName "c" [PatternDot (SurfaceName "n"), PatternName "a" []])
+        @?= Just (PatternName "c" [PatternDot (SurfaceName [] "n"), PatternName "a" []])
   , testCase "a dot on a term needs the brackets" $
       armPattern "case v of { c .(s n) a -> a }"
         @?= Just
               (PatternName "c"
-                 [ PatternDot (SurfaceApp (SurfaceName "s") (arg (SurfaceName "n") :| []))
+                 [ PatternDot (SurfaceApp (SurfaceName [] "s") (arg (SurfaceName [] "n") :| []))
                  , PatternName "a" []
                  ])
   , -- __@._@ is a dot on a placeholder, not a wildcard pattern.__ A wildcard
@@ -86,9 +86,23 @@ notationTests =
   , -- __@...@ still wins__, which is the one thing adding the token could have
     -- broken: the lexer takes the longest match, so the list-pattern tail
     -- marker is still one token and never three of these.
+    --
+    -- **@a...b@ changed at MS10 phase 240 and that is the point of the phase.**
+    -- The dot was an ordinary character inside a name until it became the
+    -- separator of a namespace path, so a name may no longer contain one and
+    -- @a...b@ is three tokens. @...@ winning over @.@ is what this still pins.
     testCase "the spread token is untouched" $
       lexed "... . .n a...b"
-        @?= Right [TSpread, TDot, TDot, TIdent "n", TIdent "a...b"]
+        @?= Right [TSpread, TDot, TDot, TIdent "n", TIdent "a", TSpread, TIdent "b"]
+  , -- __A qualified name is one token, already in pieces__ (MS10 phase 240),
+    -- and the glue is what tells it from the inaccessible-pattern dot: @k.n@ is
+    -- a name in @k@ and @k .n@ is a name and then a dot on another.
+    testCase "a qualified name is one token" $
+      lexed "List.map k.n k .n"
+        @?= Right [ TQIdent ["List", "map"], TQIdent ["k", "n"]
+                  , TIdent "k", TDot, TIdent "n" ]
+  , testCase "and a path may be deeper than one step" $
+      lexed "A.B.c" @?= Right [TQIdent ["A", "B", "c"]]
   ]
 
 -- | What the lexer made of a line, the positions dropped.
@@ -164,7 +178,7 @@ refusedTests =
     -- type the position has rather than anywhere: @.A@ where an @N@ was
     -- determined never reaches the unification.
     testCase "a dot at the wrong type" $
-      refusedWith "Type\8320 and N cannot be made equal"
+      refusedWith "Type\8320 and N.N cannot be made equal"
         (vecPreamble ++ vtail "vcons .A a as")
   , -- __A dot heads no arm.__ The grammar lets one stand anywhere an atom may,
     -- and @arm-for@ wants a constructor's name — an arm is for a case, and
@@ -194,13 +208,13 @@ refusedTests =
 namingTests :: [TestTree]
 namingTests =
   [ testCase "a dot on a compound term that is not the one" $
-      refusedWith "s q and p cannot be made equal"
+      refusedWith "N.s q and p cannot be made equal"
         (vecPreamble
            ++ [ "vq : forall (A : Type\8320) (p : N) (q : N) (xs : Vec A (s p)) -> Vec A p"
               , "vq = \\ A p q xs -> case xs of { vnil -> ; vcons .(s q) hd tl -> tl }"
               ])
   , testCase "an ordinary application, with no dot anywhere" $
-      refusedWith "kk and s kk cannot be made equal"
+      refusedWith "kk and N.s kk cannot be made equal"
         (vecPreamble
            ++ [ "vp : forall (A : Type\8320) (kk : N) (a : A) (xs : Vec A kk) -> Vec A kk"
               , "vp = \\ A kk a xs -> vcons A (s kk) a xs"
@@ -219,9 +233,14 @@ vecPreamble =
   , "data N : Type\8320 where"
   , "  z : N"
   , "  s : N -> N"
+    -- **A declaration's own short name resolves without an @open@; its
+    -- constructors do not** (MS10 phase 251). @Vec@'s own header may say @N@,
+    -- but @Vec A z@ needs @z@ in scope, and that is what the @open@ is for.
+  , "open N"
   , "data Vec (A : Type) : N -> Type where"
   , "  vnil : Vec A z"
   , "  vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n)"
+  , "open Vec"
   ]
 
 -- | @vtail@ over a @Vec A (s m)@, with the @vcons@ arm written as given. The

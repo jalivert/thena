@@ -48,20 +48,20 @@ You land at a prompt with a small prelude already loaded, and one empty goal.
 | the result of comparing | `Comparison`, `same`, `different` |
 | a decision, with its evidence | `Dec`, `yes`, `no` |
 | transport along an equality | `transport` proved |
-| deciding a literal equality | `decString`, `decChar`, `decInt` proved, each from two trusted laws |
+| deciding a literal equality | `String.dec`, `Char.dec`, `Int.dec` proved, each from two trusted laws |
 
 `String`, `Char`, `Int` and `Token` are in scope as well — those are built in
 rather than declared, so they are there in any environment — along with the
-four primitive functions, `eqString`, `eqChar`, `eqInt` and `appendString`.
+four primitive functions, `String.eq`, `Char.eq`, `Int.eq` and `String.append`.
 
-`decString a b` answers `yes` with a proof that `a` and `b` are equal, or `no`
+`String.dec a b` answers `yes` with a proof that `a` and `b` are equal, or `no`
 with a refutation, and on a name it does not know it is stuck — so a proof that
 eliminates it gets the equality in one branch and its refutation in the other.
-That is what `eqString` alone cannot give you, and it is the reason the prelude
-has both. `decString` is a *definition*, written in `prelude/prelude.thena`,
-and what it rests on is two `trusted` claims about `eqString`: that a `same`
-answer means the two really are equal (`eqStringEqual`), and that the
-comparison answers `same` of a literal and itself (`eqStringRefl`). Chapter 9
+That is what `String.eq` alone cannot give you, and it is the reason the prelude
+has both. `String.dec` is a *definition*, written in `prelude/prelude.thena`,
+and what it rests on is two `trusted` claims about `String.eq`: that a `same`
+answer means the two really are equal (`String.eqEqual`), and that the
+comparison answers `same` of a literal and itself (`String.eqRefl`). Chapter 9
 is what those are; `isSame` is the helper that tells the two answers apart.
 
 **There is no `Nat`, and no arithmetic.** A module that wants numbers declares
@@ -132,7 +132,6 @@ keyboard:
 | `≐` | `≈` |
 | `⊢` | `\|-` |
 | `▸` | `\|>` |
-| `⌜ ⌝` | `[\| \|]` |
 
 ```
 thena spine> :core \ (A : Type0) -> A
@@ -164,7 +163,7 @@ serve every level.
 `Type₁` is wanted:
 
 ```
-thena spine> :infer ⌜ (\ (A : Type₁) -> A) Type₀ ⌝
+thena spine> :infer core`(\ (A : Type₁) -> A) Type₀`
 (λ (A : Type₁) -> A) Type₀ : Type₁
 ```
 
@@ -202,9 +201,9 @@ Written in the development calculus they are explicit, and **prenex** — a use
 writes all of them or none:
 
 ```
-thena spine> :infer ⌜ refl {1} ⌝
+thena spine> :infer core`refl {1}`
 refl {1} : ∀ (A : Type₁) (a : A) -> Eq {1} A a a
-thena spine> :infer ⌜ refl {1 0} ⌝
+thena spine> :infer core`refl {1 0}`
 refl has 1 level parameter, and was given 2 level arguments
 its level parameters are prenex, so a use writes every one of them
 ```
@@ -286,11 +285,33 @@ block with explicit braces here.
 ```
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> :show Nat
 data Nat : Type₀ where
   { zero : Nat
   ; succ : Nat -> Nat }
 ```
+
+**A declaration opens a namespace named after itself**, so the type is `Nat.Nat`
+and the constructors are `Nat.zero` and `Nat.succ`. A written `Nat` reaches the
+type anyway, because a declaration's short name is derived from the environment;
+`open Nat`, on the line above, is what lets the rest of this chapter write
+`zero` and `succ` without the prefix. `DECISIONS.md`, *Modules and namespaces*,
+has the whole of it — the other four forms of `open`, and `namespace` in a file.
+
+**A later declaration may take that short name, and it is allowed to.** Prove a
+theorem called `Nat` and the word `Nat` means the theorem from the `qed` on; the
+datatype is still there and is still `Nat.Nat`, which is how you write it. You
+are told before it costs you anything — `:theorem Nat : Type₁` answers
+
+> warning: the name Nat reaches Nat.Nat here, so proving it shadows that one —
+> it is then reached by writing it in full
+
+so that renaming the theorem is still free. The same warning, in the past tense,
+comes from `declare` and from a loaded file, where the name is in the
+environment the moment the line lands. Nothing is lost either way: both names
+exist, and a path always reaches what it names.
 
 Now the three commands of the last chapter have something to look at:
 
@@ -311,14 +332,14 @@ thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
 data Box {ℓ₄₉₁₀} (A : Type (ℓ₄₉₁₀)) : Type (ℓ₄₉₁₀) where
-  { box : A -> Box {ℓ₄₉₁₀} A }
+  { Box.box : A -> Box {ℓ₄₉₁₀} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
 
 ```
 thena spine> data Big : Type₀ where { wrap : Type₀ -> Big }
-refused: the argument x of wrap lives in Type₁, which the datatype's own Type₀ does not contain
+refused: the argument x of Big.wrap lives in Type₁, which the datatype's own Type₀ does not contain
 ```
 
 Declaring a datatype checks strict positivity and **generates three things**:
@@ -346,9 +367,9 @@ elim Nat : ∀ (P : Nat -> Type₁) -> P zero -> (∀ (x : Nat) -> P x -> P (suc
 equal" and "constructors are injective" usable in a proof:
 
 ```
-thena spine> :show noConfusionNat
-noConfusionNat : ∀ (x : Nat) (x' : Nat) -> Eq {0} Nat x x' -> NoConfusionNat x x'
-noConfusionNat = λ (u : Nat) (v : Nat) (q : Eq {0} Nat u v) -> elim Eq {0} …
+thena spine> :show Nat.lemmata.noConfusion
+Nat.lemmata.noConfusion : ∀ (x : Nat) (x' : Nat) -> Eq {0} Nat x x' -> Nat.lemmata.NoConfusion x x'
+Nat.lemmata.noConfusion = λ (u : Nat) (v : Nat) (q : Eq {0} Nat u v) -> elim Eq {0} …
 ```
 
 (`:show` prints the body too; it is one long line and is elided here.)
@@ -359,7 +380,7 @@ indices**: a `Ladder x` and a `Ladder x'` are compared by a *chain* of equations
 transported along it — rather than by a single `Eq`. That is what lets the lemma
 be applied where the two sides are not visibly at the same index, which is what
 acyclicity needs. Where a family has no indices the chain is the one equation it
-always was, and the lemma reads exactly as `noConfusionNat` does above.
+always was, and the lemma reads exactly as `Nat.lemmata.noConfusion` does above.
 
 The same chain is how an argument whose *type* mentions an earlier argument is
 handled: the later equation is stated after transporting along the earlier one,
@@ -368,8 +389,8 @@ so every equation is still between two terms of one type.
 ```
 thena spine> data Ladder : Nat -> Type₀ where { base : Ladder zero ; step : ∀ (n : Nat) (r : Ladder n) -> Ladder (succ n) }
 declared Ladder
-thena spine> :infer noConfusionLadder
-noConfusionLadder : ∀ (x : Nat) (x1 : Ladder x) (x' : Nat) (x'1 : Ladder x') (q : Eq {0} Nat x x') -> Eq {0} (Ladder x') ((elim Eq {0} (Nat) (λ (u : Nat) (v : Nat) (w : Eq {0} Nat u v) -> Ladder u -> Ladder v) ((λ (a : Nat) (z : Ladder a) -> z)) (x x') q) x1) x'1 -> NoConfusionLadder x x1 x' x'1
+thena spine> :infer Ladder.lemmata.noConfusion
+Ladder.lemmata.noConfusion : ∀ (x : Nat) (x1 : Ladder x) (x' : Nat) (x'1 : Ladder x') (q : Eq {0} Nat x x') -> Eq {0} (Ladder x') ((elim Eq {0} (Nat) (λ (u : Nat) (v : Nat) (w : Eq {0} Nat u v) -> Ladder u -> Ladder v) ((λ (a : Nat) (z : Ladder a) -> z)) (x x') q) x1) x'1 -> Ladder.lemmata.NoConfusion x x1 x' x'1
 ```
 
 `DECISIONS.md`, *Thena does not assume K*, says what that buys and what it does
@@ -442,7 +463,7 @@ type
 `solve`-ing each guess as you go, and finish:
 
 ```
-thena spine> try-core ⌜ _ ⌝
+thena spine> try-core core`_`
 thena spine> solve
 thena spine> back
 thena spine> back
@@ -467,7 +488,7 @@ unknown becomes a parameter:
 ```
 thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
 proving idPoly : ∀ (A : Type (?ℓ5790)) -> A -> A
-thena spine> try-core ⌜ \ (A : Type) (a : A) -> a ⌝
+thena spine> try-core core`\ (A : Type) (a : A) -> a`
 thena spine> solve
 thena spine> qed
 idPoly {ℓ₅₈₀₂} : ∀ (A : Type (ℓ₅₈₀₂)) -> A -> A   ∎
@@ -480,7 +501,7 @@ before a `⊢`:
 ```
 thena spine> :theorem lift : Type -> Type
 proving lift : Type (?ℓ5804) -> Type (?ℓ5805)
-thena spine> try-core ⌜ \ (x : Type) -> x ⌝
+thena spine> try-core core`\ (x : Type) -> x`
 thena spine> solve
 thena spine> qed
 lift {ℓ₅₈₁₃ ℓ₅₈₁₄} : (ℓ₅₈₁₃ ≤ ℓ₅₈₁₄) ⊢ Type (ℓ₅₈₁₃) -> Type (ℓ₅₈₁₄)   ∎
@@ -497,7 +518,7 @@ collected by the kernel, not at the moment you type the term** — `:infer` and
 ```
 thena spine> :theorem bad : Type₁ -> Type₀
 proving bad : Type₁ -> Type₀
-thena spine> try-core ⌜ lift {1 0} ⌝
+thena spine> try-core core`lift {1 0}`
 thena spine> solve
 thena spine> qed
 the kernel refused it
@@ -518,13 +539,13 @@ until you do, `:theorem` will tell you there is one in progress.
 |---|---|
 | `attack` | turn the focused hole into a guess, ready to be built |
 | `intro` | move one `∀` binder from the goal into the guess body |
-| `try-core ⌜ term ⌝` | propose a term for the focused hole |
+| `` try-core core`term` `` | propose a term for the focused hole |
 | `solve` | accept the focused guess — it becomes a definition |
 | `regret` | throw away a guess's body, back to a plain hole |
 | `abandon` | remove the focused hole entirely |
-| `assume "‹x›" ⌜‹S›⌝` | add a hypothesis above the focus |
-| `claim "‹x›" ⌜‹S›⌝` | add a new hole above the focus |
-| `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve holes by unification |
+| `` assume "‹x›" core`‹S›` `` | add a hypothesis above the focus |
+| `` claim "‹x›" core`‹S›` `` | add a new hole above the focus |
+| `` unify core`‹t›` core`‹u›` `` | solve holes by unification |
 | `reduce` | reduce the focused term one step, in place |
 
 `reduce` acts on whatever term the cursor is standing on, and the change is
@@ -533,7 +554,7 @@ committed to the development:
 ```
 thena spine> :theorem two : Nat
 proving two : Nat
-thena spine> try-core ⌜ (\ (x : Nat) -> succ x) zero ⌝
+thena spine> try-core core`(\ (x : Nat) -> succ x) zero`
 thena spine> into
 thena core> :show
   let ? two : Nat ≐ (
@@ -552,7 +573,7 @@ thena core> :show
 asked on its own line, and your answer is read at the `>` prompt:
 
 ```
-thena core> claim ⌜ Nat ⌝
+thena core> claim core`Nat`
 name for the new hole?
 > k
 claimed k
@@ -621,7 +642,7 @@ amounts to starting over. Handy for scratch work.
 
 ## 7. Proof by induction
 
-`eliminate-core ⌜ target ⌝` is the induction tactic. It builds the motive, works out
+`` eliminate-core core`target` `` is the induction tactic. It builds the motive, works out
 what each case has to prove, and posts one hole per case.
 
 The example needs `Nat`, addition, and congruence of `succ`.
@@ -653,7 +674,7 @@ thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
-thena spine> eliminate-core ⌜ n ⌝
+thena spine> eliminate-core core`n`
 subgoals: zeroMethod, succMethod
 ```
 
@@ -680,10 +701,10 @@ finish:
 ```
 thena spine> back
 thena spine> back
-thena spine> try-core ⌜ refl {0} Nat zero ⌝
+thena spine> try-core core`refl {0} Nat zero`
 thena spine> solve
 thena spine> along
-thena spine> try-core ⌜ \ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc {0 0} (plus x zero) x ih ⌝
+thena spine> try-core core`\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc {0 0} (plus x zero) x ih`
 thena spine> solve
 thena spine> along
 thena spine> solve
@@ -696,14 +717,13 @@ thena spine> qed
 plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n   ∎
 ```
 
-**A core tactic's argument is written in corners**, `⌜ … ⌝`. A command line is
-a run of operands, exactly as it would be inside a rule body, so
-`try-core refl {0} Nat zero` would be four arguments and is refused — the
-corners say where the term begins and ends, and inside them nothing needs
-parenthesising.
+**A core tactic's argument is written in a fence**, `` core`…` ``. A command
+line is a run of operands, exactly as it would be inside a rule body, so
+`try-core refl {0} Nat zero` would be four arguments and is refused — the fence
+says where the term begins and ends, and inside it nothing needs parenthesising.
 
-**A surface term is written in angle brackets**, `⟨ … ⟩`, the same way — so
-`elaborate ⟨ succ zero ⟩`. Every embedded term is written in the fence its
+**A surface term is written the same way**, `` surface`…` `` — so
+`` elaborate surface`succ zero` ``. Every embedded term is written in the fence its
 language is entitled to, and an argument in no fence is neither language: it is
 a name, a number or a string, read exactly as a rule body reads one. That is why
 `goto-named` takes `goto-named "h"` and not `goto-named h` — the second is a
@@ -741,9 +761,6 @@ is the next section.
 driven by hand. It posts one hole per case, and each hole is *inside* that
 case's own binders, with the equations the split stated already discharged. So
 you write the body of the arm and nothing else.
-
-(`core`…`` and `⌜ … ⌝` are the same fence, spelled two ways; the corners are on
-their way out.)
 
 ```
 thena spine> :theorem plusZeroAgain : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
@@ -1043,6 +1060,8 @@ between slices, and stops the search by simply not asking for the next one.
 ```
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> :step 6
 thena spine> declare idn : Nat -> Nat ; idn = \ n -> n
 pc
@@ -1053,7 +1072,7 @@ env
 stack
   call, 14 instruction(s) to resume
   call, 8 instruction(s) to resume
-  call, 178 instruction(s) to resume (returned)
+  call, 186 instruction(s) to resume (returned)
 thena spine> :run 6
 pc
   0  u = universe-at l
@@ -1064,7 +1083,7 @@ stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
   call, 8 instruction(s) to resume
-  call, 178 instruction(s) to resume (returned)
+  call, 186 instruction(s) to resume (returned)
 thena spine> :run
 solved: ?ℓ4876
 solved: ?ℓ4878
@@ -1082,7 +1101,7 @@ The kernel is an independent check. It does not trust the machine.
 | | |
 |---|---|
 | `:extract` | read the finished term off the development |
-| `certify ⌜‹type›⌝` | check the extracted term really has that type |
+| `` certify core`‹type›` `` | check the extracted term really has that type |
 | `:revalidate` | re-derive the whole development's well-formedness from scratch |
 
 *From a fresh session.*
@@ -1090,16 +1109,18 @@ The kernel is an independent check. It does not trust the machine.
 ```
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> :goal Nat
 ▶ let ? goal : Nat in
   goal
-thena spine> try-core ⌜ zero ⌝
+thena spine> try-core core`zero`
 thena spine> solve
 thena spine> :extract
 let goal = zero : Nat in goal
-thena spine> certify ⌜ Nat ⌝
+thena spine> certify core`Nat`
 certified
-thena spine> certify ⌜ Nat -> Nat ⌝
+thena spine> certify core`Nat -> Nat`
 the kernel refused it
 in the term:
   let goal = zero : Nat in goal has type Nat
@@ -1111,7 +1132,7 @@ An unfinished proof cannot be extracted, and the message says exactly what is
 still open:
 
 ```
-thena spine> claim "k" ⌜ Nat ⌝
+thena spine> claim "k" core`Nat`
 thena spine> :extract
 stuck: not finished: the hole k is still open, so there is no term yet
 ```
@@ -1199,7 +1220,7 @@ thena spine> :theorem reckless : Eq {0} Nat zero (succ zero)
 proving reckless : Eq {0} Nat zero (succ zero)
 thena spine> attack
 thena spine> into
-thena spine> try-core ⌜ liar {0} ⌝
+thena spine> try-core core`liar {0}`
 thena spine> solve
 thena spine> back
 thena spine> solve
@@ -1239,10 +1260,10 @@ provable that way. Treat the middle setting as hygiene, not as safety.
 
 This is not only a facility for your own proofs: the prelude uses it. Deciding
 whether two strings are equal is the case, and it is the one that forced the
-feature. `eqString` computes — it answers `same` or `different` on two literals
+feature. `String.eq` computes — it answers `same` or `different` on two literals
 — but nothing in the type theory connects that answer to the equality type, and
-no term you can write closes the gap. So `decString` is a definition resting on
-two claims about `eqString`, and `:trust` names both:
+no term you can write closes the gap. So `String.dec` is a definition resting on
+two claims about `String.eq`, and `:trust` names both:
 
 ```
 thena spine> :trust no-undischargeable
@@ -1252,38 +1273,38 @@ thena spine> :theorem decides : Dec {0 0} (Eq {0} String "x" "x")
 proving decides : Dec {0 0} (Eq {0} String "x" "x")
 thena spine> attack
 thena spine> into
-thena spine> try-core ⌜ decString "x" "x" ⌝
+thena spine> try-core core`String.dec "x" "x"`
 thena spine> solve
 thena spine> back
 thena spine> solve
 thena spine> :trust
 trust: no undischargeable trust
-  pending, in decString · eqStringEqual
+  pending, in String.dec · String.eqEqual
     claims Eq {0} String a b
     body   Eq {0} String a a
-  pending, in decString · eqStringRefl
-    claims Eq {0} Comparison (eqString a a) same
+  pending, in String.dec · String.eqRefl
+    claims Eq {0} Comparison (String.eq a a) same
     body   Eq {0} Comparison same same
 thena spine> qed
 decides : Dec {0 0} (Eq {0} String "x" "x")   ∎
-  pending, in decString · eqStringEqual
+  pending, in String.dec · String.eqEqual
     claims Eq {0} String a b
     body   Eq {0} String a a
-  pending, in decString · eqStringRefl
-    claims Eq {0} Comparison (eqString a a) same
+  pending, in String.dec · String.eqRefl
+    claims Eq {0} Comparison (String.eq a a) same
     body   Eq {0} Comparison same same
 ```
 
-`in decString · eqStringEqual` is the route: the claim is not in your proof, it
+`in String.dec · String.eqEqual` is the route: the claim is not in your proof, it
 is in a definition your proof reached through another one. Both read **pending**,
 and here is why that is worth understanding rather than working around. The
-claims are read at `eqStringEqual`'s own definition, where `a` and `b` are its
+claims are read at `String.eqEqual`'s own definition, where `a` and `b` are its
 binders and nothing is settled — and they are read there rather than at `"x"`
 and `"x"` because the walk takes one hop into a definition and stops. It is not
 a normaliser, deliberately: finding out which claims *survive* reduction means
 reducing, and `qed` may not be made to diverge.
 
-So `:trust none` will not close this proof, even though `decString "x" "x"`
+So `:trust none` will not close this proof, even though `String.dec "x" "x"`
 reduces to `refl {0} String "x"` with nothing trusted left in it. The strictest
 setting is a statement about what a proof *reaches*, not about what is left
 after it runs. If you want it, the two laws are four lines of
@@ -1371,7 +1392,7 @@ plus one one : Nat
 
 `:infer` takes a **surface** term and elaborates it where you are asking, then
 puts the development back exactly as it was. A development-calculus term goes in
-corners instead: `:infer ⌜ succ zero ⌝`.
+a `core` fence instead: `` :infer core`succ zero` ``.
 
 A comment is `--` followed by a space, running to the end of the line, and it
 works the same way in all three kinds of file. Without the space it is not a
@@ -1464,8 +1485,8 @@ language and elaborated on load.
   type mentions the value's own arguments and one of those is a local variable:
 
   ```
-  let nc = noConfusionTerm x y q in …                          -- refused
-  let nc : NoConfusionTerm x y = noConfusionTerm x y q in …     -- fine
+  let nc = Term.lemmata.noConfusion x y q in …                                  -- refused
+  let nc : Term.lemmata.NoConfusion x y = Term.lemmata.noConfusion x y q in …     -- fine
   ```
 
   This is the same requirement Agda and Idris make. **The message you get is
@@ -1473,7 +1494,8 @@ language and elaborated on load.
   unification, and only the elaboration rule that made those holes knows what
   they stand for. A simple `let n = succ zero in n` needs no annotation.
 - **A development-calculus term writes its level arguments.**
-  `⌜ congSucc {0 0} a b e ⌝`, never `⌜ congSucc a b e ⌝`. A **surface** term has
+  `` core`congSucc {0 0} a b e` ``, never `` core`congSucc a b e` ``. A
+  **surface** term has
   them inferred, which is most of the difference between the two versions of the
   determinacy proof.
 - **No automation beyond the rule base.** There is no `auto`, no simplifier, no
@@ -1493,15 +1515,15 @@ language and elaborated on load.
 | | |
 |---|---|
 | `attack` `intro` `solve` `regret` `abandon` | the hole operations |
-| `try-core ⌜ term ⌝` | propose a term for the focused hole |
-| `apply-core ⌜ f ⌝` / `unify-refine-core ⌜ t ⌝` | apply a function / refine by unification |
+| `` try-core core`term` `` | propose a term for the focused hole |
+| `` apply-core core`f` `` / `` unify-refine-core core`t` `` | apply a function / refine by unification |
 | `goto-named "‹name›"` | move to a hole by name |
 | `goto-root` | move to the root of the development |
-| `assume "‹x›" ⌜‹S›⌝` / `claim "‹x›" ⌜‹S›⌝` | add a hypothesis / a hole above the focus |
-| `assume ⌜‹S›⌝` / `claim ⌜‹S›⌝` | the same, asking for the name |
-| `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve by unification |
-| `eliminate-core ⌜ target ⌝` | induction |
-| `eliminate-generalising-core ⌜ target ⌝` | the same, and it generalises the premises the target's indices mention |
+| `` assume "‹x›" core`‹S›` `` / `` claim "‹x›" core`‹S›` `` | add a hypothesis / a hole above the focus |
+| `` assume core`‹S›` `` / `` claim core`‹S›` `` | the same, asking for the name |
+| `` unify core`‹t›` core`‹u›` `` | solve by unification |
+| `` eliminate-core core`target` `` | induction |
+| `` eliminate-generalising-core core`target` `` | the same, and it generalises the premises the target's indices mention |
 | `induction-core core`target`` | the split: one hole per case, inside that case's own binders |
 | `case-core core`target`` | the same without the induction hypotheses |
 | `reduce` | reduce the focused term in place |
@@ -1513,10 +1535,10 @@ language and elaborated on load.
 | `retry` / `retry ‹n›` | backtrack to a choice point |
 | `data ‹D› … where { … }` | declare an inductive family |
 | `declare ‹sig› ; ‹equation›` | elaborate a surface declaration |
-| `quantify "‹x›" ⌜‹S›⌝` | add a ∀-binder above the focus |
+| `` quantify "‹x›" core`‹S›` `` | add a ∀-binder above the focus |
 | `do { ‹instruction› ; … }` | play a block of instructions here |
 | `yield` | hand control back to a rule that yielded |
-| `certify ⌜‹type›⌝` | ask the kernel |
+| `` certify core`‹type›` `` | ask the kernel |
 | `qed` | certify and admit the finished proof |
 
 **Colon commands look.**

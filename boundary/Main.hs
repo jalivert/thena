@@ -149,7 +149,7 @@ checks =
 job :: Session -> Bool
 job s = slice False (200 :: Int) (oneLine (fst (oneLine s ":step on")) claim)
   where
-    claim = "claim \"h\" \8988 Type\8320 \8989"
+    claim = "claim \"h\" core`Type\8320`"
     slice _ n (s', Ran _ _ (Paused 1)) | n > 0 = slice True (n - 1) (oneLine s' ":step")
     slice paused _ (_, Ran _ _ Completed) = paused
     slice _ _ _ = False

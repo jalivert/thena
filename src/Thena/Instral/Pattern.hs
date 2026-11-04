@@ -39,7 +39,8 @@ type Name = String
 -- rather than values a user can shadow. It is paid at stage b and c, which are
 -- not built.
 --
--- **This stage is @instral@'s own data only.** A Surface pattern (@⟨ a -> b ⟩@)
+-- **This stage is @instral@'s own data only.** A Surface pattern
+-- (@surface\`a -> b\`@)
 -- and a Core one are stages b and c of that document, and c waits on the two
 -- decisions §4 records as open.
 data Pattern
@@ -48,7 +49,9 @@ data Pattern
   | PInt  Int            -- ^ @3@
   | PChar Char           -- ^ @\'c\'@
   | PBool Bool           -- ^ @true@, @false@
-  | PText String         -- ^ @"…"@ — matches 'VText', so a name too
+  | PText String
+    -- ^ @"…"@ — matches a @VText@, and a name by its dotted form (MS10), so
+    -- @\"Nat.zero\"@ matches the name @Nat.zero@ and @\"zero\"@ does not.
   | PList [Pattern] (Maybe Pattern)
     -- ^ @[a, b]@ closed, @[a, ...rest]@ open.
     --

@@ -15,10 +15,10 @@ import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
   (counterexample, elements, forAll, listOf1, property, testProperty, withNumTests)
 
-import Thena.Core.Term (GlobalName (..), Ident (..))
+import Thena.Core.Term (Ident (..), rootName, nameDotted)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
-import Thena.Declared (natDecl)
+import Thena.Declared (declaredAs, named, natDecl)
 import Thena.Standard (withRules)
 import Thena.Instral.Infer (InstralTypeError (..), Site (..))
 import Thena.Instral.Type (Ty (..))
@@ -35,7 +35,7 @@ import Thena.Driver
   , loadSource
   )
 import Thena.Engine (Machine (..), Development, flatten)
-import Thena.Errors (FailReason (..), MoveError (..))
+import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..), Warning (..))
 import Thena.Global.Env (Definition (..), GlobalEnv, lookupDefinition)
 
 tests :: TestTree
@@ -122,8 +122,8 @@ undoLaw =
     -- below pins the behaviour on its own.
     pool =
       [ "attack", "intro", "along", "back", "into", "regret", "solve"
-      , "claim \"k\" ⌜ Type₀ ⌝", "assume \"a\" ⌜ Type₀ ⌝"
-      , "cross type", "reduce", "try-core ⌜ Type₀ ⌝"
+      , "claim \"k\" core`Type₀`", "assume \"a\" core`Type₀`"
+      , "cross type", "reduce", "try-core core`Type₀`"
       ]
 
 -- | **A command that fails does NOT reach a choice point an earlier line left**
@@ -241,7 +241,7 @@ identityProof =
   , "along"
   -- The second binder of @A -> A@ is written @_@, because a non-dependent Π
   -- carries that identifier (§2.6). It is an ordinary name and is typed as one.
-  , "try-core ⌜ _ ⌝"
+  , "try-core core`_`"
   , "solve"
   , "back"
   , "back"
@@ -255,12 +255,12 @@ theTheorem = testCase "a theorem proved by hand, start to ∎" $ do
   let l = run identityProof
   loadedError l @?= Nothing
   case reverse (loadedResponses l) of
-    Proved g _ _ _ _ : _ -> g @?= GlobalName "id"
+    Proved g _ _ _ _ : _ -> g @?= rootName "id"
     other -> assertFailure ("did not end in qed: " ++ show (take 1 other))
 
 theoremIsAGlobal :: TestTree
 theoremIsAGlobal = testCase "and it is a global definition afterwards (§3.3.1)" $
-  case lookupDefinition (GlobalName "id") (globalsAfter (run identityProof)) of
+  case lookupDefinition (rootName "id") (globalsAfter (run identityProof)) of
     Nothing -> assertFailure "id was not admitted"
     Just d  -> assertBool "admitted with no body" (definitionBody d /= definitionType d)
 
@@ -288,7 +288,7 @@ holeTests =
   , ok "intro walks a Π"        (arrowGoal ++ ["attack", "intro"])
   , ok "and then the next one"  (arrowGoal ++ ["attack", "intro", "intro"])
 
-  , ok "try attaches a guess"             (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝"])
+  , ok "try attaches a guess"             (natGoal ++ ["attack", "into", "try-core core`zero`"])
 
     -- **A bare argument is neither vocabulary as of MS5 phase 62b** — it is an
     -- @instral@ reference, so this one is simply a name nothing bound. The
@@ -300,37 +300,37 @@ holeTests =
     -- 'Thena.Rules.UnboundInRule' at entry time.
   , refuses "a bare argument is a reference, not a term"
       (natGoal ++ ["attack", "into", "try-core zero"])
-      [UnboundInRule (GlobalName "entry") 0 "zero"]
+      [UnboundInRule (rootName "entry") 0 "zero"]
     -- And the vocabularies still do not mix: the surface fence makes a
     -- 'Thena.Instral.Ops.VSurface', which a core tactic will not take. **The refusal is
     -- the type system's now**, where it used to be the op's at run time.
   , mistyped "a core tactic will not take a surface argument"
-      (natGoal ++ ["attack", "into", "try-core \10216 zero \10217"])
-      [Clash (InBody (GlobalName "entry") 0) TCore TSurface]
+      (natGoal ++ ["attack", "into", "try-core surface`zero`"])
+      [Clash (InBody (rootName "entry") 0) TCore TSurface]
     -- The corners subsume phase 23b's parenthesisation rule: an argument that
     -- is not a single atom needed parentheses, and inside corners it does not.
   , ok "and inside them an argument needs no parentheses"
-      (natGoal ++ ["attack", "into", "try-core ⌜ succ zero ⌝"])
+      (natGoal ++ ["attack", "into", "try-core core`succ zero`"])
   , ok "and regret takes it off again"
-      (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝", "regret"])
+      (natGoal ++ ["attack", "into", "try-core core`zero`", "regret"])
   , halts "regret needs a guess" (natGoal ++ ["regret"])
       (NoClauseMatched "regret" 0 [0])
 
   , ok "solve commits a pure guess"
-      (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝", "solve"])
+      (natGoal ++ ["attack", "into", "try-core core`zero`", "solve"])
   , notYetPure "and refuses one that is not pure" (natGoal ++ ["attack", "solve"])
 
     -- @claim@ inserts above the focus and leaves it where it was, so reaching
     -- the new hole is a @back@ — the path gained a step and this pops it.
   , ok "abandon drops a hole nothing refers to"
-      (natGoal ++ ["attack", "into", "claim \"spare\" ⌜ Nat ⌝", "back", "abandon"])
+      (natGoal ++ ["attack", "into", "claim \"spare\" core`Nat`", "back", "abandon"])
   , halts "and refuses one that is still referred to"
       (natGoal ++ ["abandon"]) (CannotMove StillReferenced)
   ]
   where
     goal      = [":theorem t : Type₀"]
     arrowGoal = [":theorem t : ∀ (A : Type₀) -> A -> A"]
-    natGoal   = ["data " ++ natDecl, ":theorem t : Nat"]
+    natGoal   = ["data " ++ natDecl, "open Nat", ":theorem t : Nat"]
 
 -- --------------------------------------------------------------------------
 -- The session
@@ -340,9 +340,60 @@ sessionTests :: [TestTree]
 sessionTests =
   [ ok "a theorem may be started" [":theorem t : Type₀"]
   , rejects "but not two at once" [":theorem t : Type₀", ":theorem u : Type₀"]
-      (AlreadyProving (GlobalName "t"))
-  , rejects "and not under a name the environment already has"
-      ["data " ++ natDecl, ":theorem Nat : Type₀"] (AlreadyDeclaredHere "Nat")
+      (AlreadyProving (rootName "t"))
+    -- **A THEOREM MAY NOW TAKE THE WORD A DATATYPE'S NAMESPACE USES, AND IT
+    -- SHADOWS IT** — @~s89ch@, his to rule, written out in
+    -- @.jalivert/agenda/languages-module-system.md@. The guard in
+    -- 'Thena.Driver' is @isDeclared (rootName x)@ and a datatype is @Nat.Nat@
+    -- since MS10, so nothing at the root is taken; after the @qed@ a written
+    -- @Nat@ is the theorem, because 'Thena.Core.Term.globalUnder' answers the
+    -- name as written before it tries a declaration's short name. **Pinned as
+    -- measured, not as wanted**: the refusal this asserted is unreachable
+    -- through a declaration, and what replaces it is his.
+  , ok "a theorem may take the word a datatype's namespace uses"
+      ["data " ++ natDecl, "open Nat", ":theorem Nat : Type₀"]
+    -- **AND IT SAYS SO, AT @:theorem@ AND NOT AT @qed@** (MS10 phase 264). His
+    -- ruling of 2026-11-03 accepted the shadowing, which leaves his second
+    -- principle of 2026-09-01 to say what happens instead of a refusal: the
+    -- action is allowed and the UI shows what it will cause. Here is the one
+    -- moment that costs the user nothing — the proof does not exist yet, so
+    -- renaming the theorem is free, where renaming it after a @qed@ is the
+    -- proof again.
+  , testCase "and says so while renaming the theorem is still free" $
+      warningsAfter ["data " ++ natDecl, ":theorem Nat : Type₀"]
+        @?= [ProofShadows (rootName "Nat") (declaredAs "Nat")]
+    -- **The @open@ makes no difference**, which is the point of asking
+    -- 'Thena.Core.Term.globalUnder' rather than the environment: the word
+    -- reaches the datatype either way, by the alias with nothing open and by
+    -- the alias under the prefix with @Nat@ open.
+  , testCase "and says the same with the namespace open" $
+      warningsAfter ["data " ++ natDecl, "open Nat", ":theorem Nat : Type₀"]
+        @?= [ProofShadows (rootName "Nat") (declaredAs "Nat")]
+    -- A name nothing answered takes no word, so there is nothing to say.
+  , testCase "a theorem whose word reaches nothing says nothing" $
+      warningsAfter ["data " ++ natDecl, ":theorem t : Type₀"] @?= []
+    -- **The other door, and the fact rather than the forecast**: a definition
+    -- written whole is in the environment the moment it lands, so what it says
+    -- is what has happened. This is also the door a theorem in a /file/ comes
+    -- in by.
+  , testCase "a definition written whole says so as it lands" $
+      warningsAfter ["data " ++ natDecl, "declare Nat : Type₁ ; Nat = Type₀"]
+        @?= [NameShadows (rootName "Nat") (declaredAs "Nat")]
+    -- **THE PROMPT REFUSES A CONSTRUCTOR A MODULE ACCEPTS, AND THE REFUSAL NOW
+    -- NAMES BOTH SPELLINGS** (MS10 phase 264). A @data@ LINE resolves its
+    -- constructors against the environment, where @Foo@ is the definition, so
+    -- the target is that definition and not the family — while a module's
+    -- @data@ BLOCK answers the same word with the family being declared and
+    -- loads, which "Thena.LoadTests" pins. **Pinned as measured, and the
+    -- divergence is an item of its own**; what this phase fixed is the words,
+    -- which used to say /ff must produce the datatype being declared/ and
+    -- blamed the constructor for a collision one line up.
+  , testCase "the prompt refuses a constructor a module accepts" $
+      case reverse (loadedResponses (run [ "declare Foo : Type₁ ; Foo = Type₀"
+                                         , "data Foo : Type₀ where { ff : Foo }" ])) of
+        Failed (ResolveFailed e) : _ ->
+          e @?= TargetIsNotTheDatatype "ff" (Just (rootName "Foo")) (named "Foo.Foo")
+        other -> assertFailure ("expected a refusal: " ++ show (take 1 other))
   , testCase "a statement that is not a type is refused" $
       case reverse (loadedResponses (run [":theorem t : zero"])) of
         Failed _   : _ -> pure ()
@@ -366,11 +417,12 @@ sessionTests =
       let l = run
                 [ ":theorem t : Type₀", ":suspend"
                 , "data " ++ natDecl
-                , ":resume t", "try-core ⌜ Nat ⌝", "solve", "qed"
+                , "open Nat"
+                , ":resume t", "try-core core`Nat`", "solve", "qed"
                 ]
       loadedError l @?= Nothing
       assertBool "t was not admitted"
-        (lookupDefinition (GlobalName "t") (globalsAfter l) /= Nothing)
+        (lookupDefinition (rootName "t") (globalsAfter l) /= Nothing)
 
   , testCase "abandoning drops it, suspending keeps it" $ do
       countsAre [":theorem t : Type₀", ":abandon"] Nothing 0
@@ -384,7 +436,7 @@ sessionTests =
     -- one alone would pass for the wrong reason if @qed@ ever stopped checking
     -- purity.
   , testCase "a theorem starts a fresh development, not the one it found" $
-      namesIn (developmentAfter (run ["claim \"spare\" ⌜ Type₀ ⌝", ":theorem t : Type₀"]))
+      namesIn (developmentAfter (run ["claim \"spare\" core`Type₀`", ":theorem t : Type₀"]))
         @?= ["t"]
     -- **Elaboration, end to end** (MS4 phase 41e). The unit tests in
     -- "Thena.ElaborateTests" run against a synthetic cursor with no globals;
@@ -392,15 +444,18 @@ sessionTests =
     -- declared, which is the only way to reach the application case at all.
   , ok "an application elaborates and proves"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem t : Nat"
-      , "elaborate ⟨ succ zero ⟩"
+      , "elaborate surface`succ zero`"
       , "qed"
       ]
   , ok "a two-argument spine folds"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Pair : Type\8320 where { mk : Nat -> Nat -> Pair }"
+      , "open Pair"
       , ":theorem p : Pair"
-      , "elaborate ⟨ mk zero (succ zero) ⟩"
+      , "elaborate surface`mk zero (succ zero)`"
       , "qed"
       ]
     -- **Nested lambdas were broken from the moment @here@ existed** and this is
@@ -408,14 +463,14 @@ sessionTests =
     -- name, so the outer @goto@ landed on the inner component.
   , ok "nested lambdas elaborate"
       [ ":theorem u : \8704 (A : Type\8320) (a : A) -> A"
-      , "elaborate ⟨ \\ A -> \\ y -> y ⟩"
+      , "elaborate surface`\\ A -> \\ y -> y`"
       , "qed"
       ]
     -- **The structural cases** (MS4 phase 41f). A @∀@ is the one that needed
     -- the fifth component; the other three needed no new op at all.
   , ok "a ∀ elaborates and proves"
       [ ":theorem a : Type\8321"
-      , "elaborate ⟨ forall (A : Type\8320) -> A ⟩"
+      , "elaborate surface`forall (A : Type\8320) -> A`"
       , "qed"
       ]
     -- **A binder group nests**, one @quantify@ per Π: the domain hole is
@@ -423,18 +478,19 @@ sessionTests =
     -- is not in scope.
   , ok "a ∀ with two binders nests"
       [ ":theorem a : Type\8321"
-      , "elaborate ⟨ forall (A : Type\8320) (a : A) -> A ⟩"
+      , "elaborate surface`forall (A : Type\8320) (a : A) -> A`"
       , "qed"
       ]
   , ok "an arrow elaborates and proves"
       [ ":theorem a : Type\8321"
-      , "elaborate ⟨ Type\8320 -> Type\8320 ⟩"
+      , "elaborate surface`Type\8320 -> Type\8320`"
       , "qed"
       ]
   , ok "a let elaborates and proves"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem l : Nat"
-      , "elaborate ⟨ let y = zero in y ⟩"
+      , "elaborate surface`let y = zero in y`"
       , "qed"
       ]
     -- **An annotated @let@ elaborates its annotation into the type hole
@@ -442,28 +498,32 @@ sessionTests =
     -- see @ms4/CLOSEOUT.md@ 11.
   , ok "an annotated let takes an application value"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem l : Nat"
-      , "elaborate ⟨ let y : Nat = succ zero in succ y ⟩"
+      , "elaborate surface`let y : Nat = succ zero in succ y`"
       , "qed"
       ]
     -- **A @let@ binds the name the user wrote**, which is what made phase
     -- 24c's taken-name check untenable: @y@ is a component name already.
   , ok "a let may shadow"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem l : Nat"
-      , "elaborate ⟨ let y : Nat = zero in let y : Nat = succ y in y ⟩"
+      , "elaborate surface`let y : Nat = zero in let y : Nat = succ y in y`"
       , "qed"
       ]
   , ok "an ascription elaborates and proves"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem s : Nat"
-      , "elaborate ⟨ zero : Nat ⟩"
+      , "elaborate surface`zero : Nat`"
       , "qed"
       ]
   , notOk "and an ascription that disagrees with the goal is refused"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem s : Nat"
-      , "elaborate ⟨ zero : Type\8320 ⟩"
+      , "elaborate surface`zero : Type\8320`"
       ]
     -- **Cumulativity reaching elaboration** (MS4 phase 41g). Every one of
     -- these failed with /"Type₀ and Type₁ are different universes"/ until
@@ -472,21 +532,25 @@ sessionTests =
     -- live at @Type₁@, which is what cumulativity is for.
   , ok "a term fits a universe above its own"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem u : Type\8321"
-      , "elaborate ⟨ Nat ⟩"
+      , "elaborate surface`Nat`"
       , "qed"
       ]
   , ok "including as an argument to a parameter pinned above it"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Box (A : Type\8321) : Type\8321 where { box : A -> Box A }"
+      , "open Box"
       , ":theorem u : Type\8321"
-      , "elaborate ⟨ Box Nat ⟩"
+      , "elaborate surface`Box Nat`"
       , "qed"
       ]
   , ok "and in a lambda's body"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem u : Nat -> Type\8321"
-      , "elaborate ⟨ \\ n -> Nat ⟩"
+      , "elaborate surface`\\ n -> Nat`"
       , "qed"
       ]
     -- **The degenerate flex-flex case** (MS4 phase 41g). An un-annotated
@@ -495,14 +559,16 @@ sessionTests =
     -- hole with the application's result hole, and both are bare.
   , ok "an un-annotated let takes an application value"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem l : Nat"
-      , "elaborate ⟨ let y = succ zero in y ⟩"
+      , "elaborate surface`let y = succ zero in y`"
       , "qed"
       ]
   , ok "and may still shadow"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem l : Nat"
-      , "elaborate ⟨ let y = zero in let y = succ y in y ⟩"
+      , "elaborate surface`let y = zero in let y = succ y in y`"
       , "qed"
       ]
     -- **Cumulativity does not reach into an argument** (MS4 phase 41h). Both
@@ -510,20 +576,22 @@ sessionTests =
     -- development valid — @ms4/CLOSEOUT.md@ 12. @F@ is opaque, so nothing
     -- relates @F Type₀@ to @F Type₁@.
   , notOk "a neutral spine's argument is not cumulative"
-      [ "assume \"F\" ⌜ Type\8322 -> Type\8320 ⌝"
-      , "assume \"x\" ⌜ F Type\8320 ⌝"
+      [ "assume \"F\" core`Type\8322 -> Type\8320`"
+      , "assume \"x\" core`F Type\8320`"
       , ":goal F Type\8321"
-      , "try-core \8988 x \8989"
+      , "try-core core`x`"
       ]
     -- The one that matters more, because datatype parameters are everywhere:
     -- the value inside is a @Type₀ -> Empty2@ and the type would have claimed
     -- its contents were a @Type₁ -> Empty2@.
   , notOk "nor is a datatype's parameter"
       [ "data Empty2 : Type\8320 where { }"
+      , "open Empty2"
       , "data Fn (A : Type\8322) : Type\8322 where { fn : (A -> Empty2) -> Fn A }"
-      , "assume \"g\" ⌜ Type\8320 -> Empty2 ⌝"
+      , "open Fn"
+      , "assume \"g\" core`Type\8320 -> Empty2`"
       , ":goal Fn Type\8321"
-      , "try-core \8988 fn Type\8320 g \8989"
+      , "try-core core`fn Type\8320 g`"
       ]
     -- **`elim`, the last structural case** (MS4 phase 41i). No golden for
     -- these: an elaborated elimination's term runs to several hundred
@@ -531,18 +599,21 @@ sessionTests =
     -- meaning.
   , ok "an elim elaborates and proves"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem e : Nat"
-      , "elaborate ⟨ elim Nat () (\\ x -> Nat) (zero (\\ k ih -> succ ih)) () (succ zero) ⟩"
+      , "elaborate surface`elim Nat () (\\ x -> Nat) (zero (\\ k ih -> succ ih)) () (succ zero)`"
       , "qed"
       ]
     -- An indexed family, so the index group is not always empty and the
     -- telescope walk has to place them.
   , ok "including one with indices"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Ev : Nat -> Type\8320 where { evZero : Ev zero "
           ++ "; evSS : \8704 (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
+      , "open Ev"
       , ":theorem e : Nat"
-      , "elaborate ⟨ elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero ⟩"
+      , "elaborate surface`elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero`"
       , "qed"
       ]
     -- **A failure after a nested call returned is still reported** (MS4 phase
@@ -559,6 +630,7 @@ sessionTests =
     -- @examples/choice-points.thena.rules@, six lines of rule language.
   , notOk "a failure after a nested call returned is not swallowed"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare bad : Nat -> Nat ; bad = \\ n -> "
           ++ "elim Nat () (\\ k -> Nat) ((zero) (\\ k ih -> succ ih)) () _"
       ]
@@ -575,6 +647,7 @@ sessionTests =
     -- elimination is what makes the choice point that used to swallow it.
   , notOk "a declaration left unfinished is refused, not silently dropped"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare bad : Nat ; bad = "
           ++ "elim Nat () (\\ k -> Nat) ((zero) (\\ k ih -> succ ih)) () _"
       ]
@@ -586,8 +659,10 @@ sessionTests =
     -- caught it.
   , ok "an elim with a dependent motive"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare data Id (A : Type\8320) : A -> A -> Type\8320 where "
           ++ "{ rfl : forall (a : A) -> Id A a a }"
+      , "open Id"
       , "declare eqr : forall (n : Nat) -> Id Nat n n ; eqr = "
           ++ "\\ n -> elim Nat () (\\ k -> Id Nat k k) "
           ++ "((rfl Nat zero) (\\ k ih -> rfl Nat (succ k))) () n"
@@ -598,6 +673,7 @@ sessionTests =
   , ok "a datatype with parameters and indices"
       [ "declare data Id (A : Type\8320) : A -> A -> Type\8320 where "
           ++ "{ rfl : forall (a : A) -> Id A a a }"
+      , "open Id"
       , ":show Id"
       ]
     -- **A level-polymorphic datatype eliminates** (MS4 phase 49e), and until
@@ -608,24 +684,29 @@ sessionTests =
     -- wrapper does, so the question does not arise.
   , ok "a level-polymorphic datatype eliminates"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Empty : Type where { }"
+      , "open Empty"
       , ":theorem t : \8704 (e : Empty {0}) -> Nat"
-      , "elaborate ⟨ \\ e -> elim Empty () (\\ x -> Nat) () () e ⟩"
+      , "elaborate surface`\\ e -> elim Empty () (\\ x -> Nat) () () e`"
       , "qed"
       ]
     -- **The wrapper\'s name is checked for a clash like any other name a
     -- declaration introduces** (MS4 phase 49e) — 'Thena.Global.Declare.checkNames'.
   , notOk "a datatype whose eliminator's name is taken is refused"
       [ "data " ++ natDecl
-      , "declare elimBool : Nat ; elimBool = zero"
+      , "open Nat"
+      , "declare Bool.elim : Nat ; Bool.elim = zero"
       , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+      , "open Bool"
       ]
     -- The arity is checked against the declaration, so the message names the
     -- field group rather than a total.
   , notOk "and a method count that does not match the datatype is refused"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem e : Nat"
-      , "elaborate ⟨ elim Nat () (\\ x -> Nat) (zero) () (succ zero) ⟩"
+      , "elaborate surface`elim Nat () (\\ x -> Nat) (zero) () (succ zero)`"
       ]
     -- **Surface declarations** (MS4 phase 42) — Brady's
     -- @NEW PROOF Type; E⟦t⟧; t' ← TERM; TTDECL (x : t')@, run as instructions
@@ -633,6 +714,7 @@ sessionTests =
     -- driver reads one line; a file supplies them by layout at phase 43.
   , ok "a surface declaration elaborates and installs"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare one : Nat ; one = succ zero"
       , ":show one"
       ]
@@ -644,21 +726,25 @@ sessionTests =
     -- declaration fails with @Type₀ and n -> Nat cannot be made equal@.
   , ok "and a function declaration, whose body has a binder to open"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare idn : Nat -> Nat ; idn = \\ n -> n"
       , ":show idn"
       ]
   , ok "several declarations in one run"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare a : Nat ; a = zero ; b : Nat ; b = succ zero"
       , ":show b"
       ]
     -- Agda's and Haskell's rule: the equation follows its signature.
   , notOk "a signature with no equation is refused"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare lonely : Nat"
       ]
   , notOk "and so is a body that does not have the declared type"
       [ "data " ++ natDecl
+      , "open Nat"
       , "declare bad : Nat -> Nat ; bad = zero"
       ]
     -- **Datatypes in the surface** (MS4 phase 42b) — Brady's data rule: the
@@ -667,26 +753,31 @@ sessionTests =
     -- plus a β-step.
   , ok "a surface datatype declares"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , ":show Nat"
       ]
     -- And it is a real datatype: a theorem elaborates against it.
   , ok "and a theorem over it elaborates"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare one : Nat ; one = succ zero"
       ]
     -- The parameters are shared between the datatype and its constructors,
     -- which is what the rename in @buildInductive@ is for.
   , ok "a parameterised one"
       [ "declare data Box (A : Type\8320) : Type\8320 where { box : A -> Box A }"
+      , "open Box"
       , ":show Box"
       ]
     -- An indexed family, so the parameter/index split is exercised in both
     -- halves rather than only the empty one.
   , ok "and an indexed family"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare data Ev : Nat -> Type\8320 where "
           ++ "{ evZero : Ev zero "
           ++ "; evSS : forall (n : Nat) -> Ev n -> Ev (succ (succ n)) }"
+      , "open Ev"
       , ":show Ev"
       ]
     -- The finished record goes through the same 'Thena.Global.Declare.declare'
@@ -698,9 +789,11 @@ sessionTests =
     -- so the whole prelude was out of its range.
   , ok "a polymorphic global is usable now"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Box (A : Type) : Type where { box : A -> Box A }"
+      , "open Box"
       , ":theorem e : Type\8320"
-      , "elaborate ⟨ Box Nat ⟩"
+      , "elaborate surface`Box Nat`"
       , "qed"
       ]
     -- **The dependent application rule.** @box@'s second domain is the first
@@ -708,9 +801,11 @@ sessionTests =
     -- with a scope violation, /"A3 is not bound before A1"/.
   , ok "and its constructor, whose domain is an earlier argument"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Box (A : Type) : Type where { box : A -> Box A }"
+      , "open Box"
       , ":theorem e : Box {0} Nat"
-      , "elaborate ⟨ box Nat zero ⟩"
+      , "elaborate surface`box Nat zero`"
       , "qed"
       ]
     -- **A trusted claim under a \955.** The surface form claims @A@ for the type
@@ -723,8 +818,10 @@ sessionTests =
     -- shape, which is why they were written in the development calculus.
   , ok "a trusted claim elaborates under a \955"
       [ "data " ++ natDecl
+      , "open Nat"
       , "data Eq (A : Type) : A -> A -> Type \
         \where { refl : \8704 (a : A) -> Eq A a a }"
+      , "open Eq"
       , "declare law : \8704 (a : Nat) -> Eq Nat a a \
         \; law = \\ a -> trusted (Eq Nat a a) (refl Nat a)"
       ]
@@ -732,6 +829,7 @@ sessionTests =
     -- is for and what this phase was ordered before 43 to make possible.
   , ok "a declaration may use an earlier one"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare one : Nat ; one = succ zero"
       , "declare two : Nat ; two = succ one"
       ]
@@ -739,8 +837,9 @@ sessionTests =
     -- caught by the walk rather than by a later type error.
   , notOk "and too many arguments for the head is refused"
       [ "data " ++ natDecl
+      , "open Nat"
       , ":theorem e : Nat"
-      , "elaborate ⟨ zero zero ⟩"
+      , "elaborate surface`zero zero`"
       ]
     -- **A dependent signature can be declared at all** (MS4 phase 44b). It
     -- could not before: phase 42 cleared elaboration's @=@-bindings from the
@@ -754,6 +853,7 @@ sessionTests =
     -- **Implicit arguments, inserted at a use site** — Brady's @EXPAND@.
   , ok "an implicit argument is inserted"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare idty : forall {A : Type\8320} -> A -> A ; idty = \\ A x -> x"
       , "declare z : Nat ; z = idty zero"
       ]
@@ -761,6 +861,7 @@ sessionTests =
     -- be written explicitly too."/
   , ok "and may be written in braces instead"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare idty : forall {A : Type\8320} -> A -> A ; idty = \\ A x -> x"
       , "declare z : Nat ; z = idty {Nat} zero"
       ]
@@ -768,10 +869,11 @@ sessionTests =
     -- through to a type error about a term the user did not mean to write.
   , notOk "but a brace the head has no position for is refused"
       [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "open Nat"
       , "declare z : Nat ; z = succ {Nat} zero"
       ]
   , ok "so a hole left in the scratch cannot block qed"
-      ["claim \"spare\" ⌜ Type₀ ⌝", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
+      ["claim \"spare\" core`Type₀`", ":theorem t : Type₁", "try-core core`Type₀`", "solve", "qed"]
   ]
 
 -- --------------------------------------------------------------------------
@@ -786,8 +888,8 @@ undoTests =
     -- top level has a development to take a line back in.
     rejects "with nothing typed yet there is nothing to undo" [":undo"] NothingToUndo
   , testCase "a line at the top level is taken back like any other" $
-      sameDevelopment ["assume \"A\" ⌜ Type₀ ⌝", ":undo"] []
-  , rejects "and then there is nothing left" ["assume \"A\" ⌜ Type₀ ⌝", ":undo", ":undo"]
+      sameDevelopment ["assume \"A\" core`Type₀`", ":undo"] []
+  , rejects "and then there is nothing left" ["assume \"A\" core`Type₀`", ":undo", ":undo"]
       NothingToUndo
 
     -- Every proof boundary starts a fresh history, which is what keeps @:undo@
@@ -795,7 +897,7 @@ undoTests =
     -- @globals@, which no 'Snapshot' carries.
   , rejects "nor at the start of one" [":theorem t : Type₀", ":undo"] NothingToUndo
   , rejects "a theorem does not let you undo back past it"
-      ["assume \"A\" ⌜ Type₀ ⌝", ":theorem t : Type₀", ":undo"] NothingToUndo
+      ["assume \"A\" core`Type₀`", ":theorem t : Type₀", ":undo"] NothingToUndo
   , rejects "and abandoning one does not either"
       [":theorem t : Type₀", "attack", ":abandon", ":undo"] NothingToUndo
 
@@ -828,6 +930,20 @@ run = loadSource withRules . unlines
 
 globalsAfter :: Loaded -> GlobalEnv
 globalsAfter = globals . machineOf . loadedSession
+
+-- | Every warning a script produced, from whichever response carried it.
+--
+-- **Three responses can carry one** (MS10 phase 264) and a test should not have
+-- to know which: @:theorem@ answers 'Proving', a line that ran answers 'Ran',
+-- and a module load answers 'ProofLoaded'.
+warningsAfter :: [String] -> [Warning]
+warningsAfter ls = concatMap carried (loadedResponses (run ls))
+  where
+    carried r = case r of
+      Proving _ _ ws       -> ws
+      Ran _ ws _           -> ws
+      ProofLoaded _ _ _ ws -> ws
+      _                    -> []
 
 developmentAfter :: Loaded -> Development
 developmentAfter = development . machineOf . loadedSession
@@ -893,7 +1009,7 @@ countsAre ls current suspended = do
   length (parked s) @?= suspended
   where
     s = loadedSession (run ls)
-    nameOf (GlobalName x) = x
+    nameOf = nameDotted
 
 -- | The reason names a 'Thena.Errors.Position', and the 'Var' inside it is
 -- minted by the run — so the constructor is what there is to assert on.

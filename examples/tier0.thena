@@ -8,6 +8,8 @@ data Nat : Type₀ where
   zero : Nat
   succ : Nat -> Nat
 
+open Nat
+
 plus : Nat -> Nat -> Nat
 plus = \ m n -> elim Nat () (\ k -> Nat) (n (\ k ih -> succ ih)) () m
 

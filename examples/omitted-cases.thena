@@ -8,8 +8,8 @@
 -- it structurally — `n ≃ s n` — has no solution, so the case it belongs to
 -- cannot arise, so the arm for it is not merely unnecessary but unwritable.
 --
--- The proof is generated with the datatype. `NotBelowN x y` is the tuple of
--- everything structurally below `y` that `x` is not equal to, `noCycleN` says
+-- The proof is generated with the datatype. `N.lemmata.NotBelow x y` is the tuple of
+-- everything structurally below `y` that `x` is not equal to, `N.lemmata.noCycle` says
 -- the equation puts `x` below `y`, and the contradiction is the component of
 -- that tuple reading `x ≢ x`. None of it is written here; see `DECISIONS.md`,
 -- "`specialise` discharges the equations an elimination hands you".
@@ -25,12 +25,16 @@ data N : Type₀ where
   z : N
   s : N -> N
 
+open N
+
 -- `down`'s two indices are `s n` and `n`. A target that TIES them — `Step n n`
 -- — asks for a number that is its own successor, so `case` has no case left to
 -- answer and the braces are empty.
 
 data Step : N -> N -> Type₀ where
   down : ∀ (n : N) -> Step (s n) n
+
+open Step
 
 noSelf : ∀ (n : N) (st : Step n n) -> Empty
 noSelf = \ n st -> case st of { }
@@ -40,6 +44,8 @@ noSelf = \ n st -> case st of { }
 
 data Skip : N -> N -> Type₀ where
   over : ∀ (n : N) -> Skip (s (s n)) n
+
+open Skip
 
 noSkip : ∀ (n : N) (sk : Skip n n) -> Empty
 noSkip = \ n sk -> case sk of { }
@@ -52,8 +58,12 @@ data Tree : Type₀ where
   leaf : Tree
   node : Tree -> Tree -> Tree
 
+open Tree
+
 data Sub : Tree -> Tree -> Type₀ where
   onRight : ∀ (l : Tree) (r : Tree) -> Sub r (node l r)
+
+open Sub
 
 noSub : ∀ (t : Tree) (sb : Sub t t) -> Empty
 noSub = \ t sb -> case sb of { }
@@ -65,8 +75,12 @@ data Lst (A : Type₀) : Type₀ where
   lnil : Lst A
   lcons : ∀ (a : A) (as : Lst A) -> Lst A
 
+open Lst
+
 data Tail (A : Type₀) : Lst A -> Lst A -> Type₀ where
   tl : ∀ (a : A) (as : Lst A) -> Tail A as (lcons A a as)
+
+open Tail
 
 noTail : ∀ (A : Type₀) (xs : Lst A) (t : Tail A xs xs) -> Empty
 noTail = \ A xs t -> case t of { }

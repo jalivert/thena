@@ -6,8 +6,8 @@ own — you should not have to read anything else to know where a term goes.
 
 | | what it is | where you write it |
 |---|---|---|
-| **Surface** | the language you write proofs in — binders, applications, `let`, `data` | `.thena` proof modules; inside `⟨ … ⟩` |
-| **Core** | what the kernel checks — no sugar, no implicits | inside `⌜ … ⌝`; built by ops |
+| **Surface** | the language you write proofs in — binders, applications, `let`, `data` | `.thena` proof modules; inside `` surface`…` `` |
+| **Core** | what the kernel checks — no sugar, no implicits | inside `` core`…` ``; built by ops |
 | **development calculus** (DC) | the half-built proof itself: holes, guesses, hypotheses | built by tactics; printed by `:show` |
 | **`instral`** | the instruction language — rules, functions, and what you type at the prompt | `.thena.rules` files; `do { … }` blocks; REPL entries |
 
@@ -34,8 +34,8 @@ one variable; without them nobody can tell one argument from two.
 ## 2. Every other language is written in a fence
 
 ```
-⟨ \ A a -> a ⟩             -- Surface
-⌜ succ zero ⌝              -- Core
+surface`\ A a -> a`        -- Surface
+core`succ zero`            -- Core
 LC`( M N )`                -- an object language you declared
 ```
 
@@ -46,16 +46,17 @@ rule runs, so a syntax error inside one arrives with every other syntax error.
 ```
 thena spine> :theorem id : ∀ (A : Type₀) (a : A) -> A
 proving id : ∀ (A : Type₀) -> A -> A
-thena spine> elaborate ⟨ \ A a -> a ⟩
+thena spine> elaborate surface`\ A a -> a`
 already equal
 thena spine> qed
 id : ∀ (A : Type₀) -> A -> A   ∎
 ```
 
-**A written core term is resolved by a visible step.** `try-core ⌜ x ⌝` compiles
-to `⌜1⌝ = resolve-core ⌜ x ⌝ ; try-core ⌜1⌝`, because the same term written in
+**A written core term is resolved by a visible step.** `` try-core core`x` `` compiles
+to `` ⌜1⌝ = resolve-core core`x` ; try-core ⌜1⌝ ``, because the same term written in
 two places may resolve to two different things and you should be able to see
-which one you got.
+which one you got. The name on the left is one you cannot write yourself, which
+is what keeps it from colliding with a binding of your own.
 
 ## 3. `instral`: declarations
 
@@ -184,7 +185,7 @@ onetwo
 dies with it:
 
 ```
-thena spine> h = here ; claim "k" ⌜ Type₀ ⌝ ; goto h
+thena spine> h = here ; claim "k" core`Type₀` ; goto h
 ```
 
 An entry may span lines. Open it with `:{` and close it with `:}`, each alone
@@ -194,7 +195,7 @@ rule, so they need no `;`:
 ```
 thena spine> :{
          ... h = here
-         ... claim "k" ⌜ Type₀ ⌝
+         ... claim "k" core`Type₀`
          ... goto h
          ... :}
 ```
@@ -284,6 +285,53 @@ language LC, M, N, E where
 
 - **Load the module before the rule file that uses its tag.** A rule file is
   read with the grammars the session already has.
+- **A tag resolves like any other name.** A language inside a `namespace` is
+  reached by its word wherever that namespace is open — inside the block, or
+  after an `open` — and by its path always: `` A.LC`( f g )` ``, brackets
+  included. `open … renaming` renames a tag as it renames anything else, and two
+  opened namespaces offering one tag is refused rather than chosen.
+- **A rule file writes its own `open` lines for this**, in the same five forms,
+  and the session's own `open`s do not reach it — a rule base means the same thing
+  whatever happened to be open when it was loaded. Without one, write the tag
+  whole, which always works:
+
+  ```
+  rule base inspecting where
+
+  open Stlc.Syntax
+
+  rule describe LC[var]`${s}` :- do
+    say (concat "a variable called " s)
+  ```
+
+**A metavariable belongs to its language.** `M`, `N` and `E` above are `LC`'s,
+and nothing outside `LC`'s namespace sees them until it is opened — so two
+languages may both call a metavariable `e`, and a block that writes another
+language's letter opens it first:
+
+```
+language Ty, T, S where
+  base  -> ι
+  arrow -> ( T -> S )
+
+open Ty
+
+language LC, M, N, E where
+  abs : x as binder -> ( λ x : T . E[x] )     -- T is Ty's, and Ty is open
+```
+
+A language's own name needs no `open`. **Inside a rule or a derivation you open
+nothing**: a slot carries its language from the declaration, so at a `Ty`
+position only `Ty`'s letters are read. Forget an `open` and the word becomes a
+terminal — a legitimate notation — and you are warned rather than refused.
+`DECISIONS.md` has the whole decision.
+
+**A token class is scoped the same way.** `x : Token String` may be written
+inside a `namespace` beside the block that reads it, and a block that cannot see
+a class reads its word as a terminal and is warned, exactly as for a letter. The
+names generated from a class are suffixed with the class's **word** — `A.LC.fv-x`
+for a class `A.x` — so one language reaching two classes both written `x` is
+refused and names both.
 
 `language` in a rule file is a syntax error. MS5 declared languages there, with a
 type of their own and a coercion `surface-of`; both are gone.
@@ -382,11 +430,11 @@ the generator writes for you, beside the substitution functions themselves:
 
 ```
 notation LC where
-  LC-subst-x e (x : x) n -> e [ x -> n ]
+  LC.subst-x e (x : x) n -> e [ x -> n ]
 ```
 
 The middle parameter is the one that is ascribed: it reads a *name* of the class
-`x`, and `LC-subst-x`'s declaration says only `String` there.
+`x`, and `LC.subst-x`'s declaration says only `String` there.
 
 So it is an ordinary production — it works in a term literal, not only in a rule,
 and a stuck substitution prints in it. **The comma list `E[x -> M, y -> N]` is

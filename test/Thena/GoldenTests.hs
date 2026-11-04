@@ -24,10 +24,10 @@ tests =
     "transcripts"
     [ script
         "assume"
-        [ "assume \"A\" ⌜ Type₀ ⌝"
+        [ "assume \"A\" core`Type₀`"
         , ":goal A -> A"
         , ":show"
-        , "assume ⌜ A ⌝"
+        , "assume core`A`"
         , "x"
         , ":show"
         , ":core A"
@@ -36,15 +36,16 @@ tests =
     , script
         "typing"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
-        , ":infer \8988 succ zero \8989"
-        , ":infer \8988 \\ (x : Nat) -> x \8989"
-        , ":infer \8988 \8704 (A : Type\8320) -> A \8989"
+        , "open Nat"
+        , ":infer core`succ zero`"
+        , ":infer core`\\ (x : Nat) -> x`"
+        , ":infer core`\8704 (A : Type\8320) -> A`"
         , ":convert succ \8799 \\ (n : Nat) -> succ n"
         , ":convert Type\8320 \8799 Type\8321"
         , ":convert succ zero \8799 succ (succ zero)"
-        , ":infer \8988 zero zero \8989"
-        , ":infer \8988 elim Nat () (\\ (_ : Nat) -> Nat) (zero succ) () (succ zero) \8989"
-        , "claim \"h\" ⌜ Nat ⌝"
+        , ":infer core`zero zero`"
+        , ":infer core`elim Nat () (\\ (_ : Nat) -> Nat) (zero succ) () (succ zero)`"
+        , "claim \"h\" core`Nat`"
         , "cross type"
         , ":infer"
         , "back"
@@ -59,10 +60,13 @@ tests =
     , script
         "eliminators"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data Fin : Nat -> Type\8320 \
           \where { fz : \8704 (n : Nat) -> Fin (succ n) \
           \; fs : \8704 (n : Nat) (i : Fin n) -> Fin (succ n) }"
+        , "open Fin"
         , "data Empty : Type where { }"
+        , "open Empty"
         , ":elim Nat"
         , ":elim Nat Type\8321"
         , ":elim Fin"
@@ -75,8 +79,8 @@ tests =
           -- the type takes no @P x ->@ in its @succ@ method, and the body is an
           -- @elim Nat@ whose methods bind the hypothesis and drop it. Then it
           -- computes, which is the only thing a type cannot show.
-        , ":show caseNat"
-        , ":whnf caseNat (\\ (t : Nat) -> Nat) zero (\\ (m : Nat) -> m) (succ (succ zero))"
+        , ":show Nat.case"
+        , ":whnf Nat.case (\\ (t : Nat) -> Nat) zero (\\ (m : Nat) -> m) (succ (succ zero))"
         , ":elim Foo"
         , ":elim Nat Nat"
         , ":elim"
@@ -88,21 +92,22 @@ tests =
     , script
         "kernel"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":revalidate"
         , ":goal Nat"
         , ":revalidate"
         , ":extract"
-        , "certify ⌜ Nat ⌝"
+        , "certify core`Nat`"
         , "along"
-        , "unify ⌜ goal ⌝ ⌜ zero ⌝"
+        , "unify core`goal` core`zero`"
         , ":extract"
-        , "certify ⌜ Nat ⌝"
-        , "certify ⌜ Nat -> Nat ⌝"
+        , "certify core`Nat`"
+        , "certify core`Nat -> Nat`"
         , ":revalidate"
         , "back"
-        , "assume \"A\" ⌜ Type\8320 ⌝"
+        , "assume \"A\" core`Type\8320`"
         , ":extract"
-        , "certify ⌜ Nat ⌝"
+        , "certify core`Nat`"
         , ":quit"
         ]
       -- §9's phase-14 deliverable: @noConfusion@ for MS1's own target language,
@@ -117,27 +122,30 @@ tests =
           \where { true : Term ; false : Term \
           \; ifthen : Term -> Term -> Term -> Term \
           \; zero : Term ; succ : Term -> Term }"
-        , ":show noConfusionTerm"
-        , ":whnf NoConfusionTerm true true"
-        , ":whnf NoConfusionTerm true (succ zero)"
-        , ":whnf NoConfusionTerm (succ true) (succ zero)"
-        , ":whnf NoConfusionTerm (ifthen true zero zero) (ifthen false zero zero)"
+        , "open Term"
+        , ":show Term.lemmata.noConfusion"
+        , ":whnf Term.lemmata.NoConfusion true true"
+        , ":whnf Term.lemmata.NoConfusion true (succ zero)"
+        , ":whnf Term.lemmata.NoConfusion (succ true) (succ zero)"
+        , ":whnf Term.lemmata.NoConfusion (ifthen true zero zero) (ifthen false zero zero)"
           -- And the deliverable's second half: a proof that goes /through/ the
           -- generated lemma, extracted and put to the kernel. This is
           -- injectivity of @succ@, which is what a matching branch of the
           -- determinacy proof needs.
         , ":goal \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b"
         , "along"
-        , "unify \8988 goal \8989 \8988 \\ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) \
-          \-> noConfusionTerm (succ a) (succ b) e \8989"
+        , "unify core`goal` core`\\ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) \
+          \-> Term.lemmata.noConfusion (succ a) (succ b) e`"
         , ":extract"
-        , "certify ⌜ \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b ⌝"
+        , "certify core`\8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b`"
         , "back"
         , "data Nat : Type\8320 where { zero' : Nat ; succ' : Nat -> Nat }"
+        , "open Nat"
         , "data Vec (A : Type\8320) : Nat -> Type\8320 \
           \where { nil : Vec A zero' \
           \; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ' n) }"
-        , ":show noConfusionVec"
+        , "open Vec"
+        , ":show Vec.lemmata.noConfusion"
         , ":quit"
         ])
       -- §9's phase-13 deliverable: a theorem proved by hand, and admitted.
@@ -155,7 +163,7 @@ tests =
         , "along"
         , "along"
         , ":where"
-        , "try-core ⌜ _ ⌝"
+        , "try-core core`_`"
         , "solve"
         , "back"
         , "back"
@@ -279,6 +287,7 @@ tests =
     , script
         "declarations"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "declare one : Nat ; one = succ zero"
           -- The declared TYPE is clean; the body is not, and that is
           -- @ms4/CLOSEOUT.md@ 8 rather than this phase's.
@@ -338,11 +347,11 @@ tests =
           -- @quantify@ is @intro@'s twin: it acts at the guess and claims the
           -- codomain at its own universe, which is why the Π's level is not
           -- pinned to the codomain's.
-        , "quantify \"A\" ⌜ Type\8320 ⌝"
+        , "quantify \"A\" core`Type\8320`"
         , ":show"
         , "into"
         , "along"
-        , "try-core \8988 Type\8320 \8989"
+        , "try-core core`Type\8320`"
         , "solve"
         , "back"
         , "back"
@@ -352,26 +361,27 @@ tests =
           -- A leading ∀ run is components, exactly as a leading λ run is; the
           -- corners are the escape that keeps a trailing Π writable.
         , ":dev \8704 (A : Type\8320) -> A"
-        , ":dev \8988 \8704 (A : Type\8320) -> A \8989"
+        , ":dev core`\8704 (A : Type\8320) -> A`"
         , ":theorem pi : Type\8321"
-        , "elaborate ⟨ forall (A : Type\8320) -> A ⟩"
+        , "elaborate surface`forall (A : Type\8320) -> A`"
         , ":show"
         , "qed"
         , ":theorem arr : Type\8321"
-        , "elaborate ⟨ Type\8320 -> Type\8320 ⟩"
+        , "elaborate surface`Type\8320 -> Type\8320`"
         , "qed"
         , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem lt : Nat"
-        , "elaborate ⟨ let y : Nat = zero in succ y ⟩"
+        , "elaborate surface`let y : Nat = zero in succ y`"
         , ":show"
         , "qed"
         , ":theorem asc : Nat"
-        , "elaborate ⟨ zero : Nat ⟩"
+        , "elaborate surface`zero : Nat`"
         , "qed"
           -- Refused, and the message names the ∀ rather than the term.
         , ":theorem bad : Nat"
         , "attack"
-        , "quantify \"A\" ⌜ Type\8320 ⌝"
+        , "quantify \"A\" core`Type\8320`"
         , ":quit"
         ]
     , script
@@ -387,7 +397,7 @@ tests =
           -- Two questions, two answers: the second lists only what could
           -- elaborate that hint.
         , ":matches"
-        , "elaborate ⟨ a ⟩"
+        , "elaborate surface`a`"
         , ":show"
           -- **One more @back@ than before phase 41e.** A leaf now goes through
           -- @FILL@ — park the term in a definition, unify, attach — so the
@@ -409,12 +419,12 @@ tests =
         , "into"
         , "along"
         , "along"
-        , "elaborate ⟨ b ⟩"
+        , "elaborate surface`b`"
           -- **Applying a non-function says so**, since MS8 phase 170. The
           -- name-headed clause's refusal used to be discarded by the
           -- fall-through to the binary clause, which answered with its own
           -- @A and A1 -> B cannot be made equal@ about components nobody wrote.
-        , "elaborate ⟨ a a ⟩"
+        , "elaborate surface`a a`"
         , ":abandon"
           -- The instruction language, seen: stepping shows the driver's own
           -- two-instruction program, the callee's body, and the return.
@@ -426,7 +436,7 @@ tests =
         , "along"
         , "along"
         , ":step on"
-        , "elaborate ⟨ a ⟩"
+        , "elaborate surface`a`"
         , ":step"
         , ":step"
         , ":step"
@@ -439,6 +449,7 @@ tests =
     , script
         "session"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem two : Nat"
         , "attack"
         , ":show"
@@ -447,13 +458,14 @@ tests =
         , ":suspend"
         , ":proofs"
         , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "open Bool"
         , ":theorem one : Nat"
-        , "try-core ⌜ zero ⌝"
+        , "try-core core`zero`"
         , "solve"
         , "qed"
         , ":resume two"
         , ":core true"
-        , "try-core ⌜ succ (succ zero) ⌝"
+        , "try-core core`succ (succ zero)`"
         , "solve"
         , "qed"
         , ":show two"
@@ -463,11 +475,12 @@ tests =
     , script
         "unification"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
-        , "claim \"h\" ⌜ Nat ⌝"
-        , "unify ⌜ succ h ⌝ ⌜ succ (succ zero) ⌝"
+        , "open Nat"
+        , "claim \"h\" core`Nat`"
+        , "unify core`succ h` core`succ (succ zero)`"
         , ":show"
-        , "claim \"f\" ⌜ Nat -> Nat ⌝"
-        , "unify ⌜ \\ (x : Nat) -> f x ⌝ ⌜ \\ (x : Nat) -> succ x ⌝"
+        , "claim \"f\" core`Nat -> Nat`"
+        , "unify core`\\ (x : Nat) -> f x` core`\\ (x : Nat) -> succ x`"
         , ":show"
           -- **Two bare holes now SOLVE, where this recorded a parking until
           -- MS4 phase 41g.** It is the degenerate flex-flex case: no spine on
@@ -478,28 +491,28 @@ tests =
           --
           -- Flex-flex **with** a spine still defers; that is Huet's case and
           -- §6.1 keeps it.
-        , "claim \"a\" ⌜ Nat ⌝"
-        , "claim \"b\" ⌜ Nat ⌝"
-        , "unify ⌜ a ⌝ ⌜ b ⌝"
+        , "claim \"a\" core`Nat`"
+        , "claim \"b\" core`Nat`"
+        , "unify core`a` core`b`"
         , ":show"
           -- And the solution composes: @b@ δ-unfolds to @a@, so this equation
           -- is @a ≟ zero@ and solves @a@ alone. Before 41g both were solved
           -- here at once, by the parked constraint waking.
-        , "unify ⌜ b ⌝ ⌜ zero ⌝"
+        , "unify core`b` core`zero`"
         , ":show"
-        , "claim \"c\" ⌜ Nat ⌝"
-        , "unify ⌜ c ⌝ ⌜ succ c ⌝"
-        , "unify ⌜ zero ⌝ ⌜ succ zero ⌝"
+        , "claim \"c\" core`Nat`"
+        , "unify core`c` core`succ c`"
+        , "unify core`zero` core`succ zero`"
         , ":quit"
         ]
     , script
         "stepping"
         [ ":step on"
-        , "assume \"A\" ⌜ Type\8320 ⌝"
+        , "assume \"A\" core`Type\8320`"
         , ":step"
         , ":step"
         , ":step off"
-        , "claim \"h\" ⌜ Type\8320 ⌝"
+        , "claim \"h\" core`Type\8320`"
         , ":show"
           -- **Phase 25c**: the whole of @unify-refine@\'s body, one instruction
           -- at a time. Seven ops, two of them binary and one infix, so this
@@ -508,7 +521,7 @@ tests =
           -- A swapped pair in that list would show up here and nowhere else.
         , ":goal Type\8320"
         , ":step on"
-        , "unify-refine-core ⌜ A ⌝"
+        , "unify-refine-core core`A`"
         , ":step"
         , ":step"
         , ":step"
@@ -519,8 +532,8 @@ tests =
         ]
     , script
         "navigation"
-        [ "assume \"A\" ⌜ Type₀ ⌝"
-        , "assume \"B\" ⌜ A -> Type₀ ⌝"
+        [ "assume \"A\" core`Type₀`"
+        , "assume \"B\" core`A -> Type₀`"
         , ":goal forall (x : A) -> B x"
         , ":where"
         , "cross type"
@@ -542,33 +555,38 @@ tests =
     , script
         "declaring"
         [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":show Nat"
         , ":show succ"
         , ":show zero"
         , ":core succ (succ zero)"
         , "data Vec (A : Type₀) : Nat -> Type₀ where { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
+        , "open Vec"
         , ":show Vec"
         , ":show cons"
         , "data Empty : Type where { }"
+        , "open Empty"
         , ":show Empty"
         , "data Nat : Type₀ where { z : Nat }"
+        , "open Nat"
         , "data Ordinal : Type₀ where { sup : (Nat -> Ordinal) -> Ordinal }"
         , "data Bad : Type₀ where { bad : (Bad -> Bad) -> Bad }"
         , ":show nowhere"
-        , "assume \"n\" ⌜ Nat ⌝"
+        , "assume \"n\" core`Nat`"
         , ":show"
         , ":quit"
         ]
     , script
         "reduction"
         [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":whnf succ zero"
         -- committing reduction, and the orphaning case (§4.7): claim two
         -- holes, put a redex mentioning the first in the second's type, then
         -- navigate to it — 'back' pops the step 'claim' pushed, landing on
         -- the component itself rather than the trailing goal it left alone.
-        , "claim \"h\" ⌜ Nat ⌝"
-        , "claim \"g\" ⌜ (\\ (_ : Nat) -> Nat) h ⌝"
+        , "claim \"h\" core`Nat`"
+        , "claim \"g\" core`(\\ (_ : Nat) -> Nat) h`"
         , "back"
         , "cross type"
         , ":where"
@@ -578,7 +596,7 @@ tests =
         , ":show"
         , "back"
         , "back"
-        , "claim \"n\" ⌜ Nat ⌝"
+        , "claim \"n\" core`Nat`"
         -- a hand-written elim: stuck on a neutral target, so it round-trips
         -- through the printer unreduced rather than firing ι.
         , ":whnf elim Nat () (\\ (_ : Nat) -> Nat) (zero succ) () n"
@@ -603,9 +621,11 @@ tests =
     , script
         "induction"
         [ "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }"
+        , "open Eq"
         , "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem plus : Nat -> Nat -> Nat"
-        , "try-core ⌜ \\ (n : Nat) (m : Nat) -> elim Nat () (\\ (t : Nat) -> Nat) (m (\\ (k : Nat) (ih : Nat) -> succ ih)) () n ⌝"
+        , "try-core core`\\ (n : Nat) (m : Nat) -> elim Nat () (\\ (t : Nat) -> Nat) (m (\\ (k : Nat) (ih : Nat) -> succ ih)) () n`"
         , "solve"
         , "qed"
         , ":whnf plus (succ zero) (succ zero)"
@@ -618,10 +638,10 @@ tests =
         , "along"
         , "along"
         , "along"
-        , "eliminate-core ⌜ e ⌝"
+        , "eliminate-core core`e`"
         , "back"
         , ":where"
-        , "try-core ⌜ \\ (c : Nat) -> refl {0} Nat (succ c) ⌝"
+        , "try-core core`\\ (c : Nat) -> refl {0} Nat (succ c)`"
         , "solve"
         , "along"
         , "solve"
@@ -637,14 +657,14 @@ tests =
         , "intro"
         , "into"
         , "along"
-        , "eliminate-core ⌜ n ⌝"
+        , "eliminate-core core`n`"
         , ":show"
         , "back"
         , "back"
-        , "try-core ⌜ refl {0} Nat zero ⌝"
+        , "try-core core`refl {0} Nat zero`"
         , "solve"
         , "along"
-        , "try-core ⌜ \\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih ⌝"
+        , "try-core core`\\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih`"
         , "solve"
         , "along"
         , "solve"
@@ -660,29 +680,31 @@ tests =
       -- The other half of §3.7: eliminating an indexed family at a **specific**
       -- index. @Ev (succ zero)@ matches no constructor, and the scheme is what
       -- says so — each method carries an equation between its own index
-      -- expression and @succ zero@, and @noConfusionNat@ (phase 14) turns both
+      -- expression and @succ zero@, and @Nat.lemmata.noConfusion@ (phase 14) turns both
       -- into @Empty@. Ruling out @E-IfTrue@ against @E-If@ in the determinacy
       -- proof is this, at a bigger relation (§9, phase 18).
     , script
         "inversion"
         ( preludeLines ++
         [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data Ev : Nat -> Type₀ where { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
-        , ":whnf NoConfusionNat zero (succ zero)"
-        , ":whnf NoConfusionNat (succ (succ zero)) (succ zero)"
+        , "open Ev"
+        , ":whnf Nat.lemmata.NoConfusion zero (succ zero)"
+        , ":whnf Nat.lemmata.NoConfusion (succ (succ zero)) (succ zero)"
         , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty {0}"
         , "attack"
         , "intro"
         , "into"
         , "along"
-        , "eliminate-core ⌜ p ⌝"
+        , "eliminate-core core`p`"
         , ":where"
         , "back"
         , "back"
-        , "try-core ⌜ \\ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q ⌝"
+        , "try-core core`\\ (q : Eq {0} Nat zero (succ zero)) -> Nat.lemmata.noConfusion zero (succ zero) q`"
         , "solve"
         , "along"
-        , "try-core ⌜ \\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q) ⌝"
+        , "try-core core`\\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> Nat.lemmata.noConfusion (succ n) zero (Nat.lemmata.noConfusion (succ (succ n)) (succ zero) q)`"
         , "solve"
         , "along"
         , "solve"
@@ -708,7 +730,9 @@ tests =
     , script
         "elimination"
         [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data Fin : Nat -> Type₀ where { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }"
+        , "open Fin"
         , ":theorem noEq : ∀ (n : Nat) (i : Fin n) -> Nat"
         , "attack"
         , "intro"
@@ -716,14 +740,22 @@ tests =
         , "into"
         , "along"
         , "along"
-        , "eliminate-core ⌜ i ⌝"
-        , "eliminate-core ⌜ n ⌝"
+        , "eliminate-core core`i`"
+        , "eliminate-core core`n`"
         , ":abandon"
         , "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }"
+        , "open Eq"
         , "data Unit : Type where { unit : Unit }"
+        , "open Unit"
         , "data Empty : Type where { }"
+        , "open Empty"
         , "data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }"
+        , "open And"
         , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
+          -- **No open: the declaration above it is refused today.** A datatype
+          -- may not be named after one of its own generated relations, and this one
+          -- is — so there is no namespace to open. The refusal is on the milestone
+          -- closeout list; when it is ruled, this script wants an open here.
         , ":theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat"
         , "attack"
         , "intro"
@@ -734,15 +766,15 @@ tests =
         , "along"
         , "along"
         , ":matches"
-        , "eliminate-core ⌜ Type₀ ⌝"
-        , "eliminate-core ⌜ succ ⌝"
+        , "eliminate-core core`Type₀`"
+        , "eliminate-core core`succ`"
         -- Phase 19: @Below@'s index telescope is dependent, but both indices
         -- are plain variables here, so the dependent one is friendly and
         -- states no equation. This line was a refusal until phase 19.
-        , "eliminate-core ⌜ b ⌝"
+        , "eliminate-core core`b`"
         , ":where"
         , "attack"
-        , "eliminate-core ⌜ n ⌝"
+        , "eliminate-core core`n`"
         , ":abandon"
         -- And the TIED dependent index, which was the refusal that remained
         -- until MS9 phase 213: index 2 is @fz m@, a constructor application, so
@@ -763,7 +795,7 @@ tests =
         , "into"
         , "along"
         , "along"
-        , "eliminate-core ⌜ b ⌝"
+        , "eliminate-core core`b`"
         , ":where"
         , ":abandon"
         -- __AND THE CHAINED TELESCOPE, WHICH WAS THE REFUSAL THAT REMAINED
@@ -779,6 +811,10 @@ tests =
         -- @examples/chained-index-telescope.thena@ is where the term is judged,
         -- by the kernel, with the arm's own payload reduced out of it.
         , "data Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀ where { c0 : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Chain n i b }"
+          -- **No open: the declaration above it is refused today.** A datatype
+          -- may not be named after one of its own generated relations, and this one
+          -- is — so there is no namespace to open. The refusal is on the milestone
+          -- closeout list; when it is ruled, this script wants an open here.
         , ":theorem chained : ∀ (m : Nat) (c : Chain (succ m) (fz m) (bz m)) -> Nat"
         , "attack"
         , "intro"
@@ -786,7 +822,7 @@ tests =
         , "into"
         , "along"
         , "along"
-        , "eliminate-core ⌜ c ⌝"
+        , "eliminate-core core`c`"
         , ":quit"
         ]
     , -- Thesis §2.7, and the phase's deliverable. The interesting half is the
@@ -797,6 +833,7 @@ tests =
       script
         "refining"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
           -- **The level arguments go on the /uses/, never on the constructor's
           -- name.** Written @refl {0} :@ this line was a syntax error, so @Eq@
           -- was never declared and every step below recorded @not in scope@ as
@@ -804,10 +841,11 @@ tests =
           -- (@ms3/CLOSEOUT.md@ item 14). Repaired reviewing MS3.
         , "data Eq (A : Type) : A -> A -> Type \
           \where { refl : \8704 (a : A) -> Eq A a a }"
+        , "open Eq"
           -- Already the goal's type: unification has nothing to do, and the
           -- binding is filled straight in.
         , ":theorem id0 : \8704 (A : Type\8320) -> A -> A"
-        , "unify-refine-core ⌜ \\ (A : Type\8320) (a : A) -> a ⌝"
+        , "unify-refine-core core`\\ (A : Type\8320) (a : A) -> a`"
         , ":show"
         , "qed"
           -- Holes on both sides. @refl {0} A a@ has type @Eq {0} A a a@; unifying that
@@ -819,18 +857,18 @@ tests =
           -- difference and this does not. Found by mutation testing,
           -- 2026-09-12: making the domain inherit the direction left the whole
           -- suite green, and the line below is what it would have accepted.
-        , "unify-into \8988 \8704 (x : Type\8320) -> Type\8320 \8989 \8988 \8704 (y : Type\8321) -> Type\8320 \8989"
+        , "unify-into core`\8704 (x : Type\8320) -> Type\8320` core`\8704 (y : Type\8321) -> Type\8320`"
           -- …and the CODOMAIN does inherit it, which is the other half of the
           -- same rule and is why this one is accepted.
-        , "unify-into \8988 \8704 (x : Type\8320) -> Type\8320 \8989 \8988 \8704 (y : Type\8320) -> Type\8321 \8989"
+        , "unify-into core`\8704 (x : Type\8320) -> Type\8320` core`\8704 (y : Type\8320) -> Type\8321`"
           -- **A λ's BODY is invariant too**, and for a sharper reason than the
           -- domain's: a λ is not a type, so there is no direction for its body
           -- to be read at. Found by the same mutation pass.
-        , "unify-into \8988 \\ (x : Nat) -> Type\8320 \8989 \8988 \\ (x : Nat) -> Type\8321 \8989"
+        , "unify-into core`\\ (x : Nat) -> Type\8320` core`\\ (x : Nat) -> Type\8321`"
         , ":theorem refl0 : Eq {0} Nat zero zero"
-        , "claim \"A\" ⌜ Type\8320 ⌝"
-        , "claim \"a\" ⌜ A ⌝"
-        , "unify-refine-core ⌜ refl {0} A a ⌝"
+        , "claim \"A\" core`Type\8320`"
+        , "claim \"a\" core`A`"
+        , "unify-refine-core core`refl {0} A a`"
         , ":show"
         , "qed"
         , ":show refl0"
@@ -842,7 +880,7 @@ tests =
           -- and the reason the rewind lives in the driver rather than in
           -- anything @apply@ owns.
         , ":theorem wrong : Eq {0} Nat zero (succ zero)"
-        , "unify-refine-core ⌜ refl {0} Nat zero ⌝"
+        , "unify-refine-core core`refl {0} Nat zero`"
         , ":show"
         , ":abandon"
           -- **The tactic is two calls now** (MS4 phase 48) — his request:
@@ -850,7 +888,7 @@ tests =
           -- them"/. @fill@ leaves a guess and @solve@ discharges it, so
           -- the seam Brady needs between them is one a caller can get at.
         , ":theorem split : ∀ (A : Type₀) -> A -> A"
-        , "fill ⌜ \\ (A : Type₀) (a : A) -> a ⌝"
+        , "fill core`\\ (A : Type₀) (a : A) -> a`"
         , ":show"
         , "solve"
         , "qed"
@@ -861,7 +899,7 @@ tests =
           -- symmetric, so one operation answered differently depending on
           -- which of the two you reached it through.
         , ":theorem lower : Type₂"
-        , "unify-refine-core ⌜ Type₀ ⌝"
+        , "unify-refine-core core`Type₀`"
         , ":show"
         , "qed"
         ]
@@ -882,10 +920,11 @@ tests =
       script
         "surface-inference"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem t : Nat"
         , ":show"
         , ":infer succ zero"
-        , ":infer \8988 succ zero \8989"
+        , ":infer core`succ zero`"
         , ":show"
         , ":where"
         , ":infer nosuchthing"
@@ -904,8 +943,9 @@ tests =
           -- A block is an atom, so an argument run takes it unparenthesised.
         , ":surface f (do { attack })"
         , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem t : Nat"
-        , "elaborate ⟨ do { attack ; prove } ⟩"
+        , "elaborate surface`do { attack ; prove }`"
           -- The block did what was written rather than what was tidy, and the
           -- development shows where it got to — the second principle.
         , ":show"
@@ -919,7 +959,7 @@ tests =
           -- live to backtrack into.
         , ":abandon"
         , ":theorem u : Nat"
-        , "elaborate ⟨ do { say } ⟩"
+        , "elaborate surface`do { say }`"
         , ":quit"
         ]
 
@@ -965,15 +1005,16 @@ tests =
     , script
         "yielding"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem t : Nat"
-        , "elaborate ⟨ do { h = here ; yield \"look at this\" ; goto h ; prove } ⟩"
+        , "elaborate surface`do { h = here ; yield \"look at this\" ; goto h ; prove }`"
           -- The development is what the rule has built so far, not what it
           -- started with: @attack@ has not run, but @here@ has.
         , ":show"
           -- **Every ordinary command works, and really changes things.** That
           -- is the whole difference between a yield and a question, which takes
           -- an answer and refuses everything else.
-        , "assume \"w\" ⌜ Nat ⌝"
+        , "assume \"w\" core`Nat`"
         , ":show"
         , ":infer succ zero"
         , ":revalidate"
@@ -1001,21 +1042,23 @@ tests =
     , script
         "inferring"
         [ "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "open Bool"
         , "data Maybe (A : Type\8320) : Type\8320 \
           \where { Nothing : Maybe A ; Just : \8704 (a : A) -> Maybe A }"
+        , "open Maybe"
         , ":theorem g : Maybe Bool"
           -- One hole per argument of Just, including the type parameter.
-        , "claim \"T\" ⌜ Type\8320 ⌝"
-        , "claim \"b\" ⌜ T ⌝"
+        , "claim \"T\" core`Type\8320`"
+        , "claim \"b\" core`T`"
           -- Maybe T against Maybe Bool solves T, and says so.
-        , "unify-refine-core ⌜ Just T b ⌝"
+        , "unify-refine-core core`Just T b`"
         , ":show"
           -- The only hole left is the boolean, and its type is now T = Bool.
           -- @goto@ (phase 24b) goes straight to it; counting @back@s would
           -- stop scaling the moment @apply@ claims several holes at once.
         , "goto-named \"b\""
         , ":where"
-        , "unify-refine-core ⌜ true ⌝"
+        , "unify-refine-core core`true`"
         , ":show"
         , "qed"
         , ":show g"
@@ -1031,18 +1074,20 @@ tests =
       script
         "applying"
         [ "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "open Bool"
         , "data Maybe (A : Type\8320) : Type\8320 \
           \where { Nothing : Maybe A ; Just : \8704 (a : A) -> Maybe A }"
+        , "open Maybe"
         , ":theorem g : Maybe Bool"
           -- One line for the whole of `inferring`'s three.
         , ":matches"
-        , "apply-core ⌜ Just ⌝"
+        , "apply-core core`Just`"
         , ":show"
           -- A head with no Π at all: zero holes claimed, so @apply@ degenerates
           -- to @unify-refine@ exactly. That is the phase's claim that it adds
           -- no capability, in its smallest form.
         , "goto-named \"a\""
-        , "apply-core ⌜ true ⌝"
+        , "apply-core core`true`"
         , ":show"
         , "qed"
         , ":show g"
@@ -1063,7 +1108,7 @@ tests =
         , "along"
         , "along"
         , "along"
-        , "apply-core ⌜ f ⌝"
+        , "apply-core core`f`"
         , ":show"
         , "goto-named \"_\""
         , ":where"
@@ -1078,19 +1123,19 @@ tests =
           -- from the other side: a line that did not do what it said is not a
           -- step, so there is no step to take back.
         , ":theorem bad : Bool"
-        , "apply-core ⌜ Just ⌝"
+        , "apply-core core`Just`"
         , ":show"
         , ":undo"
-        , "apply-core ⌜ true ⌝"
+        , "apply-core core`true`"
         , "qed"
           -- **The same failure with no proof open** (phase 34). The top level
           -- has a development too, so a line that did not do what it said is
           -- rewound there as well, and @:undo@ takes back a line there as well
           -- — neither of which happened until the undo stack moved off 'Proof'.
         , ":goal Maybe Bool"
-        , "apply-core ⌜ Just ⌝"
+        , "apply-core core`Just`"
         , ":show"
-        , "apply-core ⌜ Nothing ⌝"
+        , "apply-core core`Nothing`"
         , ":show"
         , ":undo"
         , ":show"
@@ -1098,7 +1143,7 @@ tests =
           -- And the rewind proper: a body that ran, changed the development and
           -- then failed, with no proof open. @:show@ is the bare hole.
         , ":goal \8704 (b : Bool) -> Maybe Bool"
-        , "apply-core ⌜ Just ⌝"
+        , "apply-core core`Just`"
         , ":show"
           -- **A goal `apply` cannot saturate into, and the way back** (the
           -- user, 2026-08-26). @Just@'s result is a @Maybe@, so no number of
@@ -1116,9 +1161,9 @@ tests =
           -- would have type @Bool -> Bool -> Maybe Bool@ anyway. §5.3's
           -- distinction between assuming and introducing, from the other side.
         , ":theorem h : \8704 (b : Bool) -> Maybe Bool"
-        , "apply-core ⌜ Just ⌝"
-        , "assume \"q\" ⌜ Bool ⌝"
-        , "apply-core ⌜ Just ⌝"
+        , "apply-core core`Just`"
+        , "assume \"q\" core`Bool`"
+        , "apply-core core`Just`"
         , ":abandon"
         , ":theorem h : \8704 (b : Bool) -> Maybe Bool"
         , "attack"
@@ -1126,9 +1171,9 @@ tests =
         , "into"
         , "along"
         , ":where"
-        , "apply-core ⌜ Just ⌝"
+        , "apply-core core`Just`"
         , "goto-named \"a\""
-        , "apply-core ⌜ b ⌝"
+        , "apply-core core`b`"
         , "goto-named \"h\""
         , "solve"
         , "qed"
@@ -1136,7 +1181,7 @@ tests =
           -- The head is the guard, so @apply@ at a guess never runs its body.
         , ":theorem guessed : Bool"
         , "attack"
-        , "apply-core ⌜ true ⌝"
+        , "apply-core core`true`"
         , ":abandon"
         ]
 
@@ -1154,7 +1199,9 @@ tests =
       script
         "fitting"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data P : Type\8320 where { mk : Nat -> Nat -> P }"
+        , "open P"
           -- **Arity 0: it fits as it stands, so there is no @backtracking to@
           -- line at all** — clause 1 succeeded first time.
           --
@@ -1163,7 +1210,7 @@ tests =
           -- survives success: the search settled on an arity and @retry@ can
           -- still push it further. Not an accident of this rule.
         , ":theorem t0 : Nat -> Nat"
-        , "fit-core ⌜ succ ⌝"
+        , "fit-core core`succ`"
         , ":show"
         , ":choices"
           -- **The contrast that says why this is not @apply-core@.**
@@ -1171,17 +1218,17 @@ tests =
           -- hole for every argument, so at this goal it lands on @Nat@ and
           -- cannot get back. @fit-core@ never went past arity 0.
         , ":undo"
-        , "apply-core ⌜ succ ⌝"
+        , "apply-core core`succ`"
         , ":abandon"
           -- Arity 1: one backtrack, one hole.
         , ":theorem t1 : Nat"
-        , "fit-core ⌜ succ ⌝"
+        , "fit-core core`succ`"
         , ":show"
         , ":abandon"
           -- Arity 2: two backtracks, two holes, minted one per step of the
           -- recursion rather than from a list a body cannot build.
         , ":theorem t2 : P"
-        , "fit-core ⌜ mk ⌝"
+        , "fit-core core`mk`"
         , ":show"
         , ":abandon"
           -- **The case @test\/golden\/applying.golden@ wrote down and could not
@@ -1191,10 +1238,12 @@ tests =
           -- goal, and unification then solves @?A@ to @Bool@. Saturating past
           -- it, as @apply-core@ must, lands on @Maybe ?A@ and fails.
         , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "open Bool"
         , "data Maybe (A : Type\8320) : Type\8320 \
           \where { Nothing : Maybe A ; Just : \8704 (a : A) -> Maybe A }"
+        , "open Maybe"
         , ":goal \8704 (b : Bool) -> Maybe Bool"
-        , "fit-core ⌜ Just ⌝"
+        , "fit-core core`Just`"
         , ":show"
           -- **And the choice point survives success** (his, 2026-08-20), so the
           -- arity it settled on is still there to be taken further.
@@ -1208,15 +1257,17 @@ tests =
       script
         "guessing"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : \8704 (n : Nat) -> Nat }"
+        , "open Nat"
         , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "open Bool"
         , ":theorem n : Nat"
           -- Refused, and it says which type against which. Before this phase
           -- the guess went in and @qed@ found it, arbitrarily far away.
-        , "try-core ⌜ true ⌝"
+        , "try-core core`true`"
           -- **And it left nothing behind** — the check runs before the
           -- component is replaced, so a refused @try@ is not the debris case.
         , ":show"
-        , "try-core ⌜ zero ⌝"
+        , "try-core core`zero`"
         , "solve"
         , "qed"
           -- **A term mentioning an open hole still checks.** Γ comes from
@@ -1224,8 +1275,8 @@ tests =
           -- @unify-refine@ depends on, since it tries a binding whose own value
           -- may still contain holes.
         , ":theorem m : Nat"
-        , "claim \"h\" ⌜ Nat ⌝"
-        , "try-core ⌜ succ h ⌝"
+        , "claim \"h\" core`Nat`"
+        , "try-core core`succ h`"
         , ":show"
         , ":abandon"
         ]
@@ -1239,18 +1290,19 @@ tests =
           -- theorem's were dropped at 31e and a datatype's here, so the schema
           -- below is entirely inferred from the two written @Type@s.
           "data Id (A : Type) : A -> A -> Type where { rfl : \8704 (a : A) -> Id A a a }"
+        , "open Id"
         , ":show Id"
-        , ":infer \8988 Id {0} \8989"
-        , ":infer \8988 rfl {0} \8989"
-        , ":infer \8988 \\ (A : Type\8320) (a : A) (b : A) (q : Id {0} A a b) -> elim Id {0} (A) (\\ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) ((\\ (c : A) -> rfl {0} A c)) (a b) q \8989"
+        , ":infer core`Id {0}`"
+        , ":infer core`rfl {0}`"
+        , ":infer core`\\ (A : Type\8320) (a : A) (b : A) (q : Id {0} A a b) -> elim Id {0} (A) (\\ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) ((\\ (c : A) -> rfl {0} A c)) (a b) q`"
           -- Prenex is all-or-nothing.
-        , ":infer \8988 Id \8989"
-        , ":infer \8988 Id {0 1} \8989"
+        , ":infer core`Id`"
+        , ":infer core`Id {0 1}`"
           -- **There is no level-variable syntax left to get wrong.** @Type {l}@
           -- was the last thing that could name one, and phase 33c deleted it;
           -- what a use may write is a numeral, and nothing else.
         , ":core Type {l}"
-        , ":infer \8988 Id {suc 0} \8989"
+        , ":infer core`Id {suc 0}`"
         , ":quit"
         ]
       -- What level polymorphism was FOR, as a pair of probes neither of which
@@ -1289,7 +1341,7 @@ tests =
     , script
         "unsatisfiable"
         [ ":theorem vacuous : Type\8321"
-        , "try-core ⌜ (\\ (y : Type) -> y) ((\\ (x : Type) -> x) Type\8321) ⌝"
+        , "try-core core`(\\ (y : Type) -> y) ((\\ (x : Type) -> x) Type\8321)`"
         , "solve"
         , ":revalidate"
         , "qed"
@@ -1301,29 +1353,34 @@ tests =
         ( preludeLines ++
         [ "data Box1 : Type\8320 -> Type\8321 \
           \where { box1 : \8704 (A : Type\8320) -> A -> Box1 A }"
+        , "open Box1"
         , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , ":theorem probe : \8704 (b : Box1 Nat) -> Nat"
         , "attack"
         , "intro"
         , "into"
         , "along"
-        , "eliminate-core ⌜ b ⌝"
+        , "eliminate-core core`b`"
         , ":abandon"
         , "data N : Type where { z : N ; s : N -> N }"
+        , "open N"
         , ":show N"
-        , ":infer \8988 s {0} \8989"
-        , ":infer \8988 s {1} (z {1}) \8989"
+        , ":infer core`s {0}`"
+        , ":infer core`s {1} (z {1})`"
           -- **A level a constructor argument's typing determines** (phase 50).
           -- @suc ?\8467 \8804 1@ pins the inner bare @Type@ at @Type\8320@, and @E@ takes no
           -- level argument. Before phase 50 the bound was dropped, @?\8467@ became a
           -- rigid, and the generated no-confusion family was refused as a bug.
         , "data E : Type where { k : Eq {1} Type Nat Nat -> E }"
+        , "open E"
         , ":show E"
           -- And one the bounds merely /constrain/: @suc ?\8467 \8804 2@ leaves @?\8467@ free
           -- below 1. Phase 50 refused it, because a datatype has nowhere to
           -- carry a conditional constraint; **phase 51 defaults it** to its
           -- least value instead, so @F@ takes no level argument either.
         , "data F : Type where { k2 : Eq {2} Type Nat Nat -> F }"
+        , "open F"
         , ":show F"
           -- **Real polymorphism is untouched**, which is the whole point of the
           -- partition: @\8467@ occurs in @Eq@'s own type, so a use determines it
@@ -1337,15 +1394,15 @@ tests =
       -- — because which one you get is the whole of what this phase decides.
     , script
         "ambiguity"
-        [ ":infer \8988 Type \8989"
-        , ":infer \8988 Type -> Type \8989"
+        [ ":infer core`Type`"
+        , ":infer core`Type -> Type`"
           -- Conversion does not refuse an undecided level; it says what it
           -- would need.
         , ":convert Type \8799 Type\8320"
           -- Forced, and written back: the theorem is stored with the level the
           -- obligations left it no choice about.
         , ":theorem lift : Type\8321"
-        , "try-core ⌜ Type ⌝"
+        , "try-core core`Type`"
         , "solve"
         , "qed"
         , ":show lift"
@@ -1353,14 +1410,14 @@ tests =
           -- refused (phase 33b) — and the relation that was left over becomes
           -- the scheme's constraint.
         , ":theorem undetermined : Type"
-        , "try-core ⌜ Type\8320 ⌝"
+        , "try-core core`Type\8320`"
         , "solve"
         , ":revalidate"
         , "qed"
         , ":show undetermined"
           -- Refuted: the same meta is pushed up by one use and down by another.
         , ":theorem crossed : Type\8320"
-        , "try-core ⌜ (\\ (x : Type) -> x) Type\8320 ⌝"
+        , "try-core core`(\\ (x : Type) -> x) Type\8320`"
         , "solve"
         , ":revalidate"
         , "qed"
@@ -1368,14 +1425,15 @@ tests =
           -- Unification solves a level and writes it through the whole
           -- development — a level meta has no component to be promoted, so this
           -- is the only place a solution can be recorded.
-        , "claim \"h\" ⌜ Type -> Type ⌝"
-        , "unify ⌜ \\ (x : Type) -> x ⌝ ⌜ \\ (x : Type\8320) -> x ⌝"
+        , "claim \"h\" core`Type -> Type`"
+        , "unify core`\\ (x : Type) -> x` core`\\ (x : Type\8320) -> x`"
         , ":show"
           -- **A declaration infers its level too** (phase 33c). It could not
           -- when this script was written — phase 33 refused a bare @Type@ here,
           -- because a declaration's levels are stored and instantiated at every
           -- use and nothing generalised one.
         , "data Box : Type where { }"
+        , "open Box"
         , ":show Box"
 
         , ":quit"
@@ -1388,27 +1446,27 @@ tests =
         [ -- One parameter, not two — conversion states an equality as two
           -- inequalities and generalisation reads them back as one.
           ":theorem id : \8704 (A : Type) -> A -> A"
-        , "try-core ⌜ \\ (A : Type) (a : A) -> a ⌝"
+        , "try-core core`\\ (A : Type) (a : A) -> a`"
         , "solve"
         , "qed"
         , ":show id"
-        , ":infer \8988 id {0} \8989"
-        , ":infer \8988 id {3} \8989"
+        , ":infer core`id {0}`"
+        , ":infer core`id {3}`"
           -- Prenex is still all-or-nothing.
-        , ":infer \8988 id \8989"
+        , ":infer core`id`"
           -- A scheme with a real constraint between two independent parameters.
         , ":theorem lift : \8704 (A : Type) -> Type"
-        , "try-core ⌜ \\ (A : Type) -> A ⌝"
+        , "try-core core`\\ (A : Type) -> A`"
         , "solve"
         , "qed"
         , ":show lift"
-        , ":infer \8988 lift {0 1} \8989"
+        , ":infer core`lift {0 1}`"
           -- **@:infer@ accepts a bad instantiation**, and that is the accepted
           -- trade: obligations are re-collected, not pooled, so the error
           -- arrives at @qed@ rather than at the line.
-        , ":infer \8988 lift {1 0} \8989"
+        , ":infer core`lift {1 0}`"
         , ":theorem bad : Type\8321 -> Type\8320"
-        , "try-core ⌜ lift {1 0} ⌝"
+        , "try-core core`lift {1 0}`"
         , "solve"
           -- Here it is: the stored constraint, instantiated. Without it
           -- @Type\8321 -> Type\8320@ is a perfectly good type and this is
@@ -1430,20 +1488,20 @@ tests =
         [ "wibble"
         , ":core y"
         , ":show it"
-        , "assume ⌜ Type₀ ⌝"
+        , "assume core`Type₀`"
         , "let"
         , ":show"
         -- Table 2.7's @Θ ⊢ S : Type@ on both binders (phase 25f). The λ is a
         -- term, not a type, so both ops refuse it and — per phase 25d — leave
         -- the proof exactly as it was.
-        , "claim \"h\" ⌜ (\\ (x : Type₀) -> x) ⌝"
-        , "assume \"k\" ⌜ (\\ (x : Type₀) -> x) ⌝"
+        , "claim \"h\" core`(\\ (x : Type₀) -> x)`"
+        , "assume \"k\" core`(\\ (x : Type₀) -> x)`"
         -- **Accepted, and this line is the point of the pair.** A type family
         -- is a perfectly good type; the condition is "S is a type", not "S is
         -- a type at level 0". Closeout 4l offered
         -- @claim h : Nat -> Nat -> Nat -> Type₀@ as an example of the defect
         -- and it never was one.
-        , "claim \"fam\" ⌜ Type₀ -> Type₀ -> Type₀ ⌝"
+        , "claim \"fam\" core`Type₀ -> Type₀ -> Type₀`"
         , ":show"
         ]
       -- The command list, and the one error that points at it. Pinning the
@@ -1466,7 +1524,9 @@ tests =
       script
         "trusted"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
+        , "open Eq"
           -- Honestly true, so the claim is met and the node goes.
         , "declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)"
         , ":whnf honest {0}"
@@ -1517,7 +1577,9 @@ tests =
         [ -- **A golden runs prelude-free**, so @Eq@ is declared here rather
           -- than assumed (@HAZARDS.md@).
           "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
+        , "open Eq"
         , "declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)"
           -- **THE DECLARE DOOR** (MS8 phase 167, his ruling on MS8 closeout
           -- 13). The same line is refused at the strictest rung and accepted at
@@ -1536,7 +1598,7 @@ tests =
         , ":theorem viaHonest : Eq {0} Nat zero zero"
         , "attack"
         , "into"
-        , "try-core \8988 honest {0} \8989"
+        , "try-core core`honest {0}`"
         , "solve"
         , "back"
         , "solve"
@@ -1545,7 +1607,7 @@ tests =
         , ":theorem viaLiar : Eq {0} Nat zero (succ zero)"
         , "attack"
         , "into"
-        , "try-core \8988 liar {0} \8989"
+        , "try-core core`liar {0}`"
         , "solve"
         , "back"
         , "solve"
@@ -1586,7 +1648,7 @@ tests =
 -- scripts declare their own @Nat@ and @Empty@, which the real prelude would
 -- clash with). Phase 14 needed only @Eq@ for that; phase 20 writes the table
 -- out of @Empty@, @Unit@ and @And@ as well, so a script that wants
--- @noConfusionD@ must declare all four up front — **and in this order**, since
+-- @D.lemmata.noConfusion@ must declare all four up front — **and in this order**, since
 -- @And@\'s own no-confusion states equations and so needs @Eq@ already there.
 --
 -- Only the two scripts that use no-confusion take it. A script that declares
@@ -1596,8 +1658,12 @@ preludeLines :: [String]
 preludeLines =
   [ "data Eq (A : Type) : A -> A -> Type \
     \where { refl : \8704 (a : A) -> Eq A a a }"
+  , "open Eq"
   , "data Unit : Type where { unit : Unit }"
+  , "open Unit"
   , "data Empty : Type where { }"
+  , "open Empty"
   , "data And (A : Type) (B : Type) : Type \
     \where { both : \8704 (a : A) (b : B) -> And A B }"
+  , "open And"
   ]

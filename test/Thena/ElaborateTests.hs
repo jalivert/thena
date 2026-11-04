@@ -39,7 +39,7 @@ import Thena.Standard (withRules)
 
 import Thena.Core.Level (Level (..))
 import qualified Thena.Core.Term
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Literal (..), Var, fresh)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Literal (..), Var, fresh, rootName, rootScope, nameDotted)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
 import qualified Thena.Development.Cursor as Cursor
@@ -55,7 +55,8 @@ import Thena.Engine
   , splicing
   )
 import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..))
-import Thena.Global.Env (emptyGlobals)
+import Thena.Global.Env
+  (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
 import Thena.Instral.Ops
   ( Instr (..)
   , Operand (..)
@@ -226,6 +227,7 @@ endToEnd =
     declaring ty tm =
       loadSource withRules $ unlines
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "open Nat"
         , "declare it : " ++ ty ++ " ; it = " ++ tm
         ]
 
@@ -315,7 +317,7 @@ holeAt ty = case Cursor.along top of
         )
 
 stringType :: Core
-stringType = Global (GlobalName "String") []
+stringType = Global (rootName "String") []
 
 hole :: Cursor
 hole = case Cursor.along top of
@@ -362,9 +364,26 @@ elaboratingAt cur s =
 --
 -- **With the standard base installed**, because elaboration lives in it.
 machineAt :: Cursor -> [Instr] -> Machine
-machineAt cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] [] 1000 0
+machineAt cur is = machineIn emptyGlobals cur is
+
+-- | The same, with globals of your own (MS10).
+machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
+machineIn env' cur is =
+  load is (Machine (Exec [] [] []) (Development cur) [] env' expectedBase [] [] rootScope 1000 0
                    NoUndischargeableTrust)
+
+-- | Elaborate against globals of your own.
+elaboratingIn :: GlobalEnv -> Surface -> Either FailReason Machine
+elaboratingIn env' s =
+  snd (runOut (machineIn env' hole
+        [Do (Ops.Call "elaborate" [Lit (VSurface (rootedAt s))])]))
+
+-- | An environment holding @Ns.thing : Type₀@, and nothing at the root.
+qualifiedGlobals :: GlobalEnv
+qualifiedGlobals =
+  addDefinition (GlobalName ["Ns"] "thing")
+                (MkDefinition [] [] (Universe LZero) (Universe LZero))
+                emptyGlobals
 
 -- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
 -- would show.
@@ -453,13 +472,33 @@ leafTests =
     [ -- @E⟦x⟧ = FILL x; SOLVE@ — Brady's variable case. What @elab-var@ did
       -- with a hint, one op does with a surface term.
       testCase "a name in scope is attached and committed" $
-        case elaborating (SurfaceName "a") of
+        case elaborating (SurfaceName [] "a") of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> isGuess m @?= False   -- solved, so it is a definition now
 
     , testCase "a name that is not in scope says so" $
-        case elaborating (SurfaceName "nope") of
+        case elaborating (SurfaceName [] "nope") of
           Left (CannotRead (ResolveFailed (NotInScope x))) -> x @?= "nope"
+          other -> assertFailure ("expected a scope error: " ++ show other)
+
+      -- **A QUALIFIED NAME ELABORATES, WHICH IT COULD NOT DO BEFORE MS10 — the
+      -- measured defect.** The variable clause carries the name through a rule
+      -- — @w = surface-name t ; x = resolve-name w@ — and a name was a piece of
+      -- text, so the path was flattened to @"Ns.thing"@ on the way in and the
+      -- environment was asked for a name at the root with a dot in its word.
+      -- The lexer and the parser were both already doing their part: a file
+      -- writing @String.append "a" "b"@ was refused /not in scope:
+      -- String.append/.
+    , testCase "a qualified name in scope elaborates" $
+        case elaboratingIn qualifiedGlobals (SurfaceName ["Ns"] "thing") of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> isGuess m @?= False
+
+      -- **And the base word on its own is still a different name**, so the
+      -- clause is finding the path and not merely ignoring it.
+    , testCase "and its base word alone is not in scope" $
+        case elaboratingIn qualifiedGlobals (SurfaceName [] "thing") of
+          Left (CannotRead (ResolveFailed (NotInScope x))) -> x @?= "thing"
           other -> assertFailure ("expected a scope error: " ++ show other)
 
       -- **A leaf goes through @FILL@, not through @try@** (MS4 phase 41e), and
@@ -483,7 +522,7 @@ leafTests =
     , testCase "and is refused at another type" $
         case elaboratingAt (holeAt stringType) (SurfaceLiteral (LInt 3)) of
           Left (Mismatch _ got want) ->
-            (got, want) @?= (Global (GlobalName "Int") [], stringType)
+            (got, want) @?= (Global (rootName "Int") [], stringType)
           other -> assertFailure ("expected a clash of the two types: " ++ show other)
 
       -- **The placeholder elaborates by not elaborating** — his words. The
@@ -523,7 +562,7 @@ unsupportedTests =
       -- placed, which the fixture's @a@ — a local, with no recorded plicities
       -- — never can.
       refused "an implicit argument this head has no position for"
-        (SurfaceApp (SurfaceName "a") [SurfaceArg Implicit (SurfaceName "a")])
+        (SurfaceApp (SurfaceName [] "a") [SurfaceArg Implicit (SurfaceName [] "a")])
       -- A @∀@ binder must say what it binds. The grammar's @PiBinder@ requires
       -- the annotation, so @∀ x -> B@ does not parse and this is reached only
       -- from a tree built by hand — but 'SurfaceBinder' is shared with λ, where
@@ -531,7 +570,7 @@ unsupportedTests =
       -- the case is constructible and the ∀ clause has to answer for it. There
       -- is no goal to read a Π's domain off.
     , refusedShape "a ∀ whose first binder has a type"
-        (SurfacePi [binder] (SurfaceName "a"))
+        (SurfacePi [binder] (SurfaceName [] "a"))
     ]
   where
     binder = SurfaceBinder Explicit "x" Nothing
@@ -555,13 +594,13 @@ unsupportedTests =
 
 -- | @elim@ (MS4 phase 41i) — the unit fixture has no datatypes, so what can be
 -- checked here is the refusal; the working cases are driven through the REPL in
--- "Thena.SessionTests", which is where a datatype can be declared.
+-- "Thena" "SessionTests", which is where a datatype can be declared.
 elimTests :: TestTree
 elimTests =
   testGroup
     "an elim names a datatype"
     [ testCase "and an unknown one is a scope error, not a missing rule" $
-        case elaborating (SurfaceElim "D" [] (SurfaceName "a") [] [] (SurfaceName "a")) of
+        case elaborating (SurfaceElim [] "D" [] (SurfaceName [] "a") [] [] (SurfaceName [] "a")) of
           Left (CannotRead (ResolveFailed (NotADatatype "D"))) -> pure ()
           other -> assertFailure ("expected NotADatatype: " ++ show other)
     ]
@@ -576,7 +615,7 @@ lambdaTests =
       -- @y@ resolves to nothing.
       testCase "the binder takes the surface name" $
         case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" Nothing]
-                                     (SurfaceName "y")) of
+                                     (SurfaceName [] "y")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> identsBound m @?= ["y"]
 
@@ -588,7 +627,7 @@ lambdaTests =
     , testCase "two binders, and the focus still comes back" $
         case elaboratingAt piGoal2 (SurfaceLam [ SurfaceBinder Explicit "y" Nothing
                                                , SurfaceBinder Explicit "z" Nothing ]
-                                      (SurfaceName "z")) of
+                                      (SurfaceName [] "z")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> (identsBound m, focusedVar m) @?= (["y", "z"], Just goalVar)
 
@@ -597,7 +636,7 @@ lambdaTests =
       -- its own @prim-solve@ lands somewhere else.
     , testCase "and the focus comes back to where it started" $
         case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" Nothing]
-                                     (SurfaceName "y")) of
+                                     (SurfaceName [] "y")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> focusedVar m @?= Just goalVar
 
@@ -605,7 +644,7 @@ lambdaTests =
       -- The surface name survives exactly as it does without one.
     , testCase "a written binder type is checked, and the binder is unchanged" $
         case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" (Just (SurfaceUniverse 0))]
-                                     (SurfaceName "y")) of
+                                     (SurfaceName [] "y")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> (identsBound m, focusedVar m) @?= (["y"], Just goalVar)
 
@@ -613,8 +652,8 @@ lambdaTests =
       -- binder of the same group, so it can only be elaborated inside them.
     , testCase "and it may name an earlier binder of the same group" $
         case elaboratingAt piGoalDep (SurfaceLam [ SurfaceBinder Explicit "A" Nothing
-                                                 , SurfaceBinder Explicit "x" (Just (SurfaceName "A")) ]
-                                        (SurfaceName "x")) of
+                                                 , SurfaceBinder Explicit "x" (Just (SurfaceName [] "A")) ]
+                                        (SurfaceName [] "x")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> identsBound m @?= ["A", "x"]
 
@@ -623,14 +662,14 @@ lambdaTests =
     , testCase "and a group mixes written and bare binders" $
         case elaboratingAt piGoal2 (SurfaceLam [ SurfaceBinder Explicit "y" (Just (SurfaceUniverse 0))
                                                , SurfaceBinder Explicit "z" Nothing ]
-                                      (SurfaceName "z")) of
+                                      (SurfaceName [] "z")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> (identsBound m, focusedVar m) @?= (["y", "z"], Just goalVar)
 
       -- **A wrong one fails at the binder it was written on**, not at @qed@.
     , testCase "and a written type that is not the goal's domain is refused" $
-        case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" (Just (SurfaceName "String"))]
-                                     (SurfaceName "y")) of
+        case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" (Just (SurfaceName [] "String"))]
+                                     (SurfaceName [] "y")) of
           Left _  -> pure ()
           Right m -> assertFailure ("elaborated: " ++ show (identsBound m))
 
@@ -638,9 +677,9 @@ lambdaTests =
       -- implicit binder is bare or written like any other, so both shapes reach
       -- the one refusal that names it.
     , refusedShape "a λ whose first binder is explicit"
-        (SurfaceLam [SurfaceBinder Implicit "x" Nothing] (SurfaceName "x"))
+        (SurfaceLam [SurfaceBinder Implicit "x" Nothing] (SurfaceName [] "x"))
     , refusedShape "a λ whose first binder is explicit"
-        (SurfaceLam [SurfaceBinder Implicit "x" (Just (SurfaceUniverse 0))] (SurfaceName "x"))
+        (SurfaceLam [SurfaceBinder Implicit "x" (Just (SurfaceUniverse 0))] (SurfaceName [] "x"))
     ]
   where
     -- **The λ case is clauses now** (MS4 phase 49c, MS8): a plain binder reads
@@ -761,7 +800,7 @@ baseTests =
       -- **@fit-core@ is two clauses and both heads pass**, which is the point
       -- of it: the choice point between them is the search.
       testCase "every rule whose head passes is a candidate" $
-        [ n | Rule (GlobalName n) _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
+        [ nameDotted g | Rule g _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
           @?= [ "attack", "try-core", "abandon", "eliminate-core"
               , "eliminate-generalising-core"
               , "prove", "fill", "unify-refine-core", "apply-core"
@@ -808,7 +847,7 @@ baseTests =
               ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $
-        case [ r | r@(Rule (GlobalName "prove") _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
+        case [ r | r@(Rule (GlobalName [] "prove") _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
           [Rule _ ps _ b] -> (ps, b) @?= ([], [Do Ops.Prove])
           other           -> assertFailure ("expected one clause: " ++ show other)
     ]
@@ -826,7 +865,7 @@ baseTests =
 -- observe a move whose answer is a focused surface term. The suite's own word
 -- tables already check that each op parses, reads back and has a keyword; what
 -- they cannot check is that a frame reaches the child it names, and
--- "Thena.SurfaceZipperTests" checks that against @rebuild@ rather than against
+-- "Thena" "SurfaceZipperTests" checks that against @rebuild@ rather than against
 -- a running rule.
 --
 -- __The second arm is reached through @split-tail@__, so a tail that dropped
@@ -987,13 +1026,13 @@ emptySplit =
     -- every other elimination.
     --
     -- **AND THE WORD IS WHAT DECIDES THE HEAD** (MS9 phase 188). @case@ applies
-    -- the generated @caseEmpty@, @induction@ builds an @elim Empty@ node. The
-    -- two are convertible — @caseD@ δ-unfolds to exactly that elimination — so
+    -- the generated @Empty.case@, @induction@ builds an @elim Empty@ node. The
+    -- two are convertible — @D.case@ δ-unfolds to exactly that elimination — so
     -- nothing downstream and nothing in the kernel can tell them apart; what
     -- changed is that the term now says which word was written.
-  , testCase "case: the term applies caseEmpty, at a solved type" $ do
+  , testCase "case: the term applies Empty.case, at a solved type" $ do
       shown <- extracted "case"
-      assertBool shown ("caseEmpty" `isInfixOf` shown)
+      assertBool shown ("Empty.case" `isInfixOf` shown)
       assertBool shown ("Tsplit = Empty" `isInfixOf` shown)
 
   , testCase "induction: the term is an elim node with no methods" $ do
@@ -1035,7 +1074,7 @@ emptySplit =
 --
 -- __The first case is the milestone's point__: a function defined by pattern
 -- matching, which declares — so @qed@ certified it — and then /computes/.
--- @pred (succ (succ zero))@ reducing to @succ zero@ is the whole claim, and it
+-- @pred (succ (Nat.succ Nat.zero))@ reducing to @Nat.succ Nat.zero@ is the whole claim, and it
 -- is checked by reduction rather than by reading the term, because the term is
 -- an @elim@ either way and only reduction says the methods went to the right
 -- constructors.
@@ -1066,7 +1105,7 @@ splittingTree =
     --
     -- __Checked by reduction and not by reading the term__, for the reason the
     -- case above gives: only reduction says the hypothesis went to the right
-    -- place. @double (succ (succ zero))@ is four, and it is four because the
+    -- place. @double (succ (Nat.succ Nat.zero))@ is four, and it is four because the
     -- call became the hypothesis about @m@ and not anything else of type
     -- @Nat@ in scope.
   , testCase "a recursive call becomes the induction hypothesis, and computes" $ do
@@ -1093,8 +1132,7 @@ splittingTree =
       [ "loop : Nat -> Nat"
       , "loop = \\ n -> induction n of { zero -> zero ; succ m -> loop zero }"
       ]
-      "stuck: no induction hypothesis is about this call, so it is not \
-      \structurally smaller: loop zero"
+      "stuck: no induction hypothesis is about this call, so it is not structurally smaller: loop Nat.zero"
 
     -- The name used as a value rather than called. There is no hypothesis for
     -- that, and leaving it would make the body open.
@@ -1123,7 +1161,7 @@ splittingTree =
     -- __AN EQUATION WITH NO SOLUTION AT ALL, AND IT IS NOT A GAP IN THE
     -- UNIFIER__ (MS9 phase 229). A family whose index is built by a function
     -- that is not injective states an equation no transition can discharge and
-    -- none ever will: @appendString a b@ and @appendString x y@ agree without
+    -- none ever will: @String.append a b@ and @String.append x y@ agree without
     -- @a@ and @x@ agreeing, @"ab"@ then @"c"@ being @"a"@ then @"bc"@. So
     -- the method keeps it, which is "Thena.Tactics.Specialise"\'s own law, and
     -- the arm either takes it or does not typecheck.
@@ -1135,13 +1173,10 @@ splittingTree =
     -- corpus of it.
   , refusesIn catModule
       "a family indexed by a function that is not injective keeps its equation, and the refusal names it"
-      [ "pick : \8704 (x : String) (y : String) -> Cat (appendString x y) -> String"
+      [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
       , "pick = \\ x y p -> case p of { mk a b -> a }"
       ]
-      "stuck: String and Eq {0} String (appendString a b) (appendString x y) \
-      \-> String cannot be made equal they differ by one argument, which the \
-      \shorter side has to take first: Eq {0} String (appendString a b) \
-      \(appendString x y)"
+      "stuck: String and Eq {0} String (String.append a b) (String.append x y) -> String cannot be made equal they differ by one argument, which the shorter side has to take first: Eq {0} String (String.append a b) (String.append x y)"
 
     -- __AND THE SPLIT IS NOT WRONG, WHICH IS WHY IT IS NOT REFUSED OUTRIGHT.__
     -- One @\\ q ->@ in the arm and the proof goes through — the equation is a
@@ -1156,25 +1191,21 @@ splittingTree =
     -- thing, because what the system knows is the same in both.
   , refusesIn catModule
       "writing no arms at all names the equation that kept the case alive"
-      [ "pick : \8704 (x : String) (y : String) -> Cat (appendString x y) -> String"
+      [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
       , "pick = \\ x y p -> case p of { }"
       ]
-      "stuck: this case did not vanish: it keeps Eq {0} String \
-      \(appendString a b) (appendString x y), which no transition can \
-      \discharge, so there is something to prove here"
+      "stuck: this case did not vanish: it keeps Eq {0} String (String.append a b) (String.append x y), which no transition can discharge, so there is something to prove here"
   , refusesIn catModule
       "and an arm with no body names it the same way"
-      [ "pick : \8704 (x : String) (y : String) -> Cat (appendString x y) -> String"
+      [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
       , "pick = \\ x y p -> case p of { mk a b -> }"
       ]
-      "stuck: this case did not vanish: it keeps Eq {0} String \
-      \(appendString a b) (appendString x y), which no transition can \
-      \discharge, so there is something to prove here"
+      "stuck: this case did not vanish: it keeps Eq {0} String (String.append a b) (String.append x y), which no transition can discharge, so there is something to prove here"
 
   , testCase "and the same split declares when the arm takes the equation" $ do
       (s0, _) <- startingSession
       let (s1, r) = loadProofSource s0 (unlines (catModule ++
-            [ "pick : \8704 (x : String) (y : String) -> Cat (appendString x y) -> String"
+            [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
             , "pick = \\ x y p -> case p of { mk a b -> \\ q -> a }"
             ]))
       case r of
@@ -1237,7 +1268,7 @@ splittingTree =
     --
     -- **It computes, which is the part a declaration alone would not say**: the
     -- definition the arm binds @m@ to is the term the split forced, reduced, so
-    -- @namesOuter (s z) (evs z evz)@ is @isucc (s z)@ and not @isucc@ of a
+    -- @namesOuter (s z) (evs z evz)@ is @IsSucc.isucc (N.s N.z)@ and not @isucc@ of a
     -- β-redex.
   , testCase "a name bound outside a split means what the split refined it to" $ do
       (s0, _) <- startingSession
@@ -1297,6 +1328,7 @@ splittingTree =
       let (s1, r) = loadProofSource s0 (unlines (evModule ++
             [ "data D : N -> Type\8320 where"
             , "  mk : \8704 (k : N) -> D k"
+            , "open D"
             , ""
             , "indexIsRefined : \8704 (m : N) (e : Ev m) -> Eq N m m"
             , "indexIsRefined = \\ m e -> case e of \
@@ -1333,6 +1365,7 @@ splittingTree =
       let (s1, r) = loadProofSource s0 (unlines (evModule ++
             [ "data D : N -> Type\8320 where"
             , "  mk : \8704 (k : N) -> D k"
+            , "open D"
             , ""
             , "onFriendly : \8704 (U : N) (d : D U) -> D U"
             , "onFriendly = \\ U d -> case d of { mk V -> d }"
@@ -1437,7 +1470,7 @@ splittingTree =
       , "wrongPremise = \\ n x e -> induction x of \
         \{ az -> z ; as k p -> s (wrongPremise k p e) }"
       ]
-      "stuck: s k and k cannot be made equal"
+      "stuck: N.s k and k cannot be made equal"
 
     -- __AND A RECURSION MAY VARY A PREMISE THE SPLIT DID NOT SPLIT ON__ (MS9
     -- phase 199, @~754m3@), which is the last of the four and the one the two
@@ -1622,10 +1655,12 @@ splittingTree =
             , "data M : Type\8320 where"
             , "  leaf : M"
             , "  node : M -> M -> M"
+            , "open M"
             , ""
             , "data R : M -> Type\8320 where"
             , "  rl : R leaf"
             , "  rn : \8704 (p : M) (q : M) (a : R p) (b : R q) -> R (node p q)"
+            , "open R"
             , ""
             , "allR : \8704 (m : M) -> R m"
             , "allR = \\ m -> induction m of { leaf -> rl \
@@ -1634,6 +1669,7 @@ splittingTree =
             , "data U : M -> Type\8320 where"
             , "  ul : U leaf"
             , "  un : \8704 (p : M) (q : M) (r : U p) (t : U q) -> U (node p q)"
+            , "open U"
             , ""
             , "conv : \8704 (m : M) (k : R m) (u : U m) -> R m"
             , "conv = \\ m k u -> induction u of { ul -> rl \
@@ -1804,9 +1840,7 @@ splittingTree =
         \; pr a b rp -> case e of \
         \{ c1 -> s (wrongArm a b (allQ a) rp c2) ; c2 -> z } }"
       ]
-      "stuck: the split fixed e and this call passes c2, so it is not the \
-      \induction hypothesis \8212 a premise the induction varies is bound \
-      \inside the arm and not before the split: wrongArm a b (allQ a) rp c2"
+      "stuck: the split fixed e and this call passes C.c2, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: wrongArm a b (allQ a) rp C.c2"
 
     -- __AND PHASE 208'S OWN CASE IS UNTOUCHED__: with no split on @e@ at all,
     -- the premise is in scope and a call naming anything else for it still
@@ -1816,9 +1850,7 @@ splittingTree =
       , "noSplit = \\ x y hx p e -> induction p of { pz c -> z \
         \; pr a b rp -> s (noSplit a b (allQ a) rp c1) }"
       ]
-      "stuck: the split fixed e and this call passes c1, so it is not the \
-      \induction hypothesis \8212 a premise the induction varies is bound \
-      \inside the arm and not before the split: noSplit a b (allQ a) rp c1"
+      "stuck: the split fixed e and this call passes C.c1, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: noSplit a b (allQ a) rp C.c1"
 
     -- __AND THE RECURSION DEMANDS A COPY THE ARMS DO NOT__ (MS9 phase 205,
     -- @~wk9qh@). Every shape above has its premises introduced where the split
@@ -1896,6 +1928,7 @@ splittingTree =
       let (s1, r) = loadProofSource s0 (unlines (atTopModule ++
             [ "data Q : N -> Type\8320 where"
             , "  qq : \8704 (n : N) -> Q n"
+            , "open Q"
             , ""
             , "fixed : \8704 (n : N) (d : Q n) (e : Eq N n n) -> N"
             , "fixed = \\ n d e -> case d of { qq n0 -> n0 }"
@@ -2079,9 +2112,7 @@ splittingTree =
       , "size2 = \\ t d u -> induction d of"
       , "  { okLeaf -> zero ; okNode a b da db -> succ (size2 a da (node u u)) }"
       ]
-      "stuck: the split fixed u and this call passes node u u, so it is not \
-      \the induction hypothesis \8212 a premise the induction varies is bound \
-      \inside the arm and not before the split: size2 a da (node u u)"
+      "stuck: the split fixed u and this call passes Tr.node u u, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: size2 a da (Tr.node u u)"
 
     -- __AND BOUND INSIDE THE ARM IT VARIES FREELY__, which is the whole of the
     -- remedy: the motive then quantifies it and the hypothesis takes it. Same
@@ -2148,7 +2179,7 @@ splittingTree =
       (s0, _) <- startingSession
       let (s1, r) = loadProofSource s0 (unlines (twoModule ++
             [ "pad : String -> String"
-            , "pad = \\ s -> appendString s \"!\""
+            , "pad = \\ s -> String.append s \"!\""
             , ""
             , "g : \8704 (a : String) (c : String) -> Eq String a c -> R (pad a) c"
             , "g = \\ a c q -> idT (R (pad a) c) (case q of { refl u -> mkR (pad u) u })"
@@ -2206,11 +2237,13 @@ splittingTree =
       let (s1, r) = loadProofSource s0 (unlines (okModule ++
             [ "data Ty : Type\8320 where"
             , "  base : Ty"
+            , "open Ty"
             , ""
             , "data Has : Tr -> Ty -> Type\8320 where"
             , "  hLeaf : Has leaf base"
             , "  hNode : \8704 (a b : Tr) -> Has a base -> Has b base"
             , "    -> Has (node a b) base"
+            , "open Has"
             , ""
             , "fine : \8704 (t : Tr) (T : Ty) -> Has t T -> Ty"
             , "fine = \\ t T d -> induction d of"
@@ -2234,15 +2267,15 @@ splittingTree =
     -- @case … of@ WITH ARMS (MS9 phase 188)
     -- ----------------------------------------------------------------
 
-    -- __The same split, through @caseD@ instead of the eliminator.__ The term
-    -- is an application of the generated @caseNat@ global rather than an
+    -- __The same split, through @D.case@ instead of the eliminator.__ The term
+    -- is an application of the generated @Nat.case@ global rather than an
     -- @Eliminate@ node, so every method is the eliminator's minus its inductive
     -- hypotheses — and @pred@ wants none, which is why this is the honest
     -- spelling of it.
     --
     -- __Checked by reduction__, for the reason @induction@'s own case gives:
     -- only reduction says the methods went to the right constructors, and here
-    -- it also says @caseNat@ δ-unfolds to the elimination underneath.
+    -- it also says @Nat.case@ δ-unfolds to the elimination underneath.
   , testCase "case: a function defined by case analysis declares and computes" $ do
       (s0, _) <- startingSession
       let (s1, r) = loadProofSource s0 (unlines (natModule ++
@@ -2255,9 +2288,9 @@ splittingTree =
       let (s2, q) = command s1 ":whnf predC (succ (succ zero))"
       unwords (renderResponse s2 q) @?= "succ zero"
 
-    -- __And the term says which word was written.__ @caseNat@ applied, with a
+    -- __And the term says which word was written.__ @Nat.case@ applied, with a
     -- method per constructor and no hypothesis in either.
-  , testCase "and the term applies caseNat, not an elim node" $ do
+  , testCase "and the term applies Nat.case, not an elim node" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 (unlines (natModule ++
             [ "predC : Nat -> Nat"
@@ -2265,10 +2298,10 @@ splittingTree =
             ]))
           (s2, q) = command s1 ":show predC"
           shown   = unwords (renderResponse s2 q)
-      assertBool shown ("caseNat" `isInfixOf` shown)
+      assertBool shown ("Nat.case" `isInfixOf` shown)
 
     -- __A RECURSIVE CALL IN A @case@ ARM IS REFUSED, AND BY ITSELF.__ Nothing
-    -- checks for it: @caseD@'s methods carry no hypothesis, so there is none
+    -- checks for it: @D.case@'s methods carry no hypothesis, so there is none
     -- for @tie-recursion@ to tie the call to, and the refusal is the same one a
     -- call on the wrong index gets under @induction@. That is the whole of why
     -- @case@ against @induction@ is a /type/ here and not a convention.
@@ -2308,6 +2341,7 @@ splittingTree =
       , "data Nat : Type\8320 where"
       , "  zero : Nat"
       , "  succ : Nat -> Nat"
+      , "open Nat"
       , ""
       ]
     -- Phase 191's own shapes: a family whose constructor's index wraps the
@@ -2319,13 +2353,16 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data Ev : N -> Type\8320 where"
       , "  evz : Ev z"
       , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+      , "open Ev"
       , ""
       , "data IsSucc : N -> Type\8320 where"
       , "  isucc : \8704 (n : N) -> IsSucc (s n)"
+      , "open IsSucc"
       , ""
       ]
     -- Phase 197's shape (@~k54hh@): a two-index family whose constructor's
@@ -2340,14 +2377,17 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data F : N -> N -> Type\8320 where"
       , "  fz : F z z"
       , "  fs : \8704 (k : N) (m : N) (r : F k m) -> F (s k) (s m)"
+      , "open F"
       , ""
       , "data A : N -> Type\8320 where"
       , "  az : A z"
       , "  as : \8704 (k : N) (p : A k) -> A (s k)"
+      , "open A"
       , ""
       ]
     -- Phase 217's shapes (@~5kcb4@), which are the hunt's own rather than any
@@ -2362,10 +2402,12 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data Q : N -> Type\8320 where"
       , "  qz : Q z"
       , "  qs : \8704 (n : N) (q : Q n) -> Q (s n)"
+      , "open Q"
       , ""
       , "allQ : \8704 (n : N) -> Q n"
       , "allQ = \\ n -> induction n of { z -> qz ; s m -> qs m (allQ m) }"
@@ -2373,14 +2415,17 @@ splittingTree =
       , "data P : N -> N -> Type\8320 where"
       , "  pz : \8704 (c : N) -> P z c"
       , "  pr : \8704 (a : N) (b : N) (r : P a b) -> P (s a) (s b)"
+      , "open P"
       , ""
       , "data T : N -> N -> N -> Type\8320 where"
       , "  tz : T z z z"
       , "  tr : \8704 (a : N) (b : N) (c : N) (r : T a b c) -> T (s a) (s b) (s c)"
+      , "open T"
       , ""
       , "data Ev : N -> Type\8320 where"
       , "  evz : Ev z"
       , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+      , "open Ev"
       , ""
       ]
     -- Phase 238's shapes (@~5kcb4@): @C@ for a premise an inner split refines
@@ -2394,14 +2439,17 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data C : Type\8320 where"
       , "  c1 : C"
       , "  c2 : C"
+      , "open C"
       , ""
       , "data Q : N -> Type\8320 where"
       , "  qz : Q z"
       , "  qs : \8704 (n : N) (q : Q n) -> Q (s n)"
+      , "open Q"
       , ""
       , "allQ : \8704 (n : N) -> Q n"
       , "allQ = \\ n -> induction n of { z -> qz ; s m -> qs m (allQ m) }"
@@ -2409,10 +2457,12 @@ splittingTree =
       , "data P : N -> N -> Type\8320 where"
       , "  pz : \8704 (c : N) -> P z c"
       , "  pr : \8704 (a : N) (b : N) (r : P a b) -> P (s a) (s b)"
+      , "open P"
       , ""
       , "data D : N -> Type\8320 where"
       , "  dz : D z"
       , "  ds : \8704 (k : N) (d : D k) -> D (s k)"
+      , "open D"
       , ""
       ]
     -- Phase 238's other shape: a family indexed by two /different/ types, whose
@@ -2425,14 +2475,17 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data B : Type\8320 where"
       , "  bz : B"
       , "  bw : B -> B"
+      , "open B"
       , ""
       , "data Q : N -> Type\8320 where"
       , "  qz : Q z"
       , "  qs : \8704 (n : N) (q : Q n) -> Q (s n)"
+      , "open Q"
       , ""
       , "allQ : \8704 (n : N) -> Q n"
       , "allQ = \\ n -> induction n of { z -> qz ; s m -> qs m (allQ m) }"
@@ -2440,6 +2493,7 @@ splittingTree =
       , "data Qb : B -> Type\8320 where"
       , "  qbz : Qb bz"
       , "  qbs : \8704 (c : B) (q : Qb c) -> Qb (bw c)"
+      , "open Qb"
       , ""
       , "allQb : \8704 (c : B) -> Qb c"
       , "allQb = \\ c -> induction c of { bz -> qbz ; bw d -> qbs d (allQb d) }"
@@ -2447,10 +2501,12 @@ splittingTree =
       , "data M : N -> B -> Type\8320 where"
       , "  mz : M z bz"
       , "  mr : \8704 (n : N) (c : B) (r : M n c) -> M (s n) (bw c)"
+      , "open M"
       , ""
       , "data K : B -> Type\8320 where"
       , "  kz : K bz"
       , "  kr : \8704 (c : B) (r : K c) -> K (bw c)"
+      , "open K"
       , ""
       ]
     -- Phase 201's shape (@~zv8kf@): a family whose constructor wraps /both/ its
@@ -2463,13 +2519,16 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data P : N -> N -> Type\8320 where"
       , "  pz : \8704 (c : N) -> P z c"
       , "  pr : \8704 (a : N) (b : N) (r : P a b) -> P (s a) (s b)"
+      , "open P"
       , ""
       , "data Q : N -> Type\8320 where"
       , "  qq : \8704 (n : N) -> Q n"
+      , "open Q"
       , ""
       ]
     -- Phase 205's shape (@~wk9qh@): a family that recurses at a /different/
@@ -2482,13 +2541,16 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data Inc : N -> N -> Type\8320 where"
       , "  mkInc : \8704 (a : N) (b : N) -> Inc a b"
+      , "open Inc"
       , ""
       , "data T : N -> Type\8320 where"
       , "  tv : \8704 (g : N) -> T g"
       , "  tl : \8704 (g : N) (p : T (s g)) -> T g"
+      , "open T"
       , ""
       ]
     -- Phase 206's shape (@~pmpqg@): a family with NO indices, and a second
@@ -2507,12 +2569,14 @@ splittingTree =
       [ "data Ty2 : Type\8320 where"
       , "  tv : String -> Ty2"
       , "  tp : Ty2"
+      , "open Ty2"
       , ""
       , "data Sb : Nat -> Ty2 -> Ty2 -> Type\8320 where"
       , "  SbTop : \8704 (g : Nat) (s : Ty2) -> Sb g s tp"
       , "  SbRefl : \8704 (g : Nat) (x : String) -> Sb g (tv x) (tv x)"
       , "  SbTrans : \8704 (x : String) (u : Ty2) (g : Nat) (t : Ty2)"
       , "              -> Sb g u t -> Sb g (tv x) t"
+      , "open Sb"
       , ""
       ]
     twoModule =
@@ -2520,6 +2584,7 @@ splittingTree =
       , ""
       , "data R : String -> String -> Type\8320 where"
       , "  mkR : \8704 (s : String) (t : String) -> R s t"
+      , "open R"
       , ""
       , "idT : \8704 (A : Type\8320) (x : A) -> A"
       , "idT = \\ A x -> x"
@@ -2531,22 +2596,26 @@ splittingTree =
       , "data N : Type\8320 where"
       , "  z : N"
       , "  s : N -> N"
+      , "open N"
       , ""
       , "data L : Type\8320 where"
       , "  ln : L"
       , "  lc : N -> L -> L"
+      , "open L"
       , ""
       , "data P : L -> Type\8320 where"
       , "  mkP : \8704 (l : L) -> P l"
+      , "open P"
       , ""
       ]
     -- A family whose index is a PRIMITIVE application, stuck on its arguments:
-    -- @appendString@ is not a constructor and is not injective, so an equation
+    -- @String.append@ is not a constructor and is not injective, so an equation
     -- between two of its results has no transition and no solution.
     catModule =
       [ "module Cat where", ""
       , "data Cat : String -> Type\8320 where"
-      , "  mk : \8704 (a : String) (b : String) -> Cat (appendString a b)"
+      , "  mk : \8704 (a : String) (b : String) -> Cat (String.append a b)"
+      , "open Cat"
       , ""
       ]
     vecModule =
@@ -2554,6 +2623,7 @@ splittingTree =
       [ "data Vec (A : Type\8320) : Nat -> Type\8320 where"
       , "  vnil : Vec A zero"
       , "  vcons : \8704 (k : Nat) (a : A) (as : Vec A k) -> Vec A (succ k)"
+      , "open Vec"
       , ""
       ]
     okModule =
@@ -2561,10 +2631,12 @@ splittingTree =
       [ "data Tr : Type\8320 where"
       , "  leaf : Tr"
       , "  node : Tr -> Tr -> Tr"
+      , "open Tr"
       , ""
       , "data Ok : Tr -> Type\8320 where"
       , "  okLeaf : Ok leaf"
       , "  okNode : \8704 (a b : Tr) -> Ok a -> Ok b -> Ok (node a b)"
+      , "open Ok"
       , ""
       ]
     vtailDef =

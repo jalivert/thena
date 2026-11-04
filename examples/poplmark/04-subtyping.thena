@@ -42,6 +42,8 @@ judgment sub = Γ ⊢ S <: T where
                  ------------------------------------------------------------------
                  Γ ⊢ ( ∀ X <: S1 . S2 ) <: ( ∀ X <: T1 . T2 )
 
+open sub
+
 
 -- ---------------------------------------------------------------------------
 -- Derivations. A judgment literal is a type, and a proof of it is the tree.

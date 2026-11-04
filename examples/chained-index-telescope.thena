@@ -39,13 +39,19 @@ data N : Type₀ where
   z : N
   s : N -> N
 
+open N
+
 data Fin : N -> Type₀ where
   fz : forall (m : N) -> Fin (s m)
   fs : forall (m : N) (j : Fin m) -> Fin (s m)
 
+open Fin
+
 data Below : forall (n : N) (i : Fin n) -> Type₀ where
   bz : forall (m : N) -> Below (s m) (fz m)
   bs : forall (m : N) (j : Fin m) (b : Below m j) -> Below (s m) (fs m j)
+
+open Below
 
 -- THREE INDICES, AND EACH DEPENDS ON EVERY EARLIER ONE. The constructor
 -- carries an `N` so that an arm has a payload to answer with: a split that
@@ -54,6 +60,8 @@ data Below : forall (n : N) (i : Fin n) -> Type₀ where
 -- own argument.
 data Chain : forall (n : N) (i : Fin n) (b : Below n i) -> Type₀ where
   c0 : forall (n : N) (i : Fin n) (b : Below n i) (w : N) -> Chain n i b
+
+open Chain
 
 chained : forall (m : N) (c : Chain (s m) (fz m) (bz m)) -> N
 chained = \ m c -> case c of { c0 n i b w -> w }

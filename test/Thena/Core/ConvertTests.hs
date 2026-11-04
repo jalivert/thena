@@ -17,8 +17,9 @@ import Thena.Core.TermTests (genTerm)
 import Thena.Core.Level (Level (..), LevelVar (..), Obligation (..), levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Convert (convert, subsumes)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), close, fresh)
-import Thena.Declared (natVec, natVecCounter)
+import Thena.Core.Term (Core (..), Ident (..), close, fresh)
+import Thena.Declared ( opensIn
+  ,named, natVec, natVecCounter)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Driver (parseCore)
 import Thena.Errors (Clash (..), ConversionFailure (..), Site (..))
@@ -107,7 +108,7 @@ term = termAt natVecCounter
 -- hypothetical — the first draft of the eta tests below did it, and conversion
 -- correctly reported two different variables where the test meant one.
 termAt :: Int -> Context -> String -> Core
-termAt n ctx src = case parseCore [] natVec ctx n src of
+termAt n ctx src = case parseCore [] natVec (opensIn natVec) ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 
@@ -130,8 +131,6 @@ yes ctx a b = same ctx a b @?= Nothing
 no :: Context -> String -> String -> IO ()
 no ctx a b = (same ctx a b == Nothing) @?= False
 
-named :: String -> GlobalName
-named = GlobalName
 
 -- | Convert two terms in a context built from @(name, type)@ pairs, with the
 -- counter threaded through the context, then both terms, in that order.
@@ -238,17 +237,17 @@ siteTests =
         @?= Just (ConversionFailure [] (LevelsDiffer (LZero) (levelOfNat 1)))
   , testCase "two formers, at the top" $
       same [] "zero" "nil Nat"
-        @?= Just (ConversionFailure [] (NamesDiffer (named "zero") (named "nil")))
+        @?= Just (ConversionFailure [] (NamesDiffer (named "Nat.zero") (named "Vec.nil")))
   , testCase "inside a former's argument" $
       same [] "succ zero" "succ (succ zero)"
         @?= Just
               (ConversionFailure
-                 [TheArgumentOf (named "succ") 0]
-                 (NamesDiffer (named "zero") (named "succ")))
+                 [TheArgumentOf (named "Nat.succ") 0]
+                 (NamesDiffer (named "Nat.zero") (named "Nat.succ")))
   , testCase "under a binder, then in the domain" $
       routeOf (same [] "\\ (x : Nat) -> Vec Nat zero -> Nat"
                      "\\ (x : Nat) -> Vec Nat (succ zero) -> Nat")
-        @?= [TheBody (Ident "x"), TheDomain (Ident "_"), TheArgumentOf (named "Vec") 1]
+        @?= [TheBody (Ident "x"), TheDomain (Ident "_"), TheArgumentOf (named "Vec.Vec") 1]
   , testCase "in an elimination's motive — with a target that keeps it stuck" $
       -- The target must be a variable. With a value there, iota fires on both
       -- sides before the motives are ever compared and the two are convertible

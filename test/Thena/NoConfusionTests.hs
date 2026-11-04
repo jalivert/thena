@@ -27,13 +27,17 @@ import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
+import Thena.Core.Level (Level (..))
+import Thena.Core.Term
+  (Core (..), GlobalName, Ident (..), declarationNamed, fresh, inLemmataOf, rootName)
 import Thena.Core.Typing (check)
 import Thena.Driver (Response (..), loadProofSource)
 import Thena.Files (startingSession)
 import Thena.Render (renderResponse)
 import Thena.Declared
-  ( declared
+  ( opensIn
+  , named
+  , declared
   , eqDecl
   , eqNat
   , eqNatCounter
@@ -54,6 +58,7 @@ import Thena.Driver
 import Thena.Global.Declare (DeclareError (..), declare)
 import Thena.Global.Env
   ( GlobalEnv
+  , addConstant
   , definitionBody
   , definitionType
   , inductiveName
@@ -62,7 +67,8 @@ import Thena.Global.Env
   )
 import Thena.Global.NoConfusion (noConfusionNames)
 import Thena.Kernel (certify)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore)
 
 tests :: TestTree
@@ -82,14 +88,14 @@ tests =
 -- --------------------------------------------------------------------------
 
 termIn :: GlobalEnv -> Int -> Context -> String -> Core
-termIn env n ctx src = case parseCore [] env ctx n src of
+termIn env n ctx src = case parseCore [] env (opensIn env) ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 
 -- | Reduce a term of the family to weak head normal form and render it.
 reduces :: GlobalEnv -> Int -> String -> String -> Assertion
 reduces env n src expect =
-  renderCore (Rendering [] n) [] (whnf env [] (termIn env n [] src)) @?= expect
+  renderCore (rendering [] n) [] (whnf env [] (termIn env n [] src)) @?= expect
 
 natReduces, taplReduces :: String -> String -> Assertion
 natReduces  = reduces eqNat eqNatCounter
@@ -112,36 +118,35 @@ taplReduces = reduces eqTapl eqTaplCounter
 caseTests :: [TestTree]
 caseTests =
   [ testCase "same nullary former — no equations to give" $
-      natReduces "NoConfusionNat zero zero" "Unit {0}"
+      natReduces "Nat.lemmata.NoConfusion zero zero" "Unit.Unit {0}"
   , testCase "different formers — the empty type" $
-      natReduces "NoConfusionNat zero (succ zero)" "Empty {0}"
+      natReduces "Nat.lemmata.NoConfusion zero (succ zero)" "Empty.Empty {0}"
   , testCase "and the other way round" $
-      natReduces "NoConfusionNat (succ zero) zero" "Empty {0}"
+      natReduces "Nat.lemmata.NoConfusion (succ zero) zero" "Empty.Empty {0}"
   , -- One argument conjoins nothing, so the case /is/ the equation and a use
     -- site applies the lemma and stops. That is the common case by a wide
     -- margin — six of MS1's seven target constructors.
     testCase "same former, one argument — injectivity" $
       natReduces
-        "NoConfusionNat (succ zero) (succ (succ zero))"
-        "Eq {0} Nat zero (succ zero)"
+        "Nat.lemmata.NoConfusion (succ zero) (succ (succ zero))"
+        "Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)"
   , -- The case §3.7 is written around, and the only one in any fixture with
     -- more than one equation to conjoin.
     testCase "three arguments — three equations, in argument order" $
       taplReduces
-        "NoConfusionTerm (ifthen true zero (succ zero)) (ifthen false zero zero)"
-        "And {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term zero zero) \
-        \(Eq {0} Term (succ zero) zero))"
+        "Term.lemmata.NoConfusion (ifthen true zero (succ zero)) (ifthen false zero zero)"
+        "And.And {0 0} (Eq.Eq {0} Term.Term Term.true Term.false) (And.And {0 0} (Eq.Eq {0} Term.Term Term.zero Term.zero) (Eq.Eq {0} Term.Term (Term.succ Term.zero) Term.zero))"
   , testCase "the family's own type" $
-      typeOfGlobal eqTapl eqTaplCounter "NoConfusionTerm"
-        @?= Just "Term -> Term -> Type₀"
+      typeOfGlobal eqTapl eqTaplCounter "Term.lemmata.NoConfusion"
+        @?= Just "Term.Term -> Term.Term -> Type₀"
   , testCase "the lemma's own type" $
-      typeOfGlobal eqTapl eqTaplCounter "noConfusionTerm"
-        @?= Just "∀ (x : Term) (x' : Term) -> Eq {0} Term x x' -> NoConfusionTerm x x'"
+      typeOfGlobal eqTapl eqTaplCounter "Term.lemmata.noConfusion"
+        @?= Just "∀ (x : Term.Term) (x' : Term.Term) -> Eq.Eq {0} Term.Term x x' -> Term.lemmata.NoConfusion x x'"
   ]
 
 typeOfGlobal :: GlobalEnv -> Int -> String -> Maybe String
 typeOfGlobal env n g =
-  renderCore (Rendering [] n) [] . definitionType <$> lookupDefinition (GlobalName g) env
+  renderCore (rendering [] n) [] . definitionType <$> lookupDefinition (named g) env
 
 -- --------------------------------------------------------------------------
 -- Using it
@@ -179,7 +184,7 @@ useTests =
     testCase "injectivity is the lemma applied, and nothing else" $
       provesIn
         "Eq {0} Term (succ x) (succ y)"
-        "noConfusionTerm (succ x) (succ y) e"
+        "Term.lemmata.noConfusion (succ x) (succ y) e"
         "Eq {0} Term x y"
   , -- Discrimination: from @true ≡ succ x@ get anything. This is what an
     -- impossible branch needs, and it is now @elim Empty@ at the goal — which
@@ -189,7 +194,7 @@ useTests =
       provesIn
         "Eq {0} Term true (succ x)"
         "elim Empty {0} () (\\ (t : Empty {0}) -> Eq {0} Term x y) () () \
-        \(noConfusionTerm true (succ x) e)"
+        \(Term.lemmata.noConfusion true (succ x) e)"
         "Eq {0} Term x y"
   , -- Three equations, right-nested in argument order, each reachable. Spelled
     -- with @elim And@ rather than the prelude's @andLeft@/@andRight@ because
@@ -205,7 +210,7 @@ useTests =
         \-> elim And {0 0} ((Eq {0} Term x y) (Eq {0} Term zero zero)) \
         \(\\ (z : And {0 0} (Eq {0} Term x y) (Eq {0} Term zero zero)) -> Eq {0} Term x y) \
         \((\\ (q2 : Eq {0} Term x y) (q3 : Eq {0} Term zero zero) -> q2)) () r)) () \
-        \(noConfusionTerm (ifthen true x zero) (ifthen false y zero) e)"
+        \(Term.lemmata.noConfusion (ifthen true x zero) (ifthen false y zero) e)"
         "Eq {0} Term x y"
   ]
 
@@ -220,7 +225,7 @@ useTests =
 -- unabstracted would be the natural mistake to make in a term this size.
 -- | What the homogeneous lemma cannot do at all, done from the surface.
 --
--- **The point is the APPLICATION and not the type.** @noConfusionEv@ asks for
+-- **The point is the APPLICATION and not the type.** @Ev.lemmata.noConfusion@ asks for
 -- one index group and both elements in it, so the appendix\'s last step — which
 -- assumes an equation between two constructor applications that sit at two
 -- different indices — cannot even pass it its arguments. These two load the
@@ -236,10 +241,12 @@ acrossTests =
         , "data N : Type\8320 where"
         , "  z : N"
         , "  s : N -> N"
+        , "open N"
         , ""
         , "data Ev : N -> Type\8320 where"
         , "  evz : Ev z"
         , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+        , "open Ev"
         , ""
         , "evzNotEvs : \8704 (k : N) (ek : Ev k)"
         , "              (q1 : (Eq N z (s (s k)) : Type\8320))"
@@ -248,7 +255,7 @@ acrossTests =
         , "                        (evs k ek) : Type\8320))"
         , "           -> Empty"
         , "evzNotEvs = \\ k ek q1 q2 ->"
-        , "  noConfusionEv z evz (s (s k)) (evs k ek) q1 q2"
+        , "  Ev.lemmata.noConfusion z evz (s (s k)) (evs k ek) q1 q2"
         ]
   , testCase "and the same constructor at two indices gives its own chain" $
       loads
@@ -257,10 +264,12 @@ acrossTests =
         , "data N : Type\8320 where"
         , "  z : N"
         , "  s : N -> N"
+        , "open N"
         , ""
         , "data Ev : N -> Type\8320 where"
         , "  evz : Ev z"
         , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+        , "open Ev"
         , ""
         , "evsInj : \8704 (m : N) (em : Ev m) (k : N) (ek : Ev k)"
         , "           (q1 : (Eq N (s (s m)) (s (s k)) : Type\8320))"
@@ -268,9 +277,9 @@ acrossTests =
         , "                     (transport N (\\ w -> Ev w) (s (s m)) (s (s k)) q1"
         , "                        (evs m em))"
         , "                     (evs k ek) : Type\8320))"
-        , "        -> NoConfusionEv (s (s m)) (evs m em) (s (s k)) (evs k ek)"
+        , "        -> Ev.lemmata.NoConfusion (s (s m)) (evs m em) (s (s k)) (evs k ek)"
         , "evsInj = \\ m em k ek q1 q2 ->"
-        , "  noConfusionEv (s (s m)) (evs m em) (s (s k)) (evs k ek) q1 q2"
+        , "  Ev.lemmata.noConfusion (s (s m)) (evs m em) (s (s k)) (evs k ek) q1 q2"
         ]
   ]
 
@@ -284,25 +293,25 @@ loads ls = do
 
 kernelTests :: [TestTree]
 kernelTests =
-  [ testCase "Nat's family" (certified eqNat "NoConfusionNat")
-  , testCase "Nat's lemma" (certified eqNat "noConfusionNat")
-  , testCase "Term's family" (certified eqTapl "NoConfusionTerm")
-  , testCase "Term's lemma" (certified eqTapl "noConfusionTerm")
+  [ testCase "Nat's family" (certified eqNat "Nat.lemmata.NoConfusion")
+  , testCase "Nat's lemma" (certified eqNat "Nat.lemmata.noConfusion")
+  , testCase "Term's family" (certified eqTapl "Term.lemmata.NoConfusion")
+  , testCase "Term's lemma" (certified eqTapl "Term.lemmata.noConfusion")
     -- **Back, as of MS3 phase 31g.** Phase 31d had to give it up: @Eq@ became
     -- level-polymorphic and the generator was written for a @Type₀@ datatype.
     -- 31g generalises the generator to the datatype's own level, and @Eq@'s
     -- own table is the case that proves it — a polymorphic, indexed family.
-  , testCase "Eq's own, which is an indexed family" (certified eqNat "noConfusionEq")
+  , testCase "Eq's own, which is an indexed family" (certified eqNat "Eq.lemmata.noConfusion")
     -- **A dependent argument telescope, which got no equipment at all before
     -- MS9 phase 212** — @fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n)@, whose
     -- second equation is stated at @Fin n'@ with @i@ transported along the
     -- first. The kernel accepting the lemma is the whole claim of that phase:
     -- the family is checked at declaration, and this says the trusted core
     -- agrees.
-  , testCase "Fin's family, whose telescope is dependent" (certified eqNatFin "NoConfusionFin")
-  , testCase "Fin's lemma, which is the transported chain" (certified eqNatFin "noConfusionFin")
-  , testCase "Vec's family, with a parameter as well" (certified eqNatVec "NoConfusionVec")
-  , testCase "Vec's lemma" (certified eqNatVec "noConfusionVec")
+  , testCase "Fin's family, whose telescope is dependent" (certified eqNatFin "Fin.lemmata.NoConfusion")
+  , testCase "Fin's lemma, which is the transported chain" (certified eqNatFin "Fin.lemmata.noConfusion")
+  , testCase "Vec's family, with a parameter as well" (certified eqNatVec "Vec.lemmata.NoConfusion")
+  , testCase "Vec's lemma" (certified eqNatVec "Vec.lemmata.noConfusion")
 
     -- **Found by phase 17, and it was a real bug.** The generator freshens a
     -- telescope in two places, and 'freshen' gave each entry a new variable
@@ -311,7 +320,7 @@ kernelTests =
     -- used: @Vec@ and @Fin@ have one index each, and their dependent
     -- /constructor/ telescopes are skipped before the copy happens. @Below@'s
     -- second index is a @Fin@ of its first, so the second copy of the index
-    -- telescope named the first copy's variable, and @NoConfusionBelow@ came
+    -- telescope named the first copy's variable, and @Below.lemmata.NoConfusion@ came
     -- out ill-typed — reported as @DeclareError@'s @NoConfusionRejected@,
     -- which is precisely the "unreachable if the generator is right" case.
     -- **The fixture gained the whole prelude at MS9 phase 222.** @Below@'s
@@ -321,9 +330,9 @@ kernelTests =
     -- for this datatype at all. 'skipTests' pins that, and the phase-17 bug is
     -- still what these two catch.
   , testCase "an index telescope that is dependent (phase 17)" $
-      certified preludeBelowEnv "NoConfusionBelow"
+      certified preludeBelowEnv "Below.lemmata.NoConfusion"
   , testCase "and its lemma" $
-      certified preludeBelowEnv "noConfusionBelow"
+      certified preludeBelowEnv "Below.lemmata.noConfusion"
 
     -- **Found by MS9 phase 216, and it was a real bug.** @span@'s last argument
     -- reaches back past the one before it, so the chain's package holds an
@@ -334,18 +343,18 @@ kernelTests =
     -- proof variable free. @Pack@ and @Fin@ have no gap, which is why nothing
     -- here caught it.
   , testCase "a chain with an argument interior to it (phase 216)" $
-      certified eqNatVecSpan "NoConfusionSpan"
+      certified eqNatVecSpan "Span.lemmata.NoConfusion"
   , testCase "and its lemma" $
-      certified eqNatVecSpan "noConfusionSpan"
+      certified eqNatVecSpan "Span.lemmata.noConfusion"
 
     -- ------------------------------------------------------------------
     -- THE TELESCOPIC PAIR (MS9 phase 218)
     -- ------------------------------------------------------------------
     --
     -- **The homogeneous lemma puts both elements at ONE index group**, which is
-    -- what the appendix's @noCycleD@ cannot use: its last step applies
+    -- what the appendix's @D.lemmata.noCycle@ cannot use: its last step applies
     -- no-confusion to an equation whose two sides are at two /different/
-    -- indices, and @noConfusionFin@ cannot even be applied there. The
+    -- indices, and @Fin.lemmata.noConfusion@ cannot even be applied there. The
     -- telescopic pair quantifies an index group per element and takes the chain
     -- between them — the index equations, then the element equation transported
     -- along them — curried rather than packaged, because a specialiser holds
@@ -354,20 +363,20 @@ kernelTests =
     -- Each case below is a shape the walk has to get right, and the kernel is
     -- what says it did.
   , testCase "Nat's telescopic family, with no indices at all" $
-      certified eqNat "NoConfusionNat"
+      certified eqNat "Nat.lemmata.NoConfusion"
   , testCase "and its lemma, where the chain is the one element equation" $
-      certified eqNat "noConfusionNat"
+      certified eqNat "Nat.lemmata.noConfusion"
   , testCase "Eq's own telescopic lemma, two indices and polymorphic" $
-      certified eqNat "noConfusionEq"
-  , testCase "Fin's telescopic family" (certified eqNatFin "NoConfusionFin")
+      certified eqNat "Eq.lemmata.noConfusion"
+  , testCase "Fin's telescopic family" (certified eqNatFin "Fin.lemmata.NoConfusion")
   , testCase "and its lemma, one index and a dependent argument telescope" $
-      certified eqNatFin "noConfusionFin"
+      certified eqNatFin "Fin.lemmata.noConfusion"
   , testCase "Vec's telescopic lemma, with a parameter as well" $
-      certified eqNatVec "noConfusionVec"
+      certified eqNatVec "Vec.lemmata.noConfusion"
   , testCase "Term's telescopic lemma, four constructors and no indices" $
-      certified eqTapl "noConfusionTerm"
+      certified eqTapl "Term.lemmata.noConfusion"
   , testCase "a chain with an argument interior to it, telescopically" $
-      certified eqNatVecSpan "noConfusionSpan"
+      certified eqNatVecSpan "Span.lemmata.noConfusion"
 
     -- **A dependent INDEX telescope is the shape that asks for a pair the
     -- homogeneous lemma never did**, and it is the one the old @Below@ fixture
@@ -377,9 +386,9 @@ kernelTests =
     -- the package, which is @telescopicInScope@'s
     -- whole reason to exist.
   , testCase "a dependent index telescope, telescopically (phase 218)" $
-      certified preludeBelowEnv "NoConfusionBelow"
+      certified preludeBelowEnv "Below.lemmata.NoConfusion"
   , testCase "and its lemma, where the index travels with the element" $
-      certified preludeBelowEnv "noConfusionBelow"
+      certified preludeBelowEnv "Below.lemmata.noConfusion"
   ]
 
 -- | @Below@\'s second index has the first in its type — a dependent /index/
@@ -394,13 +403,22 @@ belowEnv = fst (declared [eqDecl, natDecl, finDecl, belowDecl])
 preludeBelowEnv :: GlobalEnv
 preludeBelowEnv = fst (declared (preludeDecls ++ [natDecl, finDecl, belowDecl]))
 
+-- | __A datatype named after one of its own generated relations__, which was
+-- refused until his ruling of 2026-11-01 put the generated material one step
+-- deeper: the datatype is @Below.Below@ and its own structural order is
+-- @Below.lemmata.Below@, so the two no longer compete for the word. This is the
+-- fixture that found it, and it is kept pointed at that word on purpose.
+--
+-- Its own name is still written in full, which is what a user writes where
+-- nothing is open: the short word is what the ambiguity used to be about, and
+-- writing the path keeps the fixture about declaring rather than about scope.
 belowDecl :: String
 belowDecl =
   "Below : \8704 (n : Nat) (i : Fin n) -> Type\8320 \
-  \where { bz : \8704 (m : Nat) -> Below (succ m) (fz m) }"
+  \where { bz : \8704 (m : Nat) -> Below.Below (succ m) (fz m) }"
 
 certified :: GlobalEnv -> String -> Assertion
-certified env g = case lookupDefinition (GlobalName g) env of
+certified env g = case lookupDefinition (named g) env of
   Nothing -> assertFailure (g ++ " was not generated")
   Just d  -> case certify env (definitionBody d) (definitionType d) of
     Right _  -> pure ()
@@ -418,7 +436,7 @@ certified env g = case lookupDefinition (GlobalName g) env of
 -- declaration itself. Asking the environment is the stronger question anyway:
 -- what a caller can observe is whether the lemma is there.
 generated :: [String] -> String -> Either DeclareError Bool
-generated before src = case parseDeclaration [] env n src of
+generated before src = case parseDeclaration [] env (opensIn env) n src of
   Left e        -> error ("fixture does not parse: " ++ show e)
   Right (d, n1) ->
     (\(env', _) -> isDeclared (snd (noConfusionNames (inductiveName d))) env')
@@ -451,20 +469,20 @@ skipTests =
     testCase "no Eq in scope at all — skipped, and quietly" $
       generated [] natDecl @?= Right False
   , testCase "and then nothing was generated" $
-      lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [natDecl]))
-        `seq` (lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [natDecl])) == Nothing)
+      lookupDefinition (inLemmataOf (declarationNamed (rootName "Nat")) "NoConfusion") (fst (declared [natDecl]))
+        `seq` (lookupDefinition (inLemmataOf (declarationNamed (rootName "Nat")) "NoConfusion") (fst (declared [natDecl])) == Nothing)
         @?= True
   , testCase "but with Eq it was" $
-      (lookupDefinition (GlobalName "NoConfusionNat") eqNat == Nothing) @?= False
+      (lookupDefinition (inLemmataOf (declarationNamed (rootName "Nat")) "NoConfusion") eqNat == Nothing) @?= False
   , -- Phase 20's precondition is asked **per datatype**, and these two cases
     -- are why it has to be. @Eq@'s own table mentions none of the products —
     -- one constructor, so no off-diagonal @Empty@; one argument, so neither
     -- @Unit@ nor @And@ — and the prelude must declare @Eq@ before @And@,
     -- since @And@'s no-confusion states equations. A blanket precondition
-    -- silently loses @NoConfusionEq@ at that very line, which is what the
+    -- silently loses @Eq.lemmata.NoConfusion@ at that very line, which is what the
     -- first draft of the phase did.
     testCase "Eq alone: its own table needs no product, so it is generated" $
-      (lookupDefinition (GlobalName "NoConfusionEq") (fst (declared [eqDecl])) == Nothing)
+      (lookupDefinition (inLemmataOf (declarationNamed (rootName "Eq")) "NoConfusion") (fst (declared [eqDecl])) == Nothing)
         @?= False
   , -- **A dependent index telescope wants @DPair@ — MS9 phase 222.** The chain
     -- is stated over @(indices; element)@, so where an index's type mentions an
@@ -475,12 +493,12 @@ skipTests =
     testCase "a dependent index telescope with no DPair — skipped" $
       generated [eqDecl, natDecl, finDecl] belowDecl @?= Right False
   , testCase "and then nothing was generated" $
-      (lookupDefinition (GlobalName "NoConfusionBelow") belowEnv == Nothing) @?= True
+      (lookupDefinition (inLemmataOf (declarationNamed (rootName "Below")) "NoConfusion") belowEnv == Nothing) @?= True
   , -- Two constructors want an off-diagonal @Empty {0}@, and there is none.
     testCase "Nat with Eq but no Empty — skipped, and quietly" $
       generated [eqDecl] natDecl @?= Right False
   , testCase "and then nothing was generated" $
-      (lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [eqDecl, natDecl]))
+      (lookupDefinition (inLemmataOf (declarationNamed (rootName "Nat")) "NoConfusion") (fst (declared [eqDecl, natDecl]))
         == Nothing) @?= True
   ]
 
@@ -491,12 +509,31 @@ skipTests =
 -- | §3.6: one namespace, shared with generated names. A user who takes the name
 -- first loses the declaration that would generate it, rather than either of the
 -- two being hidden.
+-- | **The taken name is SEEDED and no longer written (MS10).** It was an
+-- ordinary @data@ line until here, because the generated name was flat and a
+-- user could type it. It is @Nat.lemmata.NoConfusion@ now and a declaration cannot be
+-- /named/ with a path, so the collision is unreachable from surface syntax and
+-- writing it would give a parse error in place of the refusal this is about.
+-- **The refusal itself stays reachable** — a @namespace Nat@ block is what lets
+-- a user write into that namespace again — so the name goes into the
+-- environment directly and §3.6's rule is still what is asserted.
 clashTests :: [TestTree]
 clashTests =
   [ testCase "the family's name taken" $
-      generated (preludeDecls ++ ["NoConfusionNat : Type\8320 where { }"]) natDecl
-        @?= Left (AlreadyDeclared (GlobalName "NoConfusionNat"))
+      afterSeeding (inLemmataOf (declarationNamed (rootName "Nat")) "NoConfusion")
+        @?= Left (AlreadyDeclared (inLemmataOf (declarationNamed (rootName "Nat")) "NoConfusion"))
   , testCase "the lemma's name taken" $
-      generated (preludeDecls ++ ["noConfusionNat : Type\8320 where { }"]) natDecl
-        @?= Left (AlreadyDeclared (GlobalName "noConfusionNat"))
+      afterSeeding (inLemmataOf (declarationNamed (rootName "Nat")) "noConfusion")
+        @?= Left (AlreadyDeclared (inLemmataOf (declarationNamed (rootName "Nat")) "noConfusion"))
   ]
+
+-- | Declare @Nat@ into a prelude that already holds @g@, and say what happened.
+afterSeeding :: GlobalName -> Either DeclareError Bool
+afterSeeding g = case parseDeclaration [] seeded (opensIn seeded) n natDecl of
+  Left e        -> error ("fixture does not parse: " ++ show e)
+  Right (d, n1) ->
+    (\(env', _) -> isDeclared (snd (noConfusionNames (inductiveName d))) env')
+      <$> declare seeded n1 d
+  where
+    (env, n) = declared preludeDecls
+    seeded   = addConstant g [] (Universe LZero) env

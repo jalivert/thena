@@ -28,7 +28,9 @@ module Thena.Global.Env
   , lookupInductive
   , lookupConstructor
   , isDeclared
+  , knownIn
   , declaredNames
+  , namespaceInhabited
   , addConstant
   , addPrimitive
   , generalised
@@ -52,7 +54,8 @@ module Thena.Global.Env
   , varsInEnv
   ) where
 
-import Data.List (nub)
+import Data.List (isPrefixOf, nub)
+import Data.Maybe (isJust)
 
 import Thena.Core.Level
   ( Level (..)
@@ -71,6 +74,8 @@ import Thena.Core.Term
   ( Core (..)
   , Var
   , GlobalName (..)
+  , rootName
+  , inDeclarationOf
   , Ident (..)
   , close
   , fresh
@@ -340,7 +345,7 @@ data GlobalEnv = GlobalEnv
     -- They are apart from 'constants' because 'Thena.Syntax.Resolve' does not
     -- resolve a name in that table, deliberately — an eliminator there /"would
     -- be a trap: it would resolve in term position"/. A primitive is the
-    -- opposite case: @String@ and @eqString@ are written in ordinary terms and
+    -- opposite case: @String@ and @String.eq@ are written in ordinary terms and
     -- have to resolve. One table each, rather than a flag on 'Constant', so the
     -- resolver asks a question with one answer.
   , definitions :: [(GlobalName, Definition)]           -- ^ a type and a body
@@ -392,7 +397,7 @@ emptyGlobals = GlobalEnv [] primitiveTypes [] [] []
 -- only other place these names are written.
 primitiveTypes :: [(GlobalName, Constant)]
 primitiveTypes =
-  [ (GlobalName n, MkConstant [] (Universe LZero))
+  [ (rootName n, MkConstant [] (Universe LZero))
   | n <- ["String", "Char", "Int"]
   ]
   ++ [(tokenName, MkConstant [] tokenType)]
@@ -450,6 +455,16 @@ isDeclared g e =
     || g `elem` map fst (definitions e)
     || g `elem` map fst (inductives e)
 
+-- | __What a written name may resolve to here__ (MS10 phase 254) — the
+-- predicate 'Thena.Core.Term.globalUnder' and 'Thena.Core.Term.shortestEnding'
+-- both ask.
+--
+-- **A definition or a declaration**, which is the same pair
+-- 'Thena.Engine.knownTo' asked before this was lifted here: a reader needs it
+-- too, and the printer must not have a second copy of what counts as in scope.
+knownIn :: GlobalEnv -> GlobalName -> Bool
+knownIn e g = isJust (lookupDefinition g e) || isDeclared g e
+
 -- | Every name the global environment binds (phase 24c).
 --
 -- @fresh-name@ avoids these as well as the development's own, so a generated
@@ -461,6 +476,20 @@ declaredNames e =
     ++ map fst (primitives e)
     ++ map fst (definitions e)
     ++ map fst (inductives e)
+
+-- | Is anything declared under this namespace path? (MS10 phase 247)
+--
+-- **A prefix scan over the keys, and that is the whole of it — his ruling of
+-- 2026-10-30**: @GlobalEnv@ gains no namespace table, so what a namespace holds
+-- is read off the names that are there. The scan stops at the first hit.
+--
+-- **A namespace is not declared, so this is the only thing @open@ can check.**
+-- A path nothing sits under is a mistake worth refusing — a typo, or a file not
+-- imported — and refusing it here says so once, where it is written, instead of
+-- letting every name that depended on it fail separately.
+namespaceInhabited :: [String] -> GlobalEnv -> Bool
+namespaceInhabited ns e = any under (declaredNames e)
+  where under g = ns `isPrefixOf` nameSteps g
 
 addConstant :: GlobalName -> [LevelVar] -> Core -> GlobalEnv -> GlobalEnv
 addConstant g ls t e = e { constants = (g, MkConstant ls t) : constants e }
@@ -667,7 +696,7 @@ data Scheme
 -- @elim@ is a keyword, but keywords are whole tokens, so @elimNat@ lexes as one
 -- name and there is nothing to reserve.
 eliminatorName :: GlobalName -> GlobalName
-eliminatorName (GlobalName d) = GlobalName ("elim" ++ d)
+eliminatorName d = inDeclarationOf d "elim"
 
 -- | The eliminator as an ordinary global definition — its type and its body
 -- (MS4 phase 49e).
@@ -709,7 +738,7 @@ eliminatorWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
 -- as one name and there is nothing to reserve. The same sentence
 -- 'eliminatorName' carries about @elim@.
 caseName :: GlobalName -> GlobalName
-caseName (GlobalName d) = GlobalName ("case" ++ d)
+caseName d = inDeclarationOf d "case"
 
 -- | __Case analysis: the eliminator minus its inductive hypotheses__ (MS9 phase
 -- 178), as an ordinary global definition — its type and its body.
