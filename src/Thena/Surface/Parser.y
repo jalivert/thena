@@ -139,9 +139,30 @@ Module :: { SurfaceModule }
 -- **The instruction language is term-free**, which is why it can be mirrored at
 -- all: an operand is an identifier, a number or a string, so neither copy
 -- mentions a term grammar and neither can drift towards one.
+-- **FOUR ALTERNATIVES, WHICH IS WHAT @Thena.Syntax.Parser@'s @Body@ HAS**
+-- (MS10 phase 270, `~z4trb`). It had two, so @do { }@ and @do { a ; }@ were
+-- accepted in a rule file and parse errors in a surface term — **the fourth
+-- drift of this mirror**, after the lambda of MS5 phase 73 and the two of MS6
+-- phase 104c, and the one a user meets by pasting a rule body into a surface
+-- literal.
+--
+-- **Both alternatives were decided over there and neither was about rule
+-- files.** An empty body is MS4 phase 49 and his own argument — @E⟦_⟧@ /is/ do
+-- nothing, /"those elaborate just by not elaborating"/, so a clause that does
+-- nothing and a clause that does not match are different answers. A trailing
+-- @;@ is MS5 phase 78, so that @a ;@ at the end of a block is not a parse error
+-- naming a @}@ the author never wrote. Neither reason stops at the file it was
+-- found in.
+--
+-- **A block that fills no hole is caught where every other unfilled hole is**:
+-- @x = do { }@ answers /not finished: the hole goal is still open, so there is
+-- no term yet/, which is the repair being visible rather than the writing being
+-- prevented.
 Block :: { [RawInstr] }
-  : Instr                                  { [$1] }
+  :                                        { [] }
+  | Instr                                  { [$1] }
   | Block ';' Instr                        { $3 : $1 }
+  | Block ';'                              { $1 }
 
 -- **A binding's left is a pattern** (MS5 phase 84) — @Thena.Syntax.Parser@'s
 -- @Instr@, one grammar over, and §7b's registered duplication for the fourth

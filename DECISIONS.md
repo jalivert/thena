@@ -3878,6 +3878,15 @@ the hole is already there and unification is expected to find it. A clause that
 does nothing and a clause that does not match are different answers, so the
 empty body is saying something. `do` is still required.
 
+**And since 2026-11-04 a surface term may write one too** — `do { }` and a block
+with a trailing `;`, which were writable in a rule file and syntax errors in a
+surface literal. **The block grammar is one grammar written twice** (Happy cannot
+share a nonterminal across the two parsers), and both of those alternatives had
+been added to one copy only. A block that fills no hole is not refused for it:
+`x = do { }` answers *not finished: the hole goal is still open, so there is no
+term yet*, which is the hole being visible rather than the writing being
+prevented.
+
 **A rule loops by recursing over the surface term.** The λ case needs one
 `prim-lambda` per binder of a group, and a rule body is a straight run of
 instructions with no iteration — so a helper peels one binder and calls itself

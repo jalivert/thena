@@ -53,6 +53,7 @@ tests =
     , testCase "and the arity comes from the signature" arity
     , testCase "a word that is no statement is stuck, not silent" stuck
     , testCase "a half-typed word completes to the words it begins" prefix
+    , testCase "an empty block is offerable, because it is writable" emptyBlock
     , testGroup "recovery (phase 138)"
         [ testCase "a tagged term literal alone on the line is helped" standalone
         , testCase "and one in a slot that wants something else is helped too" wrongSlot
@@ -180,6 +181,20 @@ coreTagOffered = do
   -- has: a claim's @?@, and a binder that must carry its type.
   let o' = offeredOptions (offerIn s "fill core`let ")
   ALiteralSymbol "?" `elem` o' @?= True
+
+-- | **The brace that closes an empty block is offered** (MS10 phase 270,
+-- `~z4trb`).
+--
+-- @do { }@ became writable in a surface term in that phase — it had been
+-- writable in a rule file since MS4 phase 49 — and the advising grammar is a
+-- third copy of the block grammar, so it had to learn the shape or completion
+-- would have gone on hiding a form the parser accepts. **Written as a
+-- production with the braces in it**, because "Thena.Language.Earley" rests on
+-- no nonterminal being nullable.
+emptyBlock :: IO ()
+emptyBlock = do
+  s <- withLC
+  ALiteralSymbol "}" `elem` offeredOptions (offerIn s "elaborate surface`do { ") @?= True
 
 -- | **Three languages deep, through one chart**: a statement, a surface region
 -- inside its slot, an object literal inside that.

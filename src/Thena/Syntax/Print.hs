@@ -129,7 +129,18 @@ rawRhs r = case r of
 rawFunBody :: RawBody -> String
 rawFunBody b = case b of
   BodyRhs r      -> rawRhs r
-  BodyBlock is   -> "do { " ++ intercalate " ; " (map rawInstruction is) ++ " }"
+  BodyBlock is   -> block is
+
+-- | __A block, braces and all.__
+--
+-- **The empty one is @do { }@ and not @do {  }@** (MS10 phase 270, `~z4trb`):
+-- an empty body has been writable in a rule since MS4 phase 49 and is writable
+-- in a surface term now, so it is printable, and a printer crossed against its
+-- reader may not emit a space the author would not have written.
+block :: [RawInstr] -> String
+block is = case is of
+  [] -> "do { }"
+  _  -> "do { " ++ intercalate " ; " (map rawInstruction is) ++ " }"
 
 -- | A pattern, as written.
 --
@@ -199,8 +210,7 @@ surf _ (SurfaceHole h)      = "?" ++ h
 -- **Printed with explicit braces and semicolons**, never re-laid-out: the
 -- grammar accepts both spellings and this is the one that is unambiguous on
 -- one line, which is what every other case here produces too.
-surf _ (SurfaceDo b)        =
-  "do { " ++ intercalate " ; " (map rawInstruction b) ++ " }" 
+surf _ (SurfaceDo b)        = block b
 surf p (SurfaceApp f as)    =
   paren (p >= Tight) (surf Spine f ++ concatMap arg (NE.toList as))
 -- **The body of each of these four is @Arrowed@ and not @Term@**, which is

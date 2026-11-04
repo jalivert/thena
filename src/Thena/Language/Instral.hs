@@ -124,12 +124,24 @@ instralRules gs bs =
     -- is a block/. Contributed from here for the dependency's sake:
     -- "Thena.Language.Builtin" may not import this module, and the statement
     -- head is this module's.
+    -- **THE EMPTY BLOCK IS A PRODUCTION OF ITS OWN AND NOT A NULLABLE
+    -- NONTERMINAL** (MS10 phase 270, `~z4trb`). @do { }@ is writable in both
+    -- instruction grammars, so it is offerable, but
+    -- "Thena.Language.Earley" rests on /no nonterminal is nullable/ — its
+    -- predictor is the textbook one for exactly that reason — so an empty
+    -- @blockHead@ would break the parser rather than widen the advice. Writing
+    -- the braces out costs one rule and keeps that invariant.
     surfaceBlock =
       [ E.Rule "surface atom do" Builtin.surfaceAtomHead
           [E.Literal "do", E.Literal "{", E.Nonterminal blockHead, E.Literal "}"] []
+      , E.Rule "surface atom do empty" Builtin.surfaceAtomHead
+          [E.Literal "do", E.Literal "{", E.Literal "}"] []
       , E.Rule "instral block one" blockHead [E.Nonterminal statementHead] []
       , E.Rule "instral block more" blockHead
           [E.Nonterminal blockHead, E.Literal ";", E.Nonterminal statementHead] []
+        -- A trailing @;@ is MS5 phase 78's, in the running grammar since then.
+      , E.Rule "instral block trailing" blockHead
+          [E.Nonterminal blockHead, E.Literal ";"] []
       ]
 
     -- **A phrase, like the heads "Thena.Language.Builtin" uses**, and not

@@ -886,6 +886,13 @@ blockTests =
   [ testCase "a block parses and prints back" $
       roundTrip "do { attack ; intro }"
 
+    -- **The empty one prints as @do { }@** (MS10 phase 270, `~z4trb`), not
+    -- @do {  }@: this is the printer crossed against its own reader, so a
+    -- space the author would not have written is a space that does not read
+    -- back as itself.
+  , testCase "and the empty block does too" $
+      roundTrip "do { }"
+
   , testCase "a binding in a block round-trips too" $
       roundTrip "do { h = here ; goto h }"
 
@@ -927,6 +934,16 @@ blockTests =
           -- added it rather than two phases later, which is what §7b's register
           -- is for.
         , "f = \\ z -> do { p = concat z z ; return p }"
+          -- **THE EMPTY BODY AND THE TRAILING @;@** (MS10 phase 270, `~z4trb`).
+          -- Both were decided in the rule grammar and never mirrored here: an
+          -- empty body is MS4 phase 49 and a trailing @;@ is MS5 phase 78, so
+          -- @do { }@ and @do { a ; }@ loaded in a rule file and were parse
+          -- errors in a surface literal. **That is the shape a user meets by
+          -- pasting a rule body into a file**, which is what this item is.
+        , ""
+        , "attack ;"
+        , "h = here ; goto h ;"
+        , ";"
         ] :: [String])
 
     -- **Crossed for EVERY operand form, not five hand-picked bodies**
@@ -969,22 +986,26 @@ blockTests =
     --
     -- **Exhaustive on purpose** — a new operand form leaves @-Wall@ with an
     -- incomplete pattern here, which is the only thing that makes the crossing
-    -- above total rather than another hand-picked list. 'Nothing' is a form the
-    -- surface grammar cannot write, and there is exactly one.
-    spellingFor :: RawOperand -> Maybe String
+    -- above total rather than another hand-picked list.
+    --
+    -- **It was @Maybe@ and is not** (MS10 phase 269): the one form the surface
+    -- grammar could not write was the corner operand, and corners are gone. A
+    -- form with no spelling here would now be the drift this register exists to
+    -- catch, so there is nowhere to record one.
+    spellingFor :: RawOperand -> String
     spellingFor o = case o of
-      RawRef{}     -> Just "y"
+      RawRef{}     -> "y"
       -- **A dotted word, which is the only thing that tells it from a
       -- 'RawRef'** (MS10 phase 245): a binding has no path, so a path is what
       -- makes a written word a name rather than a reference.
-      RawGlobal{}  -> Just "Ns.thing"
-      RawPos{}     -> Just "2"
-      RawText{}    -> Just "\"done\""
-      RawChar{}    -> Just "'c'"
-      RawList{}    -> Just "[1, 'c', \"s\"]"
-      RawPairOf{}  -> Just "(1, y)"
-      RawNested{}  -> Just "(concat y y)"
-      RawLambda{}  -> Just "(\\ z -> concat z z)"
+      RawGlobal{}  -> "Ns.thing"
+      RawPos{}     -> "2"
+      RawText{}    -> "\"done\""
+      RawChar{}    -> "'c'"
+      RawList{}    -> "[1, 'c', \"s\"]"
+      RawPairOf{}  -> "(1, y)"
+      RawNested{}  -> "(concat y y)"
+      RawLambda{}  -> "(\\ z -> concat z z)"
       -- **AND A CORE TERM IS ONE OF THESE NOW** (MS10 phase 269, `~3t63k`).
       -- Corners were the one form a @do@ block could not write: @⌜ t ⌝@
       -- carried a parsed 'Thena.Syntax.Concrete.Raw' through a production of
@@ -993,7 +1014,7 @@ blockTests =
       -- region like any other and goes through this same case, which is what
       -- deleting the spelling bought — @ms5\/CLOSEOUT.md@ 22 is answered
       -- rather than accepted.
-      RawRegion{}  -> Just "surface`\\ x -> x`"
+      RawRegion{}  -> "surface`\\ x -> x`"
 
     -- One value per constructor, to apply 'spellingFor' to. It is a mirror, and
     -- the exhaustive case above is what stops it going quietly out of date.
@@ -1013,15 +1034,14 @@ blockTests =
       ]
 
     writableOperands :: [String]
-    writableOperands = [ w | Just w <- map spellingFor operandForms ]
+    writableOperands = map spellingFor operandForms
 
     -- Parse the spelling and check the operand it yields is the form it was
     -- listed under, by asking 'spellingFor' the question in reverse.
     writes :: RawOperand -> Assertion
     writes form = case spellingFor form of
-      Nothing -> pure ()
-      Just w  -> case viaRule ("f " ++ w) of
-        Just [RawDo (RawOp "f" [got])] -> spellingFor got @?= Just w
+      w -> case viaRule ("f " ++ w) of
+        Just [RawDo (RawOp "f" [got])] -> spellingFor got @?= w
         other -> assertFailure (w ++ ": " ++ show other)
 
     roundTrip :: String -> Assertion
