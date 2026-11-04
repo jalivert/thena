@@ -47,6 +47,8 @@ module Thena.Driver
   , loadSource
   , loadProofSource
   , loadProofItems
+  , loadProofItemsConsulting
+  , moduleConsults
   , RuleFileError (..)
   , InstralTypeError
   , loadRuleBases
@@ -718,6 +720,13 @@ data Response
     -- 'LoadRequested' it only names them — reading is "Thena.Repl"'s (§12
     -- invariant 4) — but it names /several/, because a load replaces the whole
     -- ordered list of bases and the order is the order written
+  | ConsultsUnread [ModuleName]
+    -- ^ **this module consults these and nobody read them** (MS11 phase 273).
+    -- Not a user's mistake and not a file's: it says a caller reached
+    -- 'loadProofItems' with a module that names rule bases, and that door has
+    -- no way to read a file. "Thena.Files" reads them and goes through
+    -- 'loadProofItemsConsulting' instead, so a frontend that loads modules
+    -- through that module never sees this.
   | ConsultRequested [FilePath]
     -- ^ @:consult@ on one or more rule-base paths (MS11 phase 271). Like
     -- 'RulesRequested' it only names them — reading is "Thena.Files"'s (§12
@@ -1264,6 +1273,13 @@ data Item
     -- **A list of items because a declaration is one item here**, and the list
     -- is what makes the shape the same as 'ItemNamespace'\'s: both are a scope
     -- with contents, and 'surfaceProgram' treats them the same way.
+  | ItemConsult ModuleName
+    -- ^ @consult ‹module›@ (MS11 phase 273) — **a rule base this module's
+    -- proofs are searched against**, named as a file and not as a namespace.
+    --
+    -- It declares nothing and runs nothing, so 'surfaceProgram' emits no
+    -- instruction for it: what it does happens before the program does, when
+    -- the load collects every one of them and says which files it needs.
   | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
     -- resolves it while the file is being read, so a block with bad operands is
@@ -1307,6 +1323,9 @@ regroup = go
     -- **The declarations inside are regrouped by the same pass** (MS10 phase
     -- 254), so a signature and its equation pair inside a namespace exactly as
     -- they do outside one, and nesting needs nothing of its own.
+    -- **A file's name, not a namespace's** — the shape is 'SurfaceOpen'\'s and
+    -- the meaning is not: the steps are directories (MS11 phase 273).
+    one (SurfaceConsult ps x : rest) = Right ([ItemConsult (moduleFromSteps ps x)], rest)
     one (SurfaceNamespace ps x ds : rest) = do
       inner <- go ds
       Right ([ItemNamespace (GlobalName ps x) inner], rest)
@@ -1358,6 +1377,11 @@ surfaceProgram n0 items = foldl (item []) ([], n0) items
   item ns (acc, n) (ItemData d) =
     let (is, n1) = datatypeProgram ns n d Nothing in (acc ++ is, n1)
   item _ acc (ItemTheorem x ty body) = declaring acc (x, ty, body)
+  -- **A consult emits nothing** (MS11 phase 273). It is not a step of the
+  -- module's program: it says which bases the whole program is run against, and
+  -- that is settled before the program starts — 'moduleConsults' collects them
+  -- and 'loadProofItems' asks for the files.
+  item _ acc (ItemConsult _) = acc
   -- **A top-level block is a call to a rule** (MS6 phase 104b), and the rule is
   -- @run-block@ in the shipped base, whose whole body is @play t@. So how a
   -- module\'s blocks are treated is written in user space and a user may
@@ -1652,9 +1676,32 @@ loadProofSource s src = case parseSurfaceModule src of
 -- the only stored form (his ruling, 2026-09-27), and the JSON went with the
 -- project manifest; see "Thena.View.Source".
 loadProofItems :: Session -> String -> [Item] -> (Session, Response)
-loadProofItems s nm items =
-    let machine  = sessionMachine s
+loadProofItems s nm items = case moduleConsults items of
+  [] -> loadProofItemsConsulting (rules (sessionMachine s)) s nm items
+  -- **Refused rather than ignored** (MS11 phase 273). This door has no way to
+  -- read a file (§12 invariant 4), so a module that consults something cannot
+  -- be elaborated through it — and silently elaborating it against the
+  -- session's bases is the exact failure a consult exists to prevent. The
+  -- caller that has IO is "Thena.Files", and 'loadProofItemsConsulting' is the
+  -- door it uses.
+  ms -> (s, ConsultsUnread ms)
+
+-- | The same, against a pool the caller has already read (MS11 phase 273).
+--
+-- **The pool is the module's for the length of the load and the session's again
+-- afterwards — his ruling of 2026-11-03**: a @consult@ is scoped to the file
+-- that writes it and applies whenever that file is elaborated, which is what
+-- makes a module that type-checks in isolation type-check for whoever imports
+-- it. So a surface file's consults never reach the session that loaded it.
+--
+-- **A failed load restores the pool with everything else**, since 'rolledBack'
+-- puts the session back as it stood.
+loadProofItemsConsulting :: [RuleBase] -> Session -> String -> [Item] -> (Session, Response)
+loadProofItemsConsulting pool s nm items =
+    let machine  = (sessionMachine s) { rules = pool }
         (is, n1) = surfaceProgram (names machine) items
+        -- The pool the session had, put back the moment the module is in.
+        poolBack s'' = s'' { sessionMachine = (sessionMachine s'') { rules = rules (sessionMachine s) } }
         -- **No block is checked before the module runs** (MS6 phase 104b).
         -- Every one of them is resolved, validated and typed where the program
         -- reaches it, in the environment that exists there —
@@ -1663,7 +1710,7 @@ loadProofItems s nm items =
         -- run, which no dependency-ordered language does.
      in case progress Nothing s { sessionMachine = load is machine { names = n1 } } [] [] of
           (s', Ran _ ws Completed) ->
-            ( s'
+            ( poolBack s'
             , ProofLoaded nm (concatMap declaredNames items)
                              (sum (map blocksIn items))
                              ws
@@ -1724,6 +1771,22 @@ blocksIn i = case i of
   ItemOpenIn _ is    -> sum (map blocksIn is)
   _                  -> 0
 
+-- | Every rule base this module consults, in written order (MS11 phase 273).
+--
+-- **Nested blocks included**: a @consult@ inside a @namespace@ block is the
+-- module's just as much as one at the top, because what a consult says is which
+-- bases the module is searched against and a namespace does not change that.
+-- Where a consult written inside a block /stops/ being in force is `~c2smp` and
+-- is not answered here.
+moduleConsults :: [Item] -> [ModuleName]
+moduleConsults = concatMap go
+  where
+    go i = case i of
+      ItemConsult m      -> [m]
+      ItemNamespace _ is -> moduleConsults is
+      ItemOpenIn _ is    -> moduleConsults is
+      _                  -> []
+
 -- | The one name an item declares, where it declares exactly one.
 declaredName :: Item -> Maybe String
 declaredName i = case i of
@@ -1741,6 +1804,9 @@ declaredName i = case i of
   -- the summary by its own entry. An @open … in@ is the same.
   ItemNamespace _ _ -> Nothing
   ItemOpenIn _ _    -> Nothing
+  -- **A consult declares nothing either** (MS11 phase 273) — it says what the
+  -- module's proofs are searched against, which adds no key to the environment.
+  ItemConsult _     -> Nothing
   -- The language's name. Until phase 103 generates its datatype, what it
   -- declares is the grammar alone — the metavariables and the notation.
   -- **A @notation@ block declares nothing at all** (MS8 phase 158, §4.8): the
@@ -2800,6 +2866,14 @@ moduleName t
     word w = case w of
       c : cs -> isAlpha c && all (\x -> isAlphaNum x || x == '\'' || x == '_') cs
       []     -> False
+
+-- | The same, from a name the parser already split.
+--
+-- **Total, because the steps came from the lexer**: an identifier is a word, so
+-- there is nothing left to refuse. 'moduleName' is for text nobody has lexed —
+-- a command's argument, a path read back.
+moduleFromSteps :: [String] -> String -> ModuleName
+moduleFromSteps ps x = ModuleName (ps ++ [x])
 
 -- | How the name is written back — the inverse of 'moduleName'.
 moduleText :: ModuleName -> String

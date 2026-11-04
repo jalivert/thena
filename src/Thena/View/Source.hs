@@ -25,7 +25,7 @@ module Thena.View.Source
 import Data.List (intercalate)
 
 import Thena.Core.Term (GlobalName (..), Opened (..), nameDotted)
-import Thena.Driver (Item (..))
+import Thena.Driver (Item (..), moduleText)
 import Thena.Surface.Concrete
   ( Surface (..)
   , SurfaceConstructor (..)
@@ -52,6 +52,10 @@ printItem i = case i of
   -- declaration like any other and the printed module has to carry it: a file
   -- printed without its opens would not re-read.
   ItemOpen o -> [opens [o]]
+  -- **One line, and the module's name as written** (MS11 phase 273). A consult
+  -- declares nothing, so a file printed without it would read back and then be
+  -- searched against the wrong bases.
+  ItemConsult m -> ["consult " ++ moduleText m]
   -- **The block, indented, with its items a blank line apart** — the layout the
   -- parser reads back (MS10 phase 254). The name is written as it was: a
   -- namespace's path is relative to the one it sits in, so what the item holds

@@ -83,6 +83,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   '...'   { Located _ TSpread }
   '.'     { Located _ TDot }
   open    { Located _ TOpen }
+  consult { Located _ TConsult }
   namespace { Located _ TNamespace }
   hiding  { Located _ THiding }
   renaming { Located _ TRenaming }
@@ -314,6 +315,10 @@ Decl :: { SurfaceDecl }
   -- composes with any of them.
   | open OpenHead                          { SurfaceOpen (fst $2) (snd $2) }
   | open OpenHead in Decl                  { SurfaceOpenIn (fst $2) (snd $2) $4 }
+  -- **What this file's proofs are searched against** (MS11 phase 273, his ruling
+  -- of 2026-11-03). It names a /file/ and not a namespace, which is why it takes
+  -- a @QName@ and means something else by it: the steps are directories.
+  | consult QName                          { SurfaceConsult (fst $2) (snd $2) }
   -- **A layout block, where @open@ is a line** (MS10 phase 254): a namespace
   -- says which declarations are in it, so it has to hold them. Nesting is a
   -- longer prefix and costs no mechanism, and @namespace A.B where { … }@ is

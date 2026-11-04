@@ -38,6 +38,12 @@ import Thena.Driver
   , Response (..)
   , Session
   , loadProofSource
+  , loadProofItems
+  , loadProofItemsConsulting
+  , moduleConsults
+  , moduleFile
+  , LoadKind (..)
+  , parseSurfaceModule
   , loadRuleBases
   , consultRuleBases
   , loadSource
@@ -182,12 +188,38 @@ loadFile s path = do
 -- Simpler than 'loadFile' because a module is not a sequence of lines: the
 -- whole file is one program, so there is one response and no line to name when
 -- it stops. What went wrong is in that response, which renders like any other.
+-- **A module that consults rule bases is read in two steps** (MS11 phase 273),
+-- and both of them are here because both need the disk. The module is parsed,
+-- every base it consults is read, and only then is it elaborated — against a
+-- pool that is the module's for the length of the load and the session's again
+-- afterwards. **Nothing is installed if a base will not read**, the same
+-- all-or-nothing 'loadRuleFiles' promises.
 loadProofFile :: Session -> FilePath -> IO (Session, [Response], [Trouble])
 loadProofFile s path = do
   contents <- try (readFile path)
-  pure $ case contents of
-    Left e  -> (s, [], [Unreadable path e])
-    Right c -> let (s', resp) = loadProofSource s c in (s', [resp], [])
+  case contents of
+    Left e  -> pure (s, [], [Unreadable path e])
+    Right c -> case parseSurfaceModule c of
+      Left e -> pure (s, [Failed e], [])
+      Right (nm, items) -> case moduleConsults items of
+        -- Nothing to read: the one-step door, and the pool is the session's.
+        [] -> pure (let (s', r) = loadProofItems s nm items in (s', [r], []))
+        ms -> do
+          let paths = map (moduleFile LoadRules) ms
+          reads' <- mapM (\p -> fmap ((,) p) (try (readFile p))) paths
+          pure $ case [ (p, e) | (p, Left e) <- reads' ] of
+            (p, e) : _ -> (s, [], [Unreadable p e])
+            [] ->
+              -- 'consultRuleBases' is reused for the reading, the
+              -- all-or-nothing and the inference; the session it answers with
+              -- is dropped and only the pool is kept, because a surface file's
+              -- consults are not the session's (his ruling, 2026-11-03).
+              case consultRuleBases s [ (p, c') | (p, Right c') <- reads' ] of
+                (_, BasesLoaded pool) ->
+                  let (s', r) = loadProofItemsConsulting pool s nm items in (s', [r], [])
+                (_, bad) -> (s, [], [Unloadable (headOr path paths) bad])
+  where
+    headOr d xs = case xs of { x : _ -> x ; [] -> d }
 
 -- | **The four responses the driver cannot act on itself**: each named a file,
 -- and reading files is this module\'s (§12 invariant 4).

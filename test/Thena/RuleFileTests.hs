@@ -30,6 +30,11 @@ import Thena.Driver
   , command
   , loadRuleBases
   , consultRuleBases
+  , loadProofItems
+  , loadProofItemsConsulting
+  , moduleConsults
+  , moduleText
+  , parseSurfaceModule
   , newSession
   , baseHead
   , rawRuleDecls
@@ -40,12 +45,13 @@ import Thena.Instral.Ops (Value (..))
 import Thena.Errors (FailReason (..))
 import Thena.Instral.Ops (Rule (..), Pattern (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
+import Thena.View.Source (printItem)
 
 tests :: TestTree
 tests =
   testGroup
     "rule files (§8)"
-    [headers, opens, loading, ordering, theStack, refusals, commands, argumentHeads, returning, primitives, walking]
+    [headers, opens, loading, ordering, theStack, consulting, refusals, commands, argumentHeads, returning, primitives, walking]
 
 -- --------------------------------------------------------------------------
 -- An @open@ line, as written
@@ -601,24 +607,24 @@ theStack =
   testGroup
     "a consult pushes, a load replaces"
     [ testCase "the last base consulted is tried first" $
-        names (consulting [["one"], ["two"]]) @?= ["two", "one"]
+        names (pushing [["one"], ["two"]]) @?= ["two", "one"]
 
     , testCase "a load replaces the whole pool" $
-        names (fst (loadRuleBases (consulting [["one"]]) (sources ["two"])))
+        names (fst (loadRuleBases (pushing [["one"]]) (sources ["two"])))
           @?= ["two"]
 
     , -- His, 2026-11-03: not a move to the top and not a no-op, because the
       -- upper copy can go out of scope while the lower one is still in force.
       testCase "consulting the same base twice is a second independent push" $
-        names (consulting [["one"], ["one"]]) @?= ["one", "one"]
+        names (pushing [["one"], ["one"]]) @?= ["one", "one"]
 
     , -- One line is one push, in the order written, so the leftmost of a group
       -- is searched first within it and the group sits above what was there.
       testCase "a group keeps its written order and sits on top" $
-        names (consulting [["a", "b"], ["c"]]) @?= ["c", "a", "b"]
+        names (pushing [["a", "b"], ["c"]]) @?= ["c", "a", "b"]
 
     , testCase "a consult of nothing leaves the pool alone" $
-        names (consulting [["one"], []]) @?= ["one"]
+        names (pushing [["one"], []]) @?= ["one"]
     ]
   where
     -- A base with a header and no rules: this group is about the order of the
@@ -626,6 +632,84 @@ theStack =
     sources ns = [ (n ++ ".thena.rules", "rule base " ++ n ++ " where\n\n") | n <- ns ]
 
     -- Each inner list is one @:consult@, left to right.
-    consulting = foldl (\s ns -> fst (consultRuleBases s (sources ns))) newSession
+    pushing = foldl (\s ns -> fst (consultRuleBases s (sources ns))) newSession
 
     names = map baseName . rules . machineOf
+
+-- --------------------------------------------------------------------------
+-- A consult written in a surface file (MS11 phase 273)
+-- --------------------------------------------------------------------------
+
+-- | **A file says what its proofs are searched against — his ruling of
+-- 2026-11-03** — and the effect is the file's, not the session's.
+consulting :: TestTree
+consulting =
+  testGroup
+    "consult, written in a module"
+    [ testCase "it parses, and it prints back as it was written" $
+        printed "consult Stlc.Tactics" @?= Right ["consult Stlc.Tactics"]
+
+    , testCase "one word is a module name here too" $
+        printed "consult Tactics" @?= Right ["consult Tactics"]
+
+    , testCase "every one of them, in written order" $
+        consults (unlines ["consult B.Two", "consult A.One"])
+          @?= Right ["B.Two", "A.One"]
+
+    , -- A namespace does not change which bases the module is searched
+      -- against, so a consult inside one is still the module's.
+      testCase "and one inside a namespace block is the module's" $
+        consults (unlines [ "consult Top"
+                          , "namespace N where"
+                          , "  consult Inner"
+                          ])
+          @?= Right ["Top", "Inner"]
+
+    , -- The door with no IO refuses rather than elaborating the module
+      -- against whatever the session happened to have.
+      testCase "the door that cannot read a file refuses the module" $
+        case itemsOf "consult Stlc.Tactics" of
+          Left e -> assertFailure e
+          Right (nm, is) -> case snd (loadProofItems newSession nm is) of
+            ConsultsUnread ms -> map moduleText ms @?= ["Stlc.Tactics"]
+            other             -> assertFailure (show other)
+
+    , -- **The claim the whole design rests on**: the pool is the module's
+      -- while it loads and the session's again afterwards, so a module that
+      -- type-checks in isolation type-checks for whoever imports it.
+      testCase "the pool is the module's for the load and the session's after" $
+        case itemsOf "consult Stlc.Tactics" of
+          Left e -> assertFailure e
+          Right (nm, is) ->
+            -- The session has "mine"; the module is loaded against "extra"
+            -- on top of it, and afterwards the session has "mine" alone.
+            let (s', _) = loadProofItemsConsulting (pool extra) consulted nm is
+             in (map baseName (pool extra), map baseName (pool s'))
+                  @?= (["extra", "mine"], ["mine"])
+
+    , testCase "and the module does load" $
+        case itemsOf "consult Stlc.Tactics" of
+          Left e -> assertFailure e
+          Right (nm, is) ->
+            case snd (loadProofItemsConsulting (pool extra) consulted nm is) of
+              ProofLoaded n ds _ _ -> (n, ds) @?= ("M", [])
+              other                -> assertFailure (show other)
+    ]
+  where
+    moduleOf body = unlines (["module M where", ""] ++ [body])
+
+    itemsOf body = case parseSurfaceModule (moduleOf body) of
+      Left e  -> Left (show e)
+      Right r -> Right r
+
+    printed body = fmap (concatMap printItem . snd) (itemsOf body)
+
+    consults body = fmap (map moduleText . moduleConsults . snd) (itemsOf body)
+
+    pool = rules . machineOf
+
+    consulted =
+      fst (consultRuleBases newSession [("mine.thena.rules", "rule base mine where\n\n")])
+
+    extra =
+      fst (consultRuleBases consulted [("extra.thena.rules", "rule base extra where\n\n")])

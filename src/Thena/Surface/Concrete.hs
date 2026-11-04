@@ -381,6 +381,21 @@ data SurfaceDecl
     -- > two = succ zero
     --
     -- is one declaration under one @open@, and @succ@ resolves in both lines.
+  | SurfaceConsult [String] String
+    -- ^ @consult ‹module›@ — **what this file's proofs are searched against**
+    -- (MS11 phase 273, his ruling of 2026-11-03).
+    --
+    -- The steps and the last word of a **file's** name, the same shape
+    -- 'SurfaceOpen' uses for a namespace's and meaning something different by
+    -- it: here the steps are directories under the project's source root, and
+    -- @consult Stlc.Tactics@ reaches @Stlc\/Tactics.thena.rules@. **A file's
+    -- name and a namespace are different spaces** — his model of 2026-10-29 —
+    -- which is why the two constructors share a shape and not a type.
+    --
+    -- **Its effect is the file's, not the session's**: a consult applies
+    -- whenever this module is elaborated and does not leak to whoever loaded
+    -- it, which is what makes a module that type-checks in isolation type-check
+    -- for whoever imports it.
   | SurfaceNamespace [String] String [SurfaceDecl]
     -- ^ @namespace ‹name› where { … }@ — **declare a namespace and put these
     -- declarations in it** (MS10 phase 254).

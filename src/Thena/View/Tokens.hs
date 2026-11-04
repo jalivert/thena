@@ -172,6 +172,8 @@ kindOf t = case t of
   TModule       -> AKeyword
   -- MS10 phase 247: @open@ is a declaration, and a keyword like the rest.
   TOpen         -> AKeyword
+  -- MS11 phase 273: and so is @consult@.
+  TConsult      -> AKeyword
   TNamespace    -> AKeyword
   THiding       -> AKeyword
   TRenaming     -> AKeyword

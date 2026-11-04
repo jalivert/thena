@@ -106,6 +106,7 @@ import Thena.Driver
   , RuleFileError (..)
   , LoadError (..)
   , Response (..)
+  , moduleText
   , ChoicePoint (..)
   , Session
   , Stop (..)
@@ -306,6 +307,11 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
   ConsultRequested _ -> []
+  -- **A caller's mistake, said plainly** (MS11 phase 273): a module that
+  -- consults something reached a door that cannot read a file.
+  ConsultsUnread ms ->
+    [ "this module consults " ++ intercalate ", " (map moduleText ms)
+        ++ ", and they were not read" ]
   BasesLoaded bs   -> map loadedLine bs
   BasesListed bs   -> renderBases bs
   RulesListed bs   -> renderRuleBases ren bs
@@ -521,6 +527,7 @@ describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
   TOpen       -> "open"
+  TConsult    -> "consult"
   TNamespace  -> "namespace"
   THiding     -> "hiding"
   TRenaming   -> "renaming"
