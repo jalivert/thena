@@ -217,7 +217,16 @@ loadProofFile s path = do
         gathered <- assemble s [] [] (moduleOfFile path) path nm items
         pure $ case gathered of
           Left t   -> (s, [], [t])
-          Right ms -> let (s', rs) = loadProofModules s ms in (s', rs, [])
+          Right ms -> case loadProofModules s ms of
+            (s', Right rs)       -> (s', rs, [])
+            -- **The file the user named answers with a response and an imported
+            -- one with trouble** (MS11 phase 275) — the same split 'gather' makes
+            -- for a file that will not read, now made for one that will not
+            -- elaborate. Without it a failure inside an imported module arrives
+            -- as a bare refusal about a file nobody mentioned.
+            (s', Left (m, bad))
+              | readModulePath m == path -> (s', [bad], [])
+              | otherwise -> (s', [], [Unloadable (readModulePath m) bad])
 
 -- | Read a module an @import@ named, and everything it imports (MS11 phase
 -- 274).
@@ -258,7 +267,7 @@ assemble s stack done as path nm items = do
     Left t      -> pure (Left t)
     Right done' -> do
       pool <- consulted s path (moduleConsults items)
-      pure (fmap (\p -> done' ++ [ReadModule as nm p items]) pool)
+      pure (fmap (\p -> done' ++ [ReadModule path as nm p items]) pool)
 
 -- | One module's imports, each walked in turn (MS11 phase 274).
 --

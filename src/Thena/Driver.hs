@@ -1810,10 +1810,17 @@ loadProofItemsConsulting pool s nm items =
 -- the closure: each names what it declared and carries its own warnings, and a
 -- module that landed because something imported it is still something the user's
 -- environment now holds.
-loadProofModules :: Session -> [ReadModule] -> (Session, [Response])
+--
+-- **A failure says WHICH module it was** (MS11 phase 275), and that is the whole
+-- reason the answer is an 'Either': a refusal is about one file, the caller knows
+-- which of them the user actually named, and without the module beside the
+-- response a failure inside an imported file arrives as a bare /not in scope/
+-- about a file nobody mentioned.
+loadProofModules
+  :: Session -> [ReadModule] -> (Session, Either (ReadModule, Response) [Response])
 loadProofModules s0 = go s0 []
   where
-    go s acc [] = (s, reverse acc)
+    go s acc [] = (s, Right (reverse acc))
     go s acc (m : rest) =
       let pool = maybe (rules (sessionMachine s)) id (readModulePool m)
        in case loadProofItemsConsulting pool s (readModuleHeader m)
@@ -1821,7 +1828,7 @@ loadProofModules s0 = go s0 []
         (s', r@(ProofLoaded {})) -> go (marked (readModuleName m) s') (r : acc) rest
         -- 'loadProofItemsConsulting' has already put this module's own
         -- declarations back; this takes the closure's with them.
-        (s', bad)                -> (rolledBack s0 s', [bad])
+        (s', bad)                -> (rolledBack s0 s', Left (m, bad))
 
     marked Nothing s = s
     marked (Just n) s
@@ -1834,7 +1841,11 @@ loadProofModules s0 = go s0 []
 -- question a reader will ask — which name reaches it, which bases it consults,
 -- and what the header called it — and a four-tuple would answer none of them.
 data ReadModule = ReadModule
-  { readModuleName   :: Maybe ModuleName
+  { readModulePath   :: FilePath
+    -- ^ where it was read from. **Not derived from the name**, because a module
+    -- loaded by a path may have no name at all, and because this is what a
+    -- refusal has to print.
+  , readModuleName   :: Maybe ModuleName
     -- ^ the name an @import@ reaches it by, where it has one. 'Nothing' for a
     -- file loaded by a path no module name could produce, which today is every
     -- numbered example; such a file is simply never deduplicated against.

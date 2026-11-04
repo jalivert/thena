@@ -273,6 +273,28 @@ importTests =
       assertBool "and so did the record of it"
                  (not (moduleLoaded (named' "test.modules.Bit") s1))
 
+  , -- **A refusal inside a file nobody named has to name it** (MS11 phase 275).
+    -- The root file's failure stays a response, because the user typed that
+    -- path and it is in front of them; an imported one becomes trouble, and the
+    -- bare /not in scope/ this used to be was about a file the user had not
+    -- mentioned.
+    testCase "a failure inside an imported module names that module's file" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/ImportsBroken.thena"
+      assertBool (show (map (renderResponse s0) out)) (null out)
+      case trouble of
+        [Unloadable p _] -> p @?= "test/modules/Broken.thena"
+        other            -> assertFailure (show (map (renderTrouble s0) other))
+
+  , testCase "and the file the user named still answers with a response" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/Broken.thena"
+      assertBool ("trouble: " ++ show (map (renderTrouble s0) trouble))
+                 (null trouble)
+      assertBool "it refused" (not (null out))
+      assertBool "and not as a load"
+                 (null [ () | ProofLoaded {} <- out ])
+
   , -- 'ConsultsUnread''s twin: the pure door cannot read a file, so it refuses
     -- rather than elaborating a module whose dependencies are not in.
     testCase "the door with no IO refuses a module that imports" $ do
