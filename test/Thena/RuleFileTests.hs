@@ -29,6 +29,7 @@ import Thena.Driver
   , machineOf
   , command
   , loadRuleBases
+  , consultRuleBases
   , newSession
   , baseHead
   , rawRuleDecls
@@ -44,7 +45,7 @@ tests :: TestTree
 tests =
   testGroup
     "rule files (§8)"
-    [headers, opens, loading, ordering, refusals, commands, argumentHeads, returning, primitives, walking]
+    [headers, opens, loading, ordering, theStack, refusals, commands, argumentHeads, returning, primitives, walking]
 
 -- --------------------------------------------------------------------------
 -- An @open@ line, as written
@@ -583,3 +584,48 @@ walking =
               m : _ -> Just m
               []    -> Nothing
             other -> error ("expected Ran, got " ++ show other)
+
+-- --------------------------------------------------------------------------
+-- The stack (MS11 phase 271)
+-- --------------------------------------------------------------------------
+
+-- | **Consults form a stack — his ruling of 2026-11-03.** The last thing
+-- consulted is tried first, and the pool is walked in definition order, so what
+-- these assert is the order of 'Thena.Engine.rules' after each act.
+--
+-- They are written against 'consultRuleBases' and not against @:consult@
+-- because the command only /names/ files (§12 invariant 4): what the command
+-- does is one case in 'refusals', and what the install does is here.
+theStack :: TestTree
+theStack =
+  testGroup
+    "a consult pushes, a load replaces"
+    [ testCase "the last base consulted is tried first" $
+        names (consulting [["one"], ["two"]]) @?= ["two", "one"]
+
+    , testCase "a load replaces the whole pool" $
+        names (fst (loadRuleBases (consulting [["one"]]) (sources ["two"])))
+          @?= ["two"]
+
+    , -- His, 2026-11-03: not a move to the top and not a no-op, because the
+      -- upper copy can go out of scope while the lower one is still in force.
+      testCase "consulting the same base twice is a second independent push" $
+        names (consulting [["one"], ["one"]]) @?= ["one", "one"]
+
+    , -- One line is one push, in the order written, so the leftmost of a group
+      -- is searched first within it and the group sits above what was there.
+      testCase "a group keeps its written order and sits on top" $
+        names (consulting [["a", "b"], ["c"]]) @?= ["c", "a", "b"]
+
+    , testCase "a consult of nothing leaves the pool alone" $
+        names (consulting [["one"], []]) @?= ["one"]
+    ]
+  where
+    -- A base with a header and no rules: this group is about the order of the
+    -- list and nothing in it calls anything.
+    sources ns = [ (n ++ ".thena.rules", "rule base " ++ n ++ " where\n\n") | n <- ns ]
+
+    -- Each inner list is one @:consult@, left to right.
+    consulting = foldl (\s ns -> fst (consultRuleBases s (sources ns))) newSession
+
+    names = map baseName . rules . machineOf

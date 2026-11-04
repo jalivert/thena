@@ -50,6 +50,7 @@ module Thena.Driver
   , RuleFileError (..)
   , InstralTypeError
   , loadRuleBases
+  , consultRuleBases
   , loadRuleDecls
   , ruleBaseOfDecls
   , baseHead
@@ -712,7 +713,24 @@ data Response
     -- 'LoadRequested' it only names them — reading is "Thena.Repl"'s (§12
     -- invariant 4) — but it names /several/, because a load replaces the whole
     -- ordered list of bases and the order is the order written
-  | BasesLoaded [RuleBase]      -- ^ what @:load@ on rule files installed
+  | ConsultRequested [FilePath]
+    -- ^ @:consult@ on one or more rule-base paths (MS11 phase 271). Like
+    -- 'RulesRequested' it only names them — reading is "Thena.Files"'s (§12
+    -- invariant 4) — and like it, it names /several/, because the order written
+    -- is the order within the group.
+    --
+    -- **What it is not is a replacement.** A consult /pushes/ onto the pool, so
+    -- the last thing consulted is tried first and whatever was there goes on
+    -- being searched underneath it. His ruling of 2026-11-03: consults form a
+    -- stack, and the shipped base — consulted for you at startup — is therefore
+    -- tried last, which is the standing /universal tactics at the bottom/ with
+    -- no rule of its own.
+  | BasesLoaded [RuleBase]
+    -- ^ **the pool as it now stands, whichever act produced it** — a @:load@ of
+    -- rule files, which replaces it, or a @:consult@, which pushes onto it. One
+    -- response for both because the thing the user needs to see is the same
+    -- either way, and after phase 271 the order of this list is the search
+    -- order top down.
   | BasesListed [RuleBase]      -- ^ @:bases@ — name, description, path
   | RulesListed [RuleBase]      -- ^ @:rules@ — the rules themselves, by base
   | RuleFileRefused FilePath RuleFileError
@@ -1879,6 +1897,17 @@ dispatch s name arg = case name of
       ps@(p : _) | all ((== kindOf p) . kindOf) ps -> loadKind (kindOf p) ps
       (_ : _)  -> (s, Rejected (MixedLoad name))
       []       -> (s, Rejected (MissingArgument name))
+  -- **A consult pushes; it does not replace** (MS11 phase 271, his ruling of
+  -- 2026-11-03). Several paths in one line are one push in the order written, so
+  -- the leftmost of them is searched first within the group, and the group sits
+  -- above everything already consulted. **The extension is not read**: a
+  -- @:consult@ says the kind the way @:load rules ‹path›@ says it, so a path is
+  -- taken as a rule base whatever it is called.
+  ":consult" -> withArgument $ case pathsOf arg of
+    [] -> (s, Rejected (MissingArgument name))
+    ps -> case proofUnderway of
+      Just why -> (s, Rejected why)
+      Nothing  -> (s, ConsultRequested ps)
   -- The loaded bases, in search order. A look, so a colon.
   ":bases" -> noArgument (s, BasesListed (rules machine))
   ":rules" -> noArgument (s, RulesListed (rules machine))
@@ -2656,6 +2685,7 @@ commandSummary =
   , (":revalidate",              "recheck the whole development")
   , (":load ‹path›",             "a proof module, a script, or rule bases")
   , (":load proof / rules / script", "say which, rather than by extension")
+  , (":consult ‹path›",          "push rule bases on top of the search stack")
   , (":help",                    "this list")
   , (":quit",                    "leave")
   ]
@@ -3070,6 +3100,14 @@ loadRuleBases s ps =
   where
     gs = grammars (sessionMachine s)
 
+-- | The same, as a @:consult@ rather than a @:load@: the bases are pushed on
+-- top of the pool instead of replacing it (MS11 phase 271).
+consultRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
+consultRuleBases s ps =
+  consultReadBases s [(path, readRuleBase gs path src) | (path, src) <- ps]
+  where
+    gs = grammars (sessionMachine s)
+
 -- | The same, for bases whose declarations were stored rather than written.
 --
 -- **Added at MS7 phase 112b**, and it is the rule-file half of the seam
@@ -3090,7 +3128,33 @@ loadRuleDecls s ps =
 -- than inside it — and is why there is one fold here and not one per kind of
 -- source.
 loadReadBases :: Session -> [(FilePath, Either RuleFileError RuleBase)] -> (Session, Response)
-loadReadBases s = go []
+loadReadBases = installReadBases []
+
+-- | The same, pushing instead of replacing: the session's present pool goes
+-- /underneath/ what is being installed.
+--
+-- **MS11 phase 271, his ruling of 2026-11-03**: consults form a stack and the
+-- last thing consulted is tried first. The shipped base is consulted at startup
+-- onto an empty pool, so it ends up at the bottom and is tried last with no rule
+-- of its own — which is the standing /universal tactics at the bottom/.
+--
+-- **Consulting the same base twice is a second independent push**, his ruling
+-- the same day: not a move to the top and not a no-op, because the upper copy
+-- can go out of scope while the lower one is still in force. So this does not
+-- deduplicate, and the pool may hold one base more than once.
+consultReadBases :: Session -> [(FilePath, Either RuleFileError RuleBase)] -> (Session, Response)
+consultReadBases s = installReadBases (rules (sessionMachine s)) s
+
+-- | Install bases on top of @below@, or none of them.
+--
+-- **Inference sees the whole pool and the block check sees only the new bases.**
+-- The first is necessary — a signature the new rules answer to may be declared
+-- in a base already consulted — and the second is enough, because a base's
+-- blocks were checked when that base went in and a 'RuleBase' keeps no field to
+-- re-read them from.
+installReadBases
+  :: [RuleBase] -> Session -> [(FilePath, Either RuleFileError RuleBase)] -> (Session, Response)
+installReadBases below s = go []
   where
     -- **Inference runs here and nowhere earlier** (MS5 phase 66c), for the
     -- reason in 'BasesIllTyped': a rule's signature is not decidable until every
@@ -3105,12 +3169,14 @@ loadReadBases s = go []
       -- problem and is reported against the file, as any other rule's would be.
       Left (path, errs) -> (s, RuleFileRefused path (RuleIllFormed errs))
       Right bss ->
-        case snd (inferProgram (allSignatures acc) (allCallable acc ++ concat bss)) of
+        case snd (inferProgram (allSignatures pool) (allCallable pool ++ concat bss)) of
           []   ->
-            ( s { sessionMachine = (sessionMachine s) { rules = acc } }
-            , BasesLoaded acc
+            ( s { sessionMachine = (sessionMachine s) { rules = pool } }
+            , BasesLoaded pool
             )
           errs -> (s, BasesIllTyped errs)
+      where
+        pool = acc ++ below
 
     go acc ((path, built) : more) = case built of
       Left e  -> (s, RuleFileRefused path e)
@@ -3351,6 +3417,7 @@ loadSource s0 = go s0 1 [] . lines
             LoadRequested _  -> finished s acc (Just (NestedLoad n))
             ProofRequested _ -> finished s acc (Just (NestedLoad n))
             RulesRequested _ -> finished s acc (Just (NestedLoad n))
+            ConsultRequested _ -> finished s acc (Just (NestedLoad n))
             Quit            -> finished s' acc' Nothing
             _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
               | otherwise    -> go s' (n + 1) acc' ls

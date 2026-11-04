@@ -628,7 +628,8 @@ the surface file that declares the language; stating that dependency is
 
 ### Consults are a STACK, and clauses are a queue
 
-*Decided 2026-11-03. Not built — MS11.*
+*Decided 2026-11-03. The stack and `:consult` at the prompt are built — MS11 phase
+271. A `consult` line written inside a file is not built yet.*
 
 **The last thing you consulted is tried first.** That is the whole rule, and it does
 not matter how deep in a namespace you are standing:

@@ -305,6 +305,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
       ++ map renderWarning ws
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
+  ConsultRequested _ -> []
   BasesLoaded bs   -> map loadedLine bs
   BasesListed bs   -> renderBases bs
   RulesListed bs   -> renderRuleBases ren bs

@@ -23,6 +23,7 @@ module Thena.Files
   , loadStandardRules
   , startingSession
   , loadRuleFiles
+  , consultRuleFiles
   , loadFile
   , loadProofFile
   , following
@@ -38,6 +39,7 @@ import Thena.Driver
   , Session
   , loadProofSource
   , loadRuleBases
+  , consultRuleBases
   , loadSource
   , newSession
   )
@@ -115,7 +117,10 @@ rulesPath = Paths_thena.getDataFileName "rules/standard.thena.rules"
 loadStandardRules :: Session -> IO (Session, [Trouble])
 loadStandardRules s = do
   path <- rulesPath
-  (s', _, trouble) <- loadRuleFiles s [path]
+  -- **A consult, not a load** (MS11 phase 271): the pool is empty here so the
+  -- two do the same thing, and saying /consult/ is what puts the shipped base at
+  -- the bottom of the stack once a user consults anything of their own.
+  (s', _, trouble) <- consultRuleFiles s [path]
   pure (s', trouble)
 
 -- | Read every named rule base and install the whole ordered list, or none.
@@ -124,13 +129,25 @@ loadStandardRules s = do
 -- makes 'Thena.Driver.loadRuleBases'\' all-or-nothing promise reach as far as
 -- the disk: a second path that does not exist leaves the first uninstalled too.
 loadRuleFiles :: Session -> [FilePath] -> IO (Session, [Response], [Trouble])
-loadRuleFiles s paths = do
+loadRuleFiles = ruleFilesWith loadRuleBases
+
+-- | The same read and the same all-or-nothing, pushing instead of replacing
+-- (MS11 phase 271). The files named in one @:consult@ are one push, in the
+-- order written.
+consultRuleFiles :: Session -> [FilePath] -> IO (Session, [Response], [Trouble])
+consultRuleFiles = ruleFilesWith consultRuleBases
+
+-- | What the two share: read every path, or install nothing.
+ruleFilesWith
+  :: (Session -> [(FilePath, String)] -> (Session, Response))
+  -> Session -> [FilePath] -> IO (Session, [Response], [Trouble])
+ruleFilesWith install s paths = do
   reads' <- mapM (\p -> fmap ((,) p) (try (readFile p))) paths
   pure $ case [ (p, e) | (p, Left e) <- reads' ] of
     (p, e) : _ -> (s, [], [Unreadable p e])
     [] ->
       let contents = [ (p, c) | (p, Right c) <- reads' ]
-          (s', resp) = loadRuleBases s contents
+          (s', resp) = install s contents
           -- The path a refusal is about. 'RuleFileRefused' names its own;
           -- 'BasesIllTyped' is about the whole ordered list at once (MS5 phase
           -- 66c), so it is filed under the first file read.
@@ -172,7 +189,7 @@ loadProofFile s path = do
     Left e  -> (s, [], [Unreadable path e])
     Right c -> let (s', resp) = loadProofSource s c in (s', [resp], [])
 
--- | **The three responses the driver cannot act on itself**: each named a file,
+-- | **The four responses the driver cannot act on itself**: each named a file,
 -- and reading files is this module\'s (§12 invariant 4).
 --
 -- Written once (2026-09-13) because there are now two callers — the interactive
@@ -185,4 +202,7 @@ following s resp = case resp of
   ProofRequested path  -> Just (loadProofFile s path)
   -- Several paths rather than one — a load replaces the whole ordered list.
   RulesRequested paths -> Just (loadRuleFiles s paths)
+  -- The same read, a different install: a consult pushes onto the pool where a
+  -- load replaces it (MS11 phase 271).
+  ConsultRequested paths -> Just (consultRuleFiles s paths)
   _                    -> Nothing

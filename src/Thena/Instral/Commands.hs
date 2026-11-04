@@ -125,6 +125,7 @@ commands =
   , one ":accepts"
   , one ":produces"
   , one ":load"
+  , one ":consult"
   , one ":theorem"
   , one ":resume"
   -- Optional: the focus, or a term written out.

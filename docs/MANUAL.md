@@ -1362,6 +1362,28 @@ it out loud instead.
 A script is command lines, run in order, and the output is everything those
 lines would have printed at the prompt.
 
+### `:consult` puts a rule base on top of the stack
+
+`:load rules …` replaces every base you had with the ones you name. `:consult`
+**adds** instead: the bases you name go on top of the stack, and everything
+already there goes on being searched underneath them.
+
+*From a fresh session.*
+
+```
+thena spine> :consult examples/choice-points.thena.rules
+loaded demo (3 rules)
+loaded standard (120 rules)
+```
+
+**The last thing you consulted is tried first.** The shipped base is consulted for
+you when the session starts, so it sits at the bottom and is tried last — which is
+why a tactic of your own gets a chance before anything general does. Consulting the
+same file twice really does put it on twice; nothing is deduplicated.
+
+Like `:load rules`, it is refused while a proof is open or suspended: the base may
+not change under a half-built development.
+
 *From a fresh session.*
 
 ```
@@ -1566,6 +1588,7 @@ language and elaborated on load.
 | `:trust none` / `no-undischargeable` / `any` | how much unproved typing to allow |
 | `:load ‹path›` | a proof module, a script, or rule bases |
 | `:load proof` / `rules` / `script` | say which, rather than by extension |
+| `:consult ‹path›` | push rule bases on top of the search stack |
 | `:bases` / `:rules` | the loaded rule bases / the rules in them |
 | `:help` | this table, in one screen |
 | `:quit` | exit |

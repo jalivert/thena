@@ -55,6 +55,7 @@ a bare word acts, a word with a colon looks.
   :revalidate                   recheck the whole development
   :load ‹path›                  a proof module, a script, or rule bases
   :load proof / rules / script  say which, rather than by extension
+  :consult ‹path›               push rule bases on top of the search stack
   :help                         this list
   :quit                         leave
 

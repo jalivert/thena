@@ -99,7 +99,7 @@ unknown w = case snd (command withRules w) of
 everyColonCommand :: [String]
 everyColonCommand =
   [ ":help", ":quit", ":core", ":surface", ":dev", ":show", ":elim", ":judgment", ":where", ":matches", ":accepts", ":produces"
-  , ":choices", ":goal", ":whnf", ":infer", ":parse", ":done", ":load", ":bases", ":rules"
+  , ":choices", ":goal", ":whnf", ":infer", ":parse", ":done", ":load", ":consult", ":bases", ":rules"
   , ":revalidate", ":extract", ":theorem", ":suspend", ":resume", ":abandon"
   , ":proofs", ":undo", ":convert", ":step", ":run", ":trust"
   ]
