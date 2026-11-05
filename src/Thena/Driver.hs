@@ -54,6 +54,8 @@ module Thena.Driver
   , moduleImports
   , moduleLoaded
   , modulesLoaded
+  , moduleDeclaring
+  , declaredByModule
   , RuleFileError (..)
   , InstralTypeError
   , loadRuleBases
@@ -373,14 +375,35 @@ data Session = Session
     -- diamond in the import graph reaches the same module twice, and
     -- re-elaborating it would collide with its own declarations. **Keyed by the
     -- module name and not by the header's**, because the name is what an
-    -- @import@ writes and a header's is only a claim about where the file sits;
-    -- a file loaded by a path that is no module name — every numbered example —
-    -- adds nothing here and is simply never deduplicated against.
+    -- @import@ writes and a header's is only a claim about where the file sits.
+    -- A file loaded by a path that is no module name — one with a hyphen in a
+    -- step, as several unnumbered examples have — adds nothing here and is
+    -- simply never deduplicated against.
     --
     -- **Not in a 'Snapshot'**, the same partition @globals@ sits in (§7.7): the
     -- environment only grows and this is a record of what is in it. A load that
     -- fails takes it back with everything else, because 'rolledBack' restores
     -- the session as it stood.
+  , sessionDeclaredBy :: [(ModuleName, [GlobalName])]
+    -- ^ **which module declared which globals** (MS11 phase 280), most recently
+    -- loaded first. The addition every part of visibility rides on: nothing can
+    -- be narrowed while a global carries no record of where it came from.
+    --
+    -- **The names are the keys that ARRIVED, not the ones the file wrote.** It
+    -- is the difference between 'declaredNames' of the environment before the
+    -- module and after it, so a datatype's generated names — @LC.subst-x@,
+    -- @Nat.elim@, everything under @‹D›.lemmata@ — belong to the module whose
+    -- @data@ block produced them, which is the only answer an export list can
+    -- use. The items a module /wrote/ are 'declaredNames'\' business and are
+    -- what 'ProofLoaded' reports; they are not the same list.
+    --
+    -- **An entry only where there is a module name to key it by.** A file
+    -- reached by no name, and anything typed at the prompt, declares globals
+    -- that belong to no module — said as an absence rather than invented, the
+    -- same way 'readModuleName' says it.
+    --
+    -- **Not in a 'Snapshot'**, for 'sessionLoaded''s reason: it is a record of
+    -- what is in an environment that only grows.
   }
   deriving (Eq, Show)
 
@@ -615,6 +638,7 @@ newSession = Session
   , sessionParsing   = Nothing
   , sessionAsking    = Nothing
   , sessionLoaded    = []
+  , sessionDeclaredBy = []
   }
   where
     (ps, n) = newDevelopment 0
@@ -1840,15 +1864,29 @@ loadProofModules s0 = go s0 []
       let pool = maybe (rules (sessionMachine s)) id (readModulePool m)
        in case loadProofItemsConsulting pool s (moduleText (readModuleHeader m))
                                         (readModuleItems m) of
-        (s', r@(ProofLoaded {})) -> go (marked (readModuleName m) s') (r : acc) rest
+        (s', r@(ProofLoaded {})) -> go (marked s (readModuleName m) s') (r : acc) rest
         -- 'loadProofItemsConsulting' has already put this module's own
         -- declarations back; this takes the closure's with them.
         (s', bad)                -> (rolledBack s0 s', Left (m, bad))
 
-    marked Nothing s = s
-    marked (Just n) s
+    -- **The names are read off the two environments, not off the items** (MS11
+    -- phase 280): what a @data@ block generates arrives during elaboration and
+    -- is as much the module's as what it wrote.
+    marked _      Nothing  s = s
+    marked before (Just n) s
       | moduleLoaded n s = s
-      | otherwise        = s { sessionLoaded = n : sessionLoaded s }
+      | otherwise =
+          s { sessionLoaded     = n : sessionLoaded s
+            , sessionDeclaredBy = (n, arrived before s) : sessionDeclaredBy s
+            }
+
+    -- **Deduplicated, because 'Env.declaredNames' is four tables concatenated**
+    -- and a constructor is in two of them: a key naming its module twice would
+    -- make any count taken off this list wrong.
+    arrived before after =
+      let had = Env.declaredNames (globals (sessionMachine before))
+       in nub (filter (`notElem` had)
+                      (Env.declaredNames (globals (sessionMachine after))))
 
 -- | A module read off the disc and ready to elaborate (MS11 phase 274).
 --
@@ -1892,6 +1930,25 @@ moduleLoaded n s = n `elem` sessionLoaded s
 -- there is nothing to put in it: nothing can import such a file.
 modulesLoaded :: Session -> [ModuleName]
 modulesLoaded = sessionLoaded
+
+-- | Which module declared this global, where one did (MS11 phase 280).
+--
+-- **'Nothing' is an answer and not a failure**: a global typed at the prompt, or
+-- declared by a file reached by no module name, belongs to no module. What that
+-- means for whether an export list can hide it is \@~jmw4k\@\'s and is not
+-- decided here — this says only where the name came from.
+moduleDeclaring :: GlobalName -> Session -> Maybe ModuleName
+moduleDeclaring g s =
+  case [ n | (n, gs) <- sessionDeclaredBy s, g `elem` gs ] of
+    n : _ -> Just n
+    []    -> Nothing
+
+-- | The other direction: every global a module brought in (MS11 phase 280).
+--
+-- **Empty for a module that is not in**, which is the same answer as for one
+-- that declared nothing; 'moduleLoaded' is the question about being in.
+declaredByModule :: ModuleName -> Session -> [GlobalName]
+declaredByModule n s = concat [ gs | (m, gs) <- sessionDeclaredBy s, m == n ]
 
 -- | Put the session back as it was, carrying the fresh counter forward.
 --

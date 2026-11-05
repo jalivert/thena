@@ -19,6 +19,8 @@ import Data.Maybe (isJust)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
+import Data.List (nub)
+
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (Core (..), rootName)
 import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..), Warning (..))
@@ -44,13 +46,16 @@ import Thena.Driver
   , moduleOfFile
   , modulesLoaded
   , moduleText
+  , declaredByModule
+  , moduleDeclaring
   , newSession
   , oneLine
   , parseSurfaceModule
   )
 import Thena.Engine (Development, Machine (..), development)
 import Thena.Files (rulesPath)
-import Thena.Core.Term (substLevelsIn)
+import Thena.Core.Term (nameDotted, substLevelsIn)
+import qualified Thena.Global.Env as Env (declaredNames)
 import Thena.Global.Env
   ( Definition (..)
   , lookupDefinition
@@ -346,6 +351,63 @@ importTests =
       (_, out, trouble) <- loadProofFile s0 "test/modules/Misnamed.thena"
       assertBool (show (map (renderResponse s0) out)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Elsewhere"]
+
+  , -- **The one addition every part of visibility rides on** (MS11 phase 280):
+    -- nothing can be narrowed while a global carries no record of where it came
+    -- from. @Lang.thena@ declares a token class and a language inside a
+    -- @namespace@, so what lands is @A.x@ and everything under @A.LC@ — the
+    -- datatype itself among them, as @A.LC.LC@, since a type lives inside its
+    -- own namespace (his design of 2026-10-29).
+    testCase "a module's globals are recorded as its own" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadProofFile s0 "test/modules/Lang.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      let mine = map nameDotted (declaredByModule (named' "test.modules.Lang") s1)
+      assertBool (show mine) (all (`elem` mine) ["A.x", "A.LC.LC"])
+
+  , -- **A key is named once however many tables hold it.** A constructor is in
+    -- two of the four 'Env.declaredNames' concatenates, so the list would carry
+    -- it twice without the dedup, and anything counted off it would be wrong.
+    testCase "and each of them once" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      let mine = map nameDotted (declaredByModule (named' "test.modules.Lang") s1)
+      length mine @?= length (nub mine)
+
+  , -- **The keys that ARRIVED, not the items the file wrote**, which is the whole
+    -- reason this is a difference of two environments: a generated name belongs
+    -- to the module whose declaration produced it, and an export list has no
+    -- other answer available to it.
+    testCase "and the names its declarations generated with them" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      let mine = map nameDotted (declaredByModule (named' "test.modules.Lang") s1)
+      -- The language's productions and its generated substitution, none of
+      -- which is written as a declaration anywhere in the file.
+      assertBool (show mine)
+        (all (`elem` mine) ["A.LC.var", "A.LC.app", "A.LC.subst-x"])
+
+  , testCase "a global says which module declared it" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      case [ g | g <- declaredByModule (named' "test.modules.Lang") s1
+               , nameDotted g == "A.LC.var" ] of
+        g : _ -> fmap moduleText (moduleDeclaring g s1)
+                   @?= Just "test.modules.Lang"
+        []    -> assertFailure "A.LC.var is not among the module's names"
+
+  , -- **An absence and not an invented answer.** @0unnameable.thena@ is reached
+    -- by no module name, so what it declares belongs to no module — the same
+    -- thing that is true of anything typed at the prompt. Whether an export list
+    -- can say anything about such a name is `~jmw4k`'s and is not decided here.
+    testCase "and a file reached by no name declares for no module" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/0unnameable.thena"
+      let known = [ g | g <- Env.declaredNames (globals (machineOf s1))
+                      , nameDotted g == "Three.Three" ]
+      case known of
+        g : _ -> moduleDeclaring g s1 @?= Nothing
+        []    -> assertFailure "Three.Three was not declared"
 
   , testCase "a cycle is refused, and names the path the walk took" $ do
       (s0, _) <- startingSession
