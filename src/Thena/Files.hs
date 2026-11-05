@@ -47,7 +47,7 @@ import Thena.Driver
   , readModulePath
   , ruleBaseImports
   , rolledBack
-  , moduleConsults
+  , consultedPool
   , moduleImports
   , moduleFile
   , moduleLoaded
@@ -62,7 +62,6 @@ import Thena.Driver
   , loadSource
   , newSession
   )
-import Thena.Rules (RuleBase)
 
 -- | What went wrong to a file, with nothing rendered.
 --
@@ -309,10 +308,10 @@ gather s stack done m = do
 -- 274) — which is what puts the list in dependency order: a module is appended
 -- after everything it imports, and the one the user asked for is last.
 --
--- That order is the whole of what @import@ does today. **Which of an imported
--- module's names the importer may then write is not settled** — that is
--- @exporting ( … )@ and @public import@, and until they are built everything an
--- imported module declared is reachable.
+-- **And it is that order the pool depends on** (MS11 phase 288): a module is
+-- searched against whatever the modules it imports published, so those modules
+-- have to be gathered before 'Thena.Driver.consultedPool' is asked what this
+-- one's pool is. @done'@ and not @done@ is the whole of that.
 --
 -- @stack@ is the modules on the path from the root, innermost first; @done@ is
 -- what has been gathered so far.
@@ -320,12 +319,29 @@ assemble
   :: Session -> [ModuleName] -> [ReadModule] -> Maybe ModuleName -> FilePath
   -> ModuleName -> [Item] -> IO (Either Trouble [ReadModule])
 assemble s stack done as path nm items = do
-  walked <- imports s (maybe stack (: stack) as) done (moduleImports items)
+  walked <- imports s inner done (moduleImports items)
   case walked of
     Left t      -> pure (Left t)
     Right done' -> do
-      pool <- consulted s path (moduleConsults items)
-      pure (fmap (\p -> done' ++ [ReadModule path as nm p items]) pool)
+      got <- consulted (consultedPool s done' items)
+      case got of
+        Left t     -> pure (Left t)
+        -- **THE MODULES THOSE BASES IMPORT ARE DEPENDENCIES OF THIS ONE TOO**
+        -- (MS11 phase 288), walked after this module's own and so loaded before
+        -- it. It is 'ruleFilesWith''s rule for a base consulted at the prompt,
+        -- said for a base consulted by a file: a base is resolved against the
+        -- session's grammars, so the surface module declaring the language it
+        -- talks about has to be in. Without this a file could consult only a
+        -- base that depended on nothing — which is no base worth consulting.
+        Right srcs -> do
+          walked' <- imports s inner done' (concatMap stated (maybe [] id srcs))
+          pure (fmap (\d -> d ++ [ReadModule path as nm srcs items]) walked')
+  where
+    inner = maybe stack (: stack) as
+    -- It did not parse. **Said by the read and not here**, so the position is
+    -- in the message: 'Thena.Driver.consultRuleBases' refuses it when the pool
+    -- is resolved, with the position in it.
+    stated (_, src) = either (const []) id (ruleBaseImports src)
 
 -- | One module's imports, each walked in turn (MS11 phase 274).
 --
@@ -350,26 +366,27 @@ imports s stack done (m : rest)
         Left t      -> pure (Left t)
         Right done' -> imports s stack done' rest
 
--- | The bases a module consults, read (MS11 phase 273), or 'Nothing' where it
--- consults none and is therefore elaborated against the session's own pool.
+-- | The text of every base a module is searched against (MS11 phase 273), or
+-- 'Nothing' where there are none and it is therefore elaborated against the
+-- session's own pool.
 --
--- 'consultRuleBases' is reused for the reading, the all-or-nothing and the
--- inference; the session it answers with is dropped and only the pool is kept,
--- because **a surface file's consults are not the session's** (his ruling,
--- 2026-11-03).
-consulted
-  :: Session -> FilePath -> [ModuleName] -> IO (Either Trouble (Maybe [RuleBase]))
-consulted _ _ [] = pure (Right Nothing)
-consulted s about ms = do
+-- **READING ONLY, SINCE MS11 PHASE 288** — the resolution is
+-- 'Thena.Driver.loadProofModules'\'s, at the module's turn in the load, and
+-- 'Thena.Driver.readModulePool' says why it had to move. What stays here is the
+-- disc: every base is read before any module installs, which is the
+-- all-or-nothing the whole closure promises.
+--
+-- **In the order 'Thena.Driver.consultedPool' gave them**, which is the order
+-- the pool goes in and so the order they are read in: an 'Unreadable' names the
+-- first base that would have been tried.
+consulted :: [ModuleName] -> IO (Either Trouble (Maybe [(FilePath, String)]))
+consulted [] = pure (Right Nothing)
+consulted ms = do
   let paths = map (moduleFile LoadRules) ms
   reads' <- mapM (\p -> fmap ((,) p) (try (readFile p))) paths
   pure $ case [ (p, e) | (p, Left e) <- reads' ] of
     (p, e) : _ -> Left (Unreadable p e)
-    [] -> case consultRuleBases s [ (p, c') | (p, Right c') <- reads' ] of
-      (_, BasesLoaded pool) -> Right (Just pool)
-      (_, bad)              -> Left (Unloadable (headOr about paths) bad)
-  where
-    headOr d xs = case xs of { x : _ -> x ; [] -> d }
+    []         -> Right (Just [ (p, c') | (p, Right c') <- reads' ])
 
 -- | **The four responses the driver cannot act on itself**: each named a file,
 -- and reading files is this module\'s (§12 invariant 4).

@@ -55,13 +55,12 @@ printItem i = case i of
   ItemOpen o -> [opens [o]]
   -- **One line, and the module's name as written** (MS11 phase 273). A consult
   -- declares nothing, so a file printed without it would read back and then be
-  -- searched against the wrong bases.
-  ItemConsult m -> ["consult " ++ moduleText m]
+  -- searched against the wrong bases — and without its @public@ (MS11 phase
+  -- 288) a file that read back would stop handing the base on.
+  ItemConsult r m -> [ reaching r ++ "consult " ++ moduleText m ]
   -- **The same, for the same reason** (MS11 phase 274): a file printed without
   -- its imports would read back and then not elaborate at all.
-  ItemImport r m -> [ word r ++ "import " ++ moduleText m ]
-    where word Own    = ""
-          word Public = "public "
+  ItemImport r m -> [ reaching r ++ "import " ++ moduleText m ]
   -- **Never printed here** (MS11 phase 285) — it is the header's and
   -- 'printSurfaceModule' puts it back there. A module printed item by item
   -- without the header has no place for it.
@@ -85,6 +84,15 @@ printItem i = case i of
   ItemNamespace g is ->
     ("namespace " ++ nameDotted g ++ " where")
       : map ("  " ++) (intercalate [""] (map printItem is))
+
+-- | The word in front of an @import@ or a @consult@ that travels (MS11 phase
+-- 288).
+--
+-- **One printer for both acts**, because @public@ means the same thing in front
+-- of either: 'Thena.Surface.Concrete.Reach' is an attribute of the act.
+reaching :: Reach -> String
+reaching Own    = ""
+reaching Public = "public "
 
 -- | The @open@ line of an @open … in@, without its @in@ (MS10 phase 254).
 --

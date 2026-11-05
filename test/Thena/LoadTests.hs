@@ -41,6 +41,11 @@ import Thena.Driver
   , loadProofSource
   , loadRuleBases
   , loadSource
+  , moduleConsults
+  , consultedPool
+  , publicPushes
+  , publishedBy
+  , Published (..)
   , moduleImports
   , moduleLoaded
   , moduleName
@@ -109,7 +114,142 @@ tests =
     , testGroup "a header states the file's interface (MS11 phase 285)" exportTests
     , testGroup "a declaration may be the file's own (MS11 phase 286)" privateTests
     , testGroup "an import may travel (MS11 phase 287)" publicImportTests
+    , testGroup "a consult may travel (MS11 phase 288)" publicConsultTests
     ]
+
+-- --------------------------------------------------------------------------
+-- A consult may travel, and consults are a stack (MS11 phase 288, @~jmw4k@)
+-- --------------------------------------------------------------------------
+
+-- | __@public consult@, and the two defects building it uncovered.__
+--
+-- His ruling of 2026-10-30 is that @public@ is available to both acts, so a
+-- surface file hands on the tooling it was written against — @import Stlc@
+-- brings rules exactly when @Stlc@ wrote @public consult@, and a surface file
+-- still has no rules of its own.
+--
+-- **@marker@ is the observable throughout**: it is a rule in
+-- @Tooling.thena.rules@ and nowhere else, so a @do@ block that calls it
+-- resolves exactly when that base is in the module\'s pool. @MissesTooling@ is
+-- the control — the same block behind a plain @consult@ — and it is refused.
+publicConsultTests :: [TestTree]
+publicConsultTests =
+  [ -- **A base a file consults may state its own dependencies**, which until
+    -- this phase it could not: the base is resolved against the session\'s
+    -- grammars, and a gathered module is not loaded until the whole closure is,
+    -- so every base with an @import@ was refused — including one the consulting
+    -- file imported itself. The fix reads the disc when the file is gathered and
+    -- resolves the pool at the module\'s turn in the load.
+    testCase "a file may consult a base that imports a surface module" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/Keeps.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      -- **The base\'s own dependency joined the closure**, and before this
+      -- module: nothing in @Keeps.thena@ names @Lang@.
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.Lang", "test.modules.Keeps"]
+
+  , -- **Two consults, two bases, both in the pool**, which is what makes the
+    -- order below a question at all.
+    testCase "two consult lines put both bases in the pool" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/Stacked.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
+
+  , -- **THE LAST LINE WRITTEN IS TRIED FIRST**, which is @DECISIONS.md@,
+    -- /Consults are a STACK/, and his ruling of 2026-11-03. Until this phase a
+    -- file\'s consults went into the pool as written and the first line was
+    -- tried first; no file in the corpus and no fixture had two @consult@
+    -- lines, so the suite stayed green over the opposite of the published rule.
+    testCase "a file's consults are a stack, so the last line is tried first" $ do
+      (s0, _) <- startingSession
+      let src = unlines [ "module M where"
+                        , "consult test.modules.Tooling"
+                        , "consult test.modules.Louder" ]
+      case parseSurfaceModule src of
+        Right (_, items) ->
+          map moduleText (consultedPool s0 [] items)
+            @?= ["test.modules.Louder", "test.modules.Tooling"]
+        Left e -> assertFailure (show e)
+
+  , -- **A public consult travels one hop**, and the plain one does not:
+    -- @MissesTooling@ is the same @do@ block behind @Keeps@.
+    testCase "a public consult reaches whoever imports the file" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsTooling.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
+
+  , testCase "and a plain consult does not" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/MissesTooling.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "no rule or function is called marker")
+                               (renderResponse s0 r))
+        _   -> assertFailure (show (map (renderResponse s0) out))
+
+  , -- **AND IT IS A CLOSURE, as a public import is**: what travels is what the
+    -- module I imported /got/, so a @public import@ hands a @public consult@ on.
+    testCase "a public import passes a public consult on" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsPassedTooling.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
+
+  , -- **And a plain import ends the chain**, which is the same word doing the
+    -- same thing one level up: @KeepsPublisher@ imports the publisher plainly.
+    testCase "and a plain import does not" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/MissesPassedTooling.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "no rule or function is called marker")
+                               (renderResponse s0 r))
+        _   -> assertFailure (show (map (renderResponse s0) out))
+
+  , -- **THE OTHER END OF THE WALK**: a publisher already in the session is
+    -- answered from `sessionPublishes` rather than from its items, and the two
+    -- have to agree or a module would mean one thing loaded with its publisher
+    -- and another thing loaded after it.
+    testCase "a publisher already in the session publishes the same base" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadProofFile s0 "test/modules/Publishes.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      map moduleText (publishedBy (named' "test.modules.Publishes") s1)
+        @?= ["test.modules.Tooling"]
+      -- And a module loaded against that session gets it, with nothing left to
+      -- gather.
+      (_, out, trouble') <- loadProofFile s1 "test/modules/GetsTooling.thena"
+      assertBool (show (map (renderTrouble s1) trouble')) (null trouble')
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
+
+  , -- **The spine is what is stored, and both acts are on it in written
+    -- order** — a flattened list could not say that a published import's bases
+    -- belong where its line stood.
+    testCase "both public acts are on the published spine, in written order" $ do
+      let src = unlines [ "module M where"
+                        , "public consult test.modules.Tooling"
+                        , "public import test.modules.Bit"
+                        , "consult test.modules.Louder" ]
+      case parseSurfaceModule src of
+        Right (_, items) ->
+          publicPushes items
+            @?= [ PublishedBase (named' "test.modules.Tooling")
+                , PublishedFrom (named' "test.modules.Bit") ]
+        Left e -> assertFailure (show e)
+
+  , -- **A plain consult is on nobody's spine and still in the file's own
+    -- pool**, which is the whole of what 'Reach' changes.
+    testCase "a plain consult is the file's own and travels to nobody" $ do
+      let src = "module M where\n\nconsult test.modules.Tooling\n"
+      case parseSurfaceModule src of
+        Right (_, items) -> do
+          publicPushes items @?= []
+          map moduleText (moduleConsults items) @?= ["test.modules.Tooling"]
+        Left e -> assertFailure (show e)
+  ]
 
 -- --------------------------------------------------------------------------
 -- A module resolves against its imports, its own declarations and the
@@ -2040,7 +2180,8 @@ privateIn' src = case parseSurfaceModule src of
 
 -- | __@public import@, which is the whole of transitivity.__
 --
--- His ruling of 2026-11-03: /I get whatever the thing I am importing got/.
+-- His ruling of 2026-11-03: under @public@, and only under @public@, you get
+-- what the file you imported got.
 --
 -- **The pair here is @Pair@ against @PassesBit@**, which differ by the one
 -- word: @OnlyPair@ imports @Pair@ and is refused for writing @Bit.Bit@, and

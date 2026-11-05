@@ -626,6 +626,18 @@ imported wrote `public`, you get what it got.** Without `public`, you don't — 
 consults X and B imports A, B's own proofs do not see X's rules, and B asking for them
 is one explicit line that fails loudly if it is missing.
 
+**So a surface file can hand rules on, and never contains any.** A library writes
+
+```
+module Stlc exporting ( Term Ty ) where
+
+public consult Stlc.Tactics      -- and now `import Stlc` brings these rules too
+```
+
+and whoever writes `import Stlc` is searched against `Stlc.Tactics` as well, at the
+position of their `import` line. It travels as far as the `public` lines go: a file
+that wrote `public import Stlc` hands the same rules on again.
+
 **What `import` does today is load.** The module it names is elaborated before the
 file that imports it, so a file states its dependencies instead of relying on the
 session having loaded them in the right order:
@@ -848,8 +860,10 @@ back whatever it brought in: you never end up with half of it.
 
 ### Consults are a STACK, and clauses are a queue
 
-*Decided 2026-11-03. The stack and `:consult` at the prompt are built — MS11 phase
-271. A `consult` line written inside a file is not built yet.*
+*Decided 2026-11-03. Built: the stack and `:consult` at the prompt at MS11 phase
+271, a `consult` line written in a file at phase 273, and `public consult` at phase
+288. A `consult` written **inside a block** — the `do` below — is not built; which
+constructs end one is still open.*
 
 **The last thing you consulted is tried first.** That is the whole rule, and it does
 not matter how deep in a namespace you are standing:
@@ -868,12 +882,25 @@ out of the stack rather than being a rule of its own. **A consult reaches to the
 of the block it is written in**, so the one in that `do` block applies there and
 nowhere else.
 
-**It is *stack-like* rather than exactly a stack**, in one respect: consulting a file
+**It is *stack-like* rather than exactly a stack**, in one respect: importing a file
 that published its own dependencies with `public consult` pushes all of them as a
 single group, in the order that file wrote them, at the position of the line that
 brought them in. And consulting the same base twice really does push it twice — the
 upper copy can go out of scope while the lower one is still in force, so the earlier
-push cannot be dropped or moved.
+push cannot be dropped or moved, and a file reached along two arms of a diamond
+publishes its base down each of them.
+
+**A base may state its own dependencies, and they become yours.** A rule base is
+read against the languages the session holds, so a base that `import`s the surface
+module declaring the language it talks about has that module loaded before it — and
+loaded *for* you, before the file that consulted the base. You do not have to name it
+yourself:
+
+```
+module Proofs where
+
+consult Stlc.Tactics     -- which imports Stlc.Terms, so Stlc.Terms is loaded first
+```
 
 **This is the order the engine tries rules in when no name is given** — you at a
 hole, `:matches`, `prove`. A rule called *by name* is found by the ordinary name

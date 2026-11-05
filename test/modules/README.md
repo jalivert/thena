@@ -44,3 +44,22 @@ nobody inherits, because the block is where it ends (`~ckmsk`).
 one declares a language, the other imports it and borrows its metavariable, writing its
 own `open` rather than inheriting one. Before the phase that pair was two module
 sources loaded into one session, which measured the session and not the import.
+
+**Nine of them are MS11 phase 288's**, `public consult`. `Tooling.thena.rules` is the
+only place a rule called `marker` exists, so a `do` block that calls it resolves
+exactly when that base is in the module's pool — which is what every one of these
+measures. It also `import`s `Lang.thena`, which is the point: before this phase a file
+could consult only a base that depended on nothing.
+
+- `Keeps.thena` consults it plainly and calls `marker`, and **names `Lang` nowhere** —
+  the base's own dependency joins the closure.
+- `Stacked.thena` consults `Tooling` and `Louder` and calls a rule from each, so two
+  bases really are in one pool. `Louder.thena.rules` imports nothing and is the second
+  base purely so the order has two things to order.
+- `Publishes.thena` writes `public consult test.modules.Tooling` and declares nothing
+  else. `GetsTooling.thena` imports it and calls `marker`; `MissesTooling.thena` is the
+  control, importing `Keeps.thena` instead, and is refused.
+- `PassesTooling.thena` writes `public import test.modules.Publishes` and
+  `GetsPassedTooling.thena` imports that — the closure, since what travels is what the
+  imported module *got*. `KeepsPublisher.thena` is the plain-import half and
+  `MissesPassedTooling.thena` imports it and is refused.

@@ -339,7 +339,12 @@ Decl :: { SurfaceDecl }
   -- **What this file's proofs are searched against** (MS11 phase 273, his ruling
   -- of 2026-11-03). It names a /file/ and not a namespace, which is why it takes
   -- a @QName@ and means something else by it: the steps are directories.
-  | consult QName                          { SurfaceConsult (fst $2) (snd $2) }
+  | consult QName                          { SurfaceConsult Own (fst $2) (snd $2) }
+  -- **A consult that travels** (MS11 phase 288, his ruling of 2026-10-30 that
+  -- @public@ is available to both acts): whoever imports this file is searched
+  -- against this base too. The @public import@ production below is the twin,
+  -- and @public@ is one word's worth of difference in both.
+  | public consult QName                   { SurfaceConsult Public (fst $3) (snd $3) }
   -- **Which surface modules this file depends on** (MS11 phase 274, his ruling
   -- of 2026-11-03). A @QName@ again, and the steps are directories again: a
   -- file states what it refers to and never relies on the session.

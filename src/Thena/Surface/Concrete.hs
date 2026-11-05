@@ -359,20 +359,22 @@ data SurfaceOpenSpec
     -- decision about identifiers rather than about @open@.
   deriving (Eq, Show)
 
--- | __Whether an @import@ passes on what it brought__ (MS11 phase 287,
--- @~jmw4k@).
+-- | __Whether an @import@ or a @consult@ passes on what it brought__ (MS11
+-- phase 287 for the import, 288 for the consult, @~jmw4k@).
 --
--- **His ruling of 2026-11-03 is the whole of transitivity** — /"I get whatever
--- the thing I am importing\/consulting got"/ — so 'Public' is one word on one
--- line and there is nothing else to say about it.
+-- **His ruling of 2026-11-03 is the whole of transitivity**: under @public@,
+-- and only under @public@, you get what the file you imported or consulted got
+-- (@DECISIONS.md@, /\`public\` is how a dependency travels/). So 'Public' is one
+-- word on one line and there is nothing else to say about it.
 --
--- **An attribute of the import and not a second kind of import**: what @public@
--- changes is who else may name what came, never what is loaded or in what
--- order, so everything that walks imports ignores it and only the resolver's
--- subtraction reads it.
+-- **An attribute of the act and not a second kind of act**: what @public@
+-- changes is who else gets what came, never what is loaded or read, so
+-- everything that walks imports or collects a file's own consults ignores it.
+-- On an @import@ only the resolver's subtraction reads it; on a @consult@ only
+-- the pool assembly does.
 data Reach
-  = Own     -- ^ @import X@ — this module's own dependency
-  | Public  -- ^ @public import X@ — and its importers' too
+  = Own     -- ^ @import X@, @consult X@ — this module's own dependency
+  | Public  -- ^ @public import X@, @public consult X@ — and its importers' too
   deriving (Eq, Show)
 
 data SurfaceDecl
@@ -420,9 +422,11 @@ data SurfaceDecl
     -- > two = succ zero
     --
     -- is one declaration under one @open@, and @succ@ resolves in both lines.
-  | SurfaceConsult [String] String
-    -- ^ @consult ‹module›@ — **what this file's proofs are searched against**
-    -- (MS11 phase 273, his ruling of 2026-11-03).
+  | SurfaceConsult Reach [String] String
+    -- ^ @consult ‹module›@, or @public consult ‹module›@ — **what this file's
+    -- proofs are searched against** (MS11 phase 273, his ruling of
+    -- 2026-11-03), and whether that base travels to whoever imports this file
+    -- (phase 288).
     --
     -- The steps and the last word of a **file's** name, the same shape
     -- 'SurfaceOpen' uses for a namespace's and meaning something different by
@@ -435,6 +439,11 @@ data SurfaceDecl
     -- whenever this module is elaborated and does not leak to whoever loaded
     -- it, which is what makes a module that type-checks in isolation type-check
     -- for whoever imports it.
+    --
+    -- **@public@ is the one way it reaches further** (phase 288): an importer of
+    -- this file is searched against a @public consult@\'s base too, at the
+    -- position of the @import@ line that brought it in. A surface file still
+    -- has no rules of its own — it hands on a base and never contains one.
   | SurfaceImport Reach [String] String
     -- ^ @import ‹module›@, or @public import ‹module›@ — **which surface
     -- modules this file depends on** (MS11 phase 274, his ruling of

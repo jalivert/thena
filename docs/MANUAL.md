@@ -1499,8 +1499,28 @@ force at the prompt too, for the same reason.
 
 > **What you reach is up to the file you imported.** It says what it offers with
 > `exporting` and `private`, below, and passes its own dependencies on with
-> `public import`. One thing is still missing: a file cannot yet hand on a *rule base*
-> it consults, so if you import a file whose proofs rely on one, consult it yourself.
+> `public import` and `public consult`.
+
+**A file can hand on a rule base, and `public consult` is how.** A surface file has
+no rules of its own, but it can say that the tooling its proofs were written against
+travels with it:
+
+```
+module Stlc exporting ( Term ) where
+
+public consult Stlc.Tactics        -- and now `import Stlc` brings these rules too
+```
+
+Whoever writes `import Stlc` is searched against `Stlc.Tactics` as well, pushed where
+their `import` line stands. Without the word it stays the publisher's own: `consult
+Stlc.Tactics` means those rules apply while `Stlc` is being elaborated and nowhere
+else, and an importer who wants them writes a `consult` of their own. It travels as
+far as the `public` lines go — a file that wrote `public import Stlc` hands the same
+rules on again.
+
+**A base you consult brings its own dependencies with it.** A rule base that talks
+about a language `import`s the surface module declaring it, and that module is loaded
+for you, before the file that consulted the base — you do not name it yourself.
 
 ### `exporting` says which of your declarations other files may name
 

@@ -61,6 +61,10 @@ module Thena.Driver
   , privateIn
   , publicImports
   , publicImportsOf
+  , Published (..)
+  , publicPushes
+  , publishedBy
+  , consultedPool
   , Interface (..)
   , interfaceOf
   , exports
@@ -422,10 +426,27 @@ data Session = Session
     -- phase 287, @~jmw4k@) — what its @public import@ lines named.
     --
     -- **Read only by 'concealedFrom', and it is what makes that subtraction a
-    -- CLOSURE rather than one hop.** His ruling of 2026-11-03 is /"I get
-    -- whatever the thing I am importing got"/, so a module reaches its imports\'
-    -- exports and then whatever those imports passed on, as far as the @public@
-    -- lines go.
+    -- CLOSURE rather than one hop.** His ruling of 2026-11-03: under @public@,
+    -- and only under @public@, you get what the file you imported got — so a
+    -- module reaches its imports\' exports and then whatever those imports
+    -- passed on, as far as the @public@ lines go. @DECISIONS.md@, /\`public\` is
+    -- how a dependency travels/, is where that is written for a user.
+  , sessionPublishes :: [(ModuleName, [Published])]
+    -- ^ __What each module hands on to whoever imports it__ (MS11 phase 288,
+    -- @~jmw4k@) — its @public consult@ and @public import@ lines, in the order
+    -- it wrote them.
+    --
+    -- **The spine and not the bases it reaches**, which is what keeps the
+    -- order right: a @public import@ contributes whatever that module
+    -- publishes, at the position of its own line, so what travels is
+    -- 'publishedBy''s walk over this and not a list that could be flattened
+    -- when it was stored. 'consultPushes' is the other end.
+    --
+    -- **It overlaps 'sessionPublicImports' and the two are not one field.**
+    -- This one is positional and is read for the search order; that one is a
+    -- set of modules and is read for which names are in scope. A module that
+    -- publishes a base and one that publishes a module's names are the same
+    -- line to a reader and two different questions to the resolver.
   , sessionPrivateIn :: [(ModuleName, [GlobalName])]
     -- ^ __Which of each module's declarations it kept to itself__ (MS11 phase
     -- 286, @~jmw4k@) — what its @private@ declarations named.
@@ -701,6 +722,7 @@ newSession = Session
   , sessionAsking    = Nothing
   , sessionLoaded    = []
   , sessionPublicImports = []
+  , sessionPublishes  = []
   , sessionPrivateIn  = []
   , sessionExporting  = []
   , sessionDeclaredBy = []
@@ -1442,13 +1464,20 @@ data Item
     -- **A list of items because a declaration is one item here**, and the list
     -- is what makes the shape the same as 'ItemNamespace'\'s: both are a scope
     -- with contents, and 'surfaceProgram' treats them the same way.
-  | ItemConsult ModuleName
+  | ItemConsult Reach ModuleName
     -- ^ @consult ‹module›@ (MS11 phase 273) — **a rule base this module's
-    -- proofs are searched against**, named as a file and not as a namespace.
+    -- proofs are searched against**, named as a file and not as a namespace,
+    -- and under @public@ one that travels to this module's importers (phase
+    -- 288).
     --
     -- It declares nothing and runs nothing, so 'surfaceProgram' emits no
     -- instruction for it: what it does happens before the program does, when
     -- the load collects every one of them and says which files it needs.
+    --
+    -- **'Reach' is read by the pool assembly and by nothing else**: what a
+    -- file is searched against is 'consultPushes', and whether a base travels
+    -- is 'publicPushes'. 'moduleConsults' — the list the door with no IO
+    -- refuses on — ignores it, because an unread base is unread either way.
   | ItemImport Reach ModuleName
     -- ^ @import ‹module›@ (MS11 phase 274) — **a surface module this one depends
     -- on**, named as a file and not as a namespace.
@@ -1534,7 +1563,8 @@ regroup = go
     -- they do outside one, and nesting needs nothing of its own.
     -- **A file's name, not a namespace's** — the shape is 'SurfaceOpen'\'s and
     -- the meaning is not: the steps are directories (MS11 phase 273).
-    one (SurfaceConsult ps x : rest) = Right ([ItemConsult (moduleFromSteps ps x)], rest)
+    one (SurfaceConsult r ps x : rest) =
+      Right ([ItemConsult r (moduleFromSteps ps x)], rest)
     -- A file's name again, and the steps are directories again (MS11 phase 274).
     one (SurfaceImport r ps x : rest) = Right ([ItemImport r (moduleFromSteps ps x)], rest)
     one (SurfaceNamespace ps x ds : rest) = do
@@ -1592,7 +1622,7 @@ surfaceProgram n0 items = foldl (item []) ([], n0) items
   -- module's program: it says which bases the whole program is run against, and
   -- that is settled before the program starts — 'moduleConsults' collects them
   -- and 'loadProofItems' asks for the files.
-  item _ acc (ItemConsult _) = acc
+  item _ acc (ItemConsult _ _) = acc
   -- **An import emits nothing either** (MS11 phase 274), and for the same
   -- reason one step further out: it says which /modules/ run before this one,
   -- so by the time this program starts they are already in the environment.
@@ -2039,14 +2069,36 @@ loadProofModules
 loadProofModules s0 = go s0 []
   where
     go s acc [] = (s, Right (reverse acc))
-    go s acc (m : rest) =
-      let pool = maybe (rules (sessionMachine s)) id (readModulePool m)
-       in case loadProofItemsConsulting pool s (moduleText (readModuleHeader m))
+    go s acc (m : rest) = case poolFor s m of
+      -- **A base that will not resolve refuses the module it was consulted
+      -- by** (MS11 phase 288), which is what names the file: a base reached
+      -- through an @import@ fails against the module that published it, and
+      -- "Thena.Files" already splits the one the user named from the rest.
+      Left bad   -> (rolledBack s0 s, Left (m, bad))
+      Right pool -> case loadProofItemsConsulting pool s
+                                        (moduleText (readModuleHeader m))
                                         (readModuleItems m) of
         (s', r@(ProofLoaded {})) -> go (marked m s (readModuleName m) s') (r : acc) rest
         -- 'loadProofItemsConsulting' has already put this module's own
         -- declarations back; this takes the closure's with them.
         (s', bad)                -> (rolledBack s0 s', Left (m, bad))
+
+    -- | The pool this module is elaborated against, resolved here rather than
+    -- when the file was read — 'readModulePool' says why.
+    --
+    -- **The list is already in search order**, 'consultedPool' having put it
+    -- there, and 'consultRuleBases' installs head-first: nothing here knows
+    -- anything about the stack.
+    --
+    -- **The session it installs into is dropped and only the pool is kept**,
+    -- because a surface file's consults are not the session's (his ruling of
+    -- 2026-11-03) — 'loadProofItemsConsulting' is what puts them in force for
+    -- the length of the load and takes them out again.
+    poolFor s m = case readModulePool m of
+      Nothing   -> Right (rules (sessionMachine s))
+      Just srcs -> case consultRuleBases s srcs of
+        (_, BasesLoaded pool) -> Right pool
+        (_, bad)              -> Left bad
 
     marked _ _      Nothing  s = s
     marked m before (Just n) s =
@@ -2083,6 +2135,8 @@ moduleDeclared n face before after
             , sessionPrivateIn  = (n, interfacePrivate face) : sessionPrivateIn after
             , sessionPublicImports =
                 (n, interfacePublic face) : sessionPublicImports after
+            , sessionPublishes =
+                (n, interfacePublishes face) : sessionPublishes after
             }
   where
     -- **Deduplicated, because 'Env.declaredNames' is four tables concatenated**
@@ -2213,12 +2267,24 @@ data ReadModule = ReadModule
     -- @~r58qh@ — and "Thena.Files" refuses the module before it builds this
     -- record where they disagree, so by the time one exists they have agreed.
     -- A file loaded by a path that is no module name has nothing to agree with.
-  , readModulePool   :: Maybe [RuleBase]
-    -- ^ the bases its own @consult@ lines name, already read — or 'Nothing'
-    -- where it consults nothing, which is elaborated against **the session's
-    -- own pool as it stands**. Said as an absence rather than by handing the
-    -- session's list back in, so that nothing above this module has to reach
-    -- into the machine to answer a question about a file.
+  , readModulePool   :: Maybe [(FilePath, String)]
+    -- ^ the bases it is searched against, **read off the disc and not yet
+    -- resolved**, in search order — or 'Nothing' where there are none, which
+    -- is elaborated against **the session's own pool as it stands**. Said as an
+    -- absence rather than by handing the session's list back in, so that
+    -- nothing above this module has to reach into the machine to answer a
+    -- question about a file.
+    --
+    -- **TEXT AND NOT A 'RuleBase', WHICH IS MS11 PHASE 288'S FIX.** A base is
+    -- resolved against the session's grammars, and a base that @import@s a
+    -- surface module is refused while that module is not in ('readStated').
+    -- Reading it when the file was gathered therefore refused every base with a
+    -- dependency — including one the gathering file imported itself, since a
+    -- gathered module is not loaded until the whole closure is. **So the disc
+    -- is read when the file is gathered and the resolution waits for the
+    -- module's turn in 'loadProofModules'**, by which point everything it
+    -- imports is in. All-or-nothing is untouched: a base missing from the disc
+    -- still stops the closure before anything installs.
   , readModuleItems  :: [Item]
   }
   deriving (Eq, Show)
@@ -2290,6 +2356,7 @@ interfaceOf items = Interface
   { interfaceExporting = moduleExporting items
   , interfacePrivate   = privateIn items
   , interfacePublic    = publicImports items
+  , interfacePublishes = publicPushes items
   }
 
 -- | __Everything a module's items say about who may name what__ (MS11 phases
@@ -2304,6 +2371,8 @@ data Interface = Interface
     -- ^ what its @private@ declarations named
   , interfacePublic    :: [ModuleName]
     -- ^ which of its imports travel on
+  , interfacePublishes :: [Published]
+    -- ^ what it hands on to its importers, in written order (phase 288)
   }
   deriving (Eq, Show)
 
@@ -2362,7 +2431,7 @@ moduleConsults :: [Item] -> [ModuleName]
 moduleConsults = concatMap go
   where
     go i = case i of
-      ItemConsult m      -> [m]
+      ItemConsult _ m    -> [m]
       ItemNamespace _ is -> moduleConsults is
       ItemOpenIn _ is    -> moduleConsults is
       ItemPrivate is     -> moduleConsults is
@@ -2400,6 +2469,103 @@ publicImports = concatMap go
       ItemOpenIn _ is     -> publicImports is
       ItemPrivate is      -> publicImports is
       _                   -> []
+
+-- | __One thing a module hands on to whoever imports it__ (MS11 phase 288,
+-- @~jmw4k@).
+--
+-- **A spine and not a flat list of bases**, because the order is the whole
+-- content of the rule: @DECISIONS.md@, /Consults are a STACK/, says what a
+-- published file brought arrives **at the position of the line that brought it
+-- in**. A 'PublishedFrom' standing where its line stood is what says that; a
+-- list of bases flattened when it was stored could not.
+data Published
+  = PublishedBase ModuleName
+    -- ^ @public consult X@ — this base, where this line stands
+  | PublishedFrom ModuleName
+    -- ^ @public import M@ — whatever @M@ publishes, in @M@\'s own order
+  deriving (Eq, Show)
+
+-- | __What a module's items say it hands on__ (MS11 phase 288, @~jmw4k@).
+--
+-- **'moduleImports'\' walk, over both acts at once** and in written order
+-- across the two: a file that writes @public consult@ above @public import@
+-- publishes them that way round, and that is the order its importers are
+-- searched in.
+publicPushes :: [Item] -> [Published]
+publicPushes = concatMap go
+  where
+    go i = case i of
+      ItemConsult Public m -> [PublishedBase m]
+      ItemImport Public m  -> [PublishedFrom m]
+      ItemNamespace _ is   -> publicPushes is
+      ItemOpenIn _ is      -> publicPushes is
+      ItemPrivate is       -> publicPushes is
+      _                    -> []
+
+-- | __Which bases a module that is in hands on, in order__ (MS11 phase 288,
+-- @~jmw4k@).
+--
+-- 'sessionPublishes' expanded: a @public consult@ is the base it names, and a
+-- @public import@ is whatever that module publishes, spliced in where its line
+-- stood.
+--
+-- **No @seen@ guard, unlike 'concealedFrom''s walk, and the difference is a
+-- ruling**: consulting the same base twice is two independent pushes (his,
+-- 2026-11-03), so a diamond that publishes one base along both arms publishes
+-- it twice and neither copy may be dropped. The walk terminates because the
+-- import graph is acyclic — "Thena.Files" refuses a cycle before any of this is
+-- read.
+--
+-- **Empty for a module that is not in**, which is 'declaredByModule''s answer
+-- and carries its two meanings.
+publishedBy :: ModuleName -> Session -> [ModuleName]
+publishedBy n s =
+  concatMap brought (concat [ ps | (m, ps) <- sessionPublishes s, m == n ])
+  where
+    brought (PublishedBase b) = [b]
+    brought (PublishedFrom m) = publishedBy m s
+
+-- | __Every base a module is searched against, in the order it is searched__
+-- (MS11 phase 288, @~jmw4k@).
+--
+-- Its own @consult@ lines, and whatever each module it imports publishes, each
+-- at the position of the line that brought it in — and then **reversed, because
+-- consults are a stack and the last thing consulted is tried first**
+-- (@DECISIONS.md@, /Consults are a STACK/, his ruling of 2026-11-03). The
+-- session's own pool is what this stands on, so the shipped base stays at the
+-- bottom.
+--
+-- **THE REVERSAL IS THE PHASE'S OTHER FIX.** Until MS11 phase 288 a file's
+-- consults went into the pool as written, so the /first/ line was tried first —
+-- the opposite of the published rule. Nothing caught it because no file in the
+-- corpus and no fixture had written two @consult@ lines.
+--
+-- **A @consult@ is this module's own whether or not it says @public@**: what
+-- @public@ adds is who /else/ is searched against the base, so 'Reach' is not
+-- read here.
+--
+-- **Both ends of the walk, because a load has two halves**: a module this one
+-- imports is either already in the session, where 'publishedBy' answers for it,
+-- or gathered in the same walk and not yet loaded, where its own items are what
+-- there is to read. The gathered list is asked first; a module cannot be in
+-- both, since 'Thena.Files.imports' skips one that is in.
+consultedPool :: Session -> [ReadModule] -> [Item] -> [ModuleName]
+consultedPool s done = reverse . concatMap go
+  where
+    go i = case i of
+      ItemConsult _ m    -> [m]
+      ItemImport _ m     -> published m
+      ItemNamespace _ is -> concatMap go is
+      ItemOpenIn _ is    -> concatMap go is
+      ItemPrivate is     -> concatMap go is
+      _                  -> []
+
+    published m = case [ rm | rm <- done, readModuleName rm == Just m ] of
+      rm : _ -> concatMap brought (publicPushes (readModuleItems rm))
+      []     -> publishedBy m s
+
+    brought (PublishedBase b) = [b]
+    brought (PublishedFrom m) = published m
 
 -- | __What this module says its interface is__ (MS11 phase 285, @~jmw4k@).
 --
@@ -2494,7 +2660,7 @@ declaredName i = case i of
   ItemPrivate _     -> Nothing
   -- **A consult declares nothing either** (MS11 phase 273) — it says what the
   -- module's proofs are searched against, which adds no key to the environment.
-  ItemConsult _     -> Nothing
+  ItemConsult _ _   -> Nothing
   -- **Nor an import** (MS11 phase 274): the names it makes reachable are the
   -- imported module's own, and that module's load named them.
   ItemImport _ _    -> Nothing
