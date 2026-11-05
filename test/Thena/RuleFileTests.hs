@@ -16,6 +16,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Term (rootName, nameDotted)
 import Thena.Instral.Concrete
   ( RawDecl (..)
+  , Reach (..)
   , RawOpen (..)
   , RawOpenSpec (..)
   )
@@ -32,6 +33,7 @@ import Thena.Driver
   , consultRuleBases
   , loadProofItems
   , loadProofItemsConsulting
+  , Pool (..)
   , moduleConsults
   , moduleText
   , parseSurfaceModule
@@ -128,28 +130,47 @@ opens =
       Right [DeclSignature g] -> g
       other -> error ("the fixture signature did not parse: " ++ show other)
 
--- | **An `import` line in a rule file** (MS11 phase 276), read without a
--- session: what the line parses to, and that the printer writes it back.
+-- | **An `import` line in a rule file** (MS11 phase 276), **a `consult` line
+-- and `public` on either** (MS11 phase 289), read without a session: what the
+-- line parses to, and that the printer writes it back.
 --
--- What it /does/ is 'Thena.LoadTests'' — it needs the disc — and these say only
--- that the grammar reads it and keeps the name, which is what the printer has to
--- be able to invert. **A base printed without its imports would read back and
--- then be refused.**
+-- What they /do/ is 'Thena.LoadTests'' — it needs the disc — and these say only
+-- that the grammar reads them and keeps the name, which is what the printer has
+-- to be able to invert. **A base printed without its imports would read back and
+-- then be refused**, and since phase 289 the same is true of its consults.
 imports :: TestTree
 imports =
   testGroup
-    "an import line in a rule file (MS11 phase 276)"
+    "what a rule file states it is written against (MS11 phases 276 and 289)"
     [ testCase "import X" $
-        decls ["import Stlc"] @?= Right [DeclImport [] "Stlc"]
+        decls ["import Stlc"] @?= Right [DeclImport Own [] "Stlc"]
 
       -- **The steps are directories**, which is what makes this a file's name
       -- and not a namespace's — the same spelling meaning something else.
     , testCase "and the module name is a path" $
         decls ["import Stlc.Syntax.Terms"]
-          @?= Right [DeclImport ["Stlc", "Syntax"] "Terms"]
+          @?= Right [DeclImport Own ["Stlc", "Syntax"] "Terms"]
+
+      -- **The other act, and the other word on both** (MS11 phase 289, his
+      -- ruling of 2026-10-30 that @public@ is available to both acts and to
+      -- both kinds of file). @public@ is an attribute and not a second kind of
+      -- act, which is what 'Reach' on one constructor says.
+    , testCase "consult X" $
+        decls ["consult Stlc.Tactics"]
+          @?= Right [DeclConsult Own ["Stlc"] "Tactics"]
+
+    , testCase "public import X" $
+        decls ["public import Stlc"] @?= Right [DeclImport Public [] "Stlc"]
+
+    , testCase "public consult X" $
+        decls ["public consult Stlc.Tactics"]
+          @?= Right [DeclConsult Public ["Stlc"] "Tactics"]
 
     , testCase "it survives being printed and read again" $ do
-        let written = ["import Stlc", "import Stlc.Syntax.Terms", "open Stlc"]
+        let written = [ "import Stlc", "import Stlc.Syntax.Terms"
+                      , "public import Stlc.Terms"
+                      , "consult Stlc.Tactics", "public consult Stlc.Crush"
+                      , "open Stlc" ]
         case decls written of
           Left e   -> assertFailure e
           Right ds -> decls' (printRuleFile "mine" Nothing ds) @?= Right ds
@@ -716,7 +737,7 @@ consulting =
           Right (nm, is) ->
             -- The session has "mine"; the module is loaded against "extra"
             -- on top of it, and afterwards the session has "mine" alone.
-            let (s', _) = loadProofItemsConsulting (pool extra) consulted (moduleText nm) is
+            let (s', _) = loadProofItemsConsulting (Pool (pool extra) []) consulted (moduleText nm) is
              in (map baseName (pool extra), map baseName (pool s'))
                   @?= (["extra", "mine"], ["mine"])
 
@@ -724,7 +745,7 @@ consulting =
         case itemsOf "consult Stlc.Tactics" of
           Left e -> assertFailure e
           Right (nm, is) ->
-            case snd (loadProofItemsConsulting (pool extra) consulted (moduleText nm) is) of
+            case snd (loadProofItemsConsulting (Pool (pool extra) []) consulted (moduleText nm) is) of
               ProofLoaded n ds _ _ -> (n, ds) @?= ("M", [])
               other                -> assertFailure (show other)
     ]

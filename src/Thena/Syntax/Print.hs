@@ -54,6 +54,7 @@ import Thena.Core.Level (Level, Normal (..), levelVarName, normalise)
 import Thena.Core.Term (GlobalName (..), Literal (..), Var, nameDotted)
 import Thena.Instral.Concrete
   ( RawDecl (..)
+  , Reach (..)
   , RawOpen (..)
   , RawOpenSpec (..)
   , RawFunction (..)
@@ -409,9 +410,18 @@ rawDecl d = case d of
   DeclOpenIn o inner -> (rawOpen o ++ " in") : map ("  " ++) (rawDecl inner)
   -- **An @import@ line, as written** (MS11 phase 276). A base printed without
   -- it would read back and then be refused, because what it depends on would no
-  -- longer be stated.
-  DeclImport ps x -> ["import " ++ intercalate "." (ps ++ [x])]
+  -- longer be stated. **And a @consult@ line beside it** (MS11 phase 289), for
+  -- that reason doubled: a base printed without one would read back and be
+  -- refused for the base it is written against.
+  DeclImport r ps x  -> [reach r ++ "import " ++ dotted ps x]
+  DeclConsult r ps x -> [reach r ++ "consult " ++ dotted ps x]
   where
+    dotted ps x = intercalate "." (ps ++ [x])
+
+    -- **One word in front of the line, as it is written** (MS11 phase 289), and
+    -- the only thing 'Reach' is for in a printer.
+    reach r = case r of { Own -> "" ; Public -> "public " }
+
     header lhs b = case b of
       BodyRhs r    -> [lhs ++ " = " ++ rawRhs r]
       BodyBlock is -> (lhs ++ " = do") : map (("  " ++) . rawInstruction) is

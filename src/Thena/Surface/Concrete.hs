@@ -45,7 +45,7 @@ import Thena.Core.Term (GlobalName (..), Literal (..))
 -- this import crosses no language boundary — it is the machinery's own syntax,
 -- and a @do@ block in a surface program is `instral` written in place
 -- (@discussion\/the-five-languages.md@ §0b, table F).
-import Thena.Instral.Concrete (RawInstr (..))
+import Thena.Instral.Concrete (RawInstr (..), Reach (..))
 import Thena.Syntax.Lexer (BlockKind)
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
@@ -359,23 +359,11 @@ data SurfaceOpenSpec
     -- decision about identifiers rather than about @open@.
   deriving (Eq, Show)
 
--- | __Whether an @import@ or a @consult@ passes on what it brought__ (MS11
--- phase 287 for the import, 288 for the consult, @~jmw4k@).
---
--- **His ruling of 2026-11-03 is the whole of transitivity**: under @public@,
--- and only under @public@, you get what the file you imported or consulted got
--- (@DECISIONS.md@, /\`public\` is how a dependency travels/). So 'Public' is one
--- word on one line and there is nothing else to say about it.
---
--- **An attribute of the act and not a second kind of act**: what @public@
--- changes is who else gets what came, never what is loaded or read, so
--- everything that walks imports or collects a file's own consults ignores it.
--- On an @import@ only the resolver's subtraction reads it; on a @consult@ only
--- the pool assembly does.
-data Reach
-  = Own     -- ^ @import X@, @consult X@ — this module's own dependency
-  | Public  -- ^ @public import X@, @public consult X@ — and its importers' too
-  deriving (Eq, Show)
+-- __'Reach' — whether an @import@ or a @consult@ passes on what it brought__ —
+-- is re-exported from "Thena.Instral.Concrete" (MS11 phase 289). Both concrete
+-- syntaxes write @public@ and that module is the one below this, so the flag
+-- lives there and is listed in this module's exports beside the trees that
+-- carry it.
 
 data SurfaceDecl
   = SurfaceSignature [String] String Surface   -- ^ @foo : T@, @Ns.foo : T@

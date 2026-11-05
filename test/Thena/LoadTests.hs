@@ -89,7 +89,7 @@ import Thena.Render
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
 import Thena.Standard (withRules)
-import Thena.Rules (RuleError (..))
+import Thena.Rules (RuleError (..), baseName)
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty.Golden (goldenVsString)
 
@@ -115,6 +115,7 @@ tests =
     , testGroup "a declaration may be the file's own (MS11 phase 286)" privateTests
     , testGroup "an import may travel (MS11 phase 287)" publicImportTests
     , testGroup "a consult may travel (MS11 phase 288)" publicConsultTests
+    , testGroup "a rule base publishes too (MS11 phase 289)" publicBaseTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -281,6 +282,117 @@ publicConsultTests =
           publicPushes items @?= []
           map moduleText (moduleConsults items) @?= ["test.modules.Tooling"]
         Left e -> assertFailure (show e)
+  ]
+
+-- --------------------------------------------------------------------------
+-- A rule base states what it is written against, and publishes either act
+-- (MS11 phase 289, @~jmw4k@)
+-- --------------------------------------------------------------------------
+
+-- | __The other two of his four combinations__ (his ruling of 2026-10-30,
+-- /"We should have it work for Surface files and rule-bases as well"/).
+--
+-- A rule file now writes @consult@ beside its @import@ and @public@ in front of
+-- either: it publishes **the bases it builds on** and **the object language it
+-- is written against**.
+--
+-- **@helped@ is the observable for the first** — a rule in @Helper@ and nowhere
+-- else, called by rules in @Builds@ (which publishes it) and @Needs@ (which
+-- does not) — and **@Bit.Bit@ for the second**, named by a file that consults
+-- @Speaks@ and never imports @Bit@.
+publicBaseTests :: [TestTree]
+publicBaseTests =
+  [ -- **A base publishes the base it builds on**, and it lands UNDERNEATH it:
+    -- the publisher is the specialised one and is tried first, which is the
+    -- published group written out by hand and the standing /universal tactics
+    -- at the bottom/.
+    testCase "a base publishes the base it builds on, underneath itself" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- consultRuleFiles s0 ["test/modules/Builds.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ map baseName bs | BasesLoaded bs <- out ]
+        @?= [["builds", "helper", "standard"]]
+
+  , -- **AND A PLAIN CONSULT DOES NOT PUT IT THERE.** @Needs@ calls the same
+    -- rule behind a plain @consult@: what the line asks is that the base BE
+    -- there, because a base arriving because something else named it would be a
+    -- search order nobody wrote — the transitivity @public@ exists to answer.
+    testCase "and a plain consult asks for the base rather than pushing it" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <- consultRuleFiles s0 ["test/modules/Needs.thena.rules"]
+      case trouble of
+        [Unloadable _ (RuleFileRefused _ (RuleConsultsAbsent ms))] ->
+          map moduleText ms @?= ["test.modules.Helper"]
+        other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- **Two publications are a stack between themselves**, his ruling of
+    -- 2026-11-05 (@~d39jx@): the last line written is tried first.
+    testCase "two publications of one base are a stack" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <-
+        consultRuleFiles s0 ["test/modules/PublishesTwoBases.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ map baseName bs | BasesLoaded bs <- out ]
+        @?= [["publishestwobases", "louder", "helper", "standard"]]
+
+  , -- **A loop would splice for ever**, so it is refused and names the path.
+    testCase "two bases that publish each other are refused" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <- consultRuleFiles s0 ["test/modules/LoopX.thena.rules"]
+      case trouble of
+        [Unloadable _ (ConsultCycle ms)] ->
+          map moduleText ms
+            @?= ["test.modules.LoopY", "test.modules.LoopX", "test.modules.LoopY"]
+        other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- **And a surface file consulting the publisher gets it**, which is the
+    -- point of the whole act: nothing in @GetsHelper@ names @Helper@.
+    testCase "a file that consults the publisher is searched against both" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsHelper.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
+
+  , -- **The plain one fails loudly and the remedy is one line**: the same
+    -- @do@ block, with the file consulting @Helper@ itself.
+    -- **A response and not trouble, because this is the file the user named** —
+    -- the split 'Thena.Files.loadProofFile' makes, and the refusal is the
+    -- base's rather than this file's.
+    testCase "a file consulting a plain consulter is refused" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/MissesHelper.thena"
+      case out of
+        [RuleFileRefused _ (RuleConsultsAbsent ms)] ->
+          map moduleText ms @?= ["test.modules.Helper"]
+        other -> assertFailure (show (map (renderResponse s0) other))
+
+  , testCase "and consulting the base itself satisfies it" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/KeepsNeeds.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
+
+  , -- **THE OTHER HALF: A BASE PUBLISHES THE LANGUAGE IT IS WRITTEN AGAINST.**
+    -- His motivating case, @04-taking-terms-apart.thena.rules@ needing @LC@:
+    -- @GetsBitViaBase@ writes @Bit.Bit@ and imports nothing.
+    testCase "a base's public import hands the names on" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsBitViaBase.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it declared mine"
+                 (not (null [ () | ProofLoaded _ ds _ _ <- out
+                                 , elem "mine" ds ]))
+
+  , -- **And a plain import keeps them the base's own**, which is the same word
+    -- doing the same thing as on a surface file's import.
+    testCase "and a plain import does not" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/MissesBitViaBase.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "not in scope: Bit.Bit")
+                               (renderResponse s0 r))
+        _   -> assertFailure (show (map (renderResponse s0) out))
   ]
 
 -- --------------------------------------------------------------------------

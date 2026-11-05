@@ -75,9 +75,12 @@ module Thena.Driver
   , openedFrom
   , RuleFileError (..)
   , InstralTypeError
+  , Pool (..)
   , loadRuleBases
   , consultRuleBases
   , ruleBaseImports
+  , ruleBaseConsults
+  , ruleBasePublishes
   , rolledBack
   , ModuleName
   , moduleName
@@ -894,6 +897,15 @@ data Response
     -- there is no order to elaborate them in. Produced by whoever walks the
     -- graph, which is "Thena.Files", and carried like any other response
     -- because the driver's vocabulary is where a refusal is said (§12).
+  | ConsultCycle [ModuleName]
+    -- ^ **these rule bases publish each other** (MS11 phase 289), in the order
+    -- the walk met them, the base that closed the loop named at both ends.
+    --
+    -- 'ImportCycle''s twin one act over, and a refusal about the /program/ for
+    -- its reason. A @public consult@ splices what it names in where its line
+    -- stands, so a loop would splice for ever; a base consulted twice by two
+    -- different bases is not a loop and is two pushes, which is his ruling of
+    -- 2026-11-03.
   | ModuleMisnamed ModuleName ModuleName
     -- ^ **the module reached by the first name calls itself the second** (MS11
     -- phase 278, his ruling of 2026-11-05, @~r58qh@). The name an @import@ used
@@ -1930,7 +1942,7 @@ loadProofSource s src = case parseSurfaceModule src of
 -- project manifest; see "Thena.View.Source".
 loadProofItems :: Session -> String -> [Item] -> (Session, Response)
 loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
-  ([], []) -> loadProofItemsConsulting (rules (sessionMachine s)) s nm items
+  ([], []) -> loadProofItemsConsulting (Pool (rules (sessionMachine s)) []) s nm items
   -- **Refused rather than ignored** (MS11 phases 273 and 274). This door has no
   -- way to read a file (§12 invariant 4), so a module that names anything on
   -- disc cannot be elaborated through it — and silently elaborating it against
@@ -1943,6 +1955,23 @@ loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
   -- pool, an unread import would not elaborate at all.
   (is@(_ : _), _) -> (s, ImportsUnread is)
   ([], ms)        -> (s, ConsultsUnread ms)
+
+-- | __What a module is searched against, and what those bases hand it__ (MS11
+-- phase 289, @~jmw4k@).
+--
+-- Two things read off the same texts and used in the same breath: the bases in
+-- search order, and the surface modules those bases published with
+-- @public import@. **One record rather than two arguments**, which is the shape
+-- 'Interface' took at phase 287 for the same reason — it grew a field in three
+-- phases running.
+--
+-- **The session's own pool and nothing published is what a typed line gets**,
+-- because the prompt is not a module and is not concealed.
+data Pool = Pool
+  { poolBases     :: [RuleBase]
+  , poolPublished :: [ModuleName]
+  }
+  deriving (Eq, Show)
 
 -- | The same, against a pool the caller has already read (MS11 phase 273).
 --
@@ -1975,13 +2004,21 @@ loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
 -- it keeps whatever a load left it — and the next module to load does not see
 -- them, because it works its own out from its imports. 'moduleDeclared' reads
 -- that prefix back off as the module's own.
-loadProofItemsConsulting :: [RuleBase] -> Session -> String -> [Item] -> (Session, Response)
-loadProofItemsConsulting pool s nm items =
+--
+-- **AND WHAT THE BASES THEMSELVES PUBLISH COMES WITH THEM** (MS11 phase 289,
+-- his ruling of 2026-10-30 that @public@ is available to a rule file too): a
+-- base's @public import@ hands the names of the object language it is written
+-- against to whoever consults it, so a file that consults a tactics base
+-- written against @LC@ may write @LC@ without importing it. 'Pool' carries the
+-- two halves together because they come out of the same texts.
+loadProofItemsConsulting :: Pool -> Session -> String -> [Item] -> (Session, Response)
+loadProofItemsConsulting (Pool pool published) s nm items =
     let inherited = openedFrom (moduleImports items) s
         machine  = (sessionMachine s)
                      { rules = pool
                      , scope = (scope (sessionMachine s))
-                                 { scopeConcealed = concealedFrom (moduleImports items) s
+                                 { scopeConcealed =
+                                     concealedFrom (moduleImports items ++ published) s
                                  , scopeOpens     = inherited
                                  }
                      }
@@ -2095,9 +2132,16 @@ loadProofModules s0 = go s0 []
     -- 2026-11-03) — 'loadProofItemsConsulting' is what puts them in force for
     -- the length of the load and takes them out again.
     poolFor s m = case readModulePool m of
-      Nothing   -> Right (rules (sessionMachine s))
+      Nothing   -> Right (Pool (rules (sessionMachine s)) [])
       Just srcs -> case consultRuleBases s srcs of
-        (_, BasesLoaded pool) -> Right pool
+        -- **The published modules are read off the same texts** (MS11 phase
+        -- 289), which is the half 'consultRuleBases' has no use for: a base
+        -- that will not parse is refused by the install with the position in
+        -- it, so nothing is said about one here.
+        (_, BasesLoaded pool) ->
+          Right (Pool pool
+                      (concat [ ms | (_, src) <- srcs
+                                   , Right (_, ms) <- [ruleBasePublishes src] ]))
         (_, bad)              -> Left bad
 
     marked _ _      Nothing  s = s
@@ -3830,6 +3874,13 @@ data RuleFileError
     -- line: the header is blanked rather than dropped so that nothing shifts
   | RuleIllFormed [RuleError]
     -- ^ it parsed, and one or more rules did not resolve or did not validate
+  | RuleConsultsAbsent [ModuleName]
+    -- ^ **it is written against these bases and they are not in the pool**
+    -- (MS11 phase 289). A plain @consult@ in a rule file asks that the base be
+    -- there and does not put it there: a base arriving because something else
+    -- named it would be a search order nobody wrote, which is what @public@ is
+    -- for. So the remedy is one line — @consult@ it, or let the base that needs
+    -- it say @public consult@ — and the refusal names what is missing.
   | RuleImportsUnread [ModuleName]
     -- ^ **it imports these and nobody read them** (MS11 phase 276).
     -- 'ConsultsUnread'\'s counterpart for a rule base: a base is resolved
@@ -4026,8 +4077,11 @@ scopedDecls gs = go rootScope
       DeclOpenIn o cov  -> go (brings o sc) [cov] ++ go sc rest
       -- **An import is not a declaration to resolve either** (MS11 phase 276):
       -- what it does is make the grammars in @gs@ be there at all, and that
-      -- happened before this walk started.
-      DeclImport _ _    -> go sc rest
+      -- happened before this walk started. **A consult is the same** (MS11
+      -- phase 289): what it names is a pool, which is assembled before a rule
+      -- of this file is ever searched.
+      DeclImport _ _ _  -> go sc rest
+      DeclConsult _ _ _ -> go sc rest
       _                 -> (Reading gs sc, d) : go sc rest
 
     brings o sc = sc { scopeOpens = openedOf o ++ scopeOpens sc }
@@ -4158,7 +4212,7 @@ resolveAll gs raws =
 -- place, so a session never ends up searching half of what was asked for.
 loadRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
 loadRuleBases s ps =
-  loadReadBases s [(path, readStated s gs path src) | (path, src) <- ps]
+  loadReadBases s [(path, statedConsults src, readStated s gs path src) | (path, src) <- ps]
   where
     gs = grammars (sessionMachine s)
 
@@ -4166,9 +4220,15 @@ loadRuleBases s ps =
 -- top of the pool instead of replacing it (MS11 phase 271).
 consultRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
 consultRuleBases s ps =
-  consultReadBases s [(path, readStated s gs path src) | (path, src) <- ps]
+  consultReadBases s [(path, statedConsults src, readStated s gs path src) | (path, src) <- ps]
   where
     gs = grammars (sessionMachine s)
+
+-- | The bases a base's text states, for the install to check against the pool
+-- (MS11 phase 289). **A file that does not parse states nothing here** and
+-- 'readStated' is what says so, with the position in it.
+statedConsults :: String -> [ModuleName]
+statedConsults src = either (const []) id (ruleBaseConsults src)
 
 -- | 'readRuleBase', refusing a base whose dependencies are not in (MS11 phase
 -- 276).
@@ -4205,6 +4265,25 @@ ruleBaseImports src = do
   (_, _, raws) <- rawRuleDecls src
   Right (rawImports raws)
 
+-- | __Every base a rule file states it is written against__, in written order
+-- (MS11 phase 289). 'ruleBaseImports'\' door for the other act, and parsed
+-- rather than resolved for its reason.
+ruleBaseConsults :: String -> Either RuleFileError [ModuleName]
+ruleBaseConsults src = do
+  (_, _, raws) <- rawRuleDecls src
+  Right (rawConsults raws)
+
+-- | __Which of them it pushes for whoever consults it__ (MS11 phase 289), and
+-- **which surface modules it hands the names of on**.
+--
+-- The two halves of what a base publishes, read off the text by the caller with
+-- the disc: the bases go in the pool of whoever consults this one and the
+-- modules come out of their concealment.
+ruleBasePublishes :: String -> Either RuleFileError ([ModuleName], [ModuleName])
+ruleBasePublishes src = do
+  (_, _, raws) <- rawRuleDecls src
+  Right (rawPublicConsults raws, rawPublicImports raws)
+
 -- | The same, off declarations somebody already has (MS11 phase 276).
 --
 -- **An @open … in@ is walked into**, because the declaration it covers may be
@@ -4213,9 +4292,74 @@ rawImports :: [RawDecl] -> [ModuleName]
 rawImports = concatMap go
   where
     go d = case d of
-      DeclImport ps x -> [moduleFromSteps ps x]
-      DeclOpenIn _ cov -> go cov
-      _                -> []
+      DeclImport _ ps x -> [moduleFromSteps ps x]
+      DeclOpenIn _ cov  -> go cov
+      _                 -> []
+
+-- | __Every rule base a rule file states it is written against__, in written
+-- order (MS11 phase 289, @~jmw4k@).
+--
+-- 'rawImports'\' walk over the other act, and @public@ is not read here for
+-- 'moduleConsults'\' reason: a @consult@ is this file's own either way, and
+-- what the word adds is who else gets the base.
+--
+-- **What a plain one asks for is that the base BE there**, which is
+-- 'RuleConsultsAbsent': this file's rules may call that base's or dispatch into
+-- them, and neither works unless it is in the same pool. **It does not load
+-- it** — a base's position in the pool is its priority (@DECISIONS.md@,
+-- /Consults are a STACK/), so a base arriving because something else named it
+-- is a search order nobody wrote, which is the transitivity his ruling of
+-- 2026-10-30 answered with @public@.
+rawConsults :: [RawDecl] -> [ModuleName]
+rawConsults = concatMap go
+  where
+    go d = case d of
+      DeclConsult _ ps x -> [moduleFromSteps ps x]
+      DeclOpenIn _ cov   -> go cov
+      _                  -> []
+
+-- | __Which bases a rule file pushes for whoever consults it__ (MS11 phase 289,
+-- @~jmw4k@, his ruling of 2026-10-30).
+--
+-- 'rawConsults'\' walk, filtered — 'publicPushes' for a rule file, and in
+-- written order for its reason: what a base published arrives at the position
+-- of the line that brought it in.
+--
+-- **A spine is not needed here where a surface file needs one.** A module's
+-- publication may name another module, so what it hands on cannot be flattened
+-- when it is stored; a base hands on bases, and a base that publishes a base
+-- is read from the disc in the same walk that reads this one — so the closure
+-- is the order the reader meets it in. "Thena.Files" is that reader.
+--
+-- **A base publishes a module for its NAMES and a base for its RULES**, which
+-- is the one difference from a surface file: a @public import@ here is the
+-- object language the base is written against (his @04-taking-terms-apart@
+-- needing @LC@), and 'rawPublicImports' is what reads that half.
+rawPublicConsults :: [RawDecl] -> [ModuleName]
+rawPublicConsults = concatMap go
+  where
+    go d = case d of
+      DeclConsult Public ps x -> [moduleFromSteps ps x]
+      DeclOpenIn _ cov        -> go cov
+      _                       -> []
+
+-- | __Which surface modules a rule file's importers may name__ (MS11 phase 289,
+-- @~jmw4k@).
+--
+-- 'publicImports' for a rule file: the module travels to whoever consults this
+-- base, so a file that consults a tactics base written against @LC@ may write
+-- @LC@ without importing it.
+--
+-- **The @open@s that module left are NOT inherited with it**, which is
+-- 'openedFrom''s half and is @~4wjd7@ — unsettled for an import and therefore
+-- not decided here by a build.
+rawPublicImports :: [RawDecl] -> [ModuleName]
+rawPublicImports = concatMap go
+  where
+    go d = case d of
+      DeclImport Public ps x -> [moduleFromSteps ps x]
+      DeclOpenIn _ cov       -> go cov
+      _                      -> []
 
 -- | The same, for bases whose declarations were stored rather than written.
 --
@@ -4226,7 +4370,7 @@ rawImports = concatMap go
 -- happen once and identically whichever door a base came in by.
 loadRuleDecls :: Session -> [(FilePath, String, Maybe String, [RawDecl])] -> (Session, Response)
 loadRuleDecls s ps =
-  loadReadBases s [(path, stated path nm desc ds) | (path, nm, desc, ds) <- ps]
+  loadReadBases s [(path, rawConsults ds, stated path nm desc ds) | (path, nm, desc, ds) <- ps]
   where
     gs = grammars (sessionMachine s)
     -- 'readStated''s bargain, for the door that joins after parsing (MS11
@@ -4241,7 +4385,9 @@ loadRuleDecls s ps =
 -- the list is walked**, which is what lets the reading happen before this rather
 -- than inside it — and is why there is one fold here and not one per kind of
 -- source.
-loadReadBases :: Session -> [(FilePath, Either RuleFileError RuleBase)] -> (Session, Response)
+loadReadBases
+  :: Session -> [(FilePath, [ModuleName], Either RuleFileError RuleBase)]
+  -> (Session, Response)
 loadReadBases = installReadBases []
 
 -- | The same, pushing instead of replacing: the session's present pool goes
@@ -4256,7 +4402,9 @@ loadReadBases = installReadBases []
 -- the same day: not a move to the top and not a no-op, because the upper copy
 -- can go out of scope while the lower one is still in force. So this does not
 -- deduplicate, and the pool may hold one base more than once.
-consultReadBases :: Session -> [(FilePath, Either RuleFileError RuleBase)] -> (Session, Response)
+consultReadBases
+  :: Session -> [(FilePath, [ModuleName], Either RuleFileError RuleBase)]
+  -> (Session, Response)
 consultReadBases s = installReadBases (rules (sessionMachine s)) s
 
 -- | Install bases on top of @below@, or none of them.
@@ -4266,8 +4414,15 @@ consultReadBases s = installReadBases (rules (sessionMachine s)) s
 -- in a base already consulted — and the second is enough, because a base's
 -- blocks were checked when that base went in and a 'RuleBase' keeps no field to
 -- re-read them from.
+--
+-- **AND WHAT EACH BASE SAYS IT IS WRITTEN AGAINST IS CHECKED HERE** (MS11 phase
+-- 289), for the same reason inference is: a @consult@ may be answered by
+-- another base in the same push, so the question cannot be asked while the
+-- files are being read one at a time. 'RuleConsultsAbsent' is the refusal.
 installReadBases
-  :: [RuleBase] -> Session -> [(FilePath, Either RuleFileError RuleBase)] -> (Session, Response)
+  :: [RuleBase] -> Session
+  -> [(FilePath, [ModuleName], Either RuleFileError RuleBase)]
+  -> (Session, Response)
 installReadBases below s = go []
   where
     -- **Inference runs here and nowhere earlier** (MS5 phase 66c), for the
@@ -4278,23 +4433,35 @@ installReadBases below s = go []
     -- not callables — nothing can call one — so they are not in 'allCallable';
     -- they are handed to 'inferProgram' as extra bodies so that a mistake in one
     -- is found when the file loads.
-    go acc [] = case traverse blocksOf acc of
-      -- A block that does not resolve or does not validate is the file's
-      -- problem and is reported against the file, as any other rule's would be.
-      Left (path, errs) -> (s, RuleFileRefused path (RuleIllFormed errs))
-      Right bss ->
-        case snd (inferProgram (allSignatures pool) (allCallable pool ++ concat bss)) of
-          []   ->
-            ( s { sessionMachine = (sessionMachine s) { rules = pool } }
-            , BasesLoaded pool
-            )
-          errs -> (s, BasesIllTyped errs)
+    go acc [] = case [ (path, ms) | (path, stated, _) <- acc
+                                  , let ms = filter (not . inPool) stated
+                                  , not (null ms) ] of
+      -- **The first base that is missing one**, as a file that will not read is
+      -- the first that will not read: all or nothing either way.
+      (path, ms) : _ -> (s, RuleFileRefused path (RuleConsultsAbsent ms))
+      [] -> case traverse blocksOf bases of
+        -- A block that does not resolve or does not validate is the file's
+        -- problem and is reported against the file, as any other rule's would be.
+        Left (path, errs) -> (s, RuleFileRefused path (RuleIllFormed errs))
+        Right bss ->
+          case snd (inferProgram (allSignatures pool) (allCallable pool ++ concat bss)) of
+            []   ->
+              ( s { sessionMachine = (sessionMachine s) { rules = pool } }
+              , BasesLoaded pool
+              )
+            errs -> (s, BasesIllTyped errs)
       where
-        pool = acc ++ below
+        bases = [ b | (_, _, b) <- acc ]
+        pool  = bases ++ below
+        -- **A base is in the pool if the file that name denotes is**, which is
+        -- the only identity a 'Thena.Rules.RuleBase' has: its declared name is
+        -- its own and a module name is a path (MS11 phase 272), so
+        -- 'moduleFile' is the one place the two meet.
+        inPool m = any ((== moduleFile LoadRules m) . basePath) pool
 
-    go acc ((path, built) : more) = case built of
+    go acc ((path, stated, built) : more) = case built of
       Left e  -> (s, RuleFileRefused path e)
-      Right b -> go (acc ++ [b]) more
+      Right b -> go (acc ++ [(path, stated, b)]) more
 
     -- **Resolved here and not in 'readRuleBase'**, because what it answers is
     -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then

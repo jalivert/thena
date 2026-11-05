@@ -945,6 +945,49 @@ base written to crush one goal, brought in exactly where that goal is, and tried
 before anything general.** A queue would bury it under every library you had
 already consulted.
 
+### A rule base states the bases it is written against, and may publish either act
+
+*Decided 2026-10-30, built at MS11 phase 289. `public` is available to both acts and
+to both kinds of file; a rule file had neither `consult` nor `public` until this.*
+
+A rule file writes the same two lines a surface file does, and the same word in front
+of either:
+
+```
+rule base sharp where
+
+public import Stlc.Terms      -- the language my rules talk about, and you get it too
+import My.Internal            -- a language I need and you do not
+public consult Stlc.Broad     -- the base I build on, and you get it too
+consult My.Scratch            -- a base I need, which you must have of your own
+```
+
+**A plain `consult` asks that the base be there; it does not put it there.** Consult a
+base whose plain `consult` is unanswered and it is refused, naming what is missing —
+because a base's position in the pool is its priority, so a base arriving because
+something *else* named it would be a search order you never wrote. That is the whole
+reason `public` exists. **An `import` is different and loads**: bringing a module in
+changes no order, so a base's dependencies are loaded for you either way, and `public`
+decides only whether you may *name* what they declare.
+
+**What a published base brings lands underneath the base that published it.** Consulting
+`sharp` above is exactly:
+
+```
+consult Stlc.Broad
+consult sharp
+```
+
+so `sharp` is tried first and the library it builds on sits under it — *universal
+tactics at the bottom*, again falling out of the stack. Two publications in one base
+are a stack between themselves, the last line written tried first, and two bases that
+publish each other are refused.
+
+**And `public import` in a base hands a language on.** A tactics base written against
+`Stlc.Terms` publishes it, so a file that consults the base may write `Stlc.Term`
+without importing the module itself — which is what makes a tactics library
+distributable rather than a thing with a README telling you what to import first.
+
 ### Rules are not open to extension
 
 *Decided 2026-10-30, reaffirmed 2026-11-03.*

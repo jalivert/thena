@@ -336,6 +336,10 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   ImportCycle ms ->
     [ "these modules import each other: "
         ++ intercalate " imports " (map moduleText ms) ]
+  -- **The same shape for the same loop one act over** (MS11 phase 289).
+  ConsultCycle ms ->
+    [ "these rule bases publish each other: "
+        ++ intercalate " publishes " (map moduleText ms) ]
   -- **Both names, because either one could be the typo** (MS11 phase 278): the
   -- file may be in the wrong place or the header may be wrong, and nothing here
   -- can tell which the user meant.
@@ -2373,6 +2377,13 @@ renderRuleFileError ren path e = case e of
   RuleImportsUnread ms ->
     [ path ++ ": imports " ++ intercalate ", " (map moduleText ms)
         ++ ", and they were not read" ]
+  -- **What is missing and nothing about how to get it** (MS11 phase 289): the
+  -- base may be consulted here or published by whatever needed it, and which of
+  -- those is right is the author's business.
+  RuleConsultsAbsent ms ->
+    [ path ++ ": is written against " ++ intercalate ", " (map moduleText ms)
+        ++ ", which " ++ (if length ms == 1 then "is" else "are")
+        ++ " not in the pool" ]
 
 renderRuleError :: Rendering -> RuleError -> String
 renderRuleError ren e = whereRuleError ren e ++ whatRuleError e

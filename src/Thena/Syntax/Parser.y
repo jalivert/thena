@@ -43,7 +43,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), Reach (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -103,6 +103,11 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   -- project-wide by phase 274 for the surface language, the lexer being one
   -- lexer.
   import  { Located _ TImport }
+  -- **And the two more a rule file writes since MS11 phase 289**, both reserved
+  -- project-wide before it: @consult@ by phase 273 and @public@ by phase 287,
+  -- for the surface language.
+  consult { Located _ TConsult }
+  public  { Located _ TPublic }
   rule    { Located _ TRule }
   do      { Located _ TDo }
   when    { Located _ TWhen }
@@ -226,7 +231,14 @@ Decl :: { RawDecl }
   -- **What this base depends on** (MS11 phase 276, his ruling of 2026-11-03: a
   -- file states what it refers to and never relies on the session). A @QName@
   -- whose steps are directories, as the surface language's @import@ is.
-  | import QName                           { DeclImport (fst $2) (snd $2) }
+  | import QName                           { DeclImport Own (fst $2) (snd $2) }
+  -- **And the four combinations of his ruling of 2026-10-30 completed** (MS11
+  -- phase 289): a rule file states the bases it is written against and may
+  -- publish either act, which is the same two productions the surface language
+  -- has in "Thena.Surface.Parser" and the same one word's worth of difference.
+  | public import QName                    { DeclImport Public (fst $3) (snd $3) }
+  | consult QName                          { DeclConsult Own (fst $2) (snd $2) }
+  | public consult QName                   { DeclConsult Public (fst $3) (snd $3) }
 
 -- | What an @open@ opens, and what it says about which names it brings in
 -- (MS10 phase 267). The surface language's 'Thena.Surface.Parser' has the same

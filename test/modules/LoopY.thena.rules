@@ -1,0 +1,4 @@
+-- **The other half** (MS11 phase 289).
+rule base loopy where
+
+public consult test.modules.LoopX

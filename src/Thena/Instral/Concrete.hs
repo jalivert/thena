@@ -25,6 +25,7 @@
 -- "Thena.Rules".
 module Thena.Instral.Concrete
   ( RawDecl (..)
+  , Reach (..)
   , RawOpen (..)
   , RawOpenSpec (..)
   , RawFunction (..)
@@ -112,9 +113,10 @@ data RawDecl
     -- ^ @open X@ — in force from here to the end of the file
   | DeclOpenIn RawOpen RawDecl
     -- ^ @open X in ‹declaration›@ — in force for that declaration alone
-  | DeclImport [String] String
-    -- ^ @import ‹module›@ — **a surface module this base depends on** (MS11
-    -- phase 276, his ruling of 2026-11-03).
+  | DeclImport Reach [String] String
+    -- ^ @import ‹module›@, @public import ‹module›@ — **a surface module this
+    -- base depends on** (MS11 phase 276, his ruling of 2026-11-03; the 'Reach'
+    -- at phase 289).
     --
     -- The steps and the last word of a /file's/ name, 'RawOpen'\'s shape and not
     -- its meaning: there the steps are a namespace's, here they are
@@ -125,6 +127,43 @@ data RawDecl
     -- before the base is read: whoever has the disc loads the module it names,
     -- so the grammars this file's tags are resolved against are there because
     -- the file said so and not because the session happened to hold them.
+    --
+    -- **Under @public@ its names travel to whoever consults this base** (MS11
+    -- phase 289) — the object language a base is written against, which is his
+    -- ruling of 2026-10-30.
+  | DeclConsult Reach [String] String
+    -- ^ @consult ‹base›@, @public consult ‹base›@ — **another rule base this
+    -- one is written against** (MS11 phase 289, his ruling of 2026-10-30 that
+    -- @public@ is available to both acts and to both kinds of file).
+    --
+    -- 'DeclImport'\'s shape and the same spelling of a file's name. What
+    -- separates the two words is 'Reach' and nothing else: a plain @consult@
+    -- says this base is searched beside that one and is refused if it is not
+    -- there, where @public consult@ pushes it for whoever consults this base.
+  deriving (Eq, Show)
+
+-- | __Whether an @import@ or a @consult@ passes on what it brought__ (MS11
+-- phase 287 for the import, 288 for the consult, 289 for a rule file's own,
+-- @~jmw4k@).
+--
+-- **His ruling of 2026-11-03 is the whole of transitivity**: under @public@,
+-- and only under @public@, you get what the file you imported or consulted got
+-- (@DECISIONS.md@, /\`public\` is how a dependency travels/). So 'Public' is one
+-- word on one line and there is nothing else to say about it.
+--
+-- **An attribute of the act and not a second kind of act**: what @public@
+-- changes is who else gets what came, never what is loaded or read, so
+-- everything that walks imports or collects a file's own consults ignores it.
+-- On an @import@ only the resolver's subtraction reads it; on a @consult@ only
+-- the pool assembly does.
+--
+-- **It lives here and not beside the surface language's own trees** (MS11
+-- phase 289), because both concrete syntaxes write the word and
+-- "Thena.Surface.Concrete" imports this module: one flag with one meaning,
+-- re-exported there so a reader of either syntax finds it where the trees are.
+data Reach
+  = Own     -- ^ @import X@, @consult X@ — this module's own dependency
+  | Public  -- ^ @public import X@, @public consult X@ — and its importers' too
   deriving (Eq, Show)
 
 -- | What an @open@ line in a rule file said: the namespaces it names, and what

@@ -1,0 +1,8 @@
+-- **The control for `GetsBitViaBase`** (MS11 phase 289): `Mutters` imports
+-- `Bit` plainly, so the name stays out of reach here.
+module test.modules.MissesBitViaBase where
+
+consult test.modules.Mutters
+
+mine : Bit.Bit
+mine = Bit.on

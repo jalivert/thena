@@ -46,6 +46,7 @@ import Thena.Driver
   , loadProofModules
   , readModulePath
   , ruleBaseImports
+  , ruleBasePublishes
   , rolledBack
   , consultedPool
   , moduleImports
@@ -182,11 +183,18 @@ ruleFilesWith install s paths = do
   case [ (p, e) | (p, Left e) <- reads' ] of
     (p, e) : _ -> pure (s, [], [Unreadable p e])
     [] -> do
-      let contents = [ (p, c) | (p, Right c) <- reads' ]
-      brought <- imported s contents
-      pure $ case brought of
-        Left t -> (s, [], [t])
-        Right (s1, got) -> installing s s1 got (install s1 contents)
+      -- **What each of them publishes is read in front of it** (MS11 phase
+      -- 289): a base consulted here brings the bases it published, so the
+      -- closure is the same whichever door a base came in by — which is
+      -- 'published''s own rule, said for a path rather than a module name.
+      spread <- published [] [ (p, c) | (p, Right c) <- reads' ]
+      case spread of
+        Left t -> pure (s, [], [t])
+        Right contents -> do
+          brought <- imported s contents
+          pure $ case brought of
+            Left t -> (s, [], [t])
+            Right (s1, got) -> installing s s1 got (install s1 contents)
   where
     -- The install's own answer, read as it always was — with whatever the
     -- imported modules had to say in front of it, and with the session put back
@@ -382,11 +390,64 @@ imports s stack done (m : rest)
 consulted :: [ModuleName] -> IO (Either Trouble (Maybe [(FilePath, String)]))
 consulted [] = pure (Right Nothing)
 consulted ms = do
-  let paths = map (moduleFile LoadRules) ms
-  reads' <- mapM (\p -> fmap ((,) p) (try (readFile p))) paths
-  pure $ case [ (p, e) | (p, Left e) <- reads' ] of
-    (p, e) : _ -> Left (Unreadable p e)
-    []         -> Right (Just [ (p, c') | (p, Right c') <- reads' ])
+  -- **And what each of them published, in front of it** (MS11 phase 289).
+  got <- mapM (publishing []) ms
+  pure $ case sequence got of
+    Left t     -> Left t
+    Right srcs -> Right (Just (concat srcs))
+
+-- | __A base, and the bases it publishes read underneath it__ (MS11 phase 289,
+-- @~jmw4k@, his ruling of 2026-10-30).
+--
+-- **Underneath it, which is the published group written out by hand**: a
+-- consumer that wrote the publications itself would write them above its own
+-- earlier lines and the base that needs them last of all, so the base is tried
+-- first and its library sits under it — @DECISIONS.md@, /Consults are a STACK/,
+-- and the same rule 'Thena.Driver.consultedPool' applies to one file's own
+-- lines. **Two publications of one base are a stack between themselves too**,
+-- his ruling of 2026-11-05 (@~d39jx@) that the order is one stack whatever
+-- route a base took, so the last line written is tried first.
+--
+-- **The closure is the walk and not a stored spine**, unlike a surface module's
+-- ('Thena.Driver.Published'): a base publishes bases and nothing else, so
+-- reading them in order /is/ the order they go in.
+--
+-- **A loop is refused and nothing is deduplicated.** Two bases that publish
+-- each other would splice for ever; a base published down two arms is two
+-- independent pushes, which is his ruling of 2026-11-03.
+publishing :: [ModuleName] -> ModuleName -> IO (Either Trouble [(FilePath, String)])
+publishing stack m
+  | m `elem` stack =
+      pure (Left (Unloadable path (ConsultCycle (reverse stack ++ [m]))))
+  | otherwise = do
+      contents <- try (readFile path)
+      case contents of
+        Left e  -> pure (Left (Unreadable path e))
+        Right c -> published (m : stack) [(path, c)]
+  where
+    path = moduleFile LoadRules m
+
+-- | The same for bases already read, each with its own publications in front of
+-- it (MS11 phase 289).
+--
+-- **A base that does not parse states nothing here**, and
+-- 'Thena.Driver.consultRuleBases' refuses it when the pool is installed, with
+-- the position in it — the bargain 'assemble' already makes for a base's
+-- imports.
+published
+  :: [ModuleName] -> [(FilePath, String)]
+  -> IO (Either Trouble [(FilePath, String)])
+published _ [] = pure (Right [])
+published stack ((path, src) : rest) = do
+  let names = either (const []) fst (ruleBasePublishes src)
+  -- **Reversed, because they are a stack**: the last @public consult@ written
+  -- is the newest and so is tried first.
+  mine <- mapM (publishing stack) (reverse names)
+  more <- published stack rest
+  pure $ do
+    under <- sequence mine
+    back  <- more
+    Right ((path, src) : concat under ++ back)
 
 -- | **The four responses the driver cannot act on itself**: each named a file,
 -- and reading files is this module\'s (§12 invariant 4).

@@ -1664,6 +1664,25 @@ your session**, unlike a surface file's consults — the base's rules run in you
 session later and need the language there. A module you already have is not loaded
 again, and a base that will not install takes back whatever it brought in.
 
+**And it may consult, and publish either act.** Write `public` in front of the
+`import` and whoever consults the base may name the language too, without importing
+the module themselves; write `consult` and the base says which other base its rules
+are written against:
+
+```
+rule base sharp where
+
+public import Stlc.Syntax     -- the language, and you get it too
+public consult Stlc.Broad     -- the base I build on, and you get it too
+consult My.Scratch            -- which you must have of your own
+```
+
+**A plain `consult` asks that the base be there and does not put it there** — consult
+`sharp` without `My.Scratch` and it is refused, naming it — because a base's position
+in the stack is its priority, and one that arrived because something else named it
+would be an order you never wrote. What `public consult` brings lands *underneath*
+the base that published it, so the base you asked for is tried first.
+
 `examples/DeterminacyTactics.thena.script` is the acceptance test for the whole first
 milestone. It declares the language of chapter 3 of Pierce's *Types and
 Programming Languages* — a seven-constructor term language, a numeric-value
