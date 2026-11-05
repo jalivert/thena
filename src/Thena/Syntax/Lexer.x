@@ -217,6 +217,14 @@ tokens :-
   -- ruling of 2026-11-03 chose; @~wpwz3@ on the closeout list is what taking the
   -- two costs and is his.
   "import"      { keyword TImport }
+  -- **Reserved at MS11 phase 285**, for @module X exporting ( … ) where@ — a
+  -- file saying which of its declarations an importer may name. **The tenth
+  -- word to narrow identifiers project-wide**, and his ruling of 2026-10-30
+  -- chose the spelling along with the design: /"It's easy for the reader to keep
+  -- track of."/ It is part of a declaration's syntax — the file header's — so it
+  -- is reserved for @data@'s reason, and @~wpwz3@ on the closeout list is what
+  -- taking the words costs and is his.
+  "exporting"   { keyword TExporting }
   -- **Reserved at MS10 phase 254**, for @namespace ‹name› where { … }@ — the
   -- fifth word to narrow identifiers project-wide. His ruling of 2026-10-30
   -- costed it with the partition and took it: a namespace that is declared,
@@ -347,6 +355,7 @@ data Token
   | TOpen        -- ^ @open@, the declaration that brings a namespace into view (MS10 phase 247)
   | TConsult     -- ^ @consult@, the declaration that names a rule base (MS11 phase 273)
   | TImport      -- ^ @import@, the declaration that names a surface module (MS11 phase 274)
+  | TExporting   -- ^ @module X exporting ( … ) where@, a file's interface (MS11 phase 285)
   | TNamespace   -- ^ @namespace ‹name› where { … }@ (MS10 phase 254)
   | THiding      -- ^ @open X hiding ( … )@ (MS10 phase 254)
   | TRenaming    -- ^ @open X renaming ( e -> c )@ (MS10 phase 254)

@@ -316,6 +316,13 @@ data SurfaceBinder = SurfaceBinder Plicity String (Maybe Surface)
 data SurfaceModule = SurfaceModule
   { surfaceModuleSteps :: [String]
   , surfaceModuleWord  :: String
+  , surfaceModuleExporting :: Maybe [([String], String)]
+    -- ^ @exporting ( … )@ on the header, as written (MS11 phase 285, @~jmw4k@).
+    --
+    -- **'Nothing' and @Just []@ are different modules.** No clause at all is a
+    -- file that states no interface and exports everything it declares, which
+    -- is every file written before this phase; @exporting ( )@ is a file that
+    -- deliberately exports nothing.
   , surfaceModuleDecls :: [SurfaceDecl]
   }
   deriving (Eq, Show)

@@ -59,6 +59,10 @@ printItem i = case i of
   -- **The same, for the same reason** (MS11 phase 274): a file printed without
   -- its imports would read back and then not elaborate at all.
   ItemImport m -> ["import " ++ moduleText m]
+  -- **Never printed here** (MS11 phase 285) — it is the header's and
+  -- 'printSurfaceModule' puts it back there. A module printed item by item
+  -- without the header has no place for it.
+  ItemExporting _ -> []
   -- **The block, indented, with its items a blank line apart** — the layout the
   -- parser reads back (MS10 phase 254). The name is written as it was: a
   -- namespace's path is relative to the one it sits in, so what the item holds
@@ -110,6 +114,17 @@ printData d =
     params = concat [" (" ++ x ++ " : " ++ renderSurface t ++ ")" | (x, t) <- surfaceDataParameters d]
 
 -- | A surface module: its header, then its items, one blank line apart.
+-- **An @exporting ( … )@ clause goes back on the header line** (MS11 phase 285):
+-- the grammar admits it only there, so printing it as a declaration would print
+-- a file that does not read back. It is carried as an item because that is where
+-- the load doors can reach it — 'Thena.Driver.ItemExporting' says why.
 printSurfaceModule :: String -> [Item] -> String
 printSurfaceModule nm items =
-  unlines (["module " ++ nm ++ " where", ""] ++ intercalate [""] (map printItem items))
+  unlines ((["module " ++ nm ++ clause ++ " where", ""]) ++ body)
+  where
+    clause = case [ es | ItemExporting es <- items ] of
+      es : _ -> " exporting ( " ++ unwords (map nameDotted es) ++ " )"
+      []     -> ""
+    body = intercalate [""] [ printItem i | i <- items, notHeader i ]
+    notHeader (ItemExporting _) = False
+    notHeader _                 = True

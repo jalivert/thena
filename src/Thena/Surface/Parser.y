@@ -85,6 +85,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   open    { Located _ TOpen }
   consult { Located _ TConsult }
   import  { Located _ TImport }
+  exporting { Located _ TExporting }
   namespace { Located _ TNamespace }
   hiding  { Located _ THiding }
   renaming { Located _ TRenaming }
@@ -123,7 +124,15 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
 Module :: { SurfaceModule }
   -- A @QName@, so a header may say the path it sits at (MS11 phase 278): the
   -- steps are directories, exactly as @import@ reads them.
-  : module QName where '{' Decls '}'       { SurfaceModule (fst $2) (snd $2) (reverse $5) }
+  : module QName where '{' Decls '}'
+      { SurfaceModule (fst $2) (snd $2) Nothing (reverse $5) }
+  -- **And a header may state the file's interface** (MS11 phase 285), which is
+  -- his ruling of 2026-10-30: the export list attaches to the header, one place
+  -- per file. The list is 'ExportNames' and not 'QNames' because @exporting ( )@
+  -- is a module that exports nothing and has to be writable — the empty list is
+  -- a statement, where a missing clause is the absence of one.
+  | module QName exporting '(' ExportNames ')' where '{' Decls '}'
+      { SurfaceModule (fst $2) (snd $2) (Just (reverse $5)) (reverse $9) }
 
 -- | A block of the **instruction** language (MS4 phase 45).
 --
@@ -409,6 +418,15 @@ OpenHead :: { ([([String], String)], SurfaceOpenSpec) }
   | QName '(' Words ')'                    { ([$1], OpenOnly (reverse $3)) }
   | QName hiding '(' Words ')'             { ([$1], OpenHiding (reverse $4)) }
   | QName renaming '(' Renamings ')'       { ([$1], OpenRenaming (reverse $4)) }
+
+-- | What a header\'s @exporting ( … )@ names: zero or more whole names (MS11
+-- phase 285). **Names and not 'Words', which is the difference from an @open@\'s
+-- selection**: an entry names a namespace or one member of one, and the unit of
+-- export is the namespace, so @Nat@ covers everything under it and @Nat.Nat@ is
+-- the type alone. Reversed by its caller.
+ExportNames :: { [([String], String)] }
+  :                                        { [] }
+  | ExportNames QName                      { $2 : $1 }
 
 -- | One or more, for @open X Y Z@ (MS10 phase 254). Reversed by its caller.
 QNames :: { [([String], String)] }

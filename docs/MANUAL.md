@@ -1497,9 +1497,58 @@ will load again, so it reaches everything the session holds, the module you have
 loaded included — which is how you poke at one. An `open` a file left behind stays in
 force at the prompt too, for the same reason.
 
-> **Not narrowed yet.** Everything an imported module declared is reachable. Saying
-> which names a file *offers* — an `exporting` list on the header, and
-> `public import` for passing a dependency on — is designed and not built.
+> **Half narrowed.** A header may now say what the file offers — `exporting`, below.
+> `public import`, for passing a dependency on to whoever imports you, is designed
+> and not built, so an import still reaches only the files you import yourself.
+
+### `exporting` says which of your declarations other files may name
+
+Put the list on the header and the rest of the file is yours alone:
+
+```
+module Bits exporting ( Bit ) where
+
+data Bit : Type₀ where
+  off : Bit
+  on : Bit
+
+flip : Bit -> Bit                 -- a helper, and not part of the interface
+flip = λ b -> elim Bit () (λ _ -> Bit) (Bit.on Bit.off) () b
+```
+
+A file that imports `Bits` may write `Bit`, `Bit.off`, `Bit.elim` and anything else
+under `Bit`. Write `flip` and you get `not in scope: flip` — the same answer as for a
+module you never imported.
+
+**You name namespaces, not names.** `exporting ( Bit )` means *everything under
+`Bit`*, now and later. You never wrote `Bit.elim` or anything under `Bit.lemmata`
+yourself, and Thena may generate more there as it improves, so listing names
+one by one would mean maintaining a list of names you never typed.
+
+**To export a type without its constructors, name the type:**
+
+```
+module Opaque exporting ( Tri.Tri ) where
+
+data Tri : Type₀ where
+  low : Tri
+  mid : Tri
+  high : Tri
+```
+
+Now an importer writes `Tri` or `Tri.Tri` and cannot write `Tri.mid` or `Tri.elim`.
+The short `Tri` comes along with the type because it is a shorthand *for* the type.
+
+**Leave the clause out and everything is exported**, which is what every file did
+before this existed. `exporting ( )` says something else: this file exports nothing.
+
+**Your own file always sees all of itself**, and so does the prompt — after loading
+`Bits` you can still `:infer flip`. What the list changes is only what *another file*
+may name.
+
+> **It hides names; it does not make anything abstract.** A term carries its real
+> names however you wrote the header, so a constructor you kept back can still appear
+> in a goal, spelled with a name you are not allowed to type.
 
 ### `import` and `consult` are typed at the prompt too
 

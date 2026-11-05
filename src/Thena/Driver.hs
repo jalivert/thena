@@ -56,6 +56,9 @@ module Thena.Driver
   , modulesLoaded
   , moduleDeclaring
   , declaredByModule
+  , exportedByModule
+  , moduleExporting
+  , exports
   , openedByModule
   , moduleDeclared
   , preludeModule
@@ -109,7 +112,7 @@ import Thena.Language.Regex
   , star
   )
 import Data.Char (isAlpha, isAlphaNum, isSpace)
-import Data.List ((\\), intercalate, dropWhileEnd, isSuffixOf, nub, stripPrefix)
+import Data.List ((\\), intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
@@ -408,6 +411,19 @@ data Session = Session
     --
     -- **An entry only where there is a module name to key it by**, and **not in
     -- a 'Snapshot'**, both for 'sessionDeclaredBy''s reasons.
+  , sessionExporting :: [(ModuleName, [GlobalName])]
+    -- ^ __The @exporting ( … )@ clause of each module that stated one__ (MS11
+    -- phase 285, @~jmw4k@).
+    --
+    -- **Absence is the statement that there is no clause**, so a module that
+    -- wrote none is simply not here and exports everything it declared, while a
+    -- module that wrote @exporting ( )@ is here with an empty list and exports
+    -- nothing. 'exportedByModule' is what reads it and 'concealedFrom' is the
+    -- one caller that matters.
+    --
+    -- **The list as WRITTEN, not the names it selects**: the clause is the fact
+    -- the file stated and the selected set is derived from it, so a query may
+    -- report what the author wrote and the prefix test stays in one place.
   , sessionDeclaredBy :: [(ModuleName, [GlobalName])]
     -- ^ **which module declared which globals** (MS11 phase 280), most recently
     -- loaded first. The addition every part of visibility rides on: nothing can
@@ -662,6 +678,7 @@ newSession = Session
   , sessionParsing   = Nothing
   , sessionAsking    = Nothing
   , sessionLoaded    = []
+  , sessionExporting  = []
   , sessionDeclaredBy = []
   , sessionOpenedBy  = []
   }
@@ -1350,7 +1367,12 @@ parseSurfaceModule src = do
   ts' <- mapLeft LayoutFailed (layout ts)
   m   <- mapLeft SurfaceParseFailed (Surface.parseSurfaceModule ts')
   is  <- regroup (surfaceModuleDecls m)
-  Right (moduleFromSteps (surfaceModuleSteps m) (surfaceModuleWord m), is)
+  -- **The header's export list goes in front of the items** (MS11 phase 285):
+  -- it is the header's and the item list is what both load doors are handed, so
+  -- this is where it can be read without changing either signature.
+  let hdr = [ ItemExporting [ GlobalName ps x | (ps, x) <- es ]
+            | Just es <- [surfaceModuleExporting m] ]
+  Right (moduleFromSteps (surfaceModuleSteps m) (surfaceModuleWord m), hdr ++ is)
 
 -- | Why a top-level block did not resolve, in terms 'SyntaxError' can hold.
 --
@@ -1410,6 +1432,23 @@ data Item
     -- 'ItemConsult'\'s twin, and like it, it declares nothing and runs nothing:
     -- what it does happens before this module\'s program does, when the load
     -- collects every one of them and elaborates each named module first.
+  | ItemExporting [GlobalName]
+    -- ^ @module X exporting ( … ) where@ (MS11 phase 285, @~jmw4k@) — **the
+    -- file's interface**, as his ruling of 2026-10-30 attached it: one place per
+    -- file says what an importer may name.
+    --
+    -- **The header's, carried in the item list because that is where the two
+    -- doors can read it.** The grammar admits it only in the header, so this
+    -- item can arise nowhere else and 'Thena.View.Source.printSurfaceModule'
+    -- puts it back on the header line. Carrying it any other way would change
+    -- the type of 'parseSurfaceModule' and of the load doors a frontend calls,
+    -- and 'ItemImport' is the precedent: an item that declares nothing, runs
+    -- nothing, and is read out of the list before the program starts.
+    --
+    -- **An entry names a namespace or one member of one**, and the unit of
+    -- export is the namespace — @Nat@ covers everything under @Nat@ now or
+    -- later, which is what keeps a generated name out of an export list
+    -- ('exports' is the test).
   | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
     -- resolves it while the file is being read, so a block with bad operands is
@@ -1518,6 +1557,10 @@ surfaceProgram n0 items = foldl (item []) ([], n0) items
   -- reason one step further out: it says which /modules/ run before this one,
   -- so by the time this program starts they are already in the environment.
   item _ acc (ItemImport _) = acc
+  -- **An export list emits nothing** (MS11 phase 285). It is not a step of the
+  -- program at all: it says what an /importer/ may name, which is read when
+  -- this module is recorded and never when it runs.
+  item _ acc (ItemExporting _) = acc
   -- **A top-level block is a call to a rule** (MS6 phase 104b), and the rule is
   -- @run-block@ in the shipped base, whose whole body is @play t@. So how a
   -- module\'s blocks are treated is written in user space and a user may
@@ -1956,13 +1999,14 @@ loadProofModules s0 = go s0 []
       let pool = maybe (rules (sessionMachine s)) id (readModulePool m)
        in case loadProofItemsConsulting pool s (moduleText (readModuleHeader m))
                                         (readModuleItems m) of
-        (s', r@(ProofLoaded {})) -> go (marked s (readModuleName m) s') (r : acc) rest
+        (s', r@(ProofLoaded {})) -> go (marked m s (readModuleName m) s') (r : acc) rest
         -- 'loadProofItemsConsulting' has already put this module's own
         -- declarations back; this takes the closure's with them.
         (s', bad)                -> (rolledBack s0 s', Left (m, bad))
 
-    marked _      Nothing  s = s
-    marked before (Just n) s = moduleDeclared n before s
+    marked _ _      Nothing  s = s
+    marked m before (Just n) s =
+      moduleDeclared n (moduleExporting (readModuleItems m)) before s
 
 -- | __Which module these declarations are__ (MS11 phase 280).
 --
@@ -1978,13 +2022,19 @@ loadProofModules s0 = go s0 []
 -- the same difference taken of the other field a load now restores: the
 -- @open@s a module inherited from its imports were in force before it ran, so
 -- what is left is the ones it wrote itself. 'openedFrom' is the other end.
-moduleDeclared :: ModuleName -> Session -> Session -> Session
-moduleDeclared n before after
+-- **AND WHAT IT SAID ITS INTERFACE IS** (MS11 phase 285, @~jmw4k@) — the one
+-- thing here that is read off the items rather than off the two environments,
+-- because an export list names declarations rather than making any:
+-- 'moduleExporting' is what the caller passes.
+moduleDeclared :: ModuleName -> Maybe [GlobalName] -> Session -> Session -> Session
+moduleDeclared n es before after
   | moduleLoaded n after = after
   | otherwise =
       after { sessionLoaded     = n : sessionLoaded after
             , sessionDeclaredBy = (n, arrived) : sessionDeclaredBy after
             , sessionOpenedBy   = (n, left) : sessionOpenedBy after
+            , sessionExporting  = maybe id (\e -> ((n, e) :)) es
+                                    (sessionExporting after)
             }
   where
     -- **Deduplicated, because 'Env.declaredNames' is four tables concatenated**
@@ -2045,7 +2095,7 @@ concealedFrom ims s =
           , g `notElem` visible ]
   where
     env     = globals (sessionMachine s)
-    visible = concatMap (`declaredByModule` s) (preludeModule : ims)
+    visible = concatMap (`exportedByModule` s) (preludeModule : ims)
 
 -- | __Which @open@s a module starts with__ (MS11 phase 283, @~w46f8@).
 --
@@ -2144,6 +2194,20 @@ moduleDeclaring g s =
 declaredByModule :: ModuleName -> Session -> [GlobalName]
 declaredByModule n s = concat [ gs | (m, gs) <- sessionDeclaredBy s, m == n ]
 
+-- | __What this module lets an importer name__ (MS11 phase 285, @~jmw4k@).
+--
+-- 'declaredByModule' narrowed by the module\'s own @exporting ( … )@ clause, and
+-- equal to it for a module that wrote none. **This is what an importer sees and
+-- 'declaredByModule' is what the module declared** — the difference is the whole
+-- of visibility, and keeping both is what lets a goal say where a name came from
+-- even when the reader may not write it.
+exportedByModule :: ModuleName -> Session -> [GlobalName]
+exportedByModule n s = filter (exports clause) (declaredByModule n s)
+  where
+    clause = case [ es | (m, es) <- sessionExporting s, m == n ] of
+      es : _ -> Just es
+      []     -> Nothing
+
 -- | Every @open@ a module left in force, where one did (MS11 phase 283,
 -- @~w46f8@).
 --
@@ -2216,6 +2280,47 @@ moduleImports = concatMap go
       ItemOpenIn _ is    -> moduleImports is
       _                  -> []
 
+-- | __What this module says its interface is__ (MS11 phase 285, @~jmw4k@).
+--
+-- 'Nothing' is a file with no @exporting@ clause, which exports everything it
+-- declares — every file written before this phase — and @Just []@ is
+-- @exporting ( )@, a file that deliberately exports nothing. **The two are
+-- different modules and 'exports' tells them apart.**
+--
+-- **The top level only, which is where 'moduleImports' walks and this does
+-- not.** An import says which modules this one depends on and a namespace does
+-- not change that; an export list is the /header\'s/, and the grammar admits it
+-- nowhere else, so there is nothing inside a block for this to find.
+moduleExporting :: [Item] -> Maybe [GlobalName]
+moduleExporting items = case [ es | ItemExporting es <- items ] of
+  es : _ -> Just es
+  []     -> Nothing
+
+-- | __Whether an export list reaches this name__ (MS11 phase 285, @~jmw4k@).
+--
+-- **The unit of export is the namespace and not the name**, which is the one
+-- thing that makes an export list writable at all: a user writes @data Nat@ and
+-- never writes @Nat.elim@, @Nat.noConfusion@ or the acyclicity apparatus, so a
+-- list of /names/ would enumerate names nobody typed and would need editing
+-- whenever the generator grew one more lemma. Naming @Nat@ covers @Nat.*@
+-- whatever is in it now or later.
+--
+-- So an entry covers a key when the entry\'s whole spelling is a prefix of the
+-- key\'s, step for step:
+--
+-- * @exporting ( Nat )@ covers @Nat@, @Nat.Nat@, @Nat.z@, @Nat.lemmata.…@
+-- * @exporting ( Nat.Nat )@ covers @Nat.Nat@ alone — the type, with the
+--   resolver alias that goes wherever the type goes, and **no constructors and
+--   no eliminator**
+--
+-- **Step for step and not as text**, so @Nat@ does not cover @Natural.x@.
+exports :: Maybe [GlobalName] -> GlobalName -> Bool
+exports Nothing   _ = True
+exports (Just es) g = any covers es
+  where
+    covers e = steps e `isPrefixOf` steps g
+    steps (GlobalName ps x) = ps ++ [x]
+
 -- | The one name an item declares, where it declares exactly one.
 declaredName :: Item -> Maybe String
 declaredName i = case i of
@@ -2239,6 +2344,9 @@ declaredName i = case i of
   -- **Nor an import** (MS11 phase 274): the names it makes reachable are the
   -- imported module's own, and that module's load named them.
   ItemImport _      -> Nothing
+  -- **Nor an export list** (MS11 phase 285) — it names declarations the module
+  -- made elsewhere and makes none of its own.
+  ItemExporting _   -> Nothing
   -- The language's name. Until phase 103 generates its datatype, what it
   -- declares is the grammar alone — the metavariables and the notation.
   -- **A @notation@ block declares nothing at all** (MS8 phase 158, §4.8): the

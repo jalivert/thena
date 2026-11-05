@@ -1,0 +1,10 @@
+-- **A file that exports the TYPE and not its constructors** (MS11 phase 285).
+-- `exporting ( Tri.Tri )` names one member of the namespace, so an importer may
+-- write the type — and the short alias, which goes wherever the type goes — and
+-- may write neither `Tri.mid` nor `Tri.elim`. See `Thena.LoadTests`.
+module test.modules.GuardedType exporting ( Tri.Tri ) where
+
+data Tri : Type₀ where
+  low : Tri
+  mid : Tri
+  high : Tri

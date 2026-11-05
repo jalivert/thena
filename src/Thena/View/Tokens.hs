@@ -175,6 +175,8 @@ kindOf t = case t of
   -- MS11 phase 273: and so is @consult@.
   TConsult      -> AKeyword
   TImport       -> AKeyword
+  -- MS11 phase 285: and the header's @exporting@.
+  TExporting    -> AKeyword
   TNamespace    -> AKeyword
   THiding       -> AKeyword
   TRenaming     -> AKeyword

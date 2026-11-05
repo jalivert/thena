@@ -1,0 +1,9 @@
+-- **The constructors did not come** (MS11 phase 285): `GuardedType` exported
+-- `Tri.Tri` and not `Tri`, so `Tri.mid` is concealed although the module
+-- declared it and the session holds it.
+module test.modules.MissesCtor where
+
+import test.modules.GuardedType
+
+mine : Tri
+mine = Tri.mid

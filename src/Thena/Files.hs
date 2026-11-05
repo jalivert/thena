@@ -109,7 +109,9 @@ loadPrelude s = do
       -- anything, which is his ruling of 2026-11-05, and the subtraction that
       -- carries it has to be able to tell them from a name typed at the prompt.
       -- 'Thena.Driver.preludeModule' says why the name is supplied here.
-      (s', ProofLoaded {}) -> (moduleDeclared preludeModule s s', [])
+      -- **No export list**: the prelude states no interface, so everything it
+      -- declares is reachable from every module (MS11 phase 285).
+      (s', ProofLoaded {}) -> (moduleDeclared preludeModule Nothing s s', [])
       (s', resp)           -> (s', [Unloadable path resp])
 
 -- | A session with everything shipped loaded: **the rule base first, then the

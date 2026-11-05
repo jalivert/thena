@@ -22,7 +22,7 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import Data.List (isInfixOf, nub)
 
 import Thena.Core.Level (Level (..), instantiateLevels)
-import Thena.Core.Term (Core (..), rootName)
+import Thena.Core.Term (Core (..), GlobalName (..), rootName)
 import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..), Warning (..))
 import Thena.Declared (declaredAs, named)
 import Thena.Driver
@@ -48,6 +48,9 @@ import Thena.Driver
   , modulesLoaded
   , moduleText
   , declaredByModule
+  , exportedByModule
+  , exports
+  , moduleExporting
   , ModuleName
   , moduleDeclaring
   , preludeModule
@@ -101,6 +104,7 @@ tests =
     , testGroup "a module sees its imports and the prelude (MS11 phase 282)" isolationTests
     , testGroup "a file does not end its own opens (MS11 phase 283)" openIsolationTests
     , testGroup "import and consult at the prompt (MS11 phase 284)" promptActTests
+    , testGroup "a header states the file's interface (MS11 phase 285)" exportTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -1797,3 +1801,125 @@ tierTests =
       \\n\
       \oneImplicit : Nat\n\
       \oneImplicit = idI (succ zero)\n"
+
+-- --------------------------------------------------------------------------
+-- A header states the file's interface (MS11 phase 285, @~jmw4k@)
+-- --------------------------------------------------------------------------
+
+-- | __@exporting ( … )@, and both of its halves.__
+--
+-- **Every behavioural test here is a pair, for @~w46f8@\'s reason**: a test that
+-- only showed a concealed name being refused could not tell an export list that
+-- works from one that conceals everything, and one that only showed an exported
+-- name arriving could not tell it from no export list at all. So each fixture
+-- comes with one importer that must load and one that must be refused.
+--
+-- **The fixtures are on disc because an importer needs the door with the IO**:
+-- 'loadProofSource' is pure and refuses a module that imports anything, so the
+-- importer side cannot be written inline here.
+exportTests :: [TestTree]
+exportTests =
+  [ -- **A module that states no interface exports everything**, which is every
+    -- file written before this phase and the reason the corpus did not move:
+    -- @Bit@ has no clause and @Pair@ writes @Bit.Bit@.
+    testCase "no clause at all exports everything declared" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadProofFile s0 "test/modules/Bit.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      let m = named' "test.modules.Bit"
+      exportedByModule m s1 @?= declaredByModule m s1
+
+  , -- **Naming the namespace carries everything under it**, now or later, which
+    -- is what keeps a generated name out of an export list: @Guarded@ exports
+    -- @Bit@ and the importer writes @Bit.off@.
+    testCase "naming a namespace exports what is under it" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/SeesExport.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.Guarded", "test.modules.SeesExport"]
+
+  , -- **And what the list does not name is concealed from an importer**, with
+    -- the module declared and in the session: @Guarded@ declares @flip@ and
+    -- exports only @Bit@.
+    testCase "and a declaration the list does not name is not reachable" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesExport.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "not in scope: flip")
+                               (renderResponse s0 r))
+        _   -> assertFailure (show (map (renderTrouble s0) trouble))
+
+  , -- **An entry may name one member of a namespace**, which is how the type
+    -- goes without its constructors and costs no syntax: @GuardedType@ exports
+    -- @Tri.Tri@, and the short @Tri@ comes with it because the alias a @data@
+    -- declaration mints is a resolver fact that ends at the type.
+    testCase "naming the type alone takes its alias with it" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/SeesType.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.GuardedType", "test.modules.SeesType"]
+
+  , -- **And the constructors stay behind**, which is the whole point of being
+    -- able to name a member.
+    testCase "and the constructors do not come with it" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesCtor.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "not in scope: Tri.mid")
+                               (renderResponse s0 r))
+        _   -> assertFailure (show (map (renderTrouble s0) trouble))
+
+  , -- **A MODULE IS NOT NARROWED BY ITS OWN LIST**, which is what a naive
+    -- implementation breaks: @Guarded@ exports @Bit@ alone and its own @flip@
+    -- is written in terms of @Bit.on@ and @Bit.off@, so the file would not load
+    -- at all if the list applied to the module itself.
+    testCase "a module's own list does not narrow the module" $ do
+      (s0, _) <- startingSession
+      (s1, out, trouble) <- loadProofFile s0 "test/modules/Guarded.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Guarded"]
+      assertBool (show (map nameDotted (declaredByModule (named' "test.modules.Guarded") s1)))
+                 ("flip" `elem` map nameDotted
+                               (declaredByModule (named' "test.modules.Guarded") s1))
+
+  , -- **And the prompt is not narrowed either** (MS11 phase 282's rule, which
+    -- this does not touch): a typed line reaches everything the session holds,
+    -- @flip@ included, however the file that declared it stated its interface.
+    testCase "the prompt reaches a name the module did not export" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Guarded.thena"
+      let (_, r) = oneLine s1 ":infer flip"
+      assertBool (unwords (renderResponse s1 r))
+                 (not (any (isInfixOf "not in scope") (renderResponse s1 r)))
+
+  , -- **@exporting ( )@ is a statement and no clause is the absence of one**,
+    -- so the two may not be represented the same way: the first exports
+    -- nothing and the second everything.
+    testCase "an empty list and no list are different modules" $ do
+      moduleExporting' "module M exporting ( ) where\n\nx : Type₀\nx = Type₀\n"
+        @?= Just []
+      moduleExporting' "module M where\n\nx : Type₀\nx = Type₀\n"
+        @?= Nothing
+
+  , -- **The test is step for step and not on the text**, so a namespace does
+    -- not cover a name that merely starts with its letters.
+    testCase "an entry covers a name step for step, not as text" $ do
+      let covered = exports (Just [rootName "Nat"])
+      assertBool "Nat" (covered (rootName "Nat"))
+      assertBool "Nat.z" (covered (named'' ["Nat"] "z"))
+      assertBool "Natural.x" (not (covered (named'' ["Natural"] "x")))
+  ]
+
+-- | The export clause a module's source states, for the tests above.
+moduleExporting' :: String -> Maybe [GlobalName]
+moduleExporting' src = case parseSurfaceModule src of
+  Right (_, items) -> moduleExporting items
+  Left e           -> error (show e)
+
+-- | A name with steps, for 'exports'.
+named'' :: [String] -> String -> GlobalName
+named'' = GlobalName

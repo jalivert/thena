@@ -559,6 +559,7 @@ describe t = case t of
   TOpen       -> "open"
   TConsult    -> "consult"
   TImport     -> "import"
+  TExporting  -> "exporting"
   TNamespace  -> "namespace"
   THiding     -> "hiding"
   TRenaming   -> "renaming"

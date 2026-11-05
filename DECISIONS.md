@@ -43,7 +43,7 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | a tagged literal's fence | `` ` `` |
 | spell nothing, and stay reserved | `⌜` `⌝` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -693,6 +693,61 @@ nothing for the header to disagree with. That is deliberate — checking always 
 make a file illegal because of where it sits, and a file whose path is not a module
 name (a hyphen in a step, a leading digit) would become unloadable rather than merely
 unimportable.
+
+### A header says what the file exports, and the unit is the namespace
+
+*Decided 2026-10-30. Built — MS11 phase 285. Deliberately a simple default, and
+meant to be revisited.*
+
+A file may state its interface on its header, and what it does not name is not
+reachable from another file:
+
+```
+module Bits exporting ( Bit ) where
+
+data Bit : Type₀ where
+  off : Bit
+  on : Bit
+
+flip : Bit -> Bit                 -- declared, and not exported
+flip = λ b -> elim Bit () (λ _ -> Bit) (Bit.on Bit.off) () b
+```
+
+Import `Bits` and you may write `Bit`, `Bit.off`, `Bit.elim` and everything else
+under `Bit`. Write `flip` and you are told it is not in scope — the same answer you
+get for a module you never imported at all.
+
+**The unit of export is the namespace, not the name.** Naming `Bit` exports
+everything under `Bit`, whatever is in it now and whatever Thena generates into it
+later. That is the point: you write `data Nat` and never write `Nat.noConfusion` or
+anything under `Nat.lemmata`, so a list of individual names would be a list of names
+you never typed, and it would need editing every time Thena learned to generate one
+more lemma.
+
+**You can still name one member, and that is how a type goes out without its
+constructors:**
+
+```
+module Opaque exporting ( Tri.Tri ) where   -- the type alone
+
+data Tri : Type₀ where
+  low : Tri
+  mid : Tri
+  high : Tri
+```
+
+An importer may write `Tri` and `Tri.Tri` — the short spelling comes along, because
+it is a resolver alias that resolves *to* `Tri.Tri` — and may write neither `Tri.mid`
+nor `Tri.elim`.
+
+**No clause at all exports everything**, which is what every file did before this
+existed. `exporting ( )` is a different statement: a file that exports nothing.
+
+**Two things it is not.** Your own file is never narrowed by its own list — `Bits`
+above uses `Bit.on` freely — and the prompt is never narrowed by anybody's, so after
+loading `Bits` you can still `:infer flip`. And this is name-hiding, not abstraction:
+a term carries its real names, so a constructor you did not export can still turn up
+in a goal, printed with a name you are not allowed to type.
 
 ### A rule file writes its own `open` lines
 
