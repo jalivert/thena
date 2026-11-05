@@ -806,6 +806,23 @@ data Response
     -- elaborated at all before the modules it depends on are, and this door has
     -- no way to read a file. "Thena.Files" walks the import graph and goes
     -- through 'loadProofModules' instead.
+  | ImportRequested ModuleName
+    -- ^ **@import ‹module›@ typed at the prompt** (MS11 phase 284, his ruling
+    -- of 2026-11-03 that both acts are writable at the prompt). Like
+    -- 'ProofRequested' it only names what to read; "Thena.Files" resolves the
+    -- name, walks the graph from it and elaborates the closure.
+    --
+    -- **A NAME AND NOT A PATH, and that is not tidiness** — @~r58qh@, his
+    -- ruling of 2026-11-05: a module's header is checked against the name it
+    -- was reached by, and only when it is reached by name. A prompt @import@
+    -- reaches it by name, so turning the name into a path here and handing over
+    -- 'ProofRequested' would be the one door that skips the check.
+  | ModuleAlreadyIn ModuleName
+    -- ^ **@import ‹module›@ naming a module the session already holds** (MS11
+    -- phase 284). A module is loaded once however many files reach it, so this
+    -- is the same no-op a diamond in the graph gets — said out loud, because a
+    -- line typed at the prompt that answered nothing would leave the user
+    -- unable to tell it took. The @open@ case makes the same argument.
   | ImportCycle [ModuleName]
     -- ^ **these modules import each other** (MS11 phase 274), in the order the
     -- walk met them, the module that closed the loop last.
@@ -993,6 +1010,12 @@ data CommandError
   | MixedLoad String
     -- ^ @:load a.thena b.thena.rules@ — a script and a rule base in one
     -- command. Two different operations, and neither is what was asked for
+  | NotAModuleName String
+    -- ^ **@import@ or @consult@ at the prompt, given something no module name
+    -- could be** (MS11 phase 284) — @import foo-bar@, @import 0x@. Every step
+    -- of a module name is an ordinary word ('moduleName'), so this is the
+    -- refusal a path gets at the one door that takes no paths: the argument is
+    -- echoed because what is wrong with it is in the text.
   | ProofUnderway GlobalName
     -- ^ a rule base loaded while a proof is current. **The base may not change
     -- under a half-built proof** — the user's reproducibility argument,
@@ -2442,6 +2465,38 @@ dispatch s name arg = case name of
   -- @:step@ can watch it and phase 49 can move the program into a rule body.
   "declare" -> withArgument (declareSurface arg)
 
+  -- **@import ‹module›@ AND @consult ‹base›@ ARE WRITABLE AT THE PROMPT** (MS11
+  -- phase 284, his ruling of 2026-11-03): *both are writable in a surface file,
+  -- in an instral rule file, and at the prompt.* **Bare words, because they
+  -- act** (§2.4) — and they are the same two declarations a file writes, not
+  -- commands that resemble them, so the word is the word a file uses and there
+  -- is no @:import@.
+  --
+  -- **Each takes ONE module name**, where @:load@ and @:consult@ take paths. A
+  -- name is not a path: every step is an ordinary word, there is no relative
+  -- form, and the act supplies the extension — so these two words cannot reach
+  -- a file that @import@ in a module could not reach either.
+  "import"  -> withArgument $ case moduleName (trimmed arg) of
+    Nothing -> (s, Rejected (NotAModuleName (trimmed arg)))
+    -- **Nothing is refused for an already-loaded module**: it is the no-op a
+    -- diamond in the import graph gets, and "Thena.Files" answers it, because
+    -- the walk that knows about deduplication is the one that reads files.
+    Just m  -> (s, ImportRequested m)
+  -- **Refused while a proof is open, as @:consult@ is** — the base may not
+  -- change under a half-built proof (the user, 2026-08-25). An @import@ is not,
+  -- for the reason @:load proof@ is not: it declares and does not touch the
+  -- search.
+  "consult" -> withArgument $ case moduleName (trimmed arg) of
+    Nothing -> (s, Rejected (NotAModuleName (trimmed arg)))
+    Just m  -> case proofUnderway of
+      Just why -> (s, Rejected why)
+      -- **A path, where @import@ hands over a name**, and the asymmetry is
+      -- forced rather than chosen: a rule base has no header to disagree with
+      -- the name it was reached by (phase 267 added no header production), so
+      -- there is nothing for a by-name door to check and 'ConsultRequested' is
+      -- already exactly this act.
+      Nothing  -> (s, ConsultRequested [moduleFile LoadRules m])
+
   -- Dispatch the rule engine at the focus (§7.3). An op, so a bare word.
   --
   -- **With an argument it is elaboration** (§8, phase 17b), and the argument
@@ -2609,6 +2664,10 @@ dispatch s name arg = case name of
     withArgument k
       | null arg  = (s, Rejected (MissingArgument name))
       | otherwise = k
+
+    -- | The argument with the spaces off both ends — what a word that takes a
+    -- /name/ needs, where one that takes paths splits on spaces instead.
+    trimmed = dropWhileEnd (== ' ') . dropWhile (== ' ')
 
     -- | __What a command's argument names, under the session's @open@s__ (MS10
     -- phase 249, repairing @~7zn7k@). It is
@@ -3132,6 +3191,8 @@ commandSummary =
   , ("data ‹D› … where { … }",   "declare an inductive family")
   , ("open ‹namespace›",         "bring a namespace into view for the rest of the session")
   , ("declare ‹sig› ; ‹equation›", "elaborate a surface declaration")
+  , ("import ‹module›",            "load a surface module by its name")
+  , ("consult ‹base›",             "push a rule base by its name")
   , ("certify core`‹type›`",      "ask the kernel about the development")
   , ("qed",                      "certify and admit the finished proof")
   , (":show / :show ‹name›",     "the development / a global")
@@ -3965,9 +4026,9 @@ data LoadError
     -- had the line been typed. Two encodings of one failure can disagree
     -- (§3.7's argument against emitting ι-rules, in miniature)
   | NestedLoad Int
-    -- ^ @:load@ inside a loaded file. Refused in MS1 rather than followed:
-    -- following it needs IO from a pure function, and a file that loads itself
-    -- would not terminate.
+    -- ^ @:load@, or an @import@, inside a loaded file. Refused in MS1 rather
+    -- than followed: following it needs IO from a pure function, and a file
+    -- that loads itself would not terminate.
     --
     -- **All three kinds of load, which was not so until MS10 phase 268**: the
     -- case matched 'LoadRequested' alone, so a @:load@ naming a script said
@@ -4043,6 +4104,14 @@ loadSource s0 = go s0 1 [] . lines
             ProofRequested _ -> finished s acc (Just (NestedLoad n))
             RulesRequested _ -> finished s acc (Just (NestedLoad n))
             ConsultRequested _ -> finished s acc (Just (NestedLoad n))
+            -- **An @import@ typed in a script is the fifth** (MS11 phase 284),
+            -- and it arrived with the same defect phase 268 fixed for the other
+            -- two: the response was recorded and silently dropped, so a script
+            -- that stated what it reuses carried on without it and failed on
+            -- the next line instead. **A script still cannot import**, which is
+            -- what the five @.thena.script@ files in @examples/@ are waiting
+            -- for; the prompt can.
+            ImportRequested _ -> finished s acc (Just (NestedLoad n))
             Quit            -> finished s' acc' Nothing
             _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
               | otherwise    -> go s' (n + 1) acc' ls

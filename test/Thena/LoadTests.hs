@@ -26,7 +26,8 @@ import Thena.Core.Term (Core (..), rootName)
 import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..), Warning (..))
 import Thena.Declared (declaredAs, named)
 import Thena.Driver
-  ( LoadError (..)
+  ( CommandError (..)
+  , LoadError (..)
   , Loaded (..)
   , LoadKind (..)
   , Response (..)
@@ -71,7 +72,7 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Global.Declare (DeclareError (..))
-import Thena.Files (Trouble (..), consultRuleFiles, loadProofFile, startingSession)
+import Thena.Files (Trouble (..), consultRuleFiles, following, loadProofFile, startingSession)
 import Thena.Render
   ( rendering
   ,renderTrouble, renderResponse, renderCore, renderEliminator)
@@ -99,6 +100,7 @@ tests =
     , testGroup "a rule base states what it depends on (MS11 phase 276)" baseImportTests
     , testGroup "a module sees its imports and the prelude (MS11 phase 282)" isolationTests
     , testGroup "a file does not end its own opens (MS11 phase 283)" openIsolationTests
+    , testGroup "import and consult at the prompt (MS11 phase 284)" promptActTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -291,6 +293,118 @@ openIsolationTests =
       assertBool (unwords (renderResponse s1 r))
                  (not (any (isInfixOf "not in scope") (renderResponse s1 r)))
   ]
+
+-- --------------------------------------------------------------------------
+-- @import@ and @consult@ at the prompt (MS11 phase 284)
+-- --------------------------------------------------------------------------
+
+-- | __His ruling of 2026-11-03: both acts are writable in a surface file, in a
+-- rule file, and at the prompt.__ Neither parsed there until this phase —
+-- @1:1: unexpected import@.
+--
+-- **They take a module NAME where @:load@ and @:consult@ take paths**, and the
+-- consequence worth a test is the header check: @~r58qh@ asks a module's header
+-- to match the name it was reached by, and only when it is reached by name. A
+-- prompt @import@ reaches it by name, so it is asked — which is what a door
+-- built on 'ProofRequested' would have skipped.
+promptActTests :: [TestTree]
+promptActTests =
+  [ testCase "import loads the module it names, and what that imports" $ do
+      (s0, _) <- startingSession
+      (s1, out, trouble) <- atPrompt s0 "import test.modules.Inherits"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.Opener", "test.modules.Inherits"]
+      assertBool "and it is in" (moduleLoaded (named' "test.modules.Inherits") s1)
+
+  , -- A module is loaded once however many files reach it, and the prompt is
+    -- not an exception to that.
+    testCase "and a second import of it declares nothing again" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- atPrompt s0 "import test.modules.Bit"
+      (_, out, trouble) <- atPrompt s1 "import test.modules.Bit"
+      assertBool (show (map (renderTrouble s1) trouble)) (null trouble)
+      out @?= [ModuleAlreadyIn (named' "test.modules.Bit")]
+
+  , -- **THE PAIR, and it is the whole reason the response carries a name.**
+    -- @Misnamed.thena@ calls itself @test.modules.Elsewhere@: reached by name
+    -- it is refused, and reached by its path it is not.
+    testCase "the header is checked, because the prompt reaches it by name" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- atPrompt s0 "import test.modules.Misnamed"
+      out @?= []
+      case trouble of
+        [Unloadable p (ModuleMisnamed reached header)] -> do
+          p @?= "test/modules/Misnamed.thena"
+          reached @?= named' "test.modules.Misnamed"
+          header  @?= named' "test.modules.Elsewhere"
+        other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , testCase "and the same file loaded by its path is accepted" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/Misnamed.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Elsewhere"]
+
+  , -- A name is not a path: every step is an ordinary word.
+    testCase "a word that is no module name is refused before any IO" $
+      case snd (command newSession "import test/modules/Bit.thena") of
+        Rejected e -> e @?= NotAModuleName "test/modules/Bit.thena"
+        other      -> assertFailure (show other)
+
+  , testCase "and a hyphen is not a word either" $
+      case snd (command newSession "import foo-bar") of
+        Rejected e -> e @?= NotAModuleName "foo-bar"
+        other      -> assertFailure (show other)
+
+  , -- **The same cycle refusal a file's import gets**, because it is the same
+    -- walk: nothing about the graph is written twice.
+    testCase "a cycle reached from the prompt is refused by name" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <- atPrompt s0 "import test.modules.LoopA"
+      case trouble of
+        [Unloadable _ (ImportCycle ms)] ->
+          map moduleText ms
+            @?= ["test.modules.LoopA", "test.modules.LoopB", "test.modules.LoopA"]
+        other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- **@consult@ reaches a base by the same kind of name**, the act supplying
+    -- the extension: @test.modules.Inspecting@ is
+    -- @test/modules/Inspecting.thena.rules@, and the base's own @import@ brings
+    -- in the module declaring the language it talks about.
+    testCase "consult reaches a rule base by its module name" $ do
+      (s0, _) <- startingSession
+      (s1, out, trouble) <- atPrompt s0 "consult test.modules.Inspecting"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Lang"]
+      assertBool "the base went in" (not (null [ () | BasesLoaded _ <- out ]))
+      -- A consult pushes, so the shipped base is still underneath it.
+      assertBool "and it pushed rather than replaced"
+                 (length (rules (machineOf s1)) > length (rules (machineOf s0)))
+
+  , -- The base may not change under a half-built proof (the user, 2026-08-25),
+    -- which is @:consult@'s own rule and not a second one. An @import@ is not
+    -- refused, for the reason @:load proof@ is not.
+    testCase "consult is refused while a proof is open" $
+      case snd (command proving "consult test.modules.Inspecting") of
+        Rejected e -> e @?= ProofUnderway (rootName "t")
+        other      -> assertFailure (show other)
+
+  , testCase "and import is not" $
+      case snd (command proving "import test.modules.Bit") of
+        ImportRequested m -> m @?= named' "test.modules.Bit"
+        other             -> assertFailure (show other)
+  ]
+  where
+    -- | A line typed at the prompt, **followed as the loop follows it**: the
+    -- driver answers with a request and "Thena.Files" does the reading, so a
+    -- test that stopped at the response would not touch the disk at all.
+    atPrompt s line = case oneLine s line of
+      (s', resp) -> case following s' resp of
+        Just io -> io
+        Nothing -> pure (s', [resp], [])
+
+    proving = fst (command newSession ":theorem t : Type\8320")
 
 -- --------------------------------------------------------------------------
 -- The forms of @open@ (MS10 phase 254)
@@ -1111,6 +1225,19 @@ failureTests =
 
   , testCase "and one of a rule base" $
       let l = source ["data A0 : Type\8320 where { a0 : A0 }", ":load somewhere.thena.rules"]
+       in do
+            loadedError l @?= Just (NestedLoad 2)
+            declared "A0" l @?= True
+
+    -- **AND AN @import@, WHICH ARRIVED WITH THE SAME DEFECT** (MS11 phase 284).
+    -- A script is run by a pure function, so an @import@ in one cannot be
+    -- followed any more than a @:load@ can — and recorded-and-dropped is the
+    -- worst of the three answers, because the script carries on without what it
+    -- said it needed and fails somewhere else. **This is what the five
+    -- @.thena.script@ files in @examples/@ are still waiting for**; the prompt
+    -- takes the word, a script does not.
+  , testCase "and an import, which a script cannot follow either" $
+      let l = source ["data A0 : Type\8320 where { a0 : A0 }", "import test.modules.Bit"]
        in do
             loadedError l @?= Just (NestedLoad 2)
             declared "A0" l @?= True

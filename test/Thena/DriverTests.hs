@@ -129,11 +129,17 @@ notCommands =
   -- **@:open@ appears only in the comment that refuses it** (MS10 phase 249,
   -- his ruling): @open@ is a bare word because it acts, so the colon spelling
   -- was considered and not built.
-  [ ":yield", ":ops", ":open" ]
+  -- **@:import@ appears only in the comment that refuses it** (MS11 phase 284):
+  -- @import@ and @consult@ are the words a file writes, so the prompt takes the
+  -- same two bare words and there is no colon spelling of either.
+  [ ":yield", ":ops", ":open", ":import" ]
 
 everyBareCommand :: [String]
 everyBareCommand =
   [ "assume", "claim", "quantify", "data", "declare", "open"
+  -- Both bare, because they act (§2.4), and both the word a file writes
+  -- rather than a command that resembles it (MS11 phase 284).
+  , "import", "consult"
   , "along", "into", "back", "reduce", "unify"
   , "do", "yield"
   , "retry", "goto-named", "goto-root", "cross", "certify", "qed"

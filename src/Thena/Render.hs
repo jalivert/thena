@@ -197,7 +197,7 @@ import qualified Thena.Surface.Zipper as Zipper
 import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
-import Data.List (stripPrefix, intercalate, partition)
+import Data.List (isPrefixOf, stripPrefix, intercalate, partition)
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
 
@@ -213,7 +213,14 @@ import Thena.Instral.Infer (renderInstralTypeError)
 -- That is a fact about how the lines read, and it lives nowhere but here:
 -- 'Trouble' does not know it and neither does "Thena.Files".
 renderTrouble :: Session -> Trouble -> [String]
-renderTrouble _ (Unreadable path e)  = [path ++ ": " ++ show e]
+-- **An 'IOException' names the file itself**, so prefixing the path printed it
+-- twice — @test/modules/Nowhere.thena: test/modules/Nowhere.thena: openFile:
+-- does not exist@ — which contradicted the promise above. The prefix is kept
+-- for an exception that does not name it (MS11 phase 284).
+renderTrouble _ (Unreadable path e)
+  | path `isPrefixOf` shown = [shown]
+  | otherwise               = [path ++ ": " ++ shown]
+  where shown = show e
 renderTrouble _ (Stopped path e)     = renderLoadError path e
 renderTrouble s (Unloadable path resp)  = case resp of
   RuleFileRefused {} -> renderResponse s resp
@@ -225,7 +232,8 @@ renderTrouble s (Unloadable path resp)  = case resp of
 renderLoadError :: FilePath -> LoadError -> [String]
 renderLoadError path e = case e of
   LoadStopped n        -> [at n ++ "stopped here"]
-  NestedLoad n         -> [at n ++ ":load inside a loaded file is not followed"]
+  NestedLoad n         ->
+    [at n ++ "a load or an import inside a loaded file is not followed"]
   UnansweredQuestion n -> [at n ++ "the file ended while this was still asking"]
   where
     at n = path ++ ":" ++ show n ++ ": "
@@ -316,6 +324,13 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   ImportsUnread ms ->
     [ "this module imports " ++ intercalate ", " (map moduleText ms)
         ++ ", and they were not read" ]
+  -- Nothing to print: the caller resolves the name, reads the files and prints
+  -- what that produced (MS11 phase 284).
+  ImportRequested _ -> []
+  -- **It says so rather than saying nothing** (MS11 phase 284), for the reason
+  -- @open@ at the prompt says @opened ‹namespace›@: a word that answered
+  -- nothing would leave the user unable to tell it took.
+  ModuleAlreadyIn m -> ["module " ++ moduleText m ++ " is already in"]
   -- **The path the walk took, so the loop is readable** (MS11 phase 274): the
   -- module that closed it is named twice, once at each end.
   ImportCycle ms ->
@@ -1398,6 +1413,9 @@ renderCommandError ren e = case e of
   LevelExpected u      -> u ++ " is not a universe, as in \"Type\8320\""
   NotThere m           -> renderMoveError m
   MixedLoad w          -> w ++ " takes either one script or any number of " ++ ruleSuffix ++ " files"
+  -- **The word is echoed, because what is wrong with it is in the text** (MS11
+  -- phase 284): a hyphen, a leading digit, a path somebody wrote by habit.
+  NotAModuleName t     -> t ++ " is not a module name — every step is a word, as in Stlc.Terms"
   ProofUnderway g      ->
     "a rule base may not be loaded while " ++ nameString ren g ++ " is being proved"
   ProofsSuspended names ->

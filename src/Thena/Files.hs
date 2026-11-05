@@ -26,6 +26,7 @@ module Thena.Files
   , consultRuleFiles
   , loadFile
   , loadProofFile
+  , importModule
   , following
   ) where
 
@@ -380,4 +381,36 @@ following s resp = case resp of
   -- The same read, a different install: a consult pushes onto the pool where a
   -- load replaces it (MS11 phase 271).
   ConsultRequested paths -> Just (consultRuleFiles s paths)
+  -- A module named rather than a path: the name is resolved here, where the
+  -- disk is (MS11 phase 284).
+  ImportRequested m    -> Just (importModule s m)
   _                    -> Nothing
+
+-- | __@import ‹module›@ typed at the prompt__ (MS11 phase 284, his ruling of
+-- 2026-11-03 that both acts are writable there).
+--
+-- **It is the same walk a file's @import@ line gets**, with nothing gathered
+-- and an empty stack: 'imports' resolves the name to a file, checks the header
+-- against it (@~r58qh@), refuses a cycle, skips what is already in and returns
+-- the closure in dependency order. So a prompt @import@ and an @import@ in a
+-- file cannot drift apart, and nothing about deduplication or ordering is
+-- written twice.
+--
+-- **An empty closure means the module is already in** — the no-op a diamond in
+-- the graph gets, said out loud because a line typed at the prompt that
+-- answered nothing would leave the user unable to tell it took.
+--
+-- **A failure in the module the user named answers with a response; one inside
+-- something it pulled in answers with trouble naming that file** — the same
+-- split 'loadProofFile' makes, and for its reason.
+importModule :: Session -> ModuleName -> IO (Session, [Response], [Trouble])
+importModule s m = do
+  walked <- imports s [] [] [m]
+  pure $ case walked of
+    Left t   -> (s, [], [t])
+    Right [] -> (s, [ModuleAlreadyIn m], [])
+    Right ms -> case loadProofModules s ms of
+      (s', Right rs) -> (s', rs, [])
+      (s', Left (bad, resp))
+        | readModuleName bad == Just m -> (s', [resp], [])
+        | otherwise -> (s', [], [Unloadable (readModulePath bad) resp])

@@ -639,6 +639,17 @@ import Stlc.Lemmata
 open Stlc
 ```
 
+**And both words are typed at the prompt.** *Built MS11 phase 284.* `import
+Stlc.Terms` loads that module by name, `consult Stlc.Tactics` pushes that base, and
+they are the same two declarations a file writes rather than commands that resemble
+them — so there is no `:import`. **Neither takes a path**: a module name's steps are
+ordinary words and the act supplies the extension. Reaching a module by name is what
+asks its header to match, so a prompt `import` is held to that check where `:load
+‹path›` is not, and a module already in answers *is already in* instead of colliding
+with itself. **A `.thena.script` file still cannot import** — its lines are run by
+the part of Thena that does not read files, so an `import` there is refused like a
+nested `:load`.
+
 **A module is loaded once however many files reach it**, so a diamond costs
 nothing, and **a cycle is refused** and names the path the walk took. **A load is
 all or nothing across the whole graph**: if the file you asked for fails, the

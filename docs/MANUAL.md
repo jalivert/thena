@@ -1501,6 +1501,28 @@ force at the prompt too, for the same reason.
 > which names a file *offers* — an `exporting` list on the header, and
 > `public import` for passing a dependency on — is designed and not built.
 
+### `import` and `consult` are typed at the prompt too
+
+The two words a file writes are the two you type: `import examples.Stlc01Syntax`
+loads that module by its name and reports it exactly as `:load` would, and
+`consult examples.Stlc04TakingTermsApart` pushes that rule base on top of the search
+stack. **Neither takes a path** — every step of a module name is an ordinary word,
+the act supplies the extension, and `import test/modules/Bit.thena` is refused with
+*is not a module name*.
+
+Two things follow from reaching a module **by name**. Its header must be the name
+you used, so `import examples.Elsewhere` is refused if the file at that path calls
+itself something else — the same check an `import` in a file gets, and one `:load`
+by path does not make. And a module already in does nothing: `import` it twice and
+the second answers `module examples.Stlc01Syntax is already in` rather than
+colliding with its own declarations.
+
+**A script cannot import yet.** A `.thena.script` file is a list of command lines
+run by a part of Thena that does not read files, so an `import` on one of its lines
+is refused — *a load or an import inside a loaded file is not followed* — exactly as
+a nested `:load` is. The five scripts in `examples/` therefore still have to be run
+in a session that already holds what they reuse, and each says so at its top.
+
 **A rule file states its dependencies the same way.** A base that talks about a
 language imports the module declaring it:
 
