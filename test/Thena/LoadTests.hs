@@ -56,6 +56,9 @@ import Thena.Driver
   , exportedByModule
   , exports
   , moduleExporting
+  , moduleHiding
+  , Interface (..)
+  , interfaceOf
   , privateIn
   , publicImports
   , ModuleName
@@ -116,6 +119,7 @@ tests =
     , testGroup "an import may travel (MS11 phase 287)" publicImportTests
     , testGroup "a consult may travel (MS11 phase 288)" publicConsultTests
     , testGroup "a rule base publishes too (MS11 phase 289)" publicBaseTests
+    , testGroup "a header may withhold instead (MS11 phase 290)" hidingTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -281,6 +285,75 @@ publicConsultTests =
         Right (_, items) -> do
           publicPushes items @?= []
           map moduleText (moduleConsults items) @?= ["test.modules.Tooling"]
+        Left e -> assertFailure (show e)
+  ]
+
+-- --------------------------------------------------------------------------
+-- A header may say what it withholds (MS11 phase 290, @~jmw4k@)
+-- --------------------------------------------------------------------------
+
+-- | __`hiding ( … )` on the header, the complement of `exporting`__ (his ruling
+-- of 2026-10-30: exports are wide by default, narrowed by either word).
+--
+-- **It is the deny-list `private` already feeds** — @exports@ read the other way
+-- — so what these pin is the surface and the unit, not a second mechanism.
+-- @Withholds@ declares @Outer@, @Inner@ and @scratch@ and withholds the last
+-- two.
+hidingTests :: [TestTree]
+hidingTests =
+  [ -- **What the clause does not name is still exported.**
+    testCase "a declaration the clause does not name is reachable" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsWithheld.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.Withholds", "test.modules.GetsWithheld"]
+
+  , -- **And what it names is not**, with the module declared and in the session.
+    testCase "and a declaration it names is not" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/MissesWithheld.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "not in scope: scratch")
+                               (renderResponse s0 r))
+        other -> assertFailure (show (map (renderResponse s0) other))
+
+  , -- **The unit is the namespace**, as it is for `exporting` and `private`: the
+    -- constructors and the eliminator stay back with the type.
+    testCase "naming a datatype withholds its namespace" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/MissesWithheldData.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "not in scope: Inner.Inner")
+                               (renderResponse s0 r))
+        other -> assertFailure (show (map (renderResponse s0) other))
+
+  , -- **The module is not narrowed by its own clause** — @scratch@ is written in
+    -- terms of @Outer@ and withheld itself, so the file would not load at all if
+    -- the clause applied to the module.
+    testCase "a module's own clause does not narrow the module" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadProofFile s0 "test/modules/Withholds.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      let m = named' "test.modules.Withholds"
+      assertBool "it declared all three"
+                 (length (declaredByModule m s1) > length (exportedByModule m s1))
+
+  , -- **One slot on the header, and the items say which word was written.**
+    testCase "the clause is read off the items as the deny-list" $ do
+      let src = unlines [ "module M hiding ( Inner scratch ) where"
+                        , "x : Type₀"
+                        , "x = Type₀" ]
+      case parseSurfaceModule src of
+        Right (_, items) -> do
+          map nameDotted (moduleHiding items) @?= ["Inner", "scratch"]
+          moduleExporting items @?= Nothing
+          -- **And it goes into the same deny-list `private` writes**, which is
+          -- the whole of the mechanism.
+          map nameDotted (interfacePrivate (interfaceOf items))
+            @?= ["Inner", "scratch"]
         Left e -> assertFailure (show e)
   ]
 

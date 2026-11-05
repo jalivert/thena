@@ -34,6 +34,7 @@ import Thena.Surface.Concrete
   , SurfaceOpenSpec (..)
   , Reach (..)
   , SurfaceModule (..)
+  , SurfaceExports (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , SurfaceArg (..)
@@ -128,14 +129,20 @@ Module :: { SurfaceModule }
   -- A @QName@, so a header may say the path it sits at (MS11 phase 278): the
   -- steps are directories, exactly as @import@ reads them.
   : module QName where '{' Decls '}'
-      { SurfaceModule (fst $2) (snd $2) Nothing (reverse $5) }
+      { SurfaceModule (fst $2) (snd $2) ExportsWide (reverse $5) }
   -- **And a header may state the file's interface** (MS11 phase 285), which is
   -- his ruling of 2026-10-30: the export list attaches to the header, one place
   -- per file. The list is 'ExportNames' and not 'QNames' because @exporting ( )@
   -- is a module that exports nothing and has to be writable — the empty list is
   -- a statement, where a missing clause is the absence of one.
   | module QName exporting '(' ExportNames ')' where '{' Decls '}'
-      { SurfaceModule (fst $2) (snd $2) (Just (reverse $5)) (reverse $9) }
+      { SurfaceModule (fst $2) (snd $2) (ExportsOnly (reverse $5)) (reverse $9) }
+  -- **Or say what it withholds instead** (MS11 phase 290), the other half of
+  -- the same ruling. **One slot and not two clauses**: a file narrows by naming
+  -- what it keeps or by naming what it withholds, which is the choice an @open@
+  -- already makes between @( … )@ and @hiding ( … )@.
+  | module QName hiding '(' ExportNames ')' where '{' Decls '}'
+      { SurfaceModule (fst $2) (snd $2) (ExportsHiding (reverse $5)) (reverse $9) }
 
 -- | A block of the **instruction** language (MS4 phase 45).
 --

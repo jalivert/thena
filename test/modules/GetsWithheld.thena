@@ -1,0 +1,8 @@
+-- **What a `hiding` header still exports** (MS11 phase 290): `Outer` was not
+-- named, so it is an importer's to use.
+module test.modules.GetsWithheld where
+
+import test.modules.Withholds
+
+mine : Outer.Outer
+mine = Outer.out

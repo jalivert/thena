@@ -22,6 +22,7 @@ module Thena.Surface.Concrete
   , SurfaceOpenSpec (..)
   , Reach (..)
   , SurfaceModule (..)
+  , SurfaceExports (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , PairingError (..)
@@ -317,13 +318,9 @@ data SurfaceBinder = SurfaceBinder Plicity String (Maybe Surface)
 data SurfaceModule = SurfaceModule
   { surfaceModuleSteps :: [String]
   , surfaceModuleWord  :: String
-  , surfaceModuleExporting :: Maybe [([String], String)]
-    -- ^ @exporting ( … )@ on the header, as written (MS11 phase 285, @~jmw4k@).
-    --
-    -- **'Nothing' and @Just []@ are different modules.** No clause at all is a
-    -- file that states no interface and exports everything it declares, which
-    -- is every file written before this phase; @exporting ( )@ is a file that
-    -- deliberately exports nothing.
+  , surfaceModuleExports :: SurfaceExports
+    -- ^ what the header says about its interface, as written (MS11 phase 285
+    -- for @exporting@, 290 for @hiding@, @~jmw4k@).
   , surfaceModuleDecls :: [SurfaceDecl]
   }
   deriving (Eq, Show)
@@ -364,6 +361,25 @@ data SurfaceOpenSpec
 -- syntaxes write @public@ and that module is the one below this, so the flag
 -- lives there and is listed in this module's exports beside the trees that
 -- carry it.
+
+-- | __What a header says about its interface__ (MS11 phase 285 for
+-- @exporting ( … )@, 290 for @hiding ( … )@, @~jmw4k@).
+--
+-- His ruling of 2026-10-30: **exports are wide by default, narrowed by
+-- @exporting@ or @hiding@ on the file's @module@ clause.** So there are three
+-- states and not two flags — the clause is one slot, which is 'SurfaceOpenSpec''s
+-- shape and deliberately its three words: a file narrows by naming what it keeps
+-- or by naming what it withholds, never both at once.
+--
+-- **'ExportsWide' and @ExportsOnly []@ are different modules.** No clause at all
+-- is a file that states no interface and exports everything it declares, which
+-- is every file written before phase 285; @exporting ( )@ is a file that
+-- deliberately exports nothing.
+data SurfaceExports
+  = ExportsWide                            -- ^ no clause — everything it declares
+  | ExportsOnly   [([String], String)]     -- ^ @exporting ( … )@ — these and no more
+  | ExportsHiding [([String], String)]     -- ^ @hiding ( … )@ — everything but these
+  deriving (Eq, Show)
 
 data SurfaceDecl
   = SurfaceSignature [String] String Surface   -- ^ @foo : T@, @Ns.foo : T@

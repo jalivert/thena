@@ -58,6 +58,7 @@ module Thena.Driver
   , declaredByModule
   , exportedByModule
   , moduleExporting
+  , moduleHiding
   , privateIn
   , publicImports
   , publicImportsOf
@@ -240,6 +241,7 @@ import Thena.Surface.Concrete
   , SurfaceOpenSpec (..)
   , Reach (..)
   , SurfaceModule (..)
+  , SurfaceExports (..)
   , PairingError (..)
   )
 import Thena.Surface.Layout (layout, layoutFile)
@@ -1428,8 +1430,13 @@ parseSurfaceModule src = do
   -- **The header's export list goes in front of the items** (MS11 phase 285):
   -- it is the header's and the item list is what both load doors are handed, so
   -- this is where it can be read without changing either signature.
-  let hdr = [ ItemExporting [ GlobalName ps x | (ps, x) <- es ]
-            | Just es <- [surfaceModuleExporting m] ]
+  -- **And a @hiding ( … )@ clause the same way** (MS11 phase 290): one slot on
+  -- the header, two words, so exactly one of these items can arise.
+  let hdr = case surfaceModuleExports m of
+        ExportsWide       -> []
+        ExportsOnly   es  -> [ItemExporting (map resolvedName es)]
+        ExportsHiding es  -> [ItemHiding (map resolvedName es)]
+      resolvedName (ps, x) = GlobalName ps x
   Right (moduleFromSteps (surfaceModuleSteps m) (surfaceModuleWord m), hdr ++ is)
 
 -- | Why a top-level block did not resolve, in terms 'SyntaxError' can hold.
@@ -1507,6 +1514,16 @@ data Item
     -- scope, so 'surfaceProgram' emits the inner program and nothing around it.
     -- Where the declaration lands, what it sees and what it generates are
     -- untouched — 'privateIn' is the only thing that reads it.
+  | ItemHiding [GlobalName]
+    -- ^ @module X hiding ( … ) where@ (MS11 phase 290, @~jmw4k@) — **what the
+    -- file withholds**, the other half of his ruling of 2026-10-30 that exports
+    -- are wide by default and narrowed by either word.
+    --
+    -- 'ItemExporting''s twin in every respect, and **the same deny-list
+    -- @private@ feeds**: the test is 'exports' read the other way, so a header
+    -- that withholds a namespace and a @private@ on each of its declarations
+    -- come to the same thing. The grammar admits one clause, so a file carries
+    -- this item or 'ItemExporting' and never both.
   | ItemExporting [GlobalName]
     -- ^ @module X exporting ( … ) where@ (MS11 phase 285, @~jmw4k@) — **the
     -- file's interface**, as his ruling of 2026-10-30 attached it: one place per
@@ -1643,6 +1660,7 @@ surfaceProgram n0 items = foldl (item []) ([], n0) items
   -- program at all: it says what an /importer/ may name, which is read when
   -- this module is recorded and never when it runs.
   item _ acc (ItemExporting _) = acc
+  item _ acc (ItemHiding _) = acc
   -- **A top-level block is a call to a rule** (MS6 phase 104b), and the rule is
   -- @run-block@ in the shipped base, whose whole body is @play t@. So how a
   -- module\'s blocks are treated is written in user space and a user may
@@ -2398,7 +2416,7 @@ publicImportsOf n s = concat [ ms | (m, ms) <- sessionPublicImports s, m == n ]
 interfaceOf :: [Item] -> Interface
 interfaceOf items = Interface
   { interfaceExporting = moduleExporting items
-  , interfacePrivate   = privateIn items
+  , interfacePrivate   = privateIn items ++ moduleHiding items
   , interfacePublic    = publicImports items
   , interfacePublishes = publicPushes items
   }
@@ -2412,7 +2430,11 @@ data Interface = Interface
   { interfaceExporting :: Maybe [GlobalName]
     -- ^ the header\'s @exporting ( … )@ clause; 'Nothing' is no clause at all
   , interfacePrivate   :: [GlobalName]
-    -- ^ what its @private@ declarations named
+    -- ^ **the deny-list**: what its @private@ declarations named, and what its
+    -- header withheld with @hiding ( … )@ (phase 290). **One list with two
+    -- writers**, because the test is one test — 'exports' read the other way —
+    -- and nothing downstream has a use for which word a name was kept back by;
+    -- 'privateIn' and 'moduleHiding' answer that off the items
   , interfacePublic    :: [ModuleName]
     -- ^ which of its imports travel on
   , interfacePublishes :: [Published]
@@ -2627,6 +2649,19 @@ moduleExporting items = case [ es | ItemExporting es <- items ] of
   es : _ -> Just es
   []     -> Nothing
 
+-- | __What this module's header withholds__ (MS11 phase 290, @~jmw4k@).
+--
+-- 'moduleExporting''s twin, and **a plain list rather than a 'Maybe'** because
+-- the two states a deny-list has are /these names/ and /none/: a file with no
+-- @hiding@ clause withholds nothing, which @[]@ says. That is 'privateIn''s
+-- shape, and the two are added together — one deny-list per module, written by
+-- the header and by each @private@ declaration.
+--
+-- **The top level only**, 'moduleExporting''s reason: the clause is the
+-- header's and the grammar admits it nowhere else.
+moduleHiding :: [Item] -> [GlobalName]
+moduleHiding items = concat [ es | ItemHiding es <- items ]
+
 -- | __Which of this module's declarations are its own__ (MS11 phase 286,
 -- @~jmw4k@).
 --
@@ -2691,6 +2726,9 @@ declaredName i = case i of
   -- instructions install is known only by running them, so it is counted rather
   -- than named — see 'ProofLoaded'.
   ItemBlock _       -> Nothing
+  -- **A header clause declares nothing** (MS11 phases 285 and 290): it says
+  -- what an importer may name and adds no key.
+  ItemHiding _      -> Nothing
   -- **An @open@ declares nothing** — it changes what is in view and adds no key
   -- to the environment (MS10 phase 247).
   ItemOpen _        -> Nothing

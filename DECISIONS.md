@@ -706,8 +706,8 @@ unimportable.
 
 ### A header says what the file exports, and the unit is the namespace
 
-*Decided 2026-10-30. Built — MS11 phase 285. Deliberately a simple default, and
-meant to be revisited.*
+*Decided 2026-10-30. Built — `exporting` at MS11 phase 285, `hiding` at 290.
+Deliberately a simple default, and meant to be revisited.*
 
 A file may state its interface on its header, and what it does not name is not
 reachable from another file:
@@ -752,6 +752,20 @@ nor `Tri.elim`.
 
 **No clause at all exports everything**, which is what every file did before this
 existed. `exporting ( )` is a different statement: a file that exports nothing.
+
+**Or say what you withhold instead.** `hiding ( … )` on the header is the same clause
+read the other way, for the file that exports most of what it declares:
+
+```
+module Bits hiding ( flip ) where   -- everything but this
+```
+
+**One clause, either word** — a header says what it keeps or what it withholds, never
+both, which is the choice `open X ( … )` and `open X hiding ( … )` already make. The
+unit is the namespace there too, so `hiding ( Tri )` keeps the constructors and the
+eliminator back with the type. And it is the same deny-list `private` writes to: a
+header that withholds a declaration and a `private` in front of it come to the same
+thing, so which you write is about where you would rather read it.
 
 **And one declaration can be kept back without listing the rest.** `private` in front
 of a declaration says it is the file's own:

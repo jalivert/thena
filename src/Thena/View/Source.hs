@@ -25,7 +25,7 @@ module Thena.View.Source
 import Data.List (intercalate)
 
 import Thena.Core.Term (GlobalName (..), Opened (..), nameDotted)
-import Thena.Driver (Item (..), moduleText)
+import Thena.Driver (Item (..), moduleHiding, moduleText)
 import Thena.Surface.Concrete
   ( Surface (..)
   , Reach (..)
@@ -65,6 +65,7 @@ printItem i = case i of
   -- 'printSurfaceModule' puts it back there. A module printed item by item
   -- without the header has no place for it.
   ItemExporting _ -> []
+  ItemHiding _    -> []
   -- **The block, indented, with its items a blank line apart** — the layout the
   -- parser reads back (MS10 phase 254). The name is written as it was: a
   -- namespace's path is relative to the one it sits in, so what the item holds
@@ -139,9 +140,13 @@ printSurfaceModule :: String -> [Item] -> String
 printSurfaceModule nm items =
   unlines ((["module " ++ nm ++ clause ++ " where", ""]) ++ body)
   where
-    clause = case [ es | ItemExporting es <- items ] of
-      es : _ -> " exporting ( " ++ unwords (map nameDotted es) ++ " )"
-      []     -> ""
+    -- **Either word, and never both** (MS11 phase 290): the grammar has one
+    -- slot on the header, so at most one of these items is in the list.
+    clause = case ([ es | ItemExporting es <- items ], moduleHiding items) of
+      (es : _, _)  -> " exporting ( " ++ unwords (map nameDotted es) ++ " )"
+      (_, hs@(_ : _)) -> " hiding ( " ++ unwords (map nameDotted hs) ++ " )"
+      _            -> ""
     body = intercalate [""] [ printItem i | i <- items, notHeader i ]
     notHeader (ItemExporting _) = False
+    notHeader (ItemHiding _)    = False
     notHeader _                 = True

@@ -1563,6 +1563,19 @@ The short `Tri` comes along with the type because it is a shorthand *for* the ty
 **Leave the clause out and everything is exported**, which is what every file did
 before this existed. `exporting ( )` says something else: this file exports nothing.
 
+**Or say what you withhold instead**, which is the clause for a file that exports
+most of what it declares:
+
+```
+module Bits hiding ( flip ) where   -- everything but this
+```
+
+**One clause, either word** — never both — which is the choice `open X ( … )` and
+`open X hiding ( … )` already make. The unit is the namespace here too, so
+`hiding ( Tri )` keeps the constructors back with the type, and it writes to the same
+deny-list `private` does: a header that withholds a declaration and a `private` in
+front of it come to the same thing.
+
 **Or keep one thing back and list nothing.** `private` in front of a declaration says
 it is yours:
 
