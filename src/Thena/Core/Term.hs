@@ -28,6 +28,8 @@ module Thena.Core.Term
   , declarationNamed
   , globalUnder
   , InScope (..)
+  , concealedHere
+  , revealing
   , innermostOf
   , rootScope
   , openingOnly
@@ -240,21 +242,29 @@ data InScope = InScope
     -- @namespace X where { … }@ pushes for its declarations
   , scopeOpens  :: [Opened]
     -- ^ the namespaces an @open@ has brought into view, latest first
-  , scopeConcealed :: [GlobalName]
+  , scopeConcealed :: [[GlobalName]]
     -- ^ __what the environment holds here and a written name may not reach__
     -- (MS11 phase 282, @~xdt8c@, his ruling of 2026-11-05): a module resolves
     -- its names against its own imports, its own declarations and the prelude,
     -- never against the session.
     --
     -- **It subtracts, which is what makes a module's own declarations free.**
-    -- The list is the session's declarations that the module did not import,
+    -- A frame is the session's declarations that the module did not import,
     -- taken once when its load begins; everything the module itself declares
     -- arrives afterwards and so is never in it. An allowed-list would have to
     -- grow at every declaring op, and there are five of them.
     --
+    -- **A STACK, because an @import@ may state how far it reaches** (MS11 phase
+    -- 291, his design of 2026-11-05): @import M where { … }@ reveals @M@'s
+    -- names for the length of its block and gives them back after it, which is
+    -- one frame pushed and dropped — 'Thena.Instral.Ops.Reveal' and
+    -- 'Thena.Instral.Ops.LeaveReveal', the shape @open@ and @LeaveOpen@ already
+    -- have. 'concealedHere' is the frame that holds, and the ones under it are
+    -- what the enclosing blocks concealed.
+    --
     -- **Empty at the prompt** — a line typed there is not a module and is not
-    -- isolated, so it keeps the session, and @notElem@ on an empty list costs
-    -- nothing on the path every name takes.
+    -- isolated, so it keeps the session, and 'concealedHere' of no frames is
+    -- the empty list, which costs a @notElem@ on nothing.
     --
     -- **Here and not beside the environment** because 'globalUnder' is the one
     -- walk every door calls: the resolver's candidate list and
@@ -343,6 +353,34 @@ innermostOf sc = case scopeWithin sc of
 rootScope :: InScope
 rootScope = InScope [] [] []
 
+-- | __What a written name may not reach at this point__ (MS11 phase 291).
+--
+-- The innermost frame of 'scopeConcealed' and nothing under it: a block that
+-- revealed a module's names pushed a frame without them, and the frames beneath
+-- are what the enclosing blocks concealed, waiting for it to be dropped.
+--
+-- **No frames conceals nothing**, which is the prompt and every caller that
+-- builds a scope of its own.
+concealedHere :: InScope -> [GlobalName]
+concealedHere sc = case scopeConcealed sc of
+  f : _ -> f
+  []    -> []
+
+-- | __A module's names, revealed for the length of a block__ (MS11 phase 291).
+--
+-- One frame pushed, being what is concealed here less the names given: the
+-- shape @open@ has, so an @import@ that states how far it reaches needs no
+-- bookkeeping to put the concealment back — 'Thena.Instral.Ops.LeaveReveal'
+-- drops the frame.
+--
+-- **Revealing the same name twice is revealing it once**, so nesting is safe:
+-- @import M where { import M where { … } }@ drops one frame and the name is
+-- still out of the one below it.
+revealing :: [GlobalName] -> InScope -> InScope
+revealing gs sc =
+  sc { scopeConcealed = filter (`notElem` gs) (concealedHere sc)
+                          : scopeConcealed sc }
+
 -- | Only these namespaces open whole, at the root.
 openingOnly :: [[String]] -> InScope
 openingOnly ps = InScope [] (map openedWhole ps) []
@@ -396,7 +434,7 @@ globalUnder known sc g =
     -- declared one, and otherwise is reported /not in scope/, which is what it
     -- is. **Two concealed names cannot make an ambiguity** either: neither is a
     -- candidate, so nothing is refused for being written twice over.
-    reaches c = known c && c `notElem` scopeConcealed sc
+    reaches c = known c && c `notElem` concealedHere sc
 
     -- **The whole written name under a prefix**, so @open A@ and a written
     -- @B.c@ tries @A.B.c@.

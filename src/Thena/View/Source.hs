@@ -57,10 +57,14 @@ printItem i = case i of
   -- declares nothing, so a file printed without it would read back and then be
   -- searched against the wrong bases — and without its @public@ (MS11 phase
   -- 288) a file that read back would stop handing the base on.
-  ItemConsult r m -> [ reaching r ++ "consult " ++ moduleText m ]
+  -- **And the block it states, where it states one** (MS11 phase 292), printed
+  -- as a @namespace@ block's is, since that is the layout the parser reads
+  -- back: a consult printed without its block would put the base in the pool
+  -- for the whole file.
+  ItemConsult r m ds -> reaches (reaching r ++ "consult " ++ moduleText m) ds
   -- **The same, for the same reason** (MS11 phase 274): a file printed without
   -- its imports would read back and then not elaborate at all.
-  ItemImport r m -> [ reaching r ++ "import " ++ moduleText m ]
+  ItemImport r m ds -> reaches (reaching r ++ "import " ++ moduleText m) ds
   -- **Never printed here** (MS11 phase 285) — it is the header's and
   -- 'printSurfaceModule' puts it back there. A module printed item by item
   -- without the header has no place for it.
@@ -85,6 +89,17 @@ printItem i = case i of
   ItemNamespace g is ->
     ("namespace " ++ nameDotted g ++ " where")
       : map ("  " ++) (intercalate [""] (map printItem is))
+
+-- | An @import@ or @consult@ line, with the block it reaches under it (MS11
+-- phases 291 and 292).
+--
+-- **One printer for both acts again**, because how far an act reaches is said
+-- the same way by both — and it is a @namespace@ block's layout, two spaces in
+-- with the items a blank line apart, because that is what reads back.
+reaches :: String -> Maybe [Item] -> [String]
+reaches line Nothing   = [line]
+reaches line (Just is) =
+  (line ++ " where") : map ("  " ++) (intercalate [""] (map printItem is))
 
 -- | The word in front of an @import@ or a @consult@ that travels (MS11 phase
 -- 288).

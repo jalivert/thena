@@ -43,6 +43,8 @@ import Thena.Driver
   , loadSource
   , moduleConsults
   , consultedPool
+  , scopedConsults
+  , fileImports
   , publicPushes
   , publishedBy
   , Published (..)
@@ -120,6 +122,8 @@ tests =
     , testGroup "a consult may travel (MS11 phase 288)" publicConsultTests
     , testGroup "a rule base publishes too (MS11 phase 289)" publicBaseTests
     , testGroup "a header may withhold instead (MS11 phase 290)" hidingTests
+    , testGroup "an import states how far it reaches (MS11 phase 291)" scopedImportTests
+    , testGroup "and so does a consult (MS11 phase 292)" scopedConsultTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -2466,5 +2470,142 @@ publicImportTests =
         Right (_, items) -> do
           map moduleText (moduleImports items) @?= ["test.modules.Bit"]
           publicImports items @?= []
+        Left e -> assertFailure (show e)
+  ]
+
+-- --------------------------------------------------------------------------
+-- An act states how far it reaches (MS11 phases 291 and 292, @~c2smp@)
+-- --------------------------------------------------------------------------
+
+-- | __@import M where { … }@, and what it answered instead of being asked.__
+--
+-- His design of 2026-11-05: rather than settle which existing constructs scope
+-- an @import@, the act states its own extent. So the rule has no cases —
+-- nothing surrounding an import scopes it, and a line with no block reaches the
+-- rest of the file exactly as every import did before this phase.
+--
+-- **EVERY TEST HERE IS A PAIR, for the reason phase 283's are**: a test that
+-- only showed a name resolving inside the block could not tell a scoped import
+-- from a file-wide one. @ScopedImport@ is the block and @ScopedImportAfter@ is
+-- the same block with one declaration after it.
+scopedImportTests :: [TestTree]
+scopedImportTests =
+  [ -- **The names reach the block**, and @Opener@\'s own @open Bit@ with them:
+    -- @mine@ is written @Bit.Bit@ and built with a bare @off@, so both routes an
+    -- import opens are measured by one declaration.
+    testCase "a scoped import's names reach its block" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedImport.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ ds | ProofLoaded _ ds _ _ <- out ] @?= [["Bit", "mine"], ["mine"]]
+
+  , -- **And they stop at the end of it**, which is the whole of the phase: the
+    -- same file with one more declaration under it is refused for a name a
+    -- file-wide import would have left in scope.
+    testCase "and they stop where the block does" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedImportAfter.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (show (map (renderResponse s0) out))
+                 (any (isInfixOf "not in scope: Bit.Bit")
+                      (concatMap (renderResponse s0) out))
+
+  , -- **THE LOAD IS THE SAME EITHER WAY** — @moduleImports@ and @fileImports@
+    -- are two different questions, and this is the one the disc answers: a
+    -- module named by a scoped import is elaborated before this one just as any
+    -- other dependency is.
+    testCase "a scoped import is still a dependency" $ do
+      let src = unlines [ "module M where"
+                        , "import test.modules.Bit where"
+                        , "  mine : Bit.Bit"
+                        , "  mine = Bit.off" ]
+      case parseSurfaceModule src of
+        Right (_, items) ->
+          ( map moduleText (moduleImports items)
+          , map moduleText (fileImports items) )
+            @?= (["test.modules.Bit"], [])
+        Left e -> assertFailure (show e)
+
+  , -- **A line with no block is unchanged**, which is what every file in the
+    -- corpus relies on.
+    testCase "and a plain import is in both lists" $ do
+      let src = unlines [ "module M where", "import test.modules.Bit" ]
+      case parseSurfaceModule src of
+        Right (_, items) ->
+          ( map moduleText (moduleImports items)
+          , map moduleText (fileImports items) )
+            @?= (["test.modules.Bit"], ["test.modules.Bit"])
+        Left e -> assertFailure (show e)
+  ]
+
+-- | __@consult B where { … }@ — the same extension of the other act.__
+--
+-- **@marker@ is the observable**, as it is at phase 288: a rule of
+-- @Tooling.thena.rules@ and nowhere else, so a @do@ block that calls it
+-- resolves exactly when that base is in the pool where the block stands.
+scopedConsultTests :: [TestTree]
+scopedConsultTests =
+  [ testCase "a scoped consult's base is in the pool for its block" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedConsult.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
+
+  , testCase "and out of it afterwards" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedConsultAfter.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (show (map (renderResponse s0) out))
+                 (any (isInfixOf "no rule or function is called marker")
+                      (concatMap (renderResponse s0) out))
+
+  , -- **It is not in the file's own pool either**, which is the other half of
+    -- the same claim and the one a reader of 'consultedPool' would ask: the
+    -- base is pushed where the block begins and nowhere else.
+    testCase "a scoped consult is not in the file's pool" $ do
+      (s0, _) <- startingSession
+      let src = unlines [ "module M where"
+                        , "consult test.modules.Louder"
+                        , "consult test.modules.Tooling where"
+                        , "  do"
+                        , "    marker" ]
+      case parseSurfaceModule src of
+        Right (_, items) ->
+          ( map moduleText (consultedPool s0 [] items)
+          , map moduleText (scopedConsults items)
+          , map moduleText (moduleConsults items) )
+            @?= ( ["test.modules.Louder"]
+                , ["test.modules.Tooling"]
+                , ["test.modules.Louder", "test.modules.Tooling"] )
+        Left e -> assertFailure (show e)
+
+  , -- **NESTING PUTS BOTH IN, THE INNER ONE ON TOP** — his observation of
+    -- 2026-11-05, and it comes out of the stack phase 288 made a file's
+    -- consults: the innermost block is the last to push, and
+    -- 'Thena.Instral.Ops.PushBase' puts a base at the head of the pool.
+    --
+    -- **What this measures is that both are reachable** and the written order
+    -- is what the push order is read off. **A sharper test is not available
+    -- from the suite**: two bases offering one rule name are both offered to
+    -- the search — any matching rule always is — so a rule that fails in the
+    -- inner base falls through to the outer one and tells you nothing about
+    -- which was tried first, and a rule that succeeds says nothing a load
+    -- reports, messages being dropped on success.
+    testCase "nesting reaches both bases" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/NestedConsult.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
+
+  , testCase "and the inner one is pushed last" $ do
+      let src = unlines [ "module M where"
+                        , "consult test.modules.Tooling where"
+                        , "  consult test.modules.Mutters where"
+                        , "    do"
+                        , "      mutter" ]
+      case parseSurfaceModule src of
+        Right (_, items) ->
+          map moduleText (scopedConsults items)
+            @?= ["test.modules.Tooling", "test.modules.Mutters"]
         Left e -> assertFailure (show e)
   ]

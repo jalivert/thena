@@ -71,7 +71,7 @@ bases rs = [ruleBase "test" Nothing "" [] [] rs]
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
-  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] [] rootScope 1000 0
+  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] [] [] rootScope 1000 0
                    NoUndischargeableTrust)
 
 runOut :: Machine -> ([String], Either FailReason Machine)

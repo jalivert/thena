@@ -737,7 +737,7 @@ consulting =
           Right (nm, is) ->
             -- The session has "mine"; the module is loaded against "extra"
             -- on top of it, and afterwards the session has "mine" alone.
-            let (s', _) = loadProofItemsConsulting (Pool (pool extra) []) consulted (moduleText nm) is
+            let (s', _) = loadProofItemsConsulting (Pool (pool extra) [] []) consulted (moduleText nm) is
              in (map baseName (pool extra), map baseName (pool s'))
                   @?= (["extra", "mine"], ["mine"])
 
@@ -745,7 +745,7 @@ consulting =
         case itemsOf "consult Stlc.Tactics" of
           Left e -> assertFailure e
           Right (nm, is) ->
-            case snd (loadProofItemsConsulting (Pool (pool extra) []) consulted (moduleText nm) is) of
+            case snd (loadProofItemsConsulting (Pool (pool extra) [] []) consulted (moduleText nm) is) of
               ProofLoaded n ds _ _ -> (n, ds) @?= ("M", [])
               other                -> assertFailure (show other)
     ]

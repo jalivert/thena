@@ -49,6 +49,7 @@ import Thena.Driver
   , ruleBasePublishes
   , rolledBack
   , consultedPool
+  , scopedConsults
   , moduleImports
   , moduleFile
   , moduleLoaded
@@ -331,7 +332,11 @@ assemble s stack done as path nm items = do
   case walked of
     Left t      -> pure (Left t)
     Right done' -> do
-      got <- consulted (consultedPool s done' items)
+      -- **The scoped ones are read after the file's own** (MS11 phase 292), so
+      -- that 'Thena.Driver.Pool' can pair them back up by position: what a
+      -- @consult … where@ names is a file the disc has to answer for, and only
+      -- where it is in force is the block's business.
+      got <- consulted (consultedPool s done' items ++ scopedConsults items)
       case got of
         Left t     -> pure (Left t)
         -- **THE MODULES THOSE BASES IMPORT ARE DEPENDENCIES OF THIS ONE TOO**

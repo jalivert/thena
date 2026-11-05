@@ -346,21 +346,40 @@ Decl :: { SurfaceDecl }
   -- **What this file's proofs are searched against** (MS11 phase 273, his ruling
   -- of 2026-11-03). It names a /file/ and not a namespace, which is why it takes
   -- a @QName@ and means something else by it: the steps are directories.
-  | consult QName                          { SurfaceConsult Own (fst $2) (snd $2) }
+  | consult QName                          { SurfaceConsult Own (fst $2) (snd $2) Nothing }
   -- **A consult that travels** (MS11 phase 288, his ruling of 2026-10-30 that
   -- @public@ is available to both acts): whoever imports this file is searched
   -- against this base too. The @public import@ production below is the twin,
   -- and @public@ is one word's worth of difference in both.
-  | public consult QName                   { SurfaceConsult Public (fst $3) (snd $3) }
+  | public consult QName                   { SurfaceConsult Public (fst $3) (snd $3) Nothing }
+  -- **AND EITHER MAY SAY HOW FAR IT REACHES** (MS11 phase 292, his design of
+  -- 2026-11-05): the base is in the pool for the block's proofs and out of it
+  -- after, which is what a base wanted for one proof needs. Its twin is the
+  -- @import … where@ production below, and the two are the same extension of
+  -- the same shape.
+  | consult QName where '{' Decls '}'
+      { SurfaceConsult Own (fst $2) (snd $2) (Just (reverse $5)) }
+  | public consult QName where '{' Decls '}'
+      { SurfaceConsult Public (fst $3) (snd $3) (Just (reverse $6)) }
   -- **Which surface modules this file depends on** (MS11 phase 274, his ruling
   -- of 2026-11-03). A @QName@ again, and the steps are directories again: a
   -- file states what it refers to and never relies on the session.
-  | import QName                           { SurfaceImport Own (fst $2) (snd $2) }
+  | import QName                           { SurfaceImport Own (fst $2) (snd $2) Nothing }
   -- **An import that travels** (MS11 phase 287, his ruling of 2026-11-03):
   -- whoever imports this file gets what this file got from that one.
   -- **@public@ is an attribute of the import and not a second kind of import**,
   -- so it is one production\'s worth of difference and one constructor.
-  | public import QName                    { SurfaceImport Public (fst $3) (snd $3) }
+  | public import QName                    { SurfaceImport Public (fst $3) (snd $3) Nothing }
+  -- **AN IMPORT STATES HOW FAR IT REACHES** (MS11 phase 291, his design of
+  -- 2026-11-05) — @import M where { … }@, a layout block exactly as
+  -- @namespace … where@ is, and the module's names are writable in it and not
+  -- after it. **It is why no existing construct had to gain a scope**: the act
+  -- carries its own extent, so what a @do@ or a @data@ block does to an
+  -- @import@ written in it is nothing.
+  | import QName where '{' Decls '}'
+      { SurfaceImport Own (fst $2) (snd $2) (Just (reverse $5)) }
+  | public import QName where '{' Decls '}'
+      { SurfaceImport Public (fst $3) (snd $3) (Just (reverse $6)) }
   -- **A layout block, where @open@ is a line** (MS10 phase 254): a namespace
   -- says which declarations are in it, so it has to hold them. Nesting is a
   -- longer prefix and costs no mechanism, and @namespace A.B where { … }@ is

@@ -77,6 +77,10 @@ module Thena.Driver
   , RuleFileError (..)
   , InstralTypeError
   , Pool (..)
+  , Held (..)
+  , scopedConsults
+  , fileImports
+  , reachedBy
   , loadRuleBases
   , consultRuleBases
   , ruleBaseImports
@@ -718,7 +722,7 @@ newSession = Session
   -- can never be met is refused and one merely unmet is not. It is deliberately
   -- not 'NoTrust', which is the guarantee a user steps /up/ to, and deliberately
   -- not 'AnyTrust', which reports and enforces nothing.
-  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] rootScope n 0 NoUndischargeableTrust
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] [] rootScope n 0 NoUndischargeableTrust
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
@@ -1483,11 +1487,15 @@ data Item
     -- **A list of items because a declaration is one item here**, and the list
     -- is what makes the shape the same as 'ItemNamespace'\'s: both are a scope
     -- with contents, and 'surfaceProgram' treats them the same way.
-  | ItemConsult Reach ModuleName
+  | ItemConsult Reach ModuleName (Maybe [Item])
     -- ^ @consult ‹module›@ (MS11 phase 273) — **a rule base this module's
     -- proofs are searched against**, named as a file and not as a namespace,
     -- and under @public@ one that travels to this module's importers (phase
     -- 288).
+    --
+    -- **AND THE BLOCK IT REACHES, WHERE IT STATES ONE** (MS11 phase 292):
+    -- @consult M where { … }@ has the base in the pool for its block and out of
+    -- it after, which is 'ItemImport''s field and the same rule.
     --
     -- It declares nothing and runs nothing, so 'surfaceProgram' emits no
     -- instruction for it: what it does happens before the program does, when
@@ -1497,13 +1505,21 @@ data Item
     -- file is searched against is 'consultPushes', and whether a base travels
     -- is 'publicPushes'. 'moduleConsults' — the list the door with no IO
     -- refuses on — ignores it, because an unread base is unread either way.
-  | ItemImport Reach ModuleName
+  | ItemImport Reach ModuleName (Maybe [Item])
     -- ^ @import ‹module›@ (MS11 phase 274) — **a surface module this one depends
-    -- on**, named as a file and not as a namespace.
+    -- on**, named as a file and not as a namespace — **and how far it reaches**
+    -- (phase 291).
     --
-    -- 'ItemConsult'\'s twin, and like it, it declares nothing and runs nothing:
-    -- what it does happens before this module\'s program does, when the load
-    -- collects every one of them and elaborates each named module first.
+    -- 'ItemConsult'\'s twin, and like it, **the load is the same whether or not
+    -- it states a block**: every import in the file, nested or not, is a module
+    -- elaborated before this one, which is 'moduleImports'.
+    --
+    -- **What the block changes is where the names may be written.** 'Nothing'
+    -- is the rest of the file and is what every import was until phase 291;
+    -- @Just is@ is the block, and 'surfaceProgram' puts a 'Reveal' and a
+    -- 'LeaveReveal' around the inner program. **So 'fileImports' and
+    -- 'moduleImports' are two different questions** — what this module may name
+    -- throughout, and what has to be loaded first.
   | ItemPrivate [Item]
     -- ^ @private ‹declaration›@ (MS11 phase 286, @~jmw4k@) — **the declaration
     -- is the file's own**, and no module that imports this one may name what it
@@ -1592,10 +1608,17 @@ regroup = go
     -- they do outside one, and nesting needs nothing of its own.
     -- **A file's name, not a namespace's** — the shape is 'SurfaceOpen'\'s and
     -- the meaning is not: the steps are directories (MS11 phase 273).
-    one (SurfaceConsult r ps x : rest) =
-      Right ([ItemConsult r (moduleFromSteps ps x)], rest)
+    -- **And the block it reaches is regrouped by this same pass** (MS11 phases
+    -- 291 and 292), as a @namespace@ block's declarations are: a signature and
+    -- its equation pair inside an @import … where@ exactly as they do outside
+    -- one, and nesting needs nothing of its own.
+    one (SurfaceConsult r ps x ds : rest) = do
+      inner <- traverse go ds
+      Right ([ItemConsult r (moduleFromSteps ps x) inner], rest)
     -- A file's name again, and the steps are directories again (MS11 phase 274).
-    one (SurfaceImport r ps x : rest) = Right ([ItemImport r (moduleFromSteps ps x)], rest)
+    one (SurfaceImport r ps x ds : rest) = do
+      inner <- traverse go ds
+      Right ([ItemImport r (moduleFromSteps ps x) inner], rest)
     one (SurfaceNamespace ps x ds : rest) = do
       inner <- go ds
       Right ([ItemNamespace (GlobalName ps x) inner], rest)
@@ -1624,6 +1647,45 @@ regroup = go
 -- Surface declarations, as a program (MS4 phase 42; lifted here at 43)
 -- --------------------------------------------------------------------------
 
+-- | __What a block an act states may name__ (MS11 phase 291).
+--
+-- The names it reveals and the @open@s it inherits, which are the two routes an
+-- import opens into a file — @~xdt8c@'s and @~w46f8@'s — and a block that
+-- scopes one has to scope both.
+--
+-- **A record and not two functions**, because they are one question asked of
+-- one module name and a caller that answered one of them and not the other
+-- would be a file where a word resolves and the name behind it does not.
+data Revealed = Revealed [GlobalName] [Opened]
+
+-- | __What an act's block brings in, for the two acts that state one__ (MS11
+-- phases 291 and 292).
+--
+-- **Two fields because a module name and a base's name are different spaces** —
+-- his model of 2026-10-29, and the reason 'ItemImport' and 'ItemConsult' share
+-- a shape and not a type: one word may name a surface module and a rule file
+-- both, and a single lookup would answer for whichever it found.
+data Brought = Brought
+  { broughtImport  :: ModuleName -> Revealed
+    -- ^ what @import M where { … }@ reveals: @M@'s exports, the closure over
+    -- its @public import@s, and the @open@s @M@ wrote at its top level.
+  , broughtConsult :: ModuleName -> ([RuleBase], Revealed)
+    -- ^ what @consult B where { … }@ brings: the base to push, and the names it
+    -- publishes — a base's @public import@ hands its object language to whoever
+    -- consults it (phase 289), and a scoped consult hands it no further than
+    -- the block.
+  }
+
+-- | What an act brings where no file can be reached (MS11 phase 291) — a typed
+-- line, a generated definition, a grammar's own substitution.
+--
+-- **Nothing, and it is not a special case**: the prompt conceals nothing, so an
+-- import written there has nothing to reveal, and a @consult@ written there has
+-- never been anything but ignored — @:consult@ is the command that pushes a
+-- base.
+broughtNothing :: Brought
+broughtNothing = Brought (const (Revealed [] [])) (const ([], Revealed [] []))
+
 -- | Compile a run of surface items into the instructions that admit them.
 --
 -- **Lifted out of @dispatch@ at phase 43** so that a proof module and a typed
@@ -1635,9 +1697,15 @@ regroup = go
 -- for a single declaration and for the same reason — @:step@ can watch it, and
 -- phase 49 can move it into a rule body without the driver having sequenced
 -- anything in Haskell.
+-- **AND IT IS TOLD WHAT AN IMPORT REVEALS** (MS11 phase 291), because an
+-- import that states a block has to push the names that block may write and the
+-- session is what knows them. **A function and not a table**: the only caller
+-- that can meet a scoped import is the one loading a module, and everything
+-- else — a typed line, a generated definition, a grammar's substitution — hands
+-- over 'revealsNothing', since a prompt conceals nothing to begin with.
 surfaceProgram
-  :: Int -> [Item] -> ([Instr], Int)
-surfaceProgram n0 items = foldl (item []) ([], n0) items
+  :: Brought -> Int -> [Item] -> ([Instr], Int)
+surfaceProgram brought n0 items = foldl (item []) ([], n0) items
   where
   -- **@ns@ is the namespace the item is written in**, and only a @data@ item
   -- needs it here: a theorem, a primitive and anything a rule declares take
@@ -1651,11 +1719,54 @@ surfaceProgram n0 items = foldl (item []) ([], n0) items
   -- module's program: it says which bases the whole program is run against, and
   -- that is settled before the program starts — 'moduleConsults' collects them
   -- and 'loadProofItems' asks for the files.
-  item _ acc (ItemConsult _ _) = acc
+  item _ acc (ItemConsult _ _ Nothing) = acc
+  -- **A consult's block is lowered and nothing is put around it yet** (MS11
+  -- phase 291). What a scoped consult changes is the pool, which is the
+  -- phase-292 half; the declarations inside are the module's own either way,
+  -- and emitting them here is what makes that true of every walk at once.
+  -- **AND A CONSULT THAT STATES A BLOCK PUTS ITS BASE ON TOP OF THE POOL FOR
+  -- IT** (MS11 phase 292, his design of 2026-11-05) — the base goes on, the
+  -- proofs run against it, the base comes off. **Nesting is priority**: the
+  -- innermost block pushes last and is searched first, which is what a file's
+  -- consults being a stack (phase 288) already says one level out.
+  --
+  -- **Its publications are revealed with it**, since a base's @public import@
+  -- gives its object language's names to whoever consults it: a block searched
+  -- against a tactics base may write the language that base talks about, and
+  -- the file after the block may not.
+  item ns (acc, n) (ItemConsult _ m (Just is)) =
+    let (inner, n1) = foldl (item ns) ([], n) is
+        (bs, Revealed gs os) = broughtConsult brought m
+     in ( acc ++ [ Do (PushBase (basePath b)) | b <- bs ]
+              ++ [Do (Reveal gs)] ++ [ Do (Open o) | o <- os ]
+              ++ inner
+              ++ [ Do LeaveOpen | _ <- os ] ++ [Do LeaveReveal]
+              ++ [ Do PopBase | _ <- bs ]
+        , n1 )
   -- **An import emits nothing either** (MS11 phase 274), and for the same
   -- reason one step further out: it says which /modules/ run before this one,
   -- so by the time this program starts they are already in the environment.
-  item _ acc (ItemImport _ _) = acc
+  item _ acc (ItemImport _ _ Nothing) = acc
+  -- **AND AN IMPORT THAT STATES A BLOCK EMITS THE PAIR THAT REVEALS ITS NAMES**
+  -- (MS11 phase 291, his design of 2026-11-05). The module is in the
+  -- environment before this program starts, as every import's is; what the
+  -- block settles is where its names may be written, so the frame goes on, the
+  -- declarations run, the frame comes off — @open X in ‹declaration›@'s shape,
+  -- one gate further out.
+  --
+  -- **ITS @open@S ARE SCOPED WITH IT.** An @open@ travels with an @import@
+  -- (phase 283, and whether it should is @~4wjd7@), so a module whose top level
+  -- opens a namespace hands that spelling to its importer — and an import that
+  -- reaches a block may hand it no further than the block, or a file would be
+  -- able to write a bare word after the block whose name it could no longer
+  -- reach. 'Thena.Instral.Ops.Open' is the op, not a second one: the paths are
+  -- absolute and the names are revealed by the time it runs.
+  item ns (acc, n) (ItemImport _ m (Just is)) =
+    let (inner, n1) = foldl (item ns) ([], n) is
+        Revealed gs os = broughtImport brought m
+     in ( acc ++ [Do (Reveal gs)] ++ [ Do (Open o) | o <- os ] ++ inner
+              ++ [ Do LeaveOpen | _ <- os ] ++ [Do LeaveReveal]
+        , n1 )
   -- **An export list emits nothing** (MS11 phase 285). It is not a step of the
   -- program at all: it says what an /importer/ may name, which is read when
   -- this module is recorded and never when it runs.
@@ -1960,7 +2071,7 @@ loadProofSource s src = case parseSurfaceModule src of
 -- project manifest; see "Thena.View.Source".
 loadProofItems :: Session -> String -> [Item] -> (Session, Response)
 loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
-  ([], []) -> loadProofItemsConsulting (Pool (rules (sessionMachine s)) []) s nm items
+  ([], []) -> loadProofItemsConsulting (Pool (rules (sessionMachine s)) [] []) s nm items
   -- **Refused rather than ignored** (MS11 phases 273 and 274). This door has no
   -- way to read a file (§12 invariant 4), so a module that names anything on
   -- disc cannot be elaborated through it — and silently elaborating it against
@@ -1988,6 +2099,24 @@ loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
 data Pool = Pool
   { poolBases     :: [RuleBase]
   , poolPublished :: [ModuleName]
+  , poolHeld      :: [Held]
+    -- ^ **the bases a @consult … where@ named, read and not installed** (MS11
+    -- phase 292). They are in the machine's 'Thena.Engine.held' for the length
+    -- of the load and reach the pool only inside the block that named them.
+  }
+  deriving (Eq, Show)
+
+-- | __A base read for one block__ (MS11 phase 292).
+--
+-- **Three fields because the push needs all three**: the name the file wrote,
+-- the base the lowering emits a path for, and what the base publishes — a
+-- base's @public import@ gives its object language's names to whoever consults
+-- it (phase 289), and a scoped consult must give them no further than the
+-- block.
+data Held = Held
+  { heldName      :: ModuleName
+  , heldBase      :: RuleBase
+  , heldPublishes :: [ModuleName]
   }
   deriving (Eq, Show)
 
@@ -2030,17 +2159,29 @@ data Pool = Pool
 -- written against @LC@ may write @LC@ without importing it. 'Pool' carries the
 -- two halves together because they come out of the same texts.
 loadProofItemsConsulting :: Pool -> Session -> String -> [Item] -> (Session, Response)
-loadProofItemsConsulting (Pool pool published) s nm items =
-    let inherited = openedFrom (moduleImports items) s
+loadProofItemsConsulting (Pool pool published heldBases) s nm items =
+    let inherited = openedFrom (fileImports items) s
         machine  = (sessionMachine s)
                      { rules = pool
+                     , held  = map heldBase heldBases
                      , scope = (scope (sessionMachine s))
                                  { scopeConcealed =
-                                     concealedFrom (moduleImports items ++ published) s
+                                     [concealedFrom (fileImports items ++ published) s]
                                  , scopeOpens     = inherited
                                  }
                      }
-        (is, n1) = surfaceProgram (names machine) items
+        -- **An import that states a block is not in the frame above** (MS11
+        -- phase 291): what it reveals goes on where its block begins, which is
+        -- 'Imported' and the two ops around the inner program.
+        (is, n1) = surfaceProgram
+                     (Brought
+                        (\m -> Revealed (reachedBy [m] s) (openedByModule m s))
+                        (\m -> ( [ heldBase h | h <- heldBases, heldName h == m ]
+                               , Revealed (reachedBy (concat [ heldPublishes h
+                                                             | h <- heldBases
+                                                             , heldName h == m ]) s)
+                                          [] )))
+                     (names machine) items
         -- The pool the session had, put back the moment the module is in, the
         -- concealment lifted with it, and **the @open@s the session had put
         -- back under the ones the module wrote**: the prompt keeps whatever a
@@ -2150,16 +2291,31 @@ loadProofModules s0 = go s0 []
     -- 2026-11-03) — 'loadProofItemsConsulting' is what puts them in force for
     -- the length of the load and takes them out again.
     poolFor s m = case readModulePool m of
-      Nothing   -> Right (Pool (rules (sessionMachine s)) [])
+      Nothing   -> Right (Pool (rules (sessionMachine s)) [] [])
       Just srcs -> case consultRuleBases s srcs of
         -- **The published modules are read off the same texts** (MS11 phase
         -- 289), which is the half 'consultRuleBases' has no use for: a base
         -- that will not parse is refused by the install with the position in
         -- it, so nothing is said about one here.
+        --
+        -- **THE SCOPED ONES ARE READ WITH THE REST AND THEN TAKEN BACK OUT**
+        -- (MS11 phase 292). They are read together because the install asks one
+        -- question of the whole push — a plain @consult@ in a base may be
+        -- answered by another base in it, and inference needs every signature —
+        -- and they are taken out again because the pool they belong in is the
+        -- block's and not the file's. **The split is by position and not by
+        -- path**, so a base consulted file-wide and in a block as well is in
+        -- both and neither takes the other's place.
         (_, BasesLoaded pool) ->
-          Right (Pool pool
-                      (concat [ ms | (_, src) <- srcs
-                                   , Right (_, ms) <- [ruleBasePublishes src] ]))
+          let scoped = scopedConsults (readModuleItems m)
+              wide   = length srcs - length scoped
+              bases  = take (length srcs) pool
+           in Right (Pool (take wide bases ++ drop (length srcs) pool)
+                          (concat [ ms | (_, src) <- take wide srcs
+                                       , Right (_, ms) <- [ruleBasePublishes src] ])
+                          [ Held n b (either (const []) snd (ruleBasePublishes src))
+                          | (n, b, (_, src)) <- zip3 scoped (drop wide bases)
+                                                            (drop wide srcs) ])
         (_, bad)              -> Left bad
 
     marked _ _      Nothing  s = s
@@ -2259,13 +2415,24 @@ concealedFrom ims s =
           , g `notElem` visible ]
   where
     env     = globals (sessionMachine s)
-    -- **A CLOSURE over @public import@, which is his ruling of 2026-11-03**:
-    -- this module reaches what its imports export, and whatever those imports
-    -- passed on, as far as the @public@ lines go. **The guard is not decoration
-    -- although the import graph is acyclic** — two modules may both pass on a
-    -- third, and without it the walk would do that subtree twice for no reason.
-    visible = reach [] (preludeModule : ims)
+    visible = reachedBy (preludeModule : ims) s
 
+-- | __What importing these modules reaches__ (MS11 phase 291).
+--
+-- **A CLOSURE over @public import@, which is his ruling of 2026-11-03**: an
+-- importer reaches what they export, and whatever they passed on, as far as the
+-- @public@ lines go. **The guard is not decoration although the import graph is
+-- acyclic** — two modules may both pass on a third, and without it the walk
+-- would do that subtree twice for no reason.
+--
+-- **Lifted out of 'concealedFrom' so that a scoped import reveals exactly what
+-- a file-wide one does** (phase 291): the subtraction taken when a load begins
+-- and the frame an @import … where@ pushes are the same question asked of
+-- different imports, and asking it twice over is how the two would come to
+-- differ.
+reachedBy :: [ModuleName] -> Session -> [GlobalName]
+reachedBy ms0 s = reach [] ms0
+  where
     reach _    []       = []
     reach seen (m : ms)
       | m `elem` seen = reach seen ms
@@ -2475,6 +2642,11 @@ declaredNames = go []
     -- **A private declaration is still declared**, and the summary says so: the
     -- file declared it and this module may use it (MS11 phase 286).
     go ns (ItemPrivate is)  = concatMap (go ns) is
+    -- **And a declaration inside a block an act states is the module's** (MS11
+    -- phases 291 and 292): where its names could be written is the act's
+    -- business, and what the file declared is this list's.
+    go ns (ItemImport _ _ ds)  = concatMap (go ns) (concat ds)
+    go ns (ItemConsult _ _ ds) = concatMap (go ns) (concat ds)
     go ns i = [ intercalate "." (ns ++ [n]) | Just n <- [declaredName i] ]
 
 -- | How many top-level blocks an item holds, for the summary's count.
@@ -2484,6 +2656,8 @@ blocksIn i = case i of
   ItemNamespace _ is -> sum (map blocksIn is)
   ItemOpenIn _ is    -> sum (map blocksIn is)
   ItemPrivate is     -> sum (map blocksIn is)
+  ItemImport _ _ ds  -> sum (map blocksIn (concat ds))
+  ItemConsult _ _ ds -> sum (map blocksIn (concat ds))
   _                  -> 0
 
 -- | Every rule base this module consults, in written order (MS11 phase 273).
@@ -2497,11 +2671,69 @@ moduleConsults :: [Item] -> [ModuleName]
 moduleConsults = concatMap go
   where
     go i = case i of
-      ItemConsult _ m    -> [m]
+      ItemConsult _ m ds -> m : inside ds
+      ItemImport _ _ ds  -> inside ds
       ItemNamespace _ is -> moduleConsults is
       ItemOpenIn _ is    -> moduleConsults is
       ItemPrivate is     -> moduleConsults is
       _                  -> []
+    -- **A consult inside a block is still a file the load must read** (MS11
+    -- phase 292): where it is in force is the block's business and whether the
+    -- disc can be reached is this list's.
+    inside = maybe [] moduleConsults
+
+-- | __Which bases a block of this file is searched against__, in written order
+-- (MS11 phase 292).
+--
+-- The consults that state a block, which are the ones the file's own pool does
+-- not hold: 'consultedPool' leaves them out and 'Thena.Instral.Ops.PushBase'
+-- puts each one in where its block begins.
+--
+-- **In the order written, which is the order their texts are read in** — the
+-- load hands these to the disc after the file-wide ones and 'Pool' pairs them
+-- back up by position.
+scopedConsults :: [Item] -> [ModuleName]
+scopedConsults = concatMap go
+  where
+    go i = case i of
+      ItemConsult _ m (Just is) -> m : scopedConsults is
+      ItemConsult _ _ Nothing   -> []
+      ItemImport _ _ ds         -> maybe [] scopedConsults ds
+      ItemNamespace _ is        -> scopedConsults is
+      ItemOpenIn _ is           -> scopedConsults is
+      ItemPrivate is            -> scopedConsults is
+      _                         -> []
+
+-- | __Which modules this file may name throughout__ (MS11 phase 291).
+--
+-- The imports that state no block, which is what every import was until phase
+-- 291: a line with no @where@ reaches the rest of the file, so what it brings
+-- in is lifted when the load begins and put back when it ends.
+--
+-- **An import that states a block is not here.** Its names go on where the
+-- block begins — 'Thena.Instral.Ops.Reveal' — so counting it here as well would
+-- make the block decide nothing.
+--
+-- **AND NOTHING SURROUNDING AN IMPORT CHANGES WHICH LIST IT IS IN** (his design
+-- of 2026-11-05): the walk goes through a @namespace@ block, a @private@, an
+-- @open … in@ and the block of another act, because an act states its own
+-- extent and a construct it is written in states nothing about it. That is what
+-- @~c2smp@ asked and this is the whole of the answer — a bare @import@ written
+-- anywhere reaches the end of the file.
+--
+-- **'moduleImports' is the other question** — what has to be loaded before this
+-- module — and it answers it for every import, scoped or not.
+fileImports :: [Item] -> [ModuleName]
+fileImports = concatMap go
+  where
+    go i = case i of
+      ItemImport _ m Nothing  -> [m]
+      ItemImport _ _ (Just is) -> fileImports is
+      ItemConsult _ _ ds      -> maybe [] fileImports ds
+      ItemNamespace _ is      -> fileImports is
+      ItemOpenIn _ is         -> fileImports is
+      ItemPrivate is          -> fileImports is
+      _                       -> []
 
 -- | Every surface module this one imports, in written order (MS11 phase 274).
 --
@@ -2514,7 +2746,8 @@ moduleImports :: [Item] -> [ModuleName]
 moduleImports = concatMap go
   where
     go i = case i of
-      ItemImport _ m     -> [m]
+      ItemImport _ m ds   -> m : maybe [] moduleImports ds
+      ItemConsult _ _ ds  -> maybe [] moduleImports ds
       ItemNamespace _ is -> moduleImports is
       ItemOpenIn _ is    -> moduleImports is
       ItemPrivate is     -> moduleImports is
@@ -2530,7 +2763,9 @@ publicImports :: [Item] -> [ModuleName]
 publicImports = concatMap go
   where
     go i = case i of
-      ItemImport Public m -> [m]
+      ItemImport Public m ds -> m : maybe [] publicImports ds
+      ItemImport Own _ ds    -> maybe [] publicImports ds
+      ItemConsult _ _ ds     -> maybe [] publicImports ds
       ItemNamespace _ is  -> publicImports is
       ItemOpenIn _ is     -> publicImports is
       ItemPrivate is      -> publicImports is
@@ -2561,12 +2796,15 @@ publicPushes :: [Item] -> [Published]
 publicPushes = concatMap go
   where
     go i = case i of
-      ItemConsult Public m -> [PublishedBase m]
-      ItemImport Public m  -> [PublishedFrom m]
+      ItemConsult Public m ds -> PublishedBase m : inside ds
+      ItemConsult Own _ ds    -> inside ds
+      ItemImport Public m ds  -> PublishedFrom m : inside ds
+      ItemImport Own _ ds     -> inside ds
       ItemNamespace _ is   -> publicPushes is
       ItemOpenIn _ is      -> publicPushes is
       ItemPrivate is       -> publicPushes is
       _                    -> []
+    inside = maybe [] publicPushes
 
 -- | __Which bases a module that is in hands on, in order__ (MS11 phase 288,
 -- @~jmw4k@).
@@ -2619,8 +2857,13 @@ consultedPool :: Session -> [ReadModule] -> [Item] -> [ModuleName]
 consultedPool s done = reverse . concatMap go
   where
     go i = case i of
-      ItemConsult _ m    -> [m]
-      ItemImport _ m     -> published m
+      -- **A consult that states a block is not in the file's pool** (MS11 phase
+      -- 292): it is pushed where its block begins and popped after it, so
+      -- putting it here as well would make it the file's and the block's at
+      -- once. 'moduleConsults' is still the list of files to read.
+      ItemConsult _ m Nothing  -> [m]
+      ItemConsult _ _ (Just _) -> []
+      ItemImport _ m ds        -> published m ++ maybe [] (concatMap go) ds
       ItemNamespace _ is -> concatMap go is
       ItemOpenIn _ is    -> concatMap go is
       ItemPrivate is     -> concatMap go is
@@ -2742,10 +2985,12 @@ declaredName i = case i of
   ItemPrivate _     -> Nothing
   -- **A consult declares nothing either** (MS11 phase 273) — it says what the
   -- module's proofs are searched against, which adds no key to the environment.
-  ItemConsult _ _   -> Nothing
+  -- **Nor one that states a block** (MS11 phase 292) — the declarations inside
+  -- are named by their own entries, which is 'ItemNamespace''s rule.
+  ItemConsult {}    -> Nothing
   -- **Nor an import** (MS11 phase 274): the names it makes reachable are the
   -- imported module's own, and that module's load named them.
-  ItemImport _ _    -> Nothing
+  ItemImport {}     -> Nothing
   -- **Nor an export list** (MS11 phase 285) — it names declarations the module
   -- made elsewhere and makes none of its own.
   ItemExporting _   -> Nothing
@@ -3623,7 +3868,7 @@ dispatch s name arg = case name of
     declareSurface src = case parseSurfaceItems src of
       Left e -> (s, Failed e)
       Right items ->
-        let (is, n1) = surfaceProgram (names machine) items
+        let (is, n1) = surfaceProgram broughtNothing (names machine) items
          in progress (sessionFuel s)
               s { sessionMachine = load is machine { names = n1 } } [] []
 
@@ -5026,7 +5271,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
                      g : _ -> g
                      []    -> delta
               (fs, n1)
-                | installs = surfaceProgram (names m)
+                | installs = surfaceProgram broughtNothing (names m)
                     ([ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions gs' g' ]
                        ++ map ItemGrammar (substitutionNotations gs' g'))
                 | otherwise = ([], names m)
@@ -5068,7 +5313,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
           -- 'Thena.Language.Grammar.checkNotation' a written block does, so the
           -- one notation the system used to privilege is now an instance of the
           -- one a user declares.
-          (fs, n2) = surfaceProgram n1
+          (fs, n2) = surfaceProgram broughtNothing n1
                        ([ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions (g : grammars m) g ]
                           ++ map ItemGrammar (substitutionNotations (g : grammars m) g))
           -- **A context's lookup relation, and its notation** (MS6 phase 107,

@@ -1,0 +1,8 @@
+module test.modules.ScopedImport where
+
+-- **The import states how far it reaches** (MS11 phase 291, his design of
+-- 2026-11-05): `Bit.Bit` is writable in the block and `Opener`'s own `open Bit`
+-- reaches it too, so a bare `off` resolves — and both stop at the `}`.
+import test.modules.Opener where
+  mine : Bit.Bit
+  mine = off

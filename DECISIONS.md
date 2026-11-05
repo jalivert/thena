@@ -651,6 +651,34 @@ import Stlc.Lemmata
 open Stlc
 ```
 
+**AN IMPORT MAY SAY HOW FAR IT REACHES, AND NOTHING ELSE ENDS ONE.** *Decided
+2026-11-05, built MS11 phase 291 for `import` and 292 for `consult`.* Write a block on
+the act and what it brings in reaches that block and stops:
+
+```
+module Proofs where
+
+import Stlc.Scratch where       -- Scratch's names, in here and nowhere else
+  helper : Scratch.Thing
+  helper = Scratch.mk
+
+after : Scratch.Thing           -- not in scope: Scratch.Thing
+```
+
+With no block, an import reaches the rest of the file, which is what every import did
+before. **And that is the only thing that ends one**: an `import` inside a `do` block, a
+`data` block, a `namespace` block or a declaration's body is still the file's, to the end
+of the file. The act says its own extent, so there is no list of constructs to learn.
+
+**What is scoped is the writing of names, not the file's dependencies.** The module is
+loaded before yours either way — a nested import is a dependency like any other — and a
+declaration you wrote inside the block keeps working outside it, even for someone who
+imports your file and cannot name its type at all. The names in a type are resolved once,
+where you wrote them.
+
+**The `open`s you inherited are scoped with it.** A module that opens a namespace at its
+own top level hands you that spelling; behind a block, it hands it to the block.
+
 **And both words are typed at the prompt.** *Built MS11 phase 284.* `import
 Stlc.Terms` loads that module by name, `consult Stlc.Tactics` pushes that base, and
 they are the same two declarations a file writes rather than commands that resemble
@@ -875,9 +903,8 @@ back whatever it brought in: you never end up with half of it.
 ### Consults are a STACK, and clauses are a queue
 
 *Decided 2026-11-03. Built: the stack and `:consult` at the prompt at MS11 phase
-271, a `consult` line written in a file at phase 273, and `public consult` at phase
-288. A `consult` written **inside a block** — the `do` below — is not built; which
-constructs end one is still open.*
+271, a `consult` line written in a file at phase 273, `public consult` at phase 288,
+and a consult that states how far it reaches at phase 292.*
 
 **The last thing you consulted is tried first.** That is the whole rule, and it does
 not matter how deep in a namespace you are standing:
@@ -886,15 +913,20 @@ not matter how deep in a namespace you are standing:
 consult broad-tactics        -- tried third
 consult sharper-tactics      -- tried second
 
-thm : …
-thm = do { consult crush-this-one ; … }   -- tried FIRST, and only in here
+consult crush-this-one where -- tried FIRST, and only in here
+  thm : …
+  thm = …
 ```
 
 The shipped base is consulted for you before any of these, so it sits at the bottom
 of the stack and is tried last — which is *universal tactics at the bottom*, falling
-out of the stack rather than being a rule of its own. **A consult reaches to the end
-of the block it is written in**, so the one in that `do` block applies there and
-nowhere else.
+out of the stack rather than being a rule of its own.
+
+**A consult reaches the block it states and otherwise the rest of the file**, and that
+is the only thing that ends one: no construct it is written inside — a `do` block, a
+`data` block, a `namespace` block — does anything to it. **So nesting is priority**: the
+innermost `consult` is the last to push and the first to be searched, which falls out of
+the stack and is not a second rule.
 
 **IT IS A STACK WHATEVER ROUTE A BASE TOOK, and that is the whole of it.** A `consult`
 is a push. A base that reaches you because a module you imported published it with

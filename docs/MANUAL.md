@@ -1497,6 +1497,40 @@ will load again, so it reaches everything the session holds, the module you have
 loaded included — which is how you poke at one. An `open` a file left behind stays in
 force at the prompt too, for the same reason.
 
+### An act says how far it reaches
+
+An `import` or a `consult` reaches the rest of the file. Give it a block and it reaches
+that block instead:
+
+```
+module Proofs where
+
+import Stlc.Scratch where       -- in here, and nowhere else
+  helper : Scratch.Thing
+  helper = Scratch.mk
+
+consult Stlc.Crush where        -- these rules, for this one proof
+  hard : …
+  hard = do { crush }
+
+after : Scratch.Thing           -- not in scope: Scratch.Thing
+```
+
+**Nothing else ends one.** An `import` written inside a `do` block, a `data` block, a
+`namespace` block or a definition's body is still the file's, to the end of the file —
+the act is what says its extent, so there is no list of constructs to remember.
+
+**Nesting a consult is how you say which base wins.** The innermost one is the last
+pushed and the first searched, which is the stack rule over again and not a new one.
+
+What a block does *not* change is the loading: a module you import inside one is a
+dependency like any other, loaded before your file, and a definition you wrote in the
+block keeps working after it — including for someone who imports your file and cannot
+name its type at all. The names in a type are resolved where you write them, once.
+
+The `open`s you inherit come with it: a module that opens a namespace at its own top
+level hands you that spelling, and behind a block it hands it to the block.
+
 > **What you reach is up to the file you imported.** It says what it offers with
 > `exporting` and `private`, below, and passes its own dependencies on with
 > `public import` and `public consult`.

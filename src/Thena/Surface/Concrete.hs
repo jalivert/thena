@@ -426,11 +426,18 @@ data SurfaceDecl
     -- > two = succ zero
     --
     -- is one declaration under one @open@, and @succ@ resolves in both lines.
-  | SurfaceConsult Reach [String] String
+  | SurfaceConsult Reach [String] String (Maybe [SurfaceDecl])
     -- ^ @consult ‹module›@, or @public consult ‹module›@ — **what this file's
     -- proofs are searched against** (MS11 phase 273, his ruling of
     -- 2026-11-03), and whether that base travels to whoever imports this file
     -- (phase 288).
+    --
+    -- **AND HOW FAR IT REACHES** (MS11 phase 292, his design of 2026-11-05),
+    -- which is 'SurfaceImport'\'s field and the same rule: @consult M where
+    -- { … }@ searches the proofs in its block against @M@ and the proofs after
+    -- it against what the file had, so a base wanted for one proof is written
+    -- around that proof. **Nesting is priority**: a file's consults are a stack
+    -- (phase 288), so the innermost line is pushed last and is tried first.
     --
     -- The steps and the last word of a **file's** name, the same shape
     -- 'SurfaceOpen' uses for a namespace's and meaning something different by
@@ -448,10 +455,23 @@ data SurfaceDecl
     -- this file is searched against a @public consult@\'s base too, at the
     -- position of the @import@ line that brought it in. A surface file still
     -- has no rules of its own — it hands on a base and never contains one.
-  | SurfaceImport Reach [String] String
+  | SurfaceImport Reach [String] String (Maybe [SurfaceDecl])
     -- ^ @import ‹module›@, or @public import ‹module›@ — **which surface
     -- modules this file depends on** (MS11 phase 274, his ruling of
     -- 2026-11-03), and whether what they gave it travels on (phase 287).
+    --
+    -- **AND HOW FAR IT REACHES, WHICH THE ACT STATES ITSELF** (MS11 phase 291,
+    -- his design of 2026-11-05). @import M where { … }@ reaches the block and
+    -- stops; 'Nothing' is the rest of the file, which is what a line with no
+    -- block says. **So no surrounding construct scopes an import** — a @do@
+    -- block, a @data@ block and a declaration's body all leave it alone — and
+    -- the one rule has no cases: an act says its own extent, as @open X in
+    -- ‹declaration›@ already did.
+    --
+    -- **A field and not a second constructor**, which is 'Reach'\'s precedent
+    -- at phase 287: the block is an attribute of the import, so everything that
+    -- walks imports for the load, the graph or a display still matches one
+    -- constructor and walks into the block for what is declared inside it.
     --
     -- 'SurfaceConsult'\'s shape and 'SurfaceConsult'\'s meaning of it: the steps
     -- are directories, so @import Stlc.Terms@ reaches @Stlc\/Terms.thena@ — the

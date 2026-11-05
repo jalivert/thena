@@ -58,6 +58,7 @@ import Thena.Core.Term
   , GlobalName (..)
   , globalUnder
   , InScope (..)
+  , revealing
   , Opened (..)
   , nameDotted
   , rootName
@@ -161,7 +162,7 @@ import Thena.Tactics.Recurse (resolveRecursion)
 import Thena.Tactics.Specialise
   (Binder (..), Specialisation (..), specialise, survivingEquations)
 import Thena.Rules
-  (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock, rootReading)
+  (RuleBase, RuleError (..), RuleIter, arities, basePath, clauses, dispatch, hasNext, next, resolveBlock, rootReading)
 import Thena.Syntax.Lexer (isIdentifier)
 import Thena.Surface.Zipper (SurfaceZipper)
 import qualified Thena.Surface.Zipper as Zipper
@@ -222,6 +223,19 @@ data Machine = Machine
   , globals     :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
   , rules       :: [RuleBase] -- ^ NOT backtrackable (§7.4) — phase 15; a list
                               -- of loaded bases, leftmost searched first (phase 22)
+  , held        :: [RuleBase]
+    -- ^ **bases read for this load and not in the pool** (MS11 phase 292) —
+    -- what a @consult ‹module› where { … }@ names, waiting for the block it
+    -- reaches: 'Thena.Instral.Ops.PushBase' moves one into 'rules' and
+    -- 'Thena.Instral.Ops.PopBase' takes it back out.
+    --
+    -- **An op cannot carry a 'RuleBase'** — "Thena.Rules" is below
+    -- "Thena.Instral.Ops" and a @RuleBase@ is read off the disc by the driver —
+    -- so the op names the base's path and this is where it is found. NOT
+    -- backtrackable, like 'rules' beside it.
+    --
+    -- **Emptied with the pool when the load ends**, since a base read for one
+    -- module's blocks is not the session's.
   , signatures  :: [(GlobalName, [Plicity])]
     -- ^ **which of a global's argument positions were written implicit** (MS4
     -- phase 44b) — Brady's system state @(C, A, I)@, the @I@ of it. NOT
@@ -1158,6 +1172,35 @@ perform instr rest m = case operation instr of
 
   LeaveOpen ->
     Continue (advance m { scope = (scope m) { scopeOpens = drop 1 (scopeOpens (scope m)) } })
+
+  -- **A frame of concealment without the module's names in it** (MS11 phase
+  -- 291). Nothing is checked and nothing is installed: the keys are in the
+  -- environment already — the module was loaded before this one ran — and what
+  -- this settles is whether a written name may reach them.
+  --
+  -- **A name the module does not export is not in the list**, so a scoped
+  -- import reveals exactly what a file-wide one does; and a name that was never
+  -- concealed is revealed for nothing, which is the prompt and costs a
+  -- @filter@ over an empty frame.
+  Reveal gs -> Continue (advance m { scope = revealing gs (scope m) })
+
+  LeaveReveal ->
+    Continue (advance m { scope = (scope m)
+                { scopeConcealed = drop 1 (scopeConcealed (scope m)) } })
+
+  -- **The base goes on top of the pool** (MS11 phase 292), so the rules a block
+  -- is searched against are the block's first and the file's underneath.
+  --
+  -- **A path that names nothing held pushes nothing**, and the lowering is what
+  -- makes that unreachable where it would matter: a module's load reads every
+  -- base it names before the program is built, and refuses the module if the
+  -- disc cannot answer. At the prompt there is nothing to read and a typed
+  -- @consult@ has never done anything, so the pair is not emitted at all —
+  -- which is why this is not a refusal.
+  PushBase p -> Continue (advance m
+    { rules = [ b | b <- held m, basePath b == p ] ++ rules m })
+
+  PopBase -> Continue (advance m { rules = drop 1 (rules m) })
 
   LeaveNamespace ->
     Continue (advance m { scope = (scope m) { scopeWithin = drop 1 (scopeWithin (scope m)) } })

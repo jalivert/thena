@@ -1756,6 +1756,14 @@ operation rd g i (RawOp w as)
       ("namespace", _)            -> Left (DeclarationInBody g i)
       ("leave-namespace", _)      -> Left (DeclarationInBody g i)
       ("leave-open", _)           -> Left (DeclarationInBody g i)
+      -- §3.7 again (MS11 phase 291): an @import@ is a declaration, and so is
+      -- the end of the block one reaches.
+      ("reveal", _)               -> Left (DeclarationInBody g i)
+      ("leave-reveal", _)         -> Left (DeclarationInBody g i)
+      -- §3.7 again (MS11 phase 292): so is a @consult@, and so is the end of
+      -- the block one reaches.
+      ("push-base", _)            -> Left (DeclarationInBody g i)
+      ("pop-base", _)             -> Left (DeclarationInBody g i)
 
       _ -> case (lookup w nullaryOps, lookup w unaryOps, lookup w binaryOps, as) of
         (Just o,  _, _, [])       -> Right o
