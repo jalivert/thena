@@ -19,7 +19,7 @@
 -- `vanished-case-takes-no-body` refuses it. An arm with no body at all is
 -- legal and says the same thing `{ }` says one level out.
 
-module OmittedCases where
+module examples.OmittedCases where
 
 data N : Type₀ where
   z : N

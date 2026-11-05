@@ -646,14 +646,14 @@ amounts to starting over. Handy for scratch work.
 what each case has to prove, and posts one hole per case.
 
 The example needs `Nat`, addition, and congruence of `succ`.
-`examples/tier0.thena` declares the first two; the third is one line. It
+`examples/Tier0.thena` declares the first two; the third is one line. It
 declares its own `Nat`, so it wants a session that has not already got one.
 
 *From a fresh session.*
 
 ```
-thena spine> :load examples/tier0.thena
-module Tier0
+thena spine> :load examples/Tier0.thena
+module examples.Tier0
   declared Nat
   declared plus
   declared identity
@@ -1371,7 +1371,7 @@ already there goes on being searched underneath them.
 *From a fresh session.*
 
 ```
-thena spine> :consult examples/choice-points.thena.rules
+thena spine> :consult examples/ChoicePoints.thena.rules
 loaded demo (3 rules)
 loaded standard (120 rules)
 ```
@@ -1387,7 +1387,7 @@ not change under a half-built development.
 *From a fresh session.*
 
 ```
-thena spine> :load examples/determinacy-tactics.thena.script
+thena spine> :load examples/DeterminacyTactics.thena.script
 …
 determinacy : ∀ (t : Term) (t1 : Term) -> Step t t1 -> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2   ∎
 ```
@@ -1400,8 +1400,8 @@ would bury its own output.
 *From a fresh session.*
 
 ```
-thena spine> :load examples/tier0.thena
-module Tier0
+thena spine> :load examples/Tier0.thena
+module examples.Tier0
   declared Nat
   declared plus
   declared identity
@@ -1488,7 +1488,7 @@ your session**, unlike a surface file's consults — the base's rules run in you
 session later and need the language there. A module you already have is not loaded
 again, and a base that will not install takes back whatever it brought in.
 
-`examples/determinacy-tactics.thena.script` is the acceptance test for the whole first
+`examples/DeterminacyTactics.thena.script` is the acceptance test for the whole first
 milestone. It declares the language of chapter 3 of Pierce's *Types and
 Programming Languages* — a seven-constructor term language, a numeric-value
 predicate, and a ten-rule small-step reduction relation —
@@ -1496,7 +1496,7 @@ predicate, and a ten-rule small-step reduction relation —
 *From a fresh session.*
 
 ```
-thena spine> :load examples/determinacy-tactics.thena.script
+thena spine> :load examples/DeterminacyTactics.thena.script
 …
 thena spine> :show Term
 data Term : Type₀ where
@@ -1524,15 +1524,15 @@ that no elimination sits inside another. The file is machine-generated —
 `examples/determinacy.py` regenerates it byte for byte — because 110 of
 its 130 case branches are mechanical constructor clashes.
 
-**The same proof exists twice.** `examples/determinacy-surface.thena` is a proof
+**The same proof exists twice.** `examples/DeterminacySurface.thena` is a proof
 module in the surface language — 278 lines where the script is 1190 — and it
 proves the same theorem through the same rule base:
 
 *From a fresh session.*
 
 ```
-thena spine> :load examples/determinacy-surface.thena
-module Determinacy
+thena spine> :load examples/DeterminacySurface.thena
+module examples.DeterminacySurface
 …
 ```
 
@@ -1558,7 +1558,7 @@ It also has a **surface language** — layout-sensitive, with implicit arguments
 and inferred level arguments — and elaborates it into the development calculus.
 **That elaborator is not in the binary**: it is sixteen clauses of one rule in
 `rules/standard.thena.rules`, which you can read and change. `prelude/prelude.thena`
-and `examples/determinacy-surface.thena` are both written in the surface
+and `examples/DeterminacySurface.thena` are both written in the surface
 language and elaborated on load.
 
 **It cannot yet:**

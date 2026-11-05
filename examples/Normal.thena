@@ -1,7 +1,7 @@
 -- A value is a normal form — the companion to progress, proved in Thena's
 -- surface language.
 --
--- LOAD AFTER canonical.thena AND progress.thena — this hand-written set still
+-- LOAD AFTER Canonical.thena AND Progress.thena — this hand-written set still
 -- relies on load order, where the numbered series states its own imports.
 --
 -- Progress says a well-typed term is a value OR it takes a step. Nothing said
@@ -31,7 +31,10 @@
 -- 0. A declared type's level is generalised when nothing pins it, and nothing
 -- here passes `Empty` to `absurd` any more.
 
-module Normal where
+module examples.Normal where
+
+import examples.Canonical
+import examples.Progress
 
 trueNoStep : forall (u : Term) (s : Step true u) -> Empty
 trueNoStep = \ u s -> case s of { }

@@ -346,7 +346,7 @@ universes env n0 d = do
 -- @P (vnil {0} A) …@ — and the kernel refuses it as soon as anyone
 -- eliminates above @Type₀@. A family whose index telescope is
 -- level-polymorphic was unusable, in silence, and
--- @examples\/vector-families.thena@ has carried one since MS9 phase 216.
+-- @examples\/VectorFamilies.thena@ has carried one since MS9 phase 216.
 --
 -- Checking each index at the type the telescope declares for it is what relates
 -- the two metas, and what it owes goes where 'argumentLevels'' does —

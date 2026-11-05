@@ -1,5 +1,5 @@
 -- Determinacy of a small-step semantics for the untyped arithmetic terms of
--- TAPL chapter 3 — the same theorem as examples/determinacy-surface.thena, and
+-- TAPL chapter 3 — the same theorem as examples/DeterminacySurface.thena, and
 -- the point of the file is that EVERY ONE of its eight lemmas is dependent
 -- pattern matching. Not one line of it appeals to `elim`, and not one arm
 -- appeals to no-confusion.
@@ -39,7 +39,7 @@
 -- fits `succ p` by moving `c1`, `eIfTrue`'s `true` facing `p` has nothing to
 -- move — and the two kinds of arm are written identically.
 
-module Determinacy where
+module examples.DeterminacyPatterns where
 
 data Term : Type₀ where
   true : Term

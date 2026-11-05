@@ -1,4 +1,4 @@
--- One rung deeper than `chained-index-telescope.thena`, which is what says the
+-- One rung deeper than `ChainedIndexTelescope.thena`, which is what says the
 -- construction RECURSES rather than handling a single shape. Read that file
 -- first: it has the argument, the motive and the reason a transport needs to
 -- carry the positions that move with it.
@@ -15,7 +15,7 @@
 -- languages has this shape; it is here so that the recursion is exercised by
 -- something rather than reasoned about.
 
-module ChainedIndexTelescopeDeep where
+module examples.ChainedIndexTelescopeDeep where
 
 data N : Type₀ where
   z : N

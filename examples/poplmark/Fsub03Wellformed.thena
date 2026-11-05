@@ -1,6 +1,6 @@
 -- Well-formed contexts and well-formed types.
 --
--- LOAD AFTER 01-syntax.thena AND 02-subtyping.thena.
+-- LOAD AFTER Fsub01Syntax.thena AND 02-subtyping.thena.
 --
 -- THE CHALLENGE PAPER DOES NOT PRINT THESE, and it does not have to: its
 -- contexts are finite functions, so `Γ, X<:T` is notation that only means
@@ -35,7 +35,10 @@
 -- is the motive the hand-written elimination wrote, said in the statement
 -- instead; `tyRebind` closes it with `refl` and nothing else changed.
 
-module FsubWellformed where
+module examples.poplmark.Fsub03Wellformed where
+
+import examples.poplmark.Fsub01Syntax
+import examples.poplmark.Fsub02Contexts
 
 -- ---------------------------------------------------------------------------
 -- The usual four, as 07 defines them: equality is an ordinary datatype here.

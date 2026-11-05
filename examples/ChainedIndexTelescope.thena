@@ -5,9 +5,9 @@
 --
 -- Compare the two files beside this one, because the three are a ladder:
 --
---   * `dependent-index.thena.script` — `Below`'s indices are plain variables,
+--   * `DependentIndex.thena.script` — `Below`'s indices are plain variables,
 --     so the dependent one is FRIENDLY and states no equation at all.
---   * `tied-index-chain.thena` — `Q`'s second index is TIED and typed by the
+--   * `TiedIndexChain.thena` — `Q`'s second index is TIED and typed by the
 --     first, so its equation is stated after transporting its side along the
 --     first one's proof. One transport, and the position it moves is not itself
 --     mentioned by anything.
@@ -33,7 +33,7 @@
 -- still an `Eq` between two terms of one type, which is the same bargain the
 -- rest of the elimination machinery keeps.
 
-module ChainedIndexTelescope where
+module examples.ChainedIndexTelescope where
 
 data N : Type₀ where
   z : N
@@ -69,7 +69,7 @@ chained = \ m c -> case c of { c0 n i b w -> w }
 chainedPayload : N
 chainedPayload = chained (s z) (c0 (s (s z)) (fz (s z)) (bz (s z)) (s (s (s z))))
 
--- ONE RUNG DEEPER IS ITS OWN FILE, `chained-index-telescope-deep.thena`, and
+-- ONE RUNG DEEPER IS ITS OWN FILE, `ChainedIndexTelescopeDeep.thena`, and
 -- the reason is cost: the generated term grows about fourfold per chained
 -- index, so that split alone is most of a load. The measurement is in
 -- DECISIONS.md under the decision this file demonstrates.

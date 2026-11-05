@@ -2193,11 +2193,11 @@ never fire. Trying the written shape *first* keeps a pattern that wants an
 unreduced form able to see it. It is one rule for every pattern, not a rule
 about object terms.
 
-**Load the language's file before the rules that take it apart.** A rule file
-is read with the grammars the session already has, so the module declaring
-`language LC` has to have been loaded first. Load them the other way round and
-the tag names a language nothing has declared, which is the error it looks
-like.
+**A rule file imports the language's file.** It used to be read with whatever
+grammars the session already held, so the module declaring `language LC` had to
+have been loaded first and loading them the other way round made the tag name a
+language nothing had declared. Since 2026-11-03 a rule base says what it depends
+on and the order is not the reader's problem.
 
 ---
 
@@ -2678,8 +2678,8 @@ the admitted split: 3,835 characters for one transport, 13,269 with one chained 
 49,840 with two — about fourfold each time, with load time following it. Nothing in the
 languages Thena models has an index typed by two mutually dependent indices, so this is a
 gap closed rather than a cost anybody pays: where no index's type mentions an earlier one
-not a byte of it is generated. `examples/chained-index-telescope.thena` and
-`examples/chained-index-telescope-deep.thena` are the two worked shapes.
+not a byte of it is generated. `examples/ChainedIndexTelescope.thena` and
+`examples/ChainedIndexTelescopeDeep.thena` are the two worked shapes.
 
 **One shape of index telescope is still refused**, and it may not be reachable: a *tied*
 index — one whose position the target pins to a constructor application, so that it states
@@ -3478,7 +3478,7 @@ costs nothing beyond the assertion it makes.
 **A dot on a position nothing determined is refused.** That is the assertion failing,
 and it is the whole of what the notation buys: splitting a `Vec A n` with `n` a plain
 variable generalises it and leaves `vcons`'s own length a genuine binder, so there is
-nothing there to assert. `examples/dot-patterns.thena` has all of it, the refusals
+nothing there to assert. `examples/DotPatterns.thena` has all of it, the refusals
 included.
 
 **What a dot cannot do is destructure.** A position can be determined to a compound
@@ -3499,7 +3499,7 @@ vtail = \ A n v -> induction v of { vnil -> ; vcons k a as -> as }
 ```
 
 The whole split may also be written with no arms at all — `induction d of { }` — which
-is how the inversion lemmas in `examples/canonical.thena` are written, and **an empty
+is how the inversion lemmas in `examples/Canonical.thena` are written, and **an empty
 arm is that same notion for one case rather than for all of them.** A keyword would have
 been a second spelling for something the syntax could already say.
 
@@ -3600,9 +3600,9 @@ tyRebind = \ G Xn A B D T h ->
     (refl Ctx (append (bindTy G Xn A) D))
 ```
 
-`examples/poplmark/03-wellformed.thena` and `06-transitivity.thena` each have exactly one
+`examples/poplmark/Fsub03Wellformed.thena` and `Fsub06Transitivity.thena` each have exactly one
 lemma of that shape, and the wrapper means no caller sees it. **Where the index IS a
-variable there is nothing to say**: the split abstracts it, and `examples/progress.thena`
+variable there is nothing to say**: the split abstracts it, and `examples/Progress.thena`
 is made of that case.
 
 **AND A PREMISE ABOUT AN INDEX IS CARRIED TOO.** The position-by-position rule decides
@@ -3762,7 +3762,7 @@ proof loads**, and that is the property these rules exist to keep.
 transport by hand. It type-checks, and it is deliberately not how the examples are written:
 an arm whose right-hand side is a function of an equation you had no way to predict is
 elaboration showing through the surface, not a way to write proofs.
-`examples/determinacy-patterns.thena` has no such arm, and no `elim` either.
+`examples/DeterminacyPatterns.thena` has no such arm, and no `elim` either.
 
 ### The hand-driven induction tactic does not generalise, and the generalising one has its own name
 
@@ -3872,8 +3872,8 @@ dblC = \ n -> case n of { zero -> zero ; succ m -> succ (succ (dblC m)) }
 not recurse. The hypothesis is simply not in scope, so the call has nothing to tie
 to and is refused by the same mechanism that refuses a call at the wrong index
 under `induction`. Writing `case` is therefore a claim the type carries, not a
-comment: `examples/canonical.thena` is all `case`, because inversion never
-recurses, and `examples/progress.thena` has exactly one `induction` in it.
+comment: `examples/Canonical.thena` is all `case`, because inversion never
+recurses, and `examples/Progress.thena` has exactly one `induction` in it.
 
 **Everything else about the two is identical.** The same motive generalising the
 indices, the same equations recovering their specificity, the same forced
@@ -4709,7 +4709,7 @@ noSelf = \ n st -> case st of { }
 ```
 
 the tied target asks for a number that is its own successor, and the braces are
-empty. `examples/omitted-cases.thena` is the same thing at four shapes. **A case
+empty. `examples/OmittedCases.thena` is the same thing at four shapes. **A case
 that does arise is still refused**, by name, as it always was.
 
 **An equation it cannot simplify is kept, not refused.** When none of the five
@@ -4800,8 +4800,8 @@ the loader.
 **succeed and say something**:
 
 ```
-thena spine> :load proof examples/stlc.thena
-module STLC
+thena spine> :load proof examples/Stlc01Syntax.thena
+module examples.Stlc01Syntax
   declared Ty
   ...
 warning: in the grammar of LC, production vacuous: x binds in nothing
@@ -5083,7 +5083,7 @@ than take a value.
 
 **`true` and `false` are reserved in `instral`, and nowhere else.** They are not
 keywords: one lexer serves every language here, and an object language is free to
-declare a constructor called `true` — `examples/determinacy-tactics.thena.script`
+declare a constructor called `true` — `examples/DeterminacyTactics.thena.script`
 does. Inside a rule they are values, so a rule may not use either as a parameter
 or a binding; it is refused when the base loads rather than silently read as a
 literal.
@@ -5878,15 +5878,19 @@ parenthesis with one slot left, a production needing two does not appear.
 
 ### A project is text on disk, and there is no other format
 
-A project is the files and the order you load them in. There is no binary form,
-no JSON form and no manifest.
+A project is the files, and each file says what it depends on. There is no binary
+form, no JSON form and no manifest.
 
 ```
-:load examples/01-untyped.thena     -- this is what storing a project means
+:load examples/Stlc07Preservation.thena   -- this is what storing a project means
 ```
 
-The order is part of the project, not presentation: a module's globals are in
-scope for the next one loaded.
+**The order is not part of the project.** Until 2026-11-05 it was, and a module's
+globals were in scope for whatever was loaded next — so a file's meaning depended
+on what somebody had loaded first. **A file states what it refers to instead**: the
+line above brings the six modules `Stlc07Preservation` imports with it, in whatever
+order they need, and loading it into a session that already holds them elaborates
+nothing twice.
 
 **Stored as written, not resolved.** If a tactic that is a builtin today becomes
 an ordinary rule tomorrow and keeps its name, every stored file keeps working;

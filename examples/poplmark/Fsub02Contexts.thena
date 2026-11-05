@@ -1,10 +1,12 @@
 -- F-sub's typing context.
 --
--- LOAD AFTER 01-syntax.thena.
+-- LOAD AFTER Fsub01Syntax.thena.
 --
 -- Then try   :show bindTy-in      :parse Ctx · , X <: ⊤ , y : X
 
-module FsubContexts where
+module examples.poplmark.Fsub02Contexts where
+
+import examples.poplmark.Fsub01Syntax
 
 -- The context.      Γ ::= · | Γ, x:T | Γ, X<:T
 --

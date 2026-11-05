@@ -1,6 +1,6 @@
 -- | MS1's target — determinacy of one-step evaluation (§9, phase 18).
 --
--- @examples\/determinacy-tactics.thena.script@ is the deliverable: TAPL chapter 3's language,
+-- @examples\/DeterminacyTactics.thena.script@ is the deliverable: TAPL chapter 3's language,
 -- its numeric-value predicate, its ten-rule evaluation relation, and twenty-one
 -- theorems ending in Theorem 3.5.4. It is a script of command lines, so it is
 -- run the way phase 11 runs any file — through 'loadFile', which is the same
@@ -18,14 +18,14 @@
 --
 -- == Three versions, and they must prove the same theorem
 --
--- **@examples\/determinacy-surface.thena@ is the same proof in the surface
+-- **@examples\/DeterminacySurface.thena@ is the same proof in the surface
 -- language** (MS4 tier 3): a proof module of 278 lines where the script is
 -- 1190, because the script\'s @back@ / @along@ navigation is gone and the
 -- elimination tactic\'s motive is written out instead of derived. Both come
 -- from @examples\/determinacy.py@ — one generator, two targets — so the proof
 -- itself is stated once.
 --
--- **@examples\/determinacy-patterns.thena@ is the same theorem by dependent
+-- **@examples\/DeterminacyPatterns.thena@ is the same theorem by dependent
 -- pattern matching** (MS9), written by hand — and it exists to be read beside
 -- the generated one, which is why it is in the suite rather than in a report.
 -- **Every one of its eight lemmas is a split**: no @elim@ anywhere, and the
@@ -72,13 +72,13 @@ import Thena.Render
 -- | Relative to the package root, which is where the suite runs — the same
 -- assumption @test\/golden@ already makes.
 target :: FilePath
-target = "examples/determinacy-tactics.thena.script"
+target = "examples/DeterminacyTactics.thena.script"
 
 surfaceTarget :: FilePath
-surfaceTarget = "examples/determinacy-surface.thena"
+surfaceTarget = "examples/DeterminacySurface.thena"
 
 patternTarget :: FilePath
-patternTarget = "examples/determinacy-patterns.thena"
+patternTarget = "examples/DeterminacyPatterns.thena"
 
 tests :: TestTree
 tests =

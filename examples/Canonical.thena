@@ -1,7 +1,7 @@
 -- Canonical forms for TAPL chapter 8's typed arithmetic expressions, proved in
 -- Thena's surface language — Theorem 8.3.1, both halves.
 --
--- A companion to examples/determinacy-surface.thena. That file models the same
+-- A companion to examples/DeterminacySurface.thena. That file models the same
 -- terms and their small-step semantics and proves determinacy (TAPL 3.5.4);
 -- this one adds the TYPING relation those terms were missing and proves what
 -- a well-typed value must look like.
@@ -31,7 +31,7 @@
 -- canonical forms is FOR in TAPL: knowing that a well-typed value of type bool
 -- really is true or false is what lets an `if` take a step.
 
-module Canonical where
+module examples.Canonical where
 
 data Term : Type₀ where
   true : Term

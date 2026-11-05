@@ -1410,7 +1410,7 @@ moduleTests =
 -- from another, and proves a theorem about it — elaborated from a file, with
 -- every term argument written out.
 --
--- @examples\/tier0.thena@ is the deliverable and the golden is what it
+-- @examples\/Tier0.thena@ is the deliverable and the golden is what it
 -- produced. His reason for wanting the explicit form first, 2026-09-01:
 -- /"Couldn\'t we have a demo that uses all explicit arguments in case we want
 -- to test out that we are doing well and all is according the plan?"/
@@ -1418,7 +1418,7 @@ tierTests :: [TestTree]
 tierTests =
   [ goldenVsString "tier0" "test/golden/tier0.golden" $ do
       (s, trouble) <- startingSession
-      (s1, out, _) <- loadProofFile s "examples/tier0.thena"
+      (s1, out, _) <- loadProofFile s "examples/Tier0.thena"
       let shown = concatMap (renderResponse' s1) ["one", "two", "plusZeroLeft"]
       pure (toLazyByteString (stringUtf8 (unlines
         (concatMap (renderTrouble s) trouble

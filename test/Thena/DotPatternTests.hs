@@ -141,7 +141,7 @@ acceptedTests =
       loads (vecPreamble ++ vtail "vcons ._ a as")
   , testCase "the example file runs to the end" $ do
       (s, _) <- startingSession
-      (_, _, stopped) <- loadProofFile s "examples/dot-patterns.thena"
+      (_, _, stopped) <- loadProofFile s "examples/DotPatterns.thena"
       assertBool (unlines (map show stopped)) (null stopped)
   ]
 

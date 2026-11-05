@@ -1,6 +1,6 @@
 -- | Progress — TAPL Theorem 8.3.2.
 --
--- @examples\/progress.thena@ finishes what @examples\/canonical.thena@ starts,
+-- @examples\/Progress.thena@ finishes what @examples\/Canonical.thena@ starts,
 -- and **the pair is loaded in sequence**: Thena has no module imports, so what
 -- makes the second file short is that the first one's globals are still in
 -- scope. That is worth a test of its own — it is the only place in the suite
@@ -67,7 +67,7 @@ tests =
       -- @PreservationTests@ and @NormalTests@ make about the other three files
       -- of the chain.
     , testCase "and every proof in it is a split" $ do
-        src <- code <$> readFile "examples/progress.thena"
+        src <- code <$> readFile "examples/Progress.thena"
         (any ("elim" `isInfixOf`) src, any ("noConfusion" `isInfixOf`) src)
           @?= (False, False)
     ]
@@ -78,11 +78,11 @@ tests =
     -- **Two modules, in order** — the second reads the first's globals.
     loaded = do
       (s, _)  <- startingSession
-      (s1, _, _) <- loadProofFile s "examples/canonical.thena"
-      (s2, _, _) <- loadProofFile s1 "examples/progress.thena"
+      (s1, _, _) <- loadProofFile s "examples/Canonical.thena"
+      (s2, _, _) <- loadProofFile s1 "examples/Progress.thena"
       pure s2
 
-    declarationsOf _ = ["loaded canonical.thena, then progress.thena"]
+    declarationsOf _ = ["loaded Canonical.thena, then Progress.thena"]
 
     statementOf n = do
       s <- loaded

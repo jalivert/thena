@@ -11,7 +11,7 @@
 -- mentions the index before it — so a split on an `All` states its second
 -- equation only after transporting along the first. Both of `count`'s indices
 -- are ambient variables, so both equations are solutions and the transports
--- ι-contract; `tied-index-chain.thena` beside this one is the same chain where
+-- ι-contract; `TiedIndexChain.thena` beside this one is the same chain where
 -- the actual indices are not variables.
 --
 -- `allCons`'s own ARGUMENT telescope is dependent in a shape nothing else in
@@ -19,13 +19,13 @@
 -- package holds `as; pa; ps` and `pa` is INTERIOR to it. The rest of the
 -- package is transported along `pa`'s own equation while nothing mentions `pa`
 -- itself, and a `All.lemmata.noConfusion` that predicted the pair from the telescope
--- left that proof free. See `dependent-argument-chain.thena` for the chain
+-- left that proof free. See `DependentArgumentChain.thena` for the chain
 -- with no gap in it.
 --
 -- `Vec` is declared at `A : Type`, so its level is a parameter and everything
 -- below instantiates it at zero.
 
-module VectorFamilies where
+module examples.VectorFamilies where
 
 data N : Type₀ where
   z : N

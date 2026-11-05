@@ -26,7 +26,7 @@
 --
 -- `DECISIONS.md`, *Dot patterns are optional here*, has the whole argument.
 
-module DotPatterns where
+module examples.DotPatterns where
 
 data N : Type₀ where
   z : N

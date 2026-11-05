@@ -1,4 +1,4 @@
-module Tier0
+module examples.Tier0
   declared Nat
   declared plus
   declared identity

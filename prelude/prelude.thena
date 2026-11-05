@@ -56,7 +56,7 @@ open List
 -- What a primitive comparison answers with (MS6 phase 97b).
 --
 -- **Not @Bool@, and the reason is the one namespace.** An object language
--- modelled in Thena routinely has its own booleans — @examples/canonical.thena@
+-- modelled in Thena routinely has its own booleans — @examples/Canonical.thena@
 -- declares @true@ and @false@ as constructors of TAPL's @Term@ — and a prelude
 -- that took those names would collide with every such language. The two
 -- constructors say what they are about instead, which is also what the

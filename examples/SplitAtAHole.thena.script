@@ -6,7 +6,7 @@
 -- split's equations already discharged, and fills them in whatever order they
 -- like.
 --
--- WHAT TO COMPARE IT WITH: `dependent-index.thena.script`, beside this file,
+-- WHAT TO COMPARE IT WITH: `DependentIndex.thena.script`, beside this file,
 -- proves the same `belowRefl` by hand. There the author writes each method's
 -- whole lambda out and takes the generalised quantifier and its equation as
 -- arguments —

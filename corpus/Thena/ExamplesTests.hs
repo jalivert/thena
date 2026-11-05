@@ -9,7 +9,9 @@
 -- The numbers are his (2026-09-21) and the @Stlc@ prefix is his ruling of
 -- 2026-11-05: a step of a module name begins with a letter and holds no hyphen,
 -- so @01-stlc-syntax@ could be reached by no name at all. Zero-padding is what
--- keeps 'sort' the reading order.
+-- keeps 'sort' the reading order. **Every other example was renamed the same
+-- way in phase 281**, after his ruling that a module sees only what
+-- it imports: a file no module name reaches can state no dependency.
 --
 -- Modules are loaded into one session, in name order, because that is how the
 -- README tells a reader to load them. **Each one now states its own
@@ -95,17 +97,20 @@ tests =
     , testCase "POPLMark 1A is proved for F-sub, at its statement" $ do
         (s0, _) <- startingSession
         -- **The same door the numbered series goes through**, and for the same
-        -- reason: this is how a reader loads them. These six state nothing —
-        -- their paths hold hyphens, so no module name reaches them — and they
-        -- are loaded in order, which is what @examples\/poplmark\/README.md@
-        -- tells a reader to do.
+        -- reason: this is how a reader loads them. **Each one states its own
+        -- dependencies** (MS11 phase 281), so the order is no longer
+        -- what makes them work and any one of them loads on its own; they are
+        -- still loaded in order because that is what
+        -- @examples\/poplmark\/README.md@ tells a reader to do, and the walk's
+        -- deduplication is what keeps one session from elaborating anything
+        -- twice.
         s <- foldl (\ms p -> ms >>= \s1 -> do
                       (s2, out, trouble) <- loadProofFile s1 p
                       if null trouble then pure s2 else stopped p s2 out trouble)
                (pure s0)
-               [ "examples/poplmark/01-syntax.thena", "examples/poplmark/02-contexts.thena"
-               , "examples/poplmark/03-wellformed.thena", "examples/poplmark/04-subtyping.thena"
-               , "examples/poplmark/05-typing.thena", "examples/poplmark/06-transitivity.thena" ]
+               [ "examples/poplmark/Fsub01Syntax.thena", "examples/poplmark/Fsub02Contexts.thena"
+               , "examples/poplmark/Fsub03Wellformed.thena", "examples/poplmark/Fsub04Subtyping.thena"
+               , "examples/poplmark/Fsub05Typing.thena", "examples/poplmark/Fsub06Transitivity.thena" ]
         let (s', r) = command s ":infer transitivity"
         renderResponse s' r @?=
           [ "transitivity : (∀ (Q : Ty) (G : Ctx) (Xn : String) (D : Ctx) (P : Ty) -> ok`⊢ ${G} , ${Xn} <: ${P} , ${D} ok` -> sub`${G} ⊢ ${P} <: ${Q}` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: ${Q}`) -> ∀ (G : Ctx) (S : Ty) (Q : Ty) (T : Ty) -> sub`${G} ⊢ ${S} <: ${Q}` -> sub`${G} ⊢ ${Q} <: ${T}` -> sub`${G} ⊢ ${S} <: ${T}`" ]

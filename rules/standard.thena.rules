@@ -57,7 +57,7 @@ rule regret :- when focus-is-guess do prim-regret
 -- hand-written path each one is a binder the author takes and an arm they
 -- rewrite. That is why the generalising construction does not squat the plain
 -- word, and why every widening of what a split generalises used to land on
--- `examples/determinacy-tactics.thena.script`.
+-- `examples/DeterminacyTactics.thena.script`.
 --
 -- NEITHER IS ELABORATION'S CALLER. `split-claim` reaches `prim-eliminate` and
 -- `prim-case` itself, for the same reason it always did: the written word picks
@@ -859,7 +859,7 @@ rule split-elaborate t :-
 -- The equations are discharged, every solved copy and every forced argument is a
 -- definition rather than a binder, and the names are the declaration's own. The
 -- hand-written path paid for all of that by writing each method's whole lambda
--- out, equation arguments included — `examples/dependent-index.thena.script` is
+-- out, equation arguments included — `examples/DependentIndex.thena.script` is
 -- what that looks like.
 --
 -- THE WORD IS READ IN THE RULE'S NAME, because that is where it was written.

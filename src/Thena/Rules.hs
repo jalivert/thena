@@ -912,7 +912,7 @@ resolveTyIn owner vs0 t0 = go vs0 t0
 -- **Two, and they are not lexer keywords** — his ruling, 2026-09-12. One lexer
 -- serves every language, so reserving them there would take two constructor
 -- names away from every object language;
--- @examples\/determinacy-tactics.thena.script@ uses both.
+-- @examples\/DeterminacyTactics.thena.script@ uses both.
 reservedNames :: [Name]
 reservedNames = ["true", "false"]
 

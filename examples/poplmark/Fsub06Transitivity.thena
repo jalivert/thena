@@ -22,7 +22,13 @@
 -- the equation as arguments — the hand-written motive, said in the statement —
 -- and `narrowFrom` closes it with `refl`.
 
-module FsubTransitivity where
+module examples.poplmark.Fsub06Transitivity where
+
+import examples.poplmark.Fsub01Syntax
+import examples.poplmark.Fsub02Contexts
+import examples.poplmark.Fsub03Wellformed
+import examples.poplmark.Fsub04Subtyping
+import examples.poplmark.Fsub05Typing
 
 -- ---------------------------------------------------------------------------
 -- Reflexivity, by induction on the WELL-FORMEDNESS of the type rather than on

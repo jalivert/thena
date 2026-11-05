@@ -5,7 +5,12 @@
 -- Then try   :show typing
 --            :parse typing · ⊢ ( Λ X <: ⊤ . ( λ y : X . y ) ) : ( ∀ X <: ⊤ . ( X -> X ) )
 
-module FsubTyping where
+module examples.poplmark.Fsub05Typing where
+
+import examples.poplmark.Fsub01Syntax
+import examples.poplmark.Fsub02Contexts
+import examples.poplmark.Fsub03Wellformed
+import examples.poplmark.Fsub04Subtyping
 
 -- The six rules of part 2's typing relation. T-Sub is the one that makes this
 -- a subtyping calculus rather than F: a term of a subtype is a term of the

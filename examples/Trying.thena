@@ -1,4 +1,4 @@
-module Trying where
+module examples.Trying where
 
 data Bool : Type₀ where
   True : Bool

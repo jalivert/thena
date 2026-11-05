@@ -113,10 +113,9 @@ it. If it does not check, nothing is admitted.
 
 Thena's developments live in [`examples/`](examples/README.md) — every file
 loads as it stands, and [`examples/README.md`](examples/README.md) is the
-file-by-file index. There are three sets. **In the numbered series each file
-imports what it depends on**, so any one of them loads on its own; the other two
-sets are hand-written and still read in order, globals declared by one file
-staying in scope for the next loaded in the same session.
+file-by-file index. There are three sets, and **every file in all three imports
+what it depends on**, so any one of them loads on its own. The three are grouped
+by what they show, not by what has to be loaded first.
 
 ### 1. Type safety for TAPL's arithmetic language — by hand
 
@@ -131,25 +130,25 @@ two files are also test fixtures, so the suite fails if one stops loading.
 
 | theorem | file | statement |
 |---|---|---|
-| determinacy, TAPL 3.5.4 | [`examples/determinacy-surface.thena`](examples/determinacy-surface.thena) | `determinacy : forall (t t1 : Term) -> Step t t1 -> forall (t2 : Term) -> Step t t2 -> Eq Term t1 t2` |
-| canonical forms, TAPL 8.3.1 | [`examples/canonical.thena`](examples/canonical.thena) | `canonicalBool : forall (v : Term) -> Value v -> HasType v bool -> Or (Eq Term v true) (Eq Term v false)`, and `canonicalNat` for `nat` |
-| progress, TAPL 8.3.2 | [`examples/progress.thena`](examples/progress.thena) | `progress : forall (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)` |
-| preservation, TAPL 8.3.3 | [`examples/preservation.thena`](examples/preservation.thena) | `preservation : forall (t t' : Term) -> Step t t' -> forall (U : Ty) -> HasType t U -> HasType t' U` |
-| exclusivity | [`examples/normal.thena`](examples/normal.thena) | `valueNoStep : forall (v : Term) -> Value v -> forall (u : Term) -> Step v u -> Empty` — a value takes no step, so the disjunction `progress` returns is a real case split |
+| determinacy, TAPL 3.5.4 | [`examples/DeterminacySurface.thena`](examples/DeterminacySurface.thena) | `determinacy : forall (t t1 : Term) -> Step t t1 -> forall (t2 : Term) -> Step t t2 -> Eq Term t1 t2` |
+| canonical forms, TAPL 8.3.1 | [`examples/Canonical.thena`](examples/Canonical.thena) | `canonicalBool : forall (v : Term) -> Value v -> HasType v bool -> Or (Eq Term v true) (Eq Term v false)`, and `canonicalNat` for `nat` |
+| progress, TAPL 8.3.2 | [`examples/Progress.thena`](examples/Progress.thena) | `progress : forall (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)` |
+| preservation, TAPL 8.3.3 | [`examples/Preservation.thena`](examples/Preservation.thena) | `preservation : forall (t t' : Term) -> Step t t' -> forall (U : Ty) -> HasType t U -> HasType t' U` |
+| exclusivity | [`examples/Normal.thena`](examples/Normal.thena) | `valueNoStep : forall (v : Term) -> Value v -> forall (u : Term) -> Step v u -> Empty` — a value takes no step, so the disjunction `progress` returns is a real case split |
 
 The determinacy proof is **generated** (by
 [`examples/determinacy.py`](examples/determinacy.py) — regenerate it, never
 patch it) and exists in two forms: as a program in the surface language
 (`determinacy-surface`) and as a tactic-driven script
-([`examples/determinacy-tactics.thena.script`](examples/determinacy-tactics.thena.script)).
+([`examples/DeterminacyTactics.thena.script`](examples/DeterminacyTactics.thena.script)).
 The canonical-forms proof beside it is a third of the size and **written by
 hand**. Load the safety chain in order:
 
 ```
 cabal run thena
-thena spine> :load examples/canonical.thena
-thena spine> :load examples/progress.thena
-thena spine> :load examples/preservation.thena
+thena spine> :load examples/Canonical.thena
+thena spine> :load examples/Progress.thena
+thena spine> :load examples/Preservation.thena
 ```
 
 ### 2. Preservation for STLC — as an object language
@@ -224,12 +223,12 @@ account. **Load these in a fresh session**: the series above declares its own
 
 ```
 cabal run thena
-thena spine> :load examples/poplmark/01-syntax.thena
-thena spine> :load examples/poplmark/02-contexts.thena
-thena spine> :load examples/poplmark/03-wellformed.thena
-thena spine> :load examples/poplmark/04-subtyping.thena
-thena spine> :load examples/poplmark/05-typing.thena
-thena spine> :load examples/poplmark/06-transitivity.thena
+thena spine> :load examples/poplmark/Fsub01Syntax.thena
+thena spine> :load examples/poplmark/Fsub02Contexts.thena
+thena spine> :load examples/poplmark/Fsub03Wellformed.thena
+thena spine> :load examples/poplmark/Fsub04Subtyping.thena
+thena spine> :load examples/poplmark/Fsub05Typing.thena
+thena spine> :load examples/poplmark/Fsub06Transitivity.thena
 ```
 
 What is proved is the mutual induction at the heart of 1A — transitivity and

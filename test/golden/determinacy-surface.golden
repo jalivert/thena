@@ -1,4 +1,4 @@
-module Determinacy
+module examples.DeterminacySurface
   declared Term
   declared NV
   declared Step

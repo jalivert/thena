@@ -627,7 +627,7 @@ sessionTests =
     -- @elim@ is what makes the nested choice point here; the target is @_@, so
     -- the elimination cannot finish and @pop-development@ fails **after** that
     -- choice point has returned. The demonstration in its own right is
-    -- @examples/choice-points.thena.rules@, six lines of rule language.
+    -- @examples/ChoicePoints.thena.rules@, six lines of rule language.
   , notOk "a failure after a nested call returned is not swallowed"
       [ "data " ++ natDecl
       , "open Nat"

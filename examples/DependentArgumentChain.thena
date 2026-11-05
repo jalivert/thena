@@ -10,7 +10,7 @@
 -- transitions — the first solves `n`, which supplies `refl` for its own proof
 -- and contracts the transport, and the second solves `i`.
 --
--- COMPARE `tied-index-chain.thena` BESIDE THIS ONE. There the chain is in the
+-- COMPARE `TiedIndexChain.thena` BESIDE THIS ONE. There the chain is in the
 -- MOTIVE, because the family's INDEX telescope is dependent; here it is in the
 -- no-confusion LEMMA, because a CONSTRUCTOR's telescope is. They are different
 -- telescopes and neither is downstream of the other: `Pack` has no indices at
@@ -23,7 +23,7 @@
 -- chain, which is UIP. `Pack` pins nothing, the two sides differ in the first
 -- argument, and the first equation is a solution.
 
-module DependentArgumentChain where
+module examples.DependentArgumentChain where
 
 data N : Type₀ where
   z : N

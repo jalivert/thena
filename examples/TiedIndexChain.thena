@@ -9,7 +9,7 @@
 -- ι-contracts, both equations are discharged, and the arm binds the
 -- constructor's arguments alone.
 --
--- Compare `dependent-index.thena.script` beside this one: `Below`'s indices are
+-- Compare `DependentIndex.thena.script` beside this one: `Below`'s indices are
 -- plain variables there, so the dependent one is FRIENDLY and states no
 -- equation at all. The difference is the whole of what this file is for.
 --
@@ -20,7 +20,7 @@
 -- with one about the constructor's arguments, the later equation is restated
 -- along the proof rebuilt from it, and the law carries the method back.
 
-module TiedIndexChain where
+module examples.TiedIndexChain where
 
 data N : Type₀ where
   z : N

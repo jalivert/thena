@@ -27,7 +27,7 @@ to the file.
 
 **`examples/poplmark/` is loaded in a FRESH session**, not with the series above: it
 declares its own `Ty`, and two languages of one name cannot be installed at once. Six
-files, read in order, answering the POPLMark challenge's problem 1A — transitivity of
+files, each stating what it imports, answering the POPLMark challenge's problem 1A — transitivity of
 subtyping for System F-sub. `examples/poplmark/README.md` is the account: what is proved,
 the one premise added to the paper's rules and why, and the one step that is left over
 with its refutation.
@@ -37,24 +37,29 @@ with its refutation.
 Written in MS4 and MS5, before object languages existed. The language is a
 hand-written `data Term`. **The generated pair still appeals to `elim`
 throughout; the hand-written ones were rewritten as splits in MS9**, so the two
-styles sit side by side here and `determinacy-surface.thena` against
-`determinacy-patterns.thena` is the same theorem in both. All but the last two
+styles sit side by side here and `DeterminacySurface.thena` against
+`DeterminacyPatterns.thena` is the same theorem in both. All but the last two
 rows are also test fixtures, loaded by path from their own tests; those two load
 today, and nothing checks that they keep doing so.
 
+**Every file here is named after the module it declares, and its header is its
+path** — `examples/Canonical.thena` declares `examples.Canonical`. A file whose
+path held a hyphen could be reached by no module name at all, so it could neither
+be imported nor state what it imports; that is why none of them does now.
+
 | file | what it is |
 |---|---|
-| `canonical.thena` | Canonical forms, TAPL 8.3.1. Load first |
-| `progress.thena` | Progress, TAPL 8.3.2. After `canonical` |
-| `preservation.thena` | Preservation, TAPL 8.3.3. After `canonical` and `progress` |
-| `normal.thena` | A value is a normal form. After `canonical` and `progress` |
-| `determinacy-surface.thena` | Determinacy, TAPL 3.5.4, in the surface language. **Generated** by `determinacy.py`: regenerate it, never patch it |
-| `determinacy-tactics.thena.script` | The same proof driven by tactics. **Generated** too |
-| `determinacy-patterns.thena` | The same theorem, with **every one of its lemmas** by dependent pattern matching — no `elim` and no no-confusion anywhere. Its header says why a recursion across a generalising split is written exactly like any other one, and nothing in it binds an induction hypothesis. Read it beside `determinacy-surface.thena` |
-| `tier0.thena` | MS4's first checkpoint: a datatype, a function by elimination, a theorem |
-| `dependent-index.thena.script`, `products.thena.script` | REPL scripts: elimination over an indexed family, and no-confusion |
-| `choice-points.thena.rules` | What a choice point resumes into |
-| `trying.thena` | A scratch module, with a `Bool` and two commented-out attempts |
+| `Canonical.thena` | Canonical forms, TAPL 8.3.1. Imports nothing |
+| `Progress.thena` | Progress, TAPL 8.3.2. Imports `Canonical` |
+| `Preservation.thena` | Preservation, TAPL 8.3.3. Imports `Canonical` and `Progress` |
+| `Normal.thena` | A value is a normal form. Imports `Canonical` and `Progress` |
+| `DeterminacySurface.thena` | Determinacy, TAPL 3.5.4, in the surface language. **Generated** by `determinacy.py`: regenerate it, never patch it |
+| `DeterminacyTactics.thena.script` | The same proof driven by tactics. **Generated** too |
+| `DeterminacyPatterns.thena` | The same theorem, with **every one of its lemmas** by dependent pattern matching — no `elim` and no no-confusion anywhere. Its header says why a recursion across a generalising split is written exactly like any other one, and nothing in it binds an induction hypothesis. Read it beside `DeterminacySurface.thena` |
+| `Tier0.thena` | MS4's first checkpoint: a datatype, a function by elimination, a theorem |
+| `DependentIndex.thena.script`, `Products.thena.script` | REPL scripts: elimination over an indexed family, and no-confusion |
+| `ChoicePoints.thena.rules` | What a choice point resumes into |
+| `Trying.thena` | A scratch module, with a `Bool` and two commented-out attempts |
 
 ## Loading the series
 

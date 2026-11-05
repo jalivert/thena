@@ -396,12 +396,12 @@ omittedTests =
     -- case does arise, so the method stays open and the missing arm is refused
     -- exactly as it always was.
     -- __And all of it as the user meets it__, in a file he can read:
-    -- @examples\/omitted-cases.thena@ is the same four shapes with the prose
+    -- @examples\/OmittedCases.thena@ is the same four shapes with the prose
     -- that says what each one is, and the illegal arm commented out beside
     -- them.
   , testCase "the example file runs to the end" $ do
       (s, _) <- startingSession
-      (_, _, stopped) <- loadProofFile s "examples/omitted-cases.thena"
+      (_, _, stopped) <- loadProofFile s "examples/OmittedCases.thena"
       assertBool (unlines (map show stopped)) (null stopped)
 
     -- __The refusal names the case and not the rule since MS9 phase 230__, his

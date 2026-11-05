@@ -2,7 +2,7 @@
 -- elimination, one declaration used by another, and a theorem proved about
 -- them — all elaborated from this file, with every term argument written out.
 
-module Tier0 where
+module examples.Tier0 where
 
 data Nat : Type₀ where
   zero : Nat

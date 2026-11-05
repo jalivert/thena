@@ -176,7 +176,7 @@ data Value
   | VBool    Bool
     -- ^ **written @true@ and @false@, and they are reserved in @instral@ only**
     -- — his ruling, 2026-09-12. Not lexer keywords: one lexer serves every
-    -- language, and @examples\/determinacy-tactics.thena.script@ declares
+    -- language, and @examples\/DeterminacyTactics.thena.script@ declares
     -- @data Term … { true : Term ; false : Term ; … }@, so reserving them in
     -- the lexer would take two constructor names away from every object
     -- language. They are read where an operand is read, before a local is
