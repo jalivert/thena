@@ -1,11 +1,16 @@
 -- More judgments: many steps, halting, a swap by simultaneous substitution,
 -- and the layout a long rule may use.
 --
--- LOAD AFTER 01, 02 AND 03.
+-- Load it with   :load examples/Stlc06MoreJudgments.thena — it imports 01,
+-- 02 and 03 itself.
 --
 -- Then try   :show steps      :show halts      :show swap
 
 module examples.Stlc06MoreJudgments where
+
+import examples.Stlc01Syntax
+import examples.Stlc02Contexts
+import examples.Stlc03TypingAndReduction
 
 -- ---------------------------------------------------------------------------
 -- Many steps: the reflexive-transitive closure of 03's `step`. A premise may

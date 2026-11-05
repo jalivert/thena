@@ -1,8 +1,8 @@
 -- A value is a normal form — the companion to progress, proved in Thena's
 -- surface language.
 --
--- LOAD AFTER canonical.thena AND progress.thena. Thena has no module imports;
--- globals declared by one module are in scope for the next.
+-- LOAD AFTER canonical.thena AND progress.thena — this hand-written set still
+-- relies on load order, where the numbered series states its own imports.
 --
 -- Progress says a well-typed term is a value OR it takes a step. Nothing said
 -- those were exclusive, and this does: a value takes no step at all, well typed

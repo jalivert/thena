@@ -12,10 +12,18 @@
 -- keeps 'sort' the reading order.
 --
 -- Modules are loaded into one session, in name order, because that is how the
--- README tells a reader to load them and because a later one uses what an
--- earlier one declared. A rule file is loaded beside the shipped base and
--- every numbered rule file before it, as @:load rules@ would be — a load
--- replaces the list.
+-- README tells a reader to load them. **Each one now states its own
+-- dependencies** (MS11 phase 279), so the order is no longer what makes them
+-- work — every surface file in the series loads on its own — and the walk's
+-- own deduplication is what keeps one session from elaborating anything twice.
+-- A rule file is loaded beside the shipped base and every numbered rule file
+-- before it, as @:load rules@ would be — a load replaces the list.
+--
+-- **Everything goes through "Thena.Files", not through the pure doors.** A
+-- module that imports anything cannot be elaborated by 'loadProofSource' at all
+-- (§12 invariant 4: that door has no disk), and a rule base that imports cannot
+-- be read by 'loadRuleBases'. Using them here would test the series against a
+-- loader no user has.
 --
 -- A numbered file of any other kind is a failure rather than a skip, so that a
 -- new kind of example is a decision somebody makes.
@@ -31,11 +39,16 @@ import Thena.Driver
   ( Response (..)
   , Session
   , command
-  , loadProofSource
-  , loadRuleBases
   )
-import Thena.Files (loadFile, rulesPath, startingSession)
-import Thena.Render (renderResponse)
+import Thena.Files
+  ( Trouble
+  , loadFile
+  , loadProofFile
+  , loadRuleFiles
+  , rulesPath
+  , startingSession
+  )
+import Thena.Render (renderResponse, renderTrouble)
 
 tests :: TestTree
 tests =
@@ -45,7 +58,7 @@ tests =
         files <- sort . filter numbered <$> listDirectory "examples"
         if null files then assertFailure "no numbered examples were found" else pure ()
         (s0, _) <- startingSession
-        standard <- rulesPath >>= \p -> (,) p <$> readFile p
+        standard <- rulesPath
         sEnd <- go s0 [standard] files
         -- **THE HEADLINE STATEMENTS ARE PINNED IN THE WALK'S OWN SESSION, not
         -- in sessions of their own** (MS8 phase 163, at his instruction). Each
@@ -81,9 +94,14 @@ tests =
     -- hypothesis, and the refutation must keep refuting it.
     , testCase "POPLMark 1A is proved for F-sub, at its statement" $ do
         (s0, _) <- startingSession
-        s <- foldl (\ms p -> ms >>= \s1 -> readFile p >>= \src -> case loadProofSource s1 src of
-                               (s2, ProofLoaded {}) -> pure s2
-                               (s2, other) -> refused p s2 other)
+        -- **The same door the numbered series goes through**, and for the same
+        -- reason: this is how a reader loads them. These six state nothing —
+        -- their paths hold hyphens, so no module name reaches them — and they
+        -- are loaded in order, which is what @examples\/poplmark\/README.md@
+        -- tells a reader to do.
+        s <- foldl (\ms p -> ms >>= \s1 -> do
+                      (s2, out, trouble) <- loadProofFile s1 p
+                      if null trouble then pure s2 else stopped p s2 out trouble)
                (pure s0)
                [ "examples/poplmark/01-syntax.thena", "examples/poplmark/02-contexts.thena"
                , "examples/poplmark/03-wellformed.thena", "examples/poplmark/04-subtyping.thena"
@@ -100,31 +118,35 @@ tests =
       Just (a : b : _) -> isDigit a && isDigit b
       _                -> False
 
-    go :: Session -> [(FilePath, String)] -> [FilePath] -> IO Session
+    go :: Session -> [FilePath] -> [FilePath] -> IO Session
     go s _ [] = pure s
     go s bases (f : more) = do
       let path = "examples/" ++ f
-      src <- readFile path
       if ".thena.rules" `isSuffixOf` f
         then do
-          let bases' = bases ++ [(path, src)]
-          case loadRuleBases s bases' of
-            (s', BasesLoaded _) -> go s' bases' more
-            (s', other) -> refused path s' other
+          let bases' = bases ++ [path]
+          (s', out, trouble) <- loadRuleFiles s bases'
+          if null trouble then go s' bases' more else stopped path s' out trouble
         else if ".thena" `isSuffixOf` f
-          then case loadProofSource s src of
-            (s', ProofLoaded {}) -> go s' bases more
-            (s', other) -> refused path s' other
+          then do
+            (s', out, trouble) <- loadProofFile s path
+            if null trouble then go s' bases more else stopped path s' out trouble
           -- A script of command lines (phase 109c), run as `:load` runs one:
           -- it fails if any line stops.
           else if ".thena.script" `isSuffixOf` f
             then do
-              (s', out, stopped) <- loadFile s path
-              if null stopped then go s' bases more
+              (s', out, halted) <- loadFile s path
+              if null halted then go s' bases more
                 else assertFailure
                        (unlines ((path ++ " stopped:")
                                   : concatMap (renderResponse s') out))
             else assertFailure (path ++ " is a numbered example of a kind this test does not load")
 
-refused :: FilePath -> Session -> Response -> IO a
-refused path s r = assertFailure (unlines ((path ++ " did not load:") : renderResponse s r))
+    -- **The trouble is what says what went wrong**, since every door here reads
+    -- files: an import that is not on disc, a cycle, a header that disagrees
+    -- with its path, or a module that would not elaborate.
+    stopped :: FilePath -> Session -> [Response] -> [Trouble] -> IO a
+    stopped path s out trouble = assertFailure
+      (unlines ((path ++ " did not load:")
+                 : concatMap (renderTrouble s) trouble
+                ++ concatMap (renderResponse s) out))

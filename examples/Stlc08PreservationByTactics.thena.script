@@ -4,6 +4,11 @@
 -- and its small logic (subst, sym, trans, absurdly), and proves every lemma
 -- again, by tactics, under a name ending in -tactics.
 --
+-- **A script cannot state that yet, where a module can.** Every surface file in
+-- the series writes its own `import` lines and loads on its own; this is a list
+-- of commands, and it acts on the session it is run in, so the session is what
+-- has to hold 07. `import` at the prompt is what would let a script say it.
+--
 -- Run it with   :load examples/Stlc08PreservationByTactics.thena.script
 
 -- ---------------------------------------------------------------------------

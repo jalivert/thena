@@ -1,6 +1,7 @@
 -- Grouping without parentheses: a splice is a group.
 --
--- LOAD AFTER Stlc01Syntax.thena, which declares the token class x.
+-- Load it with   :load examples/Stlc05GroupingBySplicing.thena — it imports
+-- 01, which declares the token class x.
 --
 -- Thena reserves nothing inside an object language's notation — not even
 -- parentheses. `LC` in 01 has them because its grammar writes them into its
@@ -13,6 +14,8 @@
 -- Thena — the host — rather than to the language being modelled.
 
 module examples.Stlc05GroupingBySplicing where
+
+import examples.Stlc01Syntax
 
 -- Applicative expressions with application as bare juxtaposition, as in
 -- Haskell, and no parenthesis production at all.

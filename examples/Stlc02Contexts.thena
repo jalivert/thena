@@ -1,11 +1,12 @@
 -- Typing contexts, and looking a variable up in one.
 --
--- LOAD AFTER Stlc01Syntax.thena — a module's declarations are in scope for
--- the next one loaded in the same session.
+-- Load it with   :load examples/Stlc02Contexts.thena — it imports 01 itself.
 --
 -- Then try   :show extend-in      :parse extend-in x : ι ∈ ·, x : ι, y : ( ι -> ι )
 
 module examples.Stlc02Contexts where
+
+import examples.Stlc01Syntax
 
 -- A context is declared like a language: an empty one, and one extended by an
 -- entry. The block gives you the datatype

@@ -2,7 +2,8 @@
 --
 --     Γ ⊢ M : T   and   M --> M'   give   Γ ⊢ M' : T
 --
--- LOAD AFTER 01, 02, 03 AND 07. It reuses 07's definitions and lemmas.
+-- Load it with   :load examples/Stlc10PreservationAnyContext.thena — it
+-- imports 01, 02, 03 and 07, whose definitions and lemmas it reuses.
 -- Then try   :infer preservationAny      :trust
 --
 -- == What 07 could not do, and what makes this possible
@@ -79,6 +80,11 @@
 -- proof's.
 
 module examples.Stlc10PreservationAnyContext where
+
+import examples.Stlc01Syntax
+import examples.Stlc02Contexts
+import examples.Stlc03TypingAndReduction
+import examples.Stlc07Preservation
 
 -- ---------------------------------------------------------------------------
 -- THE THREE TRUSTED LAWS. All three are about `String.append` and `String.eq` on

@@ -113,9 +113,10 @@ it. If it does not check, nothing is admitted.
 
 Thena's developments live in [`examples/`](examples/README.md) — every file
 loads as it stands, and [`examples/README.md`](examples/README.md) is the
-file-by-file index. There are three sets, each with its own load order. Thena
-has no module imports yet: globals declared by one file stay in scope for the
-next loaded in the same session, so "load in order" means what it says.
+file-by-file index. There are three sets. **In the numbered series each file
+imports what it depends on**, so any one of them loads on its own; the other two
+sets are hand-written and still read in order, globals declared by one file
+staying in scope for the next loaded in the same session.
 
 ### 1. Type safety for TAPL's arithmetic language — by hand
 
@@ -191,17 +192,24 @@ base that matches object terms in their own notation.
 - [`Stlc09Printing.thena`](examples/Stlc09Printing.thena) — terms shown in their own
   notation, the printer writing the splices `05` writes by hand.
 
+**Each file imports what it depends on**, so load whichever one you want and the
+ones under it come in with it:
+
 ```
 cabal run thena
-thena spine> :load examples/Stlc01Syntax.thena
-thena spine> :load examples/Stlc02Contexts.thena
-thena spine> :load examples/Stlc03TypingAndReduction.thena
-thena spine> :load rules rules/standard.thena.rules examples/Stlc04TakingTermsApart.thena.rules
-thena spine> :load examples/Stlc05GroupingBySplicing.thena
-thena spine> :load examples/Stlc06MoreJudgments.thena
 thena spine> :load examples/Stlc07Preservation.thena
-thena spine> :load examples/Stlc08PreservationByTactics.thena.script
+```
+
+For the whole series, three of the surface modules import everything else between
+them; the rule base states its own dependency too, and the script is a list of
+commands, so it goes after what it reuses:
+
+```
+thena spine> :load examples/Stlc10PreservationAnyContext.thena
 thena spine> :load examples/Stlc09Printing.thena
+thena spine> :load examples/Stlc06MoreJudgments.thena
+thena spine> :consult examples/Stlc04TakingTermsApart.thena.rules
+thena spine> :load examples/Stlc08PreservationByTactics.thena.script
 ```
 
 ### 3. Transitivity for System F-sub — POPLMark 1A

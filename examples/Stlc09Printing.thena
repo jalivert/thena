@@ -1,7 +1,8 @@
 -- Printing: a term of an object language is shown in that language's notation,
 -- and what is shown can be read back.
 --
--- LOAD AFTER 01, 02, 03 AND 05.
+-- Load it with   :load examples/Stlc09Printing.thena — it imports 01, 02, 03
+-- and 05 itself.
 --
 -- Until this phase a term of LC printed as the constructor application it is —
 -- `abs "x" base (var "x")` — which is true and unreadable. Now it prints as
@@ -13,6 +14,11 @@
 -- read one.
 
 module examples.Stlc09Printing where
+
+import examples.Stlc01Syntax
+import examples.Stlc02Contexts
+import examples.Stlc03TypingAndReduction
+import examples.Stlc05GroupingBySplicing
 
 -- ---------------------------------------------------------------------------
 -- Notation, in and out

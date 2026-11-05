@@ -2,7 +2,8 @@
 --
 --     · ⊢ M : T   and   M --> M'   give   · ⊢ M' : T
 --
--- LOAD AFTER 01, 02 AND 03. Then try   :infer preservation
+-- Load it with   :load examples/Stlc07Preservation.thena — it imports 01, 02
+-- and 03 itself. Then try   :infer preservation
 --
 -- == How it is proved
 --
@@ -52,6 +53,10 @@
 --     variables on both sides (`~2d9xj`).
 
 module examples.Stlc07Preservation where
+
+import examples.Stlc01Syntax
+import examples.Stlc02Contexts
+import examples.Stlc03TypingAndReduction
 
 -- ---------------------------------------------------------------------------
 -- Logic

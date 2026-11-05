@@ -1,11 +1,15 @@
 -- Typing and reduction for the λ-calculus of 01 and 02, and some derivations.
 --
--- LOAD AFTER Stlc01Syntax.thena AND Stlc02Contexts.thena.
+-- Load it with   :load examples/Stlc03TypingAndReduction.thena — it imports
+-- 01 and 02 itself.
 --
 -- Then try   :show typing      :show step
 --            :parse typing · ⊢ ( λ x : ι . x ) : ( ι -> ι )
 
 module examples.Stlc03TypingAndReduction where
+
+import examples.Stlc01Syntax
+import examples.Stlc02Contexts
 
 -- A judgment is written as on paper: its notation, then its rules. The
 -- notation's slots are the judgment's indices, in order, so this one is

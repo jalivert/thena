@@ -58,23 +58,30 @@ today, and nothing checks that they keep doing so.
 
 ## Loading the series
 
+**Every file in the series states what it depends on**, so any one of them loads
+on its own and brings its prefix with it:
+
 ```
 cabal run thena
-:load examples/Stlc01Syntax.thena
-:load examples/Stlc02Contexts.thena
-:load examples/Stlc03TypingAndReduction.thena
-:load rules rules/standard.thena.rules examples/Stlc04TakingTermsApart.thena.rules
-:load examples/Stlc05GroupingBySplicing.thena
-:load examples/Stlc06MoreJudgments.thena
 :load examples/Stlc07Preservation.thena
-:load examples/Stlc08PreservationByTactics.thena.script
-:load examples/Stlc09Printing.thena
 ```
 
-A module's declarations stay in scope for the next module loaded in the same
-session, and that is the only way one file sees another; there are no imports
-yet. A rule file is read with the grammars already loaded, so the modules come
-first.
+For the whole series, `10`, `09` and `06` import every other surface module
+between them; the rule base states its own dependency too, and the script is a
+list of commands, so it goes last:
+
+```
+:load examples/Stlc10PreservationAnyContext.thena
+:load examples/Stlc09Printing.thena
+:load examples/Stlc06MoreJudgments.thena
+:consult examples/Stlc04TakingTermsApart.thena.rules
+:load examples/Stlc08PreservationByTactics.thena.script
+```
+
+A module is loaded once however many files reach it, so loading `09` after `10`
+re-reads `01`, `02` and `03` not at all. The script is the one piece that still
+needs the session to hold what it reuses: `import` at the prompt is what would
+let it say so.
 
 ## Things to try once they are loaded
 
