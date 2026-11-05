@@ -1497,9 +1497,10 @@ will load again, so it reaches everything the session holds, the module you have
 loaded included — which is how you poke at one. An `open` a file left behind stays in
 force at the prompt too, for the same reason.
 
-> **Half narrowed.** A header may now say what the file offers — `exporting`, below.
-> `public import`, for passing a dependency on to whoever imports you, is designed
-> and not built, so an import still reaches only the files you import yourself.
+> **What you reach is up to the file you imported.** It says what it offers with
+> `exporting` and `private`, below, and passes its own dependencies on with
+> `public import`. One thing is still missing: a file cannot yet hand on a *rule base*
+> it consults, so if you import a file whose proofs rely on one, consult it yourself.
 
 ### `exporting` says which of your declarations other files may name
 

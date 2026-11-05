@@ -656,11 +656,9 @@ all or nothing across the whole graph**: if the file you asked for fails, the
 modules it pulled in go back with it, so a failed load never leaves you holding
 half an import graph.
 
-**Which of an imported module's names you may then write is not narrowed yet.**
-Everything an imported module declared is reachable, because visibility —
-`exporting ( … )` on the header, `private` per declaration, and `public import` for
-transitivity — is one mechanism and none of it is built. **So an import today is
-wide**, and the narrowing is scheduled rather than decided afresh.
+**Which of an imported module's names you may write is up to the file you imported** —
+see *A header says what the file exports* below. An import reaches what that file
+exports, and nothing it imported unless it said `public import`.
 
 ### A file's header must match its path, and it is checked when you import it
 
