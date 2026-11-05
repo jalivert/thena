@@ -1,0 +1,13 @@
+module test.modules.Opener where
+
+-- **It declares a namespace and opens it at its own top level**, which is the
+-- shape `examples/Canonical.thena` has: whoever imports this gets both the
+-- names and the short spellings — see `Thena.Driver.openedFrom`.
+data Bit : Type₀ where
+  off : Bit
+  on : Bit
+
+open Bit
+
+mine : Bit.Bit
+mine = off

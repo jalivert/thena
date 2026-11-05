@@ -1,0 +1,9 @@
+module test.modules.Inherits where
+
+import test.modules.Opener
+
+-- **A bare `off` and no `open` of its own**: the `open Bit` it writes is
+-- `Opener`'s, and it travels with the import — `examples/Progress.thena` is the
+-- same shape, and `Thena.Driver.openedFrom` says why it must.
+b : Bit.Bit
+b = off

@@ -595,6 +595,31 @@ holds, which is what lets you poke at a module you have just loaded. **A file yo
 `:load` by path is still a module** and is held to the same rule, so a file that loads
 on its own will load for anyone.
 
+**And an `open` travels with an `import`.** *Built MS11 phase 283.* The short
+spellings a module's top level opened are reachable to whoever imports it, so a file
+that writes
+
+```
+module Progress where
+
+import Canonical          -- which declares the language Term and writes `open Term`
+
+p : Term.Term
+p = true                  -- `Term.true`, written short, with no `open` here
+```
+
+reads the same whether it is loaded alone or after fifty other files. **Only the
+`open`s the imported file wrote itself, and not the ones it inherited** — one hop, as
+a declaration travels. The alternative is a file whose meaning depends on which file
+the session loaded first, which is the thing the rule above removes: before this, an
+`open` written at a file's top level stayed behind in the session when the file
+finished loading, and the next file in could rely on it without saying so.
+
+**This is the one asymmetry in `public`'s rule**, and it is not settled: a declaration
+travels only under `public` and an `open` travels unconditionally, so `import A` can
+change what a bare word in your file means with nothing in your file saying so. The
+spelling that would close it is Agda's `public open`.
+
 **`public` is how a dependency travels, and only `public`.** `public import` and
 `public consult` republish what they bring in: **when, and only when, the file you
 imported wrote `public`, you get what it got.** Without `public`, you don't — if A

@@ -30,6 +30,16 @@ against its own imports, its own declarations and the prelude. `UsesPrelude.then
 imports nothing and writes `Eq` and `refl`, so the prelude needs no import.
 `OnlyPair.thena` imports `Pair`, which imports `Bit`, and writes `Bit.Bit`: it is
 refused, because an import is not transitive until `public import` exists.
+**Four more are MS11 phase 283's**, `~w46f8`: a file does not end its own `open`s.
+`Opener.thena` declares `Bit` and writes `open Bit` at its top level, and
+`Inherits.thena` imports it and writes a bare `off` with no `open` of its own — an
+`open` travels with an `import`, which is `examples/Progress.thena`'s shape.
+`BareOpen.thena` is the other half of that pair: it imports `Bit.thena`, which opens
+nothing, writes the same bare `off` and is refused — before the phase it was refused
+or accepted according to whether a file whose top level wrote `open Bit` had gone in
+first. `ScopedOpen.thena` writes its one `open` inside a `namespace` block, which
+nobody inherits, because the block is where it ends (`~ckmsk`).
+
 `Metavars.thena` and `BorrowsMetavars.thena` are a pair `Thena.GrammarTests` reads —
 one declares a language, the other imports it and borrows its metavariable, writing its
 own `open` rather than inheriting one. Before the phase that pair was two module

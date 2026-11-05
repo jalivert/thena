@@ -56,9 +56,11 @@ module Thena.Driver
   , modulesLoaded
   , moduleDeclaring
   , declaredByModule
+  , openedByModule
   , moduleDeclared
   , preludeModule
   , concealedFrom
+  , openedFrom
   , RuleFileError (..)
   , InstralTypeError
   , loadRuleBases
@@ -387,6 +389,25 @@ data Session = Session
     -- environment only grows and this is a record of what is in it. A load that
     -- fails takes it back with everything else, because 'rolledBack' restores
     -- the session as it stood.
+  , sessionOpenedBy :: [(ModuleName, [Opened])]
+    -- ^ **which @open@ lines a module left in force** (MS11 phase 283,
+    -- @~w46f8@), most recently loaded first — the twin of 'sessionDeclaredBy',
+    -- and it exists for the same reason: a module's @open@s cannot travel with
+    -- an @import@ while nothing records whose they were.
+    --
+    -- **The ones it wrote at its own top level, and not the ones it inherited.**
+    -- The list is the difference between the @open@s in force before the module
+    -- was loaded and after, so what an @import@ put there is already excluded —
+    -- which is what keeps this non-transitive, as 'declaredByModule' is: an
+    -- importer gets its imports' own @open@s and not their imports'
+    -- ('openedFrom' says why).
+    --
+    -- **An @open@ written inside a @namespace@ block is not here**, because it
+    -- is popped by @LeaveOpen@ when the block ends (@~ckmsk@, his ruling of
+    -- 2026-11-03) and so is in force at neither end of the difference.
+    --
+    -- **An entry only where there is a module name to key it by**, and **not in
+    -- a 'Snapshot'**, both for 'sessionDeclaredBy''s reasons.
   , sessionDeclaredBy :: [(ModuleName, [GlobalName])]
     -- ^ **which module declared which globals** (MS11 phase 280), most recently
     -- loaded first. The addition every part of visibility rides on: nothing can
@@ -642,6 +663,7 @@ newSession = Session
   , sessionAsking    = Nothing
   , sessionLoaded    = []
   , sessionDeclaredBy = []
+  , sessionOpenedBy  = []
   }
   where
     (ps, n) = newDevelopment 0
@@ -1799,24 +1821,49 @@ loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
 -- the prelude, what it imported and what it declares as it goes, and nothing
 -- else the session happens to hold. 'concealedFrom' works out the subtraction
 -- and 'Thena.Core.Term.scopeConcealed' says why it is a subtraction.
+
+-- **AND THE @open@S IT STARTS WITH ARE ITS IMPORTS' AND THE PRELUDE'S** (MS11
+-- phase 283, @~w46f8@) — the third thing this load replaces and restores, and
+-- the last route into a file from outside. A top-level @open@ used to stay in
+-- the session, so a file that wrote a bare @off@ loaded or failed according to
+-- which file had gone in before it: the same hack @~xdt8c@ removed for names,
+-- reached through the scope instead of the environment. 'openedFrom' is what a
+-- module starts with.
+--
+-- **The session's go back UNDER the ones the module wrote**, rather than the
+-- module's being discarded: the prompt is not a module and is not isolated, so
+-- it keeps whatever a load left it — and the next module to load does not see
+-- them, because it works its own out from its imports. 'moduleDeclared' reads
+-- that prefix back off as the module's own.
 loadProofItemsConsulting :: [RuleBase] -> Session -> String -> [Item] -> (Session, Response)
 loadProofItemsConsulting pool s nm items =
-    let machine  = (sessionMachine s)
+    let inherited = openedFrom (moduleImports items) s
+        machine  = (sessionMachine s)
                      { rules = pool
                      , scope = (scope (sessionMachine s))
-                                 { scopeConcealed = concealedFrom (moduleImports items) s }
+                                 { scopeConcealed = concealedFrom (moduleImports items) s
+                                 , scopeOpens     = inherited
+                                 }
                      }
         (is, n1) = surfaceProgram (names machine) items
-        -- The pool the session had, put back the moment the module is in, and
-        -- the concealment lifted with it. **The @open@s the module left are
-        -- kept**, which is what they did before this phase: only the one field
-        -- goes back, not the whole scope.
-        poolBack s'' = s'' { sessionMachine = (sessionMachine s'')
-                               { rules = rules (sessionMachine s)
-                               , scope = (scope (sessionMachine s''))
-                                           { scopeConcealed =
-                                               scopeConcealed (scope (sessionMachine s)) }
-                               } }
+        -- The pool the session had, put back the moment the module is in, the
+        -- concealment lifted with it, and **the @open@s the session had put
+        -- back under the ones the module wrote**: the prompt keeps whatever a
+        -- load left it, because a typed line is not a module and is not
+        -- isolated, while the next module to load works its own @open@s out
+        -- from its imports and never sees these.
+        poolBack s'' =
+          let final = scopeOpens (scope (sessionMachine s''))
+           in s'' { sessionMachine = (sessionMachine s'')
+                      { rules = rules (sessionMachine s)
+                      , scope = (scope (sessionMachine s''))
+                                  { scopeConcealed =
+                                      scopeConcealed (scope (sessionMachine s))
+                                  , scopeOpens =
+                                      take (length final - length inherited) final
+                                        ++ scopeOpens (scope (sessionMachine s))
+                                  }
+                      } }
         -- **No block is checked before the module runs** (MS6 phase 104b).
         -- Every one of them is resolved, validated and typed where the program
         -- reaches it, in the environment that exists there —
@@ -1904,12 +1951,17 @@ loadProofModules s0 = go s0 []
 -- **Lifted out of 'loadProofModules' at phase 282** because the prelude is
 -- marked too and 'Thena.Files.loadPrelude' is what knows it is loading the
 -- prelude — see 'preludeModule'.
+-- **AND WHICH @open@S IT LEFT IN FORCE** (MS11 phase 283, @~w46f8@), which is
+-- the same difference taken of the other field a load now restores: the
+-- @open@s a module inherited from its imports were in force before it ran, so
+-- what is left is the ones it wrote itself. 'openedFrom' is the other end.
 moduleDeclared :: ModuleName -> Session -> Session -> Session
 moduleDeclared n before after
   | moduleLoaded n after = after
   | otherwise =
       after { sessionLoaded     = n : sessionLoaded after
             , sessionDeclaredBy = (n, arrived) : sessionDeclaredBy after
+            , sessionOpenedBy   = (n, left) : sessionOpenedBy after
             }
   where
     -- **Deduplicated, because 'Env.declaredNames' is four tables concatenated**
@@ -1919,6 +1971,15 @@ moduleDeclared n before after
       let had = Env.declaredNames (globals (sessionMachine before))
        in nub (filter (`notElem` had)
                       (Env.declaredNames (globals (sessionMachine after))))
+
+    -- **By length and not by membership**, because 'scopeOpens' is latest first
+    -- and a module may legitimately write an @open@ the session already had:
+    -- 'loadProofItemsConsulting' puts the module's own in front of exactly the
+    -- list that was there, so the prefix is the module's and @notElem@ would
+    -- drop a duplicate that belongs in it.
+    left = take (length now - length had) now
+      where now = scopeOpens (scope (sessionMachine after))
+            had = scopeOpens (scope (sessionMachine before))
 
 -- | __The one module every other may reach without importing it__ (MS11 phase
 -- 282, @~xdt8c@, his ruling of 2026-11-05).
@@ -1962,6 +2023,41 @@ concealedFrom ims s =
   where
     env     = globals (sessionMachine s)
     visible = concatMap (`declaredByModule` s) (preludeModule : ims)
+
+-- | __Which @open@s a module starts with__ (MS11 phase 283, @~w46f8@).
+--
+-- Its imports' and the prelude's, and nothing the session happens to be
+-- holding. **The other half of his ruling of 2026-11-05**: @~xdt8c@ stopped a
+-- module reaching a /name/ the session held, and an @open@ it held was a second
+-- route to the same thing — a file that writes a bare @off@ and no @open Bit@
+-- loaded or failed according to which file went in before it.
+--
+-- **An @open@ travels with an @import@ because the corpus requires it.**
+-- @examples\/Progress.thena@ writes @true@ and @ifthen@ bare, which are
+-- @Term.true@ and @Term.ifthen@, and writes no @open@ for them: it imports
+-- @examples.Canonical@, whose top level opens those namespaces. The branch
+-- where a file's @open@s simply end at the file stops the whole series
+-- compiling, and @prelude\/prelude.thena@'s own @open Eq@ — how every module in
+-- the project reaches @refl@ — is that case and not an exception to it.
+-- **Whether it should travel unconditionally, as it does here, or only under a
+-- @public open@, is @~4wjd7@ and is his**; nothing is wrong under any of its
+-- answers, and the file-order dependence is a defect under all of them.
+--
+-- **Not transitive, which is 'declaredByModule''s rule and not a second one**:
+-- 'sessionOpenedBy' holds the @open@s a module wrote itself, so an importer
+-- gets its imports' and not their imports'. Were it otherwise, a module would
+-- inherit spellings for names it cannot see, since the names behind them stop
+-- at the first module without @public@ (his ruling of 2026-11-03).
+--
+-- **Deduplicated, because 'scopeOpens' is a set** — two @open@s answering one
+-- written word is a refusal and not a choice (his ruling of 2026-10-30), so a
+-- diamond in the import graph that brought @open Nat@ in twice would make every
+-- short name under it ambiguous.
+--
+-- **The prompt keeps whatever a load left it**: nothing calls this for a typed
+-- line, which is not a module and is not isolated.
+openedFrom :: [ModuleName] -> Session -> [Opened]
+openedFrom ims s = nub (concatMap (`openedByModule` s) (preludeModule : ims))
 
 -- | A module read off the disc and ready to elaborate (MS11 phase 274).
 --
@@ -2024,6 +2120,14 @@ moduleDeclaring g s =
 -- that declared nothing; 'moduleLoaded' is the question about being in.
 declaredByModule :: ModuleName -> Session -> [GlobalName]
 declaredByModule n s = concat [ gs | (m, gs) <- sessionDeclaredBy s, m == n ]
+
+-- | Every @open@ a module left in force, where one did (MS11 phase 283,
+-- @~w46f8@).
+--
+-- **The twin of 'declaredByModule'**, and empty has the same two meanings: a
+-- module that is not in, and one that opened nothing.
+openedByModule :: ModuleName -> Session -> [Opened]
+openedByModule n s = concat [ os | (m, os) <- sessionOpenedBy s, m == n ]
 
 -- | Put the session back as it was, carrying the fresh counter forward.
 --

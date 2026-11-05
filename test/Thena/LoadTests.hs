@@ -51,13 +51,15 @@ import Thena.Driver
   , moduleDeclaring
   , preludeModule
   , concealedFrom
+  , openedByModule
+  , openedFrom
   , newSession
   , oneLine
   , parseSurfaceModule
   )
 import Thena.Engine (Development, Machine (..), development)
 import Thena.Files (rulesPath)
-import Thena.Core.Term (nameDotted, substLevelsIn)
+import Thena.Core.Term (nameDotted, openedPath, substLevelsIn)
 import qualified Thena.Global.Env as Env (declaredNames)
 import Thena.Global.Env
   ( Definition (..)
@@ -96,6 +98,7 @@ tests =
     , testGroup "an import graph (MS11 phase 274)" importTests
     , testGroup "a rule base states what it depends on (MS11 phase 276)" baseImportTests
     , testGroup "a module sees its imports and the prelude (MS11 phase 282)" isolationTests
+    , testGroup "a file does not end its own opens (MS11 phase 283)" openIsolationTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -194,6 +197,99 @@ isolationTests =
       let hidden = map nameDotted (concealedFrom [named' "test.modules.Bit"] s1)
       assertBool (show hidden) ("Bit.Bit" `notElem` hidden)
       assertBool (show hidden) ("Bit.off" `notElem` hidden)
+  ]
+
+-- --------------------------------------------------------------------------
+-- A file does not end its own @open@s (MS11 phase 283, @~w46f8@)
+-- --------------------------------------------------------------------------
+
+-- | __The second route to the thing his ruling of 2026-11-05 removes.__
+--
+-- Phase 282 stopped a module reaching a /name/ the session held; a top-level
+-- @open@ the session held was the other way in, and a file that wrote a bare
+-- @off@ loaded or failed according to which file went in before it.
+--
+-- **EVERY TEST HERE IS A PAIR, because the two branches are a word apart**: a
+-- test that only showed a short spelling working could not tell an @open@ that
+-- travelled from a word that resolved anyway. @Inherits@ writes a bare @off@
+-- and gets it from the module it imports; @BareOpen@ writes the same line,
+-- imports the namespace's declarations and no @open@ of them, and is refused.
+openIsolationTests :: [TestTree]
+openIsolationTests =
+  [ -- **The defect itself, as it was measured.** @Pair@'s top level writes
+    -- @open Bit@, so before this phase loading it first was what made
+    -- @BareOpen@'s bare @off@ resolve.
+    testCase "a module does not see an open the session is holding" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Pair.thena"
+      (_, out, trouble) <- loadProofFile s1 "test/modules/BareOpen.thena"
+      assertBool (show (map (renderTrouble s1) trouble)) (null trouble)
+      assertBool (show (map (renderResponse s1) out))
+                 (any (isInfixOf "not in scope: off")
+                      (concatMap (renderResponse s1) out))
+
+  , -- **And it is refused from a fresh session too**, which is the whole claim:
+    -- one answer whatever the session is holding.
+    testCase "and it is refused the same way with nothing loaded" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/BareOpen.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (show (map (renderResponse s0) out))
+                 (any (isInfixOf "not in scope: off")
+                      (concatMap (renderResponse s0) out))
+
+  , -- **The other branch of the pair: an @open@ travels with an @import@.**
+    -- @Opener@ declares @Bit@ and opens it; @Inherits@ imports @Opener@, writes
+    -- a bare @off@ and writes no @open@. This is @examples/Progress.thena@'s
+    -- shape, and the corpus is why it must hold.
+    testCase "but an open travels with an import" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/Inherits.thena"
+      assertBool (show (map (renderResponse s0) out)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.Opener", "test.modules.Inherits"]
+
+  , -- **AND IT TRAVELS ONE HOP, which is 'declaredByModule''s rule and not a
+    -- second one.** @Inherits@ wrote no @open@ of its own, so it leaves none
+    -- for its own importer: were it otherwise a module would inherit spellings
+    -- for names it cannot see, since the names stop at the first module without
+    -- @public@ (his ruling of 2026-11-03).
+    testCase "and it travels one hop, as a declaration does" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Inherits.thena"
+      let direct   = map openedPath (openedFrom [named' "test.modules.Opener"] s1)
+          indirect = map openedPath (openedFrom [named' "test.modules.Inherits"] s1)
+      assertBool (show direct)   (["Bit"] `elem` direct)
+      assertBool (show indirect) (["Bit"] `notElem` indirect)
+
+  , -- **The prelude's own @open Eq@ is the general case and not an exception**:
+    -- it is how every module in the project reaches @refl@, and it arrives by
+    -- the one route an import uses.
+    testCase "the prelude's opens are what a module starts with" $ do
+      (s0, _) <- startingSession
+      let opens = map openedPath (openedFrom [] s0)
+      assertBool (show opens) (["Eq"] `elem` opens)
+
+  , -- **An @open@ inside a @namespace@ block is not the module's to pass on**,
+    -- because it is popped where the block ends — @~ckmsk@, his ruling of
+    -- 2026-11-03. @ScopedOpen@ writes exactly one @open@ and writes it inside a
+    -- block.
+    testCase "an open inside a namespace block is left behind by nobody" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadProofFile s0 "test/modules/ScopedOpen.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      map openedPath (openedByModule (named' "test.modules.ScopedOpen") s1) @?= []
+
+  , -- **A LINE TYPED AT THE PROMPT IS NOT A MODULE**, so it keeps what a load
+    -- left it: @Pair@'s @open Bit@ is still in force at the prompt after it
+    -- loads. This is the restoration as much as the rule — the @open@s the
+    -- module wrote go back on top of the session's own.
+    testCase "the prompt keeps the opens a load left it" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Pair.thena"
+      let (_, r) = oneLine s1 ":infer off"
+      assertBool (unwords (renderResponse s1 r))
+                 (not (any (isInfixOf "not in scope") (renderResponse s1 r)))
   ]
 
 -- --------------------------------------------------------------------------

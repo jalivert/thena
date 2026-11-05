@@ -1,0 +1,11 @@
+module test.modules.BareOpen where
+
+import test.modules.Bit
+
+-- **The other half of the pair, and it is refused.** `Bit` is imported, so
+-- `Bit.off` is in scope and `off` is not: nothing this file imports opens that
+-- namespace. Before MS11 phase 283 it loaded or failed according to whether a
+-- file whose top level wrote `open Bit` had gone in first — see
+-- `Thena.LoadTests`.
+b : Bit.Bit
+b = off

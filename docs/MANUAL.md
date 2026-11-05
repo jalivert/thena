@@ -1473,9 +1473,29 @@ Nor is what your own imports imported: if `Pair` imports `Bit` and you import `P
 want them. The rule is one sentence — **a file is correct on its own or not at all**
 — and it is what makes a file you send someone a file that loads.
 
+**An `open` obeys the same rule, and it travels with an `import`.** The short
+spellings a file's top level opened belong to that file and to whoever imports it —
+not to the next file you happen to load:
+
+```
+module Progress where
+
+import Canonical          -- Canonical declares Term and writes `open Term`
+
+p : Term.Term
+p = true                  -- Term.true, written short, with no `open` here
+```
+
+`Progress` reads the same loaded alone as loaded after fifty other files. A file that
+wrote `true` and imported nothing that opened `Term` would be refused, however many
+other files had opened it first. **One hop**: you inherit what the files you import
+opened, not what *they* imported. This is how the prelude's own `open Eq` reaches you,
+which is why `refl` is a word you can write anywhere.
+
 **The prompt is the exception, deliberately.** A line you type is not a file anybody
 will load again, so it reaches everything the session holds, the module you have just
-loaded included — which is how you poke at one.
+loaded included — which is how you poke at one. An `open` a file left behind stays in
+force at the prompt too, for the same reason.
 
 > **Not narrowed yet.** Everything an imported module declared is reachable. Saying
 > which names a file *offers* — an `exporting` list on the header, and
