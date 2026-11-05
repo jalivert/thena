@@ -882,13 +882,38 @@ out of the stack rather than being a rule of its own. **A consult reaches to the
 of the block it is written in**, so the one in that `do` block applies there and
 nowhere else.
 
-**It is *stack-like* rather than exactly a stack**, in one respect: importing a file
-that published its own dependencies with `public consult` pushes all of them as a
-single group, in the order that file wrote them, at the position of the line that
-brought them in. And consulting the same base twice really does push it twice — the
-upper copy can go out of scope while the lower one is still in force, so the earlier
-push cannot be dropped or moved, and a file reached along two arms of a diamond
-publishes its base down each of them.
+**IT IS A STACK WHATEVER ROUTE A BASE TOOK, and that is the whole of it.** A `consult`
+is a push. A base that reaches you because a module you imported published it with
+`public consult` is a push *at the position of your `import` line*. Nothing asks how a
+base got there, so **a `public consult` is indistinguishable from your having written
+those `consult` lines yourself.** Given a library
+
+```
+module Stlc exporting ( Term ) where
+
+public consult Stlc.Broad
+public consult Stlc.Sharp
+```
+
+these two files are the same file:
+
+```
+module Proofs where            module Proofs where
+
+consult My.First               consult My.First
+import Stlc                    consult Stlc.Broad
+consult My.Crush               consult Stlc.Sharp
+                               consult My.Crush
+```
+
+Both are searched `My.Crush`, `Stlc.Sharp`, `Stlc.Broad`, `My.First`, and then whatever
+your session already had, with the shipped base at the bottom. `Stlc.Sharp` beats
+`Stlc.Broad` for you because it beats it inside `Stlc` — it was pushed later.
+
+Consulting the same base twice really does push it twice: the upper copy can go out of
+scope while the lower one is still in force, so the earlier push cannot be dropped or
+moved, and a file reached along two arms of a diamond publishes its base down each of
+them.
 
 **A base may state its own dependencies, and they become yours.** A rule base is
 read against the languages the session holds, so a base that `import`s the surface
