@@ -32,6 +32,7 @@ import Thena.Surface.Concrete
   , ObjectPiece (..)
   , SurfaceDecl (..)
   , SurfaceOpenSpec (..)
+  , Reach (..)
   , SurfaceModule (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
@@ -87,6 +88,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   import  { Located _ TImport }
   exporting { Located _ TExporting }
   private { Located _ TPrivate }
+  public { Located _ TPublic }
   namespace { Located _ TNamespace }
   hiding  { Located _ THiding }
   renaming { Located _ TRenaming }
@@ -341,7 +343,12 @@ Decl :: { SurfaceDecl }
   -- **Which surface modules this file depends on** (MS11 phase 274, his ruling
   -- of 2026-11-03). A @QName@ again, and the steps are directories again: a
   -- file states what it refers to and never relies on the session.
-  | import QName                           { SurfaceImport (fst $2) (snd $2) }
+  | import QName                           { SurfaceImport Own (fst $2) (snd $2) }
+  -- **An import that travels** (MS11 phase 287, his ruling of 2026-11-03):
+  -- whoever imports this file gets what this file got from that one.
+  -- **@public@ is an attribute of the import and not a second kind of import**,
+  -- so it is one production\'s worth of difference and one constructor.
+  | public import QName                    { SurfaceImport Public (fst $3) (snd $3) }
   -- **A layout block, where @open@ is a line** (MS10 phase 254): a namespace
   -- says which declarations are in it, so it has to hold them. Nesting is a
   -- longer prefix and costs no mechanism, and @namespace A.B where { … }@ is

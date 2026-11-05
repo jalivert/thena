@@ -1,0 +1,7 @@
+-- **A public import travels as far as the public lines go** (MS11 phase 287):
+-- this file passes on a module that itself passed `Bit` on, so an importer of
+-- this one reaches `Bit` two hops away. The closure is his ruling of
+-- 2026-11-03 — *I get whatever the thing I am importing got*.
+module test.modules.PassesOn where
+
+public import test.modules.PassesBit

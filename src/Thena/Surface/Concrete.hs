@@ -20,6 +20,7 @@ module Thena.Surface.Concrete
   , ObjectPiece (..)
   , SurfaceDecl (..)
   , SurfaceOpenSpec (..)
+  , Reach (..)
   , SurfaceModule (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
@@ -358,6 +359,22 @@ data SurfaceOpenSpec
     -- decision about identifiers rather than about @open@.
   deriving (Eq, Show)
 
+-- | __Whether an @import@ passes on what it brought__ (MS11 phase 287,
+-- @~jmw4k@).
+--
+-- **His ruling of 2026-11-03 is the whole of transitivity** — /"I get whatever
+-- the thing I am importing\/consulting got"/ — so 'Public' is one word on one
+-- line and there is nothing else to say about it.
+--
+-- **An attribute of the import and not a second kind of import**: what @public@
+-- changes is who else may name what came, never what is loaded or in what
+-- order, so everything that walks imports ignores it and only the resolver's
+-- subtraction reads it.
+data Reach
+  = Own     -- ^ @import X@ — this module's own dependency
+  | Public  -- ^ @public import X@ — and its importers' too
+  deriving (Eq, Show)
+
 data SurfaceDecl
   = SurfaceSignature [String] String Surface   -- ^ @foo : T@, @Ns.foo : T@
   | SurfaceEquation  [String] String Surface   -- ^ @foo = e@, @Ns.foo = e@
@@ -418,9 +435,10 @@ data SurfaceDecl
     -- whenever this module is elaborated and does not leak to whoever loaded
     -- it, which is what makes a module that type-checks in isolation type-check
     -- for whoever imports it.
-  | SurfaceImport [String] String
-    -- ^ @import ‹module›@ — **which surface modules this file depends on**
-    -- (MS11 phase 274, his ruling of 2026-11-03).
+  | SurfaceImport Reach [String] String
+    -- ^ @import ‹module›@, or @public import ‹module›@ — **which surface
+    -- modules this file depends on** (MS11 phase 274, his ruling of
+    -- 2026-11-03), and whether what they gave it travels on (phase 287).
     --
     -- 'SurfaceConsult'\'s shape and 'SurfaceConsult'\'s meaning of it: the steps
     -- are directories, so @import Stlc.Terms@ reaches @Stlc\/Terms.thena@ — the

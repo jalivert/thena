@@ -28,6 +28,7 @@ import Thena.Core.Term (GlobalName (..), Opened (..), nameDotted)
 import Thena.Driver (Item (..), moduleText)
 import Thena.Surface.Concrete
   ( Surface (..)
+  , Reach (..)
   , SurfaceConstructor (..)
   , SurfaceData (..)
   )
@@ -58,7 +59,9 @@ printItem i = case i of
   ItemConsult m -> ["consult " ++ moduleText m]
   -- **The same, for the same reason** (MS11 phase 274): a file printed without
   -- its imports would read back and then not elaborate at all.
-  ItemImport m -> ["import " ++ moduleText m]
+  ItemImport r m -> [ word r ++ "import " ++ moduleText m ]
+    where word Own    = ""
+          word Public = "public "
   -- **Never printed here** (MS11 phase 285) — it is the header's and
   -- 'printSurfaceModule' puts it back there. A module printed item by item
   -- without the header has no place for it.

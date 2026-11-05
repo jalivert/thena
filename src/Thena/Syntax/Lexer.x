@@ -231,6 +231,12 @@ tokens :-
   -- helper back. **The eleventh word to narrow identifiers project-wide**, on
   -- @~wpwz3@ with the rest.
   "private"     { keyword TPrivate }
+  -- **Reserved at MS11 phase 287**, for @public import ‹module›@ — a file saying
+  -- that what it imported travels on to whoever imports it. His ruling of
+  -- 2026-11-03 chose the word along with the whole of transitivity
+  -- (/"I get whatever the thing I am importing\/consulting got"/). **The twelfth
+  -- word to narrow identifiers project-wide, and the last visibility needs.**
+  "public"      { keyword TPublic }
   -- **Reserved at MS10 phase 254**, for @namespace ‹name› where { … }@ — the
   -- fifth word to narrow identifiers project-wide. His ruling of 2026-10-30
   -- costed it with the partition and took it: a namespace that is declared,
@@ -363,6 +369,7 @@ data Token
   | TImport      -- ^ @import@, the declaration that names a surface module (MS11 phase 274)
   | TExporting   -- ^ @module X exporting ( … ) where@, a file's interface (MS11 phase 285)
   | TPrivate     -- ^ @private ‹declaration›@, kept out of the interface (MS11 phase 286)
+  | TPublic      -- ^ @public import ‹module›@, an import that travels (MS11 phase 287)
   | TNamespace   -- ^ @namespace ‹name› where { … }@ (MS10 phase 254)
   | THiding      -- ^ @open X hiding ( … )@ (MS10 phase 254)
   | TRenaming    -- ^ @open X renaming ( e -> c )@ (MS10 phase 254)

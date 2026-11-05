@@ -561,6 +561,7 @@ describe t = case t of
   TImport     -> "import"
   TExporting  -> "exporting"
   TPrivate    -> "private"
+  TPublic     -> "public"
   TNamespace  -> "namespace"
   THiding     -> "hiding"
   TRenaming   -> "renaming"

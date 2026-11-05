@@ -37,6 +37,7 @@ import Thena.Driver
   ( LoadError
   , Loaded (..)
   , Item
+  , interfaceOf
   , ModuleName
   , ReadModule (..)
   , Response (..)
@@ -52,6 +53,7 @@ import Thena.Driver
   , moduleLoaded
   , moduleOfFile
   , moduleDeclared
+  , interfaceOf
   , preludeModule
   , LoadKind (..)
   , parseSurfaceModule
@@ -109,9 +111,11 @@ loadPrelude s = do
       -- anything, which is his ruling of 2026-11-05, and the subtraction that
       -- carries it has to be able to tell them from a name typed at the prompt.
       -- 'Thena.Driver.preludeModule' says why the name is supplied here.
-      -- **No export list**: the prelude states no interface, so everything it
-      -- declares is reachable from every module (MS11 phase 285).
-      (s', ProofLoaded {}) -> (moduleDeclared preludeModule (Nothing, []) s s', [])
+      -- **No interface of any kind**: the prelude states no export list, marks
+      -- nothing private and passes nothing on, so everything it declares is
+      -- reachable from every module (MS11 phases 285 to 287).
+      (s', ProofLoaded {}) ->
+        (moduleDeclared preludeModule (interfaceOf []) s s', [])
       (s', resp)           -> (s', [Unloadable path resp])
 
 -- | A session with everything shipped loaded: **the rule base first, then the

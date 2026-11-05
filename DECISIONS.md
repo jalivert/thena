@@ -43,7 +43,7 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | a tagged literal's fence | `` ` `` |
 | spell nothing, and stay reserved | `⌜` `⌝` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `private` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `private` `public` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -761,6 +761,26 @@ It goes in front of a signature and covers the equation under it, and in front o
 `data` declaration it keeps the whole namespace back — constructors, eliminator, and
 anything Thena generated into it. It is a mark, not a scope: `Kept` uses `helper`
 normally, and so can you at the prompt.
+
+**An import is yours alone unless you say otherwise.** Import a file and you get what
+*it* exports — not what it imported. If you want your dependency to travel on to whoever
+imports you, say `public`:
+
+```
+module Prelude2 where
+
+public import Bits          -- whoever imports Prelude2 gets Bits too
+import Internals            -- and does not get Internals
+```
+
+**It travels as far as the `public` words go.** If `Prelude2` is itself public-imported
+by `Everything`, then importing `Everything` reaches `Bits`. This is what lets one file
+be an aggregator you import instead of a list of twelve imports — and what keeps a file's
+private scaffolding from leaking out of it.
+
+An `exporting` list on your header governs *your own* declarations; a `public import`
+governs what travelled through you. The two do not interact: a file may export nothing of
+its own and still pass a dependency on.
 
 **Two things it is not.** Your own file is never narrowed by its own list — `Bits`
 above uses `Bit.on` freely — and the prompt is never narrowed by anybody's, so after

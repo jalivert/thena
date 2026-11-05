@@ -59,6 +59,9 @@ module Thena.Driver
   , exportedByModule
   , moduleExporting
   , privateIn
+  , publicImports
+  , publicImportsOf
+  , Interface (..)
   , interfaceOf
   , exports
   , openedByModule
@@ -228,6 +231,7 @@ import Thena.Surface.Concrete
   , SurfaceData (..)
   , SurfaceDecl (..)
   , SurfaceOpenSpec (..)
+  , Reach (..)
   , SurfaceModule (..)
   , PairingError (..)
   )
@@ -413,6 +417,15 @@ data Session = Session
     --
     -- **An entry only where there is a module name to key it by**, and **not in
     -- a 'Snapshot'**, both for 'sessionDeclaredBy''s reasons.
+  , sessionPublicImports :: [(ModuleName, [ModuleName])]
+    -- ^ __Which of each module's imports travel on to its importers__ (MS11
+    -- phase 287, @~jmw4k@) — what its @public import@ lines named.
+    --
+    -- **Read only by 'concealedFrom', and it is what makes that subtraction a
+    -- CLOSURE rather than one hop.** His ruling of 2026-11-03 is /"I get
+    -- whatever the thing I am importing got"/, so a module reaches its imports\'
+    -- exports and then whatever those imports passed on, as far as the @public@
+    -- lines go.
   , sessionPrivateIn :: [(ModuleName, [GlobalName])]
     -- ^ __Which of each module's declarations it kept to itself__ (MS11 phase
     -- 286, @~jmw4k@) — what its @private@ declarations named.
@@ -687,6 +700,7 @@ newSession = Session
   , sessionParsing   = Nothing
   , sessionAsking    = Nothing
   , sessionLoaded    = []
+  , sessionPublicImports = []
   , sessionPrivateIn  = []
   , sessionExporting  = []
   , sessionDeclaredBy = []
@@ -1435,7 +1449,7 @@ data Item
     -- It declares nothing and runs nothing, so 'surfaceProgram' emits no
     -- instruction for it: what it does happens before the program does, when
     -- the load collects every one of them and says which files it needs.
-  | ItemImport ModuleName
+  | ItemImport Reach ModuleName
     -- ^ @import ‹module›@ (MS11 phase 274) — **a surface module this one depends
     -- on**, named as a file and not as a namespace.
     --
@@ -1522,7 +1536,7 @@ regroup = go
     -- the meaning is not: the steps are directories (MS11 phase 273).
     one (SurfaceConsult ps x : rest) = Right ([ItemConsult (moduleFromSteps ps x)], rest)
     -- A file's name again, and the steps are directories again (MS11 phase 274).
-    one (SurfaceImport ps x : rest) = Right ([ItemImport (moduleFromSteps ps x)], rest)
+    one (SurfaceImport r ps x : rest) = Right ([ItemImport r (moduleFromSteps ps x)], rest)
     one (SurfaceNamespace ps x ds : rest) = do
       inner <- go ds
       Right ([ItemNamespace (GlobalName ps x) inner], rest)
@@ -1582,7 +1596,7 @@ surfaceProgram n0 items = foldl (item []) ([], n0) items
   -- **An import emits nothing either** (MS11 phase 274), and for the same
   -- reason one step further out: it says which /modules/ run before this one,
   -- so by the time this program starts they are already in the environment.
-  item _ acc (ItemImport _) = acc
+  item _ acc (ItemImport _ _) = acc
   -- **An export list emits nothing** (MS11 phase 285). It is not a step of the
   -- program at all: it says what an /importer/ may name, which is read when
   -- this module is recorded and never when it runs.
@@ -2056,16 +2070,19 @@ loadProofModules s0 = go s0 []
 -- thing here that is read off the items rather than off the two environments,
 -- because an export list names declarations rather than making any:
 -- 'moduleExporting' is what the caller passes.
-moduleDeclared :: ModuleName -> (Maybe [GlobalName], [GlobalName]) -> Session -> Session -> Session
-moduleDeclared n (es, priv) before after
+moduleDeclared :: ModuleName -> Interface -> Session -> Session -> Session
+moduleDeclared n face before after
   | moduleLoaded n after = after
   | otherwise =
       after { sessionLoaded     = n : sessionLoaded after
             , sessionDeclaredBy = (n, arrived) : sessionDeclaredBy after
             , sessionOpenedBy   = (n, left) : sessionOpenedBy after
-            , sessionExporting  = maybe id (\e -> ((n, e) :)) es
-                                    (sessionExporting after)
-            , sessionPrivateIn  = (n, priv) : sessionPrivateIn after
+            , sessionExporting  =
+                maybe id (\e -> ((n, e) :)) (interfaceExporting face)
+                  (sessionExporting after)
+            , sessionPrivateIn  = (n, interfacePrivate face) : sessionPrivateIn after
+            , sessionPublicImports =
+                (n, interfacePublic face) : sessionPublicImports after
             }
   where
     -- **Deduplicated, because 'Env.declaredNames' is four tables concatenated**
@@ -2126,7 +2143,19 @@ concealedFrom ims s =
           , g `notElem` visible ]
   where
     env     = globals (sessionMachine s)
-    visible = concatMap (`exportedByModule` s) (preludeModule : ims)
+    -- **A CLOSURE over @public import@, which is his ruling of 2026-11-03**:
+    -- this module reaches what its imports export, and whatever those imports
+    -- passed on, as far as the @public@ lines go. **The guard is not decoration
+    -- although the import graph is acyclic** — two modules may both pass on a
+    -- third, and without it the walk would do that subtree twice for no reason.
+    visible = reach [] (preludeModule : ims)
+
+    reach _    []       = []
+    reach seen (m : ms)
+      | m `elem` seen = reach seen ms
+      | otherwise     =
+          exportedByModule m s
+            ++ reach (m : seen) (publicImportsOf m s ++ ms)
 
 -- | __Which @open@s a module starts with__ (MS11 phase 283, @~w46f8@).
 --
@@ -2244,13 +2273,39 @@ exportedByModule n s =
     -- nothing, which @Just []@ says and @Nothing@ would invert.
     deny = Just (concat [ gs | (m, gs) <- sessionPrivateIn s, m == n ])
 
+-- | __Which of a module's imports it passed on__ (MS11 phase 287, @~jmw4k@).
+--
+-- Empty has the two meanings 'declaredByModule''s has: a module that passed
+-- nothing on, and a module that is not in.
+publicImportsOf :: ModuleName -> Session -> [ModuleName]
+publicImportsOf n s = concat [ ms | (m, ms) <- sessionPublicImports s, m == n ]
+
 -- | __What a module's items say its interface is__ (MS11 phase 286).
 --
 -- The header's @exporting@ clause and its @private@ declarations, which are the
 -- two halves of his ruling of 2026-10-30 — (a) with (c) as the fine-grained
 -- escape — and the pair 'moduleDeclared' records.
-interfaceOf :: [Item] -> (Maybe [GlobalName], [GlobalName])
-interfaceOf items = (moduleExporting items, privateIn items)
+interfaceOf :: [Item] -> Interface
+interfaceOf items = Interface
+  { interfaceExporting = moduleExporting items
+  , interfacePrivate   = privateIn items
+  , interfacePublic    = publicImports items
+  }
+
+-- | __Everything a module's items say about who may name what__ (MS11 phases
+-- 285 to 287, @~jmw4k@).
+--
+-- **A record and not a tuple**, because this grew a field in each of three
+-- consecutive phases and every one of them changed 'moduleDeclared''s type.
+data Interface = Interface
+  { interfaceExporting :: Maybe [GlobalName]
+    -- ^ the header\'s @exporting ( … )@ clause; 'Nothing' is no clause at all
+  , interfacePrivate   :: [GlobalName]
+    -- ^ what its @private@ declarations named
+  , interfacePublic    :: [ModuleName]
+    -- ^ which of its imports travel on
+  }
+  deriving (Eq, Show)
 
 -- | Every @open@ a module left in force, where one did (MS11 phase 283,
 -- @~w46f8@).
@@ -2324,11 +2379,27 @@ moduleImports :: [Item] -> [ModuleName]
 moduleImports = concatMap go
   where
     go i = case i of
-      ItemImport m       -> [m]
+      ItemImport _ m     -> [m]
       ItemNamespace _ is -> moduleImports is
       ItemOpenIn _ is    -> moduleImports is
       ItemPrivate is     -> moduleImports is
       _                  -> []
+
+-- | __Which of this module's imports travel on to its own importers__ (MS11
+-- phase 287, @~jmw4k@).
+--
+-- **'moduleImports'\' walk, filtered**: @public@ changes who may name what came
+-- and never what is loaded, so the load walk uses the unfiltered list and this
+-- is read only by the resolver's subtraction.
+publicImports :: [Item] -> [ModuleName]
+publicImports = concatMap go
+  where
+    go i = case i of
+      ItemImport Public m -> [m]
+      ItemNamespace _ is  -> publicImports is
+      ItemOpenIn _ is     -> publicImports is
+      ItemPrivate is      -> publicImports is
+      _                   -> []
 
 -- | __What this module says its interface is__ (MS11 phase 285, @~jmw4k@).
 --
@@ -2426,7 +2497,7 @@ declaredName i = case i of
   ItemConsult _     -> Nothing
   -- **Nor an import** (MS11 phase 274): the names it makes reachable are the
   -- imported module's own, and that module's load named them.
-  ItemImport _      -> Nothing
+  ItemImport _ _    -> Nothing
   -- **Nor an export list** (MS11 phase 285) — it names declarations the module
   -- made elsewhere and makes none of its own.
   ItemExporting _   -> Nothing

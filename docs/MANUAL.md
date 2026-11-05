@@ -1561,6 +1561,38 @@ front of a signature it covers the equation under it and stops there; in front o
 `data` declaration it keeps the whole namespace back, constructors and eliminator
 included.
 
+### `public import` passes a dependency on
+
+Importing a file gives you what that file exports — not what it imported. So this is
+refused:
+
+```
+module A where
+data Bit : Type₀ where { off : Bit ; on : Bit }
+
+module B where
+import A                 -- B uses A
+
+module C where
+import B
+x : Bit.Bit              -- not in scope: Bit.Bit — C never imported A
+```
+
+Put `public` on B's import and C gets it:
+
+```
+module B where
+public import A          -- and so does whoever imports B
+```
+
+**It travels as far as the `public` words go**, so a chain of public imports reaches all
+the way. That is how one file can be the thing you import instead of a list of twelve
+imports — and why a file's internal dependencies stay internal unless you say otherwise.
+
+`exporting` on your header is about *your* declarations; `public import` is about what
+travels through you. They do not interact, so a file can export nothing of its own and
+still pass a dependency on.
+
 **Your own file always sees all of itself**, and so does the prompt — after loading
 `Bits` you can still `:infer flip`. What the list changes is only what *another file*
 may name.

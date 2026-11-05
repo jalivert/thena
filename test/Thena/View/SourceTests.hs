@@ -95,7 +95,7 @@ termsOf i = case i of
   ItemGrammar _ -> []
   ItemOpen _ -> []
   ItemConsult _ -> []
-  ItemImport _ -> []
+  ItemImport _ _ -> []
   ItemExporting _ -> []
   ItemPrivate is -> concatMap termsOf is
   ItemNamespace _ is -> concatMap termsOf is

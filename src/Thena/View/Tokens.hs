@@ -179,6 +179,8 @@ kindOf t = case t of
   TExporting    -> AKeyword
   -- MS11 phase 286: and a declaration's @private@.
   TPrivate      -> AKeyword
+  -- MS11 phase 287: and an import's @public@.
+  TPublic       -> AKeyword
   TNamespace    -> AKeyword
   THiding       -> AKeyword
   TRenaming     -> AKeyword

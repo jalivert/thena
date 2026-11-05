@@ -52,6 +52,7 @@ import Thena.Driver
   , exports
   , moduleExporting
   , privateIn
+  , publicImports
   , ModuleName
   , moduleDeclaring
   , preludeModule
@@ -107,6 +108,7 @@ tests =
     , testGroup "import and consult at the prompt (MS11 phase 284)" promptActTests
     , testGroup "a header states the file's interface (MS11 phase 285)" exportTests
     , testGroup "a declaration may be the file's own (MS11 phase 286)" privateTests
+    , testGroup "an import may travel (MS11 phase 287)" publicImportTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -2031,3 +2033,80 @@ privateIn' :: String -> [String]
 privateIn' src = case parseSurfaceModule src of
   Right (_, items) -> map nameDotted (privateIn items)
   Left e           -> error (show e)
+
+-- --------------------------------------------------------------------------
+-- An import may travel (MS11 phase 287, @~jmw4k@)
+-- --------------------------------------------------------------------------
+
+-- | __@public import@, which is the whole of transitivity.__
+--
+-- His ruling of 2026-11-03: /I get whatever the thing I am importing got/.
+--
+-- **The pair here is @Pair@ against @PassesBit@**, which differ by the one
+-- word: @OnlyPair@ imports @Pair@ and is refused for writing @Bit.Bit@, and
+-- @GetsBit@ imports @PassesBit@ and is not. A test that only showed the second
+-- could not tell a @public import@ that works from an import that was
+-- transitive all along.
+publicImportTests :: [TestTree]
+publicImportTests =
+  [ -- **The word is what makes the difference**, and @OnlyPair@ above is the
+    -- other half: the same shape with a plain @import@ is refused.
+    testCase "a public import passes its module's names on" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsBit.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= [ "test.modules.Bit", "test.modules.PassesBit"
+            , "test.modules.GetsBit" ]
+
+  , -- **AND IT IS A CLOSURE, NOT ONE HOP** — his ruling is what the thing you
+    -- import /got/, so a module that passed on a passer passes the whole chain.
+    testCase "and it travels as far as the public lines go" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsTwoHops.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= [ "test.modules.Bit", "test.modules.PassesBit"
+            , "test.modules.PassesOn", "test.modules.GetsTwoHops" ]
+
+  , -- **A public import is its own statement**: @PassesNothingOwn@ writes
+    -- @exporting ( )@ and still passes @Guarded@ on, so what travelled is the
+    -- passed module's exports and not the passer's.
+    testCase "a passer's own list does not filter what it passes on" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsThrough.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= [ "test.modules.Guarded", "test.modules.PassesNothingOwn"
+            , "test.modules.GetsThrough" ]
+
+  , -- **And its own list is still obeyed for its own declarations.**
+    testCase "and its own list still governs its own declarations" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesPasser.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "not in scope: ownThing")
+                               (renderResponse s0 r))
+        _   -> assertFailure (show (map (renderTrouble s0) trouble))
+
+  , -- **The load walk does not read the word**, which is what keeps @public@ an
+    -- attribute rather than a second kind of import: both lists name the same
+    -- modules, and only the resolver's subtraction asks which travelled.
+    testCase "the load walk takes a public import as an import" $ do
+      let src = "module M where\n\npublic import test.modules.Bit\n"
+      case parseSurfaceModule src of
+        Right (_, items) -> do
+          map moduleText (moduleImports items) @?= ["test.modules.Bit"]
+          map moduleText (publicImports items) @?= ["test.modules.Bit"]
+        Left e -> assertFailure (show e)
+
+  , -- **And a plain import is in the first list only.**
+    testCase "and a plain import travels in neither direction" $ do
+      let src = "module M where\n\nimport test.modules.Bit\n"
+      case parseSurfaceModule src of
+        Right (_, items) -> do
+          map moduleText (moduleImports items) @?= ["test.modules.Bit"]
+          publicImports items @?= []
+        Left e -> assertFailure (show e)
+  ]
