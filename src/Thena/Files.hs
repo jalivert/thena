@@ -50,6 +50,8 @@ import Thena.Driver
   , moduleFile
   , moduleLoaded
   , moduleOfFile
+  , moduleDeclared
+  , preludeModule
   , LoadKind (..)
   , parseSurfaceModule
   , loadRuleBases
@@ -100,7 +102,13 @@ loadPrelude s = do
       -- **Silent on success, and the response says which it was.** A module
       -- gives one response, so unlike 'loadFile' there is no output to discard
       -- — there is a name for the thing that happened.
-      (s', ProofLoaded {}) -> (s', [])
+      --
+      -- **And the prelude's declarations are marked as the prelude's** (MS11
+      -- phase 282, @~xdt8c@): every module may reach them without importing
+      -- anything, which is his ruling of 2026-11-05, and the subtraction that
+      -- carries it has to be able to tell them from a name typed at the prompt.
+      -- 'Thena.Driver.preludeModule' says why the name is supplied here.
+      (s', ProofLoaded {}) -> (moduleDeclared preludeModule s s', [])
       (s', resp)           -> (s', [Unloadable path resp])
 
 -- | A session with everything shipped loaded: **the rule base first, then the

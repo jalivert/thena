@@ -240,6 +240,28 @@ data InScope = InScope
     -- @namespace X where { … }@ pushes for its declarations
   , scopeOpens  :: [Opened]
     -- ^ the namespaces an @open@ has brought into view, latest first
+  , scopeConcealed :: [GlobalName]
+    -- ^ __what the environment holds here and a written name may not reach__
+    -- (MS11 phase 282, @~xdt8c@, his ruling of 2026-11-05): a module resolves
+    -- its names against its own imports, its own declarations and the prelude,
+    -- never against the session.
+    --
+    -- **It subtracts, which is what makes a module's own declarations free.**
+    -- The list is the session's declarations that the module did not import,
+    -- taken once when its load begins; everything the module itself declares
+    -- arrives afterwards and so is never in it. An allowed-list would have to
+    -- grow at every declaring op, and there are five of them.
+    --
+    -- **Empty at the prompt** — a line typed there is not a module and is not
+    -- isolated, so it keeps the session, and @notElem@ on an empty list costs
+    -- nothing on the path every name takes.
+    --
+    -- **Here and not beside the environment** because 'globalUnder' is the one
+    -- walk every door calls: the resolver's candidate list and
+    -- 'Thena.Engine.knownTo' are two different answers to /what is declared/
+    -- (one reads two tables, the other four), and writing the subtraction at
+    -- each of them is how a name comes to mean one thing in a surface term and
+    -- another in a command's argument.
   }
   deriving (Eq, Show)
 
@@ -316,13 +338,14 @@ innermostOf sc = case scopeWithin sc of
   ns : _ -> ns
   []     -> []
 
--- | At the root, with nothing opened — a prompt's scope before any @open@.
+-- | At the root, with nothing opened and nothing concealed — a prompt's scope
+-- before any @open@.
 rootScope :: InScope
-rootScope = InScope [] []
+rootScope = InScope [] [] []
 
 -- | Only these namespaces open whole, at the root.
 openingOnly :: [[String]] -> InScope
-openingOnly ps = InScope [] (map openedWhole ps)
+openingOnly ps = InScope [] (map openedWhole ps) []
 
 -- | __Which global a written name means, in a scope.__
 --
@@ -361,12 +384,20 @@ globalUnder
   :: (GlobalName -> Bool) -> InScope -> GlobalName
   -> Either [GlobalName] GlobalName
 globalUnder known sc g =
-  case [ c | ns <- scopeWithin sc ++ [[]], c <- under ns, known c ] of
+  case [ c | ns <- scopeWithin sc ++ [[]], c <- under ns, reaches c ] of
     c : _ -> Right c
-    []    -> case nub (filter known (concatMap opened (scopeOpens sc))) of
+    []    -> case nub (filter reaches (concatMap opened (scopeOpens sc))) of
       [g'] -> Right g'
       gs   -> Left gs
   where
+    -- **A concealed name is not in scope, and the walk goes on past it** (MS11
+    -- phase 282, @~xdt8c@) — see 'scopeConcealed'. So inside @A@, a written @x@
+    -- whose @A.x@ the module did not import reaches the root's @x@ if the module
+    -- declared one, and otherwise is reported /not in scope/, which is what it
+    -- is. **Two concealed names cannot make an ambiguity** either: neither is a
+    -- candidate, so nothing is refused for being written twice over.
+    reaches c = known c && c `notElem` scopeConcealed sc
+
     -- **The whole written name under a prefix**, so @open A@ and a written
     -- @B.c@ tries @A.B.c@.
     --

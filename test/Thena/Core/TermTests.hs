@@ -234,47 +234,47 @@ tests =
 scopeTests :: [TestTree]
 scopeTests =
   [ testCase "a nearer namespace wins outright, and the root is the last rung" $ do
-      globalUnder known (InScope [["A", "B"], ["A"]] []) (named ["Nat"] "Nat")
+      globalUnder known (InScope [["A", "B"], ["A"]] [] []) (named ["Nat"] "Nat")
         @?= Right (named ["A", "B", "Nat"] "Nat")
-      globalUnder known (InScope [["A"]] []) (named ["Nat"] "Nat")
+      globalUnder known (InScope [["A"]] [] []) (named ["Nat"] "Nat")
         @?= Right (named ["A", "Nat"] "Nat")
-      globalUnder known (InScope [] []) (named ["Nat"] "Nat")
+      globalUnder known (InScope [] [] []) (named ["Nat"] "Nat")
         @?= Right (named ["Nat"] "Nat")
 
   , testCase "a declaration's short name answers for the type" $
-      globalUnder known (InScope [] []) (rootName "Nat")
+      globalUnder known (InScope [] [] []) (rootName "Nat")
         @?= Right (named ["Nat"] "Nat")
 
   , -- @Vec.nil@ sits under @A@ and under @A.B@ and nowhere else, so the walk's
     -- rungs all miss and both opens answer.
     testCase "two opens answering one word is refused, not chosen" $
-      globalUnder known (InScope [] [openedWhole ["A"], openedWhole ["A", "B"]])
+      globalUnder known (InScope [] [openedWhole ["A"], openedWhole ["A", "B"]] [])
                   (named ["Vec"] "nil")
         @?= Left [named ["A", "Vec"] "nil", named ["A", "B", "Vec"] "nil"]
 
   , -- **And the walk does not refuse there**, because its rungs are ordered:
     -- the same two prefixes as enclosing namespaces answer with the nearer one.
     testCase "and the same two namespaces, walked, answer with the nearer" $
-      globalUnder known (InScope [["A", "B"], ["A"]] []) (named ["Vec"] "nil")
+      globalUnder known (InScope [["A", "B"], ["A"]] [] []) (named ["Vec"] "nil")
         @?= Right (named ["A", "B", "Vec"] "nil")
 
   , testCase "the shortest ending is what the reader sends back" $ do
-      shortestEnding known (InScope [] []) (named ["Nat"] "Nat") @?= "Nat"
-      shortestEnding known (InScope [] []) (named ["Nat"] "zero") @?= "Nat.zero"
-      shortestEnding known (InScope [] [openedWhole ["Nat"]]) (named ["Nat"] "zero")
+      shortestEnding known (InScope [] [] []) (named ["Nat"] "Nat") @?= "Nat"
+      shortestEnding known (InScope [] [] []) (named ["Nat"] "zero") @?= "Nat.zero"
+      shortestEnding known (InScope [] [openedWhole ["Nat"]] []) (named ["Nat"] "zero")
         @?= "zero"
-      shortestEnding known (InScope [["A", "Nat"]] []) (named ["A", "Nat"] "zero")
+      shortestEnding known (InScope [["A", "Nat"]] [] []) (named ["A", "Nat"] "zero")
         @?= "zero"
 
   , -- **An ending two opens would answer is not short enough**, which falls out
     -- of asking the reader rather than counting steps.
     testCase "and an ambiguous ending is not taken" $
-      shortestEnding known (InScope [] [openedWhole ["A"], openedWhole ["A", "B"]])
+      shortestEnding known (InScope [] [openedWhole ["A"], openedWhole ["A", "B"]] [])
                      (named ["A", "Nat"] "zero")
         @?= "A.Nat.zero"
 
   , testCase "a name nothing answers to prints whole" $
-      shortestEnding (const False) (InScope [] []) (named ["Nat"] "zero")
+      shortestEnding (const False) (InScope [] [] []) (named ["Nat"] "zero")
         @?= "Nat.zero"
   ]
   where

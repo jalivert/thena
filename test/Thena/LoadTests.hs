@@ -19,7 +19,7 @@ import Data.Maybe (isJust)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
-import Data.List (nub)
+import Data.List (isInfixOf, nub)
 
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (Core (..), rootName)
@@ -47,7 +47,10 @@ import Thena.Driver
   , modulesLoaded
   , moduleText
   , declaredByModule
+  , ModuleName
   , moduleDeclaring
+  , preludeModule
+  , concealedFrom
   , newSession
   , oneLine
   , parseSurfaceModule
@@ -92,7 +95,106 @@ tests =
     , testGroup "shadowing is announced (MS10 phase 264)" shadowingTests
     , testGroup "an import graph (MS11 phase 274)" importTests
     , testGroup "a rule base states what it depends on (MS11 phase 276)" baseImportTests
+    , testGroup "a module sees its imports and the prelude (MS11 phase 282)" isolationTests
     ]
+
+-- --------------------------------------------------------------------------
+-- A module resolves against its imports, its own declarations and the
+-- prelude (MS11 phase 282, @~xdt8c@)
+-- --------------------------------------------------------------------------
+
+-- | __His ruling of 2026-11-05, measured from both sides__: what a module may
+-- reach and what it may not.
+--
+-- *"A correct file is correct only if it can be type-checked in isolation
+-- relying only on what it imports and defines."* Every test here would have
+-- passed before the phase — the session held everything — so what each one
+-- pins is the refusal, or that something the ruling keeps did not go with it.
+-- | A module name from text, for a test that knows the text is one.
+named' :: String -> ModuleName
+named' t = case moduleName t of
+  Just m  -> m
+  Nothing -> error ("not a module name: " ++ t)
+
+isolationTests :: [TestTree]
+isolationTests =
+  [ -- **The hack itself, and it is gone.** @Bit@ is in the session and the
+    -- module does not import it, so its names are not this module's to write.
+    testCase "a module does not see a module the session loaded" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
+      case loadProofSource s1 "module Borrower where\n\nb : Bit.Bit\nb = Bit.off\n" of
+        (_, ProofLoaded {}) -> assertFailure "the session's Bit was reachable"
+        (s2, r) -> assertBool (unwords (renderResponse s2 r))
+                              (any (isInfixOf "not in scope: Bit.Bit")
+                                   (renderResponse s2 r))
+
+  , -- **And the import is what repairs it**, through the door that can read
+    -- one: @Pair@ imports @Bit@ and writes @Bit.Bit@, from a fresh session.
+    testCase "and the same names are reachable to a module that imports it" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/Pair.thena"
+      assertBool (show (map (renderResponse s0) out)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.Bit", "test.modules.Pair"]
+
+  , -- **AN IMPORT IS NOT TRANSITIVE** — his ruling of 2026-11-03: @public@ is
+    -- what makes a dependency travel, and until it exists a module's own
+    -- imports stay its own. @OnlyPair@ imports @Pair@, which imports @Bit@, and
+    -- writes @Bit.Bit@: the walk loads all three and the refusal is about the
+    -- name, not about the file.
+    testCase "and not to a module that only imports its importer" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/OnlyPair.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "not in scope: Bit.Bit")
+                               (renderResponse s0 r))
+        _   -> assertFailure (show (map (renderTrouble s0) trouble))
+
+  , -- **The prelude needs no import**, which is what makes it the prelude:
+    -- @UsesPrelude@ imports nothing and writes @Eq@ and @refl@.
+    testCase "the prelude is reachable with nothing imported" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/UsesPrelude.thena"
+      assertBool (show (map (renderResponse s0) out)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.UsesPrelude"]
+
+  , -- **A LINE TYPED AT THE PROMPT IS NOT A MODULE and is not isolated**, so it
+    -- keeps the session — which is what makes the system usable while a file is
+    -- being written. This is the restoration as much as the rule: the
+    -- concealment is lifted when the load ends, and @Bit@ went in through a
+    -- load that had it concealed.
+    testCase "the prompt still reaches everything the session holds" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
+      let (_, r) = oneLine s1 ":infer Bit.off"
+      assertBool (unwords (renderResponse s1 r))
+                 (not (any (isInfixOf "not in scope") (renderResponse s1 r)))
+
+  , -- **The subtraction, read directly.** A module with no imports conceals the
+    -- session's own declarations and nothing else: not the prelude's, which it
+    -- may reach, and not a primitive, which is the language's rather than any
+    -- module's.
+    testCase "the concealment is the session's names, less the prelude's" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
+      let hidden = map nameDotted (concealedFrom [] s1)
+      assertBool (show hidden) ("Bit.Bit" `elem` hidden)
+      assertBool (show hidden) ("Eq.Eq" `notElem` hidden)
+      assertBool (show hidden) ("String" `notElem` hidden)
+
+  , -- **And an import takes its module's names out of it**, generated names
+    -- included: this is the one place the two halves of phase 280's provenance
+    -- meet, and a key recorded under the wrong module would be concealed from
+    -- the file that imports it.
+    testCase "and an import takes that module's names out of it" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
+      let hidden = map nameDotted (concealedFrom [named' "test.modules.Bit"] s1)
+      assertBool (show hidden) ("Bit.Bit" `notElem` hidden)
+      assertBool (show hidden) ("Bit.off" `notElem` hidden)
+  ]
 
 -- --------------------------------------------------------------------------
 -- The forms of @open@ (MS10 phase 254)
@@ -326,7 +428,11 @@ importTests =
       (s1, out, _) <- loadProofFile s0 "test/modules/0unnameable.thena"
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Unnameable"]
       moduleOfFile "test/modules/0unnameable.thena" @?= Nothing
-      assertBool "nothing to remember" (null (modulesLoaded s1))
+      -- **The prelude is the one module a fresh session has remembered** (MS11
+      -- phase 282): it is marked under the name its own header gives it, so
+      -- that every module may reach it without importing anything. So
+      -- /nothing to remember/ is now /nothing but the prelude/.
+      modulesLoaded s1 @?= [preludeModule]
 
   , -- **The header-against-path check, and it is asked HERE ONLY** — his ruling
     -- of 2026-11-05, @~r58qh@. @Misnamed.thena@ declares
@@ -484,11 +590,6 @@ importTests =
         @?= ["test.modules.Bit", "test.modules.Pair"]
   ]
   where
-    -- A module name from text, for a test that knows the text is one.
-    named' t = case moduleName t of
-      Just m  -> m
-      Nothing -> error ("not a module name: " ++ t)
-
     importsOf src = case parseSurfaceModule src of
       Right (_, items) -> map moduleText (moduleImports items)
       Left e           -> error (show e)

@@ -16,11 +16,11 @@
 -- grammar the generator read, so it also checks that the two agree.
 module Thena.SubstitutionTests (tests) where
 
-import Data.List (elemIndex, nub, sort)
+import Data.List (elemIndex, isInfixOf, nub, sort)
 import Data.Maybe (fromMaybe, isNothing)
 
 import Test.Tasty (TestTree, testGroup, withResource)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
   (Gen, counterexample, elements, forAll, ioProperty, listOf, oneof, resize, sized, testProperty, withNumTests, (===))
 
@@ -567,32 +567,41 @@ worked io =
       map (\avoid -> whnf env [] (call env "LC.fresh-x" [Primitive (LString "x"), stringList env avoid]))
           [[], ["y"], ["x"], ["x", "x'"], ["x'", "x"]]
         @?= map (Primitive . LString) ["x", "x", "x'", "x''", "x''"]
-  -- The kernel gap found building this phase: refl at a closed String.
-  , testCase "a module can state a substitution's answer, and refl proves it" $ do
+  , -- The kernel gap found building this phase: refl at a closed String.
+    --
+    -- **Both halves are ONE module with the languages** (MS11 phase 282,
+    -- @~xdt8c@). They were a second module loaded into the session the first
+    -- left, which his ruling of 2026-11-05 no longer lets resolve — and the
+    -- refusal below is why that matters here more than elsewhere: a test that
+    -- asks only /was this refused/ goes green on @not in scope: LC@ and stops
+    -- measuring the capture it was written for.
+    testCase "a module can state a substitution's answer, and refl proves it" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 source
-          (s2, r) = loadProofSource s1 (unlines
-            [ "module Worked where"
-            , ""
+      let (s1, r) = loadProofSource s0 (source ++ unlines
+            [ ""
             , "captured : Eq LC (LC.subst-x (abs \"y\" base (var \"x\")) \"x\" (var \"y\")) (abs \"y'\" base (var \"y\"))"
             , "captured = refl LC (abs \"y'\" base (var \"y\"))"
             , ""
             , "named : Eq String \"a\" \"a\""
             , "named = refl String \"a\""
             ])
-      unwords (renderResponse s2 r) @?= "module Worked   declared captured   declared named"
+      assertBool (unwords (renderResponse s1 r))
+                 ("declared captured   declared named"
+                    `isInfixOf` unwords (renderResponse s1 r))
   , testCase "and a wrong answer is refused" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 source
-          (_, r) = loadProofSource s1 (unlines
-            [ "module Wrong where"
-            , ""
+      let (_, r) = loadProofSource s0 (source ++ unlines
+            [ ""
             , "captured : Eq LC (LC.subst-x (abs \"y\" base (var \"x\")) \"x\" (var \"y\")) (abs \"y\" base (var \"y\"))"
             , "captured = refl LC (abs \"y\" base (var \"y\"))"
             ])
       case r of
         ProofLoaded {} -> assertFailure "a capturing answer was accepted"
-        _ -> pure ()
+        -- **And refused for the right reason.** The two sides of this pair are
+        -- a module apart from each other in meaning and one line apart in text,
+        -- so a refusal that named a scope error would mean nothing.
+        _ -> assertBool (unwords (renderResponse s0 r))
+                        (not (any (isInfixOf "not in scope") (renderResponse s0 r)))
   ]
   where
     subst what t x n want = testCase what $ do

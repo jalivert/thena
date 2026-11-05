@@ -24,3 +24,13 @@ one from a lucky one.
 because the match is only asked on the way in. `0unnameable.thena` is the other
 half of that: a path that is no module name at all, so its header is never
 compared with anything.
+
+**Four of them are MS11 phase 282's**, his ruling of 2026-11-05 that a module resolves
+against its own imports, its own declarations and the prelude. `UsesPrelude.thena`
+imports nothing and writes `Eq` and `refl`, so the prelude needs no import.
+`OnlyPair.thena` imports `Pair`, which imports `Bit`, and writes `Bit.Bit`: it is
+refused, because an import is not transitive until `public import` exists.
+`Metavars.thena` and `BorrowsMetavars.thena` are a pair `Thena.GrammarTests` reads —
+one declares a language, the other imports it and borrows its metavariable, writing its
+own `open` rather than inheriting one. Before the phase that pair was two module
+sources loaded into one session, which measured the session and not the import.

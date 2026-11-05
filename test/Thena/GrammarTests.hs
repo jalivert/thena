@@ -20,7 +20,7 @@ module Thena.GrammarTests (tests) where
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (Core (..), GlobalName (..), rootName, nameDotted)
 import Thena.Declared (declaredAs, named)
@@ -42,7 +42,7 @@ import Thena.Global.Env (isDeclared)
 import Thena.Language.Grammar
 import Thena.Language.Reader
 import Thena.Language.Regex (Regex, parseRegex)
-import Thena.Files (startingSession)
+import Thena.Files (startingSession, loadProofFile)
 import Thena.Render (renderTrouble, renderResponse)
 import Thena.Syntax.Lexer
   (BlockKind (..), Located (..), Token (..), isIdentifier, lexModule, lexTokens)
@@ -880,12 +880,19 @@ meaning =
           names @?= ["x", "X", "P", "L"]
           ws @?= []
         (_, other) -> assertFailure (show other)
-  , testCase "a later module may use an earlier one's metavariables" $ do
+    -- **A module may use another's metavariables, and the import is what makes
+    -- it so** (MS11 phase 282, @~xdt8c@, his ruling of 2026-11-05). It was two
+    -- module /sources/ loaded into one session, and what made @M@ reachable was
+    -- that the session happened to hold the language declaring it — the hack
+    -- that ruling removes. The pair on disc says it properly, and
+    -- @BorrowsMetavars.thena@ writes its own @open@ rather than inheriting the
+    -- one the first module wrote.
+  , testCase "a module may use an imported module's metavariables" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 stlc
-      case loadProofSource s1 "module More where\n\nlanguage P, Q where\n  tuple -> ( M , T )\n" of
-        (_, ProofLoaded {}) -> pure ()
-        (_, other) -> assertFailure (show other)
+      (_, out, trouble) <- loadProofFile s0 "test/modules/BorrowsMetavars.thena"
+      assertBool (show (map (renderResponse s0) out)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.Metavars", "test.modules.BorrowsMetavars"]
   -- Written out a second time: a name DROPPED from 'builtInTags' would pass
   -- the walk in 'refused' by disappearing from it.
   , testCase "the built-in tags are exactly these two" $
@@ -1149,14 +1156,20 @@ notating =
             @?= [[ Argument "a" (OfLanguage (rootName "C")) Plain
                  , Argument "b" (OfLanguage (rootName "C")) Plain ]]
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
+    -- **The term is written in the same module as the block** (MS11 phase 282,
+    -- @~xdt8c@). It was a second module loaded into the session the first one
+    -- left, which his ruling of 2026-11-05 no longer lets resolve: a module
+    -- reaches what it imports and what it declares, and nothing here is about
+    -- modules — it is about a notation elaborating to its function.
   , testCase "and a term is written in it, and reduces to the constructors" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 (joiningWith "notation C where\n  join a b -> a \8746 b")
       -- @join a b = a@, so the right-hand context is dropped: the notation
       -- elaborated to the function and the function ran.
-      case loadProofSource s1
-             ("module Joined where\n\nj : Eq C C`\183 , x : o \8746 \183` (ext e \"x\" base)\n"
-                ++ "j = refl C (ext e \"x\" base)\n") of
+      case loadProofSource s0
+             (joiningWith
+                ("notation C where\n  join a b -> a \8746 b\n\n"
+                   ++ "j : Eq C C`\183 , x : o \8746 \183` (ext e \"x\" base)\n"
+                   ++ "j = refl C (ext e \"x\" base)")) of
         (_, ProofLoaded {}) -> pure ()
         (s2, other) -> assertFailure (unlines (renderResponse s2 other))
     -- **Nothing the context generated moves** (MS8 phase 158): the datatype and
@@ -1179,22 +1192,21 @@ notating =
     -- @its premises `Γ , X <: T , Δ ⊢ T <: S` do not parse: unexpected 'Δ'@.
   , testCase "a judgment rule writes it in an index position" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 (joiningWith "notation C where\n  join a b -> a \8746 b")
-      case loadProofSource s1
-             (unlines
-                [ "module Split where"
-                , ""
-                , "judgment sub = G \8866 T <: S where"
-                , "  S-refl:"
-                , "    ----------"
-                , "    G \8866 T <: T"
-                , ""
-                , "  S-split:"
-                , "    G \8746 D \8866 T <: S"
-                , "    -----------------"
-                , "    G \8866 T <: S"
-                ]) of
-        (_, ProofLoaded _ names _ _) -> names @?= ["sub"]
+      -- One module, for the reason the test above it gives.
+      case loadProofSource s0
+             (joiningWith
+                ("notation C where\n  join a b -> a \8746 b\n\n" ++ unlines
+                   [ "judgment sub = G \8866 T <: S where"
+                   , "  S-refl:"
+                   , "    ----------"
+                   , "    G \8866 T <: T"
+                   , ""
+                   , "  S-split:"
+                   , "    G \8746 D \8866 T <: S"
+                   , "    -----------------"
+                   , "    G \8866 T <: S"
+                   ])) of
+        (_, ProofLoaded _ names _ _) -> names @?= ["x", "Ty", "C", "join", "sub"]
         (s2, other) -> assertFailure (unlines (renderResponse s2 other))
   ]
 

@@ -581,12 +581,19 @@ file's meaning depended on what a considerate user had loaded first. No language
 works that way and Thena will not.
 
 **So a module's whole view is its imports, its own declarations and the prelude.**
-Decided 2026-11-05. Nothing else a session happens to be holding is reachable, however
-it got there — another file somebody loaded first, or a definition typed at the prompt.
-The test a file has to pass is that **it type-checks in isolation**, and that is what
-makes a module that type-checks for its author type-check for whoever imports it.
-Nineteen files in the shipped `examples/` relied on the old flat scope and were fixed
-rather than accommodated.
+Decided 2026-11-05, built MS11 phase 282. Nothing else a session happens to be holding
+is reachable, however it got there — another file somebody loaded first, or a definition
+typed at the prompt. The test a file has to pass is that **it type-checks in
+isolation**, and that is what makes a module that type-checks for its author type-check
+for whoever imports it. Nineteen files in the shipped `examples/` relied on the old flat
+scope and were fixed rather than accommodated.
+
+**The prelude needs no import** — it is the one module every other one may reach, so
+`Eq` and `refl` are there whatever you wrote; `import Prelude` is allowed and does
+nothing. **The prompt is not a module**: a line you type reaches everything the session
+holds, which is what lets you poke at a module you have just loaded. **A file you
+`:load` by path is still a module** and is held to the same rule, so a file that loads
+on its own will load for anyone.
 
 **`public` is how a dependency travels, and only `public`.** `public import` and
 `public consult` republish what they bring in: **when, and only when, the file you

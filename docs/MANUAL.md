@@ -1464,6 +1464,19 @@ What a file imports is the file's own business, and so is what it consults: a
 module you import is elaborated against *its* rule bases, not yours, which is what
 makes a file that works on its own work for whoever imports it.
 
+**And a file reaches nothing else the session happens to hold.** What a module may
+write is what it imported, what it declares itself, and the prelude. So a definition
+you made at the prompt, or a module you loaded by hand an hour ago, is not in scope
+inside a file — you get `not in scope`, the same as if it had never been declared.
+Nor is what your own imports imported: if `Pair` imports `Bit` and you import `Pair`,
+`Bit`'s names are not yours to write, and a second `import` line is how you say you
+want them. The rule is one sentence — **a file is correct on its own or not at all**
+— and it is what makes a file you send someone a file that loads.
+
+**The prompt is the exception, deliberately.** A line you type is not a file anybody
+will load again, so it reaches everything the session holds, the module you have just
+loaded included — which is how you poke at one.
+
 > **Not narrowed yet.** Everything an imported module declared is reachable. Saying
 > which names a file *offers* — an `exporting` list on the header, and
 > `public import` for passing a dependency on — is designed and not built.

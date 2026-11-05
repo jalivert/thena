@@ -56,6 +56,9 @@ module Thena.Driver
   , modulesLoaded
   , moduleDeclaring
   , declaredByModule
+  , moduleDeclared
+  , preludeModule
+  , concealedFrom
   , RuleFileError (..)
   , InstralTypeError
   , loadRuleBases
@@ -143,7 +146,7 @@ import Thena.Errors
 import Thena.Development.Validate (revalidate)
 -- | Qualified for one name: 'Env.declaredNames' is the environment's keys and
 -- the 'declaredNames' below is an item's, and the two are different questions.
-import qualified Thena.Global.Env as Env (declaredNames)
+import qualified Thena.Global.Env as Env (declaredNames, primitives)
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..), declare)
 
 import Thena.Kernel (certify)
@@ -1789,12 +1792,31 @@ loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
 --
 -- **A failed load restores the pool with everything else**, since 'rolledBack'
 -- puts the session back as it stood.
+--
+-- **AND THE SESSION'S OTHER NAMES ARE CONCEALED FOR THE LENGTH OF THE LOAD**
+-- (MS11 phase 282, @~xdt8c@, his ruling of 2026-11-05) — the same move as the
+-- pool, for the same reason, now made for names: what the module may reach is
+-- the prelude, what it imported and what it declares as it goes, and nothing
+-- else the session happens to hold. 'concealedFrom' works out the subtraction
+-- and 'Thena.Core.Term.scopeConcealed' says why it is a subtraction.
 loadProofItemsConsulting :: [RuleBase] -> Session -> String -> [Item] -> (Session, Response)
 loadProofItemsConsulting pool s nm items =
-    let machine  = (sessionMachine s) { rules = pool }
+    let machine  = (sessionMachine s)
+                     { rules = pool
+                     , scope = (scope (sessionMachine s))
+                                 { scopeConcealed = concealedFrom (moduleImports items) s }
+                     }
         (is, n1) = surfaceProgram (names machine) items
-        -- The pool the session had, put back the moment the module is in.
-        poolBack s'' = s'' { sessionMachine = (sessionMachine s'') { rules = rules (sessionMachine s) } }
+        -- The pool the session had, put back the moment the module is in, and
+        -- the concealment lifted with it. **The @open@s the module left are
+        -- kept**, which is what they did before this phase: only the one field
+        -- goes back, not the whole scope.
+        poolBack s'' = s'' { sessionMachine = (sessionMachine s'')
+                               { rules = rules (sessionMachine s)
+                               , scope = (scope (sessionMachine s''))
+                                           { scopeConcealed =
+                                               scopeConcealed (scope (sessionMachine s)) }
+                               } }
         -- **No block is checked before the module runs** (MS6 phase 104b).
         -- Every one of them is resolved, validated and typed where the program
         -- reaches it, in the environment that exists there —
@@ -1869,24 +1891,77 @@ loadProofModules s0 = go s0 []
         -- declarations back; this takes the closure's with them.
         (s', bad)                -> (rolledBack s0 s', Left (m, bad))
 
-    -- **The names are read off the two environments, not off the items** (MS11
-    -- phase 280): what a @data@ block generates arrives during elaboration and
-    -- is as much the module's as what it wrote.
     marked _      Nothing  s = s
-    marked before (Just n) s
-      | moduleLoaded n s = s
-      | otherwise =
-          s { sessionLoaded     = n : sessionLoaded s
-            , sessionDeclaredBy = (n, arrived before s) : sessionDeclaredBy s
-            }
+    marked before (Just n) s = moduleDeclared n before s
 
+-- | __Which module these declarations are__ (MS11 phase 280).
+--
+-- **The names are read off the two environments, not off the items**: what a
+-- @data@ block generates arrives during elaboration and is as much the module's
+-- as what it wrote. So this is handed the session before the load and the
+-- session after it, and the difference is the module's.
+--
+-- **Lifted out of 'loadProofModules' at phase 282** because the prelude is
+-- marked too and 'Thena.Files.loadPrelude' is what knows it is loading the
+-- prelude — see 'preludeModule'.
+moduleDeclared :: ModuleName -> Session -> Session -> Session
+moduleDeclared n before after
+  | moduleLoaded n after = after
+  | otherwise =
+      after { sessionLoaded     = n : sessionLoaded after
+            , sessionDeclaredBy = (n, arrived) : sessionDeclaredBy after
+            }
+  where
     -- **Deduplicated, because 'Env.declaredNames' is four tables concatenated**
     -- and a constructor is in two of them: a key naming its module twice would
     -- make any count taken off this list wrong.
-    arrived before after =
+    arrived =
       let had = Env.declaredNames (globals (sessionMachine before))
        in nub (filter (`notElem` had)
                       (Env.declaredNames (globals (sessionMachine after))))
+
+-- | __The one module every other may reach without importing it__ (MS11 phase
+-- 282, @~xdt8c@, his ruling of 2026-11-05).
+--
+-- **The prelude is a module and this is the name its own header gives it** —
+-- @prelude\/prelude.thena@ begins @module Prelude where@. So /a module resolves
+-- against its own imports, its own declarations and the prelude/ needs no third
+-- kind of visibility: the prelude is an implicit import, and 'concealedFrom'
+-- puts it beside the written ones. A file that writes @import Prelude@ finds it
+-- already loaded and the import costs nothing.
+--
+-- **It is named here rather than read off the file** because the subtraction
+-- has to know which of the session's declarations are the prelude's before any
+-- file has said anything, and the prelude is reached by a data-file path and so
+-- has no name of its own to be marked by: 'Thena.Files.loadPrelude' marks it
+-- with this one.
+preludeModule :: ModuleName
+preludeModule = ModuleName ["Prelude"]
+
+-- | __What a module being loaded may not reach__ (MS11 phase 282, @~xdt8c@).
+--
+-- Everything the session's environment already holds, less the prelude's and
+-- less the declarations of the modules this one imports. **Not transitive**:
+-- what an imported module itself imported stays its own until @public import@
+-- exists (his ruling of 2026-11-03), so a file states every module it refers
+-- to, which is the convention the corpus was put on at phase 281.
+--
+-- **A primitive is never concealed.** @String@ and @String.eq@ are the
+-- language's own constants rather than any module's — @declare-primitive@
+-- installs them and no @import@ could name them — so a file that could not
+-- write them would be a file whose correctness depended on who loaded it, which
+-- is the very thing the ruling removes.
+--
+-- **The prompt gets no concealment at all**: nothing calls this for a typed
+-- line, and 'Thena.Core.Term.rootScope' conceals nothing.
+concealedFrom :: [ModuleName] -> Session -> [GlobalName]
+concealedFrom ims s =
+  nub [ g | g <- Env.declaredNames env
+          , g `notElem` map fst (Env.primitives env)
+          , g `notElem` visible ]
+  where
+    env     = globals (sessionMachine s)
+    visible = concatMap (`declaredByModule` s) (preludeModule : ims)
 
 -- | A module read off the disc and ready to elaborate (MS11 phase 274).
 --
