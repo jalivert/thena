@@ -1542,6 +1542,25 @@ The short `Tri` comes along with the type because it is a shorthand *for* the ty
 **Leave the clause out and everything is exported**, which is what every file did
 before this existed. `exporting ( )` says something else: this file exports nothing.
 
+**Or keep one thing back and list nothing.** `private` in front of a declaration says
+it is yours:
+
+```
+module Kept where
+
+data Shown : Type₀ where
+  yes : Shown
+  no : Shown
+
+private helper : Shown -> Shown
+helper = λ s -> s
+```
+
+Write `Shown.yes` from another file and it is there; write `helper` and it is not. In
+front of a signature it covers the equation under it and stops there; in front of a
+`data` declaration it keeps the whole namespace back, constructors and eliminator
+included.
+
 **Your own file always sees all of itself**, and so does the prompt — after loading
 `Bits` you can still `:infer flip`. What the list changes is only what *another file*
 may name.

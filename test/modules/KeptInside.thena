@@ -1,0 +1,12 @@
+-- **A `private` inside a `namespace` block names the key that landed** (MS11
+-- phase 286): the declaration is `A.hid`, so that is what is kept back, and the
+-- walk that collects the marks carries the enclosing prefix exactly as the one
+-- that reports what a file declared does.
+module test.modules.KeptInside where
+
+namespace A where
+  shown : Type₁
+  shown = Type₀
+
+  private hid : Type₁
+  hid = Type₀

@@ -225,6 +225,12 @@ tokens :-
   -- is reserved for @data@'s reason, and @~wpwz3@ on the closeout list is what
   -- taking the words costs and is his.
   "exporting"   { keyword TExporting }
+  -- **Reserved at MS11 phase 286**, for @private ‹declaration›@ — the
+  -- fine-grained escape his ruling of 2026-10-30 took along with the header
+  -- list, so that a file need not spell its whole interface out to keep one
+  -- helper back. **The eleventh word to narrow identifiers project-wide**, on
+  -- @~wpwz3@ with the rest.
+  "private"     { keyword TPrivate }
   -- **Reserved at MS10 phase 254**, for @namespace ‹name› where { … }@ — the
   -- fifth word to narrow identifiers project-wide. His ruling of 2026-10-30
   -- costed it with the partition and took it: a namespace that is declared,
@@ -356,6 +362,7 @@ data Token
   | TConsult     -- ^ @consult@, the declaration that names a rule base (MS11 phase 273)
   | TImport      -- ^ @import@, the declaration that names a surface module (MS11 phase 274)
   | TExporting   -- ^ @module X exporting ( … ) where@, a file's interface (MS11 phase 285)
+  | TPrivate     -- ^ @private ‹declaration›@, kept out of the interface (MS11 phase 286)
   | TNamespace   -- ^ @namespace ‹name› where { … }@ (MS10 phase 254)
   | THiding      -- ^ @open X hiding ( … )@ (MS10 phase 254)
   | TRenaming    -- ^ @open X renaming ( e -> c )@ (MS10 phase 254)

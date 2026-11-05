@@ -1,0 +1,8 @@
+-- **Its neighbour in the same block came** (MS11 phase 286): a `private` marks
+-- one declaration and says nothing about the block it sits in.
+module test.modules.SeesInside where
+
+import test.modules.KeptInside
+
+mine : Type₁
+mine = A.shown

@@ -111,7 +111,7 @@ loadPrelude s = do
       -- 'Thena.Driver.preludeModule' says why the name is supplied here.
       -- **No export list**: the prelude states no interface, so everything it
       -- declares is reachable from every module (MS11 phase 285).
-      (s', ProofLoaded {}) -> (moduleDeclared preludeModule Nothing s s', [])
+      (s', ProofLoaded {}) -> (moduleDeclared preludeModule (Nothing, []) s s', [])
       (s', resp)           -> (s', [Unloadable path resp])
 
 -- | A session with everything shipped loaded: **the rule base first, then the

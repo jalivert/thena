@@ -51,6 +51,7 @@ import Thena.Driver
   , exportedByModule
   , exports
   , moduleExporting
+  , privateIn
   , ModuleName
   , moduleDeclaring
   , preludeModule
@@ -105,6 +106,7 @@ tests =
     , testGroup "a file does not end its own opens (MS11 phase 283)" openIsolationTests
     , testGroup "import and consult at the prompt (MS11 phase 284)" promptActTests
     , testGroup "a header states the file's interface (MS11 phase 285)" exportTests
+    , testGroup "a declaration may be the file's own (MS11 phase 286)" privateTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -1923,3 +1925,109 @@ moduleExporting' src = case parseSurfaceModule src of
 -- | A name with steps, for 'exports'.
 named'' :: [String] -> String -> GlobalName
 named'' = GlobalName
+
+-- --------------------------------------------------------------------------
+-- A declaration may be the file's own (MS11 phase 286, @~jmw4k@)
+-- --------------------------------------------------------------------------
+
+-- | __@private ‹declaration›@, the fine-grained escape from the header list.__
+--
+-- **Paired like the tests above, and for the same reason**: the fixture that
+-- must load and the one that must be refused differ by which name they write,
+-- so a deny-list that denied everything would fail the first and one that
+-- denied nothing would pass the second.
+privateTests :: [TestTree]
+privateTests =
+  [ -- **A file with no clause still exports what it did not mark**: @Kept@
+    -- states no interface, and @Shown@ comes whole.
+    testCase "a file with no clause exports what it did not mark" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/SeesKept.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.Kept", "test.modules.SeesKept"]
+
+  , -- **And not what it did mark.**
+    testCase "and a private declaration is not an importer's to name" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesKept.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "not in scope: helper")
+                               (renderResponse s0 r))
+        _   -> assertFailure (show (map (renderTrouble s0) trouble))
+
+  , -- **A GENERATED NAME INHERITS THE MARK AND NOTHING ENUMERATES ONE**, which
+    -- is the whole reason the unit is the namespace: @private data Hidden@ keeps
+    -- @Hidden.Hidden@, @Hidden.secret@ and @Hidden.elim@ back together.
+    testCase "a private datatype keeps its whole namespace back" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesKeptData.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "not in scope: Hidden.Hidden")
+                               (renderResponse s0 r))
+        _   -> assertFailure (show (map (renderTrouble s0) trouble))
+
+  , -- **The mark names the key that LANDED**, so the walk that collects it
+    -- carries the enclosing namespace: @private hid@ inside @namespace A@ is
+    -- @A.hid@, and a walk that forgot the prefix would mark a key that does not
+    -- exist and deny nothing.
+    testCase "a private inside a namespace block names the key that landed" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesInside.thena"
+      case out of
+        [r] -> assertBool (unwords (renderResponse s0 r))
+                          (any (isInfixOf "not in scope: A.hid")
+                               (renderResponse s0 r))
+        _   -> assertFailure (show (map (renderTrouble s0) trouble))
+
+  , -- **And it says nothing about the block it sits in**: its neighbour came.
+    testCase "and its neighbour in the same block still comes" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/SeesInside.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.KeptInside", "test.modules.SeesInside"]
+
+  , -- **A MARK AND NOT A SCOPE.** @Kept@'s own @helper@ is written in terms of
+    -- @Shown@ and the file loads, and the names it declares are all reported as
+    -- declared: @private@ changes who may name a thing and nothing else.
+    testCase "a private declaration is declared, and the module may use it" $ do
+      (s0, _) <- startingSession
+      (s1, out, trouble) <- loadProofFile s0 "test/modules/Kept.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      let m = named' "test.modules.Kept"
+          itDeclared = map nameDotted (declaredByModule m s1)
+          itExported = map nameDotted (exportedByModule m s1)
+      assertBool (show itDeclared) ("helper" `elem` itDeclared)
+      assertBool (show itExported) ("helper" `notElem` itExported)
+      assertBool (show itExported) ("Shown.yes" `elem` itExported)
+      assertBool (show out) (not (null out))
+
+  , -- **And the prompt reaches it**, as it reaches everything the session holds.
+    testCase "the prompt reaches a private declaration" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Kept.thena"
+      let (_, r) = oneLine s1 ":infer helper"
+      assertBool (unwords (renderResponse s1 r))
+                 (not (any (isInfixOf "not in scope") (renderResponse s1 r)))
+
+  , -- **The mark reaches the equation under the signature**, which is what
+    -- makes @private@ take a /declaration/ and not a line: a walk that marked
+    -- only the signature would leave the definition exported.
+    testCase "a private before a signature covers its equation" $
+      privateIn' "module M where\n\nprivate x : Type₁\nx = Type₀\n"
+        @?= ["x"]
+
+  , -- **And it is one declaration and not the rest of the file.**
+    testCase "and it stops at that one declaration" $
+      privateIn' "module M where\n\nprivate x : Type₁\nx = Type₀\n\ny : Type₁\ny = Type₀\n"
+        @?= ["x"]
+  ]
+
+-- | The private names a module's source marks, for the tests above.
+privateIn' :: String -> [String]
+privateIn' src = case parseSurfaceModule src of
+  Right (_, items) -> map nameDotted (privateIn items)
+  Left e           -> error (show e)

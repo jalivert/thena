@@ -43,7 +43,7 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | a tagged literal's fence | `` ` `` |
 | spell nothing, and stay reserved | `⌜` `⌝` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `private` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -742,6 +742,25 @@ nor `Tri.elim`.
 
 **No clause at all exports everything**, which is what every file did before this
 existed. `exporting ( )` is a different statement: a file that exports nothing.
+
+**And one declaration can be kept back without listing the rest.** `private` in front
+of a declaration says it is the file's own:
+
+```
+module Kept where                    -- no list: everything is exported
+
+data Shown : Type₀ where
+  yes : Shown
+  no : Shown
+
+private helper : Shown -> Shown      -- except this
+helper = λ s -> s
+```
+
+It goes in front of a signature and covers the equation under it, and in front of a
+`data` declaration it keeps the whole namespace back — constructors, eliminator, and
+anything Thena generated into it. It is a mark, not a scope: `Kept` uses `helper`
+normally, and so can you at the prompt.
 
 **Two things it is not.** Your own file is never narrowed by its own list — `Bits`
 above uses `Bit.on` freely — and the prompt is never narrowed by anybody's, so after

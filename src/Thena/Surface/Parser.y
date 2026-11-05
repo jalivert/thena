@@ -86,6 +86,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   consult { Located _ TConsult }
   import  { Located _ TImport }
   exporting { Located _ TExporting }
+  private { Located _ TPrivate }
   namespace { Located _ TNamespace }
   hiding  { Located _ THiding }
   renaming { Located _ TRenaming }
@@ -327,6 +328,12 @@ Decl :: { SurfaceDecl }
   -- composes with any of them.
   | open OpenHead                          { SurfaceOpen (fst $2) (snd $2) }
   | open OpenHead in Decl                  { SurfaceOpenIn (fst $2) (snd $2) $4 }
+  -- **The fine-grained escape from the header list** (MS11 phase 286, his
+  -- ruling of 2026-10-30). It takes a declaration the way @open … in@ does, so
+  -- a @private@ in front of a signature covers the equation under it too, and
+  -- it marks rather than scopes: nothing about where the declaration lands or
+  -- what it may see changes.
+  | private Decl                           { SurfacePrivate $2 }
   -- **What this file's proofs are searched against** (MS11 phase 273, his ruling
   -- of 2026-11-03). It names a /file/ and not a namespace, which is why it takes
   -- a @QName@ and means something else by it: the steps are directories.

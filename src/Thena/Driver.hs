@@ -58,6 +58,8 @@ module Thena.Driver
   , declaredByModule
   , exportedByModule
   , moduleExporting
+  , privateIn
+  , interfaceOf
   , exports
   , openedByModule
   , moduleDeclared
@@ -411,6 +413,13 @@ data Session = Session
     --
     -- **An entry only where there is a module name to key it by**, and **not in
     -- a 'Snapshot'**, both for 'sessionDeclaredBy''s reasons.
+  , sessionPrivateIn :: [(ModuleName, [GlobalName])]
+    -- ^ __Which of each module's declarations it kept to itself__ (MS11 phase
+    -- 286, @~jmw4k@) — what its @private@ declarations named.
+    --
+    -- **A deny-list beside 'sessionExporting''s allow-list, and the same test
+    -- reads both**: 'exports' asks whether a name is under any entry, and
+    -- 'exportedByModule' takes the allow-list and then subtracts this.
   , sessionExporting :: [(ModuleName, [GlobalName])]
     -- ^ __The @exporting ( … )@ clause of each module that stated one__ (MS11
     -- phase 285, @~jmw4k@).
@@ -678,6 +687,7 @@ newSession = Session
   , sessionParsing   = Nothing
   , sessionAsking    = Nothing
   , sessionLoaded    = []
+  , sessionPrivateIn  = []
   , sessionExporting  = []
   , sessionDeclaredBy = []
   , sessionOpenedBy  = []
@@ -1432,6 +1442,16 @@ data Item
     -- 'ItemConsult'\'s twin, and like it, it declares nothing and runs nothing:
     -- what it does happens before this module\'s program does, when the load
     -- collects every one of them and elaborates each named module first.
+  | ItemPrivate [Item]
+    -- ^ @private ‹declaration›@ (MS11 phase 286, @~jmw4k@) — **the declaration
+    -- is the file's own**, and no module that imports this one may name what it
+    -- declares.
+    --
+    -- **A list of items because a declaration is one item here**, which is
+    -- 'ItemOpenIn'\'s shape; the difference is that this one is a mark and not a
+    -- scope, so 'surfaceProgram' emits the inner program and nothing around it.
+    -- Where the declaration lands, what it sees and what it generates are
+    -- untouched — 'privateIn' is the only thing that reads it.
   | ItemExporting [GlobalName]
     -- ^ @module X exporting ( … ) where@ (MS11 phase 285, @~jmw4k@) — **the
     -- file's interface**, as his ruling of 2026-10-30 attached it: one place per
@@ -1489,6 +1509,12 @@ regroup = go
     one (SurfaceOpenIn ns spec d : rest) = do
       (is, rest') <- one (d : rest)
       Right ([ItemOpenIn [ opened spec (ps ++ [x]) | (ps, x) <- ns ] is], rest')
+    -- **The same walk, for the same reason** (MS11 phase 286): @private@ before
+    -- a signature covers the equation under it, because this is the pass that
+    -- knows where one declaration ends.
+    one (SurfacePrivate d : rest) = do
+      (is, rest') <- one (d : rest)
+      Right ([ItemPrivate is], rest')
     -- **The declarations inside are regrouped by the same pass** (MS10 phase
     -- 254), so a signature and its equation pair inside a namespace exactly as
     -- they do outside one, and nesting needs nothing of its own.
@@ -1586,6 +1612,10 @@ surfaceProgram n0 items = foldl (item []) ([], n0) items
   -- **The opens go on, the declaration runs, the opens come off** (MS10 phase
   -- 254) — the same shape a @namespace@ block compiles to, which is what makes
   -- @open X in@ need nothing of its own beyond the op that pops.
+  -- **The inner program and nothing around it** (MS11 phase 286). @private@ is
+  -- a mark on a declaration, not a scope: it changes who may name the result and
+  -- not how the result is built, so there is no op to emit.
+  item ns (acc, n) (ItemPrivate is) = foldl (item ns) (acc, n) is
   item ns (acc, n) (ItemOpenIn os is) =
     let (inner, n1) = foldl (item ns) ([], n) is
      in ( acc ++ [ Do (Open o) | o <- os ] ++ inner
@@ -2006,7 +2036,7 @@ loadProofModules s0 = go s0 []
 
     marked _ _      Nothing  s = s
     marked m before (Just n) s =
-      moduleDeclared n (moduleExporting (readModuleItems m)) before s
+      moduleDeclared n (interfaceOf (readModuleItems m)) before s
 
 -- | __Which module these declarations are__ (MS11 phase 280).
 --
@@ -2026,8 +2056,8 @@ loadProofModules s0 = go s0 []
 -- thing here that is read off the items rather than off the two environments,
 -- because an export list names declarations rather than making any:
 -- 'moduleExporting' is what the caller passes.
-moduleDeclared :: ModuleName -> Maybe [GlobalName] -> Session -> Session -> Session
-moduleDeclared n es before after
+moduleDeclared :: ModuleName -> (Maybe [GlobalName], [GlobalName]) -> Session -> Session -> Session
+moduleDeclared n (es, priv) before after
   | moduleLoaded n after = after
   | otherwise =
       after { sessionLoaded     = n : sessionLoaded after
@@ -2035,6 +2065,7 @@ moduleDeclared n es before after
             , sessionOpenedBy   = (n, left) : sessionOpenedBy after
             , sessionExporting  = maybe id (\e -> ((n, e) :)) es
                                     (sessionExporting after)
+            , sessionPrivateIn  = (n, priv) : sessionPrivateIn after
             }
   where
     -- **Deduplicated, because 'Env.declaredNames' is four tables concatenated**
@@ -2202,11 +2233,24 @@ declaredByModule n s = concat [ gs | (m, gs) <- sessionDeclaredBy s, m == n ]
 -- of visibility, and keeping both is what lets a goal say where a name came from
 -- even when the reader may not write it.
 exportedByModule :: ModuleName -> Session -> [GlobalName]
-exportedByModule n s = filter (exports clause) (declaredByModule n s)
+exportedByModule n s =
+  [ g | g <- declaredByModule n s, exports clause g, not (exports deny g) ]
   where
     clause = case [ es | (m, es) <- sessionExporting s, m == n ] of
       es : _ -> Just es
       []     -> Nothing
+    -- **@Just@ even when empty**, because 'exports' of @Nothing@ is /everything/
+    -- and this is a deny-list: a module with no @private@ declaration denies
+    -- nothing, which @Just []@ says and @Nothing@ would invert.
+    deny = Just (concat [ gs | (m, gs) <- sessionPrivateIn s, m == n ])
+
+-- | __What a module's items say its interface is__ (MS11 phase 286).
+--
+-- The header's @exporting@ clause and its @private@ declarations, which are the
+-- two halves of his ruling of 2026-10-30 — (a) with (c) as the fine-grained
+-- escape — and the pair 'moduleDeclared' records.
+interfaceOf :: [Item] -> (Maybe [GlobalName], [GlobalName])
+interfaceOf items = (moduleExporting items, privateIn items)
 
 -- | Every @open@ a module left in force, where one did (MS11 phase 283,
 -- @~w46f8@).
@@ -2238,6 +2282,9 @@ declaredNames = go []
     go ns (ItemNamespace g is) =
       concatMap (go (ns ++ nameSteps g ++ [nameWord g])) is
     go ns (ItemOpenIn _ is) = concatMap (go ns) is
+    -- **A private declaration is still declared**, and the summary says so: the
+    -- file declared it and this module may use it (MS11 phase 286).
+    go ns (ItemPrivate is)  = concatMap (go ns) is
     go ns i = [ intercalate "." (ns ++ [n]) | Just n <- [declaredName i] ]
 
 -- | How many top-level blocks an item holds, for the summary's count.
@@ -2246,6 +2293,7 @@ blocksIn i = case i of
   ItemBlock _        -> 1
   ItemNamespace _ is -> sum (map blocksIn is)
   ItemOpenIn _ is    -> sum (map blocksIn is)
+  ItemPrivate is     -> sum (map blocksIn is)
   _                  -> 0
 
 -- | Every rule base this module consults, in written order (MS11 phase 273).
@@ -2262,6 +2310,7 @@ moduleConsults = concatMap go
       ItemConsult m      -> [m]
       ItemNamespace _ is -> moduleConsults is
       ItemOpenIn _ is    -> moduleConsults is
+      ItemPrivate is     -> moduleConsults is
       _                  -> []
 
 -- | Every surface module this one imports, in written order (MS11 phase 274).
@@ -2278,6 +2327,7 @@ moduleImports = concatMap go
       ItemImport m       -> [m]
       ItemNamespace _ is -> moduleImports is
       ItemOpenIn _ is    -> moduleImports is
+      ItemPrivate is     -> moduleImports is
       _                  -> []
 
 -- | __What this module says its interface is__ (MS11 phase 285, @~jmw4k@).
@@ -2295,6 +2345,36 @@ moduleExporting :: [Item] -> Maybe [GlobalName]
 moduleExporting items = case [ es | ItemExporting es <- items ] of
   es : _ -> Just es
   []     -> Nothing
+
+-- | __Which of this module's declarations are its own__ (MS11 phase 286,
+-- @~jmw4k@).
+--
+-- The names a @private@ declaration declares, and they are read as prefixes by
+-- the same 'exports' test the header's list goes through: @private data Nat@
+-- names @Nat@, which covers @Nat.Nat@, @Nat.z@ and everything the declaration
+-- generated into @Nat@. **So a generated name inherits the visibility of the
+-- declaration that produced it and nothing has to enumerate one.**
+--
+-- **The enclosing namespace comes with it**, as it does in 'declaredNames': a
+-- @private@ inside @namespace A where@ names @A.foo@, which is the key that
+-- landed.
+privateIn :: [Item] -> [GlobalName]
+privateIn = concatMap (go [])
+  where
+    go ns (ItemNamespace g is) =
+      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) is
+    go ns (ItemOpenIn _ is) = concatMap (go ns) is
+    -- **Everything inside, and a nested @private@ adds nothing**: the mark is
+    -- already on, and the inner walk names the same declaration.
+    go ns (ItemPrivate is)  = concatMap (named ns) is
+    go _  _                 = []
+
+    -- The names the declarations under a @private@ declare, at this prefix.
+    named ns i = case i of
+      ItemNamespace g is -> concatMap (named (ns ++ nameSteps g ++ [nameWord g])) is
+      ItemOpenIn _ is    -> concatMap (named ns) is
+      ItemPrivate is     -> concatMap (named ns) is
+      _ -> [ GlobalName ns n | Just n <- [declaredName i] ]
 
 -- | __Whether an export list reaches this name__ (MS11 phase 285, @~jmw4k@).
 --
@@ -2338,6 +2418,9 @@ declaredName i = case i of
   -- the summary by its own entry. An @open … in@ is the same.
   ItemNamespace _ _ -> Nothing
   ItemOpenIn _ _    -> Nothing
+  -- **Nor a private declaration of its own** (MS11 phase 286) — what it holds
+  -- is the declaration, which is named by its own entry.
+  ItemPrivate _     -> Nothing
   -- **A consult declares nothing either** (MS11 phase 273) — it says what the
   -- module's proofs are searched against, which adds no key to the environment.
   ItemConsult _     -> Nothing

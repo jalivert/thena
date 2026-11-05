@@ -560,6 +560,7 @@ describe t = case t of
   TConsult    -> "consult"
   TImport     -> "import"
   TExporting  -> "exporting"
+  TPrivate    -> "private"
   TNamespace  -> "namespace"
   THiding     -> "hiding"
   TRenaming   -> "renaming"

@@ -70,6 +70,12 @@ printItem i = case i of
   -- **The open and the first line of the declaration it reaches are one line**
   -- — which is how it was written, and what reads back: @in@ takes a
   -- declaration, so a newline after it would start a new one (MS10 phase 254).
+  -- **The word, then the declaration it marks, on one line** (MS11 phase 286) —
+  -- which is how it was written, and what reads back: @private@ takes a
+  -- declaration, so a newline after it would start a new one.
+  ItemPrivate is -> case concatMap printItem is of
+    first : rest -> ("private " ++ first) : rest
+    []           -> ["private"]
   ItemOpenIn os is -> case concatMap printItem is of
     first : rest -> (opens os ++ " in " ++ first) : rest
     []           -> [opens os ++ " in"]

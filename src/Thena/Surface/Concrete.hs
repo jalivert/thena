@@ -378,6 +378,19 @@ data SurfaceDecl
     -- **Its effect runs from where it is written to the end of the enclosing
     -- namespace**, which for a file with no @namespace@ block is the rest of
     -- the file — so a declaration above it does not see it.
+  | SurfacePrivate SurfaceDecl
+    -- ^ @private ‹declaration›@ — **the declaration is the file's own and no
+    -- importer may name it** (MS11 phase 286, his ruling of 2026-10-30, the
+    -- fine-grained escape from the header's @exporting@ list).
+    --
+    -- **It takes a declaration, not a block**, which is 'SurfaceOpenIn'\'s shape
+    -- and for its reason: a signature and its equation are two of these and one
+    -- declaration, so the pass that pairs them is the one that can say how far
+    -- a @private@ in front of the signature reaches.
+    --
+    -- **A mark and not a scope.** Where the declaration lands, what it may see
+    -- and what it generates are all exactly what they are without the word; the
+    -- only thing that changes is whether another file may write the names.
   | SurfaceOpenIn [([String], String)] SurfaceOpenSpec SurfaceDecl
     -- ^ @open X in ‹one declaration›@ — **the open reaches that declaration and
     -- stops** (MS10 phase 254), which is his *"one local let-like"*.
