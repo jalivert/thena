@@ -580,11 +580,19 @@ which worked only because loading threw everything into one flat scope — so a 
 file's meaning depended on what a considerate user had loaded first. No language
 works that way and Thena will not.
 
-**`public` is how a dependency travels.** `public import` and `public consult`
-republish what they bring in: *you get whatever the thing you imported got.*
-Without `public`, you don't — if A consults X and B imports A, B's own proofs do
-not see X's rules, and B asking for them is one explicit line that fails loudly if
-it is missing.
+**So a module's whole view is its imports, its own declarations and the prelude.**
+Decided 2026-11-05. Nothing else a session happens to be holding is reachable, however
+it got there — another file somebody loaded first, or a definition typed at the prompt.
+The test a file has to pass is that **it type-checks in isolation**, and that is what
+makes a module that type-checks for its author type-check for whoever imports it.
+Nineteen files in the shipped `examples/` relied on the old flat scope and were fixed
+rather than accommodated.
+
+**`public` is how a dependency travels, and only `public`.** `public import` and
+`public consult` republish what they bring in: **when, and only when, the file you
+imported wrote `public`, you get what it got.** Without `public`, you don't — if A
+consults X and B imports A, B's own proofs do not see X's rules, and B asking for them
+is one explicit line that fails loudly if it is missing.
 
 **What `import` does today is load.** The module it names is elaborated before the
 file that imports it, so a file states its dependencies instead of relying on the
