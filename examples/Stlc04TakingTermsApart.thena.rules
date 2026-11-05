@@ -3,17 +3,17 @@ rule base inspecting where
 -- Rules that take λ-terms apart and put them together, in the terms' own
 -- notation.
 --
--- LOAD AFTER 01-stlc-syntax.thena, alongside the shipped rules:
+-- LOAD AFTER Stlc01Syntax.thena, alongside the shipped rules:
 --
---   :load examples/01-stlc-syntax.thena
---   :load rules rules/standard.thena.rules examples/04-taking-terms-apart.thena.rules
+--   :load examples/Stlc01Syntax.thena
+--   :load rules rules/standard.thena.rules examples/Stlc04TakingTermsApart.thena.rules
 --
 -- A rule file is read with the grammars the session already has, which is why
 -- the module declaring LC comes first. **That is the old way, and it is not the
 -- design**: since MS11 a rule file writes `import ‹module›` and states the
--- dependency itself. This file cannot yet — a module is named by its path, and
--- `01-stlc-syntax` is not a name any path can give — so it waits for the corpus
--- to be renamed.
+-- dependency itself. The rename of 2026-11-05 made that possible here —
+-- `examples.Stlc01Syntax` is a name now — and writing the line is the work
+-- after it.
 --
 -- In a rule an object term is a Core value, like any other term. Written in a
 -- pattern it MATCHES, and ${…} binds what stands in that slot; written in an

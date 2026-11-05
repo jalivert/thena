@@ -955,7 +955,7 @@ object-language term a chain of constructors.
 
 ### Preservation for a modelled language is proved about the substitution Thena generates
 
-*Decided 2026-09-22.* `examples/07-preservation.thena` proves, for the λ-calculus
+*Decided 2026-09-22.* `examples/Stlc07Preservation.thena` proves, for the λ-calculus
 of `01`–`03`,
 
 ```
@@ -967,7 +967,7 @@ generated `LC.subst-all`**, not a substitution written for the proof: the
 proof names the generated function's pieces, checks with `refl` that they are
 the same terms, and follows its `String.dec` decisions case by case.
 
-**It is proved twice.** `examples/08-preservation-by-tactics.thena.script`
+**It is proved twice.** `examples/Stlc08PreservationByTactics.thena.script`
 proves every lemma again by tactics — `:theorem`, `attack`, `intro`,
 `eliminate-core` for each induction and case split, `` elaborate surface`…` `` for each
 case — and reaches the same statement as `preservation-tactics`.
@@ -978,7 +978,7 @@ argument substituted in a β-step is then closed, so no binder is ever renamed.
 ### And for any context, resting on three laws about `String.append`
 
 *Decided 2026-10-12; the trust narrowed to the three laws on 2026-10-16.*
-`examples/10-preservation-any-context.thena` proves the same theorem with no
+`examples/Stlc10PreservationAnyContext.thena` proves the same theorem with no
 restriction on the context:
 
 ```
@@ -4122,7 +4122,7 @@ is inserted at the use.
 
 **`define-global`, the op that hands a finished definition out from a rule base,
 stays** — his ruling the same day. It is `declare-primitive`'s sibling and is
-what `examples/10-preservation-any-context.thena` uses; it is simply no longer
+what `examples/Stlc10PreservationAnyContext.thena` uses; it is simply no longer
 the only way to write a definition that rests on trust.
 
 ---

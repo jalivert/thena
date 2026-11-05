@@ -360,7 +360,7 @@ data GlobalEnv = GlobalEnv
     -- load.** @Thena.Core.Trust.reaches@ answered the same question by walking
     -- out from a term through every definition it mentions and reading each body
     -- in full, on /every/ @certify@ — 4.4 s of an 8.5 s load of
-    -- @examples\/07-preservation.thena@, and the largest single cost in it. The
+    -- @examples\/Stlc07Preservation.thena@, and the largest single cost in it. The
     -- answer is a property of a definition alone and is fixed the moment the
     -- definition is in the table, so 'addDefinition' works it out once.
     --

@@ -154,54 +154,54 @@ thena spine> :load examples/preservation.thena
 ### 2. Preservation for STLC — as an object language
 
 The numbered series
-([`01`](examples/01-stlc-syntax.thena)–[`10`](examples/10-preservation-any-context.thena))
+([`01`](examples/Stlc01Syntax.thena)–[`10`](examples/Stlc10PreservationAnyContext.thena))
 declares STLC itself — syntax, contexts, typing, and call-by-value reduction in
 paper notation — then proves preservation about the substitution Thena
 generates. This is the current showcase: grammars with binders, splices,
 judgment blocks, capture-avoiding substitution proved by `refl`, and a rule
 base that matches object terms in their own notation.
 
-- [`01-stlc-syntax.thena`](examples/01-stlc-syntax.thena) — `Ty` and `LC`
+- [`Stlc01Syntax.thena`](examples/Stlc01Syntax.thena) — `Ty` and `LC`
   declared as grammars; terms written ``LC`( λ x : ι . x )` ``; generated
   substitution with capture avoidance proved by `refl`.
-- [`02-contexts.thena`](examples/02-contexts.thena) — a `context` block, its
+- [`Stlc02Contexts.thena`](examples/Stlc02Contexts.thena) — a `context` block, its
   lookup relation `x : T ∈ Γ`, and lookups proved with `extend-here` /
   `extend-there-extend`.
-- [`03-typing-and-reduction.thena`](examples/03-typing-and-reduction.thena) —
+- [`Stlc03TypingAndReduction.thena`](examples/Stlc03TypingAndReduction.thena) —
   typing, values, and reduction as `judgment` blocks; typing derivations stated
   as judgment literals.
-- [`04-taking-terms-apart.thena.rules`](examples/04-taking-terms-apart.thena.rules)
+- [`Stlc04TakingTermsApart.thena.rules`](examples/Stlc04TakingTermsApart.thena.rules)
   — a rule base matching `LC` terms in their own notation.
-- [`05-grouping-by-splicing.thena`](examples/05-grouping-by-splicing.thena) and
-  [`06-more-judgments.thena`](examples/06-more-judgments.thena) — splices,
+- [`Stlc05GroupingBySplicing.thena`](examples/Stlc05GroupingBySplicing.thena) and
+  [`Stlc06MoreJudgments.thena`](examples/Stlc06MoreJudgments.thena) — splices,
   multi-step judgments, the annotated tier.
-- [`07-preservation.thena`](examples/07-preservation.thena) — **preservation
+- [`Stlc07Preservation.thena`](examples/Stlc07Preservation.thena) — **preservation
   for closed terms**, the series' goal:
   `preservation : forall (M : LC) (M1 : LC) (T : Ty) (d : typing empty M T) (s : step M M1) -> typing empty M1 T`,
   via weakening, the substitution lemma, and inversion.
-- [`08-preservation-by-tactics.thena.script`](examples/08-preservation-by-tactics.thena.script)
+- [`Stlc08PreservationByTactics.thena.script`](examples/Stlc08PreservationByTactics.thena.script)
   — **the same proof by tactics**: each lemma a `:theorem`, inductions and case
   splits with `eliminate-core`, cases filled with `elaborate ⟨ … ⟩`.
-- [`10-preservation-any-context.thena`](examples/10-preservation-any-context.thena)
+- [`Stlc10PreservationAnyContext.thena`](examples/Stlc10PreservationAnyContext.thena)
   — **preservation for any context**:
   `preservationAny : forall (G : Ctx) (M : LC) (M1 : LC) (T : Ty) (d : typing G M T) (s : step M M1) -> typing G M1 T`.
   An open argument can capture, so the generated substitution renames the
   binder, and the file **proves** that the name it mints is fresh — from three
   trusted laws about `appendString`, with no arithmetic anywhere in it.
-- [`09-printing.thena`](examples/09-printing.thena) — terms shown in their own
+- [`Stlc09Printing.thena`](examples/Stlc09Printing.thena) — terms shown in their own
   notation, the printer writing the splices `05` writes by hand.
 
 ```
 cabal run thena
-thena spine> :load examples/01-stlc-syntax.thena
-thena spine> :load examples/02-contexts.thena
-thena spine> :load examples/03-typing-and-reduction.thena
-thena spine> :load rules rules/standard.thena.rules examples/04-taking-terms-apart.thena.rules
-thena spine> :load examples/05-grouping-by-splicing.thena
-thena spine> :load examples/06-more-judgments.thena
-thena spine> :load examples/07-preservation.thena
-thena spine> :load examples/08-preservation-by-tactics.thena.script
-thena spine> :load examples/09-printing.thena
+thena spine> :load examples/Stlc01Syntax.thena
+thena spine> :load examples/Stlc02Contexts.thena
+thena spine> :load examples/Stlc03TypingAndReduction.thena
+thena spine> :load rules rules/standard.thena.rules examples/Stlc04TakingTermsApart.thena.rules
+thena spine> :load examples/Stlc05GroupingBySplicing.thena
+thena spine> :load examples/Stlc06MoreJudgments.thena
+thena spine> :load examples/Stlc07Preservation.thena
+thena spine> :load examples/Stlc08PreservationByTactics.thena.script
+thena spine> :load examples/Stlc09Printing.thena
 ```
 
 ### 3. Transitivity for System F-sub — POPLMark 1A

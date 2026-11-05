@@ -1,6 +1,6 @@
 -- Typing and reduction for the λ-calculus of 01 and 02, and some derivations.
 --
--- LOAD AFTER 01-stlc-syntax.thena AND 02-contexts.thena.
+-- LOAD AFTER Stlc01Syntax.thena AND Stlc02Contexts.thena.
 --
 -- Then try   :show typing      :show step
 --            :parse typing · ⊢ ( λ x : ι . x ) : ( ι -> ι )

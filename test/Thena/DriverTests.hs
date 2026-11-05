@@ -779,7 +779,8 @@ moduleNames =
             fmap moduleText (moduleName "Stlc2.Terms'_a") @?= Just "Stlc2.Terms'_a"
 
         , -- A step is a word and a word begins with a letter, which is what
-          -- makes every numbered file in examples/ unimportable as it stands.
+          -- forced the corpus rename of 2026-11-05: @01-stlc-syntax@ was a
+          -- name nothing could reach.
           testCase "a step may not begin with a digit" $
             moduleName "01-stlc-syntax" @?= Nothing
 
@@ -835,9 +836,19 @@ moduleNames =
         , testCase "a path with no extension at all is no module" $
             moduleOfFile "Stlc/Terms" @?= Nothing
 
-        , -- Measured 2026-11-04, and it is the corpus's own state: not one
-          -- numbered example can be reached by name until it is renamed.
-          testCase "and no numbered example is importable as it stands" $
+        , -- The corpus's own state since the rename of 2026-11-05, and the
+          -- whole point of it: every example in the series is reachable by
+          -- name, and the one that cannot be is the hyphenated spelling it
+          -- replaced.
+          testCase "and every numbered example is importable now" $
+            fmap moduleText (moduleOfFile "examples/Stlc01Syntax.thena")
+              @?= Just "examples.Stlc01Syntax"
+
+        , testCase "the rule file in the series too" $
+            fmap moduleText (moduleOfFile "examples/Stlc04TakingTermsApart.thena.rules")
+              @?= Just "examples.Stlc04TakingTermsApart"
+
+        , testCase "and the spelling it replaced is still no module" $
             moduleOfFile "examples/01-stlc-syntax.thena" @?= Nothing
         ]
     ]

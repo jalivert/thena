@@ -1,10 +1,15 @@
 -- | The numbered example programs load, in order (his request, 2026-09-21).
 --
--- @examples/NN-*.thena@ and @examples/NN-*.thena.rules@ are the series he reads
--- to see what the language can do as each feature lands, so a file that has
--- gone stale is a false picture of the language. **The directory is walked, not
--- listed here**, so a new example is loaded by this test the day it is written
--- and nobody has to remember to add it.
+-- @examples/StlcNN*.thena@ and @examples/StlcNN*.thena.rules@ are the series he
+-- reads to see what the language can do as each feature lands, so a file that
+-- has gone stale is a false picture of the language. **The directory is walked,
+-- not listed here**, so a new example is loaded by this test the day it is
+-- written and nobody has to remember to add it.
+--
+-- The numbers are his (2026-09-21) and the @Stlc@ prefix is his ruling of
+-- 2026-11-05: a step of a module name begins with a letter and holds no hyphen,
+-- so @01-stlc-syntax@ could be reached by no name at all. Zero-padding is what
+-- keeps 'sort' the reading order.
 --
 -- Modules are loaded into one session, in name order, because that is how the
 -- README tells a reader to load them and because a later one uses what an
@@ -17,7 +22,7 @@
 module Thena.ExamplesTests (tests) where
 
 import Data.Char (isDigit)
-import Data.List (isSuffixOf, sort)
+import Data.List (isSuffixOf, sort, stripPrefix)
 import System.Directory (listDirectory)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -91,9 +96,9 @@ tests =
           [ "wkIsFalse : (∀ (G : Ctx) (Xn : String) (D : Ctx) (P : Ty) -> ok`⊢ ${G} , ${Xn} <: ${P} , ${D} ok` -> sub`${G} ⊢ ${P} <: ( ∀ Z <: ⊤ . ⊤ )` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: ( ∀ Z <: ⊤ . ⊤ )`) -> Empty {0}" ]
     ]
   where
-    numbered f = case f of
-      a : b : '-' : _ -> isDigit a && isDigit b
-      _ -> False
+    numbered f = case stripPrefix "Stlc" f of
+      Just (a : b : _) -> isDigit a && isDigit b
+      _                -> False
 
     go :: Session -> [(FilePath, String)] -> [FilePath] -> IO Session
     go s _ [] = pure s

@@ -1,6 +1,6 @@
 -- Grouping without parentheses: a splice is a group.
 --
--- LOAD AFTER 01-stlc-syntax.thena, which declares the token class x.
+-- LOAD AFTER Stlc01Syntax.thena, which declares the token class x.
 --
 -- Thena reserves nothing inside an object language's notation — not even
 -- parentheses. `LC` in 01 has them because its grammar writes them into its

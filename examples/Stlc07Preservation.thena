@@ -210,7 +210,7 @@ ctxInvEmpty : forall (y : String) (U : Ty) (i : extend-in y U empty) -> Empty
 ctxInvEmpty = \ y U i -> case i of { }
 
 -- **Six lemmas no proof in this file needs any more, kept because
--- `08-preservation-by-tactics.thena.script` replays this development by hand
+-- `Stlc08PreservationByTactics.thena.script` replays this development by hand
 -- and still calls them.** `extendInj` and `appInj`/`absInj` are no-confusion
 -- for the reason `arrowInj` is: both sides of the equation are compound terms
 -- over AMBIENT variables, so a split cannot solve either (`~2d9xj`).

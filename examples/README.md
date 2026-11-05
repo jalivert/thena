@@ -12,16 +12,16 @@ to the file.
 
 | file | what it shows |
 |---|---|
-| `01-stlc-syntax.thena` | A token class; `Ty` and `LC` declared as grammars; terms written in their own notation; `${…}` splices; `LC[var]`; generated substitution, with capture avoidance, simultaneity and free variables proved by `refl` |
-| `02-contexts.thena` | A `context` block; its lookup relation `x : T ∈ Γ`; lookups proved with `extend-here` and `extend-there-extend`; a disequality `x ≠ f` proved with no axiom; why a shadowed binding cannot be reached |
-| `03-typing-and-reduction.thena` | Typing, values and call-by-value reduction as `judgment` blocks in paper notation; a named premise; `E[x->N]` in a rule; typing derivations stated as judgment literals; reduction steps whose right-hand side the kernel computes by substitution, one of them capture-avoiding |
-| `04-taking-terms-apart.thena.rules` | A rule base that matches `LC` terms in their own notation (`LC[app]`( ${f} ${a} )``) and builds them (`LC`( ${t} ${t} )``) |
-| `05-grouping-by-splicing.thena` | A language with no parentheses, where `f a b` reads two ways; a splice as a group (`` Ex`${Ex`f a`} b` ``), to any depth; a name or a computation spliced in as a group; the splices `09` shows the printer writing for itself |
-| `06-more-judgments.thena` | Many steps as a judgment built on `step`, with a two-step run; the annotated tier (`rule … where ∀ … ->`) ranging over a derivation; a swap by simultaneous substitution with Redex-style subscripts (`x_1`, `x_2`) beside the sequential version that gets it wrong; a premise continued onto a second line |
-| `07-preservation.thena` | **Preservation for STLC, for closed terms** — the milestone's goal. A proof about the substitution Thena generated in 01, following its `String.dec` decisions: weakening, free variables, why no binder is renamed, the substitution lemma over a whole map, inversion, preservation. Ends by typing a reduct through `preservation` |
-| `08-preservation-by-tactics.thena.script` | **The same proof again, by tactics**, as a script of command lines: each lemma a `:theorem`, its inductions and case splits done with `eliminate-core`, the cases filled with `` elaborate surface`…` ``, the β case taken apart by two nested eliminations. Reuses 07's definitions, not its lemmas |
-| `10-preservation-any-context.thena` | **Preservation for ANY context** — what `07` could not do. An open argument can capture, so the generated substitution renames the binder, and the file **proves** that the minted name is fresh. **Three trusted laws about `String.append` and everything else derived**: associativity, and that a string differs from itself with a `'` appended, with and without more after it. No lengths and no arithmetic — the counting is a `Longer` computed from two lists |
-| `09-printing.thena` | **Terms shown in their own notation** — the other direction from 01. A judgment's statement printed as it reads on paper; a name kept rather than unfolded into what it stands for, in a splice; the splices the printer writes where a grammar groups by splicing, as 05 writes them by hand; a variable spelled like one of the grammar's own terminals, which is fenced where the same position otherwise is not; reading it all back with `:core` |
+| `Stlc01Syntax.thena` | A token class; `Ty` and `LC` declared as grammars; terms written in their own notation; `${…}` splices; `LC[var]`; generated substitution, with capture avoidance, simultaneity and free variables proved by `refl` |
+| `Stlc02Contexts.thena` | A `context` block; its lookup relation `x : T ∈ Γ`; lookups proved with `extend-here` and `extend-there-extend`; a disequality `x ≠ f` proved with no axiom; why a shadowed binding cannot be reached |
+| `Stlc03TypingAndReduction.thena` | Typing, values and call-by-value reduction as `judgment` blocks in paper notation; a named premise; `E[x->N]` in a rule; typing derivations stated as judgment literals; reduction steps whose right-hand side the kernel computes by substitution, one of them capture-avoiding |
+| `Stlc04TakingTermsApart.thena.rules` | A rule base that matches `LC` terms in their own notation (`LC[app]`( ${f} ${a} )``) and builds them (`LC`( ${t} ${t} )``) |
+| `Stlc05GroupingBySplicing.thena` | A language with no parentheses, where `f a b` reads two ways; a splice as a group (`` Ex`${Ex`f a`} b` ``), to any depth; a name or a computation spliced in as a group; the splices `09` shows the printer writing for itself |
+| `Stlc06MoreJudgments.thena` | Many steps as a judgment built on `step`, with a two-step run; the annotated tier (`rule … where ∀ … ->`) ranging over a derivation; a swap by simultaneous substitution with Redex-style subscripts (`x_1`, `x_2`) beside the sequential version that gets it wrong; a premise continued onto a second line |
+| `Stlc07Preservation.thena` | **Preservation for STLC, for closed terms** — the milestone's goal. A proof about the substitution Thena generated in 01, following its `String.dec` decisions: weakening, free variables, why no binder is renamed, the substitution lemma over a whole map, inversion, preservation. Ends by typing a reduct through `preservation` |
+| `Stlc08PreservationByTactics.thena.script` | **The same proof again, by tactics**, as a script of command lines: each lemma a `:theorem`, its inductions and case splits done with `eliminate-core`, the cases filled with `` elaborate surface`…` ``, the β case taken apart by two nested eliminations. Reuses 07's definitions, not its lemmas |
+| `Stlc10PreservationAnyContext.thena` | **Preservation for ANY context** — what `07` could not do. An open argument can capture, so the generated substitution renames the binder, and the file **proves** that the minted name is fresh. **Three trusted laws about `String.append` and everything else derived**: associativity, and that a string differs from itself with a `'` appended, with and without more after it. No lengths and no arithmetic — the counting is a `Longer` computed from two lists |
+| `Stlc09Printing.thena` | **Terms shown in their own notation** — the other direction from 01. A judgment's statement printed as it reads on paper; a name kept rather than unfolded into what it stands for, in a splice; the splices the printer writes where a grammar groups by splicing, as 05 writes them by hand; a variable spelled like one of the grammar's own terminals, which is fenced where the same position otherwise is not; reading it all back with `:core` |
 
 ## System F-sub — `poplmark/`, its own set
 
@@ -60,15 +60,15 @@ today, and nothing checks that they keep doing so.
 
 ```
 cabal run thena
-:load examples/01-stlc-syntax.thena
-:load examples/02-contexts.thena
-:load examples/03-typing-and-reduction.thena
-:load rules rules/standard.thena.rules examples/04-taking-terms-apart.thena.rules
-:load examples/05-grouping-by-splicing.thena
-:load examples/06-more-judgments.thena
-:load examples/07-preservation.thena
-:load examples/08-preservation-by-tactics.thena.script
-:load examples/09-printing.thena
+:load examples/Stlc01Syntax.thena
+:load examples/Stlc02Contexts.thena
+:load examples/Stlc03TypingAndReduction.thena
+:load rules rules/standard.thena.rules examples/Stlc04TakingTermsApart.thena.rules
+:load examples/Stlc05GroupingBySplicing.thena
+:load examples/Stlc06MoreJudgments.thena
+:load examples/Stlc07Preservation.thena
+:load examples/Stlc08PreservationByTactics.thena.script
+:load examples/Stlc09Printing.thena
 ```
 
 A module's declarations stay in scope for the next module loaded in the same
