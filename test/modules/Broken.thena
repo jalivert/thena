@@ -1,4 +1,4 @@
-module Broken where
+module test.modules.Broken where
 
 import test.modules.Bit
 

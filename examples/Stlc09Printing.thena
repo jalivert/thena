@@ -12,7 +12,7 @@
 -- it is how the printer writes a constructor application and how both readers
 -- read one.
 
-module Printing where
+module examples.Stlc09Printing where
 
 -- ---------------------------------------------------------------------------
 -- Notation, in and out

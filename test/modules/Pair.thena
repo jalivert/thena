@@ -1,4 +1,4 @@
-module Pair where
+module test.modules.Pair where
 
 import test.modules.Bit
 

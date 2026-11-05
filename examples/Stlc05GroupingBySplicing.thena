@@ -12,7 +12,7 @@
 -- nesting one tagged literal in another is grouping, and it belongs to
 -- Thena — the host — rather than to the language being modelled.
 
-module Grouping where
+module examples.Stlc05GroupingBySplicing where
 
 -- Applicative expressions with application as bare juxtaposition, as in
 -- Haskell, and no parenthesis production at all.

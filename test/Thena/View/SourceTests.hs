@@ -23,6 +23,7 @@ import Test.Tasty.HUnit (assertFailure, testCase)
 import Thena.Core.Term (Literal (..))
 import Thena.Driver
   ( Item (..)
+  , moduleText
   , parseSurfaceModule
   , parseSurfaceTerm
   )
@@ -166,10 +167,10 @@ modules = do
       case parseSurfaceModule src of
         Left e -> pure [p <> ": did not parse: " <> take 120 (show e)]
         Right (nm, items) ->
-          case parseSurfaceModule (printSurfaceModule nm items) of
+          case parseSurfaceModule (printSurfaceModule (moduleText nm) items) of
             Left e -> pure [p <> ": its printing did not parse: " <> take 200 (show e)]
             Right (nm', items')
-              | nm' /= nm -> pure [p <> ": came back as module " <> nm']
+              | nm' /= nm -> pure [p <> ": came back as module " <> moduleText nm']
               | map unlined items' /= map unlined items ->
                   pure (p <> ": items differ" : firstDifference (map unlined items) (map unlined items'))
               | otherwise -> pure []
@@ -186,10 +187,10 @@ modules = do
 namespaces :: IO ()
 namespaces = case parseSurfaceModule src of
   Left e -> assertFailure ("did not parse: " <> take 200 (show e))
-  Right (nm, items) -> case parseSurfaceModule (printSurfaceModule nm items) of
+  Right (nm, items) -> case parseSurfaceModule (printSurfaceModule (moduleText nm) items) of
     Left e -> assertFailure ("its printing did not parse: " <> take 300 (show e))
     Right (nm', items')
-      | nm' /= nm -> assertFailure ("came back as module " <> nm')
+      | nm' /= nm -> assertFailure ("came back as module " <> moduleText nm')
       | items' /= items -> assertFailure ("items differ: " <> take 400 (show items'))
       | otherwise -> pure ()
   where

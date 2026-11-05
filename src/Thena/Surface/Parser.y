@@ -121,7 +121,9 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
 -- written with indentation and one written with explicit braces reach this
 -- production as the same token stream.
 Module :: { SurfaceModule }
-  : module ident where '{' Decls '}'       { SurfaceModule $2 (reverse $5) }
+  -- A @QName@, so a header may say the path it sits at (MS11 phase 278): the
+  -- steps are directories, exactly as @import@ reads them.
+  : module QName where '{' Decls '}'       { SurfaceModule (fst $2) (snd $2) (reverse $5) }
 
 -- | A block of the **instruction** language (MS4 phase 45).
 --

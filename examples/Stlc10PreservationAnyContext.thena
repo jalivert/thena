@@ -78,7 +78,7 @@
 -- the project is for, and the cost is elaboration's to answer for, not the
 -- proof's.
 
-module StlcPreservationAny where
+module examples.Stlc10PreservationAnyContext where
 
 -- ---------------------------------------------------------------------------
 -- THE THREE TRUSTED LAWS. All three are about `String.append` and `String.eq` on

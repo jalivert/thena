@@ -1,4 +1,4 @@
-module Lang where
+module test.modules.Lang where
 
 namespace A where
   x : Token String

@@ -5,7 +5,7 @@
 -- Then try   :show typing      :show step
 --            :parse typing · ⊢ ( λ x : ι . x ) : ( ι -> ι )
 
-module StlcRelations where
+module examples.Stlc03TypingAndReduction where
 
 -- A judgment is written as on paper: its notation, then its rules. The
 -- notation's slots are the judgment's indices, in order, so this one is

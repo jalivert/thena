@@ -25,6 +25,7 @@ import Thena.Core.Term (GlobalName (..), rootName)
 import Thena.Core.TermTests (genLiteral)
 import Thena.Driver
   ( Item (..)
+  , moduleText
   , parseCore
   , parseSurfaceModule
   , parseSurfaceTerm
@@ -772,7 +773,7 @@ moduleTests =
                  "module M where\nf : A\nf = a"
 
   , testCase "the name is kept" $
-      fmap fst (parseSurfaceModule "module Arith where { f : A ; f = a }")
+      fmap (moduleText . fst) (parseSurfaceModule "module Arith where { f : A ; f = a }")
         @?= Right "Arith"
 
   , -- A datatype's own @where@ opens a block inside the module's, so the two

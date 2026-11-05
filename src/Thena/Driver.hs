@@ -765,6 +765,16 @@ data Response
     -- there is no order to elaborate them in. Produced by whoever walks the
     -- graph, which is "Thena.Files", and carried like any other response
     -- because the driver's vocabulary is where a refusal is said (§12).
+  | ModuleMisnamed ModuleName ModuleName
+    -- ^ **the module reached by the first name calls itself the second** (MS11
+    -- phase 278, his ruling of 2026-11-05, @~r58qh@). The name an @import@ used
+    -- first, then the header's own.
+    --
+    -- **Asked only on the way in**, which is the whole of the ruling: a header
+    -- and a path can only be compared where both are in hand, and that is the
+    -- moment a walk resolves a name to a file. A module loaded by a path, or
+    -- typed at the prompt, is never asked — so this refusal can only come out
+    -- of "Thena.Files"'s walk.
   | ConsultRequested [FilePath]
     -- ^ @:consult@ on one or more rule-base paths (MS11 phase 271). Like
     -- 'RulesRequested' it only names them — reading is "Thena.Files"'s (§12
@@ -1254,10 +1264,13 @@ parseSurfaceItems src = do
 
 -- | A whole **proof module** (MS4 phase 43): its name, and its items.
 --
+-- **The name is a 'ModuleName' since MS11 phase 278**, because the one thing
+-- anything does with it is compare it to the name a path gave — @~r58qh@.
+--
 -- The same three passes 'parseSurfaceItems' makes, through the module start
 -- symbol instead — so a module's declaration block and a @declare@ line are the
 -- same grammar, and layout does the same work in both.
-parseSurfaceModule :: String -> Either SyntaxError (String, [Item])
+parseSurfaceModule :: String -> Either SyntaxError (ModuleName, [Item])
 parseSurfaceModule src = do
   -- 'lexModule', not 'lexTokens': only a module's lexing takes an
   -- object-language block whole (MS6 phase 101).
@@ -1265,7 +1278,7 @@ parseSurfaceModule src = do
   ts' <- mapLeft LayoutFailed (layout ts)
   m   <- mapLeft SurfaceParseFailed (Surface.parseSurfaceModule ts')
   is  <- regroup (surfaceModuleDecls m)
-  Right (surfaceModuleName m, is)
+  Right (moduleFromSteps (surfaceModuleSteps m) (surfaceModuleWord m), is)
 
 -- | Why a top-level block did not resolve, in terms 'SyntaxError' can hold.
 --
@@ -1710,7 +1723,7 @@ paramsAround ps t =
 loadProofSource :: Session -> String -> (Session, Response)
 loadProofSource s src = case parseSurfaceModule src of
   Left e            -> (s, Failed e)
-  Right (nm, items) -> loadProofItems s nm items
+  Right (nm, items) -> loadProofItems s (moduleText nm) items
 
 -- | Load a module that has already been read.
 --
@@ -1825,7 +1838,7 @@ loadProofModules s0 = go s0 []
     go s acc [] = (s, Right (reverse acc))
     go s acc (m : rest) =
       let pool = maybe (rules (sessionMachine s)) id (readModulePool m)
-       in case loadProofItemsConsulting pool s (readModuleHeader m)
+       in case loadProofItemsConsulting pool s (moduleText (readModuleHeader m))
                                         (readModuleItems m) of
         (s', r@(ProofLoaded {})) -> go (marked (readModuleName m) s') (r : acc) rest
         -- 'loadProofItemsConsulting' has already put this module's own
@@ -1849,11 +1862,15 @@ data ReadModule = ReadModule
     -- refusal has to print.
   , readModuleName   :: Maybe ModuleName
     -- ^ the name an @import@ reaches it by, where it has one. 'Nothing' for a
-    -- file loaded by a path no module name could produce, which today is every
-    -- numbered example; such a file is simply never deduplicated against.
-  , readModuleHeader :: String
-    -- ^ what the file's own header called it, for 'ProofLoaded'. **A claim and
-    -- not an identity** — that the two must agree is ruled and not built.
+    -- file loaded by a path no module name could produce — one that climbs, or
+    -- whose steps are not words; such a file is never deduplicated against, and
+    -- its header is never checked.
+  , readModuleHeader :: ModuleName
+    -- ^ what the file's own header called it, for 'ProofLoaded'. **It must agree
+    -- with 'readModuleName' wherever there is one** — his ruling of 2026-11-05,
+    -- @~r58qh@ — and "Thena.Files" refuses the module before it builds this
+    -- record where they disagree, so by the time one exists they have agreed.
+    -- A file loaded by a path that is no module name has nothing to agree with.
   , readModulePool   :: Maybe [RuleBase]
     -- ^ the bases its own @consult@ lines name, already read — or 'Nothing'
     -- where it consults nothing, which is elaborated against **the session's
@@ -3048,10 +3065,10 @@ moduleFile k (ModuleName ws) = intercalate "/" ws ++ extensionOf k
 
 -- | The same journey backwards: what a path would have to be imported as.
 --
--- **This is what a header-against-path check needs** and is why it exists
--- before anything calls it. 'Nothing' for a path no module name could produce —
--- an absolute one, one that climbs with @..@, or one whose steps are not words,
--- which today is every numbered file in @examples\/@.
+-- **This is what the header-against-path check uses** — @~r58qh@, and
+-- "Thena.Files"'s walk is its one caller. 'Nothing' for a path no module name
+-- could produce — an absolute one, one that climbs with @..@, or one whose steps
+-- are not words.
 moduleOfFile :: FilePath -> Maybe ModuleName
 moduleOfFile p = case stripSuffix (extensionOf (kindOf p)) p of
   Nothing   -> Nothing

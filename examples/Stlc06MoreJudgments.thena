@@ -5,7 +5,7 @@
 --
 -- Then try   :show steps      :show halts      :show swap
 
-module MoreJudgments where
+module examples.Stlc06MoreJudgments where
 
 -- ---------------------------------------------------------------------------
 -- Many steps: the reflexive-transitive closure of 03's `step`. A premise may

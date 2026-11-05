@@ -1,4 +1,4 @@
-module Both where
+module test.modules.Both where
 
 import test.modules.Bit
 import test.modules.Pair

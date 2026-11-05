@@ -5,7 +5,7 @@
 --
 -- Then try   :show extend-in      :parse extend-in x : ι ∈ ·, x : ι, y : ( ι -> ι )
 
-module StlcContexts where
+module examples.Stlc02Contexts where
 
 -- A context is declared like a language: an empty one, and one extended by an
 -- entry. The block gives you the datatype

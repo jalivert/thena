@@ -3,7 +3,7 @@
 -- Load it with   :load examples/Stlc01Syntax.thena
 -- then try       :show LC      :show LC.subst-x      :parse LC ( λ x : ι . x )
 
-module StlcSyntax where
+module examples.Stlc01Syntax where
 
 -- A token class: which strings are identifiers. It is an ordinary definition,
 -- and the regular expression takes its type from the signature.

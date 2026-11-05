@@ -1440,6 +1440,19 @@ open Stlc
 the extension is never written. Every step is an ordinary word, so there is no
 `..` and no way to name a file whose stem is not one.
 
+**A file's header has to be the name its path gives.** `Stlc/Terms.thena` begins
+`module Stlc.Terms where`, and **Thena asks only when somebody imports it**:
+
+```
+thena spine> :load test/modules/ImportsMisnamed.thena
+test/modules/Misnamed.thena: imported as test.modules.Misnamed, but its header says test.modules.Elsewhere
+```
+
+Both names are in the refusal because either could be the slip — the file may be in
+the wrong place, or the header may have a typo. A file you load by its path is never
+asked, so `:load some/odd-name.thena` works and a file whose path is not a module
+name is loadable but not importable.
+
 Loading one file therefore loads a graph, and you see a report for each module as
 it goes in, the one you asked for last. **A module is loaded once however many
 files reach it**, so two files importing the same third costs nothing. **A cycle is

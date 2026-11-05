@@ -1,0 +1,4 @@
+module test.modules.Elsewhere where
+
+data Elsewhere : Type₀ where
+  here : Elsewhere

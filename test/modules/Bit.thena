@@ -1,4 +1,4 @@
-module Bit where
+module test.modules.Bit where
 
 data Bit : Type₀ where
   off : Bit

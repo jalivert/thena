@@ -279,8 +279,14 @@ gather s stack done m = do
   case contents of
     Left e  -> pure (Left (Unreadable path e))
     Right c -> case parseSurfaceModule c of
-      Left e            -> pure (Left (Unloadable path (Failed e)))
-      Right (nm, items) -> assemble s stack done (Just m) path nm items
+      Left e -> pure (Left (Unloadable path (Failed e)))
+      -- **THE HEADER IS CHECKED HERE AND NOWHERE ELSE** — his ruling of
+      -- 2026-11-05, @~r58qh@: the match is asked only when the file is reached
+      -- by name, and this is the only place a name was resolved to a file.
+      -- 'loadProofFile' is the other door and it has a path, not a name.
+      Right (nm, items)
+        | nm /= m   -> pure (Left (Unloadable path (ModuleMisnamed m nm)))
+        | otherwise -> assemble s stack done (Just m) path nm items
   where
     path = moduleFile LoadProof m
 
@@ -297,7 +303,7 @@ gather s stack done m = do
 -- what has been gathered so far.
 assemble
   :: Session -> [ModuleName] -> [ReadModule] -> Maybe ModuleName -> FilePath
-  -> String -> [Item] -> IO (Either Trouble [ReadModule])
+  -> ModuleName -> [Item] -> IO (Either Trouble [ReadModule])
 assemble s stack done as path nm items = do
   walked <- imports s (maybe stack (: stack) as) done (moduleImports items)
   case walked of

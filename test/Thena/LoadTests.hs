@@ -210,7 +210,7 @@ baseImportTests =
       (s0, _) <- startingSession
       (s1, out, trouble) <- consultRuleFiles s0 ["test/modules/Inspecting.thena.rules"]
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
-      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Lang"]
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Lang"]
       assertBool "the base went in" (not (null [ () | BasesLoaded _ <- out ]))
       assertBool "and the module is in the session"
                  (moduleLoaded (importNamed "test.modules.Lang") s1)
@@ -289,7 +289,7 @@ importTests =
       (s0, _) <- startingSession
       (_, out, trouble) <- loadProofFile s0 "test/modules/Pair.thena"
       assertBool (show (map (renderResponse s0) out)) (null trouble)
-      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Bit", "Pair"]
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Bit", "test.modules.Pair"]
 
   , -- **The diamond is the case that cannot be got right by accident**:
     -- @Both@ imports @Bit@ and @Pair@, and @Pair@ imports @Bit@ too, so a walk
@@ -299,7 +299,8 @@ importTests =
       (s0, _) <- startingSession
       (_, out, trouble) <- loadProofFile s0 "test/modules/Both.thena"
       assertBool (show (map (renderResponse s0) out)) (null trouble)
-      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Bit", "Pair", "Both"]
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= ["test.modules.Bit", "test.modules.Pair", "test.modules.Both"]
 
   , -- The same memory, across two commands rather than inside one walk.
     testCase "and a module the session already loaded is not loaded again" $ do
@@ -308,7 +309,7 @@ importTests =
       assertBool "Bit is in" (moduleLoaded (named' "test.modules.Bit") s1)
       (_, out, trouble) <- loadProofFile s1 "test/modules/Pair.thena"
       assertBool (show (map (renderResponse s1) out)) (null trouble)
-      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Pair"]
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Pair"]
 
   , -- **Loaded by a path that is no module name, so there is nothing to
     -- remember.** @0unnameable@ begins with a digit, so it is no step of a
@@ -321,6 +322,30 @@ importTests =
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Unnameable"]
       moduleOfFile "test/modules/0unnameable.thena" @?= Nothing
       assertBool "nothing to remember" (null (modulesLoaded s1))
+
+  , -- **The header-against-path check, and it is asked HERE ONLY** — his ruling
+    -- of 2026-11-05, @~r58qh@. @Misnamed.thena@ declares
+    -- @module test.modules.Elsewhere where@, so reaching it by name finds a file
+    -- that answers to another name.
+    testCase "a module whose header disagrees with its path is refused" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <- loadProofFile s0 "test/modules/ImportsMisnamed.thena"
+      case trouble of
+        [Unloadable p (ModuleMisnamed reached header)] -> do
+          p @?= "test/modules/Misnamed.thena"
+          (moduleText reached, moduleText header)
+            @?= ("test.modules.Misnamed", "test.modules.Elsewhere")
+        other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- **The other half of the ruling, and the half that makes it cheap**: the
+    -- same file, loaded by its path, is never asked to agree with anything. If
+    -- the check were unconditional this would be refused too, and a file would
+    -- be illegal because of where it sits.
+    testCase "and the same file loaded by its path is not asked" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/Misnamed.thena"
+      assertBool (show (map (renderResponse s0) out)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Elsewhere"]
 
   , testCase "a cycle is refused, and names the path the walk took" $ do
       (s0, _) <- startingSession

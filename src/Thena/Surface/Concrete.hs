@@ -307,13 +307,15 @@ data SurfaceBinder = SurfaceBinder Plicity String (Maybe Surface)
 -- word in the shared lexer and identifiers narrow project-wide, exactly as they
 -- did for @data@ at 42b.
 --
--- **The name is recorded and not yet used for anything.** Nothing imports a
--- proof module until after MS4, and a module whose name disagreed with its path
--- would be a rule this phase has no reason to invent. What the header buys now
--- is that the file says what it is, which is how @:load@ tells a proof module
--- from a script without opening it further than the first line.
+-- **The name is qualified, and it is checked against the path when the file is
+-- reached by name** — his ruling of 2026-11-05, @~r58qh@. So the shape is
+-- 'SurfaceImport'\'s: the steps are the directories and the last is the file, and
+-- @module Stlc.Terms where@ is legal where it was one word before (MS11 phase
+-- 278). The check is only on the way in: a file @:load@ed by path, or typed at
+-- the prompt, is never asked to agree with anything.
 data SurfaceModule = SurfaceModule
-  { surfaceModuleName  :: String
+  { surfaceModuleSteps :: [String]
+  , surfaceModuleWord  :: String
   , surfaceModuleDecls :: [SurfaceDecl]
   }
   deriving (Eq, Show)

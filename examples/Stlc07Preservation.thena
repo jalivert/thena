@@ -51,7 +51,7 @@
 --   * `arrowInj`, whose equation has a compound term built from AMBIENT
 --     variables on both sides (`~2d9xj`).
 
-module StlcPreservation where
+module examples.Stlc07Preservation where
 
 -- ---------------------------------------------------------------------------
 -- Logic

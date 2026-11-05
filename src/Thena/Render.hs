@@ -321,6 +321,12 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   ImportCycle ms ->
     [ "these modules import each other: "
         ++ intercalate " imports " (map moduleText ms) ]
+  -- **Both names, because either one could be the typo** (MS11 phase 278): the
+  -- file may be in the wrong place or the header may be wrong, and nothing here
+  -- can tell which the user meant.
+  ModuleMisnamed reached header ->
+    [ "imported as " ++ moduleText reached ++ ", but its header says "
+        ++ moduleText header ]
   BasesLoaded bs   -> map loadedLine bs
   BasesListed bs   -> renderBases bs
   RulesListed bs   -> renderRuleBases ren bs

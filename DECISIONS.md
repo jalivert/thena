@@ -611,6 +611,38 @@ Everything an imported module declared is reachable, because visibility —
 transitivity — is one mechanism and none of it is built. **So an import today is
 wide**, and the narrowing is scheduled rather than decided afresh.
 
+### A file's header must match its path, and it is checked when you import it
+
+*Decided 2026-11-05. Built — MS11 phase 278.*
+
+A surface file begins with a header, and the header is a qualified name:
+
+```
+module Stlc.Terms where
+```
+
+**That has to be the name the file's own path gives**, so `module Stlc.Terms where`
+belongs in `Stlc/Terms.thena` and nowhere else. **Thena only asks when somebody
+reaches the file by name.** Import it under a name it does not answer to and the
+load is refused — here `Misnamed.thena` declares `module test.modules.Elsewhere
+where`, and another file imports it as `test.modules.Misnamed`:
+
+```
+thena spine> :load test/modules/ImportsMisnamed.thena
+test/modules/Misnamed.thena: imported as test.modules.Misnamed, but its header says test.modules.Elsewhere
+```
+
+The refusal names both, because either one could be the mistake — the file may be in
+the wrong place or the header may have a typo, and nothing in the system can tell
+which you meant.
+
+**A file you load by its path is never asked.** `:load some/odd-name.thena` works,
+and so does typing a module into the prompt: there is no name in play, so there is
+nothing for the header to disagree with. That is deliberate — checking always would
+make a file illegal because of where it sits, and a file whose path is not a module
+name (a hyphen in a step, a leading digit) would become unloadable rather than merely
+unimportable.
+
 ### A rule file writes its own `open` lines
 
 *Decided 2026-11-03, built the same day. The piece of the decision above that
