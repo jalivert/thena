@@ -209,6 +209,38 @@ publicConsultTests =
                                (renderResponse s0 r))
         _   -> assertFailure (show (map (renderResponse s0) out))
 
+  , -- **HIS RULING OF 2026-11-05: THE ORDER IS ONE STACK AND IT DOES NOT MATTER
+    -- HOW A BASE ARRIVED.** /"The order needs to stay consistent, it shouldn't
+    -- matter whether it has been consulted directly or whether it has been
+    -- consulted by the target and re-exported through @public consult@ — the
+    -- order needs to be a stack."/ **So this is the test of the whole rule**: a
+    -- @public consult@ is indistinguishable from the importer having written
+    -- those @consult@ lines itself, at the position of the @import@ line, in the
+    -- publisher's own order. The two item lists below differ in nothing else and
+    -- must give the same pool.
+    testCase "a published group is the consult lines written out by hand" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadProofFile s0 "test/modules/PublishesTwo.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      let viaImport = unlines [ "module M where"
+                              , "consult test.modules.First"
+                              , "import test.modules.PublishesTwo"
+                              , "consult test.modules.Last" ]
+          byHand    = unlines [ "module M where"
+                              , "consult test.modules.First"
+                              , "consult test.modules.Tooling"
+                              , "consult test.modules.Louder"
+                              , "consult test.modules.Last" ]
+      case (parseSurfaceModule viaImport, parseSurfaceModule byHand) of
+        (Right (_, a), Right (_, b)) -> do
+          map moduleText (consultedPool s1 [] a)
+            @?= map moduleText (consultedPool s1 [] b)
+          -- And spelled out, so the stack is readable and not only equal:
+          map moduleText (consultedPool s1 [] a)
+            @?= [ "test.modules.Last", "test.modules.Louder"
+                , "test.modules.Tooling", "test.modules.First" ]
+        (x, y) -> assertFailure (show (x, y))
+
   , -- **THE OTHER END OF THE WALK**: a publisher already in the session is
     -- answered from `sessionPublishes` rather than from its items, and the two
     -- have to agree or a module would mean one thing loaded with its publisher
