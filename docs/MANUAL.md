@@ -1558,8 +1558,8 @@ will mean a region of *time* rather than a region of the file: the rules in the 
 with that base pushed on top and popped when they finish, so it is searched first for
 them and is not in the pool for the rest of the file. Two things to know in advance —
 the push happens wherever those rules are called from, as deep as the call goes, so a
-base you pin travels with the rule; and it will not show in `:bases`, because it is only
-on while those rules run.
+base you pin travels with the rule; and it shows in `:bases` while those rules are
+running and not before, so `:step` into the rule is how you see what is being searched.
 
 > **What you reach is up to the file you imported.** It says what it offers with
 > `exporting` and `private`, below, and passes its own dependencies on with

@@ -722,9 +722,12 @@ Two consequences worth knowing before you write one.
   callee was written against is never removed — only possibly preceded. What is *not*
   promised is that what precedes it is better, since a push puts a whole base in front
   and none of its clauses were written with that callee in mind.
-- **A pushed base is in no `:bases` listing.** There is no moment at which you can ask
-  the session what is searched during that nested call. You can reason about the worst
-  case; you cannot look and see.
+- **You can see it while it is on.** The push goes into the one pool `:bases` reads, so
+  while the block's rules are running that base is listed like any other. `:step on`
+  hands control back between instructions, so stepping into the rule and asking is how
+  you find out. At rest it is absent because at rest it is not in the pool. What you
+  cannot do is read off the text of your own file which base will answer a call — and
+  that is already true of any base loaded after yours.
 
 **And both words are typed at the prompt.** *Built MS11 phase 284.* `import
 Stlc.Terms` loads that module by name, `consult Stlc.Tactics` pushes that base, and
