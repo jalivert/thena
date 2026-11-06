@@ -25,6 +25,8 @@ import Thena.Instral.Type (Ty (..))
 import Thena.Rules (RuleError (..))
 import Thena.Driver
   ( CommandError (..)
+  , Entry (..)
+  , Outcome (..)
   , Loaded (..)
   , Attempt (..)
   , currentAttempt
@@ -33,6 +35,12 @@ import Thena.Driver
   , parked
   , Stop (..)
   , loadSource
+  , oneLine
+  , newSession
+  , provedUnder
+  , Session
+  , recordOf
+  , submittedLines
   )
 import Thena.Engine (Machine (..), Development, flatten)
 import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..), Warning (..))
@@ -48,7 +56,55 @@ tests =
     , testGroup "undo" undoTests
     , undoLaw
     , failureStaysInTheLine
+    , testGroup "the record (MS11 phase 294)" recordTests
     ]
+
+-- --------------------------------------------------------------------------
+-- The record — one sequence, and the undo stack is a projection of it
+-- --------------------------------------------------------------------------
+
+-- | **The transcript is every submitted line, in order, whatever it did.**
+--
+-- Written with the record itself because nothing calls it yet: inside this
+-- milestone a thing built without a caller still gets tests, which is the
+-- exception he granted. What they pin is the part a later phase would
+-- otherwise be free to break — that the lines are all there, that a refused
+-- one is still there and says so, and that @:undo@ leaves the line alone and
+-- takes only its snapshot.
+recordTests :: [TestTree]
+recordTests =
+  [ testCase "every submitted line is in the transcript, in order" $
+      submittedLines (afterLines [":step off", ":bases", ":proofs"])
+        @?= [":step off", ":bases", ":proofs"]
+  , testCase "a refused line is recorded, and says it was refused" $
+      let r = recordOf (afterLines [":nonsense"])
+       in map entryOutcome r @?= [WasRefused]
+  , testCase "a line that went through says so" $
+      map entryOutcome (recordOf (afterLines [":proofs"])) @?= [WentThrough]
+  , testCase "undo leaves the line in the transcript" $
+      submittedLines (afterLines ["data N : Type0 where { z : N }", ":undo"])
+        @?= ["data N : Type0 where { z : N }", ":undo"]
+  , testCase "a line typed under no proof belongs to no proof" $
+      map entryProof (recordOf (afterLines [":proofs"])) @?= [Nothing]
+  , testCase "the lines of a proof are the slice from :theorem to qed" $
+      let s = afterLines
+                [ "data N : Type0 where { z : N }"
+                , ":theorem t : N"
+                , "attack"
+                , "qed"
+                ]
+          named = [ n | Just n <- map entryProof (recordOf s) ]
+          slice = concatMap (\n -> provedUnder n s) (take 1 named)
+       in map entrySubmitted slice
+            @?= [Just ":theorem t : N", Just "attack", Just "qed"]
+  , testCase "and the declaration before it belongs to no proof" $
+      map entryProof (take 1 (recordOf (afterLines ["data N : Type0 where { z : N }"])))
+        @?= [Nothing]
+  ]
+
+-- | A session the given lines have been typed into, in order.
+afterLines :: [String] -> Session
+afterLines = foldl (\s l -> fst (oneLine s l)) newSession
 
 -- --------------------------------------------------------------------------
 -- Undo, over generated scripts (2026-09-13)

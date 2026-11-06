@@ -35,6 +35,13 @@ module Thena.Driver
   , Working (..)
   , currentAttempt
   , Snapshot
+  , Record (..)
+  , Entry (..)
+  , Outcome (..)
+  , recordOf
+  , standing
+  , submittedLines
+  , provedUnder
   , ChoicePoint (..)
   , LoadError (..)
   , Loaded (..)
@@ -107,7 +114,7 @@ module Thena.Driver
   , kindOf
   ) where
 
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
@@ -130,7 +137,6 @@ import Thena.Language.Regex
   )
 import Data.Char (isAlpha, isAlphaNum, isSpace)
 import Data.List ((\\), intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, stripPrefix)
-import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
 import Thena.Development.Partial (Partial (..), extract, termsIn)
@@ -323,31 +329,30 @@ data Session = Session
     -- one.
   , sessionSuspended :: [Parked]
     -- ^ left and re-enterable, most recently suspended first (§2.4)
-  , sessionHistory   :: NonEmpty Snapshot
-    -- ^ where each line began, most recent first — and the head is **this**
-    -- line's, so it always exists.
+  , sessionRecord    :: Record
+    -- ^ **every submitted line, with the undo stack as a projection of it**
+    -- (MS11 phase 294, his ruling of 2026-11-06).
     --
-    -- **One field, not two** (phase 37). It was @sessionSaved :: Snapshot@ and
-    -- @sessionUndo :: [Snapshot]@, which are the head and the tail of exactly
-    -- this list: the head is what a failed line is rewound to (phase 25d), and
-    -- the tail is what @:undo@ walks. A line that changed nothing replaces the
-    -- head rather than pushing, which is why @:undo@ never has to step over a
-    -- @:show@. 'NonEmpty' is what makes \"there is always a state this line
-    -- began in\" a fact of the type rather than a discipline 'record' keeps.
-    --
-    -- **On the session, not on the attempt** (phase 34, his ruling of
-    -- 2026-08-29). It was 'Proof''s until then, so @:undo@ and phase 25d's
-    -- rewind both did nothing at the top level — where there is a development
-    -- but no theorem. That is the wrong way round: a 'Snapshot' is
-    -- @(Exec, Development)@ and 'Machine' always has both, so the history of a
-    -- thing that always exists was being kept in a record that sometimes does.
-    -- Nothing about taking a line back needs a theorem.
+    -- It was @sessionHistory :: NonEmpty Snapshot@ — a stack of the states each
+    -- line began in, with no record of the text at all. **He refused keeping a
+    -- transcript beside it**: /"That's what I call lateral truth in data
+    -- structures — its validity relies on those two independent parts
+    -- corresponding. Instead it should be merged into one collection somehow.
+    -- Commands have correspondence with snapshots after all."/ So there is one
+    -- sequence, and 'standing' reads the current state out of it instead of a
+    -- head being kept in step with a second list.
     --
     -- **Reset at every proof boundary** — @:theorem@, @qed@, @:abandon@,
     -- @:suspend@, @:resume@ — which is his choice of three. @qed@ writes to
     -- @globals@, and @globals@ is deliberately not in a 'Snapshot' (§7.7: the
     -- environment only ever grows), so an @:undo@ that crossed it would rewind
-    -- the development and leave the theorem admitted.
+    -- the development and leave the theorem admitted. **A boundary now clears
+    -- the entries\' snapshots rather than truncating anything**: the lines stay
+    -- and only the stepping back stops, because the transcript may not have
+    -- holes in it.
+    --
+    -- **On the session, not on the attempt** (phase 34, his ruling of
+    -- 2026-08-29): nothing about taking a line back needs a theorem to be open.
   , sessionFuel      :: Maybe Int
     -- ^ **how many instructions a run may do before handing control back**
     -- (MS7 phase 128): @Nothing@ to run on, @Just n@ for at most @n@.
@@ -570,6 +575,121 @@ data Working
 -- 'Parked' attempt /is/ an undo snapshot with a name and a statement attached.
 type Snapshot = (Exec, Development, [(Development, Int)])
 
+-- | __Whether a line did what it said__ (MS11 phase 294).
+--
+-- Recorded per line because a replay has to tell /this line failed the first
+-- time too/ from /this line used to work and now does not/, and nothing can
+-- recover that afterwards. His, 2026-11-06, agreeing to it: the engine appends
+-- what was submitted and annotates it, and normalises nothing.
+data Outcome
+  = WentThrough
+  | WasRefused  -- ^ 'stopped' — the four ways a line does not do what it said
+  deriving (Eq, Show)
+
+-- | __One submitted line__ (MS11 phase 294).
+--
+-- **The snapshot is a field here rather than a parallel list**, which is the
+-- whole of his /lateral truth/ ruling of 2026-11-06. Not every line is a place
+-- you can come back to — a proof boundary clears the stack, and a refused line
+-- changed nothing — so @entryUndo@ is a 'Maybe' and **the undo stack is
+-- @mapMaybe entryUndo@ over this sequence** rather than a second structure to
+-- keep in step. Under @Either@ those lines would have no entry at all, and the
+-- transcript is the one thing that may not have holes in it.
+data Entry = Entry
+  { entrySubmitted :: Maybe String
+    -- ^ the line exactly as submitted, and @Nothing@ for a program a frontend
+    -- ran through 'oneProgram' — a click is not a submitted line. **That is a
+    -- known limit on replaying a transcript and it is the frontend\'s to
+    -- close**, by submitting the line a user would have typed for the same
+    -- move.
+  , entryOutcome   :: Outcome
+  , entryUndo      :: Maybe Snapshot
+    -- ^ the state this line left, when it is one @:undo@ can come back to
+  , entryProof     :: Maybe GlobalName
+    -- ^ __which proof this line belongs to: one open on EITHER side of it__.
+    -- @:theorem t@ has none open before it and @qed@ none after, and a slice
+    -- missing either would not replay, so the test is /before or after/ and
+    -- not /before/. It is the engine\'s own
+    -- knowledge at that moment and nothing can reconstruct it afterwards: a
+    -- boundary that /clears/ the earlier snapshots leaves nothing to tell
+    -- \"cleared at a boundary\" from \"never had one\". **A stored proof is the
+    -- entries whose proof is that one** (@~xq9m2@).
+  }
+  deriving (Eq, Show)
+
+-- | __The session\'s record: the transcript and the undo stack, as one thing__
+-- (MS11 phase 294).
+--
+-- The entries are newest first, as the history they replace were.
+-- 'recordFloor' is where stepping back bottoms out — the state the session
+-- started in, or the state a proof boundary left.
+data Record = Record
+  { recordEntries :: [Entry]
+  , recordFloor   :: Snapshot
+  }
+  deriving (Eq, Show)
+
+-- | __Where the session stands now__: the newest snapshot the record still
+-- holds, or the floor.
+--
+-- This is what @sessionHistory@\'s head was, and it is a read rather than a
+-- field precisely so that it cannot drift from the lines.
+standing :: Record -> Snapshot
+standing r = case mapMaybe entryUndo (recordEntries r) of
+  (x : _) -> x
+  []      -> recordFloor r
+
+-- | __Take the newest step back__, or say there is none.
+--
+-- The line stays in the transcript and loses its snapshot — his ruling of
+-- 2026-10-30 that @:undo@ is undo and the transcript is not edited for it.
+stepBack :: Record -> Maybe Record
+stepBack r = case break (isJust . entryUndo) (recordEntries r) of
+  (_, [])             -> Nothing
+  (before, e : after) ->
+    Just r { recordEntries = before ++ e { entryUndo = Nothing } : after }
+
+-- | __Nothing before here is undoable any more__ — a proof boundary, and the
+-- end of a load.
+flattened :: Snapshot -> Record -> Record
+flattened now r =
+  Record { recordEntries = map (\e -> e { entryUndo = Nothing }) (recordEntries r)
+         , recordFloor   = now
+         }
+
+-- | __What a caller knows about a line before it runs__ (MS11 phase 294):
+-- the text, if it was text, and the proof it was typed under.
+data Said = Said
+  { saidText  :: Maybe String
+  , saidUnder :: Maybe GlobalName
+  }
+
+-- | The proof a session is working on, if it is working on one.
+provingIn :: Session -> Maybe GlobalName
+provingIn s = case sessionWork s of
+  Attempting att -> Just (attemptName att)
+  _              -> Nothing
+
+-- | __The session's record__, oldest line first — which is the order a replay
+-- wants and the reverse of how it is stored.
+--
+-- A read and not the field, so that a caller cannot write one (the note on
+-- 'Session' has why every field is read through a function of its own).
+recordOf :: Session -> [Entry]
+recordOf = reverse . recordEntries . sessionRecord
+
+-- | __The transcript__: what was submitted, oldest first, with the frontend's
+-- own programs left out because they were never lines.
+submittedLines :: Session -> [String]
+submittedLines = mapMaybe entrySubmitted . recordOf
+
+-- | __The lines of one proof__, oldest first — @:theorem@ through @qed@.
+--
+-- **This is what a stored proof is** (@~xq9m2@): a slice of a transcript and
+-- not a second kind of artifact.
+provedUnder :: GlobalName -> Session -> [Entry]
+provedUnder n = filter ((== Just n) . entryProof) . recordOf
+
 -- | An unfinished proof of a theorem (§2.4, §3.3.1).
 --
 -- **\"Attempt\" is the word for it** — his, 2026-09-01, renaming @Proof@:
@@ -725,7 +845,7 @@ newSession = Session
   { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] [] rootScope n 0 NoUndischargeableTrust
   , sessionWork      = Scratch
   , sessionSuspended = []
-  , sessionHistory   = (Exec [] [] [], ps, []) :| []
+  , sessionRecord    = Record { recordEntries = [], recordFloor = (Exec [] [] [], ps, []) }
   , sessionFuel      = Nothing
   , sessionParsing   = Nothing
   , sessionAsking    = Nothing
@@ -3650,10 +3770,10 @@ dispatch s name arg = case name of
 
     -- **No proof required** (phase 34). @:undo@ takes back the line you typed,
     -- and nothing about that needs a theorem to be open.
-    undo = case sessionHistory s of
-      _ :| []       -> (s, Rejected NothingToUndo)
-      _ :| (u : us) ->
-        ( s { sessionMachine = restore u machine, sessionHistory = u :| us }
+    undo = case stepBack (sessionRecord s) of
+      Nothing -> (s, Rejected NothingToUndo)
+      Just r  ->
+        ( s { sessionMachine = restore (standing r) machine, sessionRecord = r }
         , Undone
         )
 
@@ -4788,7 +4908,7 @@ answer s a
 -- terminal turn and 'loadSource' below — and the pending-question bookkeeping
 -- is the part a second copy would get subtly wrong.
 oneLine :: Session -> String -> (Session, Response)
-oneLine s line = settle (case sessionAsking s of
+oneLine s line = settle (Said (Just line) (provingIn s)) (case sessionAsking s of
   Just _  -> answer s line
   Nothing -> command s line)
 
@@ -4803,15 +4923,17 @@ oneLine s line = settle (case sessionAsking s of
 -- which is the special case the first design principle refuses.
 oneProgram :: Session -> [Instr] -> (Session, Response)
 oneProgram s is =
-  settle (progress (sessionFuel s) s { sessionMachine = load is (sessionMachine s) } [] [])
+  settle
+    (Said Nothing (provingIn s))
+    (progress (sessionFuel s) s { sessionMachine = load is (sessionMachine s) } [] [])
 
 -- | What every line and every program does after it has run: notice a pending
 -- question, and keep the undo history straight.
 --
 -- Factored out of 'oneLine' at MS7 phase 113, when 'oneProgram' became its
 -- second caller. Nothing here depends on how @(s', resp)@ was produced.
-settle :: (Session, Response) -> (Session, Response)
-settle (s', resp) = (record s' { sessionAsking = asking }, resp)
+settle :: Said -> (Session, Response) -> (Session, Response)
+settle said (s', resp) = (record s' { sessionAsking = asking }, resp)
   where
 
     asking = case resp of
@@ -4858,18 +4980,51 @@ settle (s', resp) = (record s' { sessionAsking = asking }, resp)
         -- and the answering line fails, this rewinds to the asking state and
         -- not to before the whole command, because that is where the previous
         -- snapshot was taken. §2.4's granularity, applied consistently.
-        | stopped resp =
-            sess { sessionMachine =
-                     restore (NE.head (sessionHistory sess)) (sessionMachine sess) }
+        | stopped resp = kept { sessionRecord = noted Nothing }
         -- **A proof boundary starts a fresh history** (phase 34, his choice of
         -- three). Done here and not in the five commands themselves, because
         -- @record@ runs /after/ the command and would push the crossing itself
         -- back on top of a stack the command had just emptied.
-        | boundary resp = sess { sessionHistory = now :| [] }
-        | resp == Undone || now == NE.head (sessionHistory sess) =
-            sess { sessionHistory = now :| NE.tail (sessionHistory sess) }
-        | otherwise = sess { sessionHistory = now NE.<| sessionHistory sess }
-       now = snapshotOf (sessionMachine sess)
+        --
+        -- **It clears the entries' snapshots and moves the floor** (MS11 phase
+        -- 294) where it used to truncate the list: the lines it crossed stay
+        -- in the transcript and only the stepping back stops.
+        | boundary resp = kept { sessionRecord = flattened now (noted Nothing) }
+        -- **A line that changed nothing records no snapshot**, which is what
+        -- /replacing the head/ was: 'standing' still answers the state the
+        -- previous line left, so @:undo@ does not have to be pressed twice for
+        -- a @:show@. @:undo@ itself lands here, since it has just restored the
+        -- state it is reporting.
+        | resp == Undone || now == standing (sessionRecord sess) =
+            kept { sessionRecord = noted Nothing }
+        | otherwise = kept { sessionRecord = noted (Just now) }
+
+       -- **The machine first, the record second.** A stopped line is rewound
+       -- before its snapshot is read, which is why 'now' is taken from 'kept'
+       -- and not from the session as it arrived.
+       kept
+        | stopped resp =
+            sess { sessionMachine =
+                     restore (standing (sessionRecord sess)) (sessionMachine sess) }
+        | otherwise = sess
+
+       now = snapshotOf (sessionMachine kept)
+
+       -- | This line, appended whatever it did. **Every submitted line gets an
+       -- entry** — that is what makes the undo stack a projection of the
+       -- transcript rather than a list beside it.
+       noted u =
+         let r = sessionRecord sess
+             e = Entry { entrySubmitted = saidText said
+                       , entryOutcome   = if stopped resp then WasRefused else WentThrough
+                       , entryUndo      = u
+                         -- **Either side of the line**, so that @:theorem t@
+                         -- and its @qed@ both belong to @t@ — the first has no
+                         -- proof open before it and the second none after, and
+                         -- a slice that lost either would not replay.
+                       , entryProof     = maybe (provingIn sess) Just (saidUnder said)
+                       }
+          in r { recordEntries = e : recordEntries r }
 
 -- | The per-proof half of a machine.
 snapshotOf :: Machine -> Snapshot
@@ -4948,8 +5103,8 @@ loadSource s0 = go s0 1 [] . lines
     -- @err@ already reports that as 'UnansweredQuestion'.
     finished s acc err =
       Loaded
-        s { sessionHistory = NE.head (sessionHistory s) :| []
-          , sessionAsking  = Nothing
+        s { sessionRecord = flattened (standing (sessionRecord s)) (sessionRecord s0)
+          , sessionAsking = Nothing
           }
         (reverse acc)
         err
