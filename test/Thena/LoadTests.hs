@@ -731,6 +731,37 @@ publicBaseTests =
         [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
           assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- es ]))
         other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- **AND A RULE FILE'S IMPORT MAY STATE HOW FAR IT REACHES** (MS11 phase
+    -- 299, his ask for the parity with the surface language). @ScopedReveals@
+    -- writes @LC[app]@ in a rule inside the block, and the module it names is
+    -- loaded for it as a file-wide @import@'s is.
+    --
+    -- **WHAT IS REVEALED IS THE GRAMMAR KEY AS WELL AS THE NAMES**, which is
+    -- phase 297's asymmetry and the one way this differs from a surface file's
+    -- block: nothing in @rule describe LC[app]\`…\`@ names a global, so the
+    -- names alone would have revealed nothing a rule file can use.
+    testCase "a rule file's import may state how far it reaches" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <-
+        consultRuleFiles s0 ["test/modules/ScopedReveals.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ map baseName bs | BasesLoaded bs _ <- out ]
+        @?= [["scoped-reveals", "standard"]]
+
+  , -- **THE PAIR, AND IT IS THE WHOLE POINT OF THE BLOCK** (MS11 phase 299):
+    -- @ScopedHides@ imports the same module with the same block and writes
+    -- @LC[app]@ in a rule AFTER it. The module is loaded and in the session,
+    -- and the rule is still refused — so the block is a frame and not a
+    -- decoration, which is the measurement phase 297 would have failed.
+    testCase "and the rule after the block may not write what it revealed" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <-
+        consultRuleFiles s0 ["test/modules/ScopedHides.thena.rules"]
+      case trouble of
+        [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
+          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- es ]))
+        other -> assertFailure (show (map (renderTrouble s0) other))
   ]
 
 -- --------------------------------------------------------------------------

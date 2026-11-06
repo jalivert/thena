@@ -413,7 +413,16 @@ rawDecl d = case d of
   -- longer be stated. **And a @consult@ line beside it** (MS11 phase 289), for
   -- that reason doubled: a base printed without one would read back and be
   -- refused for the base it is written against.
-  DeclImport r ps x  -> [reach r ++ "import " ++ dotted ps x]
+  DeclImport r ps x Nothing  -> [reach r ++ "import " ++ dotted ps x]
+  -- **AND ITS BLOCK, INDENTED** (MS11 phase 299), which is 'DeclOpenIn''s shape
+  -- one line up: @where@ ends the line and the offside rule opens the block at
+  -- the next token, so what is printed reads back as what was written.
+  -- **An empty block round-trips too** — a layout keyword with nothing after it
+  -- opens an empty block ("Thena.Surface.Layout"), so @Just []@ prints as a
+  -- bare @where@ and parses back to @Just []@.
+  DeclImport r ps x (Just ds) ->
+    (reach r ++ "import " ++ dotted ps x ++ " where")
+      : map ("  " ++) (concatMap rawDecl ds)
   DeclConsult r ps x -> [reach r ++ "consult " ++ dotted ps x]
   where
     dotted ps x = intercalate "." (ps ++ [x])

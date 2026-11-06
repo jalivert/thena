@@ -143,13 +143,13 @@ imports =
   testGroup
     "what a rule file states it is written against (MS11 phases 276 and 289)"
     [ testCase "import X" $
-        decls ["import Stlc"] @?= Right [DeclImport Own [] "Stlc"]
+        decls ["import Stlc"] @?= Right [DeclImport Own [] "Stlc" Nothing]
 
       -- **The steps are directories**, which is what makes this a file's name
       -- and not a namespace's — the same spelling meaning something else.
     , testCase "and the module name is a path" $
         decls ["import Stlc.Syntax.Terms"]
-          @?= Right [DeclImport Own ["Stlc", "Syntax"] "Terms"]
+          @?= Right [DeclImport Own ["Stlc", "Syntax"] "Terms" Nothing]
 
       -- **The other act, and the other word on both** (MS11 phase 289, his
       -- ruling of 2026-10-30 that @public@ is available to both acts and to
@@ -160,16 +160,62 @@ imports =
           @?= Right [DeclConsult Own ["Stlc"] "Tactics"]
 
     , testCase "public import X" $
-        decls ["public import Stlc"] @?= Right [DeclImport Public [] "Stlc"]
+        decls ["public import Stlc"] @?= Right [DeclImport Public [] "Stlc" Nothing]
 
     , testCase "public consult X" $
         decls ["public consult Stlc.Tactics"]
           @?= Right [DeclConsult Public ["Stlc"] "Tactics"]
 
+      -- **AND AN IMPORT MAY STATE HOW FAR IT REACHES** (MS11 phase 299, his ask
+      -- for the parity with the surface language). The block is the field, so
+      -- @Nothing@ above is the line with none and this is the same constructor.
+    , testCase "import X where { … }" $
+        decls ["import Stlc where", "  r : Core"]
+          @?= Right [DeclImport Own [] "Stlc" (Just [DeclSignature (signatureOf "r")])]
+
+      -- **@where@ with nothing after it is an EMPTY block and not a line with
+      -- no block**, which is the layout rule and not a case of its own
+      -- ("Thena.Surface.Layout"). It matters because @Just []@ and @Nothing@
+      -- mean different things: the first reveals the module to nothing, the
+      -- second to the rest of the file.
+    , testCase "and an empty block is Just []" $
+        decls ["import Stlc where"] @?= Right [DeclImport Own [] "Stlc" (Just [])]
+
+      -- **@public@ and a block are two questions**, so a line may state both:
+      -- the block says how far the module reaches here, @public@ says who else
+      -- gets it.
+    , testCase "public import X where { … }" $
+        decls ["public import Stlc where", "  r : Core"]
+          @?= Right [DeclImport Public [] "Stlc" (Just [DeclSignature (signatureOf "r")])]
+
+      -- **Nesting costs no mechanism**, because a block holds what the file
+      -- holds — the production takes @Decls@.
+    , testCase "and a block may hold another scoped import" $
+        decls ["import Stlc where", "  import Stlc.Terms where", "    r : Core"]
+          @?= Right
+                [ DeclImport Own [] "Stlc"
+                    (Just [ DeclImport Own ["Stlc"] "Terms"
+                              (Just [DeclSignature (signatureOf "r")]) ]) ]
+
     , testCase "it survives being printed and read again" $ do
         let written = [ "import Stlc", "import Stlc.Syntax.Terms"
                       , "public import Stlc.Terms"
                       , "consult Stlc.Tactics", "public consult Stlc.Crush"
+                      , "open Stlc" ]
+        case decls written of
+          Left e   -> assertFailure e
+          Right ds -> decls' (printRuleFile "mine" Nothing ds) @?= Right ds
+
+      -- **The block goes round too** (MS11 phase 299), the empty one included:
+      -- a stored project holds the tree as written, so a base printed without
+      -- its block would read back with the module reaching the rest of the file.
+    , testCase "and so does a scoped import, empty block and all" $ do
+        let written = [ "import Stlc where"
+                      , "  r : Core"
+                      , "  import Stlc.Terms where"
+                      , "    q : Core"
+                      , "public import Stlc.Other where"
+                      , "import Stlc.Nothing where"
                       , "open Stlc" ]
         case decls written of
           Left e   -> assertFailure e
@@ -181,6 +227,12 @@ imports =
     decls' src = case rawRuleDecls src of
       Right (_, _, ds) -> Right ds
       Left e           -> Left (show e)
+
+    -- Reached by parsing it, as the group above does: 'RawSignature' is a type
+    -- this module has no other reason to import.
+    signatureOf n = case decls [n ++ " : Core"] of
+      Right [DeclSignature g] -> g
+      other -> error ("the fixture signature did not parse: " ++ show other)
 
 -- --------------------------------------------------------------------------
 -- The header

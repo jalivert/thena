@@ -1538,6 +1538,26 @@ No `open` comes with it: a module that opens a namespace at its own top level ha
 you the names and never the short spellings, inside a block or out of one. The
 `open`s a block may use are the ones you write in it.
 
+**In a rule file, `import` takes a block and `consult` does not.** The import works
+exactly as above — the block's rules may write what the module reaches, the rules after
+it may not:
+
+```
+rule base describing where
+
+import Stlc.Terms where         -- Terms' names and its languages, in here only
+  rule describe LC[app]`( ${f} ${a} )` :- do
+    say "an application"
+
+rule elsewhere :- do            -- LC is not writable here
+  say "something else"
+```
+
+A `consult` block is not written in a rule file. In a proof file it says *search these
+proofs against that base*; a rule file has no proofs, and its rules are searched against
+everything the session holds at the moment they run — so there is nothing for that half
+to apply to, and the form is not offered rather than offered meaning less.
+
 > **What you reach is up to the file you imported.** It says what it offers with
 > `exporting` and `private`, below, and passes its own dependencies on with
 > `public import` and `public consult`.

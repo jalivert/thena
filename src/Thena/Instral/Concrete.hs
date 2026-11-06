@@ -113,10 +113,27 @@ data RawDecl
     -- ^ @open X@ — in force from here to the end of the file
   | DeclOpenIn RawOpen RawDecl
     -- ^ @open X in ‹declaration›@ — in force for that declaration alone
-  | DeclImport Reach [String] String
+  | DeclImport Reach [String] String (Maybe [RawDecl])
     -- ^ @import ‹module›@, @public import ‹module›@ — **a surface module this
     -- base depends on** (MS11 phase 276, his ruling of 2026-11-03; the 'Reach'
-    -- at phase 289).
+    -- at phase 289; the block at phase 299).
+    --
+    -- **AND HOW FAR IT REACHES, WHICH THE ACT STATES ITSELF** (MS11 phase 299,
+    -- his design of 2026-11-05 and his ask for the parity).
+    -- @import M where { … }@ reaches the declarations in its block and stops;
+    -- 'Nothing' is the rest of the file, which is what a line with no block
+    -- says. 'Thena.Surface.Concrete.SurfaceImport' is the twin and this is the
+    -- same field, so the two concrete syntaxes say the same thing by the same
+    -- shape.
+    --
+    -- **WHAT IT REVEALS HERE IS NAMES AND GRAMMAR KEYS, WHERE A SURFACE FILE'S
+    -- REVEALS NAMES ALONE** — not a second rule but phase 297's asymmetry read
+    -- out: writing a tagged term in surface text means naming its datatype in a
+    -- signature, so a surface block that may write the name may write the term,
+    -- while a rule file's signatures are @instral@'s own types and
+    -- @rule describe LC[app]\`…\`@ names no global at all.
+    -- 'Thena.Driver.scopedDecls' is where the frame is pushed, and
+    -- 'Thena.Core.Term.revealing' is the frame.
     --
     -- The steps and the last word of a /file's/ name, 'RawOpen'\'s shape and not
     -- its meaning: there the steps are a namespace's, here they are

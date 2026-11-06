@@ -231,12 +231,26 @@ Decl :: { RawDecl }
   -- **What this base depends on** (MS11 phase 276, his ruling of 2026-11-03: a
   -- file states what it refers to and never relies on the session). A @QName@
   -- whose steps are directories, as the surface language's @import@ is.
-  | import QName                           { DeclImport Own (fst $2) (snd $2) }
+  | import QName                           { DeclImport Own (fst $2) (snd $2) Nothing }
   -- **And the four combinations of his ruling of 2026-10-30 completed** (MS11
   -- phase 289): a rule file states the bases it is written against and may
   -- publish either act, which is the same two productions the surface language
   -- has in "Thena.Surface.Parser" and the same one word's worth of difference.
-  | public import QName                    { DeclImport Public (fst $3) (snd $3) }
+  | public import QName                    { DeclImport Public (fst $3) (snd $3) Nothing }
+  -- **AND AN IMPORT STATES HOW FAR IT REACHES HERE TOO** (MS11 phase 299, his
+  -- ask for the parity: /"I still want Surface do-blocks and instral to have
+  -- scoped imports and consults, because it makes sense."/). The twin
+  -- production is @import QName where '{' Decls '}'@ in "Thena.Surface.Parser",
+  -- and @where@ is a layout keyword in this file's lexer as it is in that one,
+  -- so the braces are the offside rule's and an explicit spelling passes
+  -- through.
+  --
+  -- **@Decls@ and not a list of its own**: what a block holds is what the file
+  -- holds, which is what makes a scoped import nest with no mechanism.
+  | import QName where '{' Decls '}'
+      { DeclImport Own (fst $2) (snd $2) (Just (reverse $5)) }
+  | public import QName where '{' Decls '}'
+      { DeclImport Public (fst $3) (snd $3) (Just (reverse $6)) }
   | consult QName                          { DeclConsult Own (fst $2) (snd $2) }
   | public consult QName                   { DeclConsult Public (fst $3) (snd $3) }
 

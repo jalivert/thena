@@ -126,7 +126,7 @@ import Data.Word (Word64)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, shortestEnding, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -2796,6 +2796,21 @@ reachedBy ms0 s = reach [] ms0
           exportedByModule m s
             ++ reach (m : seen) (publicImportsOf m s ++ ms)
 
+-- | __What a rule file's scoped @import@ reveals for its block__ (MS11 phase
+-- 299).
+--
+-- 'Thena.Driver.Brought''s @broughtImport@ for a rule file, and **it reveals
+-- one thing more: the module's grammar keys.** That is phase 297's asymmetry
+-- and not a second rule — 'concealedFrom' subtracts names and grammar keys
+-- together, and what a scoped import reveals has to be exactly what a
+-- file-wide one would not have concealed, or the two spellings come to differ.
+-- A surface file's block needs only the names, because writing a tagged term
+-- there means naming its datatype in a signature; a rule file's signatures are
+-- @instral@'s own types, so nothing in @rule describe LC[app]\`…\`@ names a
+-- global and the key is the only route.
+revealedToBase :: Session -> ModuleName -> [GlobalName]
+revealedToBase s m = reachedBy [m] s ++ grammarsReachedBy [m] s
+
 -- | __Which @open@s a module starts with__ (MS11 phase 283, @~w46f8@; narrowed
 -- to the prelude at phase 293, his ruling of 2026-11-06).
 --
@@ -4669,10 +4684,11 @@ breakOn needle = go ""
 -- with no session passes @[]@**, which is the prompt's scope and conceals
 -- nothing.
 ruleBaseOfDecls
-  :: [Grammar] -> [GlobalName] -> FilePath -> String -> Maybe String
+  :: (ModuleName -> [GlobalName]) -> [Grammar] -> [GlobalName] -> FilePath
+  -> String -> Maybe String
   -> [RawDecl] -> Either RuleFileError RuleBase
-ruleBaseOfDecls gs conc path nm desc raws = do
-  (sigs, fns, rs) <- resolveAll gs conc raws
+ruleBaseOfDecls reveals gs conc path nm desc raws = do
+  (sigs, fns, rs) <- resolveAll reveals gs conc raws
   Right (ruleBase nm desc path sigs fns rs)
 
 -- | A rule file's header and its declarations, parsed and /not/ resolved.
@@ -4747,8 +4763,10 @@ parseInstralType src = do
 -- @conc@ is 'concealedFrom' of the file's own imports, and the subtraction is
 -- the one @~xdt8c@ made for a surface module at phase 282 — the same ruling, a
 -- table further over.
-scopedDecls :: [Grammar] -> [GlobalName] -> [RawDecl] -> [(Reading, RawDecl)]
-scopedDecls gs conc = go rootScope { scopeConcealed = [conc] }
+scopedDecls
+  :: (ModuleName -> [GlobalName]) -> [Grammar] -> [GlobalName] -> [RawDecl]
+  -> [(Reading, RawDecl)]
+scopedDecls reveals gs conc = go rootScope { scopeConcealed = [conc] }
   where
     go _ []  = []
     go sc (d : rest) = case d of
@@ -4762,7 +4780,17 @@ scopedDecls gs conc = go rootScope { scopeConcealed = [conc] }
       -- happened before this walk started. **A consult is the same** (MS11
       -- phase 289): what it names is a pool, which is assembled before a rule
       -- of this file is ever searched.
-      DeclImport _ _ _  -> go sc rest
+      DeclImport _ _ _ Nothing -> go sc rest
+      -- **AND A SCOPED IMPORT IS A FRAME OVER ITS BLOCK** (MS11 phase 299, his
+      -- design of 2026-11-05). The module is loaded before this file is read,
+      -- as every import's is; what the block settles is where its names may be
+      -- written, so the frame goes on for the declarations inside and the file
+      -- carries on without it — @open … in@'s shape, one gate further out.
+      -- **'Thena.Core.Term.revealing' is the frame and 'LeaveReveal' is this
+      -- @++ go sc rest@**: a walk needs no op to put a concealment back, where
+      -- a surface program does because its declarations run.
+      DeclImport _ ps x (Just inner) ->
+        go (revealing (reveals (moduleFromSteps ps x)) sc) inner ++ go sc rest
       DeclConsult _ _ _ -> go sc rest
       _                 -> (Reading gs sc, d) : go sc rest
 
@@ -4798,10 +4826,10 @@ openedOf (RawOpen ns spec) = [ said (ps ++ [x]) | (ps, x) <- ns ]
 -- that stands where it is written and not against one scope for the file.
 -- 'scopedDecls' is the walk that pairs the two.
 resolveAll
-  :: [Grammar] -> [GlobalName] -> [RawDecl]
+  :: (ModuleName -> [GlobalName]) -> [Grammar] -> [GlobalName] -> [RawDecl]
   -> Either RuleFileError
        ([(String, Signature)], [Rule], [Rule])
-resolveAll gs conc raws =
+resolveAll reveals gs conc raws =
   case ( concat ruleErrs ++ concat fnErrs ++ sigErrs
            ++ dups ++ collisions ++ overlapping
        , concatMap validate (ok ++ fns)
@@ -4812,7 +4840,7 @@ resolveAll gs conc raws =
     -- **Each declaration beside the scope it was written in.** An @open@ is not
     -- a declaration to resolve, so it does not appear here — what it says is
     -- already in the reading beside everything under it.
-    decls = scopedDecls gs conc raws
+    decls = scopedDecls reveals gs conc raws
 
     (ruleErrs, ok)  =
       partitionEithers [ resolveRule rd r | (rd, DeclRule r) <- decls ]
@@ -4921,7 +4949,7 @@ consultRuleBases s ps =
 -- — 'handedTo' is the walk, and the whole group's texts are what it walks.
 statedConcealment :: Session -> [(FilePath, String)] -> String -> [GlobalName]
 statedConcealment s group src =
-  concealedFrom (either (const []) id (ruleBaseImports src)
+  concealedFrom (either (const []) id (ruleBaseFileImports src)
                    ++ handedTo group src) s
 
 -- | __A @public consult@ with nothing left to say__ (MS11 phase 298, his ruling
@@ -4990,8 +5018,8 @@ readStated s gs group path src = do
   (nm, desc, raws) <- rawRuleDecls src
   case filter (\m -> not (moduleLoaded m s)) (rawImports raws) of
     ms@(_ : _) -> Left (RuleImportsUnread ms)
-    []         -> ruleBaseOfDecls gs
-                    (concealedFrom (rawImports raws ++ handedTo group src) s)
+    []         -> ruleBaseOfDecls (revealedToBase s) gs
+                    (concealedFrom (rawFileImports raws ++ handedTo group src) s)
                     path nm desc raws
 
 -- | Every surface module a rule file imports, in written order (MS11 phase
@@ -4999,10 +5027,23 @@ readStated s gs group path src = do
 --
 -- **Parsed and not resolved**, which is what 'rawRuleDecls' is for: the
 -- dependency has to be known /before/ there is anything to resolve against.
+-- **A scoped import is in this list too** (MS11 phase 299): what a block
+-- changes is where the names may be written, so the load graph reads every
+-- line — 'rawImports' says why, and 'ruleBaseFileImports' is the other door.
 ruleBaseImports :: String -> Either RuleFileError [ModuleName]
 ruleBaseImports src = do
   (_, _, raws) <- rawRuleDecls src
   Right (rawImports raws)
+
+-- | __The same, less the lines that state a block__ (MS11 phase 299).
+--
+-- 'rawFileImports'' door, for the one consumer that asks what the file's text
+-- may name throughout rather than what it depends on: the file-wide
+-- concealment. **The load reads 'ruleBaseImports' and never this.**
+ruleBaseFileImports :: String -> Either RuleFileError [ModuleName]
+ruleBaseFileImports src = do
+  (_, _, raws) <- rawRuleDecls src
+  Right (rawFileImports raws)
 
 -- | __Every base a rule file states it is written against__, in written order
 -- (MS11 phase 289). 'ruleBaseImports'\' door for the other act, and parsed
@@ -5065,13 +5106,41 @@ handedTo group = go []
 --
 -- **An @open … in@ is walked into**, because the declaration it covers may be
 -- an import; nothing else nests.
+-- **AND A SCOPED IMPORT IS ONE OF THEM** (MS11 phase 299). What a block
+-- changes is where the module's names may be written, never whether the module
+-- is loaded, so the load graph and the /is it in/ check read every line —
+-- 'moduleImports' is the surface file's walk and this is the same rule.
+-- **'rawFileImports' is the other half**, for the one consumer that wants the
+-- file-wide lines alone.
 rawImports :: [RawDecl] -> [ModuleName]
 rawImports = concatMap go
   where
     go d = case d of
-      DeclImport _ ps x -> [moduleFromSteps ps x]
-      DeclOpenIn _ cov  -> go cov
-      _                 -> []
+      DeclImport _ ps x blk -> moduleFromSteps ps x : concatMap go (concat blk)
+      DeclOpenIn _ cov      -> go cov
+      _                     -> []
+
+-- | __Which surface modules a rule file's own text may name throughout__ (MS11
+-- phase 299).
+--
+-- 'rawImports' less the scoped lines, which is 'fileImports' for a rule file
+-- and the same reason: a file-wide @import@ says every declaration may write
+-- the module's names, and @import M where { … }@ says only its block may.
+-- **So this is what the file-wide concealment is worked out from**, and
+-- 'scopedDecls' pushes a frame for the rest.
+--
+-- **A scoped import written INSIDE a scoped import's block is still scoped**,
+-- so the walk goes into a block only for what a line there states file-wide —
+-- which, inside a block, is nothing. An @open … in@ is walked into for
+-- 'rawImports'' reason.
+rawFileImports :: [RawDecl] -> [ModuleName]
+rawFileImports = concatMap go
+  where
+    go d = case d of
+      DeclImport _ ps x Nothing  -> [moduleFromSteps ps x]
+      DeclImport _ _ _ (Just _)  -> []
+      DeclOpenIn _ cov           -> go cov
+      _                          -> []
 
 -- | __Every rule base a rule file states it is written against__, in written
 -- order (MS11 phase 289, @~jmw4k@).
@@ -5087,13 +5156,20 @@ rawImports = concatMap go
 -- base could land between a base and its helper and answer a call the author
 -- had pinned. Adjacency is what fetching buys, and it is why requiring was not
 -- the stricter discipline it looked like. 'Thena.Files.fetching' is the walk.
+-- **A @consult@ inside a scoped import's block is the file's** (MS11 phase
+-- 299), which is 'moduleConsults'' rule for a surface file: an @import@ block
+-- scopes names, and the pool a base is installed into is the file's whatever
+-- line names it. **@consult@ has no block of its own here**: a rule file holds
+-- no proofs, so there is nothing a pool could be scoped to, and the surface
+-- language's block means a pool as well as a set of names.
 rawConsults :: [RawDecl] -> [ModuleName]
 rawConsults = concatMap go
   where
     go d = case d of
-      DeclConsult _ ps x -> [moduleFromSteps ps x]
-      DeclOpenIn _ cov   -> go cov
-      _                  -> []
+      DeclConsult _ ps x    -> [moduleFromSteps ps x]
+      DeclImport _ _ _ blk  -> concatMap go (concat blk)
+      DeclOpenIn _ cov      -> go cov
+      _                     -> []
 
 -- | __Which bases a rule file pushes for whoever consults it__ (MS11 phase 289,
 -- @~jmw4k@, his ruling of 2026-10-30).
@@ -5117,6 +5193,7 @@ rawPublicConsults = concatMap go
   where
     go d = case d of
       DeclConsult Public ps x -> [moduleFromSteps ps x]
+      DeclImport _ _ _ blk    -> concatMap go (concat blk)
       DeclOpenIn _ cov        -> go cov
       _                       -> []
 
@@ -5130,13 +5207,18 @@ rawPublicConsults = concatMap go
 -- **The @open@s that module left are NOT inherited with it**, which is
 -- 'openedFrom''s half: his ruling of 2026-11-06 is that an @open@ travels
 -- nowhere, so a base is no exception and nothing here is a second rule.
+-- **A SCOPED @public import@ STILL TRAVELS** (MS11 phase 299), which is
+-- 'publicImports'' reading for a surface file and not a second rule: the block
+-- says how far the module reaches in THIS file, and @public@ says who else gets
+-- it — two questions, so one does not answer the other.
 rawPublicImports :: [RawDecl] -> [ModuleName]
 rawPublicImports = concatMap go
   where
     go d = case d of
-      DeclImport Public ps x -> [moduleFromSteps ps x]
-      DeclOpenIn _ cov       -> go cov
-      _                      -> []
+      DeclImport Public ps x blk -> moduleFromSteps ps x : concatMap go (concat blk)
+      DeclImport Own _ _ blk     -> concatMap go (concat blk)
+      DeclOpenIn _ cov           -> go cov
+      _                          -> []
 
 -- | The same, for bases whose declarations were stored rather than written.
 --
@@ -5149,7 +5231,7 @@ loadRuleDecls :: Session -> [(FilePath, String, Maybe String, [RawDecl])] -> (Se
 loadRuleDecls s ps =
   loadReadBases s [ ( path
                     , [ PublicConsultIdle (moduleText m) | m <- rawPublicConsults ds ]
-                    , concealedFrom (rawImports ds) s
+                    , concealedFrom (rawFileImports ds) s
                     , stated path nm desc ds )
                   | (path, nm, desc, ds) <- ps ]
   where
@@ -5168,8 +5250,8 @@ loadRuleDecls s ps =
       -- the pipeline too late to have. Nothing is lost that was ever there:
       -- this door has had no caller since it was written, and a project stored
       -- as text comes in through 'loadRuleBases' with the rest.
-      []         -> ruleBaseOfDecls gs (concealedFrom (rawImports ds) s)
-                                    path nm desc ds
+      []         -> ruleBaseOfDecls (revealedToBase s) gs
+                      (concealedFrom (rawFileImports ds) s) path nm desc ds
 
 -- | Install bases that have already been built, or none of them.
 --

@@ -688,6 +688,29 @@ where you wrote them.
 **And no `open` is inherited into the block either**, because none is inherited at all:
 a module hands on names and never spellings, inside a block or out of one.
 
+**A RULE FILE'S `import` TAKES A BLOCK TOO; ITS `consult` DOES NOT.** *Built MS11 phase
+299.* The same two spellings, and the same rule — the block's declarations may write
+what the module reaches, the rest of the file may not, and `public` in front of the line
+is a separate question that a block does not answer:
+
+```
+rule base describing where
+
+import Stlc.Terms where         -- Terms' names and its languages, in here only
+  rule describe LC[app]`( ${f} ${a} )` :- do
+    say "an application"
+
+rule elsewhere :- do            -- LC is not writable here
+  say "something else"
+```
+
+**`consult B where { … }` is not written in a rule file.** In a proof file that block
+says two things: search the block's proofs against `B`, and let the block write what `B`
+hands on. A rule file has no proofs — its rules are searched against everything the
+session holds at the moment they run, which is what lets a later base refine an earlier
+base's rule — so half of what the block says has nothing to apply to. Rather than accept
+the line and quietly mean less by it, the form is not offered yet.
+
 **And both words are typed at the prompt.** *Built MS11 phase 284.* `import
 Stlc.Terms` loads that module by name, `consult Stlc.Tactics` pushes that base, and
 they are the same two declarations a file writes rather than commands that resemble
