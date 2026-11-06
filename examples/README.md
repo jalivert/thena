@@ -19,7 +19,7 @@ to the file.
 | `Stlc05GroupingBySplicing.thena` | A language with no parentheses, where `f a b` reads two ways; a splice as a group (`` Ex`${Ex`f a`} b` ``), to any depth; a name or a computation spliced in as a group; the splices `09` shows the printer writing for itself |
 | `Stlc06MoreJudgments.thena` | Many steps as a judgment built on `step`, with a two-step run; the annotated tier (`rule … where ∀ … ->`) ranging over a derivation; a swap by simultaneous substitution with Redex-style subscripts (`x_1`, `x_2`) beside the sequential version that gets it wrong; a premise continued onto a second line |
 | `Stlc07Preservation.thena` | **Preservation for STLC, for closed terms** — the milestone's goal. A proof about the substitution Thena generated in 01, following its `String.dec` decisions: weakening, free variables, why no binder is renamed, the substitution lemma over a whole map, inversion, preservation. Ends by typing a reduct through `preservation` |
-| `Stlc08PreservationByTactics.thena.script` | **The same proof again, by tactics**, as a script of command lines: each lemma a `:theorem`, its inductions and case splits done with `eliminate-core`, the cases filled with `` elaborate surface`…` ``, the β case taken apart by two nested eliminations. Reuses 07's definitions, not its lemmas |
+| `Stlc08PreservationByTactics.thena.script` | **The same proof again, by tactics**, as a script of command lines: each lemma a `:theorem`, its inductions and case splits done with `eliminate-core`, the cases filled with `` elaborate surface`…` ``, the β case taken apart by two nested eliminations. Reuses 07's definitions, not its lemmas, and **states its own `import` lines** |
 | `Stlc10PreservationAnyContext.thena` | **Preservation for ANY context** — what `07` could not do. An open argument can capture, so the generated substitution renames the binder, and the file **proves** that the minted name is fresh. **Three trusted laws about `String.append` and everything else derived**: associativity, and that a string differs from itself with a `'` appended, with and without more after it. No lengths and no arithmetic — the counting is a `Longer` computed from two lists |
 | `Stlc09Printing.thena` | **Terms shown in their own notation** — the other direction from 01. A judgment's statement printed as it reads on paper; a name kept rather than unfolded into what it stands for, in a splice; the splices the printer writes where a grammar groups by splicing, as 05 writes them by hand; a variable spelled like one of the grammar's own terminals, which is fenced where the same position otherwise is not; reading it all back with `:core` |
 
@@ -71,9 +71,9 @@ cabal run thena
 :load examples/Stlc07Preservation.thena
 ```
 
-For the whole series, `10`, `09` and `06` import every other surface module
-between them; the rule base states its own dependency too, and the script is a
-list of commands, so it goes last:
+**Every file here loads on its own**, so there is no order to get right. For the
+whole series, `10`, `09` and `06` import every other surface module between them,
+the rule base states its own dependency, and the script states its own imports:
 
 ```
 :load examples/Stlc10PreservationAnyContext.thena
@@ -84,9 +84,8 @@ list of commands, so it goes last:
 ```
 
 A module is loaded once however many files reach it, so loading `09` after `10`
-re-reads `01`, `02` and `03` not at all. The script is the one piece that still
-needs the session to hold what it reuses: `import` at the prompt is what would
-let it say so.
+re-reads `01`, `02` and `03` not at all — and any one of the five lines above may
+be run by itself.
 
 ## Things to try once they are loaded
 

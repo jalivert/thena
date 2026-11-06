@@ -57,6 +57,8 @@ module Thena.Driver
   , entryBindings
   , oneProgram
   , loadSource
+  , loadFinished
+  , stopped
   , loadProofSource
   , loadProofItems
   , loadProofItemsConsulting
@@ -5174,16 +5176,23 @@ data LoadError
     -- had the line been typed. Two encodings of one failure can disagree
     -- (§3.7's argument against emitting ι-rules, in miniature)
   | NestedLoad Int
-    -- ^ @:load@, or an @import@, inside a loaded file. Refused in MS1 rather
-    -- than followed: following it needs IO from a pure function, and a file
-    -- that loads itself would not terminate.
+    -- ^ @:load@ inside a loaded file. Refused in MS1 rather than followed:
+    -- following it needs IO from a pure function, and **a file that loads
+    -- itself would not terminate.**
     --
     -- **All three kinds of load, which was not so until MS10 phase 268**: the
     -- case matched 'LoadRequested' alone, so a @:load@ naming a script said
     -- this while one naming a proof module or a rule base was recorded in the
-    -- responses and silently dropped. The refusal is about following a load
-    -- from a pure function and no kind of load escapes that \8212 a reader of
-    -- the one message cannot tell which kind of file it named either
+    -- responses and silently dropped. A reader of the one message cannot tell
+    -- which kind of file it named either.
+    --
+    -- **AN @import@ OR A @consult@ IS NO LONGER ONE OF THESE WHERE THE DISC IS
+    -- THERE** (MS11 phase 296, @~qnfcp@). "Thena.Files".@loadFile@ follows
+    -- those two, so a script states what it stands on like every other file in
+    -- the corpus; they still arrive here from 'loadSource', which is pure and
+    -- can follow nothing. **@:load@ is not followed by either door** — it is
+    -- the act's predecessor and is being retired, and it is the one of the five
+    -- with no cycle check behind it
   | UnansweredQuestion Int
     -- ^ the file ended while an op was still asking (§7.5). The line is the one
     -- that asked
@@ -5211,7 +5220,12 @@ data Loaded = Loaded
 -- normally written against what an earlier one declared, so carrying on past a
 -- failure reports the same mistake several times over.
 --
--- Takes the contents and not a path: §12 invariant 4 keeps IO in "Thena.Repl".
+-- Takes the contents and not a path: §12 invariant 4 keeps IO in "Thena.Files",
+-- **which is also why this is not the door a user's script comes in by** (MS11
+-- phase 296). A line that needs a file read stops the run here;
+-- "Thena.Files".@loadFile@ is the same walk with the disc behind it and follows
+-- an @import@ and a @consult@. The pair is 'loadProofSource' and
+-- @loadProofFile@ said for a script.
 --
 -- **A finished load leaves no undo history** (phase 34). Each line goes through
 -- 'oneLine' and so pushes its own snapshot, and stepping back into the middle of
@@ -5227,13 +5241,7 @@ loadSource s0 = go s0 1 [] . lines
     -- the session it has to be dropped here or a file that ran out mid-@ask@
     -- would leave the prompt waiting for an answer to a question nobody saw.
     -- @err@ already reports that as 'UnansweredQuestion'.
-    finished s acc err =
-      Loaded
-        s { sessionRecord = flattened (standing (sessionRecord s)) (sessionRecord s0)
-          , sessionAsking = Nothing
-          }
-        (reverse acc)
-        err
+    finished s acc err = Loaded (loadFinished s0 s) (reverse acc) err
 
     go s _ acc [] = case sessionAsking s of
       -- The file ran out while an op was still asking. The line to name is the
@@ -5244,10 +5252,17 @@ loadSource s0 = go s0 1 [] . lines
       let (s', resp) = oneLine s l
           acc'       = resp : acc
        in case resp of
-            -- **The three a caller would have to follow with IO**, which is
+            -- **The five a caller would have to follow with IO**, which is
             -- exactly 'Thena.Files.following's list \8212 kept here as a match
             -- rather than by asking that function, because this module is
             -- below it.
+            --
+            -- **This function follows NONE of them, and that is now the whole
+            -- of what it says** (MS11 phase 296). It is the pure half of the
+            -- pair, as 'loadProofSource' is for a module:
+            -- "Thena.Files".@loadFile@ is the door with the disc and it follows
+            -- an @import@ and a @consult@. A caller here has no disc, so the
+            -- line stops the run whichever of the five it was.
             LoadRequested _  -> finished s acc (Just (NestedLoad n))
             ProofRequested _ -> finished s acc (Just (NestedLoad n))
             RulesRequested _ -> finished s acc (Just (NestedLoad n))
@@ -5256,13 +5271,34 @@ loadSource s0 = go s0 1 [] . lines
             -- and it arrived with the same defect phase 268 fixed for the other
             -- two: the response was recorded and silently dropped, so a script
             -- that stated what it reuses carried on without it and failed on
-            -- the next line instead. **A script still cannot import**, which is
-            -- what the five @.thena.script@ files in @examples/@ are waiting
-            -- for; the prompt can.
+            -- the next line instead.
             ImportRequested _ -> finished s acc (Just (NestedLoad n))
             Quit            -> finished s' acc' Nothing
             _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
               | otherwise    -> go s' (n + 1) acc' ls
+
+-- | __What a finished load leaves behind__: no undo history, and no question
+-- pending.
+--
+-- **A read of the two doors rather than a step either of them takes.** It was
+-- 'loadSource'\'s own @finished@ until MS11 phase 296, when
+-- "Thena.Files".@loadFile@ stopped running a script through 'loadSource' and
+-- became a loop of its own — two loops that must leave the same thing behind,
+-- so what they leave is written once.
+--
+-- **No undo history** (phase 34): each line pushed its own snapshot, and
+-- stepping back into the middle of a file is not what @:undo@ is for. **No
+-- pending question** (MS7 phase 123): a file that ran out mid-@ask@ would
+-- otherwise leave the prompt waiting for an answer nobody saw, which
+-- 'UnansweredQuestion' has already reported.
+--
+-- @before@ is the session the load started in; @after@ is where it got to.
+loadFinished :: Session -> Session -> Session
+loadFinished before after =
+  after { sessionRecord = flattened (standing (sessionRecord after))
+                                    (sessionRecord before)
+        , sessionAsking = Nothing
+        }
 
 -- | Which responses cross a proof boundary — the five ways the development you
 -- are standing in is exchanged for another (§2.4).

@@ -199,9 +199,9 @@ cabal run thena
 thena spine> :load examples/Stlc07Preservation.thena
 ```
 
-For the whole series, three of the surface modules import everything else between
-them; the rule base states its own dependency too, and the script is a list of
-commands, so it goes after what it reuses:
+**Every file loads on its own**, so there is no order to get right. For the whole
+series, three of the surface modules import everything else between them, the rule
+base states its own dependency, and the script states its own imports:
 
 ```
 thena spine> :load examples/Stlc10PreservationAnyContext.thena

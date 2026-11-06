@@ -6184,6 +6184,37 @@ anything built later over LSP.
 a term you have not finished is an ordinary string and needs no special
 representation to be stored or sent anywhere.
 
+### A script states what it stands on, and its acts are yours afterwards
+
+*Decided 2026-11-06, MS11 phase 296.*
+
+A `.thena.script` is a list of command lines, run as though you had typed them. It may
+now write `import` and `consult` at its top, like every other kind of file:
+
+```
+import examples.Stlc07Preservation
+
+:theorem memberSpec-tactics : ∀ (c : String) (xs : List String) -> MemberSpec c xs
+attack
+```
+
+Until this it could not, and the reason was an implementation one — the function that ran
+a script's lines could not read a file — so a script relied on the session already
+holding what it reused, and you had to load things in the right order first.
+
+**An `import` reaches the module it names, and not that module's own imports**, so a
+script names what it uses directly. It writes its own `open` lines too, for the same
+reason: an `open` travels nowhere.
+
+**The acts are still in force when the script ends.** A *module*'s `consult` lasts only
+as long as that module is being elaborated; a script's does not, and neither does its
+`import`. **That is the difference between a script and a module**: a script is a batch of
+lines you typed, so its effects are yours, exactly as they would be had you typed them.
+
+**`:load` inside a file is still refused.** It is the construct `import` and `consult`
+replace, and it is the one with no cycle check behind it — a script that loaded itself
+would not stop. An `import` cycle is refused by name.
+
 ### A session says which files it read, and what they said
 
 *Decided 2026-11-06, MS11 phase 295.*

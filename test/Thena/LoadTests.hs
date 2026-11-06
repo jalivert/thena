@@ -75,6 +75,7 @@ import Thena.Driver
   , filesRead
   , digestOf
   , digestText
+  , stopped
   )
 import Thena.Engine (Development, Machine (..), development)
 import Thena.Files (preludePath, rulesPath)
@@ -90,7 +91,14 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Global.Declare (DeclareError (..))
-import Thena.Files (Trouble (..), consultRuleFiles, following, loadProofFile, startingSession)
+import Thena.Files
+  ( Trouble (..)
+  , consultRuleFiles
+  , following
+  , loadFile
+  , loadProofFile
+  , startingSession
+  )
 import Thena.Render
   ( rendering
   ,renderTrouble, renderResponse, renderCore, renderEliminator)
@@ -128,7 +136,9 @@ tests =
     , testGroup "an import states how far it reaches (MS11 phase 291)" scopedImportTests
     , testGroup "and so does a consult (MS11 phase 292)" scopedConsultTests
     , testGroup "every file read is hashed (MS11 phase 295)" hashTests
+    , testGroup "a script states what it stands on (MS11 phase 296)" scriptActTests
     ]
+
 
 -- --------------------------------------------------------------------------
 -- Every file read is hashed (MS11 phase 295)
@@ -249,6 +259,95 @@ hashTests =
     -- paths are the installed data directory's, which is no part of what these
     -- cases are about.
     own reads' = [ p | (p, _) <- reads', "test/modules/" `isPrefixOf` p ]
+
+-- --------------------------------------------------------------------------
+-- A script states what it stands on (MS11 phase 296, @~qnfcp@)
+-- --------------------------------------------------------------------------
+
+-- | __A @.thena.script@ may @import@ and @consult@, because the loop that runs
+-- it is where the disc is.__
+--
+-- **The pure 'loadSource' follows none of the five and that is unchanged** —
+-- *a load stops, and says where* has that side of it. What is asserted here is
+-- the door a user's script actually comes in by, 'Thena.Files.loadFile', which
+-- is why every case reads a real file off the disc.
+scriptActTests :: [TestTree]
+scriptActTests =
+  [ testCase "a script's import is followed" $ do
+      (s0, _) <- startingSession
+      (s1, out, trouble) <- loadFile s0 "test/modules/ImportsBit.thena.script"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "Bit is in" (moduleLoaded (named' "test.modules.Bit") s1)
+      -- The line after the import ran, against what the import brought: a
+      -- bare @off@ needs both the module and the @open@.
+      assertBool (show (concatMap (renderResponse s1) out))
+        (any ("off : Bit" `isInfixOf`) (concatMap (renderResponse s1) out))
+
+  , -- **The acts are still in force when the script ends**, which a module's
+    -- are not: a script is a batch of lines you typed, so its effects are
+    -- yours. The reading is `~qnfcp`'s and is his to confirm; this is what the
+    -- build does.
+    testCase "and what it brought in is still there afterwards" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadFile s0 "test/modules/ImportsBit.thena.script"
+      assertBool "the declaration is reachable"
+        (not (stopped (snd (oneLine s1 ":show Bit.Bit"))))
+      -- And the @open@ it wrote, which is an ordinary typed line.
+      assertBool "the open is still in force"
+        (not (stopped (snd (oneLine s1 ":infer on"))))
+
+  , -- **And the base is on top of the pool afterwards**, where a module's
+    -- consult is gone by the time the load ends.
+    testCase "a script's consult is followed too, and the base stays" $ do
+      (s0, _) <- startingSession
+      (s1, out, trouble) <- loadFile s0 "test/modules/ConsultsLouder.thena.script"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ map baseName bs | BasesLoaded bs <- out ] @?= [["louder", "standard"]]
+      map baseName (rules (machineOf s1)) @?= ["louder", "standard"]
+
+  , -- **A refusal inside the act stops the script**, rather than being recorded
+    -- and dropped, which is the defect phase 284 fixed for the response and
+    -- this phase has to keep fixed for the act.
+    testCase "a module that is not on disc stops the script" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadFile s0 "test/modules/ImportsNowhere.thena.script"
+      assertBool "it stopped" (not (null trouble))
+      assertBool "and the line after it did not run"
+        (not (isDeclared (declaredAs "A0") (globals (machineOf s1))))
+
+  , -- **A module that will not elaborate stops it too**, and that arrives as a
+    -- response about the file the line named rather than as trouble — so the
+    -- loop has to read 'stopped' over what the act said, not only over the
+    -- line's own response.
+    testCase "and so does a module that will not elaborate" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadFile s0 "test/modules/ImportsBrokenToo.thena.script"
+      assertBool "it stopped" (not (null trouble))
+      assertBool "and the line after it did not run"
+        (not (isDeclared (declaredAs "A0") (globals (machineOf s1))))
+
+  , -- **@:load@ is NOT followed, and that refusal is MS1's.** It is the
+    -- construct the two acts replace, and it is the one of the five with no
+    -- cycle check behind it — a script that loaded itself would not terminate.
+    testCase "but a :load inside a script is still refused" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadFile s0 "test/modules/LoadsAModule.thena.script"
+      concatMap (renderTrouble s1) trouble
+        @?= [ "test/modules/LoadsAModule.thena.script:2: "
+                ++ "a :load inside a loaded file is not followed" ]
+      assertBool "what ran before it still ran"
+        (isDeclared (declaredAs "A0") (globals (machineOf s1)))
+
+  , -- An import cycle is the module walk's own refusal, reached through a
+    -- script: nothing about it is written twice.
+    testCase "and a cycle is refused by name, as it is from a file" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <- loadFile s0 "test/modules/ImportsLoop.thena.script"
+      concatMap (renderTrouble s0) trouble
+        @?= [ "test/modules/LoopA.thena: these modules import each other: "
+                ++ "test.modules.LoopA imports test.modules.LoopB "
+                ++ "imports test.modules.LoopA" ]
+  ]
 
 -- --------------------------------------------------------------------------
 -- A consult may travel, and consults are a stack (MS11 phase 288, @~jmw4k@)
@@ -1743,15 +1842,20 @@ failureTests =
             loadedError l @?= Just (NestedLoad 2)
             declared "A0" l @?= True
 
-    -- **AND AN @import@, WHICH ARRIVED WITH THE SAME DEFECT** (MS11 phase 284).
-    -- A script is run by a pure function, so an @import@ in one cannot be
-    -- followed any more than a @:load@ can — and recorded-and-dropped is the
-    -- worst of the three answers, because the script carries on without what it
-    -- said it needed and fails somewhere else. **This is what the five
-    -- @.thena.script@ files in @examples/@ are still waiting for**; the prompt
-    -- takes the word, a script does not.
-  , testCase "and an import, which a script cannot follow either" $
+    -- **AN @import@ STOPS THIS FUNCTION AND IS FOLLOWED BY THE REAL DOOR**
+    -- (MS11 phase 296, @~qnfcp@). 'loadSource' is the pure half of the pair —
+    -- it has no disc, so every one of the five stops it — and
+    -- 'Thena.Files.loadFile' is the half with the disc. *A script states what
+    -- it stands on*, below, is the other side of this case, and the pair is
+    -- what says the refusal is purity and not policy.
+  , testCase "an import stops the PURE runner, which can follow nothing" $
       let l = source ["data A0 : Type\8320 where { a0 : A0 }", "import test.modules.Bit"]
+       in do
+            loadedError l @?= Just (NestedLoad 2)
+            declared "A0" l @?= True
+
+  , testCase "and so does a consult" $
+      let l = source ["data A0 : Type\8320 where { a0 : A0 }", "consult test.modules.Louder"]
        in do
             loadedError l @?= Just (NestedLoad 2)
             declared "A0" l @?= True

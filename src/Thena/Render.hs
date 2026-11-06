@@ -232,8 +232,11 @@ renderTrouble s (Unloadable path resp)  = case resp of
 renderLoadError :: FilePath -> LoadError -> [String]
 renderLoadError path e = case e of
   LoadStopped n        -> [at n ++ "stopped here"]
+  -- **It said /a load or an import/ until MS11 phase 296**, when an @import@
+  -- and a @consult@ started being followed. The only 'NestedLoad' anything
+  -- renders comes from "Thena.Files".@loadFile@, which refuses @:load@ alone.
   NestedLoad n         ->
-    [at n ++ "a load or an import inside a loaded file is not followed"]
+    [at n ++ "a :load inside a loaded file is not followed"]
   UnansweredQuestion n -> [at n ++ "the file ended while this was still asking"]
   where
     at n = path ++ ":" ++ show n ++ ": "

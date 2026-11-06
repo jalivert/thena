@@ -34,8 +34,7 @@ import Control.Exception (IOException, try)
 import qualified Paths_thena
 
 import Thena.Driver
-  ( LoadError
-  , Loaded (..)
+  ( LoadError (..)
   , Item
   , Digest
   , digestOf
@@ -64,7 +63,10 @@ import Thena.Driver
   , parseSurfaceModule
   , loadRuleBases
   , consultRuleBases
-  , loadSource
+  , loadFinished
+  , stopped
+  , pendingQuestion
+  , oneLine
   , newSession
   )
 
@@ -249,23 +251,88 @@ imported s contents = go [] contents
           Left t      -> pure (Left t)
           Right done' -> go done' rest
 
--- | Read a file and run it: the session after, **what its lines said**, and
--- **what went wrong**, kept apart because the two callers want different halves.
+-- | Read a script and run it, **one line at a time with the disc behind each
+-- line**: the session after, what its lines said, and what went wrong, kept
+-- apart because the two callers want different halves.
 --
 -- A loaded line\'s own output is real output — a file is a script of command
 -- lines (§9), so @:infer@ in a file answers what @:infer@ answers.
+--
+-- **IT RAN THROUGH THE PURE 'loadSource' UNTIL MS11 PHASE 296** (@~qnfcp@), and
+-- that is why a @.thena.script@ could not say what it stands on: an @import@
+-- needs a file read, 'loadSource' is pure (§12 invariant 4), so the line was
+-- refused as a 'NestedLoad' and the five scripts in @examples/@ relied on
+-- whatever the session happened to hold. **The loop is here now, where the disc
+-- is** — the same two-step shape phase 273 settled for a module, and the same
+-- shape 'Thena.Repl.transcriptIO' has had since MS1.
+--
+-- **AN @import@ AND A @consult@ ARE FOLLOWED; A @:load@ IS NOT.** The acts have
+-- a cycle check behind them — 'imports' refuses a loop by name and 'publishing'
+-- refuses one between bases — and @:load@ has none, so a script that loaded
+-- itself would not terminate. It is also the construct the acts replace, so
+-- nothing is owed it. That refusal is MS1\'s and is unchanged.
+--
+-- **A script\'s acts run into the live session and are still there afterwards**,
+-- unlike a module's, whose pool is the module's for the length of the load (his
+-- ruling of 2026-11-03, 'loadProofItems'). The asymmetry is the difference
+-- between a script and a module: **a script is a batch of lines you typed, so
+-- its effects are yours.** @DECISIONS.md@, /A script states what it stands on/,
+-- says it for a user; the reading is @~qnfcp@\'s and is his to confirm.
+--
+-- **Two loops and not one**, this and 'Thena.Repl.transcriptIO': they differ in
+-- what they produce (responses against the text a terminal would have shown) and
+-- in what they follow (the two acts against all five, a line typed at the prompt
+-- being allowed to @:load@). What they share is 'following', which is the part
+-- that could drift.
 loadFile :: Session -> FilePath -> IO (Session, [Response], [Trouble])
-loadFile s path = do
+loadFile s0 path = do
   contents <- try (readFile path)
-  pure $ case contents of
-    Left e  -> (s, [], [Unreadable path e])
-    Right c ->
+  case contents of
+    Left e  -> pure (s0, [], [Unreadable path e])
+    Right c -> do
       -- **The script's own file is noted here** (MS11 phase 295), and the files
       -- its lines name are noted by whichever door 'following' sends them
       -- through.
-      let l  = loadSource s c
-          s' = noteRead path (digestOf c) (loadedSession l)
-       in (s', loadedResponses l, map (Stopped path) (maybe [] pure (loadedError l)))
+      (s, out, trouble) <- go (noteRead path (digestOf c) s0) 1 [] (lines c)
+      pure (loadFinished s0 s, out, trouble)
+  where
+    -- The file ran out while an op was still asking. The line to name is the one
+    -- that asked, which is the last one that ran.
+    go s _ acc [] = pure $ case pendingQuestion s of
+      Just _  -> (s, reverse acc, [halted (UnansweredQuestion (length acc))])
+      Nothing -> (s, reverse acc, [])
+    go s n acc (l : ls) = case resp of
+      -- **The three kinds of @:load@**, refused and not followed, with the
+      -- line's response dropped: it asked for something that did not happen.
+      LoadRequested _    -> nested
+      ProofRequested _   -> nested
+      RulesRequested _   -> nested
+      -- **The two acts**, read where the disc is. What the act had to say comes
+      -- after the line's own response, in the order it arrived.
+      ConsultRequested _ -> follow
+      ImportRequested _  -> follow
+      Quit               -> pure (s', reverse (resp : acc), [])
+      _ | stopped resp   -> pure (s', reverse (resp : acc), [halted (LoadStopped n)])
+        | otherwise      -> go s' (n + 1) (resp : acc) ls
+      where
+        (s', resp) = oneLine s l
+        nested     = pure (s, reverse acc, [halted (NestedLoad n)])
+        -- **A refusal inside the act stops the script**, whether it arrived as
+        -- trouble about a file the walk reached or as a response about the one
+        -- the line named: either way the line did not do what it said, which is
+        -- the whole of what 'stopped' means.
+        follow = case following s' resp of
+          Nothing  -> go s' (n + 1) (resp : acc) ls
+          Just act -> do
+            (s'', rs, ts) <- act
+            let acc' = reverse rs ++ resp : acc
+            if null ts && not (any stopped rs)
+              then go s'' (n + 1) acc' ls
+              else pure ( s''
+                        , reverse acc'
+                        , if null ts then [halted (LoadStopped n)] else ts )
+
+    halted = Stopped path
 
 -- | Read a proof module, **and everything it imports**, and elaborate the lot
 -- (MS4 phase 43; the import graph at MS11 phase 274).

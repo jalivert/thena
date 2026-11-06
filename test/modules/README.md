@@ -63,3 +63,18 @@ could consult only a base that depended on nothing.
   `GetsPassedTooling.thena` imports that — the closure, since what travels is what the
   imported module *got*. `KeepsPublisher.thena` is the plain-import half and
   `MissesPassedTooling.thena` imports it and is refused.
+
+**Six of them are `.thena.script` files, MS11 phase 296's** (`~qnfcp`), and they exist
+because `Thena.Files.loadFile` is the function under test and it reads a real file:
+
+- `ImportsBit.thena.script` is the feature — `import`, `open`, and a line that needs
+  both. `ConsultsLouder.thena.script` is the same for `consult`, and `Louder` is the
+  base that imports nothing, so nothing but the consult is being measured.
+- `ImportsNowhere.thena.script` and `ImportsBrokenToo.thena.script` are the two ways a
+  followed act fails: a module the disc has not got, which arrives as `Trouble`, and
+  one that will not elaborate, which arrives as a stopped `Response` about the file the
+  line named. **Each is followed by a `data A0` line that must NOT have run.**
+- `LoadsAModule.thena.script` is the refusal that stays: a `:load` inside a file, with a
+  `data A0` line before it that must have run.
+- `ImportsLoop.thena.script` reaches `LoopA`/`LoopB` through a script, so the cycle
+  refusal is the module walk's own and is not written twice.

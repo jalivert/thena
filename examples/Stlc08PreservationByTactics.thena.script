@@ -1,15 +1,32 @@
 -- Preservation for STLC again — the same lemmas as 07, proved by tactics.
 --
--- LOAD AFTER 01, 02, 03 AND 07: this reuses 07's definitions (In, look, Good…)
--- and its small logic (subst, sym, trans, absurdly), and proves every lemma
--- again, by tactics, under a name ending in -tactics.
+-- It reuses 07's definitions (In, look, Good…) and its small logic (subst,
+-- sym, trans, absurdly), and proves every lemma again, by tactics, under a name
+-- ending in -tactics.
 --
--- **A script cannot state that yet, where a module can.** Every surface file in
--- the series writes its own `import` lines and loads on its own; this is a list
--- of commands, and it acts on the session it is run in, so the session is what
--- has to hold 07. `import` at the prompt is what would let a script say it.
+-- **IT STATES WHAT IT STANDS ON AND LOADS ON ITS OWN**, like every other file in
+-- the series — MS11 phase 296. It names 01, 02 and 03 as well as 07, because an
+-- `import` reaches the module it names and not that module's own imports, and it
+-- writes its own `open` lines, because an `open` travels nowhere either.
+--
+-- **The acts are lines you typed, so they are still in force when the script
+-- ends.** That is the difference between a script and a module: a module's pool
+-- is the module's for the length of the load, and a script's is yours.
 --
 -- Run it with   :load examples/Stlc08PreservationByTactics.thena.script
+
+import examples.Stlc01Syntax
+import examples.Stlc02Contexts
+import examples.Stlc03TypingAndReduction
+import examples.Stlc07Preservation
+
+open Ty
+open LC
+open Ctx
+open extend-in
+open typing
+open step
+open Or
 
 -- ---------------------------------------------------------------------------
 -- What `member` answers — induction on the list

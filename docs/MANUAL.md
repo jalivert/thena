@@ -1692,11 +1692,18 @@ by path does not make. And a module already in does nothing: `import` it twice a
 the second answers `module examples.Stlc01Syntax is already in` rather than
 colliding with its own declarations.
 
-**A script cannot import yet.** A `.thena.script` file is a list of command lines
-run by a part of Thena that does not read files, so an `import` on one of its lines
-is refused — *a load or an import inside a loaded file is not followed* — exactly as
-a nested `:load` is. The five scripts in `examples/` therefore still have to be run
-in a session that already holds what they reuse, and each says so at its top.
+**A script states what it stands on too, and its acts are yours afterwards.** A
+`.thena.script` file is a list of command lines, and it may write `import` and
+`consult` at its top like any other file —
+`examples/Stlc08PreservationByTactics.thena.script` names the four modules it reuses
+and loads on its own. **What a script brings in stays after the script ends**, which
+is where it differs from a module: a module's `consult` lasts only as long as that
+module is being elaborated, and a script is a batch of lines you typed, so its
+effects are yours.
+
+A `:load` inside a file is still refused — *a :load inside a loaded file is not
+followed*. It is the construct `import` and `consult` replace, and it is the one with
+no cycle check behind it; an `import` cycle is refused by name.
 
 **A rule file states its dependencies the same way.** A base that talks about a
 language imports the module declaring it:
