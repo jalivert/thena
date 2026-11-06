@@ -8,6 +8,12 @@ module examples.Stlc02Contexts where
 
 import examples.Stlc01Syntax
 
+-- An `open` does not travel with an `import`, so this file says which
+-- namespaces it is written against. A grammar's metavariables are names
+-- under it too, so a judgment written in them needs the same `open` that a
+-- bare constructor does.
+open Ty
+
 -- A context is declared like a language: an empty one, and one extended by an
 -- entry. The block gives you the datatype
 --

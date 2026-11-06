@@ -58,6 +58,17 @@ import examples.Stlc01Syntax
 import examples.Stlc02Contexts
 import examples.Stlc03TypingAndReduction
 
+-- An `open` does not travel with an `import`, so this file says which
+-- namespaces it is written against. A grammar's metavariables are names
+-- under it too, so a judgment written in them needs the same `open` that a
+-- bare constructor does.
+open Ty
+open LC
+open Ctx
+open extend-in
+open typing
+open step
+
 -- ---------------------------------------------------------------------------
 -- Logic
 

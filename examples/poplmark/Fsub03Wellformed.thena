@@ -1,6 +1,6 @@
 -- Well-formed contexts and well-formed types.
 --
--- LOAD AFTER Fsub01Syntax.thena AND 02-subtyping.thena.
+-- Load it on its own — it imports 01-syntax and 02-contexts itself.
 --
 -- THE CHALLENGE PAPER DOES NOT PRINT THESE, and it does not have to: its
 -- contexts are finite functions, so `Γ, X<:T` is notation that only means
@@ -39,6 +39,14 @@ module examples.poplmark.Fsub03Wellformed where
 
 import examples.poplmark.Fsub01Syntax
 import examples.poplmark.Fsub02Contexts
+
+-- An `open` does not travel with an `import`, so this file says which
+-- namespaces it is written against. A grammar's metavariables are names
+-- under it too, so a judgment written in them needs the same `open` that a
+-- bare constructor does.
+open Ty
+open Ctx
+open bindTy-in
 
 -- ---------------------------------------------------------------------------
 -- The usual four, as 07 defines them: equality is an ordinary datatype here.

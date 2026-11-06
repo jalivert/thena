@@ -1,6 +1,6 @@
 -- F-sub's typing relation Γ ⊢ t : T, with subsumption.
 --
--- LOAD AFTER 01-syntax, 02-contexts, 03-wellformed AND 04-subtyping.
+-- Load it on its own — it imports 01-syntax through 04-subtyping itself.
 --
 -- Then try   :show typing
 --            :parse typing · ⊢ ( Λ X <: ⊤ . ( λ y : X . y ) ) : ( ∀ X <: ⊤ . ( X -> X ) )
@@ -11,6 +11,16 @@ import examples.poplmark.Fsub01Syntax
 import examples.poplmark.Fsub02Contexts
 import examples.poplmark.Fsub03Wellformed
 import examples.poplmark.Fsub04Subtyping
+
+-- An `open` does not travel with an `import`, so this file says which
+-- namespaces it is written against. A grammar's metavariables are names
+-- under it too, so a judgment written in them needs the same `open` that a
+-- bare constructor does.
+open Ty
+open Tm
+open Ctx
+open bindTm-in
+open sub
 
 -- The six rules of part 2's typing relation. T-Sub is the one that makes this
 -- a subtyping calculus rather than F: a term of a subtype is a term of the

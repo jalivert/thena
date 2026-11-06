@@ -1,0 +1,10 @@
+module test.modules.InheritsInBlock where
+
+-- **The same refusal through the other route** — a scoped import's block, which
+-- is a different piece of code from the file-wide one (MS11 phase 291, and the
+-- ruling of 2026-11-06 is stated once for both). `Bit.Bit` is writable here
+-- because the import reveals the names; a bare `off` is not, because no `open`
+-- travels.
+import test.modules.Opener where
+  b : Bit.Bit
+  b = off

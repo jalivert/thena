@@ -1,6 +1,7 @@
 -- Algorithmic subtyping, Γ ⊢ S <: T.
 --
--- LOAD AFTER Fsub01Syntax.thena, Fsub02Contexts.thena AND Fsub03Wellformed.thena.
+-- Load it on its own — it imports 01-syntax, 02-contexts and 03-wellformed
+-- itself.
 --
 -- Then try   :show sub
 --            :parse sub · , X <: ⊤ ⊢ X <: ⊤
@@ -10,6 +11,14 @@ module examples.poplmark.Fsub04Subtyping where
 import examples.poplmark.Fsub01Syntax
 import examples.poplmark.Fsub02Contexts
 import examples.poplmark.Fsub03Wellformed
+
+-- An `open` does not travel with an `import`, so this file says which
+-- namespaces it is written against. A grammar's metavariables are names
+-- under it too, so a judgment written in them needs the same `open` that a
+-- bare constructor does.
+open Ty
+open Ctx
+open bindTy-in
 
 -- ---------------------------------------------------------------------------
 -- Algorithmic subtyping: the five rules of the challenge paper, with ONE

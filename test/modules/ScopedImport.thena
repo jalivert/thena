@@ -1,8 +1,9 @@
 module test.modules.ScopedImport where
 
 -- **The import states how far it reaches** (MS11 phase 291, his design of
--- 2026-11-05): `Bit.Bit` is writable in the block and `Opener`'s own `open Bit`
--- reaches it too, so a bare `off` resolves — and both stop at the `}`.
+-- 2026-11-05): `Bit.Bit` and `Bit.off` are writable in the block and neither is
+-- writable after the `}`. **An `open` of `Opener`'s is not inherited here** —
+-- his ruling of 2026-11-06 — so the names are written in full.
 import test.modules.Opener where
   mine : Bit.Bit
-  mine = off
+  mine = Bit.off

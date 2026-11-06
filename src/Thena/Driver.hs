@@ -1647,17 +1647,6 @@ regroup = go
 -- Surface declarations, as a program (MS4 phase 42; lifted here at 43)
 -- --------------------------------------------------------------------------
 
--- | __What a block an act states may name__ (MS11 phase 291).
---
--- The names it reveals and the @open@s it inherits, which are the two routes an
--- import opens into a file — @~xdt8c@'s and @~w46f8@'s — and a block that
--- scopes one has to scope both.
---
--- **A record and not two functions**, because they are one question asked of
--- one module name and a caller that answered one of them and not the other
--- would be a file where a word resolves and the name behind it does not.
-data Revealed = Revealed [GlobalName] [Opened]
-
 -- | __What an act's block brings in, for the two acts that state one__ (MS11
 -- phases 291 and 292).
 --
@@ -1665,11 +1654,17 @@ data Revealed = Revealed [GlobalName] [Opened]
 -- his model of 2026-10-29, and the reason 'ItemImport' and 'ItemConsult' share
 -- a shape and not a type: one word may name a surface module and a rule file
 -- both, and a single lookup would answer for whichever it found.
+--
+-- **NAMES AND NOTHING ELSE, since phase 293.** Until his ruling of 2026-11-06
+-- an import also handed on the @open@s the module wrote at its own top level,
+-- so this carried a pair and a block had to scope both halves. An @open@ does
+-- not travel at all now, so there is one route into a file and one list here —
+-- 'openedFrom' says why.
 data Brought = Brought
-  { broughtImport  :: ModuleName -> Revealed
-    -- ^ what @import M where { … }@ reveals: @M@'s exports, the closure over
-    -- its @public import@s, and the @open@s @M@ wrote at its top level.
-  , broughtConsult :: ModuleName -> ([RuleBase], Revealed)
+  { broughtImport  :: ModuleName -> [GlobalName]
+    -- ^ what @import M where { … }@ reveals: @M@'s exports and the closure over
+    -- its @public import@s.
+  , broughtConsult :: ModuleName -> ([RuleBase], [GlobalName])
     -- ^ what @consult B where { … }@ brings: the base to push, and the names it
     -- publishes — a base's @public import@ hands its object language to whoever
     -- consults it (phase 289), and a scoped consult hands it no further than
@@ -1684,7 +1679,7 @@ data Brought = Brought
 -- never been anything but ignored — @:consult@ is the command that pushes a
 -- base.
 broughtNothing :: Brought
-broughtNothing = Brought (const (Revealed [] [])) (const ([], Revealed [] []))
+broughtNothing = Brought (const []) (const ([], []))
 
 -- | Compile a run of surface items into the instructions that admit them.
 --
@@ -1736,11 +1731,11 @@ surfaceProgram brought n0 items = foldl (item []) ([], n0) items
   -- the file after the block may not.
   item ns (acc, n) (ItemConsult _ m (Just is)) =
     let (inner, n1) = foldl (item ns) ([], n) is
-        (bs, Revealed gs os) = broughtConsult brought m
+        (bs, gs) = broughtConsult brought m
      in ( acc ++ [ Do (PushBase (basePath b)) | b <- bs ]
-              ++ [Do (Reveal gs)] ++ [ Do (Open o) | o <- os ]
+              ++ [Do (Reveal gs)]
               ++ inner
-              ++ [ Do LeaveOpen | _ <- os ] ++ [Do LeaveReveal]
+              ++ [Do LeaveReveal]
               ++ [ Do PopBase | _ <- bs ]
         , n1 )
   -- **An import emits nothing either** (MS11 phase 274), and for the same
@@ -1754,19 +1749,16 @@ surfaceProgram brought n0 items = foldl (item []) ([], n0) items
   -- declarations run, the frame comes off — @open X in ‹declaration›@'s shape,
   -- one gate further out.
   --
-  -- **ITS @open@S ARE SCOPED WITH IT.** An @open@ travels with an @import@
-  -- (phase 283, and whether it should is @~4wjd7@), so a module whose top level
-  -- opens a namespace hands that spelling to its importer — and an import that
-  -- reaches a block may hand it no further than the block, or a file would be
-  -- able to write a bare word after the block whose name it could no longer
-  -- reach. 'Thena.Instral.Ops.Open' is the op, not a second one: the paths are
-  -- absolute and the names are revealed by the time it runs.
+  -- **AND NAMES ARE ALL IT BRINGS** (MS11 phase 293, his ruling of
+  -- 2026-11-06). Until then an import also handed on the @open@s the module
+  -- wrote at its own top level, so this emitted an 'Thena.Instral.Ops.Open' per
+  -- inherited spelling and popped them with the frame. An @open@ does not
+  -- travel at all now — 'openedFrom' says why — so there is one route into a
+  -- file and one pair of ops to scope.
   item ns (acc, n) (ItemImport _ m (Just is)) =
     let (inner, n1) = foldl (item ns) ([], n) is
-        Revealed gs os = broughtImport brought m
-     in ( acc ++ [Do (Reveal gs)] ++ [ Do (Open o) | o <- os ] ++ inner
-              ++ [ Do LeaveOpen | _ <- os ] ++ [Do LeaveReveal]
-        , n1 )
+        gs = broughtImport brought m
+     in (acc ++ [Do (Reveal gs)] ++ inner ++ [Do LeaveReveal], n1)
   -- **An export list emits nothing** (MS11 phase 285). It is not a step of the
   -- program at all: it says what an /importer/ may name, which is read when
   -- this module is recorded and never when it runs.
@@ -2138,13 +2130,16 @@ data Held = Held
 -- else the session happens to hold. 'concealedFrom' works out the subtraction
 -- and 'Thena.Core.Term.scopeConcealed' says why it is a subtraction.
 
--- **AND THE @open@S IT STARTS WITH ARE ITS IMPORTS' AND THE PRELUDE'S** (MS11
--- phase 283, @~w46f8@) — the third thing this load replaces and restores, and
--- the last route into a file from outside. A top-level @open@ used to stay in
--- the session, so a file that wrote a bare @off@ loaded or failed according to
--- which file had gone in before it: the same hack @~xdt8c@ removed for names,
--- reached through the scope instead of the environment. 'openedFrom' is what a
--- module starts with.
+-- **AND THE @open@S IT STARTS WITH ARE THE PRELUDE'S ALONE** (MS11 phase 283,
+-- @~w46f8@, narrowed at phase 293 by his ruling of 2026-11-06) — the third
+-- thing this load replaces and restores, and the last route into a file from
+-- outside. A top-level @open@ used to stay in the session, so a file that wrote
+-- a bare @off@ loaded or failed according to which file had gone in before it:
+-- the same hack @~xdt8c@ removed for names, reached through the scope instead
+-- of the environment. **And an @open@ no longer travels with an @import@
+-- either**, so what a module starts with depends on nothing it imports;
+-- 'openedFrom' is that list, and the prelude is in it because every surface
+-- file implicitly imports the prelude.
 --
 -- **The session's go back UNDER the ones the module wrote**, rather than the
 -- module's being discarded: the prompt is not a module and is not isolated, so
@@ -2160,7 +2155,7 @@ data Held = Held
 -- two halves together because they come out of the same texts.
 loadProofItemsConsulting :: Pool -> Session -> String -> [Item] -> (Session, Response)
 loadProofItemsConsulting (Pool pool published heldBases) s nm items =
-    let inherited = openedFrom (fileImports items) s
+    let inherited = openedFrom s
         machine  = (sessionMachine s)
                      { rules = pool
                      , held  = map heldBase heldBases
@@ -2175,12 +2170,11 @@ loadProofItemsConsulting (Pool pool published heldBases) s nm items =
         -- 'Imported' and the two ops around the inner program.
         (is, n1) = surfaceProgram
                      (Brought
-                        (\m -> Revealed (reachedBy [m] s) (openedByModule m s))
+                        (\m -> reachedBy [m] s)
                         (\m -> ( [ heldBase h | h <- heldBases, heldName h == m ]
-                               , Revealed (reachedBy (concat [ heldPublishes h
-                                                             | h <- heldBases
-                                                             , heldName h == m ]) s)
-                                          [] )))
+                               , reachedBy (concat [ heldPublishes h
+                                                   | h <- heldBases
+                                                   , heldName h == m ]) s )))
                      (names machine) items
         -- The pool the session had, put back the moment the module is in, the
         -- concealment lifted with it, and **the @open@s the session had put
@@ -2334,8 +2328,10 @@ loadProofModules s0 = go s0 []
 -- prelude — see 'preludeModule'.
 -- **AND WHICH @open@S IT LEFT IN FORCE** (MS11 phase 283, @~w46f8@), which is
 -- the same difference taken of the other field a load now restores: the
--- @open@s a module inherited from its imports were in force before it ran, so
--- what is left is the ones it wrote itself. 'openedFrom' is the other end.
+-- @open@s the module started with were in force before it ran, so what is left
+-- is the ones it wrote itself. **Only the prelude's are read back out** —
+-- an @open@ does not travel with an @import@ (his ruling of 2026-11-06) — and
+-- 'openedFrom' is the other end.
 -- **AND WHAT IT SAID ITS INTERFACE IS** (MS11 phase 285, @~jmw4k@) — the one
 -- thing here that is read off the items rather than off the two environments,
 -- because an export list names declarations rather than making any:
@@ -2395,10 +2391,10 @@ preludeModule = ModuleName ["Prelude"]
 -- | __What a module being loaded may not reach__ (MS11 phase 282, @~xdt8c@).
 --
 -- Everything the session's environment already holds, less the prelude's and
--- less the declarations of the modules this one imports. **Not transitive**:
--- what an imported module itself imported stays its own until @public import@
--- exists (his ruling of 2026-11-03), so a file states every module it refers
--- to, which is the convention the corpus was put on at phase 281.
+-- less what the modules this one imports reach it. **Transitive only through
+-- @public@** — his ruling of 2026-11-03, and 'reachedBy' is the closure — so a
+-- file states every module it refers to unless an import passed one on, which
+-- is the convention the corpus was put on at phase 281.
 --
 -- **A primitive is never concealed.** @String@ and @String.eq@ are the
 -- language's own constants rather than any module's — @declare-primitive@
@@ -2440,40 +2436,33 @@ reachedBy ms0 s = reach [] ms0
           exportedByModule m s
             ++ reach (m : seen) (publicImportsOf m s ++ ms)
 
--- | __Which @open@s a module starts with__ (MS11 phase 283, @~w46f8@).
+-- | __Which @open@s a module starts with__ (MS11 phase 283, @~w46f8@; narrowed
+-- to the prelude at phase 293, his ruling of 2026-11-06).
 --
--- Its imports' and the prelude's, and nothing the session happens to be
--- holding. **The other half of his ruling of 2026-11-05**: @~xdt8c@ stopped a
--- module reaching a /name/ the session held, and an @open@ it held was a second
--- route to the same thing — a file that writes a bare @off@ and no @open Bit@
--- loaded or failed according to which file went in before it.
+-- **The prelude's, and nothing else** — not the session's, and not its
+-- imports'. @~xdt8c@ stopped a module reaching a /name/ the session held, and
+-- an @open@ it held was a second route to the same thing: a file that writes a
+-- bare @off@ and no @open Bit@ loaded or failed according to which file went in
+-- before it.
 --
--- **An @open@ travels with an @import@ because the corpus requires it.**
--- @examples\/Progress.thena@ writes @true@ and @ifthen@ bare, which are
--- @Term.true@ and @Term.ifthen@, and writes no @open@ for them: it imports
--- @examples.Canonical@, whose top level opens those namespaces. The branch
--- where a file's @open@s simply end at the file stops the whole series
--- compiling, and @prelude\/prelude.thena@'s own @open Eq@ — how every module in
--- the project reaches @refl@ — is that case and not an exception to it.
--- **Whether it should travel unconditionally, as it does here, or only under a
--- @public open@, is @~4wjd7@ and is his**; nothing is wrong under any of its
--- answers, and the file-order dependence is a defect under all of them.
+-- **AN @open@ DOES NOT TRAVEL WITH AN @import@, TOP-LEVEL ONES INCLUDED** —
+-- his ruling of 2026-11-06, @~4wjd7@. @open@ says how a name is written where
+-- the reader stands and @public@ says what a file offers; **one word does one
+-- job**, and travelling was the only route by which something invisible in a
+-- file could change what that file means — @import A@ could make a bare word
+-- resolve, or make it ambiguous between two namespaces the reader never named.
+-- The third answer, a @public open@, is unrefuted and was not taken.
 --
--- **Not transitive, which is 'declaredByModule''s rule and not a second one**:
--- 'sessionOpenedBy' holds the @open@s a module wrote itself, so an importer
--- gets its imports' and not their imports'. Were it otherwise, a module would
--- inherit spellings for names it cannot see, since the names behind them stop
--- at the first module without @public@ (his ruling of 2026-11-03).
---
--- **Deduplicated, because 'scopeOpens' is a set** — two @open@s answering one
--- written word is a refusal and not a choice (his ruling of 2026-10-30), so a
--- diamond in the import graph that brought @open Nat@ in twice would make every
--- short name under it ambiguous.
+-- **The prelude is not an exception to that but an implicit import**, which is
+-- Haskell's answer and the one he named: every surface file starts with the
+-- prelude imported and the prelude's own top-level @open@s in force, which is
+-- why @refl@ is writable in every file in the project. It is a property of what
+-- the prelude is, and 'concealedFrom' reads it the same way for names.
 --
 -- **The prompt keeps whatever a load left it**: nothing calls this for a typed
 -- line, which is not a module and is not isolated.
-openedFrom :: [ModuleName] -> Session -> [Opened]
-openedFrom ims s = nub (concatMap (`openedByModule` s) (preludeModule : ims))
+openedFrom :: Session -> [Opened]
+openedFrom = openedByModule preludeModule
 
 -- | A module read off the disc and ready to elaborate (MS11 phase 274).
 --
@@ -4634,8 +4623,8 @@ rawPublicConsults = concatMap go
 -- @LC@ without importing it.
 --
 -- **The @open@s that module left are NOT inherited with it**, which is
--- 'openedFrom''s half and is @~4wjd7@ — unsettled for an import and therefore
--- not decided here by a build.
+-- 'openedFrom''s half: his ruling of 2026-11-06 is that an @open@ travels
+-- nowhere, so a base is no exception and nothing here is a second rule.
 rawPublicImports :: [RawDecl] -> [ModuleName]
 rawPublicImports = concatMap go
   where

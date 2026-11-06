@@ -86,6 +86,19 @@ import examples.Stlc02Contexts
 import examples.Stlc03TypingAndReduction
 import examples.Stlc07Preservation
 
+-- An `open` does not travel with an `import`, so this file says which
+-- namespaces it is written against. A grammar's metavariables are names
+-- under it too, so a judgment written in them needs the same `open` that a
+-- bare constructor does.
+open Ty
+open LC
+open Ctx
+open extend-in
+open typing
+open value
+open step
+open Or
+
 -- ---------------------------------------------------------------------------
 -- THE THREE TRUSTED LAWS. All three are about `String.append` and `String.eq` on
 -- arguments nobody knows, which is exactly where a primitive goes neutral.

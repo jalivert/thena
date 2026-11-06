@@ -1,8 +1,9 @@
 module test.modules.Opener where
 
--- **It declares a namespace and opens it at its own top level**, which is the
--- shape `examples/Canonical.thena` has: whoever imports this gets both the
--- names and the short spellings — see `Thena.Driver.openedFrom`.
+-- **It declares a namespace and opens it at its own top level**, and the bare
+-- `off` below is what that buys it. **Whoever imports this gets the names and
+-- not the short spellings** — his ruling of 2026-11-06, and `Inherits.thena`
+-- is the refusal. See `Thena.Driver.openedFrom`.
 data Bit : Type₀ where
   off : Bit
   on : Bit

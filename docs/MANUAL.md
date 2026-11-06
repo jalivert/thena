@@ -1473,24 +1473,30 @@ Nor is what your own imports imported: if `Pair` imports `Bit` and you import `P
 want them. The rule is one sentence — **a file is correct on its own or not at all**
 — and it is what makes a file you send someone a file that loads.
 
-**An `open` obeys the same rule, and it travels with an `import`.** The short
-spellings a file's top level opened belong to that file and to whoever imports it —
-not to the next file you happen to load:
+**An `open` does not travel at all.** The short spellings a file's top level opened
+belong to that file and to nobody else — not to the next file you happen to load, and
+not to whoever imports it. `open` says how a name is written where *you* stand;
+`public` says what your file offers. One word, one job:
 
 ```
 module Progress where
 
 import Canonical          -- Canonical declares Term and writes `open Term`
 
+open Term                 -- and this file says so for itself
+
 p : Term.Term
-p = true                  -- Term.true, written short, with no `open` here
+p = true                  -- Term.true, written short
 ```
 
-`Progress` reads the same loaded alone as loaded after fifty other files. A file that
-wrote `true` and imported nothing that opened `Term` would be refused, however many
-other files had opened it first. **One hop**: you inherit what the files you import
-opened, not what *they* imported. This is how the prelude's own `open Eq` reaches you,
-which is why `refl` is a word you can write anywhere.
+Without that `open Term` the last line is `not in scope: true`, however many files
+that opened it had gone in first. So a bare word in your file means what your own
+file says it means: no `import` can make one resolve, and no second `import` can make
+one ambiguous between two namespaces you never named.
+
+**The prelude is the one list you start with**, because every surface file imports the
+prelude whether it says so or not — Haskell's arrangement. That is why `refl` is a
+word you can write anywhere: the prelude writes `open Eq` and you get the prelude.
 
 **The prompt is the exception, deliberately.** A line you type is not a file anybody
 will load again, so it reaches everything the session holds, the module you have just
@@ -1528,8 +1534,9 @@ dependency like any other, loaded before your file, and a definition you wrote i
 block keeps working after it — including for someone who imports your file and cannot
 name its type at all. The names in a type are resolved where you write them, once.
 
-The `open`s you inherit come with it: a module that opens a namespace at its own top
-level hands you that spelling, and behind a block it hands it to the block.
+No `open` comes with it: a module that opens a namespace at its own top level hands
+you the names and never the short spellings, inside a block or out of one. The
+`open`s a block may use are the ones you write in it.
 
 > **What you reach is up to the file you imported.** It says what it offers with
 > `exporting` and `private`, below, and passes its own dependencies on with

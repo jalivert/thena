@@ -1,10 +1,9 @@
 -- Preservation for TAPL chapter 8's typed arithmetic expressions — Theorem
 -- 8.3.3, proved in Thena's surface language.
 --
--- IT BUILDS ON Canonical.thena AND Progress.thena AND MUST BE LOADED AFTER
--- BOTH. Thena has no module imports; it has a session, and globals declared by
--- one module are in scope for the next. This file needs Term, Ty, HasType from
--- the first and Step from the second.
+-- IT BUILDS ON Canonical.thena AND Progress.thena, WHICH IT IMPORTS, so loading
+-- this one loads both first. It needs Term, Ty and HasType from the first and
+-- Step from the second.
 --
 -- With progress beside it this is type safety for the language: a well-typed
 -- term never gets stuck, and evaluation never changes its type.
@@ -37,6 +36,12 @@ module examples.Preservation where
 
 import examples.Canonical
 import examples.Progress
+
+-- An `open` does not travel with an `import`, so this file says which of
+-- `Canonical`'s and `Progress`'s namespaces it is written against.
+open Ty
+open HasType
+open Step
 
 preservation : forall (t : Term) (t' : Term) (s : Step t t') (U : Ty) (d : HasType t U) -> HasType t' U
 preservation = \ t t' s U d -> induction s of

@@ -1,11 +1,10 @@
 -- Progress for TAPL chapter 8's typed arithmetic expressions — Theorem 8.3.2,
 -- proved in Thena's surface language.
 --
--- IT BUILDS ON examples/Canonical.thena AND MUST BE LOADED AFTER IT. Thena has
--- no module imports; what it has is a session, and globals declared by one
--- module are in scope for the next. So this file declares only what canonical
--- forms did not: the ten-rule small-step relation, three lemmas that produce a
--- step, and the theorem.
+-- IT BUILDS ON examples/Canonical.thena, WHICH IT IMPORTS, so loading this one
+-- loads that one first. It declares only what canonical forms did not: the
+-- ten-rule small-step relation, three lemmas that produce a step, and the
+-- theorem.
 --
 -- The Step relation is the one examples/DeterminacySurface.thena proves
 -- determinacy for, written out again because that proof is a separate
@@ -34,6 +33,15 @@
 module examples.Progress where
 
 import examples.Canonical
+
+-- An `open` does not travel with an `import`, so this file says which of
+-- `Canonical`'s namespaces it is written against: `true` is `Term.true`.
+open Term
+open Ty
+open NV
+open Value
+open HasType
+open Or
 
 data Step : Term -> Term -> Type₀ where
   eIfTrue : forall (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2

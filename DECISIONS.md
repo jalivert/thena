@@ -595,30 +595,33 @@ holds, which is what lets you poke at a module you have just loaded. **A file yo
 `:load` by path is still a module** and is held to the same rule, so a file that loads
 on its own will load for anyone.
 
-**And an `open` travels with an `import`.** *Built MS11 phase 283.* The short
-spellings a module's top level opened are reachable to whoever imports it, so a file
-that writes
+**And an `open` travels nowhere.** *Built MS11 phases 283 and 293.* The short
+spellings a module's top level opened are that module's own: not the session's after
+it has loaded, and not its importers'. So a file writes the `open`s it is written
+against:
 
 ```
 module Progress where
 
 import Canonical          -- which declares the language Term and writes `open Term`
 
+open Term                 -- and this file says so for itself
+
 p : Term.Term
-p = true                  -- `Term.true`, written short, with no `open` here
+p = true                  -- `Term.true`, written short
 ```
 
-reads the same whether it is loaded alone or after fifty other files. **Only the
-`open`s the imported file wrote itself, and not the ones it inherited** — one hop, as
-a declaration travels. The alternative is a file whose meaning depends on which file
-the session loaded first, which is the thing the rule above removes: before this, an
-`open` written at a file's top level stayed behind in the session when the file
-finished loading, and the next file in could rely on it without saying so.
+Without that line the last one is `not in scope: true`, however many files that
+opened `Term` had gone in first. **`open` says how a name is written where you
+stand; `public` says what your file offers — one word, one job.** The reading where
+an `open` travels with an `import` was built first and withdrawn: it made `import A`
+able to change what a bare word in your file means with nothing in your file saying
+so, and able to make one ambiguous between two namespaces you never named. Agda's
+`public open` would have been the middle answer and was not taken.
 
-**This is the one asymmetry in `public`'s rule**, and it is not settled: a declaration
-travels only under `public` and an `open` travels unconditionally, so `import A` can
-change what a bare word in your file means with nothing in your file saying so. The
-spelling that would close it is Agda's `public open`.
+**The prelude is the one list a file starts with**, because every surface file
+imports the prelude whether it says so or not, as in Haskell. That is why `refl` is
+writable everywhere: the prelude writes `open Eq`, and you have the prelude.
 
 **`public` is how a dependency travels, and only `public`.** `public import` and
 `public consult` republish what they bring in: **when, and only when, the file you
@@ -676,8 +679,8 @@ declaration you wrote inside the block keeps working outside it, even for someon
 imports your file and cannot name its type at all. The names in a type are resolved once,
 where you wrote them.
 
-**The `open`s you inherited are scoped with it.** A module that opens a namespace at its
-own top level hands you that spelling; behind a block, it hands it to the block.
+**And no `open` is inherited into the block either**, because none is inherited at all:
+a module hands on names and never spellings, inside a block or out of one.
 
 **And both words are typed at the prompt.** *Built MS11 phase 284.* `import
 Stlc.Terms` loads that module by name, `consult Stlc.Tactics` pushes that base, and

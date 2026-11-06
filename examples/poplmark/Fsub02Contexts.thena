@@ -1,12 +1,19 @@
 -- F-sub's typing context.
 --
--- LOAD AFTER Fsub01Syntax.thena.
+-- Load it with   :load examples/poplmark/Fsub02Contexts.thena — it imports 01
+-- itself.
 --
 -- Then try   :show bindTy-in      :parse Ctx · , X <: ⊤ , y : X
 
 module examples.poplmark.Fsub02Contexts where
 
 import examples.poplmark.Fsub01Syntax
+
+-- An `open` does not travel with an `import`, so this file says which
+-- namespaces it is written against. A grammar's metavariables are names
+-- under it too, so a judgment written in them needs the same `open` that a
+-- bare constructor does.
+open Ty
 
 -- The context.      Γ ::= · | Γ, x:T | Γ, X<:T
 --

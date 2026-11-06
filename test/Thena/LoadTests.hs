@@ -580,11 +580,18 @@ isolationTests =
 -- @open@ the session held was the other way in, and a file that wrote a bare
 -- @off@ loaded or failed according to which file went in before it.
 --
+-- **AND AN @open@ TRAVELS NOWHERE AT ALL — his ruling of 2026-11-06, phase
+-- 293.** Phase 283 let a file inherit its imports' top-level @open@s, so
+-- @import A@ could make a bare word in your file resolve with nothing in your
+-- file saying so. The prelude is the one list a file starts with, and it is
+-- there as an implicit import rather than as an exception — 'openedFrom'.
+--
 -- **EVERY TEST HERE IS A PAIR, because the two branches are a word apart**: a
--- test that only showed a short spelling working could not tell an @open@ that
--- travelled from a word that resolved anyway. @Inherits@ writes a bare @off@
--- and gets it from the module it imports; @BareOpen@ writes the same line,
--- imports the namespace's declarations and no @open@ of them, and is refused.
+-- test that only showed a short spelling failing could not tell an @open@ that
+-- did not travel from a word that was misspelled. @Opener@ writes a bare @off@
+-- under its own @open Bit@ and is accepted; @Inherits@ imports @Opener@, writes
+-- the same line and is refused, which is @BareOpen@'s answer and no longer its
+-- control.
 openIsolationTests :: [TestTree]
 openIsolationTests =
   [ -- **The defect itself, as it was measured.** @Pair@'s top level writes
@@ -609,37 +616,51 @@ openIsolationTests =
                  (any (isInfixOf "not in scope: off")
                       (concatMap (renderResponse s0) out))
 
-  , -- **The other branch of the pair: an @open@ travels with an @import@.**
-    -- @Opener@ declares @Bit@ and opens it; @Inherits@ imports @Opener@, writes
-    -- a bare @off@ and writes no @open@. This is @examples/Progress.thena@'s
-    -- shape, and the corpus is why it must hold.
-    testCase "but an open travels with an import" $ do
+  , -- **AND AN @open@ DOES NOT TRAVEL WITH AN @import@ EITHER** — his ruling of
+    -- 2026-11-06. @Opener@ declares @Bit@, opens it and writes a bare @off@ of
+    -- its own; @Inherits@ imports @Opener@ and writes the same line with no
+    -- @open@ of its own. **Both halves are here, because a refusal alone could
+    -- be a misspelling**: the module that wrote the @open@ is accepted and the
+    -- module that only imported it is refused for the one word.
+    testCase "and an open does not travel with an import" $ do
       (s0, _) <- startingSession
+      (_, own, ownTrouble) <- loadProofFile s0 "test/modules/Opener.thena"
+      assertBool (show (map (renderTrouble s0) ownTrouble)) (null ownTrouble)
+      [ nm | ProofLoaded nm _ _ _ <- own ] @?= ["test.modules.Opener"]
       (_, out, trouble) <- loadProofFile s0 "test/modules/Inherits.thena"
-      assertBool (show (map (renderResponse s0) out)) (null trouble)
-      [ nm | ProofLoaded nm _ _ _ <- out ]
-        @?= ["test.modules.Opener", "test.modules.Inherits"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (show (map (renderResponse s0) out))
+                 (any (isInfixOf "not in scope: off")
+                      (concatMap (renderResponse s0) out))
 
-  , -- **AND IT TRAVELS ONE HOP, which is 'declaredByModule''s rule and not a
-    -- second one.** @Inherits@ wrote no @open@ of its own, so it leaves none
-    -- for its own importer: were it otherwise a module would inherit spellings
-    -- for names it cannot see, since the names stop at the first module without
-    -- @public@ (his ruling of 2026-11-03).
-    testCase "and it travels one hop, as a declaration does" $ do
+  , -- **NOR INTO THE BLOCK OF A SCOPED IMPORT**, which is the other route into
+    -- a file and a different piece of code: the file-wide one is 'openedFrom'
+    -- and this one is what @import M where { … }@ pushes (phase 291). A rule
+    -- stated once has to hold at both.
+    testCase "and not into the block of a scoped import" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Inherits.thena"
-      let direct   = map openedPath (openedFrom [named' "test.modules.Opener"] s1)
-          indirect = map openedPath (openedFrom [named' "test.modules.Inherits"] s1)
-      assertBool (show direct)   (["Bit"] `elem` direct)
-      assertBool (show indirect) (["Bit"] `notElem` indirect)
+      (_, out, trouble) <- loadProofFile s0 "test/modules/InheritsInBlock.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (show (map (renderResponse s0) out))
+                 (any (isInfixOf "not in scope: off")
+                      (concatMap (renderResponse s0) out))
 
-  , -- **The prelude's own @open Eq@ is the general case and not an exception**:
-    -- it is how every module in the project reaches @refl@, and it arrives by
-    -- the one route an import uses.
+  , -- **The prelude's own @open Eq@ is the one list a module starts with**: it
+    -- is how every module in the project reaches @refl@, and it is there
+    -- because every surface file implicitly imports the prelude.
     testCase "the prelude's opens are what a module starts with" $ do
       (s0, _) <- startingSession
-      let opens = map openedPath (openedFrom [] s0)
+      let opens = map openedPath (openedFrom s0)
       assertBool (show opens) (["Eq"] `elem` opens)
+
+  , -- **And the list does not grow with what the session has loaded**, which
+    -- is the claim at 'openedFrom' rather than at a file: @Pair@'s top level
+    -- writes @open Bit@ and the next module to load still starts with the
+    -- prelude's and nothing else.
+    testCase "and loading a module that opens one adds nothing to it" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Pair.thena"
+      map openedPath (openedFrom s1) @?= map openedPath (openedFrom s0)
 
   , -- **An @open@ inside a @namespace@ block is not the module's to pass on**,
     -- because it is popped where the block ends — @~ckmsk@, his ruling of
@@ -680,11 +701,11 @@ promptActTests :: [TestTree]
 promptActTests =
   [ testCase "import loads the module it names, and what that imports" $ do
       (s0, _) <- startingSession
-      (s1, out, trouble) <- atPrompt s0 "import test.modules.Inherits"
+      (s1, out, trouble) <- atPrompt s0 "import test.modules.PassesBit"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
-        @?= ["test.modules.Opener", "test.modules.Inherits"]
-      assertBool "and it is in" (moduleLoaded (named' "test.modules.Inherits") s1)
+        @?= ["test.modules.Bit", "test.modules.PassesBit"]
+      assertBool "and it is in" (moduleLoaded (named' "test.modules.PassesBit") s1)
 
   , -- A module is loaded once however many files reach it, and the prompt is
     -- not an exception to that.
@@ -2490,9 +2511,10 @@ publicImportTests =
 -- the same block with one declaration after it.
 scopedImportTests :: [TestTree]
 scopedImportTests =
-  [ -- **The names reach the block**, and @Opener@\'s own @open Bit@ with them:
-    -- @mine@ is written @Bit.Bit@ and built with a bare @off@, so both routes an
-    -- import opens are measured by one declaration.
+  [ -- **The names reach the block**, and nothing else does: @mine@ is written
+    -- @Bit.Bit@ and built with @Bit.off@, because an @open@ of @Opener@'s is not
+    -- inherited here either (his ruling of 2026-11-06, and 'openIsolationTests'
+    -- has the refusal).
     testCase "a scoped import's names reach its block" $ do
       (s0, _) <- startingSession
       (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedImport.thena"

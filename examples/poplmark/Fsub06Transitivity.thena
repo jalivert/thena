@@ -1,6 +1,6 @@
 -- POPLMark problem 1A: transitivity of subtyping, with narrowing.
 --
--- LOAD AFTER 01-syntax, 02-contexts, 03-wellformed, 04-subtyping, 05-typing.
+-- Load it on its own — it imports 01-syntax through 05-typing itself.
 --
 -- The challenge's crux. Transitivity is not a rule of the system, it is a
 -- lemma, and its proof needs narrowing simultaneously: in the SA-All case the
@@ -29,6 +29,19 @@ import examples.poplmark.Fsub02Contexts
 import examples.poplmark.Fsub03Wellformed
 import examples.poplmark.Fsub04Subtyping
 import examples.poplmark.Fsub05Typing
+
+-- An `open` does not travel with an `import`, so this file says which
+-- namespaces it is written against. A grammar's metavariables are names
+-- under it too, so a judgment written in them needs the same `open` that a
+-- bare constructor does.
+open Ty
+open Ctx
+open bindTy-in
+open ty
+open ok
+open Or
+open notIn
+open sub
 
 -- ---------------------------------------------------------------------------
 -- Reflexivity, by induction on the WELL-FORMEDNESS of the type rather than on
