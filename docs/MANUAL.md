@@ -1553,10 +1553,13 @@ rule elsewhere :- do            -- LC is not writable here
   say "something else"
 ```
 
-A `consult` block is not written in a rule file. In a proof file it says *search these
-proofs against that base*; a rule file has no proofs, and its rules are searched against
-everything the session holds at the moment they run — so there is nothing for that half
-to apply to, and the form is not offered rather than offered meaning less.
+A `consult` block in a rule file is **decided and not written yet.** When it lands it
+will mean a region of *time* rather than a region of the file: the rules in the block run
+with that base pushed on top and popped when they finish, so it is searched first for
+them and is not in the pool for the rest of the file. Two things to know in advance —
+the push happens wherever those rules are called from, as deep as the call goes, so a
+base you pin travels with the rule; and it will not show in `:bases`, because it is only
+on while those rules run.
 
 > **What you reach is up to the file you imported.** It says what it offers with
 > `exporting` and `private`, below, and passes its own dependencies on with
