@@ -980,9 +980,11 @@ consult Stlc.Tactics     -- which imports Stlc.Terms, so Stlc.Terms is loaded fi
 ```
 
 **This is the order the engine tries rules in when no name is given** — you at a
-hole, `:matches`, `prove`. A rule called *by name* is found by the ordinary name
-walk, and since rules are not open to extension there is only ever one rule of a
-given name to find.
+hole, `:matches`, `prove`. **It is also the order a rule called *by name* is tried in,
+because a rule IS open to extension** — see *A later rule base may refine an earlier
+base's rule* below. This paragraph said the opposite until 2026-11-06, when it was
+measured and was wrong: there may be several clauses of one name, in several bases, and
+a `call` searches them all.
 
 **THE QUIRK, AND IT IS DELIBERATE.** Inside a rule base, the clauses of a rule are
 tried in **written order, top down** — a queue, as every rule language does it and
@@ -996,6 +998,63 @@ as a queue would prevent the thing Thena is for: **a specialised, single-use rul
 base written to crush one goal, brought in exactly where that goal is, and tried
 before anything general.** A queue would bury it under every library you had
 already consulted.
+
+### A later rule base may refine an earlier base's rule
+
+*Decided 2026-11-06, and it is a protected design choice rather than a consequence of
+one. Built since MS5; measured and written down here when it was nearly designed away.*
+
+**A tactics file you load today can be made more specific by a tactics file you load
+tomorrow, and the first one does not have to know the second exists.** A `call` is
+resolved against the whole pool at the moment it runs — not against what was loaded when
+the calling file was read — so a rule's clauses may live in several bases at once.
+
+Two files. The first defines a greeting and a rule that calls it; the second defines
+another greeting and nothing else, and knows nothing about the first:
+
+```
+rule base one where          rule base two where
+
+greet : ()                   rule greet :- do say "two's greeting"
+rule greet :- do say "one's own greeting"
+
+go : ()
+rule go :- do call greet
+```
+
+```
+thena spine> :consult one.thena.rules
+thena spine> go
+one's own greeting
+```
+
+Load the second one as well, and the *first* file's `go` reaches the *second* file's
+clause — with a choice point over the two, so `retry` still gets the original:
+
+```
+thena spine> :consult one.thena.rules
+thena spine> :consult two.thena.rules
+thena spine> go
+chose 4685: greet
+two's greeting
+thena spine> :choices
+4685  greet   untried: greet
+thena spine> retry
+retrying 4685: greet
+one's own greeting
+```
+
+**This is why the pool is one flat stack rather than one scope per file.** The shipped
+base's general tactics were written before your language existed; the only way they ever
+reach a clause of yours is that your base joins the same search. A file that could search
+only what it named itself would be closed at the moment it was written, and *any matching
+rule is always offered* — the system's first design principle — would stop at file
+boundaries.
+
+**The consequence to know about**: you cannot load a base "privately". Putting a base in
+the pool makes its rules callable by you and by every other base in that pool. **What you
+control is the extent, not the flatness** — `consult B where { … }` keeps a base to one
+block, and that is the tool for a base you want out of the way again.
 
 ### A rule base states the bases it is written against, and may publish either act
 
