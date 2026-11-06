@@ -926,7 +926,7 @@ initiallyBound = concatMap patternBinds . ruleParams
 
 -- | Every rule in one base, checked.
 --
--- **This is what a load runs**, since phase 22 — @Thena.Driver.readRuleBase@
+-- **This is what a load runs**, since phase 22 — @Thena.Driver.readStated@
 -- calls it on every rule as it resolves one, so a base that would not validate
 -- is refused rather than installed. §2.4 asked for a load-time pass and until
 -- there was a load there was only a test.

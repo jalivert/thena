@@ -510,6 +510,24 @@ data Session = Session
     --
     -- **Not in a 'Snapshot'**, for 'sessionLoaded''s reason: it is a record of
     -- what is in an environment that only grows.
+  , sessionGrammarsBy :: [(ModuleName, [GlobalName])]
+    -- ^ __Which module declared which grammars__ (MS11 phase 297).
+    --
+    -- **'sessionDeclaredBy''s twin, because a grammar's name is in a second
+    -- table.** A @language@ block puts its datatype and everything generated
+    -- from it in the environment, where 'sessionDeclaredBy' catches them, and
+    -- puts the grammar itself in 'Thena.Engine.grammars', keyed by a
+    -- 'GlobalName' that is no global at all: @language LC@ inside @namespace A@
+    -- is the key @A.LC@ beside the datatype @A.LC.LC@. So a subtraction taken
+    -- over the environment alone leaves the tag reachable, which is what
+    -- phase 297 found: a rule file writing @LC[app]@ names no global and was
+    -- resolved against every language the session held.
+    --
+    -- **The same difference, taken over the other table**, so a grammar a
+    -- @notation@ block installed belongs to the module that wrote the block and
+    -- nothing has to ask which kind of block made it.
+    --
+    -- **Not in a 'Snapshot'**, for 'sessionDeclaredBy''s reason.
   , sessionFilesRead :: [(FilePath, Digest)]
     -- ^ __Every file this session read, and what it said when it was read__
     -- (MS11 phase 295, his ruling of 2026-11-06).
@@ -955,6 +973,7 @@ newSession = Session
   , sessionPrivateIn  = []
   , sessionExporting  = []
   , sessionDeclaredBy = []
+  , sessionGrammarsBy = []
   , sessionOpenedBy  = []
   , sessionFilesRead = []
   }
@@ -2578,6 +2597,7 @@ moduleDeclared n face before after
   | otherwise =
       after { sessionLoaded     = n : sessionLoaded after
             , sessionDeclaredBy = (n, arrived) : sessionDeclaredBy after
+            , sessionGrammarsBy = (n, installed) : sessionGrammarsBy after
             , sessionOpenedBy   = (n, left) : sessionOpenedBy after
             , sessionExporting  =
                 maybe id (\e -> ((n, e) :)) (interfaceExporting face)
@@ -2596,6 +2616,13 @@ moduleDeclared n face before after
       let had = Env.declaredNames (globals (sessionMachine before))
        in nub (filter (`notElem` had)
                       (Env.declaredNames (globals (sessionMachine after))))
+
+    -- **The same difference over the grammar table** (MS11 phase 297), and it
+    -- needs no deduplication: a grammar list holds one entry per key.
+    installed =
+      let had = map grammarName (grammars (sessionMachine before))
+       in filter (`notElem` had)
+                 (map grammarName (grammars (sessionMachine after)))
 
     -- **By length and not by membership**, because 'scopeOpens' is latest first
     -- and a module may legitimately write an @open@ the session already had:
@@ -2642,12 +2669,55 @@ preludeModule = ModuleName ["Prelude"]
 -- line, and 'Thena.Core.Term.rootScope' conceals nothing.
 concealedFrom :: [ModuleName] -> Session -> [GlobalName]
 concealedFrom ims s =
-  nub [ g | g <- Env.declaredNames env
-          , g `notElem` map fst (Env.primitives env)
-          , g `notElem` visible ]
+  nub ([ g | g <- Env.declaredNames env
+           , g `notElem` map fst (Env.primitives env)
+           , g `notElem` visible ]
+         ++ tags)
   where
     env     = globals (sessionMachine s)
     visible = reachedBy (preludeModule : ims) s
+
+    -- **AND THE GRAMMAR TABLE IS SUBTRACTED TOO** (MS11 phase 297). A tag is
+    -- resolved by the same outward walk a name is —
+    -- 'Thena.Language.Grammar.grammarForTag' asks
+    -- 'Thena.Core.Term.globalUnder' with /is this a grammar/ as its predicate —
+    -- so a key left out of this list stays reachable however little the file
+    -- said. **A grammar's key is no global**, which is why the clause above
+    -- cannot reach it: @A.LC@ is in 'Thena.Engine.grammars' and @A.LC.LC@ is
+    -- the datatype in the environment.
+    --
+    -- **It changed nothing for a surface file and everything for a rule file.**
+    -- Writing a tagged term in surface text means naming its datatype in a
+    -- signature, and that name was concealed already; a rule file's signatures
+    -- are @instral@'s own types, so @rule describe LC[app]\`…\`@ names no
+    -- global anywhere and nothing stood between it and the session's languages.
+    --
+    -- **A grammar that belongs to no module is concealed from every module**,
+    -- which is 'reachedBy''s rule for a name said again here: a @language@
+    -- block typed at the prompt, or written in a file reached by no name, is
+    -- the prompt's and not something a module may rely on.
+    tags =
+      [ g | g <- map grammarName (grammars (sessionMachine s))
+          , g `notElem` grammarsReachedBy (preludeModule : ims) s ]
+
+-- | __Which grammars importing these modules reaches__ (MS11 phase 297).
+--
+-- 'reachedBy''s twin over the other table, and the closure is the same one for
+-- the same reason — his ruling of 2026-11-03, that @public@ is how a dependency
+-- travels. **A module's export list is not applied here**: an @exporting@
+-- clause names declarations and a grammar's key is not one of them, so what a
+-- file reaches is every language of every module it reaches. Narrowing a
+-- language with an export list is a question of its own and is not this
+-- phase's.
+grammarsReachedBy :: [ModuleName] -> Session -> [GlobalName]
+grammarsReachedBy ms0 s = reach [] ms0
+  where
+    reach _    []       = []
+    reach seen (m : ms)
+      | m `elem` seen = reach seen ms
+      | otherwise     =
+          concat [ gs | (m', gs) <- sessionGrammarsBy s, m' == m ]
+            ++ reach (m : seen) (publicImportsOf m s ++ ms)
 
 -- | __What importing these modules reaches__ (MS11 phase 291).
 --
@@ -4496,37 +4566,36 @@ breakOn needle = go ""
       | c : cs <- h                    = go (c : acc) cs
       | otherwise                      = Nothing
 
--- | Read one rule-base file: its header, then its rules.
---
--- **It needs nothing but the file** — phase 23 moved @call@'s lookup to run
--- time, so a rule no longer has to be resolved against the rules already in
--- scope, and this stopped threading them. That is what lets a rule call itself,
--- call a rule written below it, and call a rule in a base loaded after it.
---
--- Takes contents and not a path (§12 invariant 4).
-readRuleBase :: [Grammar] -> FilePath -> String -> Either RuleFileError RuleBase
-readRuleBase gs path src = do
-  (nm, desc, raws) <- rawRuleDecls src
-  ruleBaseOfDecls gs path nm desc raws
-
 -- | Resolve a rule file's declarations into a base.
 --
--- The second half of 'readRuleBase', split out at MS7 phase 112b so a stored
--- project can reach it without going back through text.
+-- **The second half of reading one**, split out at MS7 phase 112b so a stored
+-- project can reach it without going back through text; 'readStated' is the
+-- half in front of it and 'rawRuleDecls' the parse.
+--
+-- **It needs no rules in hand** — phase 23 moved @call@'s lookup to run time,
+-- so a rule no longer has to be resolved against the rules already in scope.
+-- That is what lets a rule call itself, call a rule written below it, and call
+-- a rule in a base loaded after it.
+--
+-- **The @conc@ list is what this base may not reach** (MS11 phase 297): a rule
+-- file is isolated from the session exactly as a surface module is, and
+-- 'concealedFrom' is the one place that subtraction is worked out. **A caller
+-- with no session passes @[]@**, which is the prompt's scope and conceals
+-- nothing.
 ruleBaseOfDecls
-  :: [Grammar] -> FilePath -> String -> Maybe String -> [RawDecl]
-  -> Either RuleFileError RuleBase
-ruleBaseOfDecls gs path nm desc raws = do
-  (sigs, fns, rs) <- resolveAll gs raws
+  :: [Grammar] -> [GlobalName] -> FilePath -> String -> Maybe String
+  -> [RawDecl] -> Either RuleFileError RuleBase
+ruleBaseOfDecls gs conc path nm desc raws = do
+  (sigs, fns, rs) <- resolveAll gs conc raws
   Right (ruleBase nm desc path sigs fns rs)
 
 -- | A rule file's header and its declarations, parsed and /not/ resolved.
 --
--- **Split out of 'readRuleBase' at MS7 phase 112a**, which needs exactly this
--- half: the project's storage format is the tree as written (his decision of
+-- **Split out of the read at MS7 phase 112a**, which needs exactly this half:
+-- the project's storage format is the tree as written (his decision of
 -- 2026-09-24), and resolution is what turns a written tree into something that
--- depends on what is loaded. 'readRuleBase' is this plus 'resolveAll', so there
--- is one parse and not two.
+-- depends on what is loaded. 'readStated' is this plus 'ruleBaseOfDecls', so
+-- there is one parse and not two.
 rawRuleDecls :: String -> Either RuleFileError (String, Maybe String, [RawDecl])
 rawRuleDecls src = case baseHead ls of
   Nothing -> Left NoRuleHeader
@@ -4585,8 +4654,15 @@ parseInstralType src = do
 -- before the prelude declares its first name ('Thena.Files.startingSession').
 -- So a path that reaches nothing is simply an @open@ that brings nothing in,
 -- and what the author sees is the tag it failed to shorten.
-scopedDecls :: [Grammar] -> [RawDecl] -> [(Reading, RawDecl)]
-scopedDecls gs = go rootScope
+--
+-- **AND THE SCOPE IT STARTS IN CONCEALS WHAT THE FILE DID NOT STATE** (MS11
+-- phase 297): the walk used to begin at 'Thena.Core.Term.rootScope', which
+-- conceals nothing, so a tag resolved against every grammar the session held.
+-- @conc@ is 'concealedFrom' of the file's own imports, and the subtraction is
+-- the one @~xdt8c@ made for a surface module at phase 282 — the same ruling, a
+-- table further over.
+scopedDecls :: [Grammar] -> [GlobalName] -> [RawDecl] -> [(Reading, RawDecl)]
+scopedDecls gs conc = go rootScope { scopeConcealed = [conc] }
   where
     go _ []  = []
     go sc (d : rest) = case d of
@@ -4636,10 +4712,10 @@ openedOf (RawOpen ns spec) = [ said (ps ++ [x]) | (ps, x) <- ns ]
 -- that stands where it is written and not against one scope for the file.
 -- 'scopedDecls' is the walk that pairs the two.
 resolveAll
-  :: [Grammar] -> [RawDecl]
+  :: [Grammar] -> [GlobalName] -> [RawDecl]
   -> Either RuleFileError
        ([(String, Signature)], [Rule], [Rule])
-resolveAll gs raws =
+resolveAll gs conc raws =
   case ( concat ruleErrs ++ concat fnErrs ++ sigErrs
            ++ dups ++ collisions ++ overlapping
        , concatMap validate (ok ++ fns)
@@ -4650,7 +4726,7 @@ resolveAll gs raws =
     -- **Each declaration beside the scope it was written in.** An @open@ is not
     -- a declaration to resolve, so it does not appear here — what it says is
     -- already in the reading beside everything under it.
-    decls = scopedDecls gs raws
+    decls = scopedDecls gs conc raws
 
     (ruleErrs, ok)  =
       partitionEithers [ resolveRule rd r | (rd, DeclRule r) <- decls ]
@@ -4732,7 +4808,8 @@ resolveAll gs raws =
 -- place, so a session never ends up searching half of what was asked for.
 loadRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
 loadRuleBases s ps =
-  loadReadBases s [(path, statedConsults src, readStated s gs path src) | (path, src) <- ps]
+  loadReadBases s [ (path, statedConsults src, statedConcealment s src, readStated s gs path src)
+                  | (path, src) <- ps ]
   where
     gs = grammars (sessionMachine s)
 
@@ -4740,7 +4817,8 @@ loadRuleBases s ps =
 -- top of the pool instead of replacing it (MS11 phase 271).
 consultRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
 consultRuleBases s ps =
-  consultReadBases s [(path, statedConsults src, readStated s gs path src) | (path, src) <- ps]
+  consultReadBases s [ (path, statedConsults src, statedConcealment s src, readStated s gs path src)
+                     | (path, src) <- ps ]
   where
     gs = grammars (sessionMachine s)
 
@@ -4750,8 +4828,20 @@ consultRuleBases s ps =
 statedConsults :: String -> [ModuleName]
 statedConsults src = either (const []) id (ruleBaseConsults src)
 
--- | 'readRuleBase', refusing a base whose dependencies are not in (MS11 phase
--- 276).
+-- | __What a base's text may not reach__ (MS11 phase 297).
+--
+-- 'statedConsults'\' companion, and the same bargain: **a file that does not
+-- parse states nothing**, so it conceals nothing and 'readStated' is what
+-- reports the parse failure with the position in it. The base is refused either
+-- way; what this answers is only what to resolve its @do@ blocks against.
+statedConcealment :: Session -> String -> [GlobalName]
+statedConcealment s src =
+  concealedFrom (either (const []) id (ruleBaseImports src)) s
+
+-- | Read one rule-base file — its header, then its rules — refusing a base
+-- whose dependencies are not in (MS11 phase 276).
+--
+-- Takes contents and not a path (§12 invariant 4).
 --
 -- **Refused rather than read anyway**, which is the whole protection and the
 -- same bargain 'loadProofItems' makes for a surface module: a base is resolved
@@ -4764,16 +4854,38 @@ statedConsults src = either (const []) id (ruleBaseConsults src)
 -- /be there/, not that this act be the one that loaded it. So the refusal names
 -- only what is missing, and a base consulted twice is read twice without
 -- reloading anything.
+--
+-- **AND REFUSING AN UNREAD DEPENDENCY WAS ONLY HALF OF IT — MS11 phase 297.**
+-- This checked that every module the file /stated/ was in, and nothing checked
+-- that what the file /used/ was stated: the base was then resolved in a scope
+-- that concealed nothing, so a file naming a language it never imported loaded
+-- according to what a considerate user had put in first. That is the very hack
+-- @DECISIONS.md@ says is closed — /a file states what it refers to; it never
+-- relies on the session/ — and 'concealedFrom' here is what closes it. **A
+-- rule file's scope is the prelude and the modules it imports**, the closure
+-- over their @public import@s included, which is 'reachedBy'.
+--
+-- **WHAT A CONSULTED BASE PUBLISHED IS NOT IN IT, AND THE ORDER IS WHY.** A
+-- base's @public import@ hands its object language to whoever consults it
+-- (phase 289) — but a plain @consult@ is an /ask/, checked when the pool is
+-- installed, and that is after every file in the group has been read and
+-- resolved. So a base could not resolve its own tags against a publication
+-- whose existence has not been established yet. **The publication reaches a
+-- surface file, which is what it was built for** ('Pool''s @poolPublished@);
+-- a rule file states what it refers to.
 readStated
   :: Session -> [Grammar] -> FilePath -> String
   -> Either RuleFileError RuleBase
-readStated s gs path src = case fmap missing (ruleBaseImports src) of
-  Right ms@(_ : _) -> Left (RuleImportsUnread ms)
-  -- Either everything it imports is in, or it does not parse — and
-  -- 'readRuleBase' is what says the second properly, with the position in it.
-  _                -> readRuleBase gs path src
-  where
-    missing = filter (\m -> not (moduleLoaded m s))
+readStated s gs path src = do
+  -- **One parse and not two** (MS11 phase 297). This asked 'ruleBaseImports'
+  -- for the names and then had the read parse the file again; the
+  -- concealment needs the same declarations, so the parse is done once here and
+  -- the second half is reached directly.
+  (nm, desc, raws) <- rawRuleDecls src
+  case filter (\m -> not (moduleLoaded m s)) (rawImports raws) of
+    ms@(_ : _) -> Left (RuleImportsUnread ms)
+    []         -> ruleBaseOfDecls gs (concealedFrom (rawImports raws) s)
+                                  path nm desc raws
 
 -- | Every surface module a rule file imports, in written order (MS11 phase
 -- 276).
@@ -4890,14 +5002,20 @@ rawPublicImports = concatMap go
 -- happen once and identically whichever door a base came in by.
 loadRuleDecls :: Session -> [(FilePath, String, Maybe String, [RawDecl])] -> (Session, Response)
 loadRuleDecls s ps =
-  loadReadBases s [(path, rawConsults ds, stated path nm desc ds) | (path, nm, desc, ds) <- ps]
+  loadReadBases s [ (path, rawConsults ds, concealedFrom (rawImports ds) s, stated path nm desc ds)
+                  | (path, nm, desc, ds) <- ps ]
   where
     gs = grammars (sessionMachine s)
     -- 'readStated''s bargain, for the door that joins after parsing (MS11
     -- phase 276).
     stated path nm desc ds = case filter (\m -> not (moduleLoaded m s)) (rawImports ds) of
       ms@(_ : _) -> Left (RuleImportsUnread ms)
-      []         -> ruleBaseOfDecls gs path nm desc ds
+      -- **The same concealment a base read from text gets** (MS11 phase 297):
+      -- a stored base is held to the rule its author wrote it under, so the
+      -- door a project comes in by cannot be the one that relies on the
+      -- session.
+      []         -> ruleBaseOfDecls gs (concealedFrom (rawImports ds) s)
+                                    path nm desc ds
 
 -- | Install bases that have already been built, or none of them.
 --
@@ -4906,7 +5024,8 @@ loadRuleDecls s ps =
 -- than inside it — and is why there is one fold here and not one per kind of
 -- source.
 loadReadBases
-  :: Session -> [(FilePath, [ModuleName], Either RuleFileError RuleBase)]
+  :: Session
+  -> [(FilePath, [ModuleName], [GlobalName], Either RuleFileError RuleBase)]
   -> (Session, Response)
 loadReadBases = installReadBases []
 
@@ -4923,7 +5042,8 @@ loadReadBases = installReadBases []
 -- can go out of scope while the lower one is still in force. So this does not
 -- deduplicate, and the pool may hold one base more than once.
 consultReadBases
-  :: Session -> [(FilePath, [ModuleName], Either RuleFileError RuleBase)]
+  :: Session
+  -> [(FilePath, [ModuleName], [GlobalName], Either RuleFileError RuleBase)]
   -> (Session, Response)
 consultReadBases s = installReadBases (rules (sessionMachine s)) s
 
@@ -4941,7 +5061,7 @@ consultReadBases s = installReadBases (rules (sessionMachine s)) s
 -- files are being read one at a time. 'RuleConsultsAbsent' is the refusal.
 installReadBases
   :: [RuleBase] -> Session
-  -> [(FilePath, [ModuleName], Either RuleFileError RuleBase)]
+  -> [(FilePath, [ModuleName], [GlobalName], Either RuleFileError RuleBase)]
   -> (Session, Response)
 installReadBases below s = go []
   where
@@ -4953,13 +5073,13 @@ installReadBases below s = go []
     -- not callables — nothing can call one — so they are not in 'allCallable';
     -- they are handed to 'inferProgram' as extra bodies so that a mistake in one
     -- is found when the file loads.
-    go acc [] = case [ (path, ms) | (path, stated, _) <- acc
+    go acc [] = case [ (path, ms) | (path, stated, _, _) <- acc
                                   , let ms = filter (not . inPool) stated
                                   , not (null ms) ] of
       -- **The first base that is missing one**, as a file that will not read is
       -- the first that will not read: all or nothing either way.
       (path, ms) : _ -> (s, RuleFileRefused path (RuleConsultsAbsent ms))
-      [] -> case traverse blocksOf bases of
+      [] -> case traverse blocksOf [ (conc, b) | (_, _, conc, b) <- acc ] of
         -- A block that does not resolve or does not validate is the file's
         -- problem and is reported against the file, as any other rule's would be.
         Left (path, errs) -> (s, RuleFileRefused path (RuleIllFormed errs))
@@ -4971,7 +5091,7 @@ installReadBases below s = go []
               )
             errs -> (s, BasesIllTyped errs)
       where
-        bases = [ b | (_, _, b) <- acc ]
+        bases = [ b | (_, _, _, b) <- acc ]
         pool  = bases ++ below
         -- **A base is in the pool if the file that name denotes is**, which is
         -- the only identity a 'Thena.Rules.RuleBase' has: its declared name is
@@ -4979,16 +5099,22 @@ installReadBases below s = go []
         -- 'moduleFile' is the one place the two meet.
         inPool m = any ((== moduleFile LoadRules m) . basePath) pool
 
-    go acc ((path, stated, built) : more) = case built of
+    go acc ((path, stated, conc, built) : more) = case built of
       Left e  -> (s, RuleFileRefused path e)
-      Right b -> go (acc ++ [(path, stated, b)]) more
+      Right b -> go (acc ++ [(path, stated, conc, b)]) more
 
-    -- **Resolved here and not in 'readRuleBase'**, because what it answers is
+    -- **Resolved here and not in 'readStated'**, because what it answers is
     -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then
     -- dropped, and a 'RuleBase' has no field for them. (Until MS6 phase 106 the
     -- reason was also that a block needed every base's MS5 languages.)
-    blocksOf b = case surfaceBlocks (rootReading (grammars (sessionMachine s))) (rootName (baseName b))
-                            (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
+    -- **In the base's own scope and not the root one** (MS11 phase 297): a
+    -- @do@ block written in a rule file is the file's text like any other, so
+    -- it reaches what the file imported and not what the session holds.
+    blocksOf (conc, b) =
+      case surfaceBlocks (Reading (grammars (sessionMachine s))
+                                  rootScope { scopeConcealed = [conc] })
+                         (rootName (baseName b))
+                         (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
       Left errs -> Left (basePath b, errs)
       Right bs  -> case concatMap validate bs of
         []   -> Right bs

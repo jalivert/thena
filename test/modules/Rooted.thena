@@ -1,0 +1,20 @@
+-- | A language declared at a module's root, with one term of it — MS11 phase 297.
+--
+-- `Thena.ObjectTermTests` builds its rule bases against this. It was the string
+-- `languageModule` inside that test module until phase 297 made a rule file
+-- state what it refers to: a base may only reach a language whose module it
+-- imports, and a module has a name to import only once it has been reached by
+-- one. `fg` is the definition the match-through-a-definition test needs.
+module test.modules.Rooted where
+
+x : Token String
+x = /[a-z]+/
+
+language LC, M, N, E where
+  var : x as occurrence -> x
+  app                   -> ( M N )
+
+open LC
+
+fg : LC
+fg = LC`( f g )`

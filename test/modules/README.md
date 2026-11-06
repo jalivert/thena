@@ -18,6 +18,23 @@ refused. Before MS11 phase 276 every test of a rule file's scope loaded the modu
 itself first, so the session satisfied the dependency and nothing could tell a stated
 one from a lucky one.
 
+**AND THE PAIR IS RUN TWICE SINCE MS11 PHASE 297, THE SECOND TIME WITH `Lang` ALREADY
+IN.** Refusing `Unstated` in a session that never loaded `Lang` measures only that the
+dependency is absent. **Until phase 297 the same file LOADED as soon as anything else had
+put `Lang` in** — `./tc test/modules/Lang.thena test/modules/Unstated.thena.rules` printed
+`loaded unstated (1 rule)` — because a rule base was resolved in a scope that concealed
+nothing. `Thena.LoadTests`' *and it is refused even when the module IS in* is the case
+that measures isolation, and `.claude/HAZARDS.md` has why the first pair could not.
+
+**Three of them are MS11 phase 297's, and they are `Thena.ObjectTermTests`', not this
+suite's.** `Rooted.thena` declares a language at a module's root and one term of it,
+`OneNested.thena` one inside a `namespace`, `TwoNested.thena` two namespaces that answer
+one word. They were strings inside that test module until a rule file had to state what it
+refers to: a base reaches a language only by importing the module declaring it, and a
+module has a name to import only once it was reached by one —
+`Thena.Driver.loadProofSource` reaches a module by no name at all, so nothing loaded that
+way can be named in an `import`.
+
 **`Misnamed.thena` declares `module test.modules.Elsewhere where`** and
 `ImportsMisnamed.thena` imports it — the pair for `~r58qh`, his ruling of
 2026-11-05. Importing it is refused; loading `Misnamed.thena` by its path is not,

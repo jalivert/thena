@@ -578,7 +578,10 @@ file that talks about a language `import`s the surface file declaring it. Until 
 decision a rule file was read with whatever grammars the session happened to hold,
 which worked only because loading threw everything into one flat scope — so a rule
 file's meaning depended on what a considerate user had loaded first. No language
-works that way and Thena will not.
+works that way and Thena will not. *Stated for both kinds of file in
+2026-11-05; the rule file's half was enforced at MS11 phase 297, which is when a base
+that wrote `LC[app]` without importing the module declaring `LC` began to be refused
+rather than resolved against whatever language was in.*
 
 **So a module's whole view is its imports, its own declarations and the prelude.**
 Decided 2026-11-05, built MS11 phase 282. Nothing else a session happens to be holding

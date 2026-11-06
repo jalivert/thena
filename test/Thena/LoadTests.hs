@@ -1154,6 +1154,35 @@ baseImportTests =
           p @?= "test/modules/Unstated.thena.rules"
         other -> assertFailure (show (map (renderTrouble s0) other))
 
+  , -- **THE PAIR'S NEGATIVE HALF, RUN WITH THE MODULE ALREADY IN** (MS11 phase
+    -- 297). The case above refuses @Unstated@ in a session that never loaded
+    -- @Lang@, which measures that the dependency is absent and not that the
+    -- file stated it — and until this phase the same file LOADED as soon as
+    -- anything else had put @Lang@ in. **This is the case that measures
+    -- isolation**: the language is there, the base does not name it, and the
+    -- base is refused.
+    testCase "and it is refused even when the module IS in, which is the isolation" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      assertBool "the module is in" (moduleLoaded (importNamed "test.modules.Lang") s1)
+      (_, _, trouble) <- consultRuleFiles s1 ["test/modules/Unstated.thena.rules"]
+      case trouble of
+        [Unloadable p (RuleFileRefused _ (RuleIllFormed _))] ->
+          p @?= "test/modules/Unstated.thena.rules"
+        other -> assertFailure (show (map (renderTrouble s1) other))
+
+  , -- **And the grammar is the table that was leaking** (MS11 phase 297): the
+    -- tag @LC@ is the only thing @Unstated@ names, and a tag is no global, so
+    -- the refusal has to come from the grammar table's own subtraction.
+    testCase "and what it is refused for is the tag, not a name" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (_, _, trouble) <- consultRuleFiles s1 ["test/modules/Unstated.thena.rules"]
+      case trouble of
+        [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
+          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- es ]))
+        other -> assertFailure (show (map (renderTrouble s1) other))
+
   , -- A dependency asks that the module BE there, not that this act load it.
     testCase "a module already in the session is not loaded again" $ do
       (s0, _) <- startingSession
