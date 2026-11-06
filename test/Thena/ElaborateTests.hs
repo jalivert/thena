@@ -991,7 +991,7 @@ walkBase = unlines
 -- back in alongside.
 walkSession :: Session
 walkSession = case loadRuleBases newSession [("walk.thena.rules", walkBase)] of
-  (s, BasesLoaded bs) -> withRuleBases (expectedBase ++ bs) s
+  (s, BasesLoaded bs _) -> withRuleBases (expectedBase ++ bs) s
   (_, other)          -> error ("the fixture's base did not load: " ++ show other)
 
 

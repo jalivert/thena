@@ -272,7 +272,7 @@ loading =
         map basePath (basesOf s) @?= ["tiny.thena.rules"]
         map ruleNames (basesOf s) @?= [["solve"]]
         case resp of
-          BasesLoaded bs -> map baseName bs @?= ["tiny"]
+          BasesLoaded bs _ -> map baseName bs @?= ["tiny"]
           other          -> assertFailure (show other)
 
     , -- Rules may span lines — DECIDED by the user 2026-08-25 — and what ends

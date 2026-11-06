@@ -317,7 +317,11 @@ renderResponse s resp = let ren = renderingOf s in case resp of
       ++ map renderWarning ws
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
-  ConsultRequested _ -> []
+  -- **Only what the line itself had to say** (MS11 phase 298): the act's own
+  -- output comes from reading the file, and a @public@ in front of it is a
+  -- remark about the line — so it is printed where the line was typed, before
+  -- what the act produced.
+  ConsultRequested _ ws -> map renderWarning ws
   -- **A caller's mistake, said plainly** (MS11 phase 273): a module that
   -- consults something reached a door that cannot read a file.
   ConsultsUnread ms ->
@@ -329,7 +333,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
         ++ ", and they were not read" ]
   -- Nothing to print: the caller resolves the name, reads the files and prints
   -- what that produced (MS11 phase 284).
-  ImportRequested _ -> []
+  ImportRequested _ ws -> map renderWarning ws
   -- **It says so rather than saying nothing** (MS11 phase 284), for the reason
   -- @open@ at the prompt says @opened ‹namespace›@: a word that answered
   -- nothing would leave the user unable to tell it took.
@@ -349,7 +353,10 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   ModuleMisnamed reached header ->
     [ "imported as " ++ moduleText reached ++ ", but its header says "
         ++ moduleText header ]
-  BasesLoaded bs   -> map loadedLine bs
+  -- **The warnings come after the pool**, which is 'ProofLoaded''s rule for
+  -- the other kind of file (MS11 phase 298): what went in is the answer and a
+  -- warning is a footnote to it.
+  BasesLoaded bs ws -> map loadedLine bs ++ map renderWarning ws
   BasesListed bs   -> renderBases bs
   RulesListed bs   -> renderRuleBases ren bs
   RuleFileRefused p e -> renderRuleFileError ren p e
@@ -1922,6 +1929,17 @@ renderWarning w = "warning: " ++ case w of
     "the name " ++ nameDotted g ++ " reaches " ++ nameDotted hid
       ++ " here, so proving it shadows that one — it is then reached by writing"
       ++ " it in full"
+  -- **It names the base, because the line to change is the one that names it**
+  -- (MS11 phase 298) — and it says what the word would have added, since that
+  -- is the thing the author believed they were asking for.
+  PublicConsultIdle b ->
+    "public consult " ++ b ++ " acts as a plain consult: a rule file's consult"
+      ++ " already hands the base on to whoever consults this one"
+  -- **One sentence for both acts**, the word being idle at the prompt for one
+  -- reason: nothing imports or consults a session (MS11 phase 298).
+  PublicIdleAtPrompt act ->
+    "public " ++ act ++ " acts as a plain " ++ act ++ ": nothing " ++ act
+      ++ "s a session"
   UnprimeableClass k g cls ->
     blockAt k g ++ ": no character may be appended to every name " ++ cls
       ++ " accepts, so a binder renamed to avoid capture will not print in this"
@@ -2380,13 +2398,6 @@ renderRuleFileError ren path e = case e of
   RuleImportsUnread ms ->
     [ path ++ ": imports " ++ intercalate ", " (map moduleText ms)
         ++ ", and they were not read" ]
-  -- **What is missing and nothing about how to get it** (MS11 phase 289): the
-  -- base may be consulted here or published by whatever needed it, and which of
-  -- those is right is the author's business.
-  RuleConsultsAbsent ms ->
-    [ path ++ ": is written against " ++ intercalate ", " (map moduleText ms)
-        ++ ", which " ++ (if length ms == 1 then "is" else "are")
-        ++ " not in the pool" ]
 
 renderRuleError :: Rendering -> RuleError -> String
 renderRuleError ren e = whereRuleError ren e ++ whatRuleError e

@@ -302,7 +302,7 @@ scriptActTests =
       (s0, _) <- startingSession
       (s1, out, trouble) <- loadFile s0 "test/modules/ConsultsLouder.thena.script"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
-      [ map baseName bs | BasesLoaded bs <- out ] @?= [["louder", "standard"]]
+      [ map baseName bs | BasesLoaded bs _ <- out ] @?= [["louder", "standard"]]
       map baseName (rules (machineOf s1)) @?= ["louder", "standard"]
 
   , -- **A refusal inside the act stops the script**, rather than being recorded
@@ -610,20 +610,33 @@ publicBaseTests =
       (s0, _) <- startingSession
       (_, out, trouble) <- consultRuleFiles s0 ["test/modules/Builds.thena.rules"]
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
-      [ map baseName bs | BasesLoaded bs <- out ]
+      [ map baseName bs | BasesLoaded bs _ <- out ]
         @?= [["builds", "helper", "standard"]]
 
-  , -- **AND A PLAIN CONSULT DOES NOT PUT IT THERE.** @Needs@ calls the same
-    -- rule behind a plain @consult@: what the line asks is that the base BE
-    -- there, because a base arriving because something else named it would be a
-    -- search order nobody wrote — the transitivity @public@ exists to answer.
-    testCase "and a plain consult asks for the base rather than pushing it" $ do
+  , -- **AND A PLAIN CONSULT PUTS IT IN THE SAME PLACE** — his ruling of
+    -- 2026-11-06 (@~ckp39@), MS11 phase 298. @Needs@ calls the same rule behind
+    -- a plain @consult@, and the pool it produces is @Builds@'s: the word
+    -- @public@ changes nothing a consumer can observe, which is why it warns.
+    testCase "and a plain consult fetches it to the same place" $ do
       (s0, _) <- startingSession
-      (_, _, trouble) <- consultRuleFiles s0 ["test/modules/Needs.thena.rules"]
-      case trouble of
-        [Unloadable _ (RuleFileRefused _ (RuleConsultsAbsent ms))] ->
-          map moduleText ms @?= ["test.modules.Helper"]
-        other -> assertFailure (show (map (renderTrouble s0) other))
+      (_, out, trouble) <- consultRuleFiles s0 ["test/modules/Needs.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ map baseName bs | BasesLoaded bs _ <- out ]
+        @?= [["needs", "helper", "standard"]]
+
+  , -- **AND THE WORD IS WARNED WHERE IT IS IDLE**, the other half of the same
+    -- ruling: @Builds@ writes @public consult@ and the warning names the base.
+    testCase "a rule file's public consult is accepted and warned" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- consultRuleFiles s0 ["test/modules/Builds.thena.rules"]
+      [ ws | BasesLoaded _ ws <- out ]
+        @?= [[PublicConsultIdle "test.modules.Helper"]]
+
+  , -- **And nothing is said where nothing says @public@** (MS11 phase 298).
+    testCase "and a plain one says nothing" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- consultRuleFiles s0 ["test/modules/Needs.thena.rules"]
+      [ ws | BasesLoaded _ ws <- out ] @?= [[]]
 
   , -- **Two publications are a stack between themselves**, his ruling of
     -- 2026-11-05 (@~d39jx@): the last line written is tried first.
@@ -632,7 +645,7 @@ publicBaseTests =
       (_, out, trouble) <-
         consultRuleFiles s0 ["test/modules/PublishesTwoBases.thena.rules"]
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
-      [ map baseName bs | BasesLoaded bs <- out ]
+      [ map baseName bs | BasesLoaded bs _ <- out ]
         @?= [["publishestwobases", "louder", "helper", "standard"]]
 
   , -- **A loop would splice for ever**, so it is refused and names the path.
@@ -653,18 +666,15 @@ publicBaseTests =
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
-  , -- **The plain one fails loudly and the remedy is one line**: the same
-    -- @do@ block, with the file consulting @Helper@ itself.
-    -- **A response and not trouble, because this is the file the user named** —
-    -- the split 'Thena.Files.loadProofFile' makes, and the refusal is the
-    -- base's rather than this file's.
-    testCase "a file consulting a plain consulter is refused" $ do
+  , -- **AND A FILE CONSULTING THE PLAIN CONSULTER GETS IT TOO** (MS11 phase
+    -- 298): @MissesHelper@ was the control for @GetsHelper@ while a plain
+    -- @consult@ asked, and under his ruling of 2026-11-06 the two files are
+    -- the same file with a different base's name in them.
+    testCase "a file consulting a plain consulter gets the base as well" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/MissesHelper.thena"
-      case out of
-        [RuleFileRefused _ (RuleConsultsAbsent ms)] ->
-          map moduleText ms @?= ["test.modules.Helper"]
-        other -> assertFailure (show (map (renderResponse s0) other))
+      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesHelper.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
   , testCase "and consulting the base itself satisfies it" $ do
       (s0, _) <- startingSession
@@ -693,6 +703,34 @@ publicBaseTests =
                           (any (isInfixOf "not in scope: Bit.Bit")
                                (renderResponse s0 r))
         _   -> assertFailure (show (map (renderResponse s0) out))
+
+  , -- **AND A RULE FILE THAT CONSULTS THE PUBLISHER GETS IT TOO** (MS11 phase
+    -- 298). Phase 297 left this out by ordering and not by decision — a plain
+    -- @consult@ was an /ask/, answered after every file had been read, so the
+    -- publication was not in hand while the consulting base was resolved.
+    -- Fetching puts it in hand, and the uniform answer is the one taken:
+    -- @public import@ says /whoever consults me may write this language/, and a
+    -- rule file is such a consumer. @Borrows@ writes @LC[app]@ in a rule's own
+    -- pattern and imports nothing.
+    testCase "a rule file consulting the publisher may write its language" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- consultRuleFiles s0 ["test/modules/Borrows.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ map baseName bs | BasesLoaded bs _ <- out ]
+        @?= [["borrows", "lends", "standard"]]
+
+  , -- **THE PAIR, AND IT IS WHAT KEEPS THIS FROM BEING THE OLD HACK** (MS11
+    -- phase 298): @Tooling@ imports @Lang@ without @public@, so a base that
+    -- consults it may not write @LC@ — even though the fetch has put @Lang@
+    -- into the session, which is the very thing phase 297 stopped a base from
+    -- relying on.
+    testCase "and consulting a plain importer does not" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <- consultRuleFiles s0 ["test/modules/MissesLent.thena.rules"]
+      case trouble of
+        [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
+          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- es ]))
+        other -> assertFailure (show (map (renderTrouble s0) other))
   ]
 
 -- --------------------------------------------------------------------------
@@ -990,7 +1028,7 @@ promptActTests =
       (s1, out, trouble) <- atPrompt s0 "consult test.modules.Inspecting"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Lang"]
-      assertBool "the base went in" (not (null [ () | BasesLoaded _ <- out ]))
+      assertBool "the base went in" (not (null [ () | BasesLoaded _ _ <- out ]))
       -- A consult pushes, so the shipped base is still underneath it.
       assertBool "and it pushed rather than replaced"
                  (length (rules (machineOf s1)) > length (rules (machineOf s0)))
@@ -1005,7 +1043,7 @@ promptActTests =
 
   , testCase "and import is not" $
       case snd (command proving "import test.modules.Bit") of
-        ImportRequested m -> m @?= named' "test.modules.Bit"
+        ImportRequested m _ -> m @?= named' "test.modules.Bit"
         other             -> assertFailure (show other)
   ]
   where
@@ -1141,7 +1179,7 @@ baseImportTests =
       (s1, out, trouble) <- consultRuleFiles s0 ["test/modules/Inspecting.thena.rules"]
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Lang"]
-      assertBool "the base went in" (not (null [ () | BasesLoaded _ <- out ]))
+      assertBool "the base went in" (not (null [ () | BasesLoaded _ _ <- out ]))
       assertBool "and the module is in the session"
                  (moduleLoaded (importNamed "test.modules.Lang") s1)
 
@@ -2248,7 +2286,7 @@ moduleTests =
                  \run-block : Surface -> ()\n\
                  \rule run-block t :- do say \"intercepted\"\n"
       case loadRuleBases s0 [("mine", mine), ("shipped", shipped)] of
-        (s1, BasesLoaded _) -> case loadProofSource s1 failingBlockModule of
+        (s1, BasesLoaded _ _) -> case loadProofSource s1 failingBlockModule of
           (_, ProofLoaded {}) -> pure ()
           (_, other) -> assertFailure (show other)
         (_, other) -> assertFailure (show other)
@@ -2837,6 +2875,38 @@ scopedConsultTests =
       assertBool (show (map (renderResponse s0) out))
                  (any (isInfixOf "no rule or function is called marker")
                       (concatMap (renderResponse s0) out))
+
+  , -- **AND THE LINE PUSHES THE WHOLE GROUP** (MS11 phase 298): @needed@ is a
+    -- rule of @Needs@ and it calls @helped@, which is a rule of @Helper@ and
+    -- nowhere else — so the block resolves only if the base the line named
+    -- arrived with what it consults, beneath it.
+    testCase "a scoped consult pushes what its base consults too" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedFetch.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
+
+  , -- **And the group comes off again, one pop per base** — the balance a
+    -- group pushed under one name has to get right (MS11 phase 298).
+    testCase "and the whole group leaves the pool after the block" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedFetchAfter.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (show (map (renderResponse s0) out))
+                 (any (isInfixOf "no rule or function is called needed")
+                      (concatMap (renderResponse s0) out))
+
+  , -- **THE SPLIT IS BY GROUP AND NOT BY A COUNT OF LINES** (MS11 phase 298).
+    -- @WideAndScoped@ has one file-wide @consult@ and one block-scoped line
+    -- whose base brings a second base with it: @helped@ is the file's
+    -- throughout and @needed@ is the block's alone. Subtracting the number of
+    -- scoped /lines/ from the number of /texts/ read put the boundary one base
+    -- out as soon as a scoped base brought anything, which it now always can.
+    testCase "a file-wide line and a scoped group are split by group" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/WideAndScoped.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
   , -- **It is not in the file's own pool either**, which is the other half of
     -- the same claim and the one a reader of 'consultedPool' would ask: the

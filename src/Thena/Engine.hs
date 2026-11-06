@@ -1197,8 +1197,14 @@ perform instr rest m = case operation instr of
   -- disc cannot answer. At the prompt there is nothing to read and a typed
   -- @consult@ has never done anything, so the pair is not emitted at all —
   -- which is why this is not a refusal.
+  -- **ONE BASE PER OP, WHICH IS WHAT MAKES THE PAIR BALANCE** (MS11 phase
+  -- 298). A path identifies a base's file and not an occurrence of it, so a
+  -- module with two blocks consulting the same base holds it twice — and
+  -- pushing both for one op would leave the second for the 'PopBase' of
+  -- whatever ran next. The copies are the same file read in the same load, so
+  -- taking the first is taking the base.
   PushBase p -> Continue (advance m
-    { rules = [ b | b <- held m, basePath b == p ] ++ rules m })
+    { rules = take 1 [ b | b <- held m, basePath b == p ] ++ rules m })
 
   PopBase -> Continue (advance m { rules = drop 1 (rules m) })
 

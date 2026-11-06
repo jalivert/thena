@@ -181,7 +181,7 @@ generalisation =
     ]
   where
     loads what src = testCase what $ case load src of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
     clashes what src = testCase what $ case load src of
@@ -269,7 +269,7 @@ annotatedLocals =
     ]
   where
     loads what src = testCase what $ case load src of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
     clashes what src = testCase what $ case load src of
@@ -325,7 +325,7 @@ surfaceBlockTyping =
     loads what src = testCase what $ do
       r <- loadWithStandard src
       case r of
-        BasesLoaded _ -> pure ()
+        BasesLoaded _ _ -> pure ()
         other         -> assertFailure ("expected a load, got " ++ show other)
 
     loadRaw src = snd (loadRuleBases newSession [("b.thena.rules", src)])
@@ -421,7 +421,7 @@ functionsAreFunctions =
     ]
   where
     loads what src = testCase what $ case load src of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
     loadRaw src = snd (loadRuleBases newSession [("f.thena.rules", src)])
@@ -665,7 +665,7 @@ bareWordRightOfEquals =
             _        -> Nothing
 
     loads what src = testCase what $ case load (src ++ "\n") of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
     clashes what src = testCase what $ case load (src ++ "\n") of
@@ -736,7 +736,7 @@ patternTyping =
     ]
   where
     loads what src = testCase what $ case load (src ++ "\n") of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
     clashes what src = testCase what $ case load (src ++ "\n") of
@@ -874,7 +874,7 @@ spliceTemplates =
     , testCase "…and fresh-universe still reads as it always did" $ do
         r <- loadWithStandard "rule go :- do u = fresh-universe ; t = resolve-core core`${u} -> ${u}` ; prim-prove"
         case r of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **The types are what keep the two apart.** A level is not a term and
@@ -899,7 +899,7 @@ spliceTemplates =
   where
     loadsWith what body = testCase what $
       case load ("rule go :- do " ++ body ++ " ; prim-prove") of
-        BasesLoaded _ -> pure ()
+        BasesLoaded _ _ -> pure ()
         other -> assertFailure ("expected a load, got " ++ show other)
 
     clashesWith what body = testCase what $
@@ -993,7 +993,7 @@ blockBodies =
       -- inference reads it with no case of its own.
     , testCase "and inference types it like any other body" $
         case load "f : String -> String\nf s = do { a = concat s s ; return a }" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
@@ -1062,7 +1062,7 @@ noKeyword =
     ]
   where
     loads what src = testCase what $ case load src of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
 -- --------------------------------------------------------------------------
@@ -1245,7 +1245,7 @@ wellTyped =
   where
     accepted label src =
       testCase label $ case load src of
-        BasesLoaded bs -> length (concatMap baseRules bs) > 0 @?= True
+        BasesLoaded bs _ -> length (concatMap baseRules bs) > 0 @?= True
         other -> assertFailure ("expected a load, got " ++ show other)
 
 -- | **A @return@ inside a @do@ block ends the BLOCK, not the rule** — see
@@ -1284,7 +1284,7 @@ annotations =
     [ -- @ignore@ is used at a Name and at a Core, and a signature says so.
       testCase "makes a rule usable at two types" $
         case load polymorphic of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **AND SO DOES INFERENCE, SINCE MS5 PHASE 76** — his ruling, take the
@@ -1296,14 +1296,14 @@ annotations =
       -- copy — exactly as the declared version does.
     , testCase "…and now so does the same base without one" $
         case load (unlines (drop 1 (lines polymorphic))) of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **What the annotation still buys is the promise**, which is the whole
       -- of its remaining job: the inferred scheme and the written one agree.
     , testCase "…and the two agree on what it is" $
         case load (unlines (drop 1 (lines polymorphic))) of
-          BasesLoaded (b : _) ->
+          BasesLoaded (b : _) _ ->
             lookup (rootName "ignore", 1) (fst (inferProgram [] (baseRules b)))
               @?= Just (Signature [TVar 0] Nothing)
           other -> assertFailure ("expected a load, got " ++ show other)
@@ -1341,7 +1341,7 @@ annotations =
         case load "ignore2 : a -> b -> ()\n\
                   \rule ignore2 x y :- do prim-prove\n\
                   \rule use :- do h = here ; n = fresh-name \"k\" ; ignore2 h n" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **A NESTED arrow's variables too** — `(a -> b)` had the same collapse as
@@ -1349,7 +1349,7 @@ annotations =
       -- signature is made of.
     , testCase "and keeps a nested arrow's apart as well" $
         case load "f : (a -> b) -> a -> b\nf g x = g x" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- …and a body that forces two of them TOGETHER breaks the promise as
@@ -1365,7 +1365,7 @@ annotations =
 
     , testCase "is about one arity only" $
         case load "f : Core -> ()\nrule f x :- do prim-try x\nrule f :- do prim-prove" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **A lambda's body is scoped at load** (found in the long hunt,
@@ -1384,7 +1384,7 @@ annotations =
       -- half a walk that simply refused every lambda would get wrong.
     , testCase "and a name the lambda binds is not" $
         case load "rule go :- do g = \\ z -> concat z z ; prim-prove" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- Nested one level down, so the walk has to recurse rather than peek.
@@ -1403,7 +1403,7 @@ annotations =
     , testCase "may give a function, not only take one" $
         case load "mk : String -> (String -> String)\n\
                   \mk s = \\ z -> concat s z" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- …and it is not the same signature as the flat one, which is the whole
@@ -1417,7 +1417,7 @@ annotations =
       -- A group around something that is not an arrow is nothing at all.
     , testCase "a group around a plain type changes nothing" $
         case load "f : (Core) -> (())\nrule f x :- do prim-try x" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
@@ -1487,7 +1487,7 @@ functions =
       -- **A file indented as a whole is a file**, which is the half that is new.
     , testCase "…but a file that lines up at another column loads" $
         case loadRaw "rule base i where\n  rule f :- do prim-prove\n  rule g :- do prim-prove\n" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **It is not offered as a tactic.** A function has no head, and a
@@ -1496,13 +1496,13 @@ functions =
       -- are a separate list.
     , testCase "is not listed among the rules" $
         case load "twice x = concat x x\nrule go :- do prim-prove" of
-          BasesLoaded bs -> map (map ruleNameOf . baseRules) bs @?= [["go"]]
+          BasesLoaded bs _ -> map (map ruleNameOf . baseRules) bs @?= [["go"]]
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- …and its type is inferred like any rule's, because it is one.
     , testCase "is inferred like a rule" $
         case load "twice x = concat x x" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **A function must produce.** Refused where it is written rather than by
@@ -1531,7 +1531,7 @@ functions =
       -- rules.
     , testCase "but may share one at a different arity" $
         case load "rule dup x :- do say \"rule\"\ndup = concat \"a\" \"b\"" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
     , testCase "that leaves nothing is refused" $
@@ -1549,11 +1549,11 @@ functions =
       -- called false/.
     , testCase "and a boolean on the right of an = is the literal" $
         case load "rule go :- do b = false ; prim-prove" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     , testCase "and a literal can be bound to a name at last" $
         case load "rule go :- do p = (1, true) ; l = [1, 2, 3] ; n = 42 ; prim-prove" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
@@ -1645,7 +1645,7 @@ lambdas =
       -- before this phase — @TypeIsAFunction@ refused it and is deleted.
     , testCase "and a function type is writable in a signature" $
         case load "f : (a -> b) -> a -> b\nf g x = g x" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where

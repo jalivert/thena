@@ -748,7 +748,7 @@ splitBase = unlines
 -- unrelated assertion about @split-one@ not existing.
 splitSession :: Session
 splitSession = case loadRuleBases newSession [("split.thena.rules", splitBase)] of
-  (s, BasesLoaded bs) -> withRuleBases (expectedBase ++ bs) s
+  (s, BasesLoaded bs _) -> withRuleBases (expectedBase ++ bs) s
   (_, other)          -> error ("the fixture's base did not load: " ++ show other)
 
 -- --------------------------------------------------------------------------

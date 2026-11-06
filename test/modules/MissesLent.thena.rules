@@ -1,0 +1,11 @@
+-- **The pair for `Borrows`** (MS11 phase 298): `Tooling` imports `Lang` with no
+-- `public`, so it keeps the language to itself and this file may not write
+-- `LC` — even though the fetch puts `Lang` in the session.
+rule base misseslent where
+
+consult test.modules.Tooling
+
+open A
+
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"

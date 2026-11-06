@@ -48,7 +48,7 @@ import Thena.Driver
   , loadProofModules
   , readModulePath
   , ruleBaseImports
-  , ruleBasePublishes
+  , ruleBaseConsults
   , rolledBack
   , consultedPool
   , scopedConsults
@@ -195,11 +195,14 @@ ruleFilesWith install s paths = do
   case [ (p, e) | (p, Left e) <- reads' ] of
     (p, e) : _ -> pure (s, [], [Unreadable p e])
     [] -> do
-      -- **What each of them publishes is read in front of it** (MS11 phase
-      -- 289): a base consulted here brings the bases it published, so the
-      -- closure is the same whichever door a base came in by — which is
-      -- 'published''s own rule, said for a path rather than a module name.
-      spread <- published [] [ (p, c) | (p, Right c) <- reads' ]
+      -- **What each of them consults is read underneath it** (MS11 phase
+      -- 289, widened at phase 298): a base consulted here brings the bases it
+      -- consults, so the closure is the same whichever door a base came in by
+      -- — which is 'beneath''s own rule, said for a path rather than a module
+      -- name. **Flat and not grouped**, unlike 'consulted''s answer: every
+      -- base named here is the session's own pool, and nothing takes one group
+      -- back out again.
+      spread <- beneath [] [ (p, c) | (p, Right c) <- reads' ]
       case spread of
         Left t -> pure (s, [], [t])
         Right contents -> do
@@ -309,8 +312,8 @@ loadFile s0 path = do
       RulesRequested _   -> nested
       -- **The two acts**, read where the disc is. What the act had to say comes
       -- after the line's own response, in the order it arrived.
-      ConsultRequested _ -> follow
-      ImportRequested _  -> follow
+      ConsultRequested _ _ -> follow
+      ImportRequested _ _  -> follow
       Quit               -> pure (s', reverse (resp : acc), [])
       _ | stopped resp   -> pure (s', reverse (resp : acc), [halted (LoadStopped n)])
         | otherwise      -> go s' (n + 1) (resp : acc) ls
@@ -432,7 +435,7 @@ assemble s stack done as path d nm items = do
         -- talks about has to be in. Without this a file could consult only a
         -- base that depended on nothing — which is no base worth consulting.
         Right srcs -> do
-          walked' <- imports s inner done' (concatMap stated (maybe [] id srcs))
+          walked' <- imports s inner done' (concatMap stated (concat (maybe [] id srcs)))
           pure (fmap (\gs -> gs ++ [ReadModule path d as nm srcs items]) walked')
   where
     inner = maybe stack (: stack) as
@@ -477,63 +480,78 @@ imports s stack done (m : rest)
 -- **In the order 'Thena.Driver.consultedPool' gave them**, which is the order
 -- the pool goes in and so the order they are read in: an 'Unreadable' names the
 -- first base that would have been tried.
-consulted :: [ModuleName] -> IO (Either Trouble (Maybe [(FilePath, String)]))
+consulted :: [ModuleName] -> IO (Either Trouble (Maybe [[(FilePath, String)]]))
 consulted [] = pure (Right Nothing)
 consulted ms = do
-  -- **And what each of them published, in front of it** (MS11 phase 289).
-  got <- mapM (publishing []) ms
-  pure $ case sequence got of
-    Left t     -> Left t
-    Right srcs -> Right (Just (concat srcs))
+  -- **And everything each of them consults, underneath it** (MS11 phase 289,
+  -- widened from @public consult@ to every @consult@ at phase 298).
+  got <- mapM (fetching []) ms
+  pure (fmap Just (sequence got))
 
--- | __A base, and the bases it publishes read underneath it__ (MS11 phase 289,
--- @~jmw4k@, his ruling of 2026-10-30).
+-- | __A base, and the bases it consults read underneath it__ (MS11 phase 289,
+-- @~jmw4k@, his ruling of 2026-10-30; every @consult@ since his ruling of
+-- 2026-11-06, @~ckp39@).
 --
--- **Underneath it, which is the published group written out by hand**: a
--- consumer that wrote the publications itself would write them above its own
--- earlier lines and the base that needs them last of all, so the base is tried
--- first and its library sits under it — @DECISIONS.md@, /Consults are a STACK/,
--- and the same rule 'Thena.Driver.consultedPool' applies to one file's own
--- lines. **Two publications of one base are a stack between themselves too**,
--- his ruling of 2026-11-05 (@~d39jx@) that the order is one stack whatever
--- route a base took, so the last line written is tried first.
+-- **ONE GROUP AND NOT A FLAT RUN, SINCE PHASE 298.** What one line brought in
+-- is what the caller has to be able to take back out again: a @consult B where
+-- { … }@ reaches the block and stops ('Thena.Driver.Held'), and the group is
+-- what says which bases go on for it. Before the fetch a group was almost
+-- always one base, so the split was arithmetic over a flat list, and that
+-- arithmetic was already wrong where a base published one.
+--
+-- **Underneath it, which is the group written out by hand**: a consumer that
+-- wrote the lines itself would write the library it builds on last of all, so
+-- the base is tried first and its dependencies sit under it —
+-- @DECISIONS.md@, /Consults are a STACK/, and the same rule
+-- 'Thena.Driver.consultedPool' applies to one file's own lines. **Two
+-- consults of one base are a stack between themselves too**, his ruling of
+-- 2026-11-05 (@~d39jx@) that the order is one stack whatever route a base took,
+-- so the last line written is tried first.
+--
+-- **THE WORD @public@ IS NOT READ HERE ANY MORE** — his ruling of 2026-11-06:
+-- a rule file's plain @consult@ fetches what it names, /"as if it were all
+-- public consult all the way down"/, and what decided it was order rather than
+-- convenience. Requiring the consumer to supply the base left the position of
+-- the base to whoever consulted it, so an unrelated base could land between a
+-- base and its helper and answer a call the author had pinned.
+-- 'Thena.Driver.rawConsults' is the read, and it never read @public@ either.
 --
 -- **The closure is the walk and not a stored spine**, unlike a surface module's
--- ('Thena.Driver.Published'): a base publishes bases and nothing else, so
+-- ('Thena.Driver.Published'): a base consults bases and nothing else, so
 -- reading them in order /is/ the order they go in.
 --
--- **A loop is refused and nothing is deduplicated.** Two bases that publish
--- each other would splice for ever; a base published down two arms is two
+-- **A loop is refused and nothing is deduplicated.** Two bases that consult
+-- each other would splice for ever; a base reached down two arms is two
 -- independent pushes, which is his ruling of 2026-11-03.
-publishing :: [ModuleName] -> ModuleName -> IO (Either Trouble [(FilePath, String)])
-publishing stack m
+fetching :: [ModuleName] -> ModuleName -> IO (Either Trouble [(FilePath, String)])
+fetching stack m
   | m `elem` stack =
       pure (Left (Unloadable path (ConsultCycle (reverse stack ++ [m]))))
   | otherwise = do
       contents <- try (readFile path)
       case contents of
         Left e  -> pure (Left (Unreadable path e))
-        Right c -> published (m : stack) [(path, c)]
+        Right c -> beneath (m : stack) [(path, c)]
   where
     path = moduleFile LoadRules m
 
--- | The same for bases already read, each with its own publications in front of
--- it (MS11 phase 289).
+-- | The same for bases already read, each with what it consults in front of it
+-- (MS11 phase 289).
 --
 -- **A base that does not parse states nothing here**, and
 -- 'Thena.Driver.consultRuleBases' refuses it when the pool is installed, with
 -- the position in it — the bargain 'assemble' already makes for a base's
 -- imports.
-published
+beneath
   :: [ModuleName] -> [(FilePath, String)]
   -> IO (Either Trouble [(FilePath, String)])
-published _ [] = pure (Right [])
-published stack ((path, src) : rest) = do
-  let names = either (const []) fst (ruleBasePublishes src)
-  -- **Reversed, because they are a stack**: the last @public consult@ written
-  -- is the newest and so is tried first.
-  mine <- mapM (publishing stack) (reverse names)
-  more <- published stack rest
+beneath _ [] = pure (Right [])
+beneath stack ((path, src) : rest) = do
+  let names = either (const []) id (ruleBaseConsults src)
+  -- **Reversed, because they are a stack**: the last @consult@ written is the
+  -- newest and so is tried first.
+  mine <- mapM (fetching stack) (reverse names)
+  more <- beneath stack rest
   pure $ do
     under <- sequence mine
     back  <- more
@@ -554,10 +572,10 @@ following s resp = case resp of
   RulesRequested paths -> Just (loadRuleFiles s paths)
   -- The same read, a different install: a consult pushes onto the pool where a
   -- load replaces it (MS11 phase 271).
-  ConsultRequested paths -> Just (consultRuleFiles s paths)
+  ConsultRequested paths _ -> Just (consultRuleFiles s paths)
   -- A module named rather than a path: the name is resolved here, where the
   -- disk is (MS11 phase 284).
-  ImportRequested m    -> Just (importModule s m)
+  ImportRequested m _  -> Just (importModule s m)
   _                    -> Nothing
 
 -- | __@import ‹module›@ typed at the prompt__ (MS11 phase 284, his ruling of

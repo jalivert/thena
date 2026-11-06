@@ -626,11 +626,14 @@ so, and able to make one ambiguous between two namespaces you never named. Agda'
 imports the prelude whether it says so or not, as in Haskell. That is why `refl` is
 writable everywhere: the prelude writes `open Eq`, and you have the prelude.
 
-**`public` is how a dependency travels, and only `public`.** `public import` and
-`public consult` republish what they bring in: **when, and only when, the file you
-imported wrote `public`, you get what it got.** Without `public`, you don't — if A
-consults X and B imports A, B's own proofs do not see X's rules, and B asking for them
-is one explicit line that fails loudly if it is missing.
+**`public` is how a dependency travels out of a surface file, and only `public`.**
+`public import` and `public consult` republish what they bring in: **when, and only
+when, the file you imported wrote `public`, you get what it got.** Without `public`, you
+don't — if A consults X and B imports A, B's own proofs do not see X's rules, and B
+asking for them is one explicit line that fails loudly if it is missing. **A rule file
+is the exception, and deliberately**: a base's `consult` fetches and travels whether it
+says `public` or not — see *A rule base states the bases it is written against, and
+fetches them*, which has why.
 
 **So a surface file can hand rules on, and never contains any.** A library writes
 
@@ -692,9 +695,10 @@ them — so there is no `:import`. **Neither takes a path**: a module name's ste
 ordinary words and the act supplies the extension. Reaching a module by name is what
 asks its header to match, so a prompt `import` is held to that check where `:load
 ‹path›` is not, and a module already in answers *is already in* instead of colliding
-with itself. **A `.thena.script` file still cannot import** — its lines are run by
-the part of Thena that does not read files, so an `import` there is refused like a
-nested `:load`.
+with itself. **And `public` in front of either act is accepted at the prompt and
+warned**: nothing imports or consults a session, so the word has nothing to say there,
+and a line pasted out of a file should act rather than fail to parse. **A
+`.thena.script` writes both acts too** — see *A script states what it stands on*.
 
 **A module is loaded once however many files reach it**, so a diamond costs
 nothing, and **a cycle is refused** and names the path the walk took. **A load is
@@ -1078,10 +1082,12 @@ and it reaches *your* `foo`. **Declaring the dependency is what guarantees you a
 it**; a file that declares nothing is back to whatever order the user happened to load
 things in.
 
-### A rule base states the bases it is written against, and may publish either act
+### A rule base states the bases it is written against, and fetches them
 
 *Decided 2026-10-30, built at MS11 phase 289. `public` is available to both acts and
-to both kinds of file; a rule file had neither `consult` nor `public` until this.*
+to both kinds of file; a rule file had neither `consult` nor `public` until this. **What
+a plain `consult` in a rule file does was decided again on 2026-11-06 and built at phase
+298**: it fetches the base, where it used to ask for it.*
 
 A rule file writes the same two lines a surface file does, and the same word in front
 of either:
@@ -1091,19 +1097,32 @@ rule base sharp where
 
 public import Stlc.Terms      -- the language my rules talk about, and you get it too
 import My.Internal            -- a language I need and you do not
-public consult Stlc.Broad     -- the base I build on, and you get it too
-consult My.Scratch            -- a base I need, which you must have of your own
+consult Stlc.Broad            -- the base I build on; you get it, underneath me
 ```
 
-**A plain `consult` asks that the base be there; it does not put it there.** Consult a
-base whose plain `consult` is unanswered and it is refused, naming what is missing —
-because a base's position in the pool is its priority, so a base arriving because
-something *else* named it would be a search order you never wrote. That is the whole
-reason `public` exists. **An `import` is different and loads**: bringing a module in
-changes no order, so a base's dependencies are loaded for you either way, and `public`
-decides only whether you may *name* what they declare.
+**A `consult` in a rule file fetches the base and puts it directly beneath this one**,
+and it does so all the way down: consult a base, and you are searched against
+everything that base is written against, each library under the base that needed it.
+You never have to know what a base you consult was built on.
 
-**What a published base brings lands underneath the base that published it.** Consulting
+**`public consult` in a rule file is accepted, acts as a plain `consult`, and warns
+that the word is idle.** A rule file's `consult` already hands the base on, so there is
+nothing for `public` to add. It is warned rather than refused because the line does
+exactly what it says it does, and taking the word out changes nothing.
+
+**What decided this was order, not convenience.** The first reading was the strict one —
+a plain `consult` *asks*, and the consumer supplies the base — and it is a hole, not a
+discipline: it leaves the base's position to whoever consults it, so an unrelated base
+can land between a base and its helper and answer a call the author thought they had
+pinned. When the base brings its own, the two are adjacent whatever else you had
+loaded. What is given up is *"I require X and will not supply it"*, which a `consult`
+naming one specific file could never really say.
+
+**An `import` was already like this**: bringing a module in changes no order, so a
+base's dependencies are loaded for you either way, and `public` decides only whether you
+may *name* what they declare.
+
+**What a fetched base brings lands underneath the base that brought it.** Consulting
 `sharp` above is exactly:
 
 ```
@@ -1112,14 +1131,22 @@ consult sharp
 ```
 
 so `sharp` is tried first and the library it builds on sits under it — *universal
-tactics at the bottom*, again falling out of the stack. Two publications in one base
+tactics at the bottom*, again falling out of the stack. Two `consult` lines in one base
 are a stack between themselves, the last line written tried first, and two bases that
-publish each other are refused.
+consult each other are refused.
 
 **And `public import` in a base hands a language on.** A tactics base written against
 `Stlc.Terms` publishes it, so a file that consults the base may write `Stlc.Term`
 without importing the module itself — which is what makes a tactics library
 distributable rather than a thing with a README telling you what to import first.
+
+**That reaches a rule file too, and whether it did was settled at phase 298.** A base
+that consults the tactics base above may write `Stlc.Term` in its own rules' patterns,
+exactly as a surface file consulting it may: `public import` says *whoever consults me
+may write this language*, and a rule file that consults it is such a consumer. A plain
+`import` in the base still keeps the language to itself — and it does so even though
+consulting the base has put that module in your session, which is the isolation a rule
+file is held to either way.
 
 ### Rules are not open to extension
 

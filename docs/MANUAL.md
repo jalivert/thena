@@ -1692,6 +1692,12 @@ by path does not make. And a module already in does nothing: `import` it twice a
 the second answers `module examples.Stlc01Syntax is already in` rather than
 colliding with its own declarations.
 
+**`public` in front of either word is accepted here and warned.** Nothing imports or
+consults a session, so the word has nothing to say at the prompt — and a line pasted
+out of a file should act rather than fail to parse. `public consult
+examples.Stlc04TakingTermsApart` consults the base and says `warning: public consult
+acts as a plain consult: nothing consults a session` first.
+
 **A script states what it stands on too, and its acts are yours afterwards.** A
 `.thena.script` file is a list of command lines, and it may write `import` and
 `consult` at its top like any other file —
@@ -1725,24 +1731,39 @@ your session**, unlike a surface file's consults — the base's rules run in you
 session later and need the language there. A module you already have is not loaded
 again, and a base that will not install takes back whatever it brought in.
 
-**And it may consult, and publish either act.** Write `public` in front of the
-`import` and whoever consults the base may name the language too, without importing
-the module themselves; write `consult` and the base says which other base its rules
-are written against:
+**And it may consult.** Write `consult` and the base says which other base its rules
+are written against; write `public` in front of the `import` and whoever consults this
+base may name the language too, without importing the module themselves:
 
 ```
 rule base sharp where
 
 public import Stlc.Syntax     -- the language, and you get it too
-public consult Stlc.Broad     -- the base I build on, and you get it too
-consult My.Scratch            -- which you must have of your own
+consult Stlc.Broad            -- the base I build on; you get it, underneath me
 ```
 
-**A plain `consult` asks that the base be there and does not put it there** — consult
-`sharp` without `My.Scratch` and it is refused, naming it — because a base's position
-in the stack is its priority, and one that arrived because something else named it
-would be an order you never wrote. What `public consult` brings lands *underneath*
-the base that published it, so the base you asked for is tried first.
+**A `consult` in a rule file fetches the base and puts it directly beneath this one**,
+and all the way down: consult `sharp` and you are searched against `sharp`, then
+`Stlc.Broad`, then whatever `Stlc.Broad` is written against. You never have to know
+what a base you consult was built on, and the base and its library are always
+adjacent — which is the point. The strict reading, where a plain `consult` *asks* and
+you supply the base, left the base's position to you, so an unrelated base you had
+loaded could sit between a base and its helper and answer a call its author thought
+they had pinned.
+
+**`public consult` in a rule file still works and warns that the word is idle**,
+since a `consult` there already hands the base on — `warning: public consult
+Stlc.Broad acts as a plain consult: a rule file's consult already hands the base on to
+whoever consults this one`.
+
+**A surface file's two words are unchanged**: there a plain `consult` is for your own
+proofs and `public consult` is what passes the base on to whoever imports you.
+
+**And what a base publishes reaches a rule file as well as a surface file.** A base
+that consults `sharp` above may write `Stlc.Syntax`'s language in its own patterns,
+because `sharp` said `public import`. A plain `import` in `sharp` would keep the
+language to itself — even though consulting it has put that module in your session,
+which a rule file may never rely on.
 
 `examples/DeterminacyTactics.thena.script` is the acceptance test for the whole first
 milestone. It declares the language of chapter 3 of Pierce's *Types and

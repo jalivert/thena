@@ -1,0 +1,11 @@
+-- **And a rule file that gets it by consulting the publisher** (MS11 phase
+-- 298). It imports nothing: `LC` reaches it because `Lends` says `public
+-- import`, which is the same thing a surface file consulting `Lends` gets.
+rule base borrows where
+
+consult test.modules.Lends
+
+open A
+
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"

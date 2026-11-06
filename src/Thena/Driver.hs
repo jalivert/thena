@@ -1118,7 +1118,7 @@ data Response
     -- elaborated at all before the modules it depends on are, and this door has
     -- no way to read a file. "Thena.Files" walks the import graph and goes
     -- through 'loadProofModules' instead.
-  | ImportRequested ModuleName
+  | ImportRequested ModuleName [Warning]
     -- ^ **@import ‹module›@ typed at the prompt** (MS11 phase 284, his ruling
     -- of 2026-11-03 that both acts are writable at the prompt). Like
     -- 'ProofRequested' it only names what to read; "Thena.Files" resolves the
@@ -1129,6 +1129,10 @@ data Response
     -- was reached by, and only when it is reached by name. A prompt @import@
     -- reaches it by name, so turning the name into a path here and handing over
     -- 'ProofRequested' would be the one door that skips the check.
+    --
+    -- **And the warnings are 'ConsultRequested''s** (MS11 phase 298): a
+    -- @public import@ written at the prompt has no importer to pass anything to,
+    -- so the word is idle there for the reason it is idle in a rule file.
   | ModuleAlreadyIn ModuleName
     -- ^ **@import ‹module›@ naming a module the session already holds** (MS11
     -- phase 284). A module is loaded once however many files reach it, so this
@@ -1162,7 +1166,7 @@ data Response
     -- moment a walk resolves a name to a file. A module loaded by a path, or
     -- typed at the prompt, is never asked — so this refusal can only come out
     -- of "Thena.Files"'s walk.
-  | ConsultRequested [FilePath]
+  | ConsultRequested [FilePath] [Warning]
     -- ^ @:consult@ on one or more rule-base paths (MS11 phase 271). Like
     -- 'RulesRequested' it only names them — reading is "Thena.Files"'s (§12
     -- invariant 4) — and like it, it names /several/, because the order written
@@ -1174,12 +1178,24 @@ data Response
     -- stack, and the shipped base — consulted for you at startup — is therefore
     -- tried last, which is the standing /universal tactics at the bottom/ with
     -- no rule of its own.
-  | BasesLoaded [RuleBase]
+    --
+    -- **THE WARNINGS ARE THE TYPED LINE'S OWN** (MS11 phase 298): a
+    -- @public consult@ written at the prompt acts as a plain @consult@ and says
+    -- so, his ruling of 2026-11-06. They are rendered before what the act
+    -- produced, because the act is answered by the response that comes back from
+    -- reading the file.
+  | BasesLoaded [RuleBase] [Warning]
     -- ^ **the pool as it now stands, whichever act produced it** — a @:load@ of
     -- rule files, which replaces it, or a @:consult@, which pushes onto it. One
     -- response for both because the thing the user needs to see is the same
     -- either way, and after phase 271 the order of this list is the search
     -- order top down.
+    --
+    -- **AND WHAT THE BASES THAT WENT IN HAVE TO SAY ABOUT THEMSELVES** (MS11
+    -- phase 298) — a @public consult@ in a rule file, which is accepted and
+    -- idle (his ruling of 2026-11-06). 'ProofLoaded''s shape for the other kind
+    -- of file, and for its reason: what went in is the answer and a warning is a
+    -- footnote to it.
   | BasesListed [RuleBase]      -- ^ @:bases@ — name, description, path
   | RulesListed [RuleBase]      -- ^ @:rules@ — the rules themselves, by base
   | RuleFileRefused FilePath RuleFileError
@@ -1905,10 +1921,15 @@ data Brought = Brought
     -- ^ what @import M where { … }@ reveals: @M@'s exports and the closure over
     -- its @public import@s.
   , broughtConsult :: ModuleName -> ([RuleBase], [GlobalName])
-    -- ^ what @consult B where { … }@ brings: the base to push, and the names it
-    -- publishes — a base's @public import@ hands its object language to whoever
-    -- consults it (phase 289), and a scoped consult hands it no further than
-    -- the block.
+    -- ^ what @consult B where { … }@ brings: the bases to push, **in search
+    -- order**, and the names they publish — a base's @public import@ hands its
+    -- object language to whoever consults it (phase 289), and a scoped consult
+    -- hands it no further than the block.
+    --
+    -- **SEVERAL BASES AND NOT ONE, SINCE MS11 PHASE 298**: a plain @consult@ in
+    -- a rule file fetches what it names, so one line brings in the base and the
+    -- closure under it ('Thena.Files.fetching'). 'Held' is one per base and the
+    -- lookup is by the name the line wrote.
   }
 
 -- | What an act brings where no file can be reached (MS11 phase 291) — a typed
@@ -1969,10 +1990,17 @@ surfaceProgram brought n0 items = foldl (item []) ([], n0) items
   -- gives its object language's names to whoever consults it: a block searched
   -- against a tactics base may write the language that base talks about, and
   -- the file after the block may not.
+  --
+  -- **AND THE LINE BRINGS IN A GROUP AND NOT A BASE** (MS11 phase 298): a
+  -- plain @consult@ in a rule file fetches what it names, so the base named
+  -- here arrives with everything it is written against. **Pushed bottom-up**,
+  -- the list being in search order and each push going on top, so the base the
+  -- block named ends up first and its dependencies sit under it — the file-wide
+  -- order, one gate in.
   item ns (acc, n) (ItemConsult _ m (Just is)) =
     let (inner, n1) = foldl (item ns) ([], n) is
         (bs, gs) = broughtConsult brought m
-     in ( acc ++ [ Do (PushBase (basePath b)) | b <- bs ]
+     in ( acc ++ [ Do (PushBase (basePath b)) | b <- reverse bs ]
               ++ [Do (Reveal gs)]
               ++ inner
               ++ [Do LeaveReveal]
@@ -2345,11 +2373,20 @@ data Pool = Pool
 -- base's @public import@ gives its object language's names to whoever consults
 -- it (phase 289), and a scoped consult must give them no further than the
 -- block.
+--
+-- **The name is the line's and not the base's**, which is what lets a group
+-- share one: the bases a fetch brought in are reached by the name the block
+-- wrote, because that is the name the block's ops are built from.
 data Held = Held
   { heldName      :: ModuleName
   , heldBase      :: RuleBase
   , heldPublishes :: [ModuleName]
   }
+  -- **ONE PER BASE AND SEVERAL PER NAME, SINCE MS11 PHASE 298.** A plain
+  -- @consult@ in a rule file fetches what it names, so @consult B where { … }@
+  -- puts @B@ and everything @B@ consults on for the block — in search order,
+  -- 'broughtConsult' being the lookup and 'Thena.Instral.Ops.PushBase' the op
+  -- per base.
   deriving (Eq, Show)
 
 -- | The same, against a pool the caller has already read (MS11 phase 273).
@@ -2511,7 +2548,7 @@ loadProofModules s00 ms0 = go s0 [] ms0
     readsOf s m =
       foldl' (\acc (p, src) -> noteRead p (digestOf src) acc)
              (noteRead (readModulePath m) (readModuleDigest m) s)
-             (fromMaybe [] (readModulePool m))
+             (concat (fromMaybe [] (readModulePool m)))
 
     go s acc [] = (s, Right (reverse acc))
     go s acc (m : rest) = case poolFor s m of
@@ -2541,7 +2578,7 @@ loadProofModules s00 ms0 = go s0 [] ms0
     -- the length of the load and takes them out again.
     poolFor s m = case readModulePool m of
       Nothing   -> Right (Pool (rules (sessionMachine s)) [] [])
-      Just srcs -> case consultRuleBases s srcs of
+      Just groups -> case consultRuleBases s (concat groups) of
         -- **The published modules are read off the same texts** (MS11 phase
         -- 289), which is the half 'consultRuleBases' has no use for: a base
         -- that will not parse is refused by the install with the position in
@@ -2549,23 +2586,40 @@ loadProofModules s00 ms0 = go s0 [] ms0
         --
         -- **THE SCOPED ONES ARE READ WITH THE REST AND THEN TAKEN BACK OUT**
         -- (MS11 phase 292). They are read together because the install asks one
-        -- question of the whole push — a plain @consult@ in a base may be
-        -- answered by another base in it, and inference needs every signature —
-        -- and they are taken out again because the pool they belong in is the
-        -- block's and not the file's. **The split is by position and not by
-        -- path**, so a base consulted file-wide and in a block as well is in
-        -- both and neither takes the other's place.
-        (_, BasesLoaded pool) ->
-          let scoped = scopedConsults (readModuleItems m)
-              wide   = length srcs - length scoped
-              bases  = take (length srcs) pool
-           in Right (Pool (take wide bases ++ drop (length srcs) pool)
-                          (concat [ ms | (_, src) <- take wide srcs
-                                       , Right (_, ms) <- [ruleBasePublishes src] ])
-                          [ Held n b (either (const []) snd (ruleBasePublishes src))
-                          | (n, b, (_, src)) <- zip3 scoped (drop wide bases)
-                                                            (drop wide srcs) ])
+        -- question of the whole push — a @consult@ in a base may be answered by
+        -- another base in it, and inference needs every signature — and they
+        -- are taken out again because the pool they belong in is the block's
+        -- and not the file's. **The split is by position and not by path**, so
+        -- a base consulted file-wide and in a block as well is in both and
+        -- neither takes the other's place.
+        --
+        -- **BY GROUP SINCE MS11 PHASE 298, WHICH IS ALSO A FIX.** One
+        -- @consult@ line brings in the base it names and everything that base
+        -- consults ('Thena.Files.fetching'), so the number of bases a line
+        -- accounts for is the length of its group. This used to subtract the
+        -- /count/ of scoped lines from the count of texts, which was right only
+        -- while every scoped base published nothing: one @public consult@ in a
+        -- base named by a block moved the boundary and the file's pool took a
+        -- base the block should have kept.
+        (_, BasesLoaded pool _) ->
+          let scoped          = scopedConsults (readModuleItems m)
+              (wide, blocks)  = splitAt (length groups - length scoped) groups
+              bases           = take (length (concat groups)) pool
+              (wideBases, bs) = splitAt (length (concat wide)) bases
+           in Right (Pool (wideBases ++ drop (length (concat groups)) pool)
+                          (publishedTo (concat wide))
+                          (concat (zipWith held scoped (shared blocks bs))))
         (_, bad)              -> Left bad
+
+    -- The bases of one block's group, beside the texts they were read from.
+    shared [] _            = []
+    shared (g : gs) bases  = let (mine, rest) = splitAt (length g) bases
+                              in zip g mine : shared gs rest
+
+    -- **One 'Held' per base and the line's name on every one of them** (MS11
+    -- phase 298): the block pushes the whole group, innermost last, and
+    -- 'broughtConsult' is what puts them back together.
+    held n group = [ Held n b (publishedTo [t]) | (t, b) <- group ]
 
     marked _ _      Nothing  s = s
     marked m before (Just n) s =
@@ -2797,7 +2851,7 @@ data ReadModule = ReadModule
     -- @~r58qh@ — and "Thena.Files" refuses the module before it builds this
     -- record where they disagree, so by the time one exists they have agreed.
     -- A file loaded by a path that is no module name has nothing to agree with.
-  , readModulePool   :: Maybe [(FilePath, String)]
+  , readModulePool   :: Maybe [[(FilePath, String)]]
     -- ^ the bases it is searched against, **read off the disc and not yet
     -- resolved**, in search order — or 'Nothing' where there are none, which
     -- is elaborated against **the session's own pool as it stands**. Said as an
@@ -2815,6 +2869,14 @@ data ReadModule = ReadModule
     -- module's turn in 'loadProofModules'**, by which point everything it
     -- imports is in. All-or-nothing is untouched: a base missing from the disc
     -- still stops the closure before anything installs.
+    --
+    -- **ONE LIST PER @consult@ LINE, SINCE MS11 PHASE 298**, the base it names
+    -- first and everything that base consults beneath it: a plain @consult@ in
+    -- a rule file fetches now (his ruling of 2026-11-06, @~ckp39@), so what one
+    -- line brings in is a group rather than almost always a single base. The
+    -- grouping is what 'loadProofModules' splits the file-wide lines from the
+    -- block-scoped ones by, and it replaces an arithmetic that was already
+    -- wrong where a base published one.
   , readModuleItems  :: [Item]
   }
   deriving (Eq, Show)
@@ -3472,7 +3534,7 @@ dispatch s name arg = case name of
     [] -> (s, Rejected (MissingArgument name))
     ps -> case proofUnderway of
       Just why -> (s, Rejected why)
-      Nothing  -> (s, ConsultRequested ps)
+      Nothing  -> (s, ConsultRequested ps [])
   -- The loaded bases, in search order. A look, so a colon.
   ":bases" -> noArgument (s, BasesListed (rules machine))
   ":rules" -> noArgument (s, RulesListed (rules machine))
@@ -3543,7 +3605,7 @@ dispatch s name arg = case name of
     -- **Nothing is refused for an already-loaded module**: it is the no-op a
     -- diamond in the import graph gets, and "Thena.Files" answers it, because
     -- the walk that knows about deduplication is the one that reads files.
-    Just m  -> (s, ImportRequested m)
+    Just m  -> (s, ImportRequested m [])
   -- **Refused while a proof is open, as @:consult@ is** — the base may not
   -- change under a half-built proof (the user, 2026-08-25). An @import@ is not,
   -- for the reason @:load proof@ is not: it declares and does not touch the
@@ -3557,7 +3619,25 @@ dispatch s name arg = case name of
       -- the name it was reached by (phase 267 added no header production), so
       -- there is nothing for a by-name door to check and 'ConsultRequested' is
       -- already exactly this act.
-      Nothing  -> (s, ConsultRequested [moduleFile LoadRules m])
+      Nothing  -> (s, ConsultRequested [moduleFile LoadRules m] [])
+
+  -- **@public@ IN FRONT OF EITHER ACT IS ACCEPTED AT THE PROMPT AND WARNED** —
+  -- his ruling of 2026-11-06 (@~ckp39@): /"make public consult at the prompt
+  -- work like normal consult too and just warn but work as if it's written as
+  -- just a consult."/ **The reason is his paste ruling**: a transcript is lines
+  -- a user could have typed, people paste a line out of a file, and a parse
+  -- error on the first word is useless to them.
+  --
+  -- **Both acts and not only @consult@**, because the word is idle at the
+  -- prompt for one reason and it covers both: @public@ says who /else/ gets what
+  -- a file brought in, and a session has no importer. Accepting one and refusing
+  -- the other would be a special case with nothing behind it.
+  --
+  -- **A word this does not name falls through**, so @public@ in front of
+  -- anything else still reaches the entry grammar and is refused there.
+  "public" | (act, rest) <- break (== ' ') arg
+           , act == "consult" || act == "import"
+           -> publicly act (dropWhile (== ' ') rest)
 
   -- Dispatch the rule engine at the focus (§7.3). An op, so a bare word.
   --
@@ -3726,6 +3806,19 @@ dispatch s name arg = case name of
     withArgument k
       | null arg  = (s, Rejected (MissingArgument name))
       | otherwise = k
+
+    -- | __An act with an idle @public@ in front of it__ (MS11 phase 298).
+    --
+    -- **The act is dispatched and the warning rides on its answer**, rather
+    -- than being a second spelling of either case: whatever @consult@ or
+    -- @import@ does with the rest of the line is what this line does, so a
+    -- refusal — a proof underway, a word that is no module name — comes back
+    -- refused and says nothing about @public@.
+    publicly act rest = case dispatch s act rest of
+      (s', ConsultRequested ps ws) -> (s', ConsultRequested ps (idle : ws))
+      (s', ImportRequested m ws)   -> (s', ImportRequested m (idle : ws))
+      refused                      -> refused
+      where idle = PublicIdleAtPrompt act
 
     -- | The argument with the spaces off both ends — what a word that takes a
     -- /name/ needs, where one that takes paths splits on spaces instead.
@@ -4464,13 +4557,6 @@ data RuleFileError
     -- line: the header is blanked rather than dropped so that nothing shifts
   | RuleIllFormed [RuleError]
     -- ^ it parsed, and one or more rules did not resolve or did not validate
-  | RuleConsultsAbsent [ModuleName]
-    -- ^ **it is written against these bases and they are not in the pool**
-    -- (MS11 phase 289). A plain @consult@ in a rule file asks that the base be
-    -- there and does not put it there: a base arriving because something else
-    -- named it would be a search order nobody wrote, which is what @public@ is
-    -- for. So the remedy is one line — @consult@ it, or let the base that needs
-    -- it say @public consult@ — and the refusal names what is missing.
   | RuleImportsUnread [ModuleName]
     -- ^ **it imports these and nobody read them** (MS11 phase 276).
     -- 'ConsultsUnread'\'s counterpart for a rule base: a base is resolved
@@ -4808,7 +4894,8 @@ resolveAll gs conc raws =
 -- place, so a session never ends up searching half of what was asked for.
 loadRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
 loadRuleBases s ps =
-  loadReadBases s [ (path, statedConsults src, statedConcealment s src, readStated s gs path src)
+  loadReadBases s [ (path, idlePublic src, statedConcealment s ps src
+                    , readStated s gs ps path src)
                   | (path, src) <- ps ]
   where
     gs = grammars (sessionMachine s)
@@ -4817,26 +4904,39 @@ loadRuleBases s ps =
 -- top of the pool instead of replacing it (MS11 phase 271).
 consultRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
 consultRuleBases s ps =
-  consultReadBases s [ (path, statedConsults src, statedConcealment s src, readStated s gs path src)
+  consultReadBases s [ (path, idlePublic src, statedConcealment s ps src
+                       , readStated s gs ps path src)
                      | (path, src) <- ps ]
   where
     gs = grammars (sessionMachine s)
 
--- | The bases a base's text states, for the install to check against the pool
--- (MS11 phase 289). **A file that does not parse states nothing here** and
--- 'readStated' is what says so, with the position in it.
-statedConsults :: String -> [ModuleName]
-statedConsults src = either (const []) id (ruleBaseConsults src)
-
 -- | __What a base's text may not reach__ (MS11 phase 297).
 --
--- 'statedConsults'\' companion, and the same bargain: **a file that does not
--- parse states nothing**, so it conceals nothing and 'readStated' is what
--- reports the parse failure with the position in it. The base is refused either
--- way; what this answers is only what to resolve its @do@ blocks against.
-statedConcealment :: Session -> String -> [GlobalName]
-statedConcealment s src =
-  concealedFrom (either (const []) id (ruleBaseImports src)) s
+-- **A file that does not parse states nothing**, so it conceals nothing and
+-- 'readStated' is what reports the parse failure with the position in it. The
+-- base is refused either way; what this answers is only what to resolve its
+-- @do@ blocks against.
+--
+-- **AND WHAT THE BASES IT CONSULTS HAND IT IS IN SCOPE, SINCE MS11 PHASE 298**
+-- — 'handedTo' is the walk, and the whole group's texts are what it walks.
+statedConcealment :: Session -> [(FilePath, String)] -> String -> [GlobalName]
+statedConcealment s group src =
+  concealedFrom (either (const []) id (ruleBaseImports src)
+                   ++ handedTo group src) s
+
+-- | __A @public consult@ with nothing left to say__ (MS11 phase 298, his ruling
+-- of 2026-11-06).
+--
+-- A plain @consult@ in a rule file fetches the base and hands it on to whoever
+-- consults this one, so the word @public@ in front of one adds nothing. **It is
+-- accepted and warned rather than refused** — his /"accept public consult in
+-- instral files but show warning"/, which is the second principle's own answer:
+-- the line does what it says, and the author is told the word is idle.
+idlePublic :: String -> [Warning]
+idlePublic src =
+  [ PublicConsultIdle (moduleText m)
+  | Right (_, _, raws) <- [rawRuleDecls src]
+  , m <- rawPublicConsults raws ]
 
 -- | Read one rule-base file — its header, then its rules — refusing a base
 -- whose dependencies are not in (MS11 phase 276).
@@ -4865,18 +4965,24 @@ statedConcealment s src =
 -- rule file's scope is the prelude and the modules it imports**, the closure
 -- over their @public import@s included, which is 'reachedBy'.
 --
--- **WHAT A CONSULTED BASE PUBLISHED IS NOT IN IT, AND THE ORDER IS WHY.** A
+-- **AND WHAT A CONSULTED BASE PUBLISHED IS IN IT, SINCE MS11 PHASE 298.** A
 -- base's @public import@ hands its object language to whoever consults it
--- (phase 289) — but a plain @consult@ is an /ask/, checked when the pool is
--- installed, and that is after every file in the group has been read and
--- resolved. So a base could not resolve its own tags against a publication
--- whose existence has not been established yet. **The publication reaches a
--- surface file, which is what it was built for** ('Pool''s @poolPublished@);
--- a rule file states what it refers to.
+-- (phase 289), and until this phase that reached a surface file and not a rule
+-- file — not by decision but by order: a plain @consult@ was an /ask/, checked
+-- when the pool was installed, which is after every file in the group has been
+-- read, so a base could not resolve its own tags against a publication whose
+-- existence had not been established yet. **A plain @consult@ fetches now**
+-- (his ruling of 2026-11-06), so the base is in hand while this file is read
+-- and the obstacle is gone. **It is the uniform answer and not a free
+-- inheritance**: @public import@ says /whoever consults me may write this
+-- language/, and a rule file that consults the base is such a consumer — a
+-- system that gave the names to a surface consumer and withheld them from a
+-- rule-file consumer would be telling the two apart. 'handedTo' is the walk and
+-- the group's texts are what it walks.
 readStated
-  :: Session -> [Grammar] -> FilePath -> String
+  :: Session -> [Grammar] -> [(FilePath, String)] -> FilePath -> String
   -> Either RuleFileError RuleBase
-readStated s gs path src = do
+readStated s gs group path src = do
   -- **One parse and not two** (MS11 phase 297). This asked 'ruleBaseImports'
   -- for the names and then had the read parse the file again; the
   -- concealment needs the same declarations, so the parse is done once here and
@@ -4884,8 +4990,9 @@ readStated s gs path src = do
   (nm, desc, raws) <- rawRuleDecls src
   case filter (\m -> not (moduleLoaded m s)) (rawImports raws) of
     ms@(_ : _) -> Left (RuleImportsUnread ms)
-    []         -> ruleBaseOfDecls gs (concealedFrom (rawImports raws) s)
-                                  path nm desc raws
+    []         -> ruleBaseOfDecls gs
+                    (concealedFrom (rawImports raws ++ handedTo group src) s)
+                    path nm desc raws
 
 -- | Every surface module a rule file imports, in written order (MS11 phase
 -- 276).
@@ -4916,6 +5023,44 @@ ruleBasePublishes src = do
   (_, _, raws) <- rawRuleDecls src
   Right (rawPublicConsults raws, rawPublicImports raws)
 
+-- | __Which surface modules a run of bases hands its consumer__ (MS11 phase
+-- 298).
+--
+-- The @public import@ half of 'ruleBasePublishes', read off every text in a
+-- group: a base's @public import@ gives its object language's names to whoever
+-- consults it (phase 289), and whoever consults the group is searched against
+-- every base in it, so every base in it is one they consult.
+--
+-- **A base that does not parse publishes nothing here**, and the install
+-- refuses it with the position in it — 'statedConcealment''s bargain.
+publishedTo :: [(FilePath, String)] -> [ModuleName]
+publishedTo texts =
+  concat [ ms | (_, src) <- texts, Right (_, ms) <- [ruleBasePublishes src] ]
+
+-- | __Which surface modules the bases THIS one consults hand it__ (MS11 phase
+-- 298, his ruling of 2026-11-06).
+--
+-- 'publishedTo' from inside the group rather than from outside it: the closure
+-- of what this text consults, which is exactly the run of bases a fetch put
+-- beneath it, and what each of them publishes. **So one rule serves both
+-- consumers** — a surface file gets what the group publishes and a base in the
+-- group gets what the bases under it publish.
+--
+-- **A base reached twice down two arms is walked once**, which is a question
+-- about names and not about the pool: the pool holds two independent pushes
+-- (his ruling of 2026-11-03) and a name is reachable or it is not. A loop
+-- cannot arrive — 'Thena.Files.fetching' refuses one — and @seen@ is here so
+-- that this terminates on its own if one ever did.
+handedTo :: [(FilePath, String)] -> String -> [ModuleName]
+handedTo group = go []
+  where
+    go seen src =
+      concat [ publishedTo [(p, t)] ++ go (p : seen) t
+             | m <- either (const []) id (ruleBaseConsults src)
+             , let p = moduleFile LoadRules m
+             , p `notElem` seen
+             , t <- take 1 [ t | (q, t) <- group, q == p ] ]
+
 -- | The same, off declarations somebody already has (MS11 phase 276).
 --
 -- **An @open … in@ is walked into**, because the declaration it covers may be
@@ -4933,15 +5078,15 @@ rawImports = concatMap go
 --
 -- 'rawImports'\' walk over the other act, and @public@ is not read here for
 -- 'moduleConsults'\' reason: a @consult@ is this file's own either way, and
--- what the word adds is who else gets the base.
+-- what the word adds is who else gets the base — nothing, since phase 298.
 --
--- **What a plain one asks for is that the base BE there**, which is
--- 'RuleConsultsAbsent': this file's rules may call that base's or dispatch into
--- them, and neither works unless it is in the same pool. **It does not load
--- it** — a base's position in the pool is its priority (@DECISIONS.md@,
--- /Consults are a STACK/), so a base arriving because something else named it
--- is a search order nobody wrote, which is the transitivity his ruling of
--- 2026-10-30 answered with @public@.
+-- **IT FETCHES THE BASE AND PUTS IT DIRECTLY BENEATH THIS ONE** — his ruling of
+-- 2026-11-06 (@~ckp39@), /"as if it were all public consult all the way
+-- down"/. Until then a plain @consult@ /asked/: the base had to be in the pool
+-- already, and a consumer that supplied it chose its position, so an unrelated
+-- base could land between a base and its helper and answer a call the author
+-- had pinned. Adjacency is what fetching buys, and it is why requiring was not
+-- the stricter discipline it looked like. 'Thena.Files.fetching' is the walk.
 rawConsults :: [RawDecl] -> [ModuleName]
 rawConsults = concatMap go
   where
@@ -5002,7 +5147,10 @@ rawPublicImports = concatMap go
 -- happen once and identically whichever door a base came in by.
 loadRuleDecls :: Session -> [(FilePath, String, Maybe String, [RawDecl])] -> (Session, Response)
 loadRuleDecls s ps =
-  loadReadBases s [ (path, rawConsults ds, concealedFrom (rawImports ds) s, stated path nm desc ds)
+  loadReadBases s [ ( path
+                    , [ PublicConsultIdle (moduleText m) | m <- rawPublicConsults ds ]
+                    , concealedFrom (rawImports ds) s
+                    , stated path nm desc ds )
                   | (path, nm, desc, ds) <- ps ]
   where
     gs = grammars (sessionMachine s)
@@ -5014,6 +5162,12 @@ loadRuleDecls s ps =
       -- a stored base is held to the rule its author wrote it under, so the
       -- door a project comes in by cannot be the one that relies on the
       -- session.
+      -- **WHAT THE BASES IT CONSULTS PUBLISH IS NOT IN THIS DOOR'S SCOPE**
+      -- (MS11 phase 298). A base read from text reaches it ('handedTo'), and
+      -- the walk needs the other bases' /texts/, which a stored project joins
+      -- the pipeline too late to have. Nothing is lost that was ever there:
+      -- this door has had no caller since it was written, and a project stored
+      -- as text comes in through 'loadRuleBases' with the rest.
       []         -> ruleBaseOfDecls gs (concealedFrom (rawImports ds) s)
                                     path nm desc ds
 
@@ -5025,7 +5179,7 @@ loadRuleDecls s ps =
 -- source.
 loadReadBases
   :: Session
-  -> [(FilePath, [ModuleName], [GlobalName], Either RuleFileError RuleBase)]
+  -> [(FilePath, [Warning], [GlobalName], Either RuleFileError RuleBase)]
   -> (Session, Response)
 loadReadBases = installReadBases []
 
@@ -5043,7 +5197,7 @@ loadReadBases = installReadBases []
 -- deduplicate, and the pool may hold one base more than once.
 consultReadBases
   :: Session
-  -> [(FilePath, [ModuleName], [GlobalName], Either RuleFileError RuleBase)]
+  -> [(FilePath, [Warning], [GlobalName], Either RuleFileError RuleBase)]
   -> (Session, Response)
 consultReadBases s = installReadBases (rules (sessionMachine s)) s
 
@@ -5055,13 +5209,18 @@ consultReadBases s = installReadBases (rules (sessionMachine s)) s
 -- blocks were checked when that base went in and a 'RuleBase' keeps no field to
 -- re-read them from.
 --
--- **AND WHAT EACH BASE SAYS IT IS WRITTEN AGAINST IS CHECKED HERE** (MS11 phase
--- 289), for the same reason inference is: a @consult@ may be answered by
--- another base in the same push, so the question cannot be asked while the
--- files are being read one at a time. 'RuleConsultsAbsent' is the refusal.
+-- **AND WHAT EACH BASE SAYS IT IS WRITTEN AGAINST IS NO LONGER CHECKED HERE**
+-- (MS11 phase 298). Until then a @consult@ in a rule file was an /ask/ and this
+-- was where it was answered — @RuleConsultsAbsent@, asked here rather than at
+-- the read because another base in the same push could satisfy it. A plain
+-- @consult@ fetches now (his ruling of 2026-11-06, @~ckp39@), so by the time a
+-- group reaches this the base it named is in the group, and the refusal had
+-- nothing left to refuse. **The slot it used is the warnings'**, which is the
+-- other half of the same ruling: a @public consult@ in a rule file is accepted
+-- and told it is idle.
 installReadBases
   :: [RuleBase] -> Session
-  -> [(FilePath, [ModuleName], [GlobalName], Either RuleFileError RuleBase)]
+  -> [(FilePath, [Warning], [GlobalName], Either RuleFileError RuleBase)]
   -> (Session, Response)
 installReadBases below s = go []
   where
@@ -5073,13 +5232,7 @@ installReadBases below s = go []
     -- not callables — nothing can call one — so they are not in 'allCallable';
     -- they are handed to 'inferProgram' as extra bodies so that a mistake in one
     -- is found when the file loads.
-    go acc [] = case [ (path, ms) | (path, stated, _, _) <- acc
-                                  , let ms = filter (not . inPool) stated
-                                  , not (null ms) ] of
-      -- **The first base that is missing one**, as a file that will not read is
-      -- the first that will not read: all or nothing either way.
-      (path, ms) : _ -> (s, RuleFileRefused path (RuleConsultsAbsent ms))
-      [] -> case traverse blocksOf [ (conc, b) | (_, _, conc, b) <- acc ] of
+    go acc [] = case traverse blocksOf [ (conc, b) | (_, _, conc, b) <- acc ] of
         -- A block that does not resolve or does not validate is the file's
         -- problem and is reported against the file, as any other rule's would be.
         Left (path, errs) -> (s, RuleFileRefused path (RuleIllFormed errs))
@@ -5087,21 +5240,19 @@ installReadBases below s = go []
           case snd (inferProgram (allSignatures pool) (allCallable pool ++ concat bss)) of
             []   ->
               ( s { sessionMachine = (sessionMachine s) { rules = pool } }
-              , BasesLoaded pool
+              -- **In the order the files were read**, which is the order they
+              -- go into the pool: a warning about the third base of a push is
+              -- read after the first two.
+              , BasesLoaded pool (concat [ ws | (_, ws, _, _) <- acc ])
               )
             errs -> (s, BasesIllTyped errs)
       where
         bases = [ b | (_, _, _, b) <- acc ]
         pool  = bases ++ below
-        -- **A base is in the pool if the file that name denotes is**, which is
-        -- the only identity a 'Thena.Rules.RuleBase' has: its declared name is
-        -- its own and a module name is a path (MS11 phase 272), so
-        -- 'moduleFile' is the one place the two meet.
-        inPool m = any ((== moduleFile LoadRules m) . basePath) pool
 
-    go acc ((path, stated, conc, built) : more) = case built of
+    go acc ((path, warns, conc, built) : more) = case built of
       Left e  -> (s, RuleFileRefused path e)
-      Right b -> go (acc ++ [(path, stated, conc, b)]) more
+      Right b -> go (acc ++ [(path, warns, conc, b)]) more
 
     -- **Resolved here and not in 'readStated'**, because what it answers is
     -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then
@@ -5392,13 +5543,13 @@ loadSource s0 = go s0 1 [] . lines
             LoadRequested _  -> finished s acc (Just (NestedLoad n))
             ProofRequested _ -> finished s acc (Just (NestedLoad n))
             RulesRequested _ -> finished s acc (Just (NestedLoad n))
-            ConsultRequested _ -> finished s acc (Just (NestedLoad n))
+            ConsultRequested _ _ -> finished s acc (Just (NestedLoad n))
             -- **An @import@ typed in a script is the fifth** (MS11 phase 284),
             -- and it arrived with the same defect phase 268 fixed for the other
             -- two: the response was recorded and silently dropped, so a script
             -- that stated what it reuses carried on without it and failed on
             -- the next line instead.
-            ImportRequested _ -> finished s acc (Just (NestedLoad n))
+            ImportRequested _ _ -> finished s acc (Just (NestedLoad n))
             Quit            -> finished s' acc' Nothing
             _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
               | otherwise    -> go s' (n + 1) acc' ls

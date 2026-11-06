@@ -95,7 +95,7 @@ walk s bases (path : more) = case kindOf path of
     -- is asked at all.
     accepted r = case r of
       ProofLoaded {} -> True
-      BasesLoaded _  -> True
+      BasesLoaded _ _  -> True
       _              -> False
 
 -- | A word of our own, on @stderr@ and after what the load had to say.
