@@ -1056,6 +1056,28 @@ the pool makes its rules callable by you and by every other base in that pool. *
 control is the extent, not the flatness** — `consult B where { … }` keeps a base to one
 block, and that is the tool for a base you want out of the way again.
 
+**The idiom this is for: a base that wants you to specialise something ships a working
+rule for it, never a stub.** Write the general tactic, let whoever consults you define a
+sharper clause of the same name, and theirs is tried first because their base sits above
+yours. **Refinement is a fallback and not a replacement** — if their clause fails, the
+search comes back to yours — so a stub that pretended to succeed would hide their
+failure, while a real definition makes the fallback a correct answer.
+
+```
+rule base hooks where            rule base mine where
+
+foo : ()                         consult hooks
+rule foo :- do ‹the general way›
+                                 rule foo :- do ‹the sharp way for my language›
+use : ()
+rule use :- do call foo
+```
+
+Consulting `mine` is one line; `hooks` arrives beneath it, `use` is `hooks`'s own rule,
+and it reaches *your* `foo`. **Declaring the dependency is what guarantees you are above
+it**; a file that declares nothing is back to whatever order the user happened to load
+things in.
+
 ### A rule base states the bases it is written against, and may publish either act
 
 *Decided 2026-10-30, built at MS11 phase 289. `public` is available to both acts and
