@@ -19,7 +19,7 @@ import Data.Maybe (isJust)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
-import Data.List (isInfixOf, nub)
+import Data.List ((\\), isInfixOf, isPrefixOf, nub)
 
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (Core (..), GlobalName (..), rootName)
@@ -72,9 +72,12 @@ import Thena.Driver
   , newSession
   , oneLine
   , parseSurfaceModule
+  , filesRead
+  , digestOf
+  , digestText
   )
 import Thena.Engine (Development, Machine (..), development)
-import Thena.Files (rulesPath)
+import Thena.Files (preludePath, rulesPath)
 import Thena.Core.Term (nameDotted, openedPath, substLevelsIn)
 import qualified Thena.Global.Env as Env (declaredNames)
 import Thena.Global.Env
@@ -124,7 +127,128 @@ tests =
     , testGroup "a header may withhold instead (MS11 phase 290)" hidingTests
     , testGroup "an import states how far it reaches (MS11 phase 291)" scopedImportTests
     , testGroup "and so does a consult (MS11 phase 292)" scopedConsultTests
+    , testGroup "every file read is hashed (MS11 phase 295)" hashTests
     ]
+
+-- --------------------------------------------------------------------------
+-- Every file read is hashed (MS11 phase 295)
+-- --------------------------------------------------------------------------
+
+-- | __What a session read, and what it said when it was read__ — his ruling of
+-- 2026-11-06: the engine hashes when it reads, because that is where the
+-- contents are, and publishes path-and-hash for everything it read.
+--
+-- **The list is the one thing a frontend cannot work out for itself.** It knows
+-- which lines the user typed; only the engine knows which path a module name
+-- resolved to and what was actually opened. So what is asserted here is which
+-- paths arrive, not what their digests are: a digest is a fact about a file on
+-- this disc, and an expectation written down here would be a second copy of the
+-- prelude.
+hashTests :: [TestTree]
+hashTests =
+  [ -- **The shipped files are in it**, which is the only part that is not the
+    -- user's own: an engine upgrade moves the prelude or the standard base and
+    -- shows up as a changed hash with nothing extra built.
+    testCase "a fresh session has read the prelude and the standard base" $ do
+      (s0, trouble) <- startingSession
+      assertBool (show trouble) (null trouble)
+      prelude <- preludePath
+      rules   <- rulesPath
+      map fst (filesRead s0) @?= [prelude, rules]
+
+  , testCase "and a module's file is in it, with the ones it imports" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadProofFile s0 "test/modules/Both.thena"
+      assertBool (show trouble) (null trouble)
+      own (filesRead s1)
+        @?= [ "test/modules/Both.thena"
+            , "test/modules/Pair.thena"
+            , "test/modules/Bit.thena"
+            ]
+
+  , -- **A base a file consults is a file the session read too**, and so is the
+    -- module that base imports: the list is what the disc was asked for, not
+    -- what a surface @import@ names.
+    testCase "a base a module consults is in it, and what the base imports" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadProofFile s0 "test/modules/Keeps.thena"
+      assertBool (show trouble) (null trouble)
+      -- The base comes in front of the file that consults it because the
+      -- module's own read is noted before its pool's, which is the engine's
+      -- bookkeeping order and not the order the disc was read in.
+      own (filesRead s1)
+        @?= [ "test/modules/Tooling.thena.rules"
+            , "test/modules/Keeps.thena"
+            , "test/modules/Lang.thena"
+            ]
+
+  , -- **Read, and not installed.** @Broken@ parses and will not elaborate, so
+    -- the closure is read whole and then refused — and a replay of the line
+    -- that asked for it will open the same three files again and be refused
+    -- again, which is why the refusal does not unread them.
+    testCase "a file that was read and then refused is still in it" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/ImportsBroken.thena"
+      assertBool "nothing landed" (null (modulesLoaded s1 \\ modulesLoaded s0))
+      own (filesRead s1)
+        @?= [ "test/modules/ImportsBroken.thena"
+            , "test/modules/Broken.thena"
+            , "test/modules/Bit.thena"
+            ]
+
+  , -- **The same for a base, and it is the placement the note depends on.**
+    -- @BadRule@ reads and then refuses at the install, and 'Thena.Files' throws
+    -- that install's session away — so a note written inside
+    -- 'Thena.Driver.loadRuleBases' would be lost here and the read is noted
+    -- before it instead.
+    testCase "and so is a base that was read and then refused" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- consultRuleFiles s0 ["test/modules/BadRule.thena.rules"]
+      assertBool "it was refused" (not (null trouble))
+      own (filesRead s1)
+        @?= [ "test/modules/Lang.thena"
+            , "test/modules/BadRule.thena.rules"
+            ]
+
+  , -- A file that would not open at all has nothing to hash, so it is not
+    -- there to be re-read later either.
+    testCase "but a file that would not open is not in it" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- loadProofFile s0 "test/modules/NoSuchFile.thena"
+      assertBool "it was refused" (not (null trouble))
+      own (filesRead s1) @?= []
+
+  , -- **One entry per path, the newest read's.** Consulting the same base
+    -- twice is two independent pushes and so two reads, and the fact being
+    -- recorded is what the file said when the session last looked.
+    testCase "one entry per path, however often it was read" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- consultRuleFiles s0 ["test/modules/Louder.thena.rules"]
+      (s2, _, trouble) <- consultRuleFiles s1 ["test/modules/Louder.thena.rules"]
+      assertBool (show trouble) (null trouble)
+      own (filesRead s2) @?= ["test/modules/Louder.thena.rules"]
+
+  , testCase "the same text hashes the same way, and different text does not" $ do
+      digestOf "wrong : Bit.Bit" @?= digestOf "wrong : Bit.Bit"
+      assertBool "a changed file changes its digest"
+        (digestOf "wrong : Bit.Bit" /= digestOf "wrong : Bit.Bil")
+      -- An empty file is a file, and it has a digest like any other.
+      assertBool "and the empty file has one" (digestOf "" /= digestOf " ")
+
+  , -- Fixed width, so a frontend that writes them down compares them as
+    -- strings as well as it compares them as digests.
+    testCase "a digest writes down as sixteen hex digits" $ do
+      (s0, _) <- startingSession
+      let texts = map (digestText . snd) (filesRead s0)
+      map length texts @?= map (const 16) texts
+      assertBool (show texts)
+        (all (`elem` "0123456789abcdef") (concat texts))
+  ]
+  where
+    -- The shipped prelude and base are in every one of these lists and their
+    -- paths are the installed data directory's, which is no part of what these
+    -- cases are about.
+    own reads' = [ p | (p, _) <- reads', "test/modules/" `isPrefixOf` p ]
 
 -- --------------------------------------------------------------------------
 -- A consult may travel, and consults are a stack (MS11 phase 288, @~jmw4k@)

@@ -42,6 +42,11 @@ module Thena.Driver
   , standing
   , submittedLines
   , provedUnder
+  , Digest
+  , digestOf
+  , digestText
+  , filesRead
+  , noteRead
   , ChoicePoint (..)
   , LoadError (..)
   , Loaded (..)
@@ -115,6 +120,7 @@ module Thena.Driver
   ) where
 
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
+import Data.Word (Word64)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
@@ -135,7 +141,8 @@ import Thena.Language.Regex
   , singleChar
   , star
   )
-import Data.Char (isAlpha, isAlphaNum, isSpace)
+import Data.Bits ((.&.), shiftR, xor)
+import Data.Char (intToDigit, isAlpha, isAlphaNum, isSpace, ord)
 import Data.List ((\\), intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, stripPrefix)
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
@@ -501,6 +508,37 @@ data Session = Session
     --
     -- **Not in a 'Snapshot'**, for 'sessionLoaded''s reason: it is a record of
     -- what is in an environment that only grows.
+  , sessionFilesRead :: [(FilePath, Digest)]
+    -- ^ __Every file this session read, and what it said when it was read__
+    -- (MS11 phase 295, his ruling of 2026-11-06).
+    --
+    -- **It is what a frontend cannot work out for itself.** A frontend knows
+    -- which lines the user typed; only the engine knows which path a module
+    -- name resolved to and what was actually opened. **The shipped prelude and
+    -- standard base are in it**, which come from the installed data directory,
+    -- so an engine upgrade shows up as a changed hash with nothing extra
+    -- built.
+    --
+    -- **Read, and not installed.** A file that was read and then refused is
+    -- here, because a replay submits the same lines again and a line that was
+    -- refused the first time has to be refused the second: the file it tried to
+    -- open is part of what that replay stands on. A file that would not open at
+    -- all is not here, there being nothing to hash.
+    --
+    -- **One entry per path, the newest read's, at the front.** The fact being
+    -- recorded is what the file said when this session last looked, and two
+    -- digests for one path would say nothing a frontend could act on.
+    --
+    -- **The order beyond that is the order the engine noted them in and is not
+    -- the order the disc was read in** — a module's own file is noted before
+    -- the bases it consults, though 'Thena.Files' opened them the other way
+    -- round. Deliberately not promised as anything else: what a frontend does
+    -- with this list is read every path again, and there is no question it
+    -- could ask of the order.
+    --
+    -- **Not in a 'Snapshot', and carried forward by 'rolledBack'** — the one
+    -- field that survives a rollback along with the name counter, because a
+    -- refusal does not unread a file.
   }
   deriving (Eq, Show)
 
@@ -690,6 +728,66 @@ submittedLines = mapMaybe entrySubmitted . recordOf
 provedUnder :: GlobalName -> Session -> [Entry]
 provedUnder n = filter ((== Just n) . entryProof) . recordOf
 
+-- | __What a file said when it was read__ (MS11 phase 295).
+--
+-- **A number and not a signature.** What it is for is telling a file that has
+-- moved from one that has not, when a stored session is taken up again and its
+-- files are read a second time — his ruling of 2026-11-06, which also settled
+-- that nothing watches them in between: /"If someone is careless enough to
+-- change them during a session, I am not listening for a file system events
+-- just for that."/ So the question asked of it is only ever /is this the same
+-- text/, never /did someone forge this text/, and a 64-bit mixing function
+-- answers it: a thousand files collide with probability around @2e-14@.
+--
+-- **Which is why the project gains no dependency for it.** A real digest means
+-- SHA-256, which means a C-backed package where the library today depends on
+-- @base@, @array@ and @containers@. If the question ever becomes adversarial —
+-- a proof shipped as trustworthy because its sources hashed to the right thing
+-- — this type is where that lands, and nothing above it has to change.
+newtype Digest = Digest Word64
+  deriving (Eq, Ord, Show)
+
+-- | Hash a file's contents: FNV-1a, over codepoints rather than bytes.
+--
+-- **Over codepoints because the contents are a 'String'** and the project reads
+-- files as text everywhere else too. It mixes a codepoint above @255@ no worse
+-- than a byte — the multiply carries the low bits up — and the only property
+-- asked of it is that the same text hashes the same way twice.
+digestOf :: String -> Digest
+digestOf = Digest . foldl' mix 14695981039346656037
+  where
+    mix h c = (h `xor` fromIntegral (ord c)) * 1099511628211
+
+-- | A digest as sixteen hex digits, for a frontend that has to write it down.
+--
+-- **Fixed width and lower case**, so two of them compare as strings as well as
+-- they compare as digests.
+digestText :: Digest -> String
+digestText (Digest w) =
+  [ intToDigit (fromIntegral ((w `shiftR` (4 * i)) .&. 0xf)) | i <- [15, 14 .. 0 :: Int] ]
+
+-- | __Every file this session read__ (MS11 phase 295) — newest read of a path
+-- first, and otherwise in no order a caller should rely on.
+--
+-- A read and not the field, as every other part of the session is.
+-- 'sessionFilesRead' says what is in it and what is deliberately not.
+filesRead :: Session -> [(FilePath, Digest)]
+filesRead = sessionFilesRead
+
+-- | __Note that a file was read__ (MS11 phase 295).
+--
+-- **The digest is the caller's, because the caller is where the contents are**
+-- — his wording of 2026-11-06: the engine hashes when it reads. "Thena.Files"
+-- is that caller for the prelude, a script and a rule base; 'loadProofModules'
+-- is it for a module and the bases the module consults, a 'ReadModule' having
+-- carried the digest in from the disc.
+--
+-- **An earlier entry for the same path is replaced**, which is
+-- 'sessionFilesRead''s one-entry-per-path rule.
+noteRead :: FilePath -> Digest -> Session -> Session
+noteRead path d s =
+  s { sessionFilesRead = (path, d) : filter ((/= path) . fst) (sessionFilesRead s) }
+
 -- | An unfinished proof of a theorem (§2.4, §3.3.1).
 --
 -- **\"Attempt\" is the word for it** — his, 2026-09-01, renaming @Proof@:
@@ -856,6 +954,7 @@ newSession = Session
   , sessionExporting  = []
   , sessionDeclaredBy = []
   , sessionOpenedBy  = []
+  , sessionFilesRead = []
   }
   where
     (ps, n) = newDevelopment 0
@@ -2374,10 +2473,25 @@ loadProofItemsConsulting (Pool pool published heldBases) s nm items =
 -- which of them the user actually named, and without the module beside the
 -- response a failure inside an imported file arrives as a bare /not in scope/
 -- about a file nobody mentioned.
+--
+-- **AND EVERY FILE THE WALK READ IS NOTED BEFORE ANYTHING INSTALLS** (MS11
+-- phase 295): each module's own file, and each base it consults, which
+-- 'readModulePool' carries the text of. Before and not as each module lands,
+-- because the closure was read all-or-nothing and the whole of it is what a
+-- replay of these lines will open again — 'sessionFilesRead' has why a file
+-- that was read and then refused still counts, and 'rolledBack' is what keeps
+-- these notes when the install does not take.
 loadProofModules
   :: Session -> [ReadModule] -> (Session, Either (ReadModule, Response) [Response])
-loadProofModules s0 = go s0 []
+loadProofModules s00 ms0 = go s0 [] ms0
   where
+    s0 = foldl' readsOf s00 ms0
+
+    readsOf s m =
+      foldl' (\acc (p, src) -> noteRead p (digestOf src) acc)
+             (noteRead (readModulePath m) (readModuleDigest m) s)
+             (fromMaybe [] (readModulePool m))
+
     go s acc [] = (s, Right (reverse acc))
     go s acc (m : rest) = case poolFor s m of
       -- **A base that will not resolve refuses the module it was consulted
@@ -2594,6 +2708,12 @@ data ReadModule = ReadModule
     -- ^ where it was read from. **Not derived from the name**, because a module
     -- loaded by a path may have no name at all, and because this is what a
     -- refusal has to print.
+  , readModuleDigest :: Digest
+    -- ^ what the file said when it was read (MS11 phase 295). **Taken where the
+    -- contents were**, in "Thena.Files", because that is the only place the
+    -- module's text exists — this record keeps the items it parsed to and not
+    -- the text, so a digest taken any later would have nothing to take it from.
+    -- 'loadProofModules' is what puts it on the session.
   , readModuleName   :: Maybe ModuleName
     -- ^ the name an @import@ reaches it by, where it has one. 'Nothing' for a
     -- file loaded by a path no module name could produce — one that climbs, or
@@ -2729,10 +2849,16 @@ openedByModule n s = concat [ os | (m, os) <- sessionOpenedBy s, m == n ]
 -- | Put the session back as it was, carrying the fresh counter forward.
 --
 -- The counter is the one thing that must not go back — see 'loadProofItems'.
+--
+-- **And what was read stays read** (MS11 phase 295). A refusal takes back what
+-- a file declared; it does not take back the fact that the file was opened and
+-- said what it said. 'sessionFilesRead' has why a replay needs the refused ones
+-- too.
 rolledBack :: Session -> Session -> Session
 rolledBack before after =
   before { sessionMachine = (sessionMachine before)
-                              { names = names (sessionMachine after) } }
+                              { names = names (sessionMachine after) }
+         , sessionFilesRead = sessionFilesRead after }
 
 -- | What an item adds to the environment, for the summary line.
 --

@@ -37,6 +37,9 @@ import Thena.Driver
   ( LoadError
   , Loaded (..)
   , Item
+  , Digest
+  , digestOf
+  , noteRead
   , interfaceOf
   , ModuleName
   , ReadModule (..)
@@ -115,9 +118,15 @@ loadPrelude s = do
       -- **No interface of any kind**: the prelude states no export list, marks
       -- nothing private and passes nothing on, so everything it declares is
       -- reachable from every module (MS11 phases 285 to 287).
+      -- **And the read is noted** (MS11 phase 295): the prelude comes from the
+      -- installed data directory, so an engine upgrade shows up as a changed
+      -- hash with nothing extra built. It is the one read where the driver
+      -- cannot do it, 'loadProofSource' taking contents and no path.
       (s', ProofLoaded {}) ->
-        (moduleDeclared preludeModule (interfaceOf []) s s', [])
-      (s', resp)           -> (s', [Unloadable path resp])
+        ( noteRead path (digestOf c)
+            (moduleDeclared preludeModule (interfaceOf []) s s')
+        , [] )
+      (s', resp)           -> (noteRead path (digestOf c) s', [Unloadable path resp])
 
 -- | A session with everything shipped loaded: **the rule base first, then the
 -- prelude**.
@@ -192,10 +201,16 @@ ruleFilesWith install s paths = do
       case spread of
         Left t -> pure (s, [], [t])
         Right contents -> do
-          brought <- imported s contents
+          -- **Every base the group read is noted before any of it installs**
+          -- (MS11 phase 295), publications included, and 'rolledBack' keeps the
+          -- notes when the install refuses. **Noted here and not in
+          -- 'Thena.Driver.loadRuleBases'**, which is handed the texts but whose
+          -- session 'installing' throws away on a refusal.
+          let sr = foldl' (\acc (p, c) -> noteRead p (digestOf c) acc) s contents
+          brought <- imported sr contents
           pure $ case brought of
-            Left t -> (s, [], [t])
-            Right (s1, got) -> installing s s1 got (install s1 contents)
+            Left t -> (sr, [], [t])
+            Right (s1, got) -> installing sr s1 got (install s1 contents)
   where
     -- The install's own answer, read as it always was — with whatever the
     -- imported modules had to say in front of it, and with the session put back
@@ -245,8 +260,11 @@ loadFile s path = do
   pure $ case contents of
     Left e  -> (s, [], [Unreadable path e])
     Right c ->
+      -- **The script's own file is noted here** (MS11 phase 295), and the files
+      -- its lines name are noted by whichever door 'following' sends them
+      -- through.
       let l  = loadSource s c
-          s' = loadedSession l
+          s' = noteRead path (digestOf c) (loadedSession l)
        in (s', loadedResponses l, map (Stopped path) (maybe [] pure (loadedError l)))
 
 -- | Read a proof module, **and everything it imports**, and elaborate the lot
@@ -274,7 +292,7 @@ loadProofFile s path = do
       -- imported file is the case that needs its path said, and 'gather' says it.
       Left e -> pure (s, [Failed e], [])
       Right (nm, items) -> do
-        gathered <- assemble s [] [] (moduleOfFile path) path nm items
+        gathered <- assemble s [] [] (moduleOfFile path) path (digestOf c) nm items
         pure $ case gathered of
           Left t   -> (s, [], [t])
           Right ms -> case loadProofModules s ms of
@@ -309,7 +327,7 @@ gather s stack done m = do
       -- 'loadProofFile' is the other door and it has a path, not a name.
       Right (nm, items)
         | nm /= m   -> pure (Left (Unloadable path (ModuleMisnamed m nm)))
-        | otherwise -> assemble s stack done (Just m) path nm items
+        | otherwise -> assemble s stack done (Just m) path (digestOf c) nm items
   where
     path = moduleFile LoadProof m
 
@@ -326,8 +344,8 @@ gather s stack done m = do
 -- what has been gathered so far.
 assemble
   :: Session -> [ModuleName] -> [ReadModule] -> Maybe ModuleName -> FilePath
-  -> ModuleName -> [Item] -> IO (Either Trouble [ReadModule])
-assemble s stack done as path nm items = do
+  -> Digest -> ModuleName -> [Item] -> IO (Either Trouble [ReadModule])
+assemble s stack done as path d nm items = do
   walked <- imports s inner done (moduleImports items)
   case walked of
     Left t      -> pure (Left t)
@@ -348,7 +366,7 @@ assemble s stack done as path nm items = do
         -- base that depended on nothing — which is no base worth consulting.
         Right srcs -> do
           walked' <- imports s inner done' (concatMap stated (maybe [] id srcs))
-          pure (fmap (\d -> d ++ [ReadModule path as nm srcs items]) walked')
+          pure (fmap (\gs -> gs ++ [ReadModule path d as nm srcs items]) walked')
   where
     inner = maybe stack (: stack) as
     -- It did not parse. **Said by the read and not here**, so the position is

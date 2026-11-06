@@ -6184,6 +6184,37 @@ anything built later over LSP.
 a term you have not finished is an ordinary string and needs no special
 representation to be stored or sent anywhere.
 
+### A session says which files it read, and what they said
+
+*Decided 2026-11-06, MS11 phase 295.*
+
+A session is a transcript: the lines you submitted, in order. Replaying it is
+submitting those lines again, one at a time, as though you had typed them — so what
+a stored session depends on is the files those lines reached. **The session carries
+that list**, each path with a hash of the contents it was read with, and a frontend
+that stores a session stores the list beside it.
+
+```
+filesRead  -- every path this session opened, with what the file said at the time
+```
+
+**The shipped prelude and the standard rule base are in it.** They come from the
+installed data directory, so **upgrading Thena shows up as a changed hash** rather
+than as a replay that fails for no visible reason.
+
+**A file that was read and then refused is in the list too.** A refused line has to
+be refused again when the transcript is replayed, so the file it reached is part of
+what the replay stands on, whether or not anything it said was installed.
+
+**Nothing watches a file while you work.** The list is for the moment a session is
+taken up again: read the paths, hash them, and say which have moved. Edit a file
+mid-session and nothing interrupts you.
+
+**It is a hash, not a signature.** Sixteen hex digits of a mixing function, enough to
+tell a file that has moved from one that has not. It is not evidence about who wrote
+the file, and nothing in Thena treats it as evidence — a proof's trustworthiness is
+`:trust`'s business and has nothing to do with this list.
+
 ### The text printers take one rendering, not a grammar list and a counter
 
 *Decided 2026-09-30.*

@@ -93,8 +93,8 @@ recordTests =
                 , "attack"
                 , "qed"
                 ]
-          named = [ n | Just n <- map entryProof (recordOf s) ]
-          slice = concatMap (\n -> provedUnder n s) (take 1 named)
+          under = [ n | Just n <- map entryProof (recordOf s) ]
+          slice = concatMap (\n -> provedUnder n s) (take 1 under)
        in map entrySubmitted slice
             @?= [Just ":theorem t : N", Just "attack", Just "qed"]
   , testCase "and the declaration before it belongs to no proof" $
