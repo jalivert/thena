@@ -96,6 +96,15 @@ because `Thena.Files.loadFile` is the function under test and it reads a real fi
 - `ImportsLoop.thena.script` reaches `LoopA`/`LoopB` through a script, so the cycle
   refusal is the module walk's own and is not written twice.
 
+**And four are `~2kc72`'s, which is OPEN on MS11's closeout list and is not a suite's.**
+`WithheldLang.thena` exports `keep` only and declares a language; `TakesLang.thena.rules`
+imports it and matches `LC[app]`, which **loads** — the leak; `NamesLang.thena` names the
+type and is refused, *not in scope: LC*; `WritesLang.thena` writes the notation without
+naming the type and is refused one step later, *not in scope: LC.app*, which is how we
+know **a surface importer gets the grammar too**. Run them with `./tc`. Added 2026-11-09
+because the first measurement's files had been deleted and the item had to be
+reproduced from its own text.
+
 **And three are MS11 phase 302's, for `:replay`** (`~22qjj`, his ruling of 2026-11-09).
 `Thena.LoadTests` — *a replay is the lines, not the asking* — is what reads them:
 
