@@ -96,6 +96,18 @@ because `Thena.Files.loadFile` is the function under test and it reads a real fi
 - `ImportsLoop.thena.script` reaches `LoopA`/`LoopB` through a script, so the cycle
   refusal is the module walk's own and is not written twice.
 
+**And three are MS11 phase 302's, for `:replay`** (`~22qjj`, his ruling of 2026-11-09).
+`Thena.LoadTests` — *a replay is the lines, not the asking* — is what reads them:
+
+- `Replayed.thena.script` is what gets replayed, and its three lines are chosen so that
+  each of the ruling's halves is observable: an `import`, so there is a file the hash
+  list must hold while the script itself must not; an `open`; and a `claim`, which
+  changes the development and so pushes the undo snapshot that a replay must leave
+  behind and a `:load script` of the same file must not.
+- `ReplaysReplayed.thena.script` replays it and then writes a line that needs what the
+  replay brought, so a nested replay is measured as a replay and not only as a read.
+- `ReplaysItself.thena.script` is the loop, refused rather than followed.
+
 **And six are MS11 phase 300's, for a rule file's `consult B where { … }`** (`~k68d7`).
 Four of them are a pool and two are names:
 

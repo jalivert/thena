@@ -13,7 +13,7 @@
 -- ends.** That is the difference between a script and a module: a module's pool
 -- is the module's for the length of the load, and a script's is yours.
 --
--- Run it with   :load examples/Stlc08PreservationByTactics.thena.script
+-- Run it with   :replay examples/Stlc08PreservationByTactics.thena.script
 
 import examples.Stlc01Syntax
 import examples.Stlc02Contexts

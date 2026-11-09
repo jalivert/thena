@@ -1762,6 +1762,36 @@ A `:load` inside a file is still refused — *a :load inside a loaded file is no
 followed*. It is the construct `import` and `consult` replace, and it is the one with
 no cycle check behind it; an `import` cycle is refused by name.
 
+### `:replay` runs a script as though you had typed it
+
+`:replay ‹path›` submits a script's lines one at a time, exactly as if you had
+typed each one at the prompt. **It is how a stored proof is taken up again**: a
+saved session is a `.thena.script`, so taking one up, reloading it and stepping
+through it are one operation at three speeds.
+
+*From a fresh session.*
+
+```
+thena spine> :replay test/modules/Replayed.thena.script
+module test.modules.Bit
+  declared Bit
+opened Bit
+thena spine> :undo
+▶ let ? goal : Type₀ in
+  goal
+```
+
+**The `:replay` line itself is not part of your session's transcript — the lines
+it brought are.** So a transcript built by replaying is indistinguishable from
+one you typed: `:undo` steps back through a replay line by line, as above, and
+nothing afterwards can tell how those lines arrived. That is also why a stored
+proof-script never has to name another one.
+
+A script may `:replay` a script. A script that replays itself — or an ancestor of
+itself — is refused, because a replay submits lines and a loop would never end:
+*these scripts replay each other*. Sameness is what the files said rather than
+what they were called, so the same file under two spellings is still a loop.
+
 **A rule file states its dependencies the same way.** A base that talks about a
 language imports the module declaring it:
 
@@ -1984,6 +2014,7 @@ language and elaborated on load.
 | `:trust none` / `no-undischargeable` / `any` | how much unproved typing to allow |
 | `:load ‹path›` | a proof module, a script, or rule bases |
 | `:load proof` / `rules` / `script` | say which, rather than by extension |
+| `:replay ‹path›` | run a proof-script, line by line, as if typed |
 | `:consult ‹path›` | push rule bases on top of the search stack |
 | `:bases` / `:rules` | the loaded rule bases / the rules in them |
 | `:help` | this table, in one screen |

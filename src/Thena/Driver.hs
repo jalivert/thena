@@ -59,6 +59,7 @@ module Thena.Driver
   , loadSource
   , loadFinished
   , stopped
+  , unrecorded
   , loadProofSource
   , loadProofItems
   , loadProofItemsConsulting
@@ -561,6 +562,14 @@ data Session = Session
     -- open is part of what that replay stands on. A file that would not open at
     -- all is not here, there being nothing to hash.
     --
+    -- **THE ONE EXCEPTION IS A SCRIPT THAT WAS RUN AS LINES** — @:replay@, and
+    -- @:load script@ with it (MS11 phase 302, his ruling of 2026-11-09). Its
+    -- lines are in the record now, so the session does not stand on that file at
+    -- all and a digest for it would warn about a dependency that is gone. **The
+    -- test is the same one the rest of the list passes**: what is here is what a
+    -- replay of these lines would have to open again. The files the script's own
+    -- lines opened are here, as always.
+    --
     -- **One entry per path, the newest read's, at the front.** The fact being
     -- recorded is what the file said when this session last looked, and two
     -- digests for one path would say nothing a frontend could act on.
@@ -802,7 +811,7 @@ digestText :: Digest -> String
 digestText (Digest w) =
   [ intToDigit (fromIntegral ((w `shiftR` (4 * i)) .&. 0xf)) | i <- [15, 14 .. 0 :: Int] ]
 
--- | __Every file this session read__ (MS11 phase 295) — newest read of a path
+-- | __Every file this session read and stands on__ (MS11 phase 295) — newest read of a path
 -- first, and otherwise in no order a caller should rely on.
 --
 -- A read and not the field, as every other part of the session is.
@@ -1100,6 +1109,17 @@ data Response
     -- because the development it built was rewound and printing a term the
     -- session no longer holds would invite a @goto@ into nothing
   | LoadRequested FilePath
+  | ReplayRequested FilePath
+    -- ^ @:replay ‹path›@ (MS11 phase 302): a **proof-script**, submitted line
+    -- by line as though the user had typed each one. Like 'LoadRequested' it
+    -- only names the file — reading it is "Thena.Files"\'s (§12 invariant 4).
+    --
+    -- **The line that asked for it is not recorded, and it is the only line
+    -- that is not** ('unrecorded', his ruling of 2026-11-09): the lines it
+    -- brings are what the transcript holds, so @:replay@ never appears in a
+    -- stored transcript and a transcript built by replaying is
+    -- indistinguishable from one that was typed. @.claude\/RULINGS.md@,
+    -- /Ruling of 2026-11-09/.
   | ProofRequested FilePath
     -- ^ @:load@ on a @.thena@ path (MS4 phase 43): a **proof module**, which is
     -- surface declarations and not command lines. Like 'LoadRequested' it only
@@ -1172,6 +1192,21 @@ data Response
     -- stands, so a loop would splice for ever; a base consulted twice by two
     -- different bases is not a loop and is two pushes, which is his ruling of
     -- 2026-11-03.
+  | ReplayCycle [FilePath]
+    -- ^ **these scripts replay each other** (MS11 phase 302), in the order the
+    -- replay met them, the script that closed the loop named at both ends.
+    --
+    -- 'ImportCycle''s third cousin, and the one refusal a replay needs: a
+    -- replay submits lines, so a script that replays an ancestor of itself
+    -- submits that @:replay@ line again and never terminates.
+    --
+    -- **Sameness here is what the files SAID, not what they were called.** A
+    -- path is not canonical — @.\/a@ and @a@ are one file under two spellings —
+    -- so the walk carries the digest of every script it is inside and compares
+    -- those. It refuses exactly the non-terminating cases: a script whose
+    -- contents are already being replayed will reach the same @:replay@ line
+    -- again, there being no conditional in a script, and two byte-identical
+    -- scripts that merely sit side by side are never both on the walk at once.
   | ModuleMisnamed ModuleName ModuleName
     -- ^ **the module reached by the first name calls itself the second** (MS11
     -- phase 278, his ruling of 2026-11-05, @~r58qh@). The name an @import@ used
@@ -3660,6 +3695,26 @@ dispatch s name arg = case name of
       ps@(p : _) | all ((== kindOf p) . kindOf) ps -> loadKind (kindOf p) ps
       (_ : _)  -> (s, Rejected (MixedLoad name))
       []       -> (s, Rejected (MissingArgument name))
+  -- | @:replay ‹proof-script›@ — **run a script\'s lines as though the user
+  -- had typed them** (MS11 phase 302). His name of 2026-10-29, and the third of
+  -- the three words that replace @:load@: @import@ a surface module, @consult@ a
+  -- rule base, @:replay@ a script.
+  --
+  -- **A path and not a module name**, which is the pattern the colon already
+  -- carries: @consult ‹base›@ takes a name and @:consult ‹path›@ takes a path,
+  -- and a @.thena.script@ has no header to check a name against (@~r58qh@) and
+  -- is not a node in the import graph.
+  --
+  -- **One path.** Several would be several acts, and two scripts replayed in
+  -- order are two lines — unlike @:consult@, whose list is one push group and
+  -- therefore means something as a list.
+  --
+  -- **Reading is the caller\'s; this only names it** (§12 invariant 4), and
+  -- what the reader does with it is 'ReplayRequested'.
+  ":replay" -> withArgument $ case pathsOf arg of
+    []    -> (s, Rejected (MissingArgument name))
+    [one] -> (s, ReplayRequested one)
+    _     -> (s, Rejected (UnexpectedArgument name))
   -- **A consult pushes; it does not replace** (MS11 phase 271, his ruling of
   -- 2026-11-03). Several paths in one line are one push in the order written, so
   -- the leftmost of them is searched first within the group, and the group sits
@@ -4515,6 +4570,7 @@ commandSummary =
   , (":undo",                    "take back the last line")
   , (":extract",                 "the term the development stands for")
   , (":revalidate",              "recheck the whole development")
+  , (":replay ‹path›",           "run a proof-script, line by line, as if typed")
   , (":load ‹path›",             "a proof module, a script, or rule bases")
   , (":load proof / rules / script", "say which, rather than by extension")
   , (":consult ‹path›",          "push rule bases on top of the search stack")
@@ -5808,6 +5864,13 @@ settle said (s', resp) = (record s' { sessionAsking = asking }, resp)
     record sess = sess'
       where
        sess'
+        -- **A line that brings other lines is not itself recorded** (MS11
+        -- phase 302, his ruling of 2026-11-09). 'unrecorded' says which, and
+        -- @:replay@ is the only one: what the transcript holds is the lines the
+        -- replay submitted, each of which comes through here on its own, so
+        -- recording the asking line too would put a line in the transcript that
+        -- replaying it would run twice.
+        | unrecorded resp = kept
         -- **A line that did not do what it said leaves the proof exactly as it
         -- was** (phase 25d). Before this, a rule body that had already changed
         -- the development and then failed left what it built behind, and the
@@ -5999,6 +6062,10 @@ loadSource s0 = go s0 1 [] . lines
             -- that stated what it reuses carried on without it and failed on
             -- the next line instead.
             ImportRequested _ _ -> finished s acc (Just (NestedLoad n))
+            -- **A @:replay@ is the sixth** (MS11 phase 302), and it is the one
+            -- the door with the disc follows while this one cannot: a replay
+            -- reads a file, and this function is pure.
+            ReplayRequested _ -> finished s acc (Just (NestedLoad n))
             Quit            -> finished s' acc' Nothing
             _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
               | otherwise    -> go s' (n + 1) acc' ls
@@ -6074,6 +6141,37 @@ stopped resp = case resp of
   Ran _ _ (Refused _)     -> True
   Ran _ _ (Uncertified _) -> True
   _                     -> False
+
+-- | __Which responses come from a line the transcript does not hold__ — and
+-- there is exactly one, @:replay@ (MS11 phase 302, his ruling of 2026-11-09).
+--
+-- **A replay submits the script\'s lines one at a time as though the user had
+-- typed them, and those lines are what the record holds.** So the @:replay@
+-- line itself is dropped: it never appears in a stored transcript, and a
+-- transcript built by replaying is indistinguishable from one that was typed.
+--
+-- **His reason was the one that decided it**, and it is about the artefact and
+-- not about the recorder: a recorded @:replay@ line would make a proof-script
+-- name another proof-script, so the stored format would grow a composition
+-- mechanism with its own resolution, visibility and staleness — /"this
+-- essentially becomes @include@ in the repl-script… And I really didn\'t want
+-- there to be one more level of a module-system. I think two are enough."/
+--
+-- Three things fall out of it. **A proof stays a slice of a transcript** —
+-- under the alternative, a proof that arrived by replay would have no lines in
+-- this transcript to slice. **It closes under itself**: a replayed script that
+-- replays flattens the same way, so there is no depth to reason about. And
+-- **live-script mode gets the lines as ordinary editable lines**, which is the
+-- use he named.
+--
+-- **The hash list leaves the script out for the same reason**
+-- ('sessionFilesRead'): the lines are in the record now, so the transcript does
+-- not stand on the script at all. The files those lines open are noted as
+-- normal.
+unrecorded :: Response -> Bool
+unrecorded resp = case resp of
+  ReplayRequested _ -> True
+  _                 -> False
 
 -- | Run until the machine needs the user, spending at most this much fuel —
 -- 'Nothing' to run on, @Just n@ for at most @n@ instructions (phase 128).

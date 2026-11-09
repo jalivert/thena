@@ -6388,6 +6388,43 @@ lines you typed, so its effects are yours, exactly as they would be had you type
 replace, and it is the one with no cycle check behind it — a script that loaded itself
 would not stop. An `import` cycle is refused by name.
 
+### `:replay` runs a script as though you typed it, and leaves no trace of itself
+
+*Decided 2026-11-09, MS11 phase 302.*
+
+`:replay ‹proof-script›` submits a script's lines one at a time, exactly as if you had
+typed each one at the prompt. **It is how a stored proof is taken up again** — a saved
+session is a `.thena.script`, which is why there is no second format — and it is the
+third of the three words that replace `:load`: `import` a module, `consult` a rule
+base, `:replay` a script.
+
+```
+thena spine> :replay Stlc/Preservation.thena.script
+```
+
+**The `:replay` line is not part of your session's transcript. The lines it brought
+are.** So a transcript built by replaying is indistinguishable from one you typed:
+`:undo` steps back through a replay line by line, and nothing afterwards can tell how
+those lines arrived.
+
+**The reason is about the stored file, not about the recorder.** If a transcript
+recorded the `:replay` line instead, a stored proof-script would name another stored
+proof-script — and that is a composition mechanism, with its own resolution,
+visibility and staleness rules, over an artefact you did not declare. Thena has two
+such mechanisms, surface modules and rule bases, and that is enough. Three
+consequences follow: a stored proof stays a slice of a transcript, a replay closes
+under itself so there is no nesting to reason about, and an editor that lets you edit
+submitted lines gets the brought-in lines as ordinary editable lines.
+
+**A replayed script is not something your session depends on**, so it is not in the
+list of files read — see *A session says which files it read*. The files its lines
+open are.
+
+**A script may replay a script.** A script that replays itself, or an ancestor of
+itself, is refused: a replay submits lines, so the loop would never end. Sameness is
+what the files said rather than what they were called, so the same file reached by two
+different paths is still a loop.
+
 ### A session says which files it read, and what they said
 
 *Decided 2026-11-06, MS11 phase 295.*
@@ -6409,6 +6446,11 @@ than as a replay that fails for no visible reason.
 **A file that was read and then refused is in the list too.** A refused line has to
 be refused again when the transcript is replayed, so the file it reached is part of
 what the replay stands on, whether or not anything it said was installed.
+
+**A script you replayed is not in the list, and it is the one exception.** Its lines
+are in your transcript now, so replaying that transcript does not open the script
+again — see *`:replay` runs a script as though you typed it*. The test is the same one
+everything else in the list passes: what is here is what a replay would have to read.
 
 **Nothing watches a file while you work.** The list is for the moment a session is
 taken up again: read the paths, hash them, and say which have moved. Edit a file

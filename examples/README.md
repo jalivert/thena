@@ -73,14 +73,16 @@ cabal run thena
 
 **Every file here loads on its own**, so there is no order to get right. For the
 whole series, `10`, `09` and `06` import every other surface module between them,
-the rule base states its own dependency, and the script states its own imports:
+the rule base states its own dependency, and the script states its own imports.
+**A script is run with `:replay`**, which submits its lines as though you had typed
+them:
 
 ```
 :load examples/Stlc10PreservationAnyContext.thena
 :load examples/Stlc09Printing.thena
 :load examples/Stlc06MoreJudgments.thena
 :consult examples/Stlc04TakingTermsApart.thena.rules
-:load examples/Stlc08PreservationByTactics.thena.script
+:replay examples/Stlc08PreservationByTactics.thena.script
 ```
 
 A module is loaded once however many files reach it, so loading `09` after `10`

@@ -25,6 +25,7 @@ module Thena.Files
   , loadRuleFiles
   , consultRuleFiles
   , loadFile
+  , replayFile
   , loadProofFile
   , importModule
   , following
@@ -296,34 +297,116 @@ imported s contents = go [] contents
 -- that could drift.
 loadFile :: Session -> FilePath -> IO (Session, [Response], [Trouble])
 loadFile s0 path = do
+  (s, out, trouble) <- script [] s0 path
+  pure (loadFinished s0 s, out, trouble)
+
+-- | __@:replay ‹proof-script›@ — run a script\'s lines as though the user had
+-- typed them__ (MS11 phase 302, his ruling of 2026-11-09, @~22qjj@).
+--
+-- **The same loop 'loadFile' runs, and the difference is only what it leaves
+-- behind.** A @:load script@ is a file being /loaded/, so it ends with
+-- 'Thena.Driver.loadFinished' — no undo history, no pending question. A replay
+-- is the user typing, so it ends with whatever the lines left: the snapshots
+-- the lines pushed are still there, so @:undo@ steps back through a replay
+-- exactly as far as it steps back through the same lines typed, and a script
+-- whose last line asked is left asking, for the user to answer.
+--
+-- **That is what makes a replayed transcript indistinguishable from a typed
+-- one**, which is the ruling: the @:replay@ line is not recorded
+-- ('Thena.Driver.unrecorded'), the lines are, and nothing of the session\'s
+-- state says which way they arrived.
+--
+-- **The script is not in 'Thena.Driver.filesRead'**, by the same ruling: the
+-- lines are in the record now, so the transcript does not stand on the script
+-- at all. The files those lines open are noted as they always were.
+replayFile :: Session -> FilePath -> IO (Session, [Response], [Trouble])
+replayFile = script []
+
+-- | The loop both doors run: **one line at a time with the disc behind each
+-- line**, the session after, what its lines said, and what went wrong, kept
+-- apart because the two callers want different halves.
+--
+-- A loaded line\'s own output is real output — a file is a script of command
+-- lines (§9), so @:infer@ in a file answers what @:infer@ answers.
+--
+-- **IT RAN THROUGH THE PURE 'loadSource' UNTIL MS11 PHASE 296** (@~qnfcp@), and
+-- that is why a @.thena.script@ could not say what it stands on: an @import@
+-- needs a file read, 'loadSource' is pure (§12 invariant 4), so the line was
+-- refused as a 'NestedLoad' and the five scripts in @examples/@ relied on
+-- whatever the session happened to hold. **The loop is here now, where the disc
+-- is** — the same two-step shape phase 273 settled for a module, and the same
+-- shape 'Thena.Repl.transcriptIO' has had since MS1.
+--
+-- **AN @import@, A @consult@ AND A @:replay@ ARE FOLLOWED; A @:load@ IS NOT.**
+-- The three have a cycle check behind them — 'imports' refuses a loop by name,
+-- 'publishing' refuses one between bases, and the @stack@ argument here refuses
+-- one between scripts — and @:load@ has none, so a script that loaded itself
+-- would not terminate. It is also the construct the acts replace, so nothing is
+-- owed it. That refusal is MS1\'s and is unchanged.
+--
+-- **A script\'s acts run into the live session and are still there afterwards**,
+-- unlike a module\'s, whose pool is the module\'s for the length of the load (his
+-- ruling of 2026-11-03, 'loadProofItems'). The asymmetry is the difference
+-- between a script and a module: **a script is a batch of lines you typed, so
+-- its effects are yours.** @DECISIONS.md@, /A script states what it stands on/,
+-- says it for a user; the reading is @~qnfcp@\'s and is his to confirm.
+--
+-- **The script\'s own file is NOT noted in 'Thena.Driver.filesRead'** — it was
+-- until MS11 phase 302, when his ruling on @:replay@ made the lines the thing
+-- the transcript holds: a script a replay flattened is not something the
+-- session stands on, so a digest for it would warn about a dependency that is
+-- gone. The files its lines name are noted by whichever door 'following' sends
+-- them through.
+--
+-- **Two loops and not one**, this and 'Thena.Repl.transcriptIO': they differ in
+-- what they produce (responses against the text a terminal would have shown)
+-- and in what they follow (the three acts against all six, a line typed at the
+-- prompt being allowed to @:load@). What they share is 'following', which is the
+-- part that could drift.
+--
+-- @stack@ is the scripts this one is nested inside, innermost first, each with
+-- the digest of what it said — see 'Thena.Driver.ReplayCycle' for why sameness
+-- is the contents and not the path.
+script
+  :: [(FilePath, Digest)] -> Session -> FilePath
+  -> IO (Session, [Response], [Trouble])
+script stack s0 path = do
   contents <- try (readFile path)
   case contents of
     Left e  -> pure (s0, [], [Unreadable path e])
-    Right c -> do
-      -- **The script's own file is noted here** (MS11 phase 295), and the files
-      -- its lines name are noted by whichever door 'following' sends them
-      -- through.
-      (s, out, trouble) <- go (noteRead path (digestOf c) s0) 1 [] (lines c)
-      pure (loadFinished s0 s, out, trouble)
+    -- **The loop is refused here, where the contents are**, so the file is read
+    -- once and the digest the check uses is the digest of the text that would
+    -- have run.
+    Right c
+      | digestOf c `elem` map snd stack ->
+          pure ( s0
+               , []
+               , [ Unloadable path
+                     (ReplayCycle (reverse (map fst stack) ++ [path])) ] )
+      | otherwise -> go (digestOf c) s0 1 [] (lines c)
   where
     -- The file ran out while an op was still asking. The line to name is the one
     -- that asked, which is the last one that ran.
-    go s _ acc [] = pure $ case pendingQuestion s of
+    go _ s _ acc [] = pure $ case pendingQuestion s of
       Just _  -> (s, reverse acc, [halted (UnansweredQuestion (length acc))])
       Nothing -> (s, reverse acc, [])
-    go s n acc (l : ls) = case resp of
+    go d s n acc (l : ls) = case resp of
       -- **The three kinds of @:load@**, refused and not followed, with the
       -- line's response dropped: it asked for something that did not happen.
       LoadRequested _    -> nested
       ProofRequested _   -> nested
       RulesRequested _   -> nested
-      -- **The two acts**, read where the disc is. What the act had to say comes
-      -- after the line's own response, in the order it arrived.
+      -- **The three acts**, read where the disc is. What the act had to say
+      -- comes after the line's own response, in the order it arrived.
       ConsultRequested _ _ -> follow
       ImportRequested _ _  -> follow
+      -- **A script may replay a script** (MS11 phase 302). It is the same act
+      -- the prompt writes and it flattens the same way, so there is no depth to
+      -- reason about — only the loop to refuse.
+      ReplayRequested p    -> replay p
       Quit               -> pure (s', reverse (resp : acc), [])
       _ | stopped resp   -> pure (s', reverse (resp : acc), [halted (LoadStopped n)])
-        | otherwise      -> go s' (n + 1) (resp : acc) ls
+        | otherwise      -> go d s' (n + 1) (resp : acc) ls
       where
         (s', resp) = oneLine s l
         nested     = pure (s, reverse acc, [halted (NestedLoad n)])
@@ -332,15 +415,22 @@ loadFile s0 path = do
         -- the line named: either way the line did not do what it said, which is
         -- the whole of what 'stopped' means.
         follow = case following s' resp of
-          Nothing  -> go s' (n + 1) (resp : acc) ls
-          Just act -> do
-            (s'', rs, ts) <- act
-            let acc' = reverse rs ++ resp : acc
-            if null ts && not (any stopped rs)
-              then go s'' (n + 1) acc' ls
-              else pure ( s''
-                        , reverse acc'
-                        , if null ts then [halted (LoadStopped n)] else ts )
+          Nothing  -> go d s' (n + 1) (resp : acc) ls
+          Just act -> spliced act
+
+        -- **The ancestors, innermost last, so the list reads as the path the
+        -- replay took** — 'imports' names a cycle the same way, and the script
+        -- that closed the loop is named at both ends.
+        replay p = spliced (script ((path, d) : stack) s' p)
+
+        spliced act = do
+          (s'', rs, ts) <- act
+          let acc' = reverse rs ++ resp : acc
+          if null ts && not (any stopped rs)
+            then go d s'' (n + 1) acc' ls
+            else pure ( s''
+                      , reverse acc'
+                      , if null ts then [halted (LoadStopped n)] else ts )
 
     halted = Stopped path
 
@@ -586,8 +676,8 @@ beneath stack ((path, src) : rest) = do
                      ++ concatMap spreadHeld held''
                      ++ spreadHeld back))
 
--- | **The four responses the driver cannot act on itself**: each named a file,
--- and reading files is this module\'s (§12 invariant 4).
+-- | **The responses the driver cannot act on itself**: each named a file, and
+-- reading files is this module\'s (§12 invariant 4).
 --
 -- Written once (2026-09-13) because there are now two callers — the interactive
 -- @loop@ and @transcriptIO@ — and three near-identical cases in each would be
@@ -605,6 +695,10 @@ following s resp = case resp of
   -- A module named rather than a path: the name is resolved here, where the
   -- disk is (MS11 phase 284).
   ImportRequested m _  -> Just (importModule s m)
+  -- **A script, submitted as though typed** (MS11 phase 302). The empty stack
+  -- is the point of entry: a line typed at the prompt is nested inside nothing,
+  -- so no replay it starts can close a loop that was already open.
+  ReplayRequested path -> Just (replayFile s path)
   _                    -> Nothing
 
 -- | __@import ‹module›@ typed at the prompt__ (MS11 phase 284, his ruling of

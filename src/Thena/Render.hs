@@ -280,6 +280,9 @@ renderResponse s resp = let ren = renderingOf s in case resp of
           Just f  -> (q ++ "   no") : renderConversionFailure ren f
   -- Nothing to print: the caller reads the file and prints what that produced.
   LoadRequested _ -> []
+  -- **Nothing of its own, like the other five requests**: what a replay has to
+  -- say is the responses of the lines it submitted (MS11 phase 302).
+  ReplayRequested _ -> []
   Revalidated Nothing  -> ["valid"]
   Revalidated (Just e) -> renderKernelError ren e
   Extracted t          -> [renderCore ren [] t]
@@ -347,6 +350,11 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   ConsultCycle ms ->
     [ "these rule bases publish each other: "
         ++ intercalate " publishes " (map moduleText ms) ]
+  -- **The path the replay took** (MS11 phase 302), the script that closed the
+  -- loop named at both ends. The paths as they were written, which is the only
+  -- form the user can act on.
+  ReplayCycle ps ->
+    [ "these scripts replay each other: " ++ intercalate " replays " ps ]
   -- **Both names, because either one could be the typo** (MS11 phase 278): the
   -- file may be in the wrong place or the header may be wrong, and nothing here
   -- can tell which the user meant.

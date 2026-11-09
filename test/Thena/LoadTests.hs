@@ -73,6 +73,7 @@ import Thena.Driver
   , oneLine
   , parseSurfaceModule
   , filesRead
+  , submittedLines
   , digestOf
   , digestText
   , stopped
@@ -96,6 +97,7 @@ import Thena.Files
   , consultRuleFiles
   , following
   , loadFile
+  , replayFile
   , loadProofFile
   , startingSession
   )
@@ -138,6 +140,7 @@ tests =
     , testGroup "and so does a consult (MS11 phase 292)" scopedConsultTests
     , testGroup "every file read is hashed (MS11 phase 295)" hashTests
     , testGroup "a script states what it stands on (MS11 phase 296)" scriptActTests
+    , testGroup "a replay is the lines, not the asking (MS11 phase 302)" replayTests
     ]
 
 
@@ -3126,3 +3129,101 @@ scopedConsultTests =
             @?= ["test.modules.Tooling", "test.modules.Mutters"]
         Left e -> assertFailure (show e)
   ]
+
+
+-- --------------------------------------------------------------------------
+-- A replay is the lines it ran (MS11 phase 302, @~22qjj@)
+-- --------------------------------------------------------------------------
+
+-- | __@:replay ‹proof-script›@ submits a script\'s lines as though the user had
+-- typed them, and the @:replay@ line itself is never recorded__ — his ruling of
+-- 2026-11-09.
+--
+-- **The whole of the ruling is observable in the session**, and these are the
+-- four observations: the lines are in the record and the asking line is not,
+-- the script is not in the hash list while the files its lines open are, the
+-- undo history is the one the lines pushed, and a loop is refused.
+--
+-- **Every case goes through the door a user\'s line goes through** —
+-- 'oneLine' to get the response, 'following' to act on it — because the thing
+-- under test is what the asking line leaves behind, and calling 'replayFile'
+-- directly would have no asking line to leave anything.
+replayTests :: [TestTree]
+replayTests =
+  [ testCase "the lines are in the record and the :replay line is not" $ do
+      (s0, _) <- startingSession
+      let (s1, resp) = oneLine s0 ":replay test/modules/Replayed.thena.script"
+      resp @?= ReplayRequested "test/modules/Replayed.thena.script"
+      -- Nothing was recorded by the asking line itself.
+      submittedLines s1 @?= submittedLines s0
+      case following s1 resp of
+        Nothing  -> assertFailure "a replay was not followed"
+        Just act -> do
+          (s2, _, trouble) <- act
+          assertBool (show (map (renderTrouble s1) trouble)) (null trouble)
+          -- And what is there afterwards is the script, line for line: a
+          -- transcript built by replaying is indistinguishable from one that
+          -- was typed.
+          drop (length (submittedLines s0)) (submittedLines s2)
+            @?= [ "import test.modules.Bit"
+                , "open Bit"
+                , "claim \"h\" core`Bit`"
+                ]
+
+  , -- **The script is not a file the session stands on**, because its lines
+    -- are in the record now — his ruling of 2026-11-09. The module its
+    -- @import@ line reached is, like any other file a line opens.
+    testCase "the script is not in the hash list, and what its lines open is" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- replayFile s0 "test/modules/Replayed.thena.script"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      own (filesRead s1) @?= ["test/modules/Bit.thena"]
+
+  , -- **The undo history is the one the lines pushed**, which is the other half
+    -- of /as though the user had typed them/: the caret can be moved back
+    -- through a replay without replaying anything again.
+    testCase "undo steps back into a replay" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- replayFile s0 "test/modules/Replayed.thena.script"
+      assertBool "the claim is in" ("h" `isInfixOf` shown s1 ":show")
+      let (s2, undone) = oneLine s1 ":undo"
+      assertBool (show (renderResponse s1 undone)) (not (stopped undone))
+      assertBool "and the claim is out" (not ("h" `isInfixOf` shown s2 ":show"))
+
+  , -- **Where a @:load script@ of the same file leaves none**, which is the one
+    -- difference between the two doors: a load ends with
+    -- 'Thena.Driver.loadFinished' and a replay ends with whatever the lines
+    -- left.
+    testCase "where a :load script of the same file leaves none" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadFile s0 "test/modules/Replayed.thena.script"
+      let (_, undone) = oneLine s1 ":undo"
+      assertBool (show (renderResponse s1 undone)) (stopped undone)
+
+  , -- **A script may replay a script**, and the line after the replay runs
+    -- against what it brought.
+    testCase "a script may replay a script" $ do
+      (s0, _) <- startingSession
+      (s1, out, trouble) <- replayFile s0 "test/modules/ReplaysReplayed.thena.script"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (show (concatMap (renderResponse s1) out))
+        (any ("off : Bit" `isInfixOf`) (concatMap (renderResponse s1) out))
+
+  , -- **And a loop is refused rather than followed** — a replay submits lines,
+    -- so a script that replays an ancestor of itself would reach the same
+    -- @:replay@ line again and never terminate. Sameness is what the files
+    -- said, not what they were called: a path is not canonical.
+    testCase "a script that replays itself is refused, and the loop is named" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- replayFile s0 "test/modules/ReplaysItself.thena.script"
+      submittedLines s1 @?= submittedLines s0
+      case trouble of
+        [Unloadable _ (ReplayCycle ps)] ->
+          ps @?= [ "test/modules/ReplaysItself.thena.script"
+                 , "test/modules/ReplaysItself.thena.script"
+                 ]
+        _ -> assertFailure (show (map (renderTrouble s0) trouble))
+  ]
+  where
+    own reads' = [ p | (p, _) <- reads', "test/modules/" `isPrefixOf` p ]
+    shown s line = unlines (renderResponse s (snd (oneLine s line)))
