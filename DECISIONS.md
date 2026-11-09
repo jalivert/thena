@@ -745,6 +745,10 @@ Two consequences worth knowing before you write one.
   you find out. At rest it is absent because at rest it is not in the pool. What you
   cannot do is read off the text of your own file which base will answer a call — and
   that is already true of any base loaded after yours.
+- **And a call that reaches out of its block is refused when the file loads.** *Built
+  MS11 phase 301.* A rule is checked against the pool plus whatever its own block
+  pushed, so `outside` above calling a rule only `Stlc.Crush` defines is a load error
+  that names `outside` — not a *no rule is called …* the first time somebody runs it.
 
 **And both words are typed at the prompt.** *Built MS11 phase 284.* `import
 Stlc.Terms` loads that module by name, `consult Stlc.Tactics` pushes that base, and

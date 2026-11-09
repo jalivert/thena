@@ -26,6 +26,10 @@
 module Thena.Instral.Infer
   ( InstralTypeError (..)
   , Site (..)
+  , Scoped (..)
+  , Callable
+  , callableOf
+  , reachingAll
   , inferProgram
   , inferBlock
   , boundBy
@@ -275,6 +279,55 @@ instantiateWith ts st0 =
 -- error"*.
 type Callable = (GlobalName, Int)
 
+-- | __One rule, and the callables its body may call__ (MS11 phase 301).
+--
+-- **Two rules in one push need not reach the same callables**, which is what
+-- MS11 phase 300 changed: a rule written inside @consult B where { … }@ runs
+-- with @B@ in front of the pool and a rule outside that block does not, so
+-- /does anything answer this call/ is a question about the body and not about
+-- the file. Asking it of the file is the defect this type is here to make
+-- unstatable — a rule that calls into a base it does not push used to load and
+-- fail at run time.
+--
+-- **The reach is the pool plus what that body's own pushes put on**, and
+-- 'Thena.Driver.installReadBases' reads it off the @push-base@ instructions
+-- the block compiled into the body — the same list the engine pushes when the
+-- body runs, so the check and the run cannot come to disagree.
+--
+-- **It is the callables and not the bases**, because that is what a call site
+-- looks up, and a name several bases answer is one callable however many of
+-- them there are (the flat pool, @~hf9wh@).
+data Scoped = Scoped
+  { scopedRule  :: Rule
+  , scopedReach :: [Callable]
+  }
+
+-- | Every rule, each reaching every callable the others define — **what a
+-- caller with nothing held asks**, and what every load asked before MS11 phase
+-- 300.
+--
+-- A typed line, a @do@ block and @:accepts@ all read a pool that is already
+-- assembled: there is no body in it whose reach is narrower than the list, so
+-- the narrowing has nothing to do.
+reachingAll :: [Rule] -> [Scoped]
+reachingAll rs = [ Scoped r cs | r <- rs ]
+  where
+    cs = nub (map callableOf rs)
+
+-- | __The environment one body may read__ (MS11 phase 301): the entries its
+-- reach names.
+--
+-- **Its own entry is kept whether the reach names it or not.** 'clause' looks
+-- that one up directly and treats a miss as a bug in 'declareThese', so a
+-- reach computed wrongly would be a crash where it should at worst be a
+-- refusal. A rule is in the file it is written in either way.
+inReach :: Scoped -> SigEnv -> SigEnv
+inReach sc env =
+  [ e
+  | e@(c, _) <- env
+  , c `elem` scopedReach sc || c == callableOf (scopedRule sc)
+  ]
+
 -- | Every clause of one name and arity shares one signature — its parameters'
 -- types and the type it returns. Clauses that disagree are what a 'Clash'
 -- reports, and the site is whichever clause was walked second.
@@ -321,10 +374,11 @@ data Bound
 -- The order the components come back in is the order they must be walked —
 -- callees first — so this is a left fold and the environment grows as it goes.
 inferProgram
-  :: [(String, Signature)] -> [Rule]
+  :: [(String, Signature)] -> [Scoped]
   -> ([(Callable, Signature)], [InstralTypeError])
-inferProgram sigs rs =
-  let (env, st) = foldl (inferGroup sigs rs) ([], St 0 [] [] []) (components rs)
+inferProgram sigs scoped =
+  let rs        = map scopedRule scoped
+      (env, st) = foldl (inferGroup sigs scoped) ([], St 0 [] [] []) (components rs)
       -- **Reported in the order the file declares them, not the order they were
       -- walked.** The call graph decides the walking order and that is an
       -- implementation detail; @:accepts@, @:produces@ and the shipped base\'s
@@ -388,7 +442,7 @@ blockResult
   :: [(String, Signature)] -> [Rule] -> [(Name, Value)] -> Rule
   -> ([InstralTypeError], [(Name, Ty)])
 blockResult sigs rs bound r =
-  let (env, st0)  = foldl (inferGroup sigs rs) ([], St 0 [] [] []) (components rs)
+  let (env, st0)  = foldl (inferGroup sigs (reachingAll rs)) ([], St 0 [] [] []) (components rs)
       site        = InBody (ruleName r) 0
       (ctx, st1)  = foldr seed ([], st0) bound
       seed (n, v) (acc, st) = let (t, st') = valueType site v st in ((n, Mono t) : acc, st')
@@ -464,10 +518,21 @@ blamedOn e = case e of
 -- turning /this is a string/ into /this is any type/. See 'settleText', whose
 -- comment says why leaving it free is wrong.
 inferGroup
-  :: [(String, Signature)] -> [Rule] -> (SigEnv, St) -> [Callable] -> (SigEnv, St)
-inferGroup sigs rs (env0, st0) cs =
-  let (env1, st1) = declareThese sigs rs cs (env0, st0)
-      st2         = foldl (clause env1) st1 [ r | r <- rs, callableOf r `elem` cs ]
+  :: [(String, Signature)] -> [Scoped] -> (SigEnv, St) -> [Callable] -> (SigEnv, St)
+inferGroup sigs scoped (env0, st0) cs =
+  let rs          = map scopedRule scoped
+      (env1, st1) = declareThese sigs rs cs (env0, st0)
+      -- **Each body against its own reach** (MS11 phase 301), which
+      -- is the one place the narrowing happens: everything below here is handed
+      -- the environment this body may read, so no call site has to ask the
+      -- question a second time.
+      --
+      -- **What is declared is not narrowed, only what is read.** A group's
+      -- entries are one set of variables shared by every use ('declareThese'),
+      -- and hiding an entry from a body that may not call it leaves that
+      -- sharing exactly as it was.
+      st2         = foldl (\st sc -> clause (inReach sc env1) st (scopedRule sc)) st1
+                      [ sc | sc <- scoped, callableOf (scopedRule sc) `elem` cs ]
       st3         = settleText st2
    in ([ (c, if c `elem` cs then generalise st3 b else b) | (c, b) <- env1 ], st3)
 

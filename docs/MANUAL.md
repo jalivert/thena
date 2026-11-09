@@ -1572,6 +1572,11 @@ rule outside :- do
   call answer                -- this file's: Crush is not in the pool here
 ```
 
+**A rule that calls out of its block is refused when you load the file.** Had `outside`
+called a rule that only `Crush` defines, the load would fail and name `outside`: the
+check asks what each rule reaches, not what the file as a whole brought in, so you hear
+about it when you load rather than the first time somebody runs the rule.
+
 Three things to know before you write one.
 
 - **It travels with the rule, not with the file.** The push happens wherever those rules

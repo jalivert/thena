@@ -235,7 +235,15 @@ import Thena.Instral.Ops
   , Value (..)
   )
 import Data.Either (partitionEithers)
-import Thena.Instral.Infer (InstralTypeError (..), boundBy, inferBlock, inferProgram)
+import Thena.Instral.Infer
+  ( InstralTypeError (..)
+  , Scoped (..)
+  , boundBy
+  , callableOf
+  , inferBlock
+  , inferProgram
+  , reachingAll
+  )
 import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
   ( RuleBase (..)
@@ -3896,7 +3904,7 @@ dispatch s name arg = case name of
         ( s
         , Fitting verb ty
             [ (nm, k, isRule nm k, sg)
-            | ((nm, k), sg) <- fst (inferProgram (allSignatures bs) (allCallable bs))
+            | ((nm, k), sg) <- fst (inferProgram (allSignatures bs) (reachingAll (allCallable bs)))
             , question sg ty
             ]
         )
@@ -5108,18 +5116,24 @@ consultRuleTexts s = consultRuleBases s . unfetched
 
 -- | __Every text a fetch read, read__ (MS11 phase 300).
 --
--- **One list and a flag, because the install asks one question of the whole
--- push**: a @consult@ in one base may be answered by another base in the same
--- fetch, and inference needs every signature in hand ('installReadBases'). So
--- the bases a block holds are resolved and typed with the pool's and only
--- their /position/ differs — which is the bargain 'loadProofModules' already
--- makes for a proof file's blocks.
+-- **One list, because the install reads and types the whole push at once**: a
+-- @consult@ in one base may be answered by another base in the same fetch, and
+-- inference needs every signature in hand ('installReadBases'). So the bases a
+-- block holds are resolved and typed with the pool's and only their /position/
+-- differs — which is the bargain 'loadProofModules' already makes for a proof
+-- file's blocks.
+--
+-- **What each entry carries beside its text is where it goes** ('Standing', MS11
+-- phase 301), and for a held one that is the whole group it was fetched with:
+-- being typed together is not being in reach of one another, and which
+-- callables a body may call is the group's business and not the push's.
 --
 -- **The held ones come last**, so a caller that wants them back can take them
 -- off the end; 'loadProofModules' does.
 readSpread :: Session -> Spread -> [ReadBase]
-readSpread s sp = map (entry True) (spreadPool sp)
-                    ++ [ entry False t | g <- spreadHeld sp, t <- heldTexts g ]
+readSpread s sp = map (entry InPool) (spreadPool sp)
+                    ++ [ entry (HeldWith (map fst (heldTexts g))) t
+                       | g <- spreadHeld sp, t <- heldTexts g ]
   where
     gs    = grammars (sessionMachine s)
     -- **The lookup table is every text the fetch read**, held ones included: a
@@ -5127,11 +5141,11 @@ readSpread s sp = map (entry True) (spreadPool sp)
     -- other, and what it publishes has to be findable while it is read.
     texts = spreadPool sp ++ concatMap heldTexts (spreadHeld sp)
 
-    entry inPool (path, src) =
+    entry goes (path, src) =
       ( path
       , idlePublic src
       , statedConcealment s texts src
-      , inPool
+      , goes
       , readStated s gs texts (spreadHeld sp) path src
       )
 
@@ -5493,7 +5507,7 @@ loadRuleDecls s ps =
   loadReadBases s [ ( path
                     , [ PublicConsultIdle (moduleText m) | m <- rawPublicConsults ds ]
                     , concealedFrom (rawFileImports ds) s
-                    , True
+                    , InPool
                     , stated path nm desc ds )
                   | (path, nm, desc, ds) <- ps ]
   where
@@ -5568,11 +5582,27 @@ consultReadBases s =
 -- the tuple is MS5 phase 66c's).
 --
 -- Its path, the warnings reading it produced, what its @do@ blocks may not
--- reach, **whether it goes in the pool at all** — 'False' for a base a
--- @consult … where { … }@ block holds — and either the base or why it was
+-- reach, where in the session it goes, and either the base or why it was
 -- refused.
 type ReadBase =
-  (FilePath, [Warning], [GlobalName], Bool, Either RuleFileError RuleBase)
+  (FilePath, [Warning], [GlobalName], Standing, Either RuleFileError RuleBase)
+
+-- | __Where a base in one push goes, and what it was fetched with__ (MS11
+-- phase 301; the 'Bool' it replaces is phase 300's).
+--
+-- **The group is what a block's rule pushes**, so it is what says which
+-- callables a rule of a held base may call: a held base is reached only by a
+-- push of its whole group ('Thena.Driver.groupsFor'), so its own rules run with
+-- the group in front of the pool exactly as the block's rules do. Carrying it
+-- here is the same move phase 300 made for 'HeldGroup' — the grouping is in the
+-- data and not recomputed from a count.
+data Standing
+  = InPool
+    -- ^ in the pool, which every body in the push may call
+  | HeldWith [FilePath]
+    -- ^ held for a @consult … where { … }@ block, with the group it was fetched
+    -- with — its own path included
+  deriving (Eq, Show)
 
 installReadBases
   :: [RuleBase] -> [RuleBase] -> Session -> [ReadBase] -> (Session, Response)
@@ -5586,13 +5616,12 @@ installReadBases below heldBelow s = go []
     -- not callables — nothing can call one — so they are not in 'allCallable';
     -- they are handed to 'inferProgram' as extra bodies so that a mistake in one
     -- is found when the file loads.
-    go acc [] = case traverse blocksOf [ (conc, b) | (_, _, conc, _, b) <- acc ] of
+    go acc [] = case traverse (blocksOf reachOf) [ (conc, st, b) | (_, _, conc, st, b) <- acc ] of
         -- A block that does not resolve or does not validate is the file's
         -- problem and is reported against the file, as any other rule's would be.
         Left (path, errs) -> (s, RuleFileRefused path (RuleIllFormed errs))
         Right bss ->
-          case snd (inferProgram (allSignatures everything)
-                                 (allCallable everything ++ concat bss)) of
+          case snd (inferProgram (allSignatures everything) (scoped ++ concat bss)) of
             []   ->
               ( s { sessionMachine = (sessionMachine s)
                                        { pool = pool'
@@ -5609,13 +5638,57 @@ installReadBases below heldBelow s = go []
         -- rules are running, and 'Thena.Instral.Ops.PushBase' finds it in
         -- 'Thena.Engine.held' by its path — so inference sees it and the pool
         -- does not.
-        pool'      = [ b | (_, _, _, True, b) <- acc ] ++ below
-        heldNow    = [ b | (_, _, _, False, b) <- acc ]
-        everything = pool' ++ heldNow
+        pool'      = [ b | (_, _, _, InPool, b) <- acc ] ++ below
+        heldNow    = [ b | (_, _, _, HeldWith _, b) <- acc ]
+        -- **AND WHAT THE SESSION ALREADY HOLDS IS TYPED WITH THE PUSH TOO**
+        -- (MS11 phase 301). Until this phase a base held by an earlier act was
+        -- left out, so a rule already in the pool that pushes it was read as
+        -- calling a name nothing defines — and the next unrelated @:consult@
+        -- was refused with that rule's error. It is in hand here for its
+        -- signatures; what re-checking it would say was said when it went in.
+        everything = pool' ++ heldNow ++ heldBelow
 
-    go acc ((path, warns, conc, inPool, built) : more) = case built of
+        -- **WHAT EACH BODY MAY CALL** (MS11 phase 301). The pool is
+        -- callable from every body; a held base is callable from the bodies
+        -- that push it, which are the block's rules and the base's own. Before
+        -- this every rule in the push was handed one set — the pool plus every
+        -- held base — so a rule written outside a @consult B where { … }@ block
+        -- and calling into @B@ loaded and failed at run time, which is
+        -- /"type-checking a lambda's body and ignoring its arguments are in
+        -- scope"/ (his words, 2026-11-09).
+        --
+        -- **The bases already in reach everything**, which is not a licence:
+        -- each was checked against its own reach as it was installed, and this
+        -- pass has nothing to add to a file it is not loading.
+        scoped = [ Scoped r (reachOf st r) | (st, b) <- read', r <- baseRules b ]
+                   ++ [ Scoped r (reachOf st r) | (st, b) <- read', r <- baseFunctions b ]
+                   ++ [ Scoped r anything | r <- allCallable (below ++ heldBelow) ]
+
+        read' = [ (st, b) | (_, _, _, st, b) <- acc ]
+
+        anything = nub (map callableOf (allCallable everything))
+        poolCs   = nub (map callableOf (allCallable pool'))
+
+        -- **The pushes are read off the body** and not recomputed from the
+        -- file's text: they are the instructions the block compiled in
+        -- ('resolveAll'\'s @pushing@) and the engine pushes exactly those when
+        -- the body runs, so the check and the run read one list. A body that
+        -- pushes nothing is left with the pool, which is what every rule
+        -- written outside every block has.
+        reachOf st r = poolCs ++ definedBy (groupOf st ++ pushedBy r)
+
+        groupOf st = case st of
+          InPool      -> []
+          HeldWith ps -> ps
+
+        pushedBy r = [ p | Do (PushBase p) <- ruleBody r ]
+
+        definedBy ps = nub (map callableOf (concat
+          [ baseRules b ++ baseFunctions b | (_, b) <- read', basePath b `elem` ps ]))
+
+    go acc ((path, warns, conc, goes, built) : more) = case built of
       Left e  -> (s, RuleFileRefused path e)
-      Right b -> go (acc ++ [(path, warns, conc, inPool, b)]) more
+      Right b -> go (acc ++ [(path, warns, conc, goes, b)]) more
 
     -- **Resolved here and not in 'readStated'**, because what it answers is
     -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then
@@ -5624,15 +5697,28 @@ installReadBases below heldBelow s = go []
     -- **In the base's own scope and not the root one** (MS11 phase 297): a
     -- @do@ block written in a rule file is the file's text like any other, so
     -- it reaches what the file imported and not what the session holds.
-    blocksOf (conc, b) =
+    --
+    -- **AND A BLOCK IS TYPED WITH WHAT THE FILE'S BODIES REACH** (MS11 phase
+    -- 301). A block inside a surface literal is played where the rule that
+    -- holds it runs ('Thena.Instral.Ops.Play'), so the pool it meets is that
+    -- rule's — but which rule a block was written in is not kept: the blocks of
+    -- one file are resolved in one walk, which is what gives them names that do
+    -- not collide when two clauses of one rule each hold one. So the reach here
+    -- is the file's widest, the pool plus every base any of its blocks holds.
+    -- **The residue is narrow and in the safe direction**: a block in a rule
+    -- outside every @consult … where@ block may call into a base that file
+    -- holds somewhere, and is told so when it runs rather than when it loads.
+    blocksOf reach (conc, st, b) =
       case surfaceBlocks (Reading (grammars (sessionMachine s))
                                   rootScope { scopeConcealed = [conc] })
                          (rootName (baseName b))
-                         (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
+                         (concatMap ruleBody bodies) of
       Left errs -> Left (basePath b, errs)
       Right bs  -> case concatMap validate bs of
-        []   -> Right bs
+        []   -> Right [ Scoped x (concatMap (reach st) bodies) | x <- bs ]
         errs -> Left (basePath b, errs)
+      where
+        bodies = baseRules b ++ baseFunctions b
     -- Typing them is 'go''s job, because a block may call a rule in a base that
     -- has not been read yet.
 

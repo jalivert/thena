@@ -26,6 +26,7 @@ import Thena.Instral.Infer
   ( InstralTypeError (..)
   , Site (..)
   , inferProgram
+  , reachingAll
   , renderInstralTypeError
   )
 import Thena.Instral.Type (Signature (..), Ty (..), renderSignature)
@@ -1077,7 +1078,7 @@ shippedBase =
   testGroup
     "the shipped base"
     [ testCase "infers with no errors at all" $
-        map renderInstralTypeError (snd (inferProgram [] shipped)) @?= []
+        map renderInstralTypeError (snd (inferProgram [] (reachingAll shipped))) @?= []
 
       -- **What it inferred, handed back as a DECLARATION** (2026-09-13).
       -- Inference and checking are two modes over one program — §6.5 — and
@@ -1091,8 +1092,8 @@ shippedBase =
       -- not stay distinct variables, so an inferred signature that could not be
       -- written down fails here.
     , testCase "and declaring exactly what it inferred changes nothing" $
-        let inferred = [ (nameDotted g, sg) | ((g, _), sg) <- fst (inferProgram [] shipped) ]
-         in map renderInstralTypeError (snd (inferProgram inferred shipped)) @?= []
+        let inferred = [ (nameDotted g, sg) | ((g, _), sg) <- fst (inferProgram [] (reachingAll shipped)) ]
+         in map renderInstralTypeError (snd (inferProgram inferred (reachingAll shipped))) @?= []
 
       -- **Written out, not counted — and written in the base itself** (MS5
       -- phase 93). Every callable in @rules/standard.thena.rules@ carries a
@@ -1105,7 +1106,7 @@ shippedBase =
         let written  = [ n ++ "/" ++ show (length (sigParams sg)) ++ " : " ++ renderSignature sg
                        | b <- bases, (n, sg) <- baseSignatures b ]
             inferred = [ n ++ "/" ++ show a ++ " : " ++ renderSignature sg
-                       | ((gn, a), sg) <- fst (inferProgram [] shipped), let n = nameDotted gn ]
+                       | ((gn, a), sg) <- fst (inferProgram [] (reachingAll shipped)), let n = nameDotted gn ]
         sort written @?= sort inferred
 
       -- **…and every callable has one**, so a rule added without a signature
@@ -1113,21 +1114,21 @@ shippedBase =
     , testCase "and every callable in it is annotated" $ do
         bases <- standardBases
         length [ () | b <- bases, _ <- baseSignatures b ]
-          @?= length (fst (inferProgram [] shipped))
+          @?= length (fst (inferProgram [] (reachingAll shipped)))
 
       -- **`elaborate`'s parameter is a Surface term and nothing says so.** It
       -- comes from the head predicates: sixteen clauses each ask a
       -- `surface-is-…` question of `t`, and 'Thena.Rules.testTypes' is what
       -- makes that an answer.
     , testCase "elaborate's parameter came from its head" $
-        lookup (rootName "elaborate", 1) (fst (inferProgram [] expectedStandard))
+        lookup (rootName "elaborate", 1) (fst (inferProgram [] (reachingAll expectedStandard)))
           @?= Just (Signature [TSurface] Nothing)
 
       -- **`spine-arguments` has no head test about `h` or `f` at all.** Their
       -- types come from the body — `goto h` wants a Core, `apply-next f n` wants
       -- one — which is the part a head-only reading would miss.
     , testCase "and spine-arguments' came from its body" $
-        lookup (rootName "spine-arguments", 3) (fst (inferProgram [] expectedStandard))
+        lookup (rootName "spine-arguments", 3) (fst (inferProgram [] (reachingAll expectedStandard)))
           @?= Just (Signature [TCore, TCore, TSurface] Nothing)
     ]
 
@@ -1263,7 +1264,7 @@ blockReturn =
                     [Do (Block [Do (Return (Lit (VText "x")))])]
         bad     = Rule (rootName "bad") [] []
                     [Bind (PVar "y") Nothing (Call "blocked" []), Do (Say (Ref "y"))]
-     in snd (inferProgram [] [blocked, bad])
+     in snd (inferProgram [] (reachingAll [blocked, bad]))
           @?= [BindsNothing (InBody (rootName "bad") 0) (rootName "blocked")]
 
 -- --------------------------------------------------------------------------
@@ -1304,7 +1305,7 @@ annotations =
     , testCase "…and the two agree on what it is" $
         case load (unlines (drop 1 (lines polymorphic))) of
           BasesLoaded (b : _) _ ->
-            lookup (rootName "ignore", 1) (fst (inferProgram [] (baseRules b)))
+            lookup (rootName "ignore", 1) (fst (inferProgram [] (reachingAll (baseRules b))))
               @?= Just (Signature [TVar 0] Nothing)
           other -> assertFailure ("expected a load, got " ++ show other)
 

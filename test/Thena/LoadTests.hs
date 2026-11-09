@@ -106,6 +106,7 @@ import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
 import Thena.Standard (withRules)
 import Thena.Rules (RuleError (..), baseName)
+import Thena.Instral.Infer (InstralTypeError (..), Site (..))
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty.Golden (goldenVsString)
 
@@ -827,6 +828,49 @@ publicBaseTests =
           [ map baseName bs | BasesListed bs <- [snd (oneLine s2 ":bases")] ]
             @?= [["pins", "standard"]]
         (_, other) -> assertFailure (show other)
+
+  , -- **AND A RULE OUTSIDE THE BLOCK DOES NOT REACH THE BASE IT HOLDS** (MS11
+    -- phase 301, which phase 300 left). @Leaky@ consults @Quiet@
+    -- with a block and calls @Quiet@'s @stumbles@ from a rule written after
+    -- it. **The load is refused and the rule outside is the one blamed** — so
+    -- the refusal arrives when the file loads, where until this phase the file
+    -- loaded and the call failed when the rule was run.
+    testCase "and a rule outside the block does not reach what it holds" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <- consultRuleFiles s0 ["test/modules/Leaky.thena.rules"]
+      case trouble of
+        [Unloadable _ (BasesIllTyped es)] ->
+          [ nameDotted n | Undefined (InBody n _) "stumbles" _ _ <- es ]
+            @?= ["outside"]
+        other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- **AND A HELD BASE REACHES ITS OWN GROUP** (MS11 phase 301), which is the
+    -- other side of the same question: a held base is reached only by a push of
+    -- the whole group it was fetched with, so its own rules run with that group
+    -- in front of the pool exactly as the block's rules do. @Deep@'s @own@
+    -- calls a rule of @Deep@ and its @reaches@ calls one of @Quiet@, which
+    -- @Deep@ consults and the fetch brings in beneath it — **and the holder
+    -- loads**, where a reach that stopped at the pool would refuse both.
+    testCase "and a base a block holds reaches its own group" $ do
+      (s0, _) <- startingSession
+      (s1, out, trouble) <-
+        consultRuleFiles s0 ["test/modules/HoldsDeep.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ map baseName bs | BasesLoaded bs _ <- out ]
+        @?= [["holds-deep", "standard"]]
+      said (oneLine s1 "go") @?= ["deep"]
+
+  , -- **AND WHAT AN EARLIER ACT HELD DOES NOT REFUSE THE NEXT CONSULT** (MS11
+    -- phase 301). @Pins@ holds @Quiet@ for its block; consulting any other
+    -- base afterwards re-reads @Pins@ for its signatures, and until this phase
+    -- @Quiet@ was left out of that reading — so the block's own rule was read
+    -- as calling a name nothing defines and the unrelated act was refused.
+    testCase "and a held base does not refuse the next consult" $ do
+      (s1, _) <- pinned
+      (_, out, trouble) <- consultRuleFiles s1 ["test/modules/Loud.thena.rules"]
+      assertBool (show (map (renderTrouble s1) trouble)) (null trouble)
+      [ map baseName bs | BasesLoaded bs _ <- out ]
+        @?= [["loud", "pins", "standard"]]
 
   , -- **AND NESTING IS PRIORITY** (MS11 phase 300), which is a file's consults
     -- being a stack (phase 288) one gate in: the innermost block pushes last
