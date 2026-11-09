@@ -96,14 +96,23 @@ because `Thena.Files.loadFile` is the function under test and it reads a real fi
 - `ImportsLoop.thena.script` reaches `LoopA`/`LoopB` through a script, so the cycle
   refusal is the module walk's own and is not written twice.
 
-**And four are `~2kc72`'s, which is OPEN on MS11's closeout list and is not a suite's.**
-`WithheldLang.thena` exports `keep` only and declares a language; `TakesLang.thena.rules`
-imports it and matches `LC[app]`, which **loads** — the leak; `NamesLang.thena` names the
-type and is refused, *not in scope: LC*; `WritesLang.thena` writes the notation without
-naming the type and is refused one step later, *not in scope: LC.app*, which is how we
-know **a surface importer gets the grammar too**. Run them with `./tc`. Added 2026-11-09
-because the first measurement's files had been deleted and the item had to be
-reproduced from its own text.
+**And six are `~2kc72`'s — MS11 phase 303, a withheld language is withheld.**
+`Thena.LoadTests` — *a withheld language is withheld* — reads them, and they are a pair of
+modules with the same four acts over each:
+
+- `WithheldLang.thena` declares a language and exports `keep` only. `TakesLang.thena.rules`
+  imports it and matches `LC[app]`: **refused**, *no language is called LC* — this was the
+  leak, and it loaded until phase 303. `NamesLang.thena` names the type: refused, *not in
+  scope: LC*. `WritesLang.thena` writes the notation without naming the type: refused at
+  the tag now, where before the fix it got as far as *not in scope: LC.app*, which is how
+  we knew the grammar reached a surface importer too.
+- `SharesLang.thena` is the same module with the language NAMED on its clause,
+  `exporting ( LC keep )`, and `UsesSharedLang.thena.rules` is `TakesLang` over it:
+  **loads**. The pair is what shows there is one grant and not two — the clause covers the
+  key `LC` and the datatype `LC.LC` together.
+
+**Both modules call their language `LC`, so one session cannot hold the two of them**;
+the suite loads each in its own session, and that collision is `~ps4c7`'s territory.
 
 **And three are MS11 phase 302's, for `:replay`** (`~22qjj`, his ruling of 2026-11-09).
 `Thena.LoadTests` — *a replay is the lines, not the asking* — is what reads them:

@@ -141,6 +141,7 @@ tests =
     , testGroup "every file read is hashed (MS11 phase 295)" hashTests
     , testGroup "a script states what it stands on (MS11 phase 296)" scriptActTests
     , testGroup "a replay is the lines, not the asking (MS11 phase 302)" replayTests
+    , testGroup "a withheld language is withheld (MS11 phase 303)" langInterfaceTests
     ]
 
 
@@ -3227,3 +3228,80 @@ replayTests =
   where
     own reads' = [ p | (p, _) <- reads', "test/modules/" `isPrefixOf` p ]
     shown s line = unlines (renderResponse s (snd (oneLine s line)))
+
+
+-- --------------------------------------------------------------------------
+-- A withheld language is withheld (MS11 phase 303, @~2kc72@)
+-- --------------------------------------------------------------------------
+
+-- | __A module\'s export clause withholds its @language@ block\'s notation along
+-- with its names__ — his ruling of 2026-11-09: /"When that language is not
+-- actually imported, it shouldn't be imported. Period."/
+--
+-- **What it fixed**: @concealedFrom@ subtracted the grammar table by module
+-- (phase 297) and never applied the exporter\'s own list to it, so a module that
+-- withheld its language handed the notation to every importer anyway. A surface
+-- importer only got as far as the constructor; **a rule file got all the way,
+-- because a rule head is a pattern and a pattern names nothing.**
+--
+-- **The pair is the test.** @WithheldLang@ exports @keep@ only and @SharesLang@
+-- is the same file with @exporting ( LC keep )@, so every case below is the same
+-- act over the two of them.
+langInterfaceTests :: [TestTree]
+langInterfaceTests =
+  [ -- **The subtraction itself**, which is where the filter went: an importer of
+    -- the withholding module has the grammar KEY concealed, and an importer of
+    -- the sharing one does not. The key is @LC@ and the datatype is @LC.LC@ —
+    -- two entries, one grant.
+    -- **A session each**, because both modules call their language @LC@ and one
+    -- session cannot hold two of that name — which is `~ps4c7`'s territory and
+    -- no part of this.
+    testCase "the key is concealed from an importer of the withholding module" $ do
+      let key = GlobalName [] "LC"
+          loaded path = do
+            (s0, _) <- startingSession
+            (s1, _, trouble) <- loadProofFile s0 path
+            assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+            pure s1
+      withheld <- loaded "test/modules/WithheldLang.thena"
+      shared   <- loaded "test/modules/SharesLang.thena"
+      assertBool "withheld: the key is concealed"
+        (key `elem` concealedFrom [named' "test.modules.WithheldLang"] withheld)
+      assertBool "shared: the key is not"
+        (key `notElem` concealedFrom [named' "test.modules.SharesLang"] shared)
+
+  , -- **The rule file is the case that leaked.** Refused at the TAG now, which
+    -- is the refusal a base that never imported the language gets.
+    testCase "a rule file may not match a withheld language" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- consultRuleFiles s0 ["test/modules/TakesLang.thena.rules"]
+      let said = concatMap (renderTrouble s0) trouble
+                   ++ concatMap (renderResponse s0) out
+      assertBool (show said) (any (isInfixOf "no language is called LC") said)
+
+  , -- **And the control: naming it on the clause is the one grant**, covering
+    -- the grammar key and the datatype together.
+    testCase "and it may match one the exporter named" $ do
+      (s0, _) <- startingSession
+      (s1, out, trouble) <- consultRuleFiles s0 ["test/modules/UsesSharedLang.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (show (concatMap (renderResponse s1) out))
+        (any ("usesshared" `isInfixOf`) (concatMap (renderResponse s1) out))
+
+  , -- **A surface importer is refused one step earlier than it was.** It used to
+    -- parse the literal and fail on @LC.app@; the language is not there to parse
+    -- against at all now.
+    testCase "a surface file may not write a withheld language's notation" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/WritesLang.thena"
+      let said = concatMap (renderResponse s0) out
+      assertBool (show said) (any (isInfixOf "no language called LC") said)
+
+  , -- **The half that always worked, kept as a guard**: the type is a declared
+    -- name and the clause withheld it.
+    testCase "and still may not name its type" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/NamesLang.thena"
+      let said = concatMap (renderResponse s0) out
+      assertBool (show said) (any (isInfixOf "not in scope: LC") said)
+  ]

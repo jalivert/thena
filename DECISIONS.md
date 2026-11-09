@@ -886,6 +886,27 @@ It goes in front of a signature and covers the equation under it, and in front o
 anything Thena generated into it. It is a mark, not a scope: `Kept` uses `helper`
 normally, and so can you at the prompt.
 
+**A `language` block is part of your interface too, notation included** — *decided
+2026-11-09, built at MS11 phase 303.* If you declare a language and do not name it on
+your export clause, an importer may neither name its type nor **write terms in it**:
+
+```
+module Hidden exporting ( keep ) where   -- LC is this file's own
+
+language LC, M, N where
+  var : x as occurrence -> x
+  app                   -> ( M N )
+```
+
+Import `Hidden` and write ``LC`( a b )`` and you are told *no language is called LC* —
+the same answer as for a language nobody declared. Name it, `exporting ( LC keep )`, and
+both halves come along: the type `LC` and the right to write its notation. **It is one
+grant, because the unit is the namespace here as everywhere.**
+
+This mattered most to a rule base, which is why it is worth saying: a rule head is a
+pattern, so `rule describe LC[app]`( ${f} ${a} )`` names nothing and used to match
+against any language the session had read, withheld or not.
+
 **An import is yours alone unless you say otherwise.** Import a file and you get what
 *it* exports — not what it imported. If you want your dependency to travel on to whoever
 imports you, say `public`:

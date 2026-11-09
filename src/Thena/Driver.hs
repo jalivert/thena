@@ -2902,6 +2902,10 @@ concealedFrom ims s =
     -- are @instral@'s own types, so @rule describe LC[app]\`…\`@ names no
     -- global anywhere and nothing stood between it and the session's languages.
     --
+    -- **And the exporter's list narrows this too, since MS11 phase 303** — his
+    -- ruling of 2026-11-09 — so a withheld language reaches an importer in
+    -- neither table. 'grammarsReachedBy' has his words.
+    --
     -- **A grammar that belongs to no module is concealed from every module**,
     -- which is 'reachedBy''s rule for a name said again here: a @language@
     -- block typed at the prompt, or written in a file reached by no name, is
@@ -2914,11 +2918,21 @@ concealedFrom ims s =
 --
 -- 'reachedBy''s twin over the other table, and the closure is the same one for
 -- the same reason — his ruling of 2026-11-03, that @public@ is how a dependency
--- travels. **A module's export list is not applied here**: an @exporting@
--- clause names declarations and a grammar's key is not one of them, so what a
--- file reaches is every language of every module it reaches. Narrowing a
--- language with an export list is a question of its own and is not this
--- phase's.
+-- travels.
+--
+-- **AND THE EXPORTER'S OWN LIST IS APPLIED HERE — MS11 PHASE 303, HIS RULING OF
+-- 2026-11-09.** It was not until then, on the argument that an @exporting@ clause
+-- names declarations and a grammar\'s key is not one of them — so a module that
+-- withheld its language handed the notation to every importer anyway, and a rule
+-- file could match @LC[app]\`…\`@ against a language it was not allowed to name.
+-- **His ruling**: /"When that language is not actually imported, it shouldn't be
+-- imported. Period."/ So a @language@ block is part of a file\'s interface, and
+-- 'interfaceAdmits' is the one test both tables ask.
+--
+-- **There is one grant and not two.** @exporting ( LC )@ covers the key @LC@ and
+-- the datatype @LC.LC@ together, because 'exports' tests a prefix — so a module
+-- that means to share its language names it once and gets both halves, and one
+-- that does not name it withholds both.
 grammarsReachedBy :: [ModuleName] -> Session -> [GlobalName]
 grammarsReachedBy ms0 s = reach [] ms0
   where
@@ -2926,7 +2940,8 @@ grammarsReachedBy ms0 s = reach [] ms0
     reach seen (m : ms)
       | m `elem` seen = reach seen ms
       | otherwise     =
-          concat [ gs | (m', gs) <- sessionGrammarsBy s, m' == m ]
+          filter (interfaceAdmits m s)
+                 (concat [ gs | (m', gs) <- sessionGrammarsBy s, m' == m ])
             ++ reach (m : seen) (publicImportsOf m s ++ ms)
 
 -- | __What importing these modules reaches__ (MS11 phase 291).
@@ -3091,15 +3106,32 @@ declaredByModule n s = concat [ gs | (m, gs) <- sessionDeclaredBy s, m == n ]
 -- of visibility, and keeping both is what lets a goal say where a name came from
 -- even when the reader may not write it.
 exportedByModule :: ModuleName -> Session -> [GlobalName]
-exportedByModule n s =
-  [ g | g <- declaredByModule n s, exports clause g, not (exports deny g) ]
+exportedByModule n s = filter (interfaceAdmits n s) (declaredByModule n s)
+
+-- | __Does the interface this module stated let an importer have this key?__
+--
+-- The allow-list and the deny-list of one module's header, as one test. **It was
+-- inside 'exportedByModule' until MS11 phase 303**, when the grammar table
+-- started asking the same question and the two had to be the same question
+-- rather than two spellings of it — his ruling of 2026-11-09, that a withheld
+-- language is withheld.
+--
+-- **A path, so the unit is the namespace.** 'exports' tests a prefix, which is
+-- why @exporting ( LC )@ covers the grammar key @LC@ and the datatype @LC.LC@
+-- with one entry, and why @hiding ( Inner )@ keeps a datatype\'s constructors
+-- back with the type (phase 290).
+interfaceAdmits :: ModuleName -> Session -> GlobalName -> Bool
+interfaceAdmits n s g = exports clause g && not (exports deny g)
   where
     clause = case [ es | (m, es) <- sessionExporting s, m == n ] of
       es : _ -> Just es
       []     -> Nothing
     -- **@Just@ even when empty**, because 'exports' of @Nothing@ is /everything/
     -- and this is a deny-list: a module with no @private@ declaration denies
-    -- nothing, which @Just []@ says and @Nothing@ would invert.
+    -- nothing, which @Just []@ says and @Nothing@ would invert. **A @hiding@
+    -- clause is in this list too** — 'interfacePrivate' is @privateIn@ and
+    -- @moduleHiding@ concatenated — so one test covers all three ways a module
+    -- withholds something.
     deny = Just (concat [ gs | (m, gs) <- sessionPrivateIn s, m == n ])
 
 -- | __Which of a module's imports it passed on__ (MS11 phase 287, @~jmw4k@).
