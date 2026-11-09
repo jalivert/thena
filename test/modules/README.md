@@ -95,3 +95,20 @@ because `Thena.Files.loadFile` is the function under test and it reads a real fi
   `data A0` line before it that must have run.
 - `ImportsLoop.thena.script` reaches `LoopA`/`LoopB` through a script, so the cycle
   refusal is the module walk's own and is not written twice.
+
+**And six are MS11 phase 300's, for a rule file's `consult B where { … }`** (`~k68d7`).
+Four of them are a pool and two are names:
+
+- `Pins.thena.rules` holds `Quiet.thena.rules` for one block. Both answer `answer`, so
+  which clause runs says where the push landed: `inside` gets `Quiet`'s, `outside` gets
+  the file's own, and `:bases` at rest lists neither `Quiet` nor anything else new.
+  `peeks` yields from inside the block, which is the only way to see the pushed base
+  listed; `breaks` calls a rule of `Quiet` that fails, which is how the pool after a
+  body that never reached its pop is measured.
+- `Nests.thena.rules` writes a block inside a block, with `Loud.thena.rules` as the
+  inner one's base — three clauses of `answer` and three answers, which is *nesting is
+  priority*.
+- `ScopedBorrows.thena.rules` and `ScopedBorrowsAfter.thena.rules` are the names half
+  and only the pair measures anything: both consult `Lends.thena.rules`, which hands
+  `Lang` on with `public import`, and the first writes `LC[app]` inside the block while
+  the second writes it after. The first loads; the second is refused.

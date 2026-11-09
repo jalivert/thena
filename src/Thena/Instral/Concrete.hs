@@ -148,15 +148,29 @@ data RawDecl
     -- **Under @public@ its names travel to whoever consults this base** (MS11
     -- phase 289) — the object language a base is written against, which is his
     -- ruling of 2026-10-30.
-  | DeclConsult Reach [String] String
+  | DeclConsult Reach [String] String (Maybe [RawDecl])
     -- ^ @consult ‹base›@, @public consult ‹base›@ — **another rule base this
     -- one is written against** (MS11 phase 289, his ruling of 2026-10-30 that
-    -- @public@ is available to both acts and to both kinds of file).
+    -- @public@ is available to both acts and to both kinds of file; the block
+    -- at phase 300).
     --
-    -- 'DeclImport'\'s shape and the same spelling of a file's name. What
-    -- separates the two words is 'Reach' and nothing else: a plain @consult@
-    -- says this base is searched beside that one and is refused if it is not
-    -- there, where @public consult@ pushes it for whoever consults this base.
+    -- 'DeclImport'\'s shape and the same spelling of a file's name. A plain
+    -- @consult@ /fetches/ the base and splices it directly beneath this one
+    -- (his ruling of 2026-11-06, @~ckp39@), so 'Reach' has nothing left to add
+    -- to it and @public consult@ is accepted with a warning
+    -- ('Thena.Driver.idlePublic').
+    --
+    -- **AND HOW FAR IT REACHES, WHICH THE ACT STATES ITSELF** (MS11 phase 300,
+    -- his ruling of 2026-11-06, @~k68d7@). @consult B where { … }@ reaches the
+    -- declarations in its block and stops; 'Nothing' is the rest of the file.
+    -- **What the block settles is a region of TIME** — the running of its
+    -- rules — and not a region of text: each rule in it is compiled with a
+    -- push of @B@ at the front of its body and a pop at the end, so @B@ is
+    -- searched first for whatever those rules do, however deep. His words:
+    -- /"this is not a matter of attaching some new thing, this is about that
+    -- rule being compiled such that there is the instruction that pushes the
+    -- rule base and then pops it."/ 'Thena.Driver.scopedDecls' is where the
+    -- pushes are collected and 'Thena.Instral.Ops.PushBase' is the op.
   deriving (Eq, Show)
 
 -- | __Whether an @import@ or a @consult@ passes on what it brought__ (MS11

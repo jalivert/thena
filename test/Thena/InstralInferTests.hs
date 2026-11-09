@@ -16,10 +16,10 @@ import Thena.Driver
   , RuleFileError (..)
   , Stop (..)
   , command
-  , loadRuleBases
+  , loadRuleTexts
   , newSession
   )
-import Thena.Engine (Machine (..))
+import Thena.Engine (Machine (..), rules)
 import Thena.Driver (Session
   , machineOf)
 import Thena.Instral.Infer
@@ -123,7 +123,7 @@ writtenLines =
              , renderInstralTypeError (Clash (InBody (rootName "go") 1) TCore TString) ])
     ]
   where
-    loadRaw src = snd (loadRuleBases newSession [("a.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("a.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- Generalisation, per strongly connected component (MS5 phase 76)
@@ -276,7 +276,7 @@ annotatedLocals =
       BasesIllTyped (Clash{} : _) -> pure ()
       other -> assertFailure ("expected a clash, got " ++ show other)
 
-    loadRaw src = snd (loadRuleBases newSession [("a.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("a.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A do block in a surface term is typed (MS5 phase 79)
@@ -328,7 +328,7 @@ surfaceBlockTyping =
         BasesLoaded _ _ -> pure ()
         other         -> assertFailure ("expected a load, got " ++ show other)
 
-    loadRaw src = snd (loadRuleBases newSession [("b.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("b.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A function is called, a rule is searched (MS5 phase 80)
@@ -424,7 +424,7 @@ functionsAreFunctions =
       BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
-    loadRaw src = snd (loadRuleBases newSession [("f.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("f.thena.rules", src)])
 
     -- **Two clauses that OVERLAP**, and that is the whole point of the
     -- fixture: @["a"]@ matches both @[_]@ and @[_, ..._]@. A non-overlapping
@@ -436,14 +436,14 @@ functionsAreFunctions =
 
     -- Load, run @go@, and report what the machine said.
     ranBy src =
-      let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
+      let s0 = fst (loadRuleTexts newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
        in case snd (command s0 "go") of
             Ran ms _ _ -> Just ms
             _        -> Nothing
 
     -- Load, run @go@, and ask what decisions are left standing.
     choicesAfter src =
-      let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
+      let s0 = fst (loadRuleTexts newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
        in case snd (command (fst (command s0 "go")) ":choices") of
             Choices cs -> Just cs
             _          -> Nothing
@@ -549,7 +549,7 @@ destructuringRuns =
     lists = "three = do { return [\"alpha\", \"beta\", \"gamma\"] }\n"
 
     run src = snd (command
-      (fst (loadRuleBases newSession
+      (fst (loadRuleTexts newSession
               [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])) "go")
 
     ranBy src = case run src of
@@ -571,7 +571,7 @@ destructuringRuns =
     -- Drive the prompt, and assert on the lines it printed rather than on the
     -- shape of the session: what is being tested is what the user sees.
     asking ls src prompts final =
-      let s0 = fst (loadRuleBases newSession
+      let s0 = fst (loadRuleTexts newSession
                      [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
           out = lines (transcriptFrom s0 ls)
           n   = length [ () | l <- out, "say yes: " `isInfixOf` l ]
@@ -659,7 +659,7 @@ bareWordRightOfEquals =
     firstOr = "firstOr d [] = d\nfirstOr _ [x, ..._] = x\n"
 
     ranBy src =
-      let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
+      let s0 = fst (loadRuleTexts newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
        in case snd (command s0 "go") of
             Ran ms _ _ -> Just ms
             _        -> Nothing
@@ -939,7 +939,7 @@ spliceTemplates =
         Shown c -> pure (renderCursor (rendering [] (names (machineOf s2))) c)
         other   -> assertFailure ("the test rule built nothing: " ++ show other) >> pure ""
 
-    loadRaw src = snd (loadRuleBases newSession [("s.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("s.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A function body may be a block (MS5 phase 75b)
@@ -997,12 +997,12 @@ blockBodies =
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
-    said src = case snd (command (fst (loadRuleBases newSession
+    said src = case snd (command (fst (loadRuleTexts newSession
                  [("b.thena.rules", "rule base b where\n" ++ src ++ "\n")])) "go") of
       Ran msgs _ _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
 
-    loadRaw src = snd (loadRuleBases newSession [("b.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("b.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A signature needs no keyword (MS5 phase 74)
@@ -1559,13 +1559,13 @@ functions =
   where
     ruleNameOf = nameDotted . ruleName
 
-    said line = case snd (command (fst (loadRuleBases newSession
+    said line = case snd (command (fst (loadRuleTexts newSession
                   [("f.thena.rules", "rule base f where\ntwice x = concat x x\n" ++ line ++ "\n")]))
                   "go") of
       Ran msgs _ _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
 
-    loadRaw src = snd (loadRuleBases newSession [("i.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("i.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- Lambdas (MS5 phase 68b)
@@ -1589,7 +1589,7 @@ lambdas =
       -- (MS5 phase 94, @ms5\/CLOSEOUT.md@ 23). @\\ -> e@ built a closure of no
       -- arguments whose type nothing could write; it is a parse error now.
     , testCase "of no parameters does not parse" $
-        case snd (loadRuleBases newSession [("i.thena.rules", "rule base i where\nrule go :- do d = \\ -> concat \"a\" \"b\"\n")]) of
+        case snd (loadRuleTexts newSession [("i.thena.rules", "rule base i where\nrule go :- do d = \\ -> concat \"a\" \"b\"\n")]) of
           RuleFileRefused _ (RuleSyntaxError _) -> pure ()
           other -> assertFailure ("expected a syntax error, got " ++ show other)
 
@@ -1649,13 +1649,13 @@ lambdas =
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
-    said src = case snd (command (fst (loadRuleBases newSession
+    said src = case snd (command (fst (loadRuleTexts newSession
                  [("l.thena.rules", "rule base l where\n" ++ src ++ "\n")])) "go") of
       Ran msgs _ _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
 
 load :: String -> Response
-load src = snd (loadRuleBases newSession [("t.thena.rules", "rule base t where\n" ++ src)])
+load src = snd (loadRuleTexts newSession [("t.thena.rules", "rule base t where\n" ++ src)])
 
 -- | A session holding the shipped base AND these files, loaded together as
 -- @:load rules standard.thena.rules …@ does (MS5 phase 92). A rule file that
@@ -1664,12 +1664,12 @@ load src = snd (loadRuleBases newSession [("t.thena.rules", "rule base t where\n
 withStandard :: [(FilePath, String)] -> IO Session
 withStandard files = do
   std <- readFile "rules/standard.thena.rules"
-  pure (fst (loadRuleBases newSession (("standard.thena.rules", std) : files)))
+  pure (fst (loadRuleTexts newSession (("standard.thena.rules", std) : files)))
 
 loadWithStandard :: String -> IO Response
 loadWithStandard src = do
   std <- readFile "rules/standard.thena.rules"
-  pure (snd (loadRuleBases newSession
+  pure (snd (loadRuleTexts newSession
     [("standard.thena.rules", std), ("t.thena.rules", "rule base t where\n" ++ src)]))
 
 -- | The shipped base as one program: its rules AND its function. The rules alone

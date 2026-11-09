@@ -1538,9 +1538,8 @@ No `open` comes with it: a module that opens a namespace at its own top level ha
 you the names and never the short spellings, inside a block or out of one. The
 `open`s a block may use are the ones you write in it.
 
-**In a rule file, `import` takes a block and `consult` does not.** The import works
-exactly as above — the block's rules may write what the module reaches, the rules after
-it may not:
+**A rule file takes a block on either act too.** The import works exactly as above —
+the block's rules may write what the module reaches, the rules after it may not:
 
 ```
 rule base describing where
@@ -1553,13 +1552,37 @@ rule elsewhere :- do            -- LC is not writable here
   say "something else"
 ```
 
-A `consult` block in a rule file is **decided and not written yet.** When it lands it
-will mean a region of *time* rather than a region of the file: the rules in the block run
-with that base pushed on top and popped when they finish, so it is searched first for
-them and is not in the pool for the rest of the file. Two things to know in advance —
-the push happens wherever those rules are called from, as deep as the call goes, so a
-base you pin travels with the rule; and it shows in `:bases` while those rules are
-running and not before, so `:step` into the rule is how you see what is being searched.
+**A `consult` block in a rule file is a region of *time* rather than a region of the
+file.** There are no proofs here for a pool to be scoped to, so what the block scopes is
+the *running* of the rules in it: each one runs with that base pushed on top of the pool
+and popped when it finishes, so it is searched first for them and is not in the pool for
+the rest of the file.
+
+```
+rule base pins where
+
+consult Stlc.Crush where
+  rule inside :- do
+    call answer              -- Crush's answer, if it has one
+
+rule answer :- do            -- this file's own
+  say "pins"
+
+rule outside :- do
+  call answer                -- this file's: Crush is not in the pool here
+```
+
+Three things to know before you write one.
+
+- **It travels with the rule, not with the file.** The push happens wherever those rules
+  are called from, as deep as the call goes, so a base you pin for one rule is briefly
+  the highest-priority base in the session of whoever calls it.
+- **The clause you wrote against is still there.** A base in front is *tried* first and
+  never substituted: every matching rule is offered in pool order, so the worst that
+  happens is that something is tried before it.
+- **You can see it while it is on.** The push goes into the one pool `:bases` reads, so
+  stepping into one of those rules and asking shows that base at the top. At rest it is
+  absent, because at rest it really is not in the pool.
 
 > **What you reach is up to the file you imported.** It says what it offers with
 > `exporting` and `private`, below, and passes its own dependencies on with

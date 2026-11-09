@@ -89,7 +89,7 @@ import Thena.Driver
   , workingOn
   )
 import Thena.Core.Trust (TrustLevel)
-import Thena.Engine (Machine (..), cursor, development, focusContext, knownTo)
+import Thena.Engine (Machine (..), cursor, development, focusContext, knownTo, rules)
 import Thena.Global.Env (GlobalEnv)
 import Thena.Instral.Type (Signature)
 import Thena.Instral.Ops (ruleName, Instr, Rule)

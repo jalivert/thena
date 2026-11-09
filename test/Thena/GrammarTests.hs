@@ -32,7 +32,7 @@ import Thena.Driver
   , machineOf
   , Stop (..)
   , loadProofSource
-  , loadRuleBases
+  , loadRuleTexts
   , newSession
   )
 import Thena.Engine (Machine (..))
@@ -901,7 +901,7 @@ meaning =
     -- file @language@ is a reserved word that nothing reads, so it is a plain
     -- syntax error and not a message about where languages went.
   , testCase "a rule file may not declare a language" $
-      case snd (loadRuleBases newSession
+      case snd (loadRuleTexts newSession
                   [("t.thena.rules", "rule base t where\nlanguage Tm where { var : name }\n")]) of
         RuleFileRefused _ (RuleSyntaxError _) -> pure ()
         other -> assertFailure (show other)

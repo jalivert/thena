@@ -1,6 +1,6 @@
 -- | Rule-base files: the header, the ordered list, and what a load refuses.
 --
--- All of it is pure — 'Thena.Driver.loadRuleBases' takes file /contents/, not
+-- All of it is pure — 'Thena.Driver.loadRuleTexts' takes file /contents/, not
 -- paths (§12 invariant 4) — so the paths here are made up and nothing is read.
 -- The one test that touches the real file is "Thena.RuleSyntaxTests"; the one
 -- that drives the real REPL is "Thena.GoldenTests".
@@ -29,8 +29,8 @@ import Thena.Driver
   , Session
   , machineOf
   , command
-  , loadRuleBases
-  , consultRuleBases
+  , loadRuleTexts
+  , consultRuleTexts
   , loadProofItems
   , loadProofItemsConsulting
   , Pool (..)
@@ -41,7 +41,7 @@ import Thena.Driver
   , baseHead
   , rawRuleDecls
   )
-import Thena.Engine (Machine (rules))
+import Thena.Engine (rules)
 import qualified Thena.Engine as Engine
 import Thena.Instral.Ops (Value (..))
 import Thena.Errors (FailReason (..))
@@ -157,14 +157,14 @@ imports =
       -- act, which is what 'Reach' on one constructor says.
     , testCase "consult X" $
         decls ["consult Stlc.Tactics"]
-          @?= Right [DeclConsult Own ["Stlc"] "Tactics"]
+          @?= Right [DeclConsult Own ["Stlc"] "Tactics" Nothing]
 
     , testCase "public import X" $
         decls ["public import Stlc"] @?= Right [DeclImport Public [] "Stlc" Nothing]
 
     , testCase "public consult X" $
         decls ["public consult Stlc.Tactics"]
-          @?= Right [DeclConsult Public ["Stlc"] "Tactics"]
+          @?= Right [DeclConsult Public ["Stlc"] "Tactics" Nothing]
 
       -- **AND AN IMPORT MAY STATE HOW FAR IT REACHES** (MS11 phase 299, his ask
       -- for the parity with the surface language). The block is the field, so
@@ -306,7 +306,7 @@ oneRule :: String
 oneRule = "rule base tiny where\nrule solve :- when focus-is-guess do prim-solve\n"
 
 load1 :: [(FilePath, String)] -> (Session, Response)
-load1 = loadRuleBases newSession
+load1 = loadRuleTexts newSession
 
 basesOf :: Session -> [RuleBase]
 basesOf = rules . machineOf
@@ -410,7 +410,7 @@ ordering =
 
     , testCase "a load replaces the whole list" $
         let s1 = fst (load1 [a, b])
-            s2 = fst (loadRuleBases s1 [b])
+            s2 = fst (loadRuleTexts s1 [b])
          in map baseName (basesOf s2) @?= ["b"]
     ]
   where
@@ -705,7 +705,7 @@ walking =
 -- consulted is tried first, and the pool is walked in definition order, so what
 -- these assert is the order of 'Thena.Engine.rules' after each act.
 --
--- They are written against 'consultRuleBases' and not against @:consult@
+-- They are written against 'consultRuleTexts' and not against @:consult@
 -- because the command only /names/ files (§12 invariant 4): what the command
 -- does is one case in 'refusals', and what the install does is here.
 theStack :: TestTree
@@ -716,7 +716,7 @@ theStack =
         names (pushing [["one"], ["two"]]) @?= ["two", "one"]
 
     , testCase "a load replaces the whole pool" $
-        names (fst (loadRuleBases (pushing [["one"]]) (sources ["two"])))
+        names (fst (loadRuleTexts (pushing [["one"]]) (sources ["two"])))
           @?= ["two"]
 
     , -- His, 2026-11-03: not a move to the top and not a no-op, because the
@@ -738,7 +738,7 @@ theStack =
     sources ns = [ (n ++ ".thena.rules", "rule base " ++ n ++ " where\n\n") | n <- ns ]
 
     -- Each inner list is one @:consult@, left to right.
-    pushing = foldl (\s ns -> fst (consultRuleBases s (sources ns))) newSession
+    pushing = foldl (\s ns -> fst (consultRuleTexts s (sources ns))) newSession
 
     names = map baseName . rules . machineOf
 
@@ -789,7 +789,7 @@ consulting =
           Right (nm, is) ->
             -- The session has "mine"; the module is loaded against "extra"
             -- on top of it, and afterwards the session has "mine" alone.
-            let (s', _) = loadProofItemsConsulting (Pool (pool extra) [] []) consulted (moduleText nm) is
+            let (s', _) = loadProofItemsConsulting (Pool (pool extra) [] [] []) consulted (moduleText nm) is
              in (map baseName (pool extra), map baseName (pool s'))
                   @?= (["extra", "mine"], ["mine"])
 
@@ -797,7 +797,7 @@ consulting =
         case itemsOf "consult Stlc.Tactics" of
           Left e -> assertFailure e
           Right (nm, is) ->
-            case snd (loadProofItemsConsulting (Pool (pool extra) [] []) consulted (moduleText nm) is) of
+            case snd (loadProofItemsConsulting (Pool (pool extra) [] [] []) consulted (moduleText nm) is) of
               ProofLoaded n ds _ _ -> (n, ds) @?= ("M", [])
               other                -> assertFailure (show other)
     ]
@@ -815,7 +815,7 @@ consulting =
     pool = rules . machineOf
 
     consulted =
-      fst (consultRuleBases newSession [("mine.thena.rules", "rule base mine where\n\n")])
+      fst (consultRuleTexts newSession [("mine.thena.rules", "rule base mine where\n\n")])
 
     extra =
-      fst (consultRuleBases consulted [("extra.thena.rules", "rule base extra where\n\n")])
+      fst (consultRuleTexts consulted [("extra.thena.rules", "rule base extra where\n\n")])

@@ -1,0 +1,14 @@
+-- **Its twin, and the measurement is that this one is refused** (MS11 phase
+-- 300): the same consult with the same block, and the rule that writes `LC` is
+-- written after it. The base is fetched and `Lang` is in the session, and the
+-- rule is still refused — which is what makes the block a frame.
+rule base scoped-borrows-after where
+
+consult test.modules.Lends where
+  rule inside :- do
+    say "inside"
+
+open A
+
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"

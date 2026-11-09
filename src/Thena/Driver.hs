@@ -92,13 +92,20 @@ module Thena.Driver
   , InstralTypeError
   , Pool (..)
   , Held (..)
+  , Spread (..)
+  , HeldGroup (..)
   , scopedConsults
   , fileImports
   , reachedBy
   , loadRuleBases
   , consultRuleBases
+  , loadRuleTexts
+  , consultRuleTexts
+  , unfetched
   , ruleBaseImports
   , ruleBaseConsults
+  , ruleBaseFileConsults
+  , ruleBaseScopedConsults
   , ruleBasePublishes
   , rolledBack
   , ModuleName
@@ -151,6 +158,7 @@ import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLe
 import Thena.Development.Partial (Partial (..), extract, termsIn)
 import Thena.Engine
   ( ChoicePoint (..)
+  , rules
   , Exec (..)
   , Machine (..)
   , Message
@@ -606,7 +614,7 @@ pendingQuestion = sessionAsking
 -- in Haskell rather than read from disk ("Thena.Standard"). A frontend that
 -- builds a base with 'ruleBaseOfDecls' wants the same door.
 withRuleBases :: [RuleBase] -> Session -> Session
-withRuleBases bs s = s { sessionMachine = (sessionMachine s) { rules = bs } }
+withRuleBases bs s = s { sessionMachine = (sessionMachine s) { pool = bs } }
 
 -- | What the session is working on.
 --
@@ -876,7 +884,7 @@ data Parked = Parked
 -- away to prove a lemma and coming back is unaffected; only what a *finished*
 -- proof left behind is dropped.
 atRest :: Machine -> Machine
-atRest m = m { exec = Exec [] [] [] }
+atRest m = m { exec = Exec [] [] [] [] }
 
 -- | The attempt being worked on, if there is one.
 currentAttempt :: Session -> Maybe Attempt
@@ -960,10 +968,10 @@ newSession = Session
   -- can never be met is refused and one merely unmet is not. It is deliberately
   -- not 'NoTrust', which is the guarantee a user steps /up/ to, and deliberately
   -- not 'AnyTrust', which reports and enforces nothing.
-  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] [] rootScope n 0 NoUndischargeableTrust
+  { sessionMachine   = Machine (Exec [] [] [] []) ps [] emptyGlobals [] [] [] [] rootScope n [] 0 NoUndischargeableTrust
   , sessionWork      = Scratch
   , sessionSuspended = []
-  , sessionRecord    = Record { recordEntries = [], recordFloor = (Exec [] [] [], ps, []) }
+  , sessionRecord    = Record { recordEntries = [], recordFloor = (Exec [] [] [] [], ps, []) }
   , sessionFuel      = Nothing
   , sessionParsing   = Nothing
   , sessionAsking    = Nothing
@@ -1450,7 +1458,14 @@ checkSurfaceBlocks gs bases nm prog = case surfaceBlocks (rootReading gs) nm pro
   Left errs -> Just (BlockIll errs)
   Right bs  -> case concatMap validate bs of
     e : es -> Just (BlockIll (e : es))
-    []     -> case snd (inferProgram (allSignatures bases) (allCallable bases ++ bs)) of
+    -- **ONE BLOCK AT A TIME, SO THAT ONLY THESE BLOCKS ARE BLAMED** (MS11
+    -- phase 300). 'inferProgram' answers with every mistake in the program,
+    -- the pool's rules included, and a rule compiled inside a
+    -- @consult … where@ block does not type against the pool alone — so every
+    -- line typed after such a base was loaded carried that rule's error.
+    -- 'Thena.Instral.Infer.inferBlock' walks the same groups and keeps what is
+    -- this block's.
+    []     -> case concatMap (inferBlock (allSignatures bases) (allCallable bases) []) bs of
       []   -> Nothing
       errs -> Just (BlockMistyped errs)
 
@@ -2331,7 +2346,7 @@ loadProofSource s src = case parseSurfaceModule src of
 -- project manifest; see "Thena.View.Source".
 loadProofItems :: Session -> String -> [Item] -> (Session, Response)
 loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
-  ([], []) -> loadProofItemsConsulting (Pool (rules (sessionMachine s)) [] []) s nm items
+  ([], []) -> loadProofItemsConsulting (Pool (rules (sessionMachine s)) [] [] []) s nm items
   -- **Refused rather than ignored** (MS11 phases 273 and 274). This door has no
   -- way to read a file (§12 invariant 4), so a module that names anything on
   -- disc cannot be elaborated through it — and silently elaborating it against
@@ -2363,8 +2378,78 @@ data Pool = Pool
     -- ^ **the bases a @consult … where@ named, read and not installed** (MS11
     -- phase 292). They are in the machine's 'Thena.Engine.held' for the length
     -- of the load and reach the pool only inside the block that named them.
+  , poolPushable  :: [RuleBase]
+    -- ^ **and the ones a CONSULTED BASE's own blocks named** (MS11 phase 300).
+    -- The same waiting room one level in: a base this module consults may
+    -- write @consult B where { … }@ itself, and @B@ is then pushed by that
+    -- base's rules rather than by anything in this module. **Path-keyed and
+    -- not name-keyed**, which is the only difference from 'poolHeld': the
+    -- module's own blocks are looked up by the name the line wrote
+    -- ('broughtConsult'), where a base's are already compiled into its rules'
+    -- bodies and reach 'Thena.Engine.held' by path.
   }
   deriving (Eq, Show)
+
+-- | __What a fetch read, split by where it goes__ (MS11 phase 300).
+--
+-- A @consult@ fetches the base it names and everything that base consults
+-- ('Thena.Files.fetching', his ruling of 2026-11-06), and since this phase one
+-- of those lines may state a block — so the walk no longer answers with one
+-- run of texts. **The pool run and the held groups are two answers to two
+-- questions**: which bases a consumer is searched against, and which bases are
+-- waiting for a block of somebody's rules to run.
+--
+-- **Everything in both halves is read, resolved and typed together**, which is
+-- 'installReadBases'' own bargain: a held base's rules may call a rule in the
+-- pool and the other way about, so there is one push and not two.
+data Spread = Spread
+  { spreadPool :: [(FilePath, String)]
+    -- ^ in search order, as the pool takes them
+  , spreadHeld :: [HeldGroup]
+  }
+  deriving (Eq, Show)
+
+-- | __One @consult B where { … }@ line in a rule file, and what it fetched__
+-- (MS11 phase 300, his ruling of 2026-11-06, @~k68d7@).
+--
+-- **The line's base and everything that base consults**, in search order, which
+-- is the group a plain @consult@ would have spliced into the pool: what the
+-- block changes is how far it reaches, not what it brings.
+--
+-- **Which file wrote the line is part of the key.** Two bases in one push may
+-- each write @consult B where { … }@, and each one's block compiles the push
+-- into its own rules — so the lookup that turns the name back into a group is
+-- per file ('groupsFor').
+data HeldGroup = HeldGroup
+  { heldFor   :: FilePath    -- ^ the base whose text wrote the line
+  , heldNamed :: ModuleName  -- ^ the name the line wrote
+  , heldTexts :: [(FilePath, String)]
+  }
+  deriving (Eq, Show)
+
+-- | __The groups one file's blocks hold__, as 'scopedDecls' wants them (MS11
+-- phase 300): the base paths to push, in search order, and the surface modules
+-- the group publishes.
+--
+-- **A name the fetch did not answer gives nothing to push**, which cannot
+-- arise through either door — the fetch reads every @consult@ line
+-- ('rawConsults') and refuses the whole act if a file is missing — and is
+-- written out rather than left to a partial lookup. The stored-project door
+-- passes no groups at all and so writes no pushes.
+groupsFor
+  :: Session -> [HeldGroup] -> FilePath -> ModuleName -> ([FilePath], [GlobalName])
+groupsFor s groups path m =
+  ( concat [ map fst (heldTexts g) | g <- mine ]
+  -- **'revealedToBase' and not 'reachedBy'**, which is phase 299's finding for
+  -- the other act: what the group published reaches a rule file through its
+  -- grammar keys as well as its names, because nothing in
+  -- @rule describe LC[app]\`…\`@ names a global. One lookup serves both
+  -- halves of the parity.
+  , concatMap (revealedToBase s)
+              (concat [ publishedTo (heldTexts g) | g <- mine ])
+  )
+  where
+    mine = take 1 [ g | g <- groups, heldFor g == path, heldNamed g == m ]
 
 -- | __A base read for one block__ (MS11 phase 292).
 --
@@ -2431,11 +2516,18 @@ data Held = Held
 -- written against @LC@ may write @LC@ without importing it. 'Pool' carries the
 -- two halves together because they come out of the same texts.
 loadProofItemsConsulting :: Pool -> Session -> String -> [Item] -> (Session, Response)
-loadProofItemsConsulting (Pool pool published heldBases) s nm items =
+loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items =
     let inherited = openedFrom s
         machine  = (sessionMachine s)
-                     { rules = pool
-                     , held  = map heldBase heldBases
+                     { pool  = poolOf
+                     -- **AND THE ONES A CONSULTED BASE'S OWN BLOCKS HOLD**
+                     -- (MS11 phase 300), which reach 'Thena.Engine.held' by
+                     -- path because they are already compiled into that
+                     -- base's rules. **The session's stay under them**: a rule
+                     -- base in the session's pool may have blocks of its own
+                     -- and its rules can run during this load.
+                     , held  = map heldBase heldBases ++ pushable
+                                 ++ held (sessionMachine s)
                      , scope = (scope (sessionMachine s))
                                  { scopeConcealed =
                                      [concealedFrom (fileImports items ++ published) s]
@@ -2462,7 +2554,8 @@ loadProofItemsConsulting (Pool pool published heldBases) s nm items =
         poolBack s'' =
           let final = scopeOpens (scope (sessionMachine s''))
            in s'' { sessionMachine = (sessionMachine s'')
-                      { rules = rules (sessionMachine s)
+                      { pool = pool (sessionMachine s)
+                      , held = held (sessionMachine s)
                       , scope = (scope (sessionMachine s''))
                                   { scopeConcealed =
                                       scopeConcealed (scope (sessionMachine s))
@@ -2548,7 +2641,8 @@ loadProofModules s00 ms0 = go s0 [] ms0
     readsOf s m =
       foldl' (\acc (p, src) -> noteRead p (digestOf src) acc)
              (noteRead (readModulePath m) (readModuleDigest m) s)
-             (concat (fromMaybe [] (readModulePool m)))
+             (concat [ spreadPool sp ++ concatMap heldTexts (spreadHeld sp)
+                     | sp <- fromMaybe [] (readModulePool m) ])
 
     go s acc [] = (s, Right (reverse acc))
     go s acc (m : rest) = case poolFor s m of
@@ -2577,8 +2671,8 @@ loadProofModules s00 ms0 = go s0 [] ms0
     -- 2026-11-03) — 'loadProofItemsConsulting' is what puts them in force for
     -- the length of the load and takes them out again.
     poolFor s m = case readModulePool m of
-      Nothing   -> Right (Pool (rules (sessionMachine s)) [] [])
-      Just groups -> case consultRuleBases s (concat groups) of
+      Nothing   -> Right (Pool (rules (sessionMachine s)) [] [] [])
+      Just groups -> case consultRuleBases s (spreadOf groups) of
         -- **The published modules are read off the same texts** (MS11 phase
         -- 289), which is the half 'consultRuleBases' has no use for: a base
         -- that will not parse is refused by the install with the position in
@@ -2601,15 +2695,34 @@ loadProofModules s00 ms0 = go s0 [] ms0
         -- while every scoped base published nothing: one @public consult@ in a
         -- base named by a block moved the boundary and the file's pool took a
         -- base the block should have kept.
-        (_, BasesLoaded pool _) ->
+        -- **AND A BASE IN THE GROUP MAY HOLD BASES OF ITS OWN** (MS11 phase
+        -- 300): one of its @consult@ lines may state a block, and what that
+        -- line fetched is read with everything else and installed nowhere.
+        -- 'installReadBases' has already put those in the session's
+        -- 'Thena.Engine.held' — which is the session this function drops — so
+        -- they are read back off it here and travel in the 'Pool' with the
+        -- rest of what the load is searched against.
+        (s1, BasesLoaded pool _) ->
           let scoped          = scopedConsults (readModuleItems m)
               (wide, blocks)  = splitAt (length groups - length scoped) groups
-              bases           = take (length (concat groups)) pool
-              (wideBases, bs) = splitAt (length (concat wide)) bases
-           in Right (Pool (wideBases ++ drop (length (concat groups)) pool)
-                          (publishedTo (concat wide))
-                          (concat (zipWith held scoped (shared blocks bs))))
+              runs            = map spreadPool groups
+              bases           = take (length (concat runs)) pool
+              (wideBases, bs) = splitAt (length (concat (map spreadPool wide))) bases
+           in Right (Pool (wideBases ++ drop (length (concat runs)) pool)
+                          (publishedTo (concat (map spreadPool wide)))
+                          (concat (zipWith held scoped
+                                     (shared (map spreadPool blocks) bs)))
+                          (take (length (concat [ heldTexts g
+                                                | sp <- groups
+                                                , g <- spreadHeld sp ]))
+                                (Engine.held (sessionMachine s1))))
         (_, bad)              -> Left bad
+
+    -- **One fetch out of several** (MS11 phase 300): each @consult@ line was
+    -- fetched on its own, and the install asks one question of the whole push,
+    -- so the pool runs are concatenated in written order and the held groups
+    -- travel beside them with the file they belong to on each.
+    spreadOf gs = Spread (concatMap spreadPool gs) (concatMap spreadHeld gs)
 
     -- The bases of one block's group, beside the texts they were read from.
     shared [] _            = []
@@ -2866,7 +2979,7 @@ data ReadModule = ReadModule
     -- @~r58qh@ — and "Thena.Files" refuses the module before it builds this
     -- record where they disagree, so by the time one exists they have agreed.
     -- A file loaded by a path that is no module name has nothing to agree with.
-  , readModulePool   :: Maybe [[(FilePath, String)]]
+  , readModulePool   :: Maybe [Spread]
     -- ^ the bases it is searched against, **read off the disc and not yet
     -- resolved**, in search order — or 'Nothing' where there are none, which
     -- is elaborated against **the session's own pool as it stands**. Said as an
@@ -4684,11 +4797,12 @@ breakOn needle = go ""
 -- with no session passes @[]@**, which is the prompt's scope and conceals
 -- nothing.
 ruleBaseOfDecls
-  :: (ModuleName -> [GlobalName]) -> [Grammar] -> [GlobalName] -> FilePath
+  :: (ModuleName -> [GlobalName]) -> (ModuleName -> ([FilePath], [GlobalName]))
+  -> [Grammar] -> [GlobalName] -> FilePath
   -> String -> Maybe String
   -> [RawDecl] -> Either RuleFileError RuleBase
-ruleBaseOfDecls reveals gs conc path nm desc raws = do
-  (sigs, fns, rs) <- resolveAll reveals gs conc raws
+ruleBaseOfDecls reveals brought gs conc path nm desc raws = do
+  (sigs, fns, rs) <- resolveAll reveals brought gs conc raws
   Right (ruleBase nm desc path sigs fns rs)
 
 -- | A rule file's header and its declarations, parsed and /not/ resolved.
@@ -4764,23 +4878,24 @@ parseInstralType src = do
 -- the one @~xdt8c@ made for a surface module at phase 282 — the same ruling, a
 -- table further over.
 scopedDecls
-  :: (ModuleName -> [GlobalName]) -> [Grammar] -> [GlobalName] -> [RawDecl]
-  -> [(Reading, RawDecl)]
-scopedDecls reveals gs conc = go rootScope { scopeConcealed = [conc] }
+  :: (ModuleName -> [GlobalName]) -> (ModuleName -> ([FilePath], [GlobalName]))
+  -> [Grammar] -> [GlobalName] -> [RawDecl]
+  -> [(Reading, [FilePath], RawDecl)]
+scopedDecls reveals brought gs conc = go rootScope { scopeConcealed = [conc] } []
   where
-    go _ []  = []
-    go sc (d : rest) = case d of
-      DeclOpen o        -> go (brings o sc) rest
+    go _ _ []  = []
+    go sc ps (d : rest) = case d of
+      DeclOpen o        -> go (brings o sc) ps rest
       -- **One declaration, and then the file carries on without it.** The
       -- inner one may be another @open … in@, which is why it goes back
       -- through this walk rather than being paired here.
-      DeclOpenIn o cov  -> go (brings o sc) [cov] ++ go sc rest
+      DeclOpenIn o cov  -> go (brings o sc) ps [cov] ++ go sc ps rest
       -- **An import is not a declaration to resolve either** (MS11 phase 276):
       -- what it does is make the grammars in @gs@ be there at all, and that
       -- happened before this walk started. **A consult is the same** (MS11
       -- phase 289): what it names is a pool, which is assembled before a rule
       -- of this file is ever searched.
-      DeclImport _ _ _ Nothing -> go sc rest
+      DeclImport _ _ _ Nothing -> go sc ps rest
       -- **AND A SCOPED IMPORT IS A FRAME OVER ITS BLOCK** (MS11 phase 299, his
       -- design of 2026-11-05). The module is loaded before this file is read,
       -- as every import's is; what the block settles is where its names may be
@@ -4789,10 +4904,28 @@ scopedDecls reveals gs conc = go rootScope { scopeConcealed = [conc] }
       -- **'Thena.Core.Term.revealing' is the frame and 'LeaveReveal' is this
       -- @++ go sc rest@**: a walk needs no op to put a concealment back, where
       -- a surface program does because its declarations run.
-      DeclImport _ ps x (Just inner) ->
-        go (revealing (reveals (moduleFromSteps ps x)) sc) inner ++ go sc rest
-      DeclConsult _ _ _ -> go sc rest
-      _                 -> (Reading gs sc, d) : go sc rest
+      DeclImport _ pth x (Just inner) ->
+        go (revealing (reveals (moduleFromSteps pth x)) sc) ps inner
+          ++ go sc ps rest
+      DeclConsult _ _ _ Nothing -> go sc ps rest
+      -- **AND A SCOPED CONSULT IS TWO FRAMES OVER ITS BLOCK** (MS11 phase 300,
+      -- his ruling of 2026-11-06). The names the group published are revealed
+      -- for the block exactly as a scoped import's are — one lookup, the other
+      -- act — and the pool half is the pushes, which travel down this walk
+      -- beside the scope and are compiled into each of the block's rules by
+      -- 'resolveAll'.
+      --
+      -- **The group is appended, so the innermost block pushes last and is
+      -- searched first** — the stack rule, which a file's consults already
+      -- follow (phase 288). Within one group the pushes are written in reverse
+      -- of search order, each going on top, so the base the line named ends up
+      -- first and what it consults sits under it: 'surfaceProgram' spells the
+      -- same sentence for a proof file's block.
+      DeclConsult _ pth x (Just inner) ->
+        let (paths, names) = brought (moduleFromSteps pth x)
+         in go (revealing names sc) (ps ++ reverse paths) inner
+              ++ go sc ps rest
+      _                 -> (Reading gs sc, ps, d) : go sc ps rest
 
     brings o sc = sc { scopeOpens = openedOf o ++ scopeOpens sc }
 
@@ -4826,10 +4959,11 @@ openedOf (RawOpen ns spec) = [ said (ps ++ [x]) | (ps, x) <- ns ]
 -- that stands where it is written and not against one scope for the file.
 -- 'scopedDecls' is the walk that pairs the two.
 resolveAll
-  :: (ModuleName -> [GlobalName]) -> [Grammar] -> [GlobalName] -> [RawDecl]
+  :: (ModuleName -> [GlobalName]) -> (ModuleName -> ([FilePath], [GlobalName]))
+  -> [Grammar] -> [GlobalName] -> [RawDecl]
   -> Either RuleFileError
        ([(String, Signature)], [Rule], [Rule])
-resolveAll reveals gs conc raws =
+resolveAll reveals brought gs conc raws =
   case ( concat ruleErrs ++ concat fnErrs ++ sigErrs
            ++ dups ++ collisions ++ overlapping
        , concatMap validate (ok ++ fns)
@@ -4840,18 +4974,41 @@ resolveAll reveals gs conc raws =
     -- **Each declaration beside the scope it was written in.** An @open@ is not
     -- a declaration to resolve, so it does not appear here — what it says is
     -- already in the reading beside everything under it.
-    decls = scopedDecls reveals gs conc raws
+    decls = scopedDecls reveals brought gs conc raws
 
     (ruleErrs, ok)  =
-      partitionEithers [ resolveRule rd r | (rd, DeclRule r) <- decls ]
+      partitionEithers [ pushing ps <$> resolveRule rd r | (rd, ps, DeclRule r) <- decls ]
     -- **A function is validated like any rule**, because it is one
     -- ('Thena.Rules.resolveFunction').
     (fnErrs, fns)   =
-      partitionEithers [ resolveFunction rd f | (rd, DeclFunction f) <- decls ]
+      partitionEithers [ pushing ps <$> resolveFunction rd f
+                       | (rd, ps, DeclFunction f) <- decls ]
     -- **A signature needs no scope**: @instral@'s types are its own words, and
     -- a tag never appears in one.
     (sigErrs, sigs) =
-      partitionEithers [ resolveSignature g | (_, DeclSignature g) <- decls ]
+      partitionEithers [ resolveSignature g | (_, _, DeclSignature g) <- decls ]
+
+    -- **WHAT A @consult … where@ BLOCK COMPILES TO** (MS11 phase 300, his
+    -- ruling of 2026-11-06): a push of the base at the front of the body and a
+    -- pop at the end, which is his own description of the mechanism — /"this
+    -- is about that rule being compiled such that there is the instruction
+    -- that pushes the rule base and then pops it"/. A rule outside every
+    -- block gets an empty list and is left exactly as it was written.
+    --
+    -- **The trailing pop is not what makes the extent end**, and it is worth
+    -- saying because the obvious reading of the line above is that it is.
+    -- 'Thena.Instral.Ops.Return' drops the rest of the body and
+    -- 'Thena.Engine.failure' never reaches the end of one at all, so a pop
+    -- written here would be skipped on two of a body's three exits.
+    -- 'Thena.Engine.Frame''s @savedPushes@ is what restores the pool on every
+    -- one of them; this pop is what makes a body that runs to the end balance
+    -- without waiting to be unwound, and what makes the program read as the
+    -- pair it is.
+    pushing ps r
+      | null ps   = r
+      | otherwise = r { ruleBody = map (Do . PushBase) ps
+                                     ++ ruleBody r
+                                     ++ [ Do PopBase | _ <- ps ] }
     -- **A name may not be a rule and a function at one arity** (MS5, reviewed
     -- 2026-09-12). They would become two clauses of one callable — 'clauses'
     -- searches 'Thena.Rules.allCallable' — so the function would join the rule's
@@ -4920,23 +5077,63 @@ resolveAll reveals gs conc raws =
 --
 -- **All or nothing.** A file that will not load leaves the previous list in
 -- place, so a session never ends up searching half of what was asked for.
-loadRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
-loadRuleBases s ps =
-  loadReadBases s [ (path, idlePublic src, statedConcealment s ps src
-                    , readStated s gs ps path src)
-                  | (path, src) <- ps ]
-  where
-    gs = grammars (sessionMachine s)
+loadRuleBases :: Session -> Spread -> (Session, Response)
+loadRuleBases s sp = loadReadBases s (readSpread s sp)
+
+-- | __The same for bases handed over as text rather than fetched by name__
+-- (MS11 phase 300).
+--
+-- 'loadReadBases'\' shape one gate out: a specialisation of the door above and
+-- not a second one. **What it cannot express is a held group**, so a base that
+-- writes @consult B where { … }@ reaches this door with nothing to push —
+-- which is exactly what a plain @consult@ gets here too, the pool being the
+-- caller's to supply. A caller with the disc goes through "Thena.Files".
+loadRuleTexts :: Session -> [(FilePath, String)] -> (Session, Response)
+loadRuleTexts s = loadRuleBases s . unfetched
+
+-- | __Texts in pool order and nothing held back__ (MS11 phase 300) — what a
+-- caller with no fetch behind it has.
+unfetched :: [(FilePath, String)] -> Spread
+unfetched texts = Spread texts []
 
 -- | The same, as a @:consult@ rather than a @:load@: the bases are pushed on
 -- top of the pool instead of replacing it (MS11 phase 271).
-consultRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
-consultRuleBases s ps =
-  consultReadBases s [ (path, idlePublic src, statedConcealment s ps src
-                       , readStated s gs ps path src)
-                     | (path, src) <- ps ]
+consultRuleBases :: Session -> Spread -> (Session, Response)
+consultRuleBases s sp = consultReadBases s (readSpread s sp)
+
+-- | __The same, as a push rather than a replacement__ (MS11 phase 300) —
+-- 'loadRuleTexts'\' twin, and its paragraph applies word for word.
+consultRuleTexts :: Session -> [(FilePath, String)] -> (Session, Response)
+consultRuleTexts s = consultRuleBases s . unfetched
+
+-- | __Every text a fetch read, read__ (MS11 phase 300).
+--
+-- **One list and a flag, because the install asks one question of the whole
+-- push**: a @consult@ in one base may be answered by another base in the same
+-- fetch, and inference needs every signature in hand ('installReadBases'). So
+-- the bases a block holds are resolved and typed with the pool's and only
+-- their /position/ differs — which is the bargain 'loadProofModules' already
+-- makes for a proof file's blocks.
+--
+-- **The held ones come last**, so a caller that wants them back can take them
+-- off the end; 'loadProofModules' does.
+readSpread :: Session -> Spread -> [ReadBase]
+readSpread s sp = map (entry True) (spreadPool sp)
+                    ++ [ entry False t | g <- spreadHeld sp, t <- heldTexts g ]
   where
-    gs = grammars (sessionMachine s)
+    gs    = grammars (sessionMachine s)
+    -- **The lookup table is every text the fetch read**, held ones included: a
+    -- base inside a block's group states its own imports and consults like any
+    -- other, and what it publishes has to be findable while it is read.
+    texts = spreadPool sp ++ concatMap heldTexts (spreadHeld sp)
+
+    entry inPool (path, src) =
+      ( path
+      , idlePublic src
+      , statedConcealment s texts src
+      , inPool
+      , readStated s gs texts (spreadHeld sp) path src
+      )
 
 -- | __What a base's text may not reach__ (MS11 phase 297).
 --
@@ -5008,9 +5205,9 @@ idlePublic src =
 -- rule-file consumer would be telling the two apart. 'handedTo' is the walk and
 -- the group's texts are what it walks.
 readStated
-  :: Session -> [Grammar] -> [(FilePath, String)] -> FilePath -> String
-  -> Either RuleFileError RuleBase
-readStated s gs group path src = do
+  :: Session -> [Grammar] -> [(FilePath, String)] -> [HeldGroup] -> FilePath
+  -> String -> Either RuleFileError RuleBase
+readStated s gs group held' path src = do
   -- **One parse and not two** (MS11 phase 297). This asked 'ruleBaseImports'
   -- for the names and then had the read parse the file again; the
   -- concealment needs the same declarations, so the parse is done once here and
@@ -5018,7 +5215,7 @@ readStated s gs group path src = do
   (nm, desc, raws) <- rawRuleDecls src
   case filter (\m -> not (moduleLoaded m s)) (rawImports raws) of
     ms@(_ : _) -> Left (RuleImportsUnread ms)
-    []         -> ruleBaseOfDecls (revealedToBase s) gs
+    []         -> ruleBaseOfDecls (revealedToBase s) (groupsFor s held' path) gs
                     (concealedFrom (rawFileImports raws ++ handedTo group src) s)
                     path nm desc raws
 
@@ -5052,6 +5249,28 @@ ruleBaseConsults :: String -> Either RuleFileError [ModuleName]
 ruleBaseConsults src = do
   (_, _, raws) <- rawRuleDecls src
   Right (rawConsults raws)
+
+-- | __The same, less the lines that state a block__ (MS11 phase 300).
+--
+-- 'rawFileConsults'\' door, and the two things it answers are the two a
+-- file-wide @consult@ does: where the base goes in the pool
+-- ('Thena.Files.beneath') and whose publications the file may write throughout
+-- ('handedTo'). **The fetch reads 'ruleBaseConsults' and never this.**
+ruleBaseFileConsults :: String -> Either RuleFileError [ModuleName]
+ruleBaseFileConsults src = do
+  (_, _, raws) <- rawRuleDecls src
+  Right (rawFileConsults raws)
+
+-- | __Which of a rule file's @consult@ lines state a block__, in written order
+-- (MS11 phase 300).
+--
+-- What 'Thena.Files.beneath' fetches into a 'HeldGroup' rather than into the
+-- pool run. **'ruleBaseFileConsults'\' complement**, so the two together are
+-- 'ruleBaseConsults' and no line is read twice or dropped.
+ruleBaseScopedConsults :: String -> Either RuleFileError [ModuleName]
+ruleBaseScopedConsults src = do
+  (_, _, raws) <- rawRuleDecls src
+  Right (rawScopedConsults raws)
 
 -- | __Which of them it pushes for whoever consults it__ (MS11 phase 289), and
 -- **which surface modules it hands the names of on**.
@@ -5097,7 +5316,7 @@ handedTo group = go []
   where
     go seen src =
       concat [ publishedTo [(p, t)] ++ go (p : seen) t
-             | m <- either (const []) id (ruleBaseConsults src)
+             | m <- either (const []) id (ruleBaseFileConsults src)
              , let p = moduleFile LoadRules m
              , p `notElem` seen
              , t <- take 1 [ t | (q, t) <- group, q == p ] ]
@@ -5159,17 +5378,58 @@ rawFileImports = concatMap go
 -- **A @consult@ inside a scoped import's block is the file's** (MS11 phase
 -- 299), which is 'moduleConsults'' rule for a surface file: an @import@ block
 -- scopes names, and the pool a base is installed into is the file's whatever
--- line names it. **@consult@ has no block of its own here**: a rule file holds
--- no proofs, so there is nothing a pool could be scoped to, and the surface
--- language's block means a pool as well as a set of names.
+-- line names it.
+-- **AND A @consult@ THAT STATES A BLOCK IS IN THIS LIST TOO** (MS11 phase
+-- 300), which is 'rawImports'' rule for the other act: what a block changes is
+-- how far the base reaches, never whether the base is read, so the fetch reads
+-- every line and 'rawFileConsults' is the one consumer that wants the
+-- file-wide ones alone.
 rawConsults :: [RawDecl] -> [ModuleName]
 rawConsults = concatMap go
   where
     go d = case d of
-      DeclConsult _ ps x    -> [moduleFromSteps ps x]
-      DeclImport _ _ _ blk  -> concatMap go (concat blk)
-      DeclOpenIn _ cov      -> go cov
-      _                     -> []
+      DeclConsult _ ps x blk -> moduleFromSteps ps x : concatMap go (concat blk)
+      DeclImport _ _ _ blk   -> concatMap go (concat blk)
+      DeclOpenIn _ cov       -> go cov
+      _                      -> []
+
+-- | __The same, less the lines that state a block__ (MS11 phase 300).
+--
+-- 'rawFileImports'' twin for the other act, and the two consumers that want it
+-- are the two things a file-wide @consult@ does and a scoped one does not: the
+-- base's position in the pool ('Thena.Files.beneath'), and the names the base
+-- published being writable throughout the file ('handedTo').
+--
+-- **A consult written inside a scoped block is not file-wide**, which is why
+-- the walk goes into an @import@ block and not into a @consult@ one: an
+-- @import@ block scopes names and leaves the pool the file's, where a
+-- @consult@ block is itself the thing being scoped.
+rawFileConsults :: [RawDecl] -> [ModuleName]
+rawFileConsults = concatMap go
+  where
+    go d = case d of
+      DeclConsult _ ps x Nothing -> [moduleFromSteps ps x]
+      DeclConsult _ _ _ (Just _) -> []
+      DeclImport _ _ _ blk       -> concatMap go (concat blk)
+      DeclOpenIn _ cov           -> go cov
+      _                          -> []
+
+-- | __And the lines that do state one__, in written order (MS11 phase 300).
+--
+-- 'rawFileConsults'\' complement: the two together are 'rawConsults', so a
+-- line is in exactly one of them and the fetch reads each one once. **A
+-- consult inside a block is one of these too, whichever kind of block it is**
+-- — a scoped consult written inside a scoped consult's block is a group held
+-- for that inner block, and nesting is what makes it the innermost push.
+rawScopedConsults :: [RawDecl] -> [ModuleName]
+rawScopedConsults = concatMap go
+  where
+    go d = case d of
+      DeclConsult _ ps x (Just blk) -> moduleFromSteps ps x : concatMap go blk
+      DeclConsult _ _ _ Nothing     -> []
+      DeclImport _ _ _ blk          -> concatMap go (concat blk)
+      DeclOpenIn _ cov              -> go cov
+      _                             -> []
 
 -- | __Which bases a rule file pushes for whoever consults it__ (MS11 phase 289,
 -- @~jmw4k@, his ruling of 2026-10-30).
@@ -5192,10 +5452,11 @@ rawPublicConsults :: [RawDecl] -> [ModuleName]
 rawPublicConsults = concatMap go
   where
     go d = case d of
-      DeclConsult Public ps x -> [moduleFromSteps ps x]
-      DeclImport _ _ _ blk    -> concatMap go (concat blk)
-      DeclOpenIn _ cov        -> go cov
-      _                       -> []
+      DeclConsult Public ps x blk -> moduleFromSteps ps x : concatMap go (concat blk)
+      DeclConsult Own _ _ blk     -> concatMap go (concat blk)
+      DeclImport _ _ _ blk        -> concatMap go (concat blk)
+      DeclOpenIn _ cov            -> go cov
+      _                           -> []
 
 -- | __Which surface modules a rule file's importers may name__ (MS11 phase 289,
 -- @~jmw4k@).
@@ -5232,6 +5493,7 @@ loadRuleDecls s ps =
   loadReadBases s [ ( path
                     , [ PublicConsultIdle (moduleText m) | m <- rawPublicConsults ds ]
                     , concealedFrom (rawFileImports ds) s
+                    , True
                     , stated path nm desc ds )
                   | (path, nm, desc, ds) <- ps ]
   where
@@ -5250,7 +5512,14 @@ loadRuleDecls s ps =
       -- the pipeline too late to have. Nothing is lost that was ever there:
       -- this door has had no caller since it was written, and a project stored
       -- as text comes in through 'loadRuleBases' with the rest.
-      []         -> ruleBaseOfDecls (revealedToBase s) gs
+      -- **AND NO PUSHES, BECAUSE THIS DOOR FETCHES NOTHING** (MS11 phase
+      -- 300). A @consult … where@ block compiles to a push of the group the
+      -- line fetched, and this door does not fetch: a plain @consult@ in a
+      -- base stored as declarations brings no base in either, which is the
+      -- same gap one line over and not a new one. **It has had no caller since
+      -- it was written** — see the paragraph above — and closing it means
+      -- giving it the disc, which is what 'readStated' is for.
+      []         -> ruleBaseOfDecls (revealedToBase s) (const ([], [])) gs
                       (concealedFrom (rawFileImports ds) s) path nm desc ds
 
 -- | Install bases that have already been built, or none of them.
@@ -5259,11 +5528,8 @@ loadRuleDecls s ps =
 -- the list is walked**, which is what lets the reading happen before this rather
 -- than inside it — and is why there is one fold here and not one per kind of
 -- source.
-loadReadBases
-  :: Session
-  -> [(FilePath, [Warning], [GlobalName], Either RuleFileError RuleBase)]
-  -> (Session, Response)
-loadReadBases = installReadBases []
+loadReadBases :: Session -> [ReadBase] -> (Session, Response)
+loadReadBases = installReadBases [] []
 
 -- | The same, pushing instead of replacing: the session's present pool goes
 -- /underneath/ what is being installed.
@@ -5277,11 +5543,9 @@ loadReadBases = installReadBases []
 -- the same day: not a move to the top and not a no-op, because the upper copy
 -- can go out of scope while the lower one is still in force. So this does not
 -- deduplicate, and the pool may hold one base more than once.
-consultReadBases
-  :: Session
-  -> [(FilePath, [Warning], [GlobalName], Either RuleFileError RuleBase)]
-  -> (Session, Response)
-consultReadBases s = installReadBases (rules (sessionMachine s)) s
+consultReadBases :: Session -> [ReadBase] -> (Session, Response)
+consultReadBases s =
+  installReadBases (pool (sessionMachine s)) (held (sessionMachine s)) s
 
 -- | Install bases on top of @below@, or none of them.
 --
@@ -5300,11 +5564,19 @@ consultReadBases s = installReadBases (rules (sessionMachine s)) s
 -- nothing left to refuse. **The slot it used is the warnings'**, which is the
 -- other half of the same ruling: a @public consult@ in a rule file is accepted
 -- and told it is idle.
+-- | __One base, read and waiting to be installed__ (MS11 phase 300 named it;
+-- the tuple is MS5 phase 66c's).
+--
+-- Its path, the warnings reading it produced, what its @do@ blocks may not
+-- reach, **whether it goes in the pool at all** — 'False' for a base a
+-- @consult … where { … }@ block holds — and either the base or why it was
+-- refused.
+type ReadBase =
+  (FilePath, [Warning], [GlobalName], Bool, Either RuleFileError RuleBase)
+
 installReadBases
-  :: [RuleBase] -> Session
-  -> [(FilePath, [Warning], [GlobalName], Either RuleFileError RuleBase)]
-  -> (Session, Response)
-installReadBases below s = go []
+  :: [RuleBase] -> [RuleBase] -> Session -> [ReadBase] -> (Session, Response)
+installReadBases below heldBelow s = go []
   where
     -- **Inference runs here and nowhere earlier** (MS5 phase 66c), for the
     -- reason in 'BasesIllTyped': a rule's signature is not decidable until every
@@ -5314,27 +5586,36 @@ installReadBases below s = go []
     -- not callables — nothing can call one — so they are not in 'allCallable';
     -- they are handed to 'inferProgram' as extra bodies so that a mistake in one
     -- is found when the file loads.
-    go acc [] = case traverse blocksOf [ (conc, b) | (_, _, conc, b) <- acc ] of
+    go acc [] = case traverse blocksOf [ (conc, b) | (_, _, conc, _, b) <- acc ] of
         -- A block that does not resolve or does not validate is the file's
         -- problem and is reported against the file, as any other rule's would be.
         Left (path, errs) -> (s, RuleFileRefused path (RuleIllFormed errs))
         Right bss ->
-          case snd (inferProgram (allSignatures pool) (allCallable pool ++ concat bss)) of
+          case snd (inferProgram (allSignatures everything)
+                                 (allCallable everything ++ concat bss)) of
             []   ->
-              ( s { sessionMachine = (sessionMachine s) { rules = pool } }
+              ( s { sessionMachine = (sessionMachine s)
+                                       { pool = pool'
+                                       , held = heldNow ++ heldBelow } }
               -- **In the order the files were read**, which is the order they
               -- go into the pool: a warning about the third base of a push is
               -- read after the first two.
-              , BasesLoaded pool (concat [ ws | (_, ws, _, _) <- acc ])
+              , BasesLoaded pool' (concat [ ws | (_, ws, _, _, _) <- acc ])
               )
             errs -> (s, BasesIllTyped errs)
       where
-        bases = [ b | (_, _, _, b) <- acc ]
-        pool  = bases ++ below
+        -- **A BASE A BLOCK HOLDS IS TYPED WITH THE POOL'S AND INSTALLED
+        -- NOWHERE** (MS11 phase 300). It answers a call only while the block's
+        -- rules are running, and 'Thena.Instral.Ops.PushBase' finds it in
+        -- 'Thena.Engine.held' by its path — so inference sees it and the pool
+        -- does not.
+        pool'      = [ b | (_, _, _, True, b) <- acc ] ++ below
+        heldNow    = [ b | (_, _, _, False, b) <- acc ]
+        everything = pool' ++ heldNow
 
-    go acc ((path, warns, conc, built) : more) = case built of
+    go acc ((path, warns, conc, inPool, built) : more) = case built of
       Left e  -> (s, RuleFileRefused path e)
-      Right b -> go (acc ++ [(path, warns, conc, b)]) more
+      Right b -> go (acc ++ [(path, warns, conc, inPool, b)]) more
 
     -- **Resolved here and not in 'readStated'**, because what it answers is
     -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then

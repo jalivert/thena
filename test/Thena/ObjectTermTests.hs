@@ -22,9 +22,9 @@ import Thena.Driver
   ( Response (..)
   , Session
   , machineOf
-  , loadRuleBases
+  , loadRuleTexts
   )
-import Thena.Engine (Machine (..))
+import Thena.Engine (Machine (..), rules)
 import Thena.Instral.Ops
   ( Instr (..)
   , Op (..)
@@ -84,7 +84,7 @@ loadedModule = do
 withRules :: IO (Session, String) -> String -> IO (Either Response [Rule])
 withRules io src = do
   (s, shipped) <- io
-  pure $ case loadRuleBases s [("shipped", shipped), ("mine", src)] of
+  pure $ case loadRuleTexts s [("shipped", shipped), ("mine", src)] of
     (s', BasesLoaded _ _) ->
       Right (concatMap baseRules (filter ((== "mine") . baseName) (rules (machineOf s'))))
     (_, other) -> Left other

@@ -62,7 +62,7 @@ base = machineOf . fst <$> startingSession
 idle :: IO Machine
 idle = do
   m <- base
-  pure m { exec = Exec { pc = [], env = [], stack = [] } }
+  pure m { exec = Exec { pc = [], env = [], stack = [], pushes = [] } }
 
 busy :: IO Machine
 busy = do
@@ -76,9 +76,10 @@ busy = do
               ]
           , env = [("a", VInt 3), ("b", VBool True)]
           , stack =
-              [ Call { resume = [Do (Assume (Lit (VInt 1)) (Lit (VInt 2)))], resumeEnv = [], destination = Nothing, returned = False }
-              , Call { resume = [], resumeEnv = [], destination = Nothing, returned = True }
+              [ Call { resume = [Do (Assume (Lit (VInt 1)) (Lit (VInt 2)))], resumeEnv = [], destination = Nothing, savedPushes = [], returned = False }
+              , Call { resume = [], resumeEnv = [], destination = Nothing, savedPushes = [], returned = True }
               ]
+          , pushes = []
           }
     }
 

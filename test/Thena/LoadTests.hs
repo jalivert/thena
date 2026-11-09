@@ -39,7 +39,7 @@ import Thena.Driver
   , command
   , kindOf
   , loadProofSource
-  , loadRuleBases
+  , loadRuleTexts
   , loadSource
   , moduleConsults
   , consultedPool
@@ -77,7 +77,7 @@ import Thena.Driver
   , digestText
   , stopped
   )
-import Thena.Engine (Development, Machine (..), development)
+import Thena.Engine (Development, Machine (..), development, rules)
 import Thena.Files (preludePath, rulesPath)
 import Thena.Core.Term (nameDotted, openedPath, substLevelsIn)
 import qualified Thena.Global.Env as Env (declaredNames)
@@ -163,8 +163,8 @@ hashTests =
       (s0, trouble) <- startingSession
       assertBool (show trouble) (null trouble)
       prelude <- preludePath
-      rules   <- rulesPath
-      map fst (filesRead s0) @?= [prelude, rules]
+      shipped <- rulesPath
+      map fst (filesRead s0) @?= [prelude, shipped]
 
   , testCase "and a module's file is in it, with the ones it imports" $ do
       (s0, _) <- startingSession
@@ -209,7 +209,7 @@ hashTests =
   , -- **The same for a base, and it is the placement the note depends on.**
     -- @BadRule@ reads and then refuses at the install, and 'Thena.Files' throws
     -- that install's session away — so a note written inside
-    -- 'Thena.Driver.loadRuleBases' would be lost here and the read is noted
+    -- 'Thena.Driver.loadRuleTexts' would be lost here and the read is noted
     -- before it instead.
     testCase "and so is a base that was read and then refused" $ do
       (s0, _) <- startingSession
@@ -762,7 +762,100 @@ publicBaseTests =
         [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
           assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- es ]))
         other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- **AND SO MAY A RULE FILE'S CONSULT** (MS11 phase 300, his ruling of
+    -- 2026-11-06, @~k68d7@), which is the other half of the parity and the
+    -- half with a pool in it. @ScopedBorrows@ consults @Lends@ with a block:
+    -- the base is fetched, the names it published reach the block, and **the
+    -- base is in no pool** — which is what the two names in 'BasesLoaded' say.
+    testCase "a rule file's consult may state how far it reaches" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <-
+        consultRuleFiles s0 ["test/modules/ScopedBorrows.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ map baseName bs | BasesLoaded bs _ <- out ]
+        @?= [["scoped-borrows", "standard"]]
+
+  , -- **THE PAIR** (MS11 phase 300): the same consult with the same block and
+    -- the rule that writes @LC@ written after it. @Lends@ is fetched and
+    -- @Lang@ is in the session, and the rule is still refused.
+    testCase "and a consult's block ends where it is written" $ do
+      (s0, _) <- startingSession
+      (_, _, trouble) <-
+        consultRuleFiles s0 ["test/modules/ScopedBorrowsAfter.thena.rules"]
+      case trouble of
+        [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
+          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- es ]))
+        other -> assertFailure (show (map (renderTrouble s0) other))
+
+  , -- **AND THE POOL HALF IS PRIORITY** (MS11 phase 300, his ruling: /"that's
+    -- exactly what the scope consult is for! To change what gets priority"/).
+    -- @Pins@ and @Quiet@ both answer @answer@; a rule written in the block
+    -- gets @Quiet@'s and a rule written outside it gets the file's own. **The
+    -- file's clause is still there** — the push inserts and never removes,
+    -- which is why /at worst the BAR it knows/ is a property and not a hope.
+    testCase "a block's rules are searched against the base it named first" $ do
+      (s1, _) <- pinned
+      said (oneLine s1 "inside") @?= ["quiet"]
+      said (oneLine s1 "outside") @?= ["pins"]
+
+  , -- **AND THE BASE IS IN NO POOL BEFORE OR AFTER THEM** (MS11 phase 300):
+    -- at rest it is genuinely absent rather than hidden, which is the other
+    -- half of what makes the design observable.
+    testCase "and the pool at rest is the file's own" $ do
+      (s1, _) <- pinned
+      basesAfter s1 "outside" @?= ["pins", "standard"]
+
+  , -- **AND IT IS IN @:bases@ WHILE THE BLOCK'S RULES RUN** — his own
+    -- correction of 2026-11-06, and the thing a cost put to him claimed was
+    -- impossible: /"you could yield into the repl and there you would run
+    -- :bases and the yield back."/ @peeks@ yields from inside the block.
+    testCase "and it is in the pool while a block's rule is running" $ do
+      (s1, _) <- pinned
+      basesAfter s1 "peeks" @?= ["quiet", "pins", "standard"]
+
+  , -- **AND A BODY THAT NEVER REACHES ITS POP GIVES THE POOL BACK** (MS11
+    -- phase 300). @breaks@ calls a rule of @Quiet@ that fails, so the block's
+    -- rule halts with the push in force and the trailing @pop-base@ unrun.
+    -- **The pool the line began with is what the next line gets** —
+    -- 'Thena.Engine.floorPushes' — and without it the base would answer every
+    -- line typed afterwards.
+    testCase "and a halted body leaves the pool as the line found it" $ do
+      (s1, _) <- pinned
+      case oneLine s1 "breaks" of
+        (s2, Ran _ _ (Halted _)) ->
+          [ map baseName bs | BasesListed bs <- [snd (oneLine s2 ":bases")] ]
+            @?= [["pins", "standard"]]
+        (_, other) -> assertFailure (show other)
+
+  , -- **AND NESTING IS PRIORITY** (MS11 phase 300), which is a file's consults
+    -- being a stack (phase 288) one gate in: the innermost block pushes last
+    -- and is searched first.
+    testCase "and a block inside a block is searched firster" $ do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- consultRuleFiles s0 ["test/modules/Nests.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      said (oneLine s1 "outer") @?= ["quiet"]
+      said (oneLine s1 "inner") @?= ["loud"]
+      said (oneLine s1 "answer") @?= ["nests"]
   ]
+  where
+    pinned = do
+      (s0, _) <- startingSession
+      (s1, _, trouble) <- consultRuleFiles s0 ["test/modules/Pins.thena.rules"]
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      pure (s1, trouble)
+
+    -- **What the rule said, less what the engine said about choosing it.** A
+    -- @call@ with two clauses announces the one it took (\"chose ‹n›: …\"), and
+    -- the identifier in it is the session's counter — so the test reads the
+    -- rule's own @say@ and not the announcement.
+    said (_, Ran msgs _ _) = [ m | m <- msgs, not ("chose " `isPrefixOf` m) ]
+    said (_, other)        = [show other]
+
+    basesAfter s line = case oneLine (fst (oneLine s line)) ":bases" of
+      (_, BasesListed bs) -> map baseName bs
+      (_, other)          -> [show other]
 
 -- --------------------------------------------------------------------------
 -- A module resolves against its imports, its own declarations and the
@@ -1285,7 +1378,7 @@ baseImportTests =
     testCase "the door with no IO refuses a base that imports" $ do
       (s0, _) <- startingSession
       src <- readFile "test/modules/Inspecting.thena.rules"
-      case loadRuleBases s0 [("test/modules/Inspecting.thena.rules", src)] of
+      case loadRuleTexts s0 [("test/modules/Inspecting.thena.rules", src)] of
         (_, RuleFileRefused _ (RuleImportsUnread ms)) ->
           map moduleText ms @?= ["test.modules.Lang"]
         (_, other) -> assertFailure (show other)
@@ -2316,7 +2409,7 @@ moduleTests =
       let mine = "rule base mine where\n\n\
                  \run-block : Surface -> ()\n\
                  \rule run-block t :- do say \"intercepted\"\n"
-      case loadRuleBases s0 [("mine", mine), ("shipped", shipped)] of
+      case loadRuleTexts s0 [("mine", mine), ("shipped", shipped)] of
         (s1, BasesLoaded _ _) -> case loadProofSource s1 failingBlockModule of
           (_, ProofLoaded {}) -> pure ()
           (_, other) -> assertFailure (show other)

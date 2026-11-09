@@ -251,8 +251,19 @@ Decl :: { RawDecl }
       { DeclImport Own (fst $2) (snd $2) (Just (reverse $5)) }
   | public import QName where '{' Decls '}'
       { DeclImport Public (fst $3) (snd $3) (Just (reverse $6)) }
-  | consult QName                          { DeclConsult Own (fst $2) (snd $2) }
-  | public consult QName                   { DeclConsult Public (fst $3) (snd $3) }
+  | consult QName                          { DeclConsult Own (fst $2) (snd $2) Nothing }
+  | public consult QName                   { DeclConsult Public (fst $3) (snd $3) Nothing }
+  -- **AND A CONSULT STATES HOW FAR IT REACHES** (MS11 phase 300, his ruling of
+  -- 2026-11-06, @~k68d7@), which completes the parity the two productions
+  -- above and the two @import@ ones are halves of. The twin is
+  -- @consult QName where '{' Items '}'@ in "Thena.Surface.Parser".
+  --
+  -- **What the block holds is what the file holds**, @Decls@ and not a list of
+  -- its own — the same thing that makes a scoped import nest.
+  | consult QName where '{' Decls '}'
+      { DeclConsult Own (fst $2) (snd $2) (Just (reverse $5)) }
+  | public consult QName where '{' Decls '}'
+      { DeclConsult Public (fst $3) (snd $3) (Just (reverse $6)) }
 
 -- | What an @open@ opens, and what it says about which names it brings in
 -- (MS10 phase 267). The surface language's 'Thena.Surface.Parser' has the same

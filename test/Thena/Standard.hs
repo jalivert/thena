@@ -30,7 +30,7 @@ import Thena.Driver
   , newSession
   , withRuleBases
   )
-import Thena.Engine (Machine (..))
+import Thena.Engine (rules)
 import Thena.Instral.Ops
   ( Instr (..)
   , Op (..)

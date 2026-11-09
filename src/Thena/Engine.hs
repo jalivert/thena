@@ -16,6 +16,7 @@ module Thena.Engine
     Machine (..)
   , Exec (..)
   , Frame (..)
+  , rules
   , Development (..)
   , newDevelopment
   , focusContext
@@ -221,13 +222,19 @@ data Machine = Machine
     --
     -- **Backtrackable, like 'development' and unlike everything below it.**
   , globals     :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
-  , rules       :: [RuleBase] -- ^ NOT backtrackable (§7.4) — phase 15; a list
-                              -- of loaded bases, leftmost searched first (phase 22)
+  , pool        :: [RuleBase]
+    -- ^ **the bases this session has consulted**, leftmost searched first
+    -- (phase 15, the order at phase 22). NOT backtrackable (§7.4).
+    --
+    -- **IT IS NOT THE WHOLE POOL — 'rules' IS** (MS11 phase 300). What a
+    -- running body pushed stands in front of this, and 'rules' is the two put
+    -- together: every search, @:bases@ and inference read that and never this,
+    -- so there is one pool and not two.
   , held        :: [RuleBase]
-    -- ^ **bases read for this load and not in the pool** (MS11 phase 292) —
+    -- ^ **bases read and not in the pool** (MS11 phase 292) —
     -- what a @consult ‹module› where { … }@ names, waiting for the block it
-    -- reaches: 'Thena.Instral.Ops.PushBase' moves one into 'rules' and
-    -- 'Thena.Instral.Ops.PopBase' takes it back out.
+    -- reaches: 'Thena.Instral.Ops.PushBase' moves one into 'Exec'\'s @pushes@
+    -- and 'Thena.Instral.Ops.PopBase' takes it back out.
     --
     -- **An op cannot carry a 'RuleBase'** — "Thena.Rules" is below
     -- "Thena.Instral.Ops" and a @RuleBase@ is read off the disc by the driver —
@@ -271,6 +278,23 @@ data Machine = Machine
     -- of that could disagree with it. So @open@ costs one path here and the
     -- work happens at the lookup.
   , names       :: Int        -- ^ NOT backtrackable (§7.4)
+  , floorPushes :: [RuleBase]
+    -- ^ **and what the pool was then** (MS11 phase 300) — 'lineFloor''s twin
+    -- for the other thing a line's work can grow, set from the same place by
+    -- 'load'.
+    --
+    -- **What it is for is the one exit a body has that restores nothing.** A
+    -- @consult … where@ block's push comes back on a @return@, on running off
+    -- the end and on backtracking, each time out of the frame being left
+    -- ('Frame''s @savedPushes@). A line that /halts/ leaves its frames standing
+    -- — that is what makes @retry@ after a failed line possible — so there is
+    -- no frame being left and nothing to restore from. Without this the base a
+    -- failed rule had pushed would answer every line typed afterwards, which
+    -- is the opposite of /it should always be predictable what gets used/.
+    --
+    -- **It is the line's floor and not zero**, so a line typed inside a yield
+    -- that halts goes back to the pool the suspended program was running
+    -- with, not to the session's.
   , lineFloor   :: Int
     -- ^ **how many frames were already on the stack when this line's program
     -- was loaded** (MS5 phase 95) — the depth below which a failure will not
@@ -313,8 +337,42 @@ data Exec = Exec
   { pc    :: [Instr]
   , env   :: Env
   , stack :: [Frame]
+  , pushes :: [RuleBase]
+    -- ^ **what the bodies now running have consulted, newest first** (MS11
+    -- phase 300, his ruling of 2026-11-06) — 'Thena.Instral.Ops.PushBase'
+    -- puts one on and 'Thena.Instral.Ops.PopBase' takes it off, and 'rules'
+    -- searches these in front of 'pool'.
+    --
+    -- **It is execution state and that is why it lives here**, beside the
+    -- frame stack rather than beside 'pool': a @consult B where { … }@ in a
+    -- rule file compiles to a push at the front of each of the block's rule
+    -- bodies and a pop at the end, so what is pushed belongs to a body that is
+    -- running and not to the session. Being in 'Exec' is what makes @:undo@
+    -- put it back — "Thena.Driver"\'s @Snapshot@ carries an 'Exec' — and what
+    -- makes 'load' keep it while a program is suspended in a yield.
+    --
+    -- **A @:consult@ typed at the prompt never touches this**, which is why
+    -- the two cannot be confused when they interleave: that line adds to
+    -- 'pool', so a body's pop takes back exactly what its push put on and
+    -- §7.4's /@pool@ is not backtrackable/ still holds.
   }
   deriving (Eq, Show)
+
+-- | __The pool a search is run against__ (MS11 phase 300).
+--
+-- **One pool, and this is it.** What a running body pushed stands in front of
+-- what the session consulted, so a @consult B where { … }@ block gets @B@
+-- first and a block nested inside it gets its own base firster — the stack
+-- rule, which a file's consults already follow one gate out (phase 288).
+--
+-- **Everything that reads the pool reads this**: 'dispatch', 'clauses',
+-- 'arities', inference, and @:bases@ ("Thena.Driver"). So a base a block
+-- pushed is listed like any other while the block's rules run, which is his
+-- own observation of 2026-11-06 — /"you could yield into the repl and there
+-- you would run :bases"/ — and at rest it is genuinely absent rather than
+-- hidden.
+rules :: Machine -> [RuleBase]
+rules m = pushes (exec m) ++ pool m
 
 -- | Phase 4 pushes none of these — nothing nests until @Prove@ dispatches the
 -- rule engine (phase 16) — but 'Exec' carries the stack because that is the
@@ -342,6 +400,17 @@ data Frame
         -- A 'Op.Block' frame always carries 'Nothing': a block produces
         -- nothing ('Thena.Instral.Ops.produces'), so @validate@ refuses a @Bind@ on one
         -- before it can get here.
+      , savedPushes :: [RuleBase]
+        -- ^ **the push stack as it stood when the body inside this frame
+        -- began** (MS11 phase 300) — 'Exec'\'s @pushes@ restored whenever
+        -- control leaves that body, which is the one thing that makes a block's
+        -- pop unmissable: 'Op.Return' drops the rest of @pc@ and 'failure'
+        -- never reaches the end of a body at all, so a @PopBase@ written after
+        -- the last instruction would be skipped on both of those exits.
+        --
+        -- **'savedEnclosing''s shape, for the other stack a body can grow**,
+        -- and here on 'Call' as well as on 'Choice' because returning from an
+        -- ordinary call is an exit too.
       , returned  :: Bool
         -- ^ has control already passed back out of this call? See 'resumeFrom',
         -- and it means for a 'Call' exactly what it means for a 'Choice'.
@@ -370,6 +439,11 @@ data Frame
         -- ^ and the developments it was nested inside (MS4 phase 42). A body
         -- that pushes a development and then fails must unwind to the stack it
         -- had, not to the one it left.
+      , savedPushes :: [RuleBase]
+        -- ^ **and the bases it was searched against** (MS11 phase 300) — the
+        -- same field a 'Call' carries and the same sentence one line over: a
+        -- body that pushes a base and then fails must leave the pool it found,
+        -- not the one it made.
       , choiceId  :: Int         -- ^ what @retry ‹n›@ names it by
       , chosen    :: GlobalName  -- ^ the rule this frame is currently running
       , returned  :: Bool
@@ -615,7 +689,11 @@ load is m
   | isYielding m = (floored m) { exec = (exec m) { pc = is ++ pc (exec m) } }
   | otherwise    = (floored m) { exec = (exec m) { pc = is, env = [] } }
   where
-    floored k = k { lineFloor = length (stack (exec k)) }
+    -- **AND WHAT THE POOL IS, FOR THE SAME REASON** (MS11 phase 300):
+    -- 'floorPushes' says what a halt goes back to, and a line's floor is where
+    -- its work begins whichever of the two is being measured.
+    floored k = k { lineFloor   = length (stack (exec k))
+                  , floorPushes = pushes (exec k) }
 
 -- | Is the machine waiting for an answer? The driver asks this before it calls
 -- 'resumeAt', so that a line typed when nothing was asked is reported rather
@@ -671,7 +749,10 @@ step m = case pc (exec m) of
       -- 'Thena.Instral.Ops.produces' saying 'True' for every call: which clauses a name
       -- has is not known when a body is read.
       Just n  -> failure (NothingReturned n) m
-      Nothing -> Continue m { exec = Exec is e stk' }
+      -- **The pool the body found, put back** (MS11 phase 300): running off
+      -- the end is one of a body's three exits and 'savedPushes' is what every
+      -- one of them restores.
+      Nothing -> Continue m { exec = Exec is e stk' (savedPushes fr) }
   instr : rest -> perform instr rest m
 
 -- | Where control goes when a body runs out of instructions.
@@ -796,7 +877,7 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
     -- frame at the head belongs to an earlier line exactly when @depth@ has
     -- fallen to the floor. Counted down rather than measured with 'length' at
     -- each step, which would be quadratic in the stack.
-    unwind _ [] = Stuck r0 m
+    unwind _ [] = Stuck r0 (atFloor m)
     unwind depth frames@(fr : stk)
       | depth <= lineFloor m = declined frames
       | otherwise = case fr of
@@ -819,10 +900,14 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
             -- stepped over must be entered again. Without this the alternative
             -- would run and the caller\'s remaining program would not — which
             -- is the same hole from the other side.
+            -- **And the pool goes back with it** (MS11 phase 300): the
+            -- branch being abandoned may have pushed a base, and the
+            -- alternative about to run is one on which that body never ran.
             Just (r, it') -> Saying (took "backtracking to" fr r) m
               { development = saved fr
               , exec  = Exec (ruleBody r) (seedFor (globals m) fr r)
                              (demote fr r it' : map unreturned stk)
+                             (savedPushes fr)
               }
 
     -- **Below the floor: report, do not run** (MS5 phase 95). The first live
@@ -836,8 +921,15 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
     -- no test — and it is written out for the same reason the neighbour is,
     -- rather than left to name a dead frame if that ever stops being true.
     declined frames = case [ fr | fr@Choice {} <- frames, hasNext (alts fr) ] of
-      fr : _ -> Stuck (WouldLeaveTheLine r0 (choiceId fr)) m
-      []     -> Stuck r0 m
+      fr : _ -> Stuck (WouldLeaveTheLine r0 (choiceId fr)) (atFloor m)
+      []     -> Stuck r0 (atFloor m)
+
+    -- **The pool the line began with** (MS11 phase 300). The frames stay — a
+    -- halted line is still standing where it stopped, and @retry@ reaches its
+    -- choice points — but what a body of this line pushed does not answer the
+    -- next line typed. A @retry@ that re-enters one of those frames puts its
+    -- own pushes back ('savedPushes'), so nothing is lost by this.
+    atFloor k = k { exec = (exec k) { pushes = floorPushes k } }
 
     took verb fr r = verb ++ " " ++ show (choiceId fr) ++ ": " ++ nameOfRule r
 
@@ -864,6 +956,7 @@ choicePoint m dest rest it' r vs seed =
     , alts           = it'
     , saved          = development m
     , savedEnclosing = enclosing m
+    , savedPushes    = pushes (exec m)
     , choiceId       = names m
     , chosen         = ruleName r
     , returned       = False
@@ -883,6 +976,7 @@ demote fr r it'
         , alts           = it'
         , saved          = saved fr
         , savedEnclosing = savedEnclosing fr
+        , savedPushes    = savedPushes fr
         , choiceId       = choiceId fr
         , chosen         = ruleName r
         , returned       = False
@@ -894,7 +988,9 @@ demote fr r it'
     -- would demote a frame that had already returned into one that is stepped
     -- straight over, and its @resume@ — the caller\'s leftovers — would never
     -- run (MS4 phase 57).
-  | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr) (destination fr) False
+  | otherwise =
+      Thena.Engine.Call (resume fr) (resumeEnv fr) (destination fr)
+                        (savedPushes fr) False
 
 -- --------------------------------------------------------------------------
 -- Performing one instruction
@@ -918,7 +1014,11 @@ perform instr rest m = case operation instr of
   -- arguments: a block's bindings are its own, and the surface term around it
   -- has none to pass in.
   Op.Block body ->
-    Continue m { exec = Exec body [] (Thena.Engine.Call rest (env (exec m)) Nothing False : stack (exec m)) }
+    Continue m { exec = Exec body []
+                          (Thena.Engine.Call rest (env (exec m)) Nothing
+                                             (pushes (exec m)) False
+                             : stack (exec m))
+                          (pushes (exec m)) }
 
   -- **The data structures** (MS5 phase 65). A list and a pair are built by the
   -- operand itself — 'Thena.Instral.Ops.operandIn' does it, because neither runs
@@ -994,11 +1094,15 @@ perform instr rest m = case operation instr of
       -- **Matched into the destination** (MS5 phase 84), so
       -- @(x, y) = some-rule@ takes the answer apart where it lands. A frame
       -- with no destination drops the value, as it always did.
+      -- **And the pool the body found, put back** (MS11 phase 300). @return@
+      -- drops the rest of @pc@, so a @PopBase@ written at the end of the body
+      -- would never run on this exit — 'savedPushes' is what makes the pop
+      -- belong to the body rather than to a position in it.
       Just (fr, is, e, stk') -> case destination fr of
-        Nothing -> Continue m { exec = Exec is e stk' }
+        Nothing -> Continue m { exec = Exec is e stk' (savedPushes fr) }
         Just p  -> case Op.matchPattern (globals m) p v of
           Nothing -> failure (BindingDidNotMatch p) m
-          Just bs -> Continue m { exec = Exec is (bs ++ e) stk' }
+          Just bs -> Continue m { exec = Exec is (bs ++ e) stk' (savedPushes fr) }
 
   -- **Hand control over, and stay put** (MS4 phase 45b). @pc@ is deliberately
   -- unchanged — see 'Op.Yield' and 'resumeYield'.
@@ -1204,9 +1308,12 @@ perform instr rest m = case operation instr of
   -- whatever ran next. The copies are the same file read in the same load, so
   -- taking the first is taking the base.
   PushBase p -> Continue (advance m
-    { rules = take 1 [ b | b <- held m, basePath b == p ] ++ rules m })
+    { exec = (exec m)
+               { pushes = take 1 [ b | b <- held m, basePath b == p ]
+                            ++ pushes (exec m) } })
 
-  PopBase -> Continue (advance m { rules = drop 1 (rules m) })
+  PopBase -> Continue (advance m
+    { exec = (exec m) { pushes = drop 1 (pushes (exec m)) } })
 
   LeaveNamespace ->
     Continue (advance m { scope = (scope m) { scopeWithin = drop 1 (scopeWithin (scope m)) } })
@@ -1360,7 +1467,8 @@ perform instr rest m = case operation instr of
           Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
                  (entering r (choicePoint m Nothing rest it' r [] []) m { names = names m + 1 })
       | otherwise ->
-          Continue (entering r (Thena.Engine.Call rest (env (exec m)) Nothing False) m)
+          Continue (entering r (Thena.Engine.Call rest (env (exec m)) Nothing
+                                                  (pushes (exec m)) False) m)
     where
       it = dispatch (rules m) (globals m) (cursor (development m))
 
@@ -1370,7 +1478,7 @@ perform instr rest m = case operation instr of
       -- snapshot and no identifier. The cost is Prolog's own: one more head
       -- match is computed than is used.
       entering r fr k =
-        k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) }
+        k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) (pushes (exec m)) }
 
   -- **Call by name: the same search as @Prove@, over a narrower candidate
   -- list** (§8, phase 23). The user's own framing, and it is why this case now
@@ -1416,8 +1524,10 @@ perform instr rest m = case operation instr of
             -- destination all work without a second mechanism.
             Continue m
               { exec = Exec body (fromMaybe [] (Op.matchPatterns (globals m) ps vs) ++ cl)
-                         (Thena.Engine.Call rest (env (exec m)) wants False
+                         (Thena.Engine.Call rest (env (exec m)) wants
+                                            (pushes (exec m)) False
                             : stack (exec m))
+                         (pushes (exec m))
               }
 
   Op.Call nm args -> case traverse (operandValue (env (exec m))) args of
@@ -1429,7 +1539,8 @@ perform instr rest m = case operation instr of
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
                    (entering vs r (choicePoint m wants rest it' r vs []) m { names = names m + 1 })
         | otherwise ->
-            Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) wants False) m)
+            Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) wants
+                                                       (pushes (exec m)) False) m)
     where
       it vs = clauses (rules m) (globals m) (cursor (development m)) (rootName nm) vs
 
@@ -1443,7 +1554,7 @@ perform instr rest m = case operation instr of
       -- total, which is what the one-matcher design is for.
       entering vs r fr k =
         k { exec = Exec (ruleBody r) (fromMaybe [] (matchClause (globals m) r vs))
-                     (fr : stack (exec m)) }
+                     (fr : stack (exec m)) (pushes (exec m)) }
 
   -- §3.7's elimination tactic (phase 17). The goal is the focus, as with the
   -- six hole ops; the target is an operand, for the reason 'Try' takes one —
@@ -3117,6 +3228,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
         Just (r, it') -> Right
           ( m { development = saved fr
               , exec  = Exec (ruleBody r) (seedFor (globals m) fr r) (demote fr r it' : stk)
+                             (savedPushes fr)
                 -- **@retry@ lowers the floor to the frame it entered** (MS5
                 -- phase 95). 'lineFloor' records where /this line's/ work
                 -- begins, and this is a line that deliberately begins its work

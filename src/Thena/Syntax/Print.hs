@@ -423,7 +423,11 @@ rawDecl d = case d of
   DeclImport r ps x (Just ds) ->
     (reach r ++ "import " ++ dotted ps x ++ " where")
       : map ("  " ++) (concatMap rawDecl ds)
-  DeclConsult r ps x -> [reach r ++ "consult " ++ dotted ps x]
+  DeclConsult r ps x Nothing -> [reach r ++ "consult " ++ dotted ps x]
+  -- **AND A CONSULT'S BLOCK, THE SAME WAY** (MS11 phase 300).
+  DeclConsult r ps x (Just ds) ->
+    (reach r ++ "consult " ++ dotted ps x ++ " where")
+      : map ("  " ++) (concatMap rawDecl ds)
   where
     dotted ps x = intercalate "." (ps ++ [x])
 

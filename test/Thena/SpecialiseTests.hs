@@ -48,7 +48,7 @@ import Thena.Driver
   , Response (..)
   , Session
   , loadProofSource
-  , loadRuleBases
+  , loadRuleTexts
   , loadSource
   , newSession
   , parseCore
@@ -747,7 +747,7 @@ splitBase = unlines
 -- and errors loudly, because otherwise every script below would turn into an
 -- unrelated assertion about @split-one@ not existing.
 splitSession :: Session
-splitSession = case loadRuleBases newSession [("split.thena.rules", splitBase)] of
+splitSession = case loadRuleTexts newSession [("split.thena.rules", splitBase)] of
   (s, BasesLoaded bs _) -> withRuleBases (expectedBase ++ bs) s
   (_, other)          -> error ("the fixture's base did not load: " ++ show other)
 

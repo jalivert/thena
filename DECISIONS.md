@@ -688,8 +688,8 @@ where you wrote them.
 **And no `open` is inherited into the block either**, because none is inherited at all:
 a module hands on names and never spellings, inside a block or out of one.
 
-**A RULE FILE'S `import` TAKES A BLOCK TOO; ITS `consult` DOES NOT.** *Built MS11 phase
-299.* The same two spellings, and the same rule — the block's declarations may write
+**A RULE FILE TAKES A BLOCK ON EITHER ACT TOO.** *Built MS11 phase 299 for `import`,
+phase 300 for `consult`.* The same two spellings, and the same rule — the block's declarations may write
 what the module reaches, the rest of the file may not, and `public` in front of the line
 is a separate question that a block does not answer:
 
@@ -704,12 +704,29 @@ rule elsewhere :- do            -- LC is not writable here
   say "something else"
 ```
 
-**`consult B where { … }` in a rule file is decided and not yet written.** *Decided
-2026-11-06.* In a proof file the block is a region of the document: those proofs are
-searched against `B` and the ones after are not. **In a rule file it is a region of
-time** — the rules in the block run with `B` pushed on top of the pool and popped when
-they finish, so `B` is searched first for them and is not in the pool at all for the rest
-of the file.
+**`consult B where { … }` IN A RULE FILE IS A REGION OF TIME.** *Decided 2026-11-06,
+built MS11 phase 300.* In a proof file the block is a region of the document: those
+proofs are searched against `B` and the ones after are not. In a rule file there are no
+proofs, so the block is the *running* of the rules in it — each of them runs with `B`
+pushed on top of the pool and popped when it finishes, so `B` is searched first for them
+and is not in the pool at all for the rest of the file:
+
+```
+rule base pins where
+
+consult Stlc.Crush where
+  rule inside :- do
+    call answer              -- Crush's answer, if it has one
+
+rule answer :- do            -- this file's own
+  say "pins"
+
+rule outside :- do
+  call answer                -- this file's: Crush is not in the pool here
+```
+
+**`:bases` shows `pins` and the shipped base, and never `Crush` — until you stop inside
+`inside`, where it is at the top.**
 
 Two consequences worth knowing before you write one.
 

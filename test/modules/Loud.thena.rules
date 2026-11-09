@@ -1,0 +1,6 @@
+-- **The second base a nested block holds** (MS11 phase 300): another clause of
+-- `answer`, so that which of three is tried first says where the push landed.
+rule base loud where
+
+rule answer :- do
+  say "loud"

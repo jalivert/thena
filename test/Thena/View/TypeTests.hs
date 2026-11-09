@@ -25,7 +25,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase)
 
 import Thena.Driver (machineOf)
-import Thena.Engine (Machine (..))
+import Thena.Engine (rules)
 import Thena.Files (startingSession)
 import Thena.Instral.Ops (signatureOf)
 import Thena.Instral.Type

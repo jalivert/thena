@@ -35,6 +35,10 @@ import qualified Paths_thena
 
 import Thena.Driver
   ( LoadError (..)
+  , Spread (..)
+  , HeldGroup (..)
+  , ruleBaseFileConsults
+  , ruleBaseScopedConsults
   , Item
   , Digest
   , digestOf
@@ -48,7 +52,6 @@ import Thena.Driver
   , loadProofModules
   , readModulePath
   , ruleBaseImports
-  , ruleBaseConsults
   , rolledBack
   , consultedPool
   , scopedConsults
@@ -188,7 +191,7 @@ consultRuleFiles = ruleFilesWith consultRuleBases
 -- **Unlike a surface file's consults, they stay**: the base's rules run in the
 -- session later and need the language there.
 ruleFilesWith
-  :: (Session -> [(FilePath, String)] -> (Session, Response))
+  :: (Session -> Spread -> (Session, Response))
   -> Session -> [FilePath] -> IO (Session, [Response], [Trouble])
 ruleFilesWith install s paths = do
   reads' <- mapM (\p -> fmap ((,) p) (try (readFile p))) paths
@@ -199,13 +202,17 @@ ruleFilesWith install s paths = do
       -- 289, widened at phase 298): a base consulted here brings the bases it
       -- consults, so the closure is the same whichever door a base came in by
       -- — which is 'beneath''s own rule, said for a path rather than a module
-      -- name. **Flat and not grouped**, unlike 'consulted''s answer: every
-      -- base named here is the session's own pool, and nothing takes one group
-      -- back out again.
+      -- name. **One fetch and not one per line**, unlike 'consulted''s
+      -- answer: every base named here goes into the session's own pool, so
+      -- there is nothing to take one group back out of — except what a base's
+      -- own @consult … where@ block holds, which 'beneath' answers with
+      -- separately (MS11 phase 300).
       spread <- beneath [] [ (p, c) | (p, Right c) <- reads' ]
       case spread of
         Left t -> pure (s, [], [t])
-        Right contents -> do
+        Right got' -> do
+          let contents = spreadPool got'
+                           ++ concatMap heldTexts (spreadHeld got')
           -- **Every base the group read is noted before any of it installs**
           -- (MS11 phase 295), publications included, and 'rolledBack' keeps the
           -- notes when the install refuses. **Noted here and not in
@@ -215,7 +222,7 @@ ruleFilesWith install s paths = do
           brought <- imported sr contents
           pure $ case brought of
             Left t -> (sr, [], [t])
-            Right (s1, got) -> installing sr s1 got (install s1 contents)
+            Right (s1, got) -> installing sr s1 got (install s1 got')
   where
     -- The install's own answer, read as it always was — with whatever the
     -- imported modules had to say in front of it, and with the session put back
@@ -435,7 +442,13 @@ assemble s stack done as path d nm items = do
         -- talks about has to be in. Without this a file could consult only a
         -- base that depended on nothing — which is no base worth consulting.
         Right srcs -> do
-          walked' <- imports s inner done' (concatMap stated (concat (maybe [] id srcs)))
+          -- **A base a block holds states its own dependencies too** (MS11
+          -- phase 300), so what is walked is every text the fetch read and not
+          -- the pool runs alone.
+          walked' <- imports s inner done'
+                       (concatMap stated
+                          (concat [ spreadPool sp ++ concatMap heldTexts (spreadHeld sp)
+                                  | sp <- maybe [] id srcs ]))
           pure (fmap (\gs -> gs ++ [ReadModule path d as nm srcs items]) walked')
   where
     inner = maybe stack (: stack) as
@@ -480,11 +493,14 @@ imports s stack done (m : rest)
 -- **In the order 'Thena.Driver.consultedPool' gave them**, which is the order
 -- the pool goes in and so the order they are read in: an 'Unreadable' names the
 -- first base that would have been tried.
-consulted :: [ModuleName] -> IO (Either Trouble (Maybe [[(FilePath, String)]]))
+consulted :: [ModuleName] -> IO (Either Trouble (Maybe [Spread]))
 consulted [] = pure (Right Nothing)
 consulted ms = do
   -- **And everything each of them consults, underneath it** (MS11 phase 289,
   -- widened from @public consult@ to every @consult@ at phase 298).
+  -- **One 'Thena.Driver.Spread' per line since phase 300**: a base in the run
+  -- may hold a group back for a block of its own rules, and that group is read
+  -- here with everything else and installed nowhere.
   got <- mapM (fetching []) ms
   pure (fmap Just (sequence got))
 
@@ -523,7 +539,7 @@ consulted ms = do
 -- **A loop is refused and nothing is deduplicated.** Two bases that consult
 -- each other would splice for ever; a base reached down two arms is two
 -- independent pushes, which is his ruling of 2026-11-03.
-fetching :: [ModuleName] -> ModuleName -> IO (Either Trouble [(FilePath, String)])
+fetching :: [ModuleName] -> ModuleName -> IO (Either Trouble Spread)
 fetching stack m
   | m `elem` stack =
       pure (Left (Unloadable path (ConsultCycle (reverse stack ++ [m]))))
@@ -543,19 +559,32 @@ fetching stack m
 -- the position in it — the bargain 'assemble' already makes for a base's
 -- imports.
 beneath
-  :: [ModuleName] -> [(FilePath, String)]
-  -> IO (Either Trouble [(FilePath, String)])
-beneath _ [] = pure (Right [])
+  :: [ModuleName] -> [(FilePath, String)] -> IO (Either Trouble Spread)
+beneath _ [] = pure (Right (Spread [] []))
 beneath stack ((path, src) : rest) = do
-  let names = either (const []) id (ruleBaseConsults src)
+  let names  = either (const []) id (ruleBaseFileConsults src)
+      scoped = either (const []) id (ruleBaseScopedConsults src)
   -- **Reversed, because they are a stack**: the last @consult@ written is the
   -- newest and so is tried first.
-  mine <- mapM (fetching stack) (reverse names)
-  more <- beneath stack rest
+  mine  <- mapM (fetching stack) (reverse names)
+  -- **AND A LINE THAT STATES A BLOCK IS FETCHED AND HELD** (MS11 phase 300,
+  -- his ruling of 2026-11-06). The same walk brings the same group — what the
+  -- block changes is how far it reaches, not what it brings — and the group
+  -- is kept whole under the name the line wrote, because that is the name the
+  -- block's rules were compiled against. **Not reversed**: these are not a
+  -- stack between themselves, each line standing on its own.
+  held' <- mapM (fetching stack) scoped
+  more  <- beneath stack rest
   pure $ do
     under <- sequence mine
+    held'' <- sequence held'
     back  <- more
-    Right ((path, src) : concat under ++ back)
+    Right (Spread ((path, src) : concatMap spreadPool under ++ spreadPool back)
+                  (concatMap spreadHeld under
+                     ++ [ HeldGroup path m (spreadPool sp)
+                        | (m, sp) <- zip scoped held'' ]
+                     ++ concatMap spreadHeld held''
+                     ++ spreadHeld back))
 
 -- | **The four responses the driver cannot act on itself**: each named a file,
 -- and reading files is this module\'s (§12 invariant 4).

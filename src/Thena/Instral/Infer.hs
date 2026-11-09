@@ -347,9 +347,22 @@ inferProgram sigs rs =
 -- value by 'valueType'. That is how a block typed while a rule is yielding sees
 -- the rule's own locals: @do { goto h }@ reads the @h@ the rule bound, and is
 -- checked against what @h@ actually is rather than refused as unbound.
+-- **AND WHAT IT ANSWERS IS THIS BLOCK'S MISTAKES AND NOT THE POOL'S** (MS11
+-- phase 300). The callables' groups are walked first, so their errors are in
+-- the state by the time the block is — and reporting them here blames a
+-- typed line for a rule somebody else loaded. **It matters now because a rule
+-- CAN be in the pool and not check against it**: a rule written inside
+-- @consult B where { … }@ calls into @B@, which is in no pool until that rule
+-- runs ('Thena.Engine.held'), so every line typed afterwards was told that
+-- rule's call was undefined. 'blamedOn' is the filter.
+--
+-- **Nothing real is lost**: a base is type-checked as a whole when it is
+-- installed ('Thena.Driver.installReadBases'), which is where a pool rule's
+-- errors are reported and refused.
 inferBlock
   :: [(String, Signature)] -> [Rule] -> [(Name, Value)] -> Rule -> [InstralTypeError]
-inferBlock sigs rs bound r = fst (blockResult sigs rs bound r)
+inferBlock sigs rs bound r =
+  [ e | e <- fst (blockResult sigs rs bound r), blamedOn e == Just (ruleName r) ]
 
 -- | **What a block binds, and the type each name ended up with** (MS7 phase 140).
 --
@@ -415,17 +428,28 @@ inFileOrder :: [Rule] -> [InstralTypeError] -> [InstralTypeError]
 inFileOrder rs = sortOn position
   where
     order = nub (map ruleName rs)
-    position e = maybe (length order) id (elemIndex (whose e) order)
-    whose e = case e of
-      Clash si _ _          -> nameIn si
-      Occurs si _           -> nameIn si
-      BindsNothing si _     -> nameIn si
-      AnnotationTooGeneral si _ -> nameIn si
-      SignatureUnanswered n _   -> n
-      TextNotTextual si _   -> nameIn si
-      Undefined si _ _ _    -> nameIn si
-      NotCallable si _      -> nameIn si
+    position e = maybe (length order) id
+                   (blamedOn e >>= \n -> elemIndex n order)
 
+-- | __Which callable an error is about__, or 'Nothing' where it is about the
+-- file as a whole (MS11 phase 300 named it; 'inFileOrder' has asked it since
+-- MS5 phase 76).
+--
+-- **Lifted out of 'inFileOrder' so that 'inferBlock' can ask it too**: one
+-- answer to /whose mistake is this/, where a second copy would be two.
+blamedOn :: InstralTypeError -> Maybe GlobalName
+blamedOn e = case e of
+  Clash si _ _              -> Just (nameIn si)
+  Occurs si _               -> Just (nameIn si)
+  BindsNothing si _         -> Just (nameIn si)
+  AnnotationTooGeneral si _ -> Just (nameIn si)
+  -- **A signature no rule answers is the file's and no callable's**, which is
+  -- what makes this a 'Maybe': there is no body to blame.
+  SignatureUnanswered _ _   -> Nothing
+  TextNotTextual si _       -> Just (nameIn si)
+  Undefined si _ _ _        -> Just (nameIn si)
+  NotCallable si _          -> Just (nameIn si)
+  where
     nameIn si = case si of
       InHead n _      -> n
       InBody n _      -> n
