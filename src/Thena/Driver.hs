@@ -2644,7 +2644,12 @@ loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
             ( poolBack s'
             , ProofLoaded nm (concatMap declaredNames items)
                              (sum (map blocksIn items))
-                             ws
+                             -- **AND WHAT TRAVELS THAT THE HEADER DOES NOT LIST**
+                             -- (MS11 phase 307, @~f8x53@), appended after the
+                             -- run's own: a warning is a footnote to what went
+                             -- in, which is 'BasesLoaded''s rule for the other
+                             -- kind of file.
+                             (ws ++ unlistedTravelling s' items)
             )
           -- **A load that does not complete declares nothing** (MS6 closeout 15,
           -- his ruling 2026-09-30: /"Atomic from now on."/). Before this, the
@@ -3367,6 +3372,41 @@ importClauses = concatMap go
       ItemOpenIn _ is       -> importClauses is
       ItemPrivate is        -> importClauses is
       _                     -> []
+
+-- | __A @public import@ whose names this file's @exporting@ clause does not
+-- list__ (MS11 phase 307, his ruling of 2026-11-10, @~f8x53@).
+--
+-- **A warning and not a refusal, and it changes nothing about what travels.** His
+-- ruling of 2026-11-10 is that a header's clause never gates a @public import@,
+-- because gating it would mean re-listing another module's namespaces as though
+-- they were your own. What survives that is his honesty concern: a reader of a
+-- header with an @exporting@ clause does not see everything the file offers.
+--
+-- **Only an @exporting@ clause raises it.** @hiding ( … )@ is a deny-list and no
+-- clause at all is wide, so neither claims to enumerate an interface and a
+-- passed-on name is missing from nothing. 'moduleExporting' is @Nothing@ for
+-- both, which is the test.
+--
+-- **The namespaces and not the names**, because the unit of the clause is the
+-- namespace: a travelling @Bit.off@ is listed by writing @Bit@, so that is what
+-- the warning names and what silences it. One entry per @public import@ line's
+-- module, so a file that passes two modules on gets two warnings and can fix
+-- them one at a time.
+unlistedTravelling :: Session -> [Item] -> [Warning]
+unlistedTravelling s items = case moduleExporting items of
+  Nothing -> []
+  Just es ->
+    [ PublicImportUnlisted (moduleText m) ns
+    | (m, sel) <- publicImports items
+    , let travels = selects sel (reachedBy [whole m] s
+                                   ++ grammarsReachedBy [whole m] s)
+    , let ns = nub [ top g | g <- travels, not (exports (Just es) g) ]
+    , not (null ns)
+    ]
+  where
+    -- The namespace a name would be listed under: its first step, or the name
+    -- itself where it has none.
+    top (GlobalName ps x) = case ps of { (q : _) -> q ; [] -> x }
 
 -- | __Which names an import's clause asked for that the module does not
 -- offer__ (MS11 phase 306).

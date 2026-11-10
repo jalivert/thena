@@ -135,6 +135,8 @@ tests =
     , testGroup "a declaration may be the file's own (MS11 phase 286)" privateTests
     , testGroup "an import may travel (MS11 phase 287)" publicImportTests
     , testGroup "an import may narrow (MS11 phase 306)" narrowedImportTests
+    , testGroup "a public import the header omits warns (MS11 phase 307)"
+        unlistedTravellingTests
     , testGroup "a consult may travel (MS11 phase 288)" publicConsultTests
     , testGroup "a rule base publishes too (MS11 phase 289)" publicBaseTests
     , testGroup "a header may withhold instead (MS11 phase 290)" hidingTests
@@ -2938,6 +2940,57 @@ privateIn' src = case parseSurfaceModule src of
 -- take it apart. **Every case is a pair**: what the clause let through, and what
 -- it kept out, because a filter that quietly matched nothing would pass the
 -- first half of each on its own.
+
+-- | __A `public import` the header's `exporting` clause does not list warns__
+-- (MS11 phase 307, @~f8x53@, his ruling of 2026-11-10).
+--
+-- **It still travels** — that is the whole shape of the ruling, and the first
+-- case is what proves the warning changed nothing. The other three are the
+-- boundaries: listing it silences it, and neither a @hiding@ header nor a header
+-- with no clause raises it, because neither claims to enumerate an interface.
+unlistedTravellingTests :: [TestTree]
+unlistedTravellingTests =
+  [ testCase "a passed-on module the exporting clause omits warns, and still travels" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsThrough.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      let said = concatMap (renderResponse s0) out
+      assertBool (unwords said)
+        (any (isInfixOf "public import test.modules.Guarded passes on Bit") said)
+      -- **And the names arrived anyway**: GetsThrough writes Bit.off through
+      -- the passer, and a refusal would have shown up as a response here.
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= [ "test.modules.Guarded", "test.modules.PassesNothingOwn"
+            , "test.modules.GetsThrough" ]
+
+  , testCase "and listing the namespace silences it" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/ListsWhatTravels.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (unwords (concatMap (renderResponse s0) out))
+        (not (any (isInfixOf "does not list")
+                  (concatMap (renderResponse s0) out)))
+
+  , -- **A deny-list enumerates nothing**, so there is nothing to be missing from.
+    testCase "a hiding header does not raise it" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/HidesAndPasses.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (unwords (concatMap (renderResponse s0) out))
+        (not (any (isInfixOf "does not list")
+                  (concatMap (renderResponse s0) out)))
+
+  , -- **And neither does a header with no clause at all**, which is every file
+    -- written before MS11 phase 285: the corpus must stay silent.
+    testCase "and neither does a header with no clause" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsBit.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      assertBool (unwords (concatMap (renderResponse s0) out))
+        (not (any (isInfixOf "does not list")
+                  (concatMap (renderResponse s0) out)))
+  ]
+
 narrowedImportTests :: [TestTree]
 narrowedImportTests =
   [ testCase "a name list narrows what the importer may write" $ do

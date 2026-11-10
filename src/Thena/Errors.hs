@@ -142,6 +142,22 @@ data Warning
     -- files but show warning"/, which is the second principle of 2026-09-01
     -- doing its own work: the line does exactly what it says it does, and
     -- taking the word out changes nothing.
+  | PublicImportUnlisted String [String]
+    -- ^ **a @public import@ whose names the header's @exporting@ clause does
+    -- not list, and the namespaces it would have to name to list them** (MS11
+    -- phase 307, his ruling of 2026-11-10, @~f8x53@).
+    --
+    -- **It still travels, and that is the point of warning rather than
+    -- refusing.** His ruling settled on 2026-11-10 that a header's clause never
+    -- gates what a @public import@ hands on, because gating it would mean
+    -- re-listing another module's namespaces as though they were your own. What
+    -- is left is that a reader of such a header does not see everything the file
+    -- offers — so the file is told, and the author may silence it by listing
+    -- those namespaces, which is the clunkiness he accepted deliberately.
+    --
+    -- **Only an @exporting@ clause raises it.** A header with @hiding ( … )@ or
+    -- with no clause at all claims to enumerate nothing, so there is nothing for
+    -- a passed-on name to be missing from.
   | PublicIdleAtPrompt String
     -- ^ **@public@ in front of an act typed at the prompt, and the act's own
     -- word** (MS11 phase 298). Its twin for the other place the word is idle,

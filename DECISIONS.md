@@ -1078,6 +1078,42 @@ unchanged** and still ignores a word that is not there.
 refusal, and it narrows the languages a module offers as well as its names — a
 clause that keeps `LC` out leaves a rule written in `LC` refused at the tag.
 **`consult` takes no clause.**
+
+### A header that lists its exports is told what it passes on
+
+*Decided 2026-11-10. Built — MS11 phase 307.*
+
+Your `exporting` list governs *your* declarations. A `public import` governs what came
+through you. The two do not interact — see above — which leaves one honest problem:
+**a reader of a header that says `exporting ( … )` does not see everything the file
+offers**, because a `public import` in the body hands on names the list never mentions.
+
+**Thena warns, and hands them on anyway.**
+
+```
+thena spine> :load Passer.thena
+warning: public import Bits passes on Bit, which this file's exporting clause does not list
+```
+
+**Nothing is prevented and nothing is narrowed.** The names travel exactly as they did;
+the file is told so that the header is not quietly incomplete.
+
+**To silence it, name those namespaces in your own list.** That means writing another
+module's namespaces in your header, which is a little clunky — and that is the accepted
+price of a header you can read on its own:
+
+```
+module Passer exporting ( Bit mine ) where   -- Bit is Bits', and listed anyway
+
+public import Bits
+
+mine : Bit.Bit
+mine = Bit.off
+```
+
+**Only an `exporting` list raises it.** A header with `hiding ( … )`, or with no clause
+at all, claims to enumerate nothing — so there is nothing for a passed-on name to be
+missing from, and no file written before export lists existed will ever see this.
 ### A rule file writes its own `open` lines
 
 *Decided 2026-11-03, built the same day. The piece of the decision above that

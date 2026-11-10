@@ -1732,10 +1732,10 @@ may name.
 ### An import can say which names it takes
 
 The header says what a file *offers*. The import line says what you *take*, with the
-same two words. Say `Shapes` offers both of its datatypes:
+same two words. `test/modules/Twins.thena` offers both of its datatypes:
 
 ```
-module Shapes where
+module test.modules.Twins where
 
 data Bit : Type₀ where
   off : Bit
@@ -1746,25 +1746,27 @@ data Tri : Type₀ where
   hi : Tri
 ```
 
-Then an importer can ask for part of it:
+So an importer can ask for part of it:
 
 ```
-import Shapes ( Bit )          -- this namespace and no more
-import Shapes hiding ( Tri )   -- everything but this
-import Shapes                  -- everything Shapes offers
+import test.modules.Twins ( Bit )          -- this namespace and no more
+import test.modules.Twins hiding ( Tri )   -- everything but this
+import test.modules.Twins                  -- everything Twins offers
 ```
 
 **One clause, either word, never both** — the choice `open X ( … )` and a header
 already make — and **you name namespaces, not names** here too, so `( Bit )` takes
-the type and its constructors together. Write the names the way `Shapes` writes them.
-Write `Tri.lo` under the first line and you get `not in scope: Tri.lo`.
+the type and its constructors together. Write the names the way `Twins` writes them.
+Write `Tri.lo` under the first line and you get `not in scope: Tri.Tri`.
 
 **A clause that names something the module does not offer is refused**, and it says
-which name missed:
+which name missed. `TypoClause.thena` asks `Twins` for a `Nonesuch`:
+
+*From a fresh session.*
 
 ```
-thena spine> :load Takes.thena
-Takes.thena: Shapes offers no Nonsuch
+thena spine> :load test/modules/TypoClause.thena
+test.modules.Twins offers no Nonesuch
 ```
 
 That is the one list Thena checks this way. `open X ( … )` still ignores a word that
@@ -1775,12 +1777,12 @@ you is what you took, not what you were offered:
 
 ```
 module Middle where
-public import Shapes ( Bit )   -- Bit is what Middle hands on
+public import test.modules.Twins ( Bit )   -- Bit is what Middle hands on
 
 module User where
 import Middle
-x : Bit.Bit                    -- fine
-y : Tri.Tri                    -- not in scope: Middle narrowed Tri away
+x : Bit.Bit                                -- fine
+y : Tri.Tri                                -- not in scope: Middle narrowed Tri away
 ```
 
 It keeps narrowing however long the chain is — a file that public-imports `Middle`
@@ -1790,13 +1792,43 @@ hands on `Bit` alone, and nothing downstream widens it back.
 both lines. They are two statements about one module and do not cancel:
 
 ```
-import Shapes                  -- all of Shapes, for my own use
-public import Shapes ( Bit )   -- but only Bit travels
+import test.modules.Twins                  -- all of it, for my own use
+public import test.modules.Twins ( Bit )   -- but only Bit travels
 ```
 
 **A rule file's `import` takes the same clause**, and it narrows the object languages
 a module offers along with its names: keep `LC` out and a rule written in `LC` is
 refused at the tag. `consult` takes no clause.
+
+### A header that lists its exports is told what it passes on
+
+If your header says `exporting ( … )` and a `public import` hands on names the list
+does not mention, Thena says so — and hands them on anyway:
+
+*From a fresh session.*
+
+```
+thena spine> :load test/modules/GetsThrough.thena
+module test.modules.Guarded
+  declared Bit
+  declared flip
+module test.modules.PassesNothingOwn
+  declared ownThing
+warning: public import test.modules.Guarded passes on Bit, which this file's exporting clause does not list
+module test.modules.GetsThrough
+  declared mine
+```
+
+**The names still travel.** The warning exists because the two statements are about
+different things — your list governs *your* declarations, a `public import` governs
+what came through you — so a reader of your header alone does not see everything your
+file offers. **To silence it, name those namespaces in your own list**, which means
+naming another module's namespaces in your header; that is a little clunky and it is
+the price of the header being honest.
+
+A header with `hiding ( … )`, or with no clause at all, never raises it: neither
+claims to enumerate what the file offers, so there is nothing for a passed-on name to
+be missing from.
 
 ### `import` and `consult` are typed at the prompt too
 

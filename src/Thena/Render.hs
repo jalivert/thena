@@ -1951,6 +1951,12 @@ renderWarning w = "warning: " ++ case w of
       ++ " already hands the base on to whoever consults this one"
   -- **One sentence for both acts**, the word being idle at the prompt for one
   -- reason: nothing imports or consults a session (MS11 phase 298).
+  -- **The module, then the namespaces to list** (MS11 phase 307): the line to
+  -- change is the one that named the module, and what silences the warning is a
+  -- list of namespaces, so both halves of the remedy are in the sentence.
+  PublicImportUnlisted m ns ->
+    "public import " ++ m ++ " passes on " ++ intercalate ", " ns
+      ++ ", which this file's exporting clause does not list"
   PublicIdleAtPrompt act ->
     "public " ++ act ++ " acts as a plain " ++ act ++ ": nothing " ++ act
       ++ "s a session"
