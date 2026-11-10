@@ -435,11 +435,11 @@ term gs self@(selfRule, selfWord) rename t = case t of
     -- is spliced into having written an @open@. The /types/ stay short, because
     -- a @data@ declaration's short name reaches them.
     con d w = surfaceName (inDeclarationOf (declarationNamed (rootName d)) w)
-    pairType l c = app (SurfaceName [] "And") [SurfaceName [] (classType gs c), SurfaceName [] (ownerOf gs l c)]
+    pairType l c = app (SurfaceName [] "And") [SurfaceName [] (classType gs c), ownerType gs l c]
     cons l c (x, m) rest =
       app (con "List" "cons")
         [ pairType l c
-        , app (con "And" "both") [SurfaceName [] (classType gs c), SurfaceName [] (ownerOf gs l c), x, m]
+        , app (con "And" "both") [SurfaceName [] (classType gs c), ownerType gs l c, x, m]
         , rest ]
     nil l c = app (con "List" "nil") [pairType l c]
 
@@ -525,7 +525,7 @@ ruleGrammar gs =
                     : [ Earley.Rule ("pair " ++ l ++ " " ++ x) (pairNT l)
                           [ Earley.Scan x (metavariables [x])
                           , Earley.Literal "->"
-                          , Earley.Nonterminal (ownerOf gs l x) ] []
+                          , Earley.Nonterminal (ownerKey gs l x) ] []
                       | x <- cs
                       ]
 
@@ -612,19 +612,34 @@ grammarNamed gs l = [ g | g <- gs, grammarName g == nameFromText l ]
 
 -- | The language that owns a class — what the right-hand side of one of its
 -- pairs is a term of, and what its map is a map into.
--- **It answers with the owner's WORD** (MS10 phase 258), because every caller
--- writes it into a surface type rather than handing it to the parser.
+--
 -- **The class is found by its WORD among the ones that language reaches** (MS10
 -- phase 259), because a class carries a path now and @x@ is what the rule
--- wrote. One grammar reaching two classes of one word is refused
--- ('Thena.Language.Grammar.substitutable'), so there is nothing to choose
--- between.
-ownerOf :: [Grammar] -> String -> String -> String
-ownerOf gs l x = case [ g | h <- grammarNamed gs l
-                          , c <- classesSubstituted gs h, classWord c == x
-                          , Just g <- [classOwner gs h c] ] of
-  g : _ -> grammarWord g
-  _ -> x
+-- wrote. A grammar reaching two classes of one word is no longer refused —
+-- phase 304 deleted that refusal — so this answers with the first, and which
+-- one a comma list meant is the open question of the generated notation.
+ownerGrammar :: [Grammar] -> String -> String -> Maybe Grammar
+ownerGrammar gs l x = listToMaybe [ g | h <- grammarNamed gs l
+                                      , c <- classesSubstituted gs h, classWord c == x
+                                      , Just g <- [classOwner gs h c] ]
+
+-- | The owner as a PARSER KEY, which is the dotted name every nonterminal is
+-- installed under ('Thena.Language.Grammar.grammarKey').
+--
+-- **The word is not a nonterminal** — a language inside a @namespace@ is
+-- @Source.LC@ to the parser, so a pair rule built with @LC@ referred to a
+-- nonterminal that did not exist and the comma-list form could not parse at
+-- all. Measured: a file whose class and language sit at the top level took
+-- @( x_1 x_2 )[x_1->x_2, x_2->x_1]@ and the same file under a @namespace@
+-- refused it with /unexpected ','/.
+ownerKey :: [Grammar] -> String -> String -> String
+ownerKey gs l x = maybe x grammarKey (ownerGrammar gs l x)
+
+-- | The owner as a type to WRITE, path and all (MS10 phase 244's rule, which
+-- this had escaped): generated code may not rely on the file it is spliced
+-- into having opened the owner's namespace.
+ownerType :: [Grammar] -> String -> String -> Surface
+ownerType gs l x = maybe (SurfaceName [] x) (surfaceName . grammarName) (ownerGrammar gs l x)
 
 -- | A class's @T@ — @String@ for every class a binder or an occurrence may be
 -- at (§4.5 refuses any other), asked rather than assumed so that `~tmnrr`'s

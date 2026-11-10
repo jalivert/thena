@@ -136,6 +136,36 @@ scoped =
         , isDeclared (named "A.A.LC.subst.A.x") env
         , isDeclared (named "LC.subst.A.x") env ) @?= (True, True, False, False)
 
+    -- **A COMMA LIST REACHES THE OWNING LANGUAGE BY ITS KEY, NOT ITS WORD**
+    -- (2026-11-10). The pair rule a rule's grammar gets per class names the
+    -- class's owning language as an Earley nonterminal, and a nonterminal is
+    -- the dotted key — built from the word it referred to one that does not
+    -- exist, so the comma-list form could not parse at all for a language
+    -- inside a namespace: this body refused with @unexpected ','@ while the
+    -- same body at the top level took it.
+    -- **NOTHING IN THE EXAMPLE CORPUS CAN CATCH THAT**, because every example
+    -- declares its token class at the top level.
+    -- 'Thena.Language.Judgment.ownerKey'.
+  , testCase "a comma list parses for a language inside a namespace" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (unlines
+             [ "module Swap where", ""
+             , "namespace A where"
+             , "  x : Token String"
+             , "  x = /[a-z][a-zA-Z0-9']*/"
+             , "  language LC, M, N, E where"
+             , "    var : x as occurrence -> x"
+             , "    abs : x as binder     -> ( λ x . E[x] )"
+             , "    app                   -> ( M N )"
+             , ""
+             , "open A.LC", ""
+             , "judgment sw = M ⇄ N where", ""
+             , "  Swap:  ---------------------------------------"
+             , "         ( x_1 x_2 ) ⇄ ( x_1 x_2 )[x_1->x_2, x_2->x_1]"
+             , "" ]) of
+        (_, ProofLoaded _ ds _ ws) -> (ds, ws) @?= (["A.x", "A.LC", "sw"], [])
+        (_, other) -> assertFailure (show other)
+
     -- **A block's own word opens where it is written** (MS10 phase 258): the
     -- @open Ty@ inside the namespace is what every one of those blocks needs,
     -- since a block that writes its letters with its language shut installs
