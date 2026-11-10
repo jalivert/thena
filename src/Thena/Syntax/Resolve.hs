@@ -101,11 +101,26 @@ data Globals = Globals
     -- written @empty@ resolved in a surface term and not in @:theorem@'s type.
     -- Carried here so that a caller saying what is in scope says it in full,
     -- rather than every door having to remember a second argument.
+  , scopeDeclaring :: Maybe (String, GlobalName)
+    -- ^ the word a declaration's own family answers to, while that
+    -- declaration's constructors are resolved, and the family it answers with
+    --
+    -- __It is a binding and not a rung of the walk__ (MS11 phase 305). A
+    -- surface @data@ block elaborates each constructor's type with the family's
+    -- word /assumed/ — 'Thena.Driver.datatypeProgram' pushes an @Assume@ — so
+    -- inside the block @Foo@ is bound and no global lookup for it happens at
+    -- all. A core-syntax @data@ line had no such binding and resolved the word
+    -- through 'Thena.Core.Term.globalUnder', where a definition written exactly
+    -- @Foo@ answered before the alias of the family being declared and the
+    -- declaration was refused for naming the wrong head. **The two doors read
+    -- the same declaration two ways, which is what the first design principle
+    -- forbids**, and this is the binding that ends it: one word, only while the
+    -- constructors are read, consulted exactly where a local would be.
   }
 
 globalsOf :: GlobalEnv -> InScope -> Globals
 globalsOf e sc =
-  Globals (map fst (definitions e) ++ map fst (primitives e)) sc
+  Globals (map fst (definitions e) ++ map fst (primitives e)) sc Nothing
 
 -- | What a written term's @${x}@ holes are filled with (MS5 phase 81).
 --
@@ -419,10 +434,20 @@ core gr env gs sp ctx local n raw = case raw of
     -- 'Thena.Engine.globalNamed', so a written word cannot mean one thing in a
     -- surface term and another in a command's argument. The alias above is
     -- part of that walk, which is why it is no longer tried separately.
-    plainAt g args = case globalUnder (`elem` scopeNames gs) (scopeIn gs) g of
-      Right g'  -> Right (Global g' args, n)
-      Left []   -> Left (NotInScope (nameDotted g))
-      Left amb  -> Left (NameIsAmbiguous (nameDotted g) (map nameDotted amb))
+    -- **The family being declared answers its own word first** (MS11 phase
+    -- 305), because that is what a surface @data@ block's @Assume@ does one
+    -- door along — see 'scopeDeclaring'. It is asked here and not before the
+    -- locals, so a binder over the word still shadows it, exactly as a binder
+    -- shadows the assumption in a surface block.
+    plainAt g args
+      | Just (w, dn) <- scopeDeclaring gs
+      , null (nameSteps g)
+      , nameWord g == w
+      = Right (Global dn args, n)
+      | otherwise = case globalUnder (`elem` scopeNames gs) (scopeIn gs) g of
+          Right g'  -> Right (Global g' args, n)
+          Left []   -> Left (NotInScope (nameDotted g))
+          Left amb  -> Left (NameIsAmbiguous (nameDotted g) (map nameDotted amb))
 
 -- | Resolve @elim@\'s head through the ordinary scope chain, and insist it
 -- named a global.
@@ -597,7 +622,11 @@ resolveData gr env sc n (RawData name ps ty cs) = do
   -- The datatype being declared joins 'Globals' here, and only here: a
   -- constructor may recursively mention it (@succ : Nat -> Nat@), and
   -- 'lookupInductive' would find nothing for it in @env@ mid-declaration.
-  (cs', n4) <- constructors gr env gs { scopeNames = dn : scopeNames gs } dn params (length indices) afterParams n3 cs
+  (cs', n4) <- constructors gr env
+                 gs { scopeNames     = dn : scopeNames gs
+                    , scopeDeclaring = Just (name, dn)
+                    }
+                 dn params (length indices) afterParams n3 cs
   Right (InductiveDefinition dn [] params indices level cs', n4)
   where
     gs = globalsOf env sc

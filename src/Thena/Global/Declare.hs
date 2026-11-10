@@ -46,6 +46,7 @@ import Thena.Core.Term
   , GlobalName
   , Ident
   , close
+  , declarationWord
   , levelMetasIn
   , fresh
   , instantiate
@@ -521,12 +522,37 @@ checkNames env d =
     : caseName (inductiveName d)
     : map constructorName (inductiveConstructors d)
     )
+    >> alias
   where
     go _ [] = Right ()
     go seen (g : gs)
       | g `elem` seen    = Left (RepeatedName g)
       | isDeclared g env = Left (AlreadyDeclared g)
       | otherwise        = go (g : seen) gs
+
+    -- | __The word the declaration takes, which is not one of the names above.__
+    --
+    -- **HIS ruling of 2026-11-10, and the rule is about reachability**: a name
+    -- that would be born unreachable by any spelling is refused, and a name
+    -- that merely makes an older one harder to reach is allowed and announced.
+    -- Every name in the list above lands inside the declaration's own
+    -- namespace, so none of them can take a word — but the alias
+    -- 'Thena.Core.Term.declarationWord' names does, and it is the spelling the
+    -- author actually writes.
+    --
+    -- **Nothing in the environment holds the alias**, so the check is a probe
+    -- of what the word already means rather than a clash between two entries.
+    -- When a definition or a theorem is installed at exactly that name, the
+    -- declaration's own type former could be reached only by its full path and
+    -- by nothing else: an @open@ of the namespace cannot shorten it, because an
+    -- @open@ is consulted only after the walk's rungs have failed and the exact
+    -- name answers on the first rung. That is the unreachable name the ruling
+    -- refuses, and refusing it here covers every door that declares a datatype
+    -- — a @data@ line, a surface block, a @language@ block's own former, a
+    -- judgment and a lookup relation — because 'declare' is the one entry.
+    alias = case declarationWord (inductiveName d) of
+      Just w | isDeclared w env -> Left (AlreadyDeclared w)
+      _                         -> Right ()
 
 -- | One constructor: it must target the family at the right number of indices,
 -- and every argument must be strictly positive.

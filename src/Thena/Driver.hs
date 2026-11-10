@@ -129,12 +129,12 @@ module Thena.Driver
   , kindOf
   ) where
 
-import Data.Maybe (fromMaybe, isJust, mapMaybe)
+import Data.Maybe (fromMaybe, isJust, mapMaybe, maybeToList)
 import Data.Word (Word64)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, declarationWord, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -6292,13 +6292,25 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
       | otherwise -> spending fuel spent s { sessionMachine = installed } msgs took
       where
         installed = m { globals = g, names = n1 }
-        -- **Every name the declaration added is asked, not just the former's**
-        -- (MS10 phase 264): a @data@ block's names all land inside its own
-        -- namespace, so the /former/ can never take a word — but a constructor
-        -- can, if a datatype is declared at exactly that path, and the door
-        -- should not have to know which of its names is the dangerous one.
+        -- **Every name the declaration added is asked, and the word it takes
+        -- besides** (MS10 phase 264; the word at MS11 phase 305). A @data@
+        -- block's names all land inside its own namespace, so no name it
+        -- installs can take a word — a constructor is the one that can, if a
+        -- datatype is declared at exactly that path, and the door does not have
+        -- to know which of its names is the dangerous one.
+        --
+        -- **The former takes a word all the same**, through the alias
+        -- 'Thena.Core.Term.declarationWord' names. The environment does not
+        -- hold it, so a door that asks what the environment gained cannot see
+        -- it, and this one has to add it: the note here used to say the former
+        -- could never take a word, and that was the whole of why @data Foo@
+        -- over an opened @Bar.Foo@ went in silently where a definition called
+        -- @Foo@ announced itself. **It is a shadowing and not a refusal**,
+        -- because @Bar.Foo@ is still there to write — see
+        -- 'Thena.Global.Declare.checkNames' for the case the ruling refuses.
         took = shadowings (globals m) (Engine.scope m)
-                          (Env.declaredNames g \\ Env.declaredNames (globals m))
+                          ( (Env.declaredNames g \\ Env.declaredNames (globals m))
+                              ++ maybeToList (declarationWord (inductiveName d)) )
                  ++ warns
   -- The kernel runs here, outside the machine, for 'Declaring'\'s reason: it is
   -- policy, and §7.5 has the driver own policy. On refusal the rest of the

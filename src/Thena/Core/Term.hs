@@ -27,6 +27,7 @@ module Thena.Core.Term
   , inFamilyOf
   , declarationOf
   , declarationNamed
+  , declarationWord
   , globalUnder
   , InScope (..)
   , concealedHere
@@ -250,6 +251,26 @@ declarationOf (GlobalName ps _) = case reverse ps of
 -- the name it points at — one function, so they cannot drift apart.
 declarationNamed :: GlobalName -> GlobalName
 declarationNamed (GlobalName ps w) = GlobalName (ps ++ [w]) w
+
+-- | __The word a declaration takes in the namespace that holds it.__
+--
+-- 'declarationNamed' backwards: @Foo.Foo@ is what a written @Foo@ reaches, so
+-- @declarationWord (GlobalName ["Foo"] "Foo")@ is @Just (GlobalName [] "Foo")@.
+-- A name whose last step is not its own word is nobody's alias and answers
+-- 'Nothing' — only a declaration mints one, which is why a class, a generated
+-- substitution function and a theorem have none.
+--
+-- __It is the one name a declaration takes and does not install__ (MS11 phase
+-- 305, HIS ruling of 2026-11-10). The alias is a resolution fact, so nothing in
+-- the environment holds it, and a door that asks the environment what the
+-- declaration took sees every name but this one. Both doors that care ask here:
+-- 'Thena.Global.Declare.checkNames' refuses a declaration whose alias is
+-- already somebody's name, and 'Thena.Driver.shadowings' announces the word
+-- when it takes one that was reachable.
+declarationWord :: GlobalName -> Maybe GlobalName
+declarationWord (GlobalName ps w) = case reverse ps of
+  s : rest | s == w -> Just (GlobalName (reverse rest) w)
+  _                 -> Nothing
 
 -- | __Where a written name is looked up from.__
 --

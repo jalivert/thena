@@ -426,6 +426,41 @@ what it names. **It is announced instead**, naming the shadowed name in full,
 because that spelling is the repair; at `:theorem` it is announced before the
 proof exists, which is while renaming it is still free.
 
+**THE OTHER DIRECTION IS REFUSED, AND THE RULE IS ABOUT REACHABILITY.** A name
+that would be born unreachable by any spelling is refused; a name that merely
+makes an older one harder to reach is allowed and announced. So a `data`
+declaration may not be written where something already holds the word it takes:
+
+```
+thena spine> declare Foo : Type₁ ; Foo = Type₀
+thena spine> data Foo : Type₀ where { ff : Foo }
+refused: Foo is already declared
+```
+
+The datatype would be `Foo.Foo`, and nothing could reach it except that path
+written out in full. An `open Foo` cannot help — an `open` is consulted only
+after the walk's rungs have failed, and the exact `Foo` answers on the first
+rung — so unlike every other collision here there is no repair, which is why
+this one is a refusal rather than a warning. It is the same restriction two
+theorems of one word already live under, and it applies wherever a datatype is
+declared: a `data` line, a `data` block in a file, a `language` block's own type,
+and the types generated for judgments and context lookups.
+
+**Where the word was merely reachable, the declaration goes in and says so:**
+
+```
+thena spine> open Bar
+thena spine> data Foo : Type₀ where { ff : Foo }
+declared Foo
+warning: the name Foo shadows Bar.Foo, which is reached by writing it in full from here
+```
+
+**Inside the declaration, its own word is the type being declared.** `ff : Foo`
+means the family, whatever else `Foo` reaches outside — the word is bound for the
+length of the declaration, exactly as a λ-bound name is, so a binder over it
+still shadows it. That holds whether the declaration is typed at the prompt or
+read from a file.
+
 **An `open` can only add a way for a name to resolve, never change one.** A name
 that already denotes something is taken as written, so an `open` is safe to put
 above code that was already working. If two open namespaces both answer a word

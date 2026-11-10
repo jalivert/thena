@@ -1824,30 +1824,48 @@ shadowingTests =
           ws @?= [NameShadows (named "Nat") (named "Nat.Nat")]
         (_, other) -> assertFailure (show other)
 
-  , -- **The other direction says nothing, and it is right not to**: a @data@
-    -- block puts everything it declares inside its own namespace, so a
-    -- datatype arriving under a word a definition already holds takes no word
-    -- from anyone — @Foo@ is still the definition and the datatype is
-    -- @Foo.Foo@, which is how the load reports it.
+  , -- **A @data@ BLOCK IS REFUSED FOR THE WORD IT TAKES, AS THE @data@ LINE IS**
+    -- (MS11 phase 305, HIS ruling of 2026-11-10). Until this phase the block
+    -- loaded and the prompt's line refused the same text: a block puts
+    -- everything it declares inside its own namespace, so no name it installs
+    -- clashed with the definition called @Foo@, and the alias @Foo@ that the
+    -- declaration mints was checked by nobody. The type former would then have
+    -- been reachable by @Foo.Foo@ and by nothing else — an @open Foo@ cannot
+    -- shorten it, because the exact @Foo@ answers on the walk's first rung and
+    -- an @open@ is consulted only after every rung fails.
     --
-    -- **What this pins is that the block answers its OWN word with the
-    -- datatype being declared**: @ff : Foo@ is written where a definition
-    -- called @Foo@ is in scope, and it still means the datatype. **The @data@
-    -- LINE at the prompt refuses the same text** — "Thena.SessionTests",
-    -- /the prompt refuses a constructor a module accepts/, has that divergence
-    -- and the item it is written in.
-    testCase "a data block answers its own word with the datatype, not a definition" $ do
+    -- **This is the module half of @~8zcf6@ and its control is in
+    -- "Thena.SessionTests"**, /the word a data line takes is refused when a
+    -- definition holds it/. The two doors give the same answer now, and these
+    -- two tests are what keeps them doing so.
+    testCase "a data block is refused when a definition holds the word it takes" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 datatypeUnderATakenWord of
+        (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= rootName "Foo"
+        (_, other) -> assertFailure (show other)
+
+  , -- **What survives of the old test, and it is the half that was right**: the
+    -- block answers its OWN word with the family being declared. The word has
+    -- to be reachable for the claim to have any content and must not be
+    -- installed exactly, or the refusal above fires first — so @Bar.Foo@ is
+    -- opened, @ff : Foo@ is written, and the constructor targets @Foo.Foo@
+    -- rather than the opened name.
+    --
+    -- **The alias it takes is announced and not refused**, because @Bar.Foo@
+    -- is still there to write. That is the line the ruling draws: a name born
+    -- unreachable is refused, a name that only makes an older one harder to
+    -- reach is allowed and said.
+    testCase "a data block answers its own word with the datatype, not an opened name" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 datatypeUnderAnOpenedWord of
         (s1, ProofLoaded _ _ _ ws) -> do
           let env = globals (machineOf s1)
-          -- The declaration was accepted at all, which 'targetIndices' only
-          -- permits when the constructor's target IS the family being
-          -- declared, so this is the whole of the claim.
+          -- Accepted at all, which 'targetIndices' only permits when the
+          -- constructor's target IS the family being declared.
           isDeclared (named "Foo.Foo") env @?= True
           isDeclared (named "Foo.ff") env @?= True
-          isJust (lookupDefinition (named "Foo") env) @?= True
-          ws @?= []
+          isJust (lookupDefinition (named "Bar.Foo") env) @?= True
+          ws @?= [NameShadows (rootName "Foo") (named "Bar.Foo")]
         (_, other) -> assertFailure (show other)
   ]
   where
@@ -1872,6 +1890,18 @@ shadowingTests =
       "module Shadow where\n\
       \Foo : Type\8321\n\
       \Foo = Type\8320\n\
+      \\n\
+      \data Foo : Type\8320 where\n\
+      \  ff : Foo\n"
+
+    -- The word is reachable and not installed: @Bar.Foo@ under an @open@.
+    datatypeUnderAnOpenedWord =
+      "module Shadow where\n\
+      \namespace Bar where\n\
+      \  Foo : Type\8321\n\
+      \  Foo = Type\8320\n\
+      \\n\
+      \open Bar\n\
       \\n\
       \data Foo : Type\8320 where\n\
       \  ff : Foo\n"

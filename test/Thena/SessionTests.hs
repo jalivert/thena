@@ -43,7 +43,8 @@ import Thena.Driver
   , submittedLines
   )
 import Thena.Engine (Machine (..), Development, flatten)
-import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..), Warning (..))
+import Thena.Errors (FailReason (..), MoveError (..), Warning (..))
+import Thena.Global.Declare (DeclareError (..))
 import Thena.Global.Env (Definition (..), GlobalEnv, lookupDefinition)
 
 tests :: TestTree
@@ -435,21 +436,33 @@ sessionTests =
   , testCase "a definition written whole says so as it lands" $
       warningsAfter ["data " ++ natDecl, "declare Nat : Type₁ ; Nat = Type₀"]
         @?= [NameShadows (rootName "Nat") (declaredAs "Nat")]
-    -- **THE PROMPT REFUSES A CONSTRUCTOR A MODULE ACCEPTS, AND THE REFUSAL NOW
-    -- NAMES BOTH SPELLINGS** (MS10 phase 264). A @data@ LINE resolves its
-    -- constructors against the environment, where @Foo@ is the definition, so
-    -- the target is that definition and not the family — while a module's
-    -- @data@ BLOCK answers the same word with the family being declared and
-    -- loads, which "Thena.LoadTests" pins. **Pinned as measured, and the
-    -- divergence is an item of its own**; what this phase fixed is the words,
-    -- which used to say /ff must produce the datatype being declared/ and
-    -- blamed the constructor for a collision one line up.
-  , testCase "the prompt refuses a constructor a module accepts" $
+    -- **THE PROMPT AND A MODULE ANSWER THE SAME TEXT THE SAME WAY** (MS11 phase
+    -- 305, HIS ruling of 2026-11-10), where until this phase the @data@ LINE
+    -- refused what a module's @data@ BLOCK accepted. **What is refused is the
+    -- word the declaration takes**: @data Foo@ mints the alias @Foo@, a
+    -- definition already holds it, and a type former no spelling reaches is
+    -- refused rather than installed.
+    --
+    -- **The refusal is no longer the constructor's**, which is the half of
+    -- @~8zcf6@ phase 264 could only reword: 'TargetIsNotTheDatatype' blamed
+    -- @ff@ for a collision one line up, and it now reports only a target that
+    -- genuinely names something else. "Thena.LoadTests" pins the module side of
+    -- this same text, and the two tests are each other's control.
+  , testCase "the word a data line takes is refused when a definition holds it" $
       case reverse (loadedResponses (run [ "declare Foo : Type₁ ; Foo = Type₀"
                                          , "data Foo : Type₀ where { ff : Foo }" ])) of
-        Failed (ResolveFailed e) : _ ->
-          e @?= TargetIsNotTheDatatype "ff" (Just (rootName "Foo")) (named "Foo.Foo")
+        Ran _ _ (Refused e) : _ -> e @?= AlreadyDeclared (rootName "Foo")
         other -> assertFailure ("expected a refusal: " ++ show (take 1 other))
+    -- **And the word the constructor writes answers the family, as it always
+    -- did in a surface block.** @Bar.Foo@ is reachable as @Foo@ through the
+    -- @open@, so the declaration resolves, goes in, and the word it takes is
+    -- announced rather than refused — @Bar.Foo@ is still there to write, which
+    -- is the line the ruling draws.
+  , testCase "a data line takes a word an open reached, and says so" $
+      warningsAfter [ "declare Bar.Foo : Type₁ ; Bar.Foo = Type₀"
+                    , "open Bar"
+                    , "data Foo : Type₀ where { ff : Foo }" ]
+        @?= [NameShadows (rootName "Foo") (named "Bar.Foo")]
   , testCase "a statement that is not a type is refused" $
       case reverse (loadedResponses (run [":theorem t : zero"])) of
         Failed _   : _ -> pure ()
