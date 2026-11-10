@@ -1,0 +1,9 @@
+-- **The other word, and the same clause** (MS11 phase 306): naming what it
+-- keeps out rather than what it takes. One clause and either word, never both,
+-- which is the choice a header and an `open` already make.
+module test.modules.HidesTri where
+
+import test.modules.Twins hiding ( Tri )
+
+mine : Bit.Bit
+mine = Bit.on

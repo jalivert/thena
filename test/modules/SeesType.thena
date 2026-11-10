@@ -1,0 +1,10 @@
+-- **The type came, and so did its alias** (MS11 phase 285): `GuardedType`
+-- exported `Tri.Tri` alone, and `Tri` resolves to it because the alias a `data`
+-- declaration mints is a resolver fact that ends at the type — so it travels
+-- with the type and needs no rule of its own.
+module test.modules.SeesType where
+
+import test.modules.GuardedType
+
+mine : Tri -> Tri.Tri
+mine = λ t -> t

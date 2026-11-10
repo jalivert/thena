@@ -1,0 +1,14 @@
+-- **A `hiding` header does not raise it** (MS11 phase 307): his ruling names
+-- the header that "explicitly exports only allow-listed things", and a deny-list
+-- claims to enumerate nothing — so there is nothing a passed-on name can be
+-- missing from. This file withholds one of its own declarations and passes
+-- `Guarded` on, and says nothing.
+module test.modules.HidesAndPasses hiding ( kept ) where
+
+public import test.modules.Guarded
+
+kept : Bit.Bit
+kept = Bit.on
+
+shown : Bit.Bit
+shown = Bit.off

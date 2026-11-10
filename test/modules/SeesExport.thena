@@ -1,0 +1,8 @@
+-- **What `Guarded` exports is reachable** (MS11 phase 285): the datatype's
+-- namespace was named, so everything under it came too.
+module test.modules.SeesExport where
+
+import test.modules.Guarded
+
+mine : Bit.Bit
+mine = Bit.off

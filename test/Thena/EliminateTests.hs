@@ -83,7 +83,7 @@ tests =
 -- | **One fixture, both 'Premises', and the only difference is the copies.**
 --
 -- @p a b u : Term@, @d : Step (ifthen p a b) u@ — the state
--- @examples\/determinacy-patterns.thena@ reaches at its inner split, and the
+-- @examples\/DeterminacyPatterns.thena@ reaches at its inner split, and the
 -- shape phase 191 was built for. The fixture's @Step@ is the first three rules
 -- of TAPL's, which is enough: the generalisation is decided by @eIfTrue@. The left index is @ifthen p a b@, constructed
 -- and so tied, and @eIfTrue@\'s own left index is @ifthen true t2 t3@: position
@@ -580,7 +580,7 @@ refusalTests =
     -- __It is asserted here as a build and nowhere else as a string__: the
     -- motive is three nested transports and pinning its text would say nothing
     -- a reader could check. @Thena.DependentIndexTests@ runs
-    -- @examples/chained-index-telescope.thena@ through the kernel instead,
+    -- @examples/ChainedIndexTelescope.thena@ through the kernel instead,
     -- which is the judge that matters, and asserts the arm computes.
   , testCase "two chained dependent indices are eliminated, not refused" $
       let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl, chainDecl]

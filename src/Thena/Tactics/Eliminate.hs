@@ -257,7 +257,7 @@ data MethodShape = MethodShape
 -- nothing and buys the refinement. A method written __by hand__ has no
 -- specialiser behind it, so every copy is a binder its author has to take and
 -- write the arm about — the cost @~84x46@ measured over 1190 lines of
--- @examples\/determinacy-tactics.thena.script@.
+-- @examples\/DeterminacyTactics.thena.script@.
 --
 -- __It is a parameter for 'Scheme'\'s reason__, and not a mode: nothing
 -- downstream can tell the results apart. Both build an ordinary
@@ -510,7 +510,7 @@ eliminate env ctx sch prem n0 goal tgt =
             --
             -- __A SEED OVERRIDES IT, and that is measured.__ The same variable
             -- can be bare at one index position and inside a term at another —
-            -- @examples\/determinacy-patterns.thena@ splits a step whose indices
+            -- @examples\/DeterminacyPatterns.thena@ splits a step whose indices
             -- are @p@ and @ifthen p p2 p3@ — and there the demand test has
             -- already said the copy is the only thing a solution can reach.
             -- Without the override that file loses two arms:
@@ -541,7 +541,7 @@ eliminate env ctx sch prem n0 goal tgt =
             --     @ePred c1@ against @pred (succ v)@ — and @solution@ removes
             --     that binder with no copy in sight. __Nothing is demanded__,
             --     and demanding it is what cost two arms of
-            --     @examples\/determinacy-patterns.thena@: the copy is bound
+            --     @examples\/DeterminacyPatterns.thena@: the copy is bound
             --     after @c1@, so @c1 := succ v9@ points backwards.
             --   * the target's side is a bare ambient variable facing anything
             --     else — @true@ against @p@ — and __the copy is the only thing
@@ -652,7 +652,7 @@ eliminate env ctx sch prem n0 goal tgt =
             -- __It is asked per position, only of a recursive premise, and only
             -- under @induction@__: a case analysis offers no hypothesis at all,
             -- so there is nothing for a copy to let vary, and demanding one there
-            -- is what broke @examples\/normal.thena@ when this was first
+            -- is what broke @examples\/Normal.thena@ when this was first
             -- measured. A family that does not recurse at that index demands
             -- nothing new either, and the narrow rule stands unchanged.
             recursionDemandsAt c k
@@ -745,7 +745,7 @@ eliminate env ctx sch prem n0 goal tgt =
             -- hypothesis the proof needs does not exist in the arm**, and no
             -- amount of work at the call could have found it. With @u@ copied it
             -- does, and @nvNoStep@ with its four premises written at the top is
-            -- the same shape in @examples\/determinacy-patterns.thena@.
+            -- the same shape in @examples\/DeterminacyPatterns.thena@.
             --
             -- __What makes it the right rule rather than a wider one__: the
             -- copies are a sub-telescope the motive moves (§2.8), and a
@@ -768,7 +768,7 @@ eliminate env ctx sch prem n0 goal tgt =
             -- puts definitions in the context; the first of those to mention a
             -- seed pulled itself into the closure, failed the 'Hypothesis' test
             -- and so cancelled the generalisation outright.
-            -- @examples\/determinacy-patterns.thena@ measured it: @p@ stopped
+            -- @examples\/DeterminacyPatterns.thena@ measured it: @p@ stopped
             -- being refined to @true@ the moment the outer split bound @t@.
             -- Testing the type instead fixed /that/ shape; what was left is the
             -- definition whose own TYPE mentions a seed, and 'generalisable' is
@@ -1424,7 +1424,7 @@ eliminate env ctx sch prem n0 goal tgt =
     -- __The exception is "the entry the target denotes", not "the entry whose
     -- variable the target is"__, and the two were the same thing until a caller
     -- elaborated its target into a hole. That the wider reading is right is not
-    -- a judgement call: @examples\/progress.thena@ writes the same elimination by
+    -- a judgement call: @examples\/Progress.thena@ writes the same elimination by
     -- hand, over a context holding @d : HasType t T@, with no equations — and
     -- the kernel accepts it.
     --

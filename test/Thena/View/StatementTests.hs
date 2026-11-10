@@ -122,7 +122,7 @@ tests =
 withLC :: IO Session
 withLC = do
   (s0, _) <- startingSession
-  let (s1, r) = oneLine s0 ":load examples/01-stlc-syntax.thena"
+  let (s1, r) = oneLine s0 ":load examples/Stlc01Syntax.thena"
   case following s1 r of
     Just io -> do (s2, _, _) <- io; pure s2
     Nothing -> pure s1

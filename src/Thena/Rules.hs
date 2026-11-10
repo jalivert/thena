@@ -912,7 +912,7 @@ resolveTyIn owner vs0 t0 = go vs0 t0
 -- **Two, and they are not lexer keywords** — his ruling, 2026-09-12. One lexer
 -- serves every language, so reserving them there would take two constructor
 -- names away from every object language;
--- @examples\/determinacy-tactics.thena.script@ uses both.
+-- @examples\/DeterminacyTactics.thena.script@ uses both.
 reservedNames :: [Name]
 reservedNames = ["true", "false"]
 
@@ -926,7 +926,7 @@ initiallyBound = concatMap patternBinds . ruleParams
 
 -- | Every rule in one base, checked.
 --
--- **This is what a load runs**, since phase 22 — @Thena.Driver.readRuleBase@
+-- **This is what a load runs**, since phase 22 — @Thena.Driver.readStated@
 -- calls it on every rule as it resolves one, so a base that would not validate
 -- is refused rather than installed. §2.4 asked for a load-time pass and until
 -- there was a load there was only a test.
@@ -1756,6 +1756,14 @@ operation rd g i (RawOp w as)
       ("namespace", _)            -> Left (DeclarationInBody g i)
       ("leave-namespace", _)      -> Left (DeclarationInBody g i)
       ("leave-open", _)           -> Left (DeclarationInBody g i)
+      -- §3.7 again (MS11 phase 291): an @import@ is a declaration, and so is
+      -- the end of the block one reaches.
+      ("reveal", _)               -> Left (DeclarationInBody g i)
+      ("leave-reveal", _)         -> Left (DeclarationInBody g i)
+      -- §3.7 again (MS11 phase 292): so is a @consult@, and so is the end of
+      -- the block one reaches.
+      ("push-base", _)            -> Left (DeclarationInBody g i)
+      ("pop-base", _)             -> Left (DeclarationInBody g i)
 
       _ -> case (lookup w nullaryOps, lookup w unaryOps, lookup w binaryOps, as) of
         (Just o,  _, _, [])       -> Right o

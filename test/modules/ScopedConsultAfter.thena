@@ -1,0 +1,10 @@
+module test.modules.ScopedConsultAfter where
+
+-- **The control** (MS11 phase 292): the same block, and then the same call
+-- outside it, where the base is out of the pool again.
+consult test.modules.Tooling where
+  do
+    marker
+
+do
+  marker

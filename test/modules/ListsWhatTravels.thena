@@ -1,0 +1,12 @@
+-- **The warning silenced by listing it** (MS11 phase 307, `~f8x53`, his ruling
+-- of 2026-11-10). `PassesNothingOwn.thena` is the same shape and warns: its
+-- header says `exporting ( )` while a `public import` hands `Bit` on. This file
+-- names `Bit` in its own clause, so the header enumerates everything the file
+-- offers and nothing is said. **The clunkiness is the point** — `Bit` is
+-- `Guarded`'s namespace and not this file's.
+module test.modules.ListsWhatTravels exporting ( Bit mine ) where
+
+public import test.modules.Guarded
+
+mine : Bit.Bit
+mine = Bit.off

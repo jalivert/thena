@@ -1,0 +1,11 @@
+module test.modules.ScopedImportAfter where
+
+-- **The control, and it is refused at the LAST declaration** (MS11 phase 291).
+-- The block is `ScopedImport`'s and loads; what follows it names a module this
+-- file no longer reaches, which a file-wide `import` would have left in scope.
+import test.modules.Opener where
+  mine : Bit.Bit
+  mine = Bit.off
+
+after : Bit.Bit
+after = Bit.off

@@ -1,0 +1,11 @@
+-- **A plain import beside a narrowed `public import` of the same module** —
+-- his case of 2026-11-10, a file that wants all of `Twins` for itself and
+-- passes on only part of it. The two lines are independent facts: this file
+-- writes `Tri`, and `GetsOnlyWhatTravelled.thena` cannot.
+module test.modules.BothLines where
+
+import test.modules.Twins
+public import test.modules.Twins ( Bit )
+
+mine : Tri.Tri
+mine = Tri.lo

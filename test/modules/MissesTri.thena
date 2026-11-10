@@ -1,0 +1,10 @@
+-- **What the clause kept out is concealed** (MS11 phase 306): `Twins` declares
+-- and offers `Tri`, and this file's import asked for `Bit` alone, so writing
+-- `Tri.lo` is refused although the session holds it. `TakesBit.thena` is the
+-- half that works.
+module test.modules.MissesTri where
+
+import test.modules.Twins ( Bit )
+
+mine : Tri.Tri
+mine = Tri.lo

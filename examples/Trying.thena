@@ -1,0 +1,16 @@
+module examples.Trying where
+
+data Bool : Type₀ where
+  True : Bool
+  False : Bool
+
+open Bool
+
+test : Type₀
+test = Bool
+
+-- not : Bool -> Bool
+-- not = eliminate
+
+-- foo : Type₀
+-- foo = Type₀

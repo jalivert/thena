@@ -30,7 +30,7 @@ import Thena.Driver
   , Session
   , command
   , loadProofSource
-  , loadRuleBases
+  , loadRuleTexts
   , loadSource
   , newSession
   , withRuleBases
@@ -369,7 +369,7 @@ machineAt cur is = machineIn emptyGlobals cur is
 -- | The same, with globals of your own (MS10).
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env' expectedBase [] [] rootScope 1000 0
+  load is (Machine (Exec [] [] [] []) (Development cur) [] env' expectedBase [] [] [] rootScope 1000 [] 0
                    NoUndischargeableTrust)
 
 -- | Elaborate against globals of your own.
@@ -990,8 +990,8 @@ walkBase = unlines
 -- load __replaces__ the bases a session searches, so the standard rules go
 -- back in alongside.
 walkSession :: Session
-walkSession = case loadRuleBases newSession [("walk.thena.rules", walkBase)] of
-  (s, BasesLoaded bs) -> withRuleBases (expectedBase ++ bs) s
+walkSession = case loadRuleTexts newSession [("walk.thena.rules", walkBase)] of
+  (s, BasesLoaded bs _) -> withRuleBases (expectedBase ++ bs) s
   (_, other)          -> error ("the fixture's base did not load: " ++ show other)
 
 
@@ -2205,7 +2205,7 @@ splittingTree =
 
     -- __A SPLIT AT A VARIABLE INDEX TIES NOTHING__ (MS9 phase 186, `~7pn6x`),
     -- and this is the case the whole corpus is: every lemma in
-    -- @examples\/progress.thena@ splits a derivation whose indices are the
+    -- @examples\/Progress.thena@ splits a derivation whose indices are the
     -- lemma's own variables. Until the fix each arm was handed
     -- @Eq Tr leaf t -> …@, an equation over an ambient variable, which is rigid
     -- and which no specialiser transition can touch.
@@ -2562,7 +2562,7 @@ splittingTree =
     -- which is the whole of what these probes are about.
     -- __A family whose index is a CONSTRUCTOR APPLIED to an ambient variable__
     -- (MS9 phase 210, @~5kcb4@), which is what @sub@'s middle type is in
-    -- @examples\/poplmark\/06-transitivity.thena@: @d1 : sub G S ‹Z›@ pins the
+    -- @examples\/poplmark\/Fsub06Transitivity.thena@: @d1 : sub G S ‹Z›@ pins the
     -- upper index to @tvar Z@, and @Z@ is inside it rather than being it.
     sbModule =
       natModule ++

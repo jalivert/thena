@@ -32,7 +32,9 @@ import Thena.Surface.Concrete
   , ObjectPiece (..)
   , SurfaceDecl (..)
   , SurfaceOpenSpec (..)
+  , Reach (..)
   , SurfaceModule (..)
+  , Selection (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , SurfaceArg (..)
@@ -83,6 +85,11 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   '...'   { Located _ TSpread }
   '.'     { Located _ TDot }
   open    { Located _ TOpen }
+  consult { Located _ TConsult }
+  import  { Located _ TImport }
+  exporting { Located _ TExporting }
+  private { Located _ TPrivate }
+  public { Located _ TPublic }
   namespace { Located _ TNamespace }
   hiding  { Located _ THiding }
   renaming { Located _ TRenaming }
@@ -119,7 +126,23 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
 -- written with indentation and one written with explicit braces reach this
 -- production as the same token stream.
 Module :: { SurfaceModule }
-  : module ident where '{' Decls '}'       { SurfaceModule $2 (reverse $5) }
+  -- A @QName@, so a header may say the path it sits at (MS11 phase 278): the
+  -- steps are directories, exactly as @import@ reads them.
+  : module QName where '{' Decls '}'
+      { SurfaceModule (fst $2) (snd $2) SelectWide (reverse $5) }
+  -- **And a header may state the file's interface** (MS11 phase 285), which is
+  -- his ruling of 2026-10-30: the export list attaches to the header, one place
+  -- per file. The list is 'ExportNames' and not 'QNames' because @exporting ( )@
+  -- is a module that exports nothing and has to be writable — the empty list is
+  -- a statement, where a missing clause is the absence of one.
+  | module QName exporting '(' ExportNames ')' where '{' Decls '}'
+      { SurfaceModule (fst $2) (snd $2) (SelectOnly (reverse $5)) (reverse $9) }
+  -- **Or say what it withholds instead** (MS11 phase 290), the other half of
+  -- the same ruling. **One slot and not two clauses**: a file narrows by naming
+  -- what it keeps or by naming what it withholds, which is the choice an @open@
+  -- already makes between @( … )@ and @hiding ( … )@.
+  | module QName hiding '(' ExportNames ')' where '{' Decls '}'
+      { SurfaceModule (fst $2) (snd $2) (SelectHiding (reverse $5)) (reverse $9) }
 
 -- | A block of the **instruction** language (MS4 phase 45).
 --
@@ -301,7 +324,7 @@ Decls :: { [SurfaceDecl] }
 -- that follows it.
 --
 -- **What is declared may be written with a path** (MS10 phase 243), which is
--- how a generated name is placed in its namespace: @Ty.subst-X : …@ is the
+-- how a generated name is placed in its namespace: @Ty.subst.X : …@ is the
 -- shape 'Thena.Language.Substitution' emits.
 Decl :: { SurfaceDecl }
   : QName ':' Term                         { SurfaceSignature (fst $1) (snd $1) $3 }
@@ -314,6 +337,49 @@ Decl :: { SurfaceDecl }
   -- composes with any of them.
   | open OpenHead                          { SurfaceOpen (fst $2) (snd $2) }
   | open OpenHead in Decl                  { SurfaceOpenIn (fst $2) (snd $2) $4 }
+  -- **The fine-grained escape from the header list** (MS11 phase 286, his
+  -- ruling of 2026-10-30). It takes a declaration the way @open … in@ does, so
+  -- a @private@ in front of a signature covers the equation under it too, and
+  -- it marks rather than scopes: nothing about where the declaration lands or
+  -- what it may see changes.
+  | private Decl                           { SurfacePrivate $2 }
+  -- **What this file's proofs are searched against** (MS11 phase 273, his ruling
+  -- of 2026-11-03). It names a /file/ and not a namespace, which is why it takes
+  -- a @QName@ and means something else by it: the steps are directories.
+  | consult QName                          { SurfaceConsult Own (fst $2) (snd $2) Nothing }
+  -- **A consult that travels** (MS11 phase 288, his ruling of 2026-10-30 that
+  -- @public@ is available to both acts): whoever imports this file is searched
+  -- against this base too. The @public import@ production below is the twin,
+  -- and @public@ is one word's worth of difference in both.
+  | public consult QName                   { SurfaceConsult Public (fst $3) (snd $3) Nothing }
+  -- **AND EITHER MAY SAY HOW FAR IT REACHES** (MS11 phase 292, his design of
+  -- 2026-11-05): the base is in the pool for the block's proofs and out of it
+  -- after, which is what a base wanted for one proof needs. Its twin is the
+  -- @import … where@ production below, and the two are the same extension of
+  -- the same shape.
+  | consult QName where '{' Decls '}'
+      { SurfaceConsult Own (fst $2) (snd $2) (Just (reverse $5)) }
+  | public consult QName where '{' Decls '}'
+      { SurfaceConsult Public (fst $3) (snd $3) (Just (reverse $6)) }
+  -- **Which surface modules this file depends on** (MS11 phase 274, his ruling
+  -- of 2026-11-03). A @QName@ again, and the steps are directories again: a
+  -- file states what it refers to and never relies on the session.
+  | import QName ImportSel                 { SurfaceImport Own (fst $2) (snd $2) $3 Nothing }
+  -- **An import that travels** (MS11 phase 287, his ruling of 2026-11-03):
+  -- whoever imports this file gets what this file got from that one.
+  -- **@public@ is an attribute of the import and not a second kind of import**,
+  -- so it is one production\'s worth of difference and one constructor.
+  | public import QName ImportSel          { SurfaceImport Public (fst $3) (snd $3) $4 Nothing }
+  -- **AN IMPORT STATES HOW FAR IT REACHES** (MS11 phase 291, his design of
+  -- 2026-11-05) — @import M where { … }@, a layout block exactly as
+  -- @namespace … where@ is, and the module's names are writable in it and not
+  -- after it. **It is why no existing construct had to gain a scope**: the act
+  -- carries its own extent, so what a @do@ or a @data@ block does to an
+  -- @import@ written in it is nothing.
+  | import QName ImportSel where '{' Decls '}'
+      { SurfaceImport Own (fst $2) (snd $2) $3 (Just (reverse $6)) }
+  | public import QName ImportSel where '{' Decls '}'
+      { SurfaceImport Public (fst $3) (snd $3) $4 (Just (reverse $7)) }
   -- **A layout block, where @open@ is a line** (MS10 phase 254): a namespace
   -- says which declarations are in it, so it has to hold them. Nesting is a
   -- longer prefix and costs no mechanism, and @namespace A.B where { … }@ is
@@ -397,6 +463,32 @@ OpenHead :: { ([([String], String)], SurfaceOpenSpec) }
   | QName '(' Words ')'                    { ([$1], OpenOnly (reverse $3)) }
   | QName hiding '(' Words ')'             { ([$1], OpenHiding (reverse $4)) }
   | QName renaming '(' Renamings ')'       { ([$1], OpenRenaming (reverse $4)) }
+
+-- | What a header\'s @exporting ( … )@ names: zero or more whole names (MS11
+-- phase 285). **Names and not 'Words', which is the difference from an @open@\'s
+-- selection**: an entry names a namespace or one member of one, and the unit of
+-- export is the namespace, so @Nat@ covers everything under it and @Nat.Nat@ is
+-- the type alone. Reversed by its caller.
+-- | __What an import takes from the module it names__ (MS11 phase 306,
+-- @~htngj@) — his design of 2026-11-05, the half phases 291 and 292 left out.
+--
+-- **Nullable, which is what keeps the import at four productions and not
+-- twelve.** The alternative was the cross product of @public@, the three
+-- clauses and the @where@ block. An empty clause is decided by LALR's single
+-- token of lookahead — @'('@ and @hiding@ shift into a clause, anything else
+-- reduces the empty one — so each import production gained one symbol and
+-- nothing else.
+--
+-- **'SelectWide' is no clause at all and @SelectOnly []@ is @( )@**, an import
+-- that deliberately takes nothing, exactly as @exporting ( )@ offers nothing.
+ImportSel :: { Selection }
+  :                                        { SelectWide }
+  | '(' ExportNames ')'                    { SelectOnly (reverse $2) }
+  | hiding '(' ExportNames ')'             { SelectHiding (reverse $3) }
+
+ExportNames :: { [([String], String)] }
+  :                                        { [] }
+  | ExportNames QName                      { $2 : $1 }
 
 -- | One or more, for @open X Y Z@ (MS10 phase 254). Reversed by its caller.
 QNames :: { [([String], String)] }

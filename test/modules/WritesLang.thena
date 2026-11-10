@@ -1,0 +1,10 @@
+-- **And the grammar reaches a SURFACE importer too — `~2kc72`, measured
+-- 2026-11-09.** The literal parses; what fails is the constructor, *not in
+-- scope: LC.app*. So the notation is not a rule file's privilege: it is the
+-- spelling/name split, and only a pattern can be written with a spelling alone.
+module test.modules.WritesLang where
+
+import test.modules.WithheldLang
+
+mine : Type₀
+mine = LC`( a b )`

@@ -1,0 +1,10 @@
+module test.modules.Inherits where
+
+import test.modules.Opener
+
+-- **A bare `off` and no `open` of its own, and it is REFUSED** — his ruling of
+-- 2026-11-06. The `open Bit` is `Opener`'s and stays there: an `open` says how
+-- a name is written where the reader stands, so nothing invisible in this file
+-- can change what a word in it means. `Thena.Driver.openedFrom` says why.
+b : Bit.Bit
+b = off

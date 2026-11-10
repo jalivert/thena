@@ -203,6 +203,40 @@ tokens :-
   -- and @module@ and is reserved for their reason: the header is real syntax
   -- rather than a textual pre-pass.
   "open"        { keyword TOpen }
+  -- **Reserved at MS11 phase 273**, for @consult ‹module›@ — a file saying which
+  -- rule base its proofs are searched against. His ruling of 2026-11-03 chose
+  -- the word (/"surface files are imported and instral files are consulted"/),
+  -- and reserving it is what choosing it costs: it is a declaration keyword
+  -- like @data@, @module@ and @open@, so it is reserved for their reason.
+  -- **The eighth word to narrow identifiers project-wide** — the note under
+  -- @renaming@ saying the module system wanted no more was written before
+  -- partition four and is wrong.
+  "consult"     { keyword TConsult }
+  -- **Reserved at MS11 phase 274**, for @import ‹module›@ — a file saying which
+  -- surface modules it depends on. The ninth and, with @consult@, the pair his
+  -- ruling of 2026-11-03 chose; @~wpwz3@ on the closeout list is what taking the
+  -- two costs and is his.
+  "import"      { keyword TImport }
+  -- **Reserved at MS11 phase 285**, for @module X exporting ( … ) where@ — a
+  -- file saying which of its declarations an importer may name. **The tenth
+  -- word to narrow identifiers project-wide**, and his ruling of 2026-10-30
+  -- chose the spelling along with the design: /"It's easy for the reader to keep
+  -- track of."/ It is part of a declaration's syntax — the file header's — so it
+  -- is reserved for @data@'s reason, and @~wpwz3@ on the closeout list is what
+  -- taking the words costs and is his.
+  "exporting"   { keyword TExporting }
+  -- **Reserved at MS11 phase 286**, for @private ‹declaration›@ — the
+  -- fine-grained escape his ruling of 2026-10-30 took along with the header
+  -- list, so that a file need not spell its whole interface out to keep one
+  -- helper back. **The eleventh word to narrow identifiers project-wide**, on
+  -- @~wpwz3@ with the rest.
+  "private"     { keyword TPrivate }
+  -- **Reserved at MS11 phase 287**, for @public import ‹module›@ — a file saying
+  -- that what it imported travels on to whoever imports it. His ruling of
+  -- 2026-11-03 chose the word along with the whole of transitivity
+  -- (/"I get whatever the thing I am importing\/consulting got"/). **The twelfth
+  -- word to narrow identifiers project-wide, and the last visibility needs.**
+  "public"      { keyword TPublic }
   -- **Reserved at MS10 phase 254**, for @namespace ‹name› where { … }@ — the
   -- fifth word to narrow identifiers project-wide. His ruling of 2026-10-30
   -- costed it with the partition and took it: a namespace that is declared,
@@ -331,6 +365,11 @@ data Token
     -- what it saw rather than failing, and so a later operator may claim it.
   | TData
   | TOpen        -- ^ @open@, the declaration that brings a namespace into view (MS10 phase 247)
+  | TConsult     -- ^ @consult@, the declaration that names a rule base (MS11 phase 273)
+  | TImport      -- ^ @import@, the declaration that names a surface module (MS11 phase 274)
+  | TExporting   -- ^ @module X exporting ( … ) where@, a file's interface (MS11 phase 285)
+  | TPrivate     -- ^ @private ‹declaration›@, kept out of the interface (MS11 phase 286)
+  | TPublic      -- ^ @public import ‹module›@, an import that travels (MS11 phase 287)
   | TNamespace   -- ^ @namespace ‹name› where { … }@ (MS10 phase 254)
   | THiding      -- ^ @open X hiding ( … )@ (MS10 phase 254)
   | TRenaming    -- ^ @open X renaming ( e -> c )@ (MS10 phase 254)

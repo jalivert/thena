@@ -1,0 +1,8 @@
+module test.modules.Metavars where
+
+x : Token String
+x = /[a-z][a-zA-Z0-9']*/
+
+language LC, M, N where
+  var : x as occurrence -> x
+  app                   -> ( M N )

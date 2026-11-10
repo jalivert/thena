@@ -29,7 +29,7 @@ import Thena.Render
   ,renderCore)
 
 target :: FilePath
-target = "examples/normal.thena"
+target = "examples/Normal.thena"
 
 tests :: TestTree
 tests =
@@ -73,8 +73,8 @@ tests =
 
     loaded = do
       (s, _)  <- startingSession
-      (s1, _, _) <- loadProofFile s  "examples/canonical.thena"
-      (s2, _, _) <- loadProofFile s1 "examples/progress.thena"
+      (s1, _, _) <- loadProofFile s  "examples/Canonical.thena"
+      (s2, _, _) <- loadProofFile s1 "examples/Progress.thena"
       (s3, _, _) <- loadProofFile s2 target
       pure s3
 

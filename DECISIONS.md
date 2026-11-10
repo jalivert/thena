@@ -27,8 +27,8 @@ one paragraph, not three; the full argument lives in the design notes.
 ### An identifier may contain almost anything
 
 *Decided 2026-08-25; consequences accepted 2026-08-29. The keyword list is
-reviewed whenever a word is reserved — most recently 2026-10-19. The dot was
-reserved on 2026-10-30, for namespaces.*
+reviewed whenever a word is reserved — most recently 2026-11-10, when the module
+system's five were accepted. The dot was reserved on 2026-10-30, for namespaces.*
 
 Most languages reserve a generous set of punctuation and give you the rest.
 Thena does the opposite: it reserves as little as it can, so you can name things
@@ -43,10 +43,18 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | a tagged literal's fence | `` ` `` |
 | spell nothing, and stay reserved | `⌜` `⌝` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `private` `public` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
+
+**Every keyword is unconditional — decided 2026-11-10.** A word in that row is never an
+identifier, anywhere, whatever surrounds it: `import` cannot name a theorem, a definition,
+a constructor, a rule, a metavariable, or a constructor of a language you are modelling.
+Some languages make a word a keyword only in the position that uses it; Thena does not,
+because the gain is five names nobody has asked for and the price is a special case per
+word in the grammar. **The module system's five — `consult`, `import`, `exporting`,
+`private`, `public` — were taken on that basis**, and the row above is the whole list.
 
 **The corners are reserved and spell nothing**, which is the one oddity in the
 table: they were the old notation for an embedded core term, removed on
@@ -242,6 +250,80 @@ written `∀ {A : Type₀} -> A -> A`.
 
 ## Modules and namespaces
 
+### A generated substitution names its class as a path, not as a suffix
+
+*Decided 2026-11-10.* A language's substitution family is **three namespaces and
+one word**: `LC.fresh.x`, `LC.fv.x`, `LC.subst.x` per class, and one
+`LC.subst-*` for the simultaneous substitution. What sits inside `fresh`, `fv`
+and `subst` is the class's **whole name**, path included, so a language reaching
+`Source.x` and `Target.x` declares `Compiles.subst.Source.x` and
+`Compiles.subst.Target.x`.
+
+**What this buys you is two-language metatheory with the obvious names.** A
+compilation relation, an elaboration relation or a bisimulation between two
+modelled languages is a third language whose terms mention a term of each, and
+both languages calling their identifiers `x` is the natural thing to write. Until
+this decision the family's name was `LC.subst-x`, with the class glued into the
+word; a word may hold no dot, so the class's path was dropped there and nowhere
+else, two classes of one word collapsed onto one name, and **that third language
+was refused**. The only way round it was to rename one of the classes, which is
+the collision namespaces exist to remove.
+
+**The simultaneous one is `subst-*` and not `subst-all`.** It names no class, so
+it has nothing to put inside `subst` and stays a word beside that namespace. A
+literal step would be forgeable — a token class called `all` generates the very
+same `LC.subst.all`, and against the old `subst-all` that collision was real and
+silent. **`*` cannot begin a name**, so no token class can ever be spelled it,
+while `subst-*` itself begins with a letter and is ordinary to type.
+
+**What a reader sees is the shortest ending that still means it**, so `subst.x`
+wherever the language is open. The full name is absolute: a class declared beside
+its language inside `namespace A` is `A.LC.subst.A.x`.
+
+**And a written substitution says which class it is for**, which is the decision
+below.
+
+---
+
+### A written substitution says which class it is for
+
+*Decided 2026-11-10.* A substitution written in a term or a rule may carry the
+class's name in front of the name it replaces, in the one-pair bracket and in
+each pair of a comma list:
+
+```
+E[x->M]                      the bare spelling, unchanged
+E[LC.x: x->M]                the same substitution, saying which class
+C[Source.x: x->M, Target.x: x->P]   a comma list, one pair per class
+```
+
+**Why there is anything to say.** Neither bare spelling names a class. What you
+write between the brackets is a *name* — a metavariable in a rule, an identifier
+in a concrete term — and the class was taken from the production that matched,
+or, for a comma list, from the class's word. For every language that reaches one
+class of each word that is enough. For a language reaching `Source.x` and
+`Target.x` it is not: the two brackets have the same text, so a concrete term
+written with one **parsed two ways**, and a comma list could reach only the
+first class's owning language. Those are the files two-language metatheory is
+made of — a compilation relation, an elaboration relation, a bisimulation.
+
+**The qualifier is the class's whole name.** It is generated for every class,
+beside the bare spelling rather than instead of it, so nothing written before
+this decision reads differently and the bare form stays what a reader writes
+whenever it is unambiguous. In that position the class's name is text, not a
+name to look up — a word that names something in scope would be read as a slot,
+which is exactly what the bare bracket's middle item is.
+
+**What it costs.** A grammar carries two notation productions per class instead
+of one, so a list of what a language offers shows one name twice with two
+shapes, and a parse error at that position names both. The qualified spelling is
+the only way to write a substitution in a language that reaches two classes of
+one word; the alternative, leaving that case to the per-class function by name
+(`Compiles.subst.Source.x E x N`), was refused because a comma list has no such
+fallback at all.
+
+---
+
 ### A name is qualified, and a `data` declaration opens a namespace of its own
 
 *Decided 2026-10-30. **Being built.** A name carries its path, the dot is
@@ -251,8 +333,8 @@ equipment is already in its namespace** — `Nat.elim` and `Nat.case` — so
 `:show Nat.case` is how you ask for one, and **the relations and proofs a
 declaration derives are one step deeper, in `Nat.lemmata`**:
 `Nat.lemmata.noConfusion`, `Nat.lemmata.Below` and the rest, reached short with
-`open Nat.lemmata`. **A language's generated substitution is too**, as `LC.fv-x`,
-`LC.subst-x`, `LC.subst-all` and `LC.fresh-x`, and **a declaration of your own
+`open Nat.lemmata`. **A language's generated substitution is too**, as `LC.fv.x`,
+`LC.subst.x`, `LC.subst-*` and `LC.fresh.x`, and **a declaration of your own
 may be written with a path**: `Ty.lemma : …` declares `lemma` in `Ty`. **The four
 primitive functions have moved in too** — `String.eq`, `Char.eq`, `Int.eq` and
 `String.append`, where they were `eqString`, `eqChar`, `eqInt` and `appendString` — **and so have the prelude's own nine theorems about them**, which
@@ -268,14 +350,13 @@ built, and resolution walks outward through it. All five forms of `open` are
 built, and a name prints as the shortest ending that still means it.** **A `language`,
 `context`, `judgment` or `notation` block may be written inside a `namespace`
 block**, and what it declares and generates lands there: inside `namespace A`,
-`language Ty` is `A.Ty.Ty` with `A.Ty.base`, `A.Ty.subst-x` and the rest, and
+`language Ty` is `A.Ty.Ty` with `A.Ty.base`, `A.Ty.subst.x` and the rest, and
 `open Ty` beside it brings them in — a namespace resolves by the same outward
 walk a name does, and **that includes a token class**, so `x : Token String` may
 be written inside the namespace with the block that reads it. A class carries
-its path like anything else, while **the name generated from it is suffixed with
-the class's word** — `A.LC.fv-x` for a class `A.x`, because a word holds no dot
-— so one language reaching two classes both written `x` is refused. **And a tag
-resolves like any other name**: see below.*
+its path like anything else, and **the name generated from it carries that path**
+— `A.LC.fv.A.x` for a class `A.x` — so one language may reach two classes both
+written `x`. **And a tag resolves like any other name**: see below.*
 
 **A TAG RESOLVES LIKE ANY OTHER NAME.** `` LC`( f g )` `` reaches `A.LC` wherever
 `A` is open — inside the `namespace` block itself, or after an `open A` — and the
@@ -388,6 +469,41 @@ resembles, and nothing is lost: both names are there and a path always reaches
 what it names. **It is announced instead**, naming the shadowed name in full,
 because that spelling is the repair; at `:theorem` it is announced before the
 proof exists, which is while renaming it is still free.
+
+**THE OTHER DIRECTION IS REFUSED, AND THE RULE IS ABOUT REACHABILITY.** A name
+that would be born unreachable by any spelling is refused; a name that merely
+makes an older one harder to reach is allowed and announced. So a `data`
+declaration may not be written where something already holds the word it takes:
+
+```
+thena spine> declare Foo : Type₁ ; Foo = Type₀
+thena spine> data Foo : Type₀ where { ff : Foo }
+refused: Foo is already declared
+```
+
+The datatype would be `Foo.Foo`, and nothing could reach it except that path
+written out in full. An `open Foo` cannot help — an `open` is consulted only
+after the walk's rungs have failed, and the exact `Foo` answers on the first
+rung — so unlike every other collision here there is no repair, which is why
+this one is a refusal rather than a warning. It is the same restriction two
+theorems of one word already live under, and it applies wherever a datatype is
+declared: a `data` line, a `data` block in a file, a `language` block's own type,
+and the types generated for judgments and context lookups.
+
+**Where the word was merely reachable, the declaration goes in and says so:**
+
+```
+thena spine> open Bar
+thena spine> data Foo : Type₀ where { ff : Foo }
+declared Foo
+warning: the name Foo shadows Bar.Foo, which is reached by writing it in full from here
+```
+
+**Inside the declaration, its own word is the type being declared.** `ff : Foo`
+means the family, whatever else `Foo` reaches outside — the word is bound for the
+length of the declaration, exactly as a λ-bound name is, so a binder over it
+still shadows it. That holds whether the declaration is typed at the prompt or
+read from a file.
 
 **An `open` can only add a way for a name to resolve, never change one.** A name
 that already denotes something is taken as written, so an `open` is safe to put
@@ -555,7 +671,9 @@ warning: in the grammar of LC, production abs: T is read as a terminal.
 
 ### Surface files are imported; rule bases are consulted
 
-*Decided 2026-11-03. Not built — MS11, with one piece pulled into MS10.*
+*Decided 2026-11-03. `consult` is built — MS11 phases 271 and 273 — and `import`
+loads what it names, MS11 phase 274. What an importer may then **write** is not
+settled: see `exporting` and `public` below.*
 
 Two acts, and which one you write depends on what you are reaching for, not on
 which language you are writing in. **Both are writable in a surface file, in an
@@ -576,14 +694,462 @@ file that talks about a language `import`s the surface file declaring it. Until 
 decision a rule file was read with whatever grammars the session happened to hold,
 which worked only because loading threw everything into one flat scope — so a rule
 file's meaning depended on what a considerate user had loaded first. No language
-works that way and Thena will not.
+works that way and Thena will not. *Stated for both kinds of file in
+2026-11-05; the rule file's half was enforced at MS11 phase 297, which is when a base
+that wrote `LC[app]` without importing the module declaring `LC` began to be refused
+rather than resolved against whatever language was in.*
 
-**`public` is how a dependency travels.** `public import` and `public consult`
-republish what they bring in: *you get whatever the thing you imported got.*
-Without `public`, you don't — if A consults X and B imports A, B's own proofs do
-not see X's rules, and B asking for them is one explicit line that fails loudly if
-it is missing.
+**So a module's whole view is its imports, its own declarations and the prelude.**
+Decided 2026-11-05, built MS11 phase 282. Nothing else a session happens to be holding
+is reachable, however it got there — another file somebody loaded first, or a definition
+typed at the prompt. The test a file has to pass is that **it type-checks in
+isolation**, and that is what makes a module that type-checks for its author type-check
+for whoever imports it. Nineteen files in the shipped `examples/` relied on the old flat
+scope and were fixed rather than accommodated.
 
+**The prelude needs no import** — it is the one module every other one may reach, so
+`Eq` and `refl` are there whatever you wrote; `import Prelude` is allowed and does
+nothing. **The prompt is not a module**: a line you type reaches everything the session
+holds, which is what lets you poke at a module you have just loaded. **A file you
+`:load` by path is still a module** and is held to the same rule, so a file that loads
+on its own will load for anyone.
+
+**And an `open` travels nowhere.** *Built MS11 phases 283 and 293.* The short
+spellings a module's top level opened are that module's own: not the session's after
+it has loaded, and not its importers'. So a file writes the `open`s it is written
+against:
+
+```
+module Progress where
+
+import Canonical          -- which declares the language Term and writes `open Term`
+
+open Term                 -- and this file says so for itself
+
+p : Term.Term
+p = true                  -- `Term.true`, written short
+```
+
+Without that line the last one is `not in scope: true`, however many files that
+opened `Term` had gone in first. **`open` says how a name is written where you
+stand; `public` says what your file offers — one word, one job.** The reading where
+an `open` travels with an `import` was built first and withdrawn: it made `import A`
+able to change what a bare word in your file means with nothing in your file saying
+so, and able to make one ambiguous between two namespaces you never named. Agda's
+`public open` would have been the middle answer and was not taken.
+
+**The prelude is the one list a file starts with**, because every surface file
+imports the prelude whether it says so or not, as in Haskell. That is why `refl` is
+writable everywhere: the prelude writes `open Eq`, and you have the prelude.
+
+**`public` is how a dependency travels out of a surface file, and only `public`.**
+`public import` and `public consult` republish what they bring in: **when, and only
+when, the file you imported wrote `public`, you get what it got.** Without `public`, you
+don't — if A consults X and B imports A, B's own proofs do not see X's rules, and B
+asking for them is one explicit line that fails loudly if it is missing. **A rule file
+is the exception, and deliberately**: a base's `consult` fetches and travels whether it
+says `public` or not — see *A rule base states the bases it is written against, and
+fetches them*, which has why.
+
+**So a surface file can hand rules on, and never contains any.** A library writes
+
+```
+module Stlc exporting ( Term Ty ) where
+
+public consult Stlc.Tactics      -- and now `import Stlc` brings these rules too
+```
+
+and whoever writes `import Stlc` is searched against `Stlc.Tactics` as well, at the
+position of their `import` line. It travels as far as the `public` lines go: a file
+that wrote `public import Stlc` hands the same rules on again.
+
+**What `import` does today is load.** The module it names is elaborated before the
+file that imports it, so a file states its dependencies instead of relying on the
+session having loaded them in the right order:
+
+```
+module Both where
+
+import Stlc.Terms        -- elaborated first, and once however often it is reached
+import Stlc.Lemmata
+
+open Stlc
+```
+
+**AN IMPORT MAY SAY HOW FAR IT REACHES, AND NOTHING ELSE ENDS ONE.** *Decided
+2026-11-05, built MS11 phase 291 for `import` and 292 for `consult`.* Write a block on
+the act and what it brings in reaches that block and stops:
+
+```
+module Proofs where
+
+import Stlc.Scratch where       -- Scratch's names, in here and nowhere else
+  helper : Scratch.Thing
+  helper = Scratch.mk
+
+after : Scratch.Thing           -- not in scope: Scratch.Thing
+```
+
+With no block, an import reaches the rest of the file, which is what every import did
+before. **And that is the only thing that ends one**: an `import` inside a `do` block, a
+`data` block, a `namespace` block or a declaration's body is still the file's, to the end
+of the file. The act says its own extent, so there is no list of constructs to learn.
+
+**What is scoped is the writing of names, not the file's dependencies.** The module is
+loaded before yours either way — a nested import is a dependency like any other — and a
+declaration you wrote inside the block keeps working outside it, even for someone who
+imports your file and cannot name its type at all. The names in a type are resolved once,
+where you wrote them.
+
+**And no `open` is inherited into the block either**, because none is inherited at all:
+a module hands on names and never spellings, inside a block or out of one.
+
+**A RULE FILE TAKES A BLOCK ON EITHER ACT TOO.** *Built MS11 phase 299 for `import`,
+phase 300 for `consult`.* The same two spellings, and the same rule — the block's declarations may write
+what the module reaches, the rest of the file may not, and `public` in front of the line
+is a separate question that a block does not answer:
+
+```
+rule base describing where
+
+import Stlc.Terms where         -- Terms' names and its languages, in here only
+  rule describe LC[app]`( ${f} ${a} )` :- do
+    say "an application"
+
+rule elsewhere :- do            -- LC is not writable here
+  say "something else"
+```
+
+**`consult B where { … }` IN A RULE FILE IS A REGION OF TIME.** *Decided 2026-11-06,
+built MS11 phase 300.* In a proof file the block is a region of the document: those
+proofs are searched against `B` and the ones after are not. In a rule file there are no
+proofs, so the block is the *running* of the rules in it — each of them runs with `B`
+pushed on top of the pool and popped when it finishes, so `B` is searched first for them
+and is not in the pool at all for the rest of the file:
+
+```
+rule base pins where
+
+consult Stlc.Crush where
+  rule inside :- do
+    call answer              -- Crush's answer, if it has one
+
+rule answer :- do            -- this file's own
+  say "pins"
+
+rule outside :- do
+  call answer                -- this file's: Crush is not in the pool here
+```
+
+**`:bases` shows `pins` and the shipped base, and never `Crush` — until you stop inside
+`inside`, where it is at the top.**
+
+Two consequences worth knowing before you write one.
+
+- **It travels with the rule, not with the file.** The rules in the block are ordinary
+  rules; anything may call them, and the push happens wherever they are called from, as
+  deep as the call goes. So a base you pinned for one rule is briefly the
+  highest-priority base in the session of whoever calls it.
+- **The worst case is still the one you wrote against.** A base in front is *tried*
+  first, never substituted: every matching rule is offered in pool order, so the clause a
+  callee was written against is never removed — only possibly preceded. What is *not*
+  promised is that what precedes it is better, since a push puts a whole base in front
+  and none of its clauses were written with that callee in mind.
+- **You can see it while it is on.** The push goes into the one pool `:bases` reads, so
+  while the block's rules are running that base is listed like any other. `:step on`
+  hands control back between instructions, so stepping into the rule and asking is how
+  you find out. At rest it is absent because at rest it is not in the pool. What you
+  cannot do is read off the text of your own file which base will answer a call — and
+  that is already true of any base loaded after yours.
+- **And a call that reaches out of its block is refused when the file loads.** *Built
+  MS11 phase 301.* A rule is checked against the pool plus whatever its own block
+  pushed, so `outside` above calling a rule only `Stlc.Crush` defines is a load error
+  that names `outside` — not a *no rule is called …* the first time somebody runs it.
+
+**And both words are typed at the prompt.** *Built MS11 phase 284.* `import
+Stlc.Terms` loads that module by name, `consult Stlc.Tactics` pushes that base, and
+they are the same two declarations a file writes rather than commands that resemble
+them — so there is no `:import`. **Neither takes a path**: a module name's steps are
+ordinary words and the act supplies the extension. Reaching a module by name is what
+asks its header to match, so a prompt `import` is held to that check where `:load
+‹path›` is not, and a module already in answers *is already in* instead of colliding
+with itself. **And `public` in front of either act is accepted at the prompt and
+warned**: nothing imports or consults a session, so the word has nothing to say there,
+and a line pasted out of a file should act rather than fail to parse. **A
+`.thena.script` writes both acts too** — see *A script states what it stands on*.
+
+**A module is loaded once however many files reach it**, so a diamond costs
+nothing, and **a cycle is refused** and names the path the walk took. **A load is
+all or nothing across the whole graph**: if the file you asked for fails, the
+modules it pulled in go back with it, so a failed load never leaves you holding
+half an import graph.
+
+**Which of an imported module's names you may write is up to the file you imported** —
+see *A header says what the file exports* below. An import reaches what that file
+exports, and nothing it imported unless it said `public import`.
+
+### A file's header must match its path, and it is checked when you import it
+
+*Decided 2026-11-05. Built — MS11 phase 278.*
+
+A surface file begins with a header, and the header is a qualified name:
+
+```
+module Stlc.Terms where
+```
+
+**That has to be the name the file's own path gives**, so `module Stlc.Terms where`
+belongs in `Stlc/Terms.thena` and nowhere else. **Thena only asks when somebody
+reaches the file by name.** Import it under a name it does not answer to and the
+load is refused — here `Misnamed.thena` declares `module test.modules.Elsewhere
+where`, and another file imports it as `test.modules.Misnamed`:
+
+```
+thena spine> :load test/modules/ImportsMisnamed.thena
+test/modules/Misnamed.thena: imported as test.modules.Misnamed, but its header says test.modules.Elsewhere
+```
+
+The refusal names both, because either one could be the mistake — the file may be in
+the wrong place or the header may have a typo, and nothing in the system can tell
+which you meant.
+
+**A file you load by its path is never asked.** `:load some/odd-name.thena` works,
+and so does typing a module into the prompt: there is no name in play, so there is
+nothing for the header to disagree with. That is deliberate — checking always would
+make a file illegal because of where it sits, and a file whose path is not a module
+name (a hyphen in a step, a leading digit) would become unloadable rather than merely
+unimportable.
+
+### A header says what the file exports, and the unit is the namespace
+
+*Decided 2026-10-30. Built — `exporting` at MS11 phase 285, `hiding` at 290.
+Deliberately a simple default, and meant to be revisited.*
+
+A file may state its interface on its header, and what it does not name is not
+reachable from another file:
+
+```
+module Bits exporting ( Bit ) where
+
+data Bit : Type₀ where
+  off : Bit
+  on : Bit
+
+flip : Bit -> Bit                 -- declared, and not exported
+flip = λ b -> elim Bit () (λ _ -> Bit) (Bit.on Bit.off) () b
+```
+
+Import `Bits` and you may write `Bit`, `Bit.off`, `Bit.elim` and everything else
+under `Bit`. Write `flip` and you are told it is not in scope — the same answer you
+get for a module you never imported at all.
+
+**The unit of export is the namespace, not the name.** Naming `Bit` exports
+everything under `Bit`, whatever is in it now and whatever Thena generates into it
+later. That is the point: you write `data Nat` and never write `Nat.noConfusion` or
+anything under `Nat.lemmata`, so a list of individual names would be a list of names
+you never typed, and it would need editing every time Thena learned to generate one
+more lemma.
+
+**You can still name one member, and that is how a type goes out without its
+constructors:**
+
+```
+module Opaque exporting ( Tri.Tri ) where   -- the type alone
+
+data Tri : Type₀ where
+  low : Tri
+  mid : Tri
+  high : Tri
+```
+
+An importer may write `Tri` and `Tri.Tri` — the short spelling comes along, because
+it is a resolver alias that resolves *to* `Tri.Tri` — and may write neither `Tri.mid`
+nor `Tri.elim`.
+
+**No clause at all exports everything**, which is what every file did before this
+existed. `exporting ( )` is a different statement: a file that exports nothing.
+
+**Or say what you withhold instead.** `hiding ( … )` on the header is the same clause
+read the other way, for the file that exports most of what it declares:
+
+```
+module Bits hiding ( flip ) where   -- everything but this
+```
+
+**One clause, either word** — a header says what it keeps or what it withholds, never
+both, which is the choice `open X ( … )` and `open X hiding ( … )` already make. The
+unit is the namespace there too, so `hiding ( Tri )` keeps the constructors and the
+eliminator back with the type. And it is the same deny-list `private` writes to: a
+header that withholds a declaration and a `private` in front of it come to the same
+thing, so which you write is about where you would rather read it.
+
+**And one declaration can be kept back without listing the rest.** `private` in front
+of a declaration says it is the file's own:
+
+```
+module Kept where                    -- no list: everything is exported
+
+data Shown : Type₀ where
+  yes : Shown
+  no : Shown
+
+private helper : Shown -> Shown      -- except this
+helper = λ s -> s
+```
+
+It goes in front of a signature and covers the equation under it, and in front of a
+`data` declaration it keeps the whole namespace back — constructors, eliminator, and
+anything Thena generated into it. It is a mark, not a scope: `Kept` uses `helper`
+normally, and so can you at the prompt.
+
+**A `language` block is part of your interface too, notation included** — *decided
+2026-11-09, built at MS11 phase 303.* If you declare a language and do not name it on
+your export clause, an importer may neither name its type nor **write terms in it**:
+
+```
+module Hidden exporting ( keep ) where   -- LC is this file's own
+
+language LC, M, N where
+  var : x as occurrence -> x
+  app                   -> ( M N )
+```
+
+Import `Hidden` and write ``LC`( a b )`` and you are told *no language is called LC* —
+the same answer as for a language nobody declared. Name it, `exporting ( LC keep )`, and
+both halves come along: the type `LC` and the right to write its notation. **It is one
+grant, because the unit is the namespace here as everywhere.**
+
+This mattered most to a rule base, which is why it is worth saying: a rule head is a
+pattern, so `rule describe LC[app]`( ${f} ${a} )`` names nothing and used to match
+against any language the session had read, withheld or not.
+
+**An import is yours alone unless you say otherwise.** Import a file and you get what
+*it* exports — not what it imported. If you want your dependency to travel on to whoever
+imports you, say `public`:
+
+```
+module Prelude2 where
+
+public import Bits          -- whoever imports Prelude2 gets Bits too
+import Internals            -- and does not get Internals
+```
+
+**It travels as far as the `public` words go.** If `Prelude2` is itself public-imported
+by `Everything`, then importing `Everything` reaches `Bits`. This is what lets one file
+be an aggregator you import instead of a list of twelve imports — and what keeps a file's
+private scaffolding from leaking out of it.
+
+An `exporting` list on your header governs *your own* declarations; a `public import`
+governs what travelled through you. **The two do not interact** — his ruling of
+2026-11-10: a file may export nothing of its own and still pass a dependency on, because
+a header that gated a `public import` would make you re-list another module's namespaces
+as if they were yours. What a `public import` hands on is narrowed by its own clause and
+by nothing else — see *An import may say which of a module's names it takes*.
+
+**Two things it is not.** Your own file is never narrowed by its own list — `Bits`
+above uses `Bit.on` freely — and the prompt is never narrowed by anybody's, so after
+loading `Bits` you can still `:infer flip`. And this is name-hiding, not abstraction:
+a term carries its real names, so a constructor you did not export can still turn up
+in a goal, printed with a name you are not allowed to type.
+
+
+### An import may say which of a module's names it takes
+
+*Decided 2026-11-10. Built — MS11 phase 306.*
+
+A header says what a file *offers*. An import line says what the importer *takes*,
+with the same two words and the same meaning. Over a `Shapes` that offers two
+datatypes, `Bit` and `Tri`:
+
+```
+import Shapes ( Bit )          -- this namespace and no more
+import Shapes hiding ( Tri )   -- everything but this
+import Shapes                  -- everything Shapes offers
+```
+
+**One clause, either word, never both** — the choice `open X ( … )` and a header's
+clause already make. **The unit is the namespace here too**, so `( Bit )` takes the
+type and its constructors together, and the names are written as `Shapes` itself
+writes them.
+
+**A narrowed `public import` passes the narrowing on.** This is the whole of how the
+two clauses meet: what travels through you is what you took, not what you were
+offered.
+
+```
+module Middle where
+public import Shapes ( Bit )   -- Middle took Bit; Bit is what Middle hands on
+
+module User where
+import Middle                  -- reaches Bit, and never Tri
+```
+
+**And it composes along a chain.** If a third file public-imports `Middle`, the
+narrowing is still in force four files away; nothing re-widens it.
+
+**So a file can take a module for itself and re-export part of it**, by writing both
+lines:
+
+```
+import Shapes                  -- all of Shapes, for my own use
+public import Shapes ( Bit )   -- but only Bit travels
+```
+
+The two are independent statements about one module and do not cancel.
+
+**A clause that names something the module does not offer is refused**, naming the
+module and every name that missed:
+
+```
+thena spine> :load Takes.thena
+Takes.thena: Shapes offers no Nonsuch
+```
+
+That is deliberate and it is the one place a list is checked: a clause is a filter,
+so an unmatched name would otherwise narrow silently to nothing and the file would
+fail several lines later at a name the message never mentions. **`open X ( … )` is
+unchanged** and still ignores a word that is not there.
+
+**It is on `import` in a rule file too**, with the same spelling and the same
+refusal, and it narrows the languages a module offers as well as its names — a
+clause that keeps `LC` out leaves a rule written in `LC` refused at the tag.
+**`consult` takes no clause.**
+
+### A header that lists its exports is told what it passes on
+
+*Decided 2026-11-10. Built — MS11 phase 307.*
+
+Your `exporting` list governs *your* declarations. A `public import` governs what came
+through you. The two do not interact — see above — which leaves one honest problem:
+**a reader of a header that says `exporting ( … )` does not see everything the file
+offers**, because a `public import` in the body hands on names the list never mentions.
+
+**Thena warns, and hands them on anyway.**
+
+```
+thena spine> :load Passer.thena
+warning: public import Bits passes on Bit, which this file's exporting clause does not list
+```
+
+**Nothing is prevented and nothing is narrowed.** The names travel exactly as they did;
+the file is told so that the header is not quietly incomplete.
+
+**To silence it, name those namespaces in your own list.** That means writing another
+module's namespaces in your header, which is a little clunky — and that is the accepted
+price of a header you can read on its own:
+
+```
+module Passer exporting ( Bit mine ) where   -- Bit is Bits', and listed anyway
+
+public import Bits
+
+mine : Bit.Bit
+mine = Bit.off
+```
+
+**Only an `exporting` list raises it.** A header with `hiding ( … )`, or with no clause
+at all, claims to enumerate nothing — so there is nothing for a passed-on name to be
+missing from, and no file written before export lists existed will ever see this.
 ### A rule file writes its own `open` lines
 
 *Decided 2026-11-03, built the same day. The piece of the decision above that
@@ -621,14 +1187,34 @@ rules under it are separate declarations — so it covers the one it is written
 above and no more. That is a real difference from a surface file, where a
 signature and its equation are one declaration.
 
-**`import` is not this, and is not built.** This is the half that needed no way
-to find a file on disc. A rule file still relies on the session having loaded
-the surface file that declares the language; stating that dependency is
-`import`'s job and waits for it.
+**And it writes its own `import` lines too — MS11 phase 276**, which is what makes
+the `open` above honest: the base says which surface module declares the language,
+instead of hoping the session loaded it.
+
+```
+rule base inspecting where
+
+import Stlc.Syntax
+
+open Stlc.Syntax
+
+rule describe LC[var]`${s}` :- do
+  say (concat "a variable called " s)
+```
+
+**Consulting that base loads `Stlc/Syntax.thena` first**, and reports it, because the
+base cannot be read before the language it talks about exists. **The module stays in
+your session** — unlike a surface file's consults, which are that file's alone: the
+base's rules run in your session later and need the language there. **A module you
+already have is not loaded again**, so the dependency asks that the module *be*
+there, not that consulting be what brought it. And a base that will not install takes
+back whatever it brought in: you never end up with half of it.
 
 ### Consults are a STACK, and clauses are a queue
 
-*Decided 2026-11-03. Not built — MS11.*
+*Decided 2026-11-03. Built: the stack and `:consult` at the prompt at MS11 phase
+271, a `consult` line written in a file at phase 273, `public consult` at phase 288,
+and a consult that states how far it reaches at phase 292.*
 
 **The last thing you consulted is tried first.** That is the whole rule, and it does
 not matter how deep in a namespace you are standing:
@@ -637,27 +1223,72 @@ not matter how deep in a namespace you are standing:
 consult broad-tactics        -- tried third
 consult sharper-tactics      -- tried second
 
-thm : …
-thm = do { consult crush-this-one ; … }   -- tried FIRST, and only in here
+consult crush-this-one where -- tried FIRST, and only in here
+  thm : …
+  thm = …
 ```
 
 The shipped base is consulted for you before any of these, so it sits at the bottom
 of the stack and is tried last — which is *universal tactics at the bottom*, falling
-out of the stack rather than being a rule of its own. **A consult reaches to the end
-of the block it is written in**, so the one in that `do` block applies there and
-nowhere else.
+out of the stack rather than being a rule of its own.
 
-**It is *stack-like* rather than exactly a stack**, in one respect: consulting a file
-that published its own dependencies with `public consult` pushes all of them as a
-single group, in the order that file wrote them, at the position of the line that
-brought them in. And consulting the same base twice really does push it twice — the
-upper copy can go out of scope while the lower one is still in force, so the earlier
-push cannot be dropped or moved.
+**A consult reaches the block it states and otherwise the rest of the file**, and that
+is the only thing that ends one: no construct it is written inside — a `do` block, a
+`data` block, a `namespace` block — does anything to it. **So nesting is priority**: the
+innermost `consult` is the last to push and the first to be searched, which falls out of
+the stack and is not a second rule.
+
+**IT IS A STACK WHATEVER ROUTE A BASE TOOK, and that is the whole of it.** A `consult`
+is a push. A base that reaches you because a module you imported published it with
+`public consult` is a push *at the position of your `import` line*. Nothing asks how a
+base got there, so **a `public consult` is indistinguishable from your having written
+those `consult` lines yourself.** Given a library
+
+```
+module Stlc exporting ( Term ) where
+
+public consult Stlc.Broad
+public consult Stlc.Sharp
+```
+
+these two files are the same file:
+
+```
+module Proofs where            module Proofs where
+
+consult My.First               consult My.First
+import Stlc                    consult Stlc.Broad
+consult My.Crush               consult Stlc.Sharp
+                               consult My.Crush
+```
+
+Both are searched `My.Crush`, `Stlc.Sharp`, `Stlc.Broad`, `My.First`, and then whatever
+your session already had, with the shipped base at the bottom. `Stlc.Sharp` beats
+`Stlc.Broad` for you because it beats it inside `Stlc` — it was pushed later.
+
+Consulting the same base twice really does push it twice: the upper copy can go out of
+scope while the lower one is still in force, so the earlier push cannot be dropped or
+moved, and a file reached along two arms of a diamond publishes its base down each of
+them.
+
+**A base may state its own dependencies, and they become yours.** A rule base is
+read against the languages the session holds, so a base that `import`s the surface
+module declaring the language it talks about has that module loaded before it — and
+loaded *for* you, before the file that consulted the base. You do not have to name it
+yourself:
+
+```
+module Proofs where
+
+consult Stlc.Tactics     -- which imports Stlc.Terms, so Stlc.Terms is loaded first
+```
 
 **This is the order the engine tries rules in when no name is given** — you at a
-hole, `:matches`, `prove`. A rule called *by name* is found by the ordinary name
-walk, and since rules are not open to extension there is only ever one rule of a
-given name to find.
+hole, `:matches`, `prove`. **It is also the order a rule called *by name* is tried in,
+because a rule IS open to extension** — see *A later rule base may refine an earlier
+base's rule* below. This paragraph said the opposite until 2026-11-06, when it was
+measured and was wrong: there may be several clauses of one name, in several bases, and
+a `call` searches them all.
 
 **THE QUIRK, AND IT IS DELIBERATE.** Inside a rule base, the clauses of a rule are
 tried in **written order, top down** — a queue, as every rule language does it and
@@ -671,6 +1302,151 @@ as a queue would prevent the thing Thena is for: **a specialised, single-use rul
 base written to crush one goal, brought in exactly where that goal is, and tried
 before anything general.** A queue would bury it under every library you had
 already consulted.
+
+### A later rule base may refine an earlier base's rule
+
+*Decided 2026-11-06, and it is a protected design choice rather than a consequence of
+one. Built since MS5; measured and written down here when it was nearly designed away.*
+
+**A tactics file you load today can be made more specific by a tactics file you load
+tomorrow, and the first one does not have to know the second exists.** A `call` is
+resolved against the whole pool at the moment it runs — not against what was loaded when
+the calling file was read — so a rule's clauses may live in several bases at once.
+
+Two files. The first defines a greeting and a rule that calls it; the second defines
+another greeting and nothing else, and knows nothing about the first:
+
+```
+rule base one where          rule base two where
+
+greet : ()                   rule greet :- do say "two's greeting"
+rule greet :- do say "one's own greeting"
+
+go : ()
+rule go :- do call greet
+```
+
+```
+thena spine> :consult one.thena.rules
+thena spine> go
+one's own greeting
+```
+
+Load the second one as well, and the *first* file's `go` reaches the *second* file's
+clause — with a choice point over the two, so `retry` still gets the original:
+
+```
+thena spine> :consult one.thena.rules
+thena spine> :consult two.thena.rules
+thena spine> go
+chose 4685: greet
+two's greeting
+thena spine> :choices
+4685  greet   untried: greet
+thena spine> retry
+retrying 4685: greet
+one's own greeting
+```
+
+**This is why the pool is one flat stack rather than one scope per file.** The shipped
+base's general tactics were written before your language existed; the only way they ever
+reach a clause of yours is that your base joins the same search. A file that could search
+only what it named itself would be closed at the moment it was written, and *any matching
+rule is always offered* — the system's first design principle — would stop at file
+boundaries.
+
+**The consequence to know about**: you cannot load a base "privately". Putting a base in
+the pool makes its rules callable by you and by every other base in that pool. **What you
+control is the extent, not the flatness** — `consult B where { … }` keeps a base to one
+block, and that is the tool for a base you want out of the way again.
+
+**The idiom this is for: a base that wants you to specialise something ships a working
+rule for it, never a stub.** Write the general tactic, let whoever consults you define a
+sharper clause of the same name, and theirs is tried first because their base sits above
+yours. **Refinement is a fallback and not a replacement** — if their clause fails, the
+search comes back to yours — so a stub that pretended to succeed would hide their
+failure, while a real definition makes the fallback a correct answer.
+
+```
+rule base hooks where            rule base mine where
+
+foo : ()                         consult hooks
+rule foo :- do ‹the general way›
+                                 rule foo :- do ‹the sharp way for my language›
+use : ()
+rule use :- do call foo
+```
+
+Consulting `mine` is one line; `hooks` arrives beneath it, `use` is `hooks`'s own rule,
+and it reaches *your* `foo`. **Declaring the dependency is what guarantees you are above
+it**; a file that declares nothing is back to whatever order the user happened to load
+things in.
+
+### A rule base states the bases it is written against, and fetches them
+
+*Decided 2026-10-30, built at MS11 phase 289. `public` is available to both acts and
+to both kinds of file; a rule file had neither `consult` nor `public` until this. **What
+a plain `consult` in a rule file does was decided again on 2026-11-06 and built at phase
+298**: it fetches the base, where it used to ask for it.*
+
+A rule file writes the same two lines a surface file does, and the same word in front
+of either:
+
+```
+rule base sharp where
+
+public import Stlc.Terms      -- the language my rules talk about, and you get it too
+import My.Internal            -- a language I need and you do not
+consult Stlc.Broad            -- the base I build on; you get it, underneath me
+```
+
+**A `consult` in a rule file fetches the base and puts it directly beneath this one**,
+and it does so all the way down: consult a base, and you are searched against
+everything that base is written against, each library under the base that needed it.
+You never have to know what a base you consult was built on.
+
+**`public consult` in a rule file is accepted, acts as a plain `consult`, and warns
+that the word is idle.** A rule file's `consult` already hands the base on, so there is
+nothing for `public` to add. It is warned rather than refused because the line does
+exactly what it says it does, and taking the word out changes nothing.
+
+**What decided this was order, not convenience.** The first reading was the strict one —
+a plain `consult` *asks*, and the consumer supplies the base — and it is a hole, not a
+discipline: it leaves the base's position to whoever consults it, so an unrelated base
+can land between a base and its helper and answer a call the author thought they had
+pinned. When the base brings its own, the two are adjacent whatever else you had
+loaded. What is given up is *"I require X and will not supply it"*, which a `consult`
+naming one specific file could never really say.
+
+**An `import` was already like this**: bringing a module in changes no order, so a
+base's dependencies are loaded for you either way, and `public` decides only whether you
+may *name* what they declare.
+
+**What a fetched base brings lands underneath the base that brought it.** Consulting
+`sharp` above is exactly:
+
+```
+consult Stlc.Broad
+consult sharp
+```
+
+so `sharp` is tried first and the library it builds on sits under it — *universal
+tactics at the bottom*, again falling out of the stack. Two `consult` lines in one base
+are a stack between themselves, the last line written tried first, and two bases that
+consult each other are refused.
+
+**And `public import` in a base hands a language on.** A tactics base written against
+`Stlc.Terms` publishes it, so a file that consults the base may write `Stlc.Term`
+without importing the module itself — which is what makes a tactics library
+distributable rather than a thing with a README telling you what to import first.
+
+**That reaches a rule file too, and whether it did was settled at phase 298.** A base
+that consults the tactics base above may write `Stlc.Term` in its own rules' patterns,
+exactly as a surface file consulting it may: `public import` says *whoever consults me
+may write this language*, and a rule file that consults it is such a consumer. A plain
+`import` in the base still keeps the language to itself — and it does so even though
+consulting the base has put that module in your session, which is the isolation a rule
+file is held to either way.
 
 ### Rules are not open to extension
 
@@ -909,7 +1685,7 @@ object-language term a chain of constructors.
 
 ### Preservation for a modelled language is proved about the substitution Thena generates
 
-*Decided 2026-09-22.* `examples/07-preservation.thena` proves, for the λ-calculus
+*Decided 2026-09-22.* `examples/Stlc07Preservation.thena` proves, for the λ-calculus
 of `01`–`03`,
 
 ```
@@ -917,11 +1693,11 @@ preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 
 ```
 
 in the surface language, with `elim` and no proof sugar. **It is about the
-generated `LC.subst-all`**, not a substitution written for the proof: the
+generated `LC.subst-*`**, not a substitution written for the proof: the
 proof names the generated function's pieces, checks with `refl` that they are
 the same terms, and follows its `String.dec` decisions case by case.
 
-**It is proved twice.** `examples/08-preservation-by-tactics.thena.script`
+**It is proved twice.** `examples/Stlc08PreservationByTactics.thena.script`
 proves every lemma again by tactics — `:theorem`, `attack`, `intro`,
 `eliminate-core` for each induction and case split, `` elaborate surface`…` `` for each
 case — and reaches the same statement as `preservation-tactics`.
@@ -932,7 +1708,7 @@ argument substituted in a β-step is then closed, so no binder is ever renamed.
 ### And for any context, resting on three laws about `String.append`
 
 *Decided 2026-10-12; the trust narrowed to the three laws on 2026-10-16.*
-`examples/10-preservation-any-context.thena` proves the same theorem with no
+`examples/Stlc10PreservationAnyContext.thena` proves the same theorem with no
 restriction on the context:
 
 ```
@@ -1000,11 +1776,11 @@ name nobody knows can follow the decision:
 
 ```
 varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty)
-            -> Eq LC (LC.subst-x (var y) x N) (var y)
+            -> Eq LC (LC.subst.x (var y) x N) (var y)
 ```
 
 **Generated substitution decides with `String.dec`**, which is what lets a
-proof about `LC.subst-x` follow it at all. What is trusted is the same as for
+proof about `LC.subst.x` follow it at all. What is trusted is the same as for
 `String.eq`: the verdict on two literals. The refutation it writes is built
 from `String.dec` itself and checked by the kernel.
 
@@ -1196,7 +1972,7 @@ one.** What the middle setting refuses is a claim that is provably false, and a
 claim can be discharged at every instance anybody has written down and still be
 nonsense: `Empty` is provable that way. It stops accidents, not adversaries.
 
-**`no trust` still admits a *discharged* claim — item `~xhf2g`, and this is the
+**`no trust` still admits a *discharged* claim, and this is the
 one part of the above that is a choice rather than a consequence.** A claim whose
 two types are convertible is met, so the body already has the type the node
 asserts and the node reduces away; refusing it would refuse a term that is sound.
@@ -1224,7 +2000,7 @@ So the strictest setting admits exactly what the reducer would contract away, an
 nothing else: at that setting every asserted type in a proof is one the system
 could have erased.
 
-**The alternative reading, kept as `~xhf2g`, is that the setting should mean *no
+**The alternative reading, kept open, is that the setting should mean *no
 asserted type reaches this proof at all*.** That is a stricter promise and a
 one-line change. **What it would cost is smaller than it first appears, and the
 earlier claim here was wrong**: it is not that the prelude becomes unusable
@@ -1668,14 +2444,14 @@ Generated substitution now writes the block a user would have written —
 
 ```
 notation LC where
-  LC.subst-x -> M [ x -> N ]
+  LC.subst.x -> M [ x -> N ]
 ```
 
 — as a surface item, checked the same way. Two things follow and both are gains.
 It **parses outside a rule**, so `` LC`x[x -> y]` `` is an ordinary term literal
 where it used to be a parse error; and it **prints back**, so a rule whose index
 substitutes reads ``sub`${Γ} [ ${X} -> ${T} ] ⊢ …` `` instead of splicing
-`${Ctx.subst-X Γ X T}`.
+`${Ctx.subst.X Γ X T}`.
 
 **The comma list stays sugar**, because `E[x -> M, y -> N]` builds a *list* per
 class and no object grammar spells a list. So the one-pair form is a production
@@ -1793,11 +2569,11 @@ namespace Source where
 open Source.LC                -- all that M needs, and all that is needed
 
 language Wrap, W where
-  box -> [ M ]                -- reaches Source.x through M, so Wrap.subst-x
+  box -> [ M ]                -- reaches Source.x through M, so Wrap.subst.x
 ```
 
 works with no `open Source`. **The generated function's name is still suffixed
-with the class's *word*** — `Wrap.subst-x` for a class `Source.x` — because a
+with the class's *word*** — `Wrap.subst.x` for a class `Source.x` — because a
 word holds no dot, which is why two classes both written `x` still cannot both
 be reached.
 
@@ -2107,11 +2883,11 @@ never fire. Trying the written shape *first* keeps a pattern that wants an
 unreduced form able to see it. It is one rule for every pattern, not a rule
 about object terms.
 
-**Load the language's file before the rules that take it apart.** A rule file
-is read with the grammars the session already has, so the module declaring
-`language LC` has to have been loaded first. Load them the other way round and
-the tag names a language nothing has declared, which is the error it looks
-like.
+**A rule file imports the language's file.** It used to be read with whatever
+grammars the session already held, so the module declaring `language LC` had to
+have been loaded first and loading them the other way round made the tag name a
+language nothing had declared. Since 2026-11-03 a rule base says what it depends
+on and the order is not the reader's problem.
 
 ---
 
@@ -2266,8 +3042,8 @@ the first premise continues the one above:
 
 A premise may be named, `d : Γ ⊢ M : T`; one that is
 not is `d1`, `d2`, … by position. A premise is never named like a
-metavariable, so `x : T ∈ Γ` is always the lookup. `E[x->N]` is `LC.subst-x E x
-N`; `E[x->M, y->N]` is `LC.subst-all`, simultaneous; `E[x->M][y->N]` is one
+metavariable, so `x : T ∈ Γ` is always the lookup. `E[x->N]` is `LC.subst.x E x
+N`; `E[x->M, y->N]` is `LC.subst-*`, simultaneous; `E[x->M][y->N]` is one
 after the other.
 
 **The annotated tier writes the quantification**, which fixes the argument
@@ -2370,14 +3146,14 @@ kind of name its entries can hold, it gets the free-variables function and the
 substitution — so F-sub's Γ, whose entries hold types, gets:
 
 ```
-Ctx.fv-X     : Ctx -> List String
-Ctx.subst-X  : Ctx -> String -> Ty -> Ctx
-Ctx.subst-all : Ctx -> List (And String Ty) -> Ctx
+Ctx.fv.X     : Ctx -> List String
+Ctx.subst.X  : Ctx -> String -> Ty -> Ctx
+Ctx.subst-* : Ctx -> List (And String Ty) -> Ctx
 ```
 
-`Ctx.subst-X` is the `[X↦P]Δ` that System F's type-substitution lemma is written
+`Ctx.subst.X` is the `[X↦P]Δ` that System F's type-substitution lemma is written
 with, and a rule may write it in notation: `Γ[X -> T]` elaborates to
-`Ctx.subst-X Γ X T`.
+`Ctx.subst.X Γ X T`.
 
 It is a plain fold with **no capture avoidance and no renaming**, because a
 context's name slot is an ordinary name and not a binder: `Γ , x : T` has no body
@@ -2397,10 +3173,10 @@ for every kind of name it can contain, right after its datatype — here the one
 kind, `x`:
 
 ```
-LC.fresh-x   : String -> List String -> String
-LC.fv-x      : LC -> List String
-LC.subst-all : LC -> List (And String LC) -> LC     -- simultaneous
-LC.subst-x   : LC -> String -> LC -> LC             -- LC.subst-x E x N is E[x->N]
+LC.fresh.x   : String -> List String -> String
+LC.fv.x      : LC -> List String
+LC.subst-* : LC -> List (And String LC) -> LC     -- simultaneous
+LC.subst.x   : LC -> String -> LC -> LC             -- LC.subst.x E x N is E[x->N]
 ```
 
 **The kind is in the name even when there is only one**, because leaving it out
@@ -2411,7 +3187,7 @@ They are ordinary definitions, written by `elim` and elaborated like anything
 you write. They compute, so a substitution's answer is provable by `refl`:
 
 ```
-captured : Eq LC (LC.subst-x (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
+captured : Eq LC (LC.subst.x (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
 captured = refl LC (abs "y'" base (var "y"))
 ```
 
@@ -2425,7 +3201,7 @@ What it needs of the language, each refused at the block with a message: one
 variable production **per kind of name**, taking only its occurrence; and a
 binder free only in an argument of a language that reads names of that binder's
 kind — see the next entry. A language that can contain no name at all (`Ty` in
-the example above) gets nothing. The four names are yours to keep free — declaring `LC.fv-x` first
+the example above) gets nothing. The four names are yours to keep free — declaring `LC.fv.x` first
 is refused.
 
 A binder of one kind does not bind names of another: the kinds are separate
@@ -2436,7 +3212,7 @@ Two things arrived with it. **`List`, with `nil` and `cons`, is in the
 prelude**, so those names are taken from every object language until imports
 exist. **`String.append : String -> String -> String`** is the one way to build
 a `String`, and it computes only on two literals. The types that mention `List`
-carry a level parameter, `LC.fv-x {ℓ}`, because a list of names is a list at any
+carry a level parameter, `LC.fv.x {ℓ}`, because a list of names is a list at any
 level and nothing is defaulted.
 
 ### A binder may scope into another language, if that language reads that kind of name
@@ -2475,13 +3251,13 @@ way now is nothing.
 substitution for each:
 
 ```
-Tm.subst-x   : Tm -> String -> Tm -> Tm     -- a term for a term variable
-Tm.subst-X   : Tm -> String -> Ty -> Tm     -- a TYPE for a type variable
-Tm.subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
+Tm.subst.x   : Tm -> String -> Tm -> Tm     -- a term for a term variable
+Tm.subst.X   : Tm -> String -> Ty -> Tm     -- a TYPE for a type variable
+Tm.subst-* : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
 ```
 
 **A kind of name belongs to the language whose variable production reads it**, and
-that is what a substitution for it replaces a name *with* — so `Tm.subst-X` takes
+that is what a substitution for it replaces a name *with* — so `Tm.subst.X` takes
 a type. Two unrelated languages may both read `x : Token String`, each the owner
 for itself; what is refused is one language reaching two that read the same kind,
 where the substitution would have no single language to replace a name with.
@@ -2592,8 +3368,8 @@ the admitted split: 3,835 characters for one transport, 13,269 with one chained 
 49,840 with two — about fourfold each time, with load time following it. Nothing in the
 languages Thena models has an index typed by two mutually dependent indices, so this is a
 gap closed rather than a cost anybody pays: where no index's type mentions an earlier one
-not a byte of it is generated. `examples/chained-index-telescope.thena` and
-`examples/chained-index-telescope-deep.thena` are the two worked shapes.
+not a byte of it is generated. `examples/ChainedIndexTelescope.thena` and
+`examples/ChainedIndexTelescopeDeep.thena` are the two worked shapes.
 
 **One shape of index telescope is still refused**, and it may not be reachable: a *tied*
 index — one whose position the target pins to a constructor application, so that it states
@@ -3392,7 +4168,7 @@ costs nothing beyond the assertion it makes.
 **A dot on a position nothing determined is refused.** That is the assertion failing,
 and it is the whole of what the notation buys: splitting a `Vec A n` with `n` a plain
 variable generalises it and leaves `vcons`'s own length a genuine binder, so there is
-nothing there to assert. `examples/dot-patterns.thena` has all of it, the refusals
+nothing there to assert. `examples/DotPatterns.thena` has all of it, the refusals
 included.
 
 **What a dot cannot do is destructure.** A position can be determined to a compound
@@ -3413,7 +4189,7 @@ vtail = \ A n v -> induction v of { vnil -> ; vcons k a as -> as }
 ```
 
 The whole split may also be written with no arms at all — `induction d of { }` — which
-is how the inversion lemmas in `examples/canonical.thena` are written, and **an empty
+is how the inversion lemmas in `examples/Canonical.thena` are written, and **an empty
 arm is that same notion for one case rather than for all of them.** A keyword would have
 been a second spelling for something the syntax could already say.
 
@@ -3514,9 +4290,9 @@ tyRebind = \ G Xn A B D T h ->
     (refl Ctx (append (bindTy G Xn A) D))
 ```
 
-`examples/poplmark/03-wellformed.thena` and `06-transitivity.thena` each have exactly one
+`examples/poplmark/Fsub03Wellformed.thena` and `Fsub06Transitivity.thena` each have exactly one
 lemma of that shape, and the wrapper means no caller sees it. **Where the index IS a
-variable there is nothing to say**: the split abstracts it, and `examples/progress.thena`
+variable there is nothing to say**: the split abstracts it, and `examples/Progress.thena`
 is made of that case.
 
 **AND A PREMISE ABOUT AN INDEX IS CARRIED TOO.** The position-by-position rule decides
@@ -3676,7 +4452,7 @@ proof loads**, and that is the property these rules exist to keep.
 transport by hand. It type-checks, and it is deliberately not how the examples are written:
 an arm whose right-hand side is a function of an equation you had no way to predict is
 elaboration showing through the surface, not a way to write proofs.
-`examples/determinacy-patterns.thena` has no such arm, and no `elim` either.
+`examples/DeterminacyPatterns.thena` has no such arm, and no `elim` either.
 
 ### The hand-driven induction tactic does not generalise, and the generalising one has its own name
 
@@ -3786,8 +4562,8 @@ dblC = \ n -> case n of { zero -> zero ; succ m -> succ (succ (dblC m)) }
 not recurse. The hypothesis is simply not in scope, so the call has nothing to tie
 to and is refused by the same mechanism that refuses a call at the wrong index
 under `induction`. Writing `case` is therefore a claim the type carries, not a
-comment: `examples/canonical.thena` is all `case`, because inversion never
-recurses, and `examples/progress.thena` has exactly one `induction` in it.
+comment: `examples/Canonical.thena` is all `case`, because inversion never
+recurses, and `examples/Progress.thena` has exactly one `induction` in it.
 
 **Everything else about the two is identical.** The same motive generalising the
 indices, the same equations recovering their specificity, the same forced
@@ -4076,7 +4852,7 @@ is inserted at the use.
 
 **`define-global`, the op that hands a finished definition out from a rule base,
 stays** — his ruling the same day. It is `declare-primitive`'s sibling and is
-what `examples/10-preservation-any-context.thena` uses; it is simply no longer
+what `examples/Stlc10PreservationAnyContext.thena` uses; it is simply no longer
 the only way to write a definition that rests on trust.
 
 ---
@@ -4623,7 +5399,7 @@ noSelf = \ n st -> case st of { }
 ```
 
 the tied target asks for a number that is its own successor, and the braces are
-empty. `examples/omitted-cases.thena` is the same thing at four shapes. **A case
+empty. `examples/OmittedCases.thena` is the same thing at four shapes. **A case
 that does arise is still refused**, by name, as it always was.
 
 **An equation it cannot simplify is kept, not refused.** When none of the five
@@ -4714,8 +5490,8 @@ the loader.
 **succeed and say something**:
 
 ```
-thena spine> :load proof examples/stlc.thena
-module STLC
+thena spine> :load proof examples/Stlc01Syntax.thena
+module examples.Stlc01Syntax
   declared Ty
   ...
 warning: in the grammar of LC, production vacuous: x binds in nothing
@@ -4997,7 +5773,7 @@ than take a value.
 
 **`true` and `false` are reserved in `instral`, and nowhere else.** They are not
 keywords: one lexer serves every language here, and an object language is free to
-declare a constructor called `true` — `examples/determinacy-tactics.thena.script`
+declare a constructor called `true` — `examples/DeterminacyTactics.thena.script`
 does. Inside a rule they are values, so a rule may not use either as a parameter
 or a binding; it is refused when the base loads rather than silently read as a
 literal.
@@ -5792,15 +6568,19 @@ parenthesis with one slot left, a production needing two does not appear.
 
 ### A project is text on disk, and there is no other format
 
-A project is the files and the order you load them in. There is no binary form,
-no JSON form and no manifest.
+A project is the files, and each file says what it depends on. There is no binary
+form, no JSON form and no manifest.
 
 ```
-:load examples/01-untyped.thena     -- this is what storing a project means
+:load examples/Stlc07Preservation.thena   -- this is what storing a project means
 ```
 
-The order is part of the project, not presentation: a module's globals are in
-scope for the next one loaded.
+**The order is not part of the project.** Until 2026-11-05 it was, and a module's
+globals were in scope for whatever was loaded next — so a file's meaning depended
+on what somebody had loaded first. **A file states what it refers to instead**: the
+line above brings the six modules `Stlc07Preservation` imports with it, in whatever
+order they need, and loading it into a session that already holds them elaborates
+nothing twice.
 
 **Stored as written, not resolved.** If a tactic that is a builtin today becomes
 an ordinary rule tomorrow and keeps its name, every stored file keeps working;
@@ -5814,6 +6594,125 @@ anything built later over LSP.
 **A half-written term is still text.** The parser takes a placeholder inline, so
 a term you have not finished is an ordinary string and needs no special
 representation to be stored or sent anywhere.
+
+### A script states what it stands on, and its acts are yours afterwards
+
+*Decided 2026-11-06, MS11 phase 296.*
+
+A `.thena.script` is a list of command lines, run as though you had typed them. It may
+now write `import` and `consult` at its top, like every other kind of file:
+
+```
+import examples.Stlc07Preservation
+
+:theorem memberSpec-tactics : ∀ (c : String) (xs : List String) -> MemberSpec c xs
+attack
+```
+
+Until this it could not, and the reason was an implementation one — the function that ran
+a script's lines could not read a file — so a script relied on the session already
+holding what it reused, and you had to load things in the right order first.
+
+**An `import` reaches the module it names, and not that module's own imports**, so a
+script names what it uses directly. It writes its own `open` lines too, for the same
+reason: an `open` travels nowhere.
+
+**The acts are still in force when the script ends.** A *module*'s `consult` lasts only
+as long as that module is being elaborated; a script's does not, and neither does its
+`import`. **That is the difference between a script and a module**: a script is a batch of
+lines you typed, so its effects are yours, exactly as they would be had you typed them.
+
+**`:load` inside a file is still refused.** It is the construct `import` and `consult`
+replace, and it is the one with no cycle check behind it — a script that loaded itself
+would not stop. An `import` cycle is refused by name.
+
+### `:replay` runs a script as though you typed it, and leaves no trace of itself
+
+*Decided 2026-11-09, MS11 phase 302.*
+
+`:replay ‹proof-script›` submits a script's lines one at a time, exactly as if you had
+typed each one at the prompt. **It is how a stored proof is taken up again** — a saved
+session is a `.thena.script`, which is why there is no second format — and it is the
+third of the three words that replace `:load`: `import` a module, `consult` a rule
+base, `:replay` a script.
+
+```
+thena spine> :replay Stlc/Preservation.thena.script
+```
+
+**The `:replay` line is not part of your session's transcript. The lines it brought
+are.** So a transcript built by replaying is indistinguishable from one you typed:
+`:undo` steps back through a replay line by line, and nothing afterwards can tell how
+those lines arrived.
+
+**The reason is about the stored file, not about the recorder.** If a transcript
+recorded the `:replay` line instead, a stored proof-script would name another stored
+proof-script — and that is a composition mechanism, with its own resolution,
+visibility and staleness rules, over an artefact you did not declare. Thena has two
+such mechanisms, surface modules and rule bases, and that is enough. Three
+consequences follow: a stored proof stays a slice of a transcript, a replay closes
+under itself so there is no nesting to reason about, and an editor that lets you edit
+submitted lines gets the brought-in lines as ordinary editable lines.
+
+**A replayed script is not something your session depends on**, so it is not in the
+list of files read — see *A session says which files it read*. The files its lines
+open are.
+
+**A script may replay a script.** A script that replays itself, or an ancestor of
+itself, is refused: a replay submits lines, so the loop would never end. Sameness is
+what the files said rather than what they were called, so the same file reached by two
+different paths is still a loop.
+
+### A session says which files it read, and what they said
+
+*Decided 2026-11-06, MS11 phase 295.*
+
+A session is a transcript: the lines you submitted, in order. Replaying it is
+submitting those lines again, one at a time, as though you had typed them — so what
+a stored session depends on is the files those lines reached. **The session carries
+that list**, each path with a hash of the contents it was read with, and a frontend
+that stores a session stores the list beside it.
+
+```
+filesRead  -- every path this session opened, with what the file said at the time
+```
+
+**The shipped prelude and the standard rule base are in it.** They come from the
+installed data directory, so **upgrading Thena shows up as a changed hash** rather
+than as a replay that fails for no visible reason.
+
+**A file that was read and then refused is in the list too.** A refused line has to
+be refused again when the transcript is replayed, so the file it reached is part of
+what the replay stands on, whether or not anything it said was installed.
+
+**A script you replayed is not in the list, and it is the one exception.** Its lines
+are in your transcript now, so replaying that transcript does not open the script
+again — see *`:replay` runs a script as though you typed it*. The test is the same one
+everything else in the list passes: what is here is what a replay would have to read.
+
+**Nothing watches a file while you work.** The list is for the moment a session is
+taken up again: read the paths, hash them, and say which have moved. Edit a file
+mid-session and nothing interrupts you.
+
+**It is change detection, and that is deliberate — decided 2026-11-10.** The digest is
+sixteen hex digits of a mixing function (FNV-1a), which is enough to tell a file that has
+moved from one that has not, and it is not forgery-resistant: somebody who wanted to could
+write a different file that hashes the same. **So the list answers *has this file changed
+since the proof was made*, and it is never an answer to *are these the sources this proof
+was checked against*.** The second is a claim about trust, and nothing in Thena makes it —
+a proof's trustworthiness is `:trust`'s business and has nothing to do with this list.
+
+**A frontend must not present the comparison as verification.** *Three of the files this
+session read have changed* is the sentence the list supports; *verified against the
+original sources* is not.
+
+**Why it stops there, since the stronger claim looks close.** It would need the recorded
+digests to be as hard to tamper with as the sources, and they are not: there is no `:save`
+in the engine, so a frontend stores a session — the digest list included — wherever it
+keeps its own data, typically beside the project. Whoever can edit a source file can edit
+the digest recorded for it. Making the hash cryptographic without also protecting the
+store would buy a stronger-sounding claim and no more actual assurance, so Thena makes the
+weaker claim and makes it honestly.
 
 ### The text printers take one rendering, not a grammar list and a counter
 

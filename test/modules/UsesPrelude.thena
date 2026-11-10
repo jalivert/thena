@@ -1,0 +1,11 @@
+module test.modules.UsesPrelude where
+
+-- **Nothing is imported, and `Eq` and `refl` are the prelude's.** Every module
+-- may reach them: the prelude is an implicit import — see
+-- `Thena.Driver.preludeModule`.
+data Bit : Type₀ where
+  off : Bit
+  on : Bit
+
+itself : Eq Bit.Bit Bit.off Bit.off
+itself = refl Bit.Bit Bit.off

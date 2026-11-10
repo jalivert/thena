@@ -22,6 +22,23 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      # The example corpus is behind the `examples` flag so that an ordinary push
+      # does not pay its ~70 s, and so that it can neither pass silently nor be
+      # skipped silently -- his instruction, 2026-10-12, and the flag is the whole
+      # of the opt-in.
+      #
+      # A pull request pays it. That is the run whose green tick stands for what
+      # lands in `main`, and until 2026-11-10 no pull request had ever loaded
+      # `examples/` at all: `cabal test all` with no flags cannot, because the
+      # suite is `buildable: False` without one.
+      #
+      # It is one configuration per run rather than a second test step, because
+      # changing the flag set makes cabal reconfigure and rebuild the library --
+      # so a step that added the flag afterwards would pay for the whole build
+      # twice. Empty on a push, where the commands are then exactly as they were.
+      CORPUS: ${{ github.event_name == 'pull_request' && '--flags=examples' || '' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -53,12 +70,14 @@ jobs:
       - name: Install dependencies
         run: |
           cabal update
-          cabal build --only-dependencies --enable-tests all
+          cabal build --only-dependencies --enable-tests all $CORPUS
 
       - name: Build
-        run: cabal build --enable-tests all
+        run: cabal build --enable-tests all $CORPUS
 
       # --test-show-details=direct so a failing golden's diff reaches the log;
       # cabal hides test output otherwise and the run is useless when it is red.
+      # On a pull request this includes `thena-examples`, which loads the whole
+      # numbered series in one session and proves its headline theorems.
       - name: Run tests
-        run: cabal test all --test-show-details=direct
+        run: cabal test all --test-show-details=direct $CORPUS

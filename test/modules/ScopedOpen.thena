@@ -1,0 +1,14 @@
+module test.modules.ScopedOpen where
+
+data Bit : Type₀ where
+  off : Bit
+  on : Bit
+
+-- **The `open` ends with the block it is written in** — `~ckmsk`, his ruling of
+-- 2026-11-03 — so this module leaves none in force and nothing that imports it
+-- inherits one.
+namespace Inside where
+  open Bit
+
+  b : Bit.Bit
+  b = off

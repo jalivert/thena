@@ -456,7 +456,7 @@ guardTests =
       has eqNatVecSpan "Span" "NotBelowEq" @?= True
   , -- **The same gap over an indexed family with a recursive argument**, which
     -- @Span@ cannot show because acyclicity for a family with no recursive
-    -- argument is trivial. This is @examples\/vector-families.thena@'s @All@,
+    -- argument is trivial. This is @examples\/VectorFamilies.thena@'s @All@,
     -- where the gap was found.
     testCase "and over an indexed family whose recursive argument is in the package" $
       has eqNatVecAll "All" "noCycle" @?= True

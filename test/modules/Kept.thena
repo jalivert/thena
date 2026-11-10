@@ -1,0 +1,15 @@
+-- **`private` is the escape from the header list** (MS11 phase 286): this file
+-- states no interface at all, so everything it declares is exported — except
+-- what it marks. `helper` is its own, and so is everything under `Hidden`,
+-- generated names included. See `Thena.LoadTests`.
+module test.modules.Kept where
+
+data Shown : Type₀ where
+  yes : Shown
+  no : Shown
+
+private data Hidden : Type₀ where
+  secret : Hidden
+
+private helper : Shown -> Shown
+helper = λ s -> s

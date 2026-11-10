@@ -1,0 +1,8 @@
+-- **What a base's `public import` hands over** (MS11 phase 289): `Bit.Bit` is
+-- named here and nothing in this file imports `Bit`.
+module test.modules.GetsBitViaBase where
+
+consult test.modules.Speaks
+
+mine : Bit.Bit
+mine = Bit.on

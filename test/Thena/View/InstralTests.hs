@@ -17,7 +17,7 @@ import Test.Tasty.HUnit (assertFailure, testCase)
 import Thena.Driver
   ( machineOf
   )
-import Thena.Engine (Machine (..))
+import Thena.Engine (rules)
 import Thena.Instral.Ops (Instr, Rule (..))
 import Thena.Core.Term (wholePath)
 import Thena.View.Address (Address (..))

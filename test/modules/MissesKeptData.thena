@@ -1,0 +1,9 @@
+-- **A `private data` keeps its whole namespace back** (MS11 phase 286) — the
+-- constructors and the eliminator with it, because the mark names the
+-- declaration's namespace and everything generated into it is under that name.
+module test.modules.MissesKeptData where
+
+import test.modules.Kept
+
+mine : Hidden.Hidden
+mine = Hidden.secret

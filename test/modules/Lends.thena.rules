@@ -1,0 +1,11 @@
+-- **A base that publishes the language it is written against** (MS11 phase
+-- 298): `Speaks`'s shape, with a language rather than a datatype, so that what
+-- it hands on can be measured in a rule's own pattern.
+rule base lends where
+
+public import test.modules.Lang
+
+open A
+
+rule lent LC[app]`( ${f} ${a} )` :- do
+  say "lent"

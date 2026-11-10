@@ -1,8 +1,8 @@
 -- | Preservation — TAPL Theorem 8.3.3, and with @progress@ beside it, type
 -- safety for the language.
 --
--- **Three modules loaded in sequence.** @canonical.thena@ declares the terms,
--- the typing relation and canonical forms; @progress.thena@ adds the step
+-- **Three modules loaded in sequence.** @Canonical.thena@ declares the terms,
+-- the typing relation and canonical forms; @Progress.thena@ adds the step
 -- relation and 8.3.2; this one takes the typing derivation apart at each term
 -- shape and proves 8.3.3. Thena has no imports, so the chain is the session's
 -- globals — which is what keeps each file to what it actually contributes.
@@ -31,7 +31,7 @@ import Thena.Render
   ,renderCore)
 
 target :: FilePath
-target = "examples/preservation.thena"
+target = "examples/Preservation.thena"
 
 tests :: TestTree
 tests =
@@ -75,8 +75,8 @@ tests =
     -- **Three modules, in order** — each reads what the ones before it declared.
     loaded = do
       (s, _)  <- startingSession
-      (s1, _, _) <- loadProofFile s  "examples/canonical.thena"
-      (s2, _, _) <- loadProofFile s1 "examples/progress.thena"
+      (s1, _, _) <- loadProofFile s  "examples/Canonical.thena"
+      (s2, _, _) <- loadProofFile s1 "examples/Progress.thena"
       (s3, _, _) <- loadProofFile s2 target
       pure s3
 

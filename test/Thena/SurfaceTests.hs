@@ -25,6 +25,7 @@ import Thena.Core.Term (GlobalName (..), rootName)
 import Thena.Core.TermTests (genLiteral)
 import Thena.Driver
   ( Item (..)
+  , moduleText
   , parseCore
   , parseSurfaceModule
   , parseSurfaceTerm
@@ -772,7 +773,7 @@ moduleTests =
                  "module M where\nf : A\nf = a"
 
   , testCase "the name is kept" $
-      fmap fst (parseSurfaceModule "module Arith where { f : A ; f = a }")
+      fmap (moduleText . fst) (parseSurfaceModule "module Arith where { f : A ; f = a }")
         @?= Right "Arith"
 
   , -- A datatype's own @where@ opens a block inside the module's, so the two
@@ -806,8 +807,8 @@ moduleTests =
   , -- **A declaration may be named with a path** (MS10 phase 243): the steps
     -- and the word, exactly as a written name in a term carries them.
     testCase "a declaration is named with a path" $
-      fmap snd (parseSurfaceModule "module M where { Ty.subst-X : A ; Ty.subst-X = a }")
-        @?= Right [ ItemTheorem (GlobalName ["Ty"] "subst-X")
+      fmap snd (parseSurfaceModule "module M where { Ty.subst.X : A ; Ty.subst.X = a }")
+        @?= Right [ ItemTheorem (GlobalName ["Ty", "subst"] "X")
                       (SurfaceName [] "A") (SurfaceName [] "a") ]
 
   , -- **The path is part of the name being paired on**, so these are a

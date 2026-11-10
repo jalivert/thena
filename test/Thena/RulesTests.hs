@@ -727,8 +727,8 @@ text = Lit . VText
 -- above every 'Var' the fixtures mint, so nothing it mints collides.
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env
-                   (expectedBase ++ [returning]) [] [] rootScope 1000 0 NoUndischargeableTrust)
+  load is (Machine (Exec [] [] [] []) (Development cur) [] env
+                   (expectedBase ++ [returning]) [] [] [] rootScope 1000 [] 0 NoUndischargeableTrust)
 
 -- | A base with one rule in it that returns something (MS5 phase 63).
 --

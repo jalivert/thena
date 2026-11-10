@@ -122,7 +122,7 @@ spanDecl =
   \(e : Eq {0} (Vec A n) as as) -> Span A }"
 
 -- | 'spanDecl'\'s gap, over a family with an INDEX TELESCOPE and a RECURSIVE
--- argument (MS9 phase 223) — @examples\/vector-families.thena@\'s @All@, which
+-- argument (MS9 phase 223) — @examples\/VectorFamilies.thena@\'s @All@, which
 -- is where the gap was found.
 --
 -- **@Span@ does not cover it.** @Span@ has no recursive argument, so acyclicity
@@ -163,7 +163,7 @@ beforeDecl =
 
 -- | TWO indices reaching back to the SAME earlier one (MS9 phase 226) — the
 -- shape a family indexed by two vectors of one length has, and
--- @examples\/vector-families.thena@\'s @Pairwise@ is the same shape split on.
+-- @examples\/VectorFamilies.thena@\'s @Pairwise@ is the same shape split on.
 --
 -- **Two components are read out of one package, and each one\'s projection
 -- mentions the other\'s argument**: a projection names the package and the

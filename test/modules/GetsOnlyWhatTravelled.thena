@@ -1,0 +1,9 @@
+-- **What the narrowed line passed on, and not what the plain one took** (MS11
+-- phase 306). `BothLines` reaches all of `Twins` itself; this file reaches
+-- `Bit` alone, so writing `Tri.lo` is refused.
+module test.modules.GetsOnlyWhatTravelled where
+
+import test.modules.BothLines
+
+mine : Tri.Tri
+mine = Tri.lo

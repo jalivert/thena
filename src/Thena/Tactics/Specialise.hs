@@ -195,7 +195,7 @@ data Specialisation = Specialisation
     -- mentions what the split refined — @s1 := eIf p p' a b sr@ is a
     -- @Step (ifthen p a b) (ifthen p' a b)@. While one definition anywhere in a
     -- nested split's forward closure cancelled every copy, binding it broke
-    -- @examples\/determinacy-patterns.thena@ outright, @p@ stopping being
+    -- @examples\/DeterminacyPatterns.thena@ outright, @p@ stopping being
     -- refined to @true@. @Thena.Tactics.Eliminate@'s @generalisable@ skips a
     -- definition instead, so the entry stays exactly what it was and nothing is
     -- cancelled.

@@ -513,7 +513,7 @@ trustIn env ctx n t
 -- breadth-first search out from the term through every definition it mentions,
 -- every definition those mention, and so on, reading each body in full. That is
 -- the same answer, and it cost **4.4 s of an 8.5 s load** of
--- @examples\/07-preservation.thena@ — the largest single cost in it, paid again
+-- @examples\/Stlc07Preservation.thena@ — the largest single cost in it, paid again
 -- on every @certify@, with 167 million association-list lookups beneath it.
 --
 -- **Whether a definition rests on a trusted claim never changes once it is in

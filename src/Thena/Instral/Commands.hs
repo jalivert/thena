@@ -125,6 +125,10 @@ commands =
   , one ":accepts"
   , one ":produces"
   , one ":load"
+  -- A path, like @:load@'s: a proof-script is reached by path and not by module
+  -- name, because its naming is the frontend's (MS11 phase 302).
+  , one ":replay"
+  , one ":consult"
   , one ":theorem"
   , one ":resume"
   -- Optional: the focus, or a term written out.

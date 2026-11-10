@@ -1,0 +1,14 @@
+-- **A header may name what it withholds** (MS11 phase 290): `hiding` is the
+-- complement of `exporting`, so everything here is exported except `Inner` and
+-- `scratch` — and the namespace is the unit, so `Inner`'s constructors go with
+-- it. See `Thena.LoadTests`.
+module test.modules.Withholds hiding ( Inner scratch ) where
+
+data Outer : Type₀ where
+  out : Outer
+
+data Inner : Type₀ where
+  in' : Inner
+
+scratch : Outer -> Outer
+scratch = λ s -> s

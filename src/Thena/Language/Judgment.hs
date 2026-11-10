@@ -398,17 +398,21 @@ term gs self@(selfRule, selfWord) rename t = case t of
   -- **Not renamed** (MS8 phase 172): the premise binder carries the user's own
   -- name, so this is the name of the thing it reaches.
   Node n _ | [PremiseRef x] <- special n -> Right (SurfaceName [] x)
-  -- §6.3: a comma list is @L.subst-all@ — simultaneous, and across classes, so
+  -- §6.3: a comma list is @L.subst-*@ — simultaneous, and across classes, so
   -- each class's map takes the pairs written at it and the rest are empty (MS8
   -- phase 155). **A single pair never reaches here since MS8 phase 159**: it is
   -- a generated @notation@ production, so it is an ordinary 'Node' and the
-  -- clause below builds @L.subst-‹k›@ applied without knowing anything about it.
+  -- clause below builds @L.subst.‹k›@ applied without knowing anything about it.
   Node n [e, s] | [SubstituteIn l] <- special n -> do
     e' <- go e
     ps <- pairs s
+    -- **ONE LIST PER CLASS, KEYED BY THE CLASS'S WHOLE NAME.** Keyed by the
+    -- word, a language reaching two classes both written @x@ built two lists
+    -- under one key and every pair went into both.
     Right (app (surfaceName (allOf (nameFromText l)))
              (e' : [ foldr (cons l c) (nil l c) [ (x, m) | (c', x, m) <- ps, c' == c ]
-                   | h <- grammarNamed gs l, c <- substitutedClasses gs h ]))
+                   | h <- grammarNamed gs l
+                   , c <- map nameDotted (classesSubstituted gs h) ]))
   Node n children -> case production gs n of
     Nothing -> Left (NoSuchProduction n)
     Just p -> do
@@ -435,11 +439,11 @@ term gs self@(selfRule, selfWord) rename t = case t of
     -- is spliced into having written an @open@. The /types/ stay short, because
     -- a @data@ declaration's short name reaches them.
     con d w = surfaceName (inDeclarationOf (declarationNamed (rootName d)) w)
-    pairType l c = app (SurfaceName [] "And") [SurfaceName [] (classType gs c), SurfaceName [] (ownerOf gs l c)]
+    pairType l c = app (SurfaceName [] "And") [SurfaceName [] (classType gs c), ownerType gs l c]
     cons l c (x, m) rest =
       app (con "List" "cons")
         [ pairType l c
-        , app (con "And" "both") [SurfaceName [] (classType gs c), SurfaceName [] (ownerOf gs l c), x, m]
+        , app (con "And" "both") [SurfaceName [] (classType gs c), ownerType gs l c, x, m]
         , rest ]
     nil l c = app (con "List" "nil") [pairType l c]
 
@@ -495,7 +499,7 @@ ruleGrammar gs =
       let l = grammarKey g
        in Earley.Rule ("metavariable " ++ l) l
             [Earley.Scan ("a metavariable of " ++ l) (metavariables (grammarMetavars g))] []
-            : case substitutedClasses gs g of
+            : case classesSubstituted gs g of
                 [] -> []
                 cs ->
                   -- **TWO OR MORE PAIRS, and that is the whole of what MS8 phase
@@ -522,12 +526,30 @@ ruleGrammar gs =
                         [Earley.Nonterminal (pairNT l), Earley.Literal ",", Earley.Nonterminal (pairNT l)] []
                     : Earley.Rule ("pairs " ++ l) (pairsNT l)
                         [Earley.Nonterminal (pairNT l), Earley.Literal ",", Earley.Nonterminal (pairsNT l)] []
-                    : [ Earley.Rule ("pair " ++ l ++ " " ++ x) (pairNT l)
-                          [ Earley.Scan x (metavariables [x])
-                          , Earley.Literal "->"
-                          , Earley.Nonterminal (ownerOf gs l x) ] []
-                      | x <- cs
-                      ]
+                    -- **TWO SPELLINGS PER CLASS — HIS RULING OF 2026-11-10 —
+                    -- AND THE PAIR IS NAMED BY THE CLASS, NOT BY ITS WORD.**
+                    -- A pair says which class it is for in the same way the
+                    -- generated bracket does
+                    -- ('Thena.Language.Substitution.substitutionNotations'):
+                    -- @‹class›: x -> M@ carries the class's whole name, and the
+                    -- bare @x -> M@ stays for every language that reaches one
+                    -- class of each word. Both are built for every class, never
+                    -- one or the other by case. **The rule's NAME carries the
+                    -- class's whole name** because that is what says which map
+                    -- the pair belongs in (MS8 phase 155), and two classes of
+                    -- one word have one word and two names.
+                    : concat
+                        [ [ Earley.Rule nm (pairNT l) body []
+                          , Earley.Rule nm (pairNT l)
+                              (Earley.Literal (nameDotted c) : Earley.Literal ":" : body) []
+                          ]
+                        | c <- cs
+                        , let nm = "pair " ++ l ++ " " ++ nameDotted c
+                              x = classWord c
+                              body = [ Earley.Scan x (metavariables [x])
+                                     , Earley.Literal "->"
+                                     , Earley.Nonterminal (ownerKey gs l (nameDotted c)) ]
+                        ]
 
     -- A premise name is anything up to a space, a colon or a bracket.
     premiseName = let c = oneOf (complement (fromRanges ([ (d, d) | d <- ":()[]{}," ] ++ spaces)))
@@ -581,17 +603,11 @@ special n = case words n of
   -- children: a pair, then a pair or another list.
   ["pairs", l] -> [PairsIn l]
   -- The class is in the rule's name because that is what says which map the
-  -- pair belongs in (MS8 phase 155).
-  ["pair", l, x] -> [PairIn l x]
+  -- pair belongs in (MS8 phase 155). **It is the class's whole name**
+  -- (2026-11-10): a word is not enough once a language may reach two classes
+  -- that share one, and a name holds no space, so @words@ still cuts it out.
+  ["pair", l, cls] -> [PairIn l cls]
   _ -> []
-
--- | The classes a substitution written in a rule may be for — every class the
--- language has a generated substitution for (§6.3, per class at MS8 phase 155).
--- **A class is written as its WORD** (MS10 phase 259) — that is what a rule's
--- text says where a class slot goes, and what the generated substitution's own
--- name hangs off.
-substitutedClasses :: [Grammar] -> Grammar -> [String]
-substitutedClasses gs g = map classWord (classesSubstituted gs g)
 
 -- | The grammar of that name, among those installed.
 -- | The word a grammar's key is written with — @A.Ty@ becomes @Ty@.
@@ -612,27 +628,46 @@ grammarNamed gs l = [ g | g <- gs, grammarName g == nameFromText l ]
 
 -- | The language that owns a class — what the right-hand side of one of its
 -- pairs is a term of, and what its map is a map into.
--- **It answers with the owner's WORD** (MS10 phase 258), because every caller
--- writes it into a surface type rather than handing it to the parser.
+--
 -- **The class is found by its WORD among the ones that language reaches** (MS10
 -- phase 259), because a class carries a path now and @x@ is what the rule
--- wrote. One grammar reaching two classes of one word is refused
--- ('Thena.Language.Grammar.substitutable'), so there is nothing to choose
--- between.
-ownerOf :: [Grammar] -> String -> String -> String
-ownerOf gs l x = case [ g | h <- grammarNamed gs l
-                          , c <- classesSubstituted gs h, classWord c == x
-                          , Just g <- [classOwner gs h c] ] of
-  g : _ -> grammarWord g
-  _ -> x
+-- wrote. A grammar reaching two classes of one word is no longer refused —
+-- phase 304 deleted that refusal — so this answers with the first, and which
+-- one a comma list meant is the open question of the generated notation.
+ownerGrammar :: [Grammar] -> String -> String -> Maybe Grammar
+ownerGrammar gs l cls = listToMaybe [ g | h <- grammarNamed gs l
+                                        , c <- classesSubstituted gs h, nameDotted c == cls
+                                        , Just g <- [classOwner gs h c] ]
+
+-- | The owner as a PARSER KEY, which is the dotted name every nonterminal is
+-- installed under ('Thena.Language.Grammar.grammarKey').
+--
+-- **The word is not a nonterminal** — a language inside a @namespace@ is
+-- @Source.LC@ to the parser, so a pair rule built with @LC@ referred to a
+-- nonterminal that did not exist and the comma-list form could not parse at
+-- all. Measured: a file whose class and language sit at the top level took
+-- @( x_1 x_2 )[x_1->x_2, x_2->x_1]@ and the same file under a @namespace@
+-- refused it with /unexpected ','/.
+ownerKey :: [Grammar] -> String -> String -> String
+ownerKey gs l cls = maybe cls grammarKey (ownerGrammar gs l cls)
+
+-- | The owner as a type to WRITE, path and all (MS10 phase 244's rule, which
+-- this had escaped): generated code may not rely on the file it is spliced
+-- into having opened the owner's namespace.
+ownerType :: [Grammar] -> String -> String -> Surface
+ownerType gs l cls =
+  maybe (surfaceName (nameFromText cls)) (surfaceName . grammarName) (ownerGrammar gs l cls)
 
 -- | A class's @T@ — @String@ for every class a binder or an occurrence may be
 -- at (§4.5 refuses any other), asked rather than assumed so that `~tmnrr`'s
 -- @Int@ class has one place to change.
+-- **BY THE CLASS'S WHOLE NAME** (2026-11-10), since two classes of one word
+-- are no longer refused and a comma list now says which of them a pair is for.
 classType :: [Grammar] -> String -> String
-classType gs x = case [ t | g <- gs, (c, _) <- variableProductions g, classWord c == x
-                          , p <- grammarProductions g
-                          , Slot y (OfClass _ tn _) _ <- gproductionItems p, let t = nameDotted tn, y == x ] of
+classType gs cls = case [ t | g <- gs, (c, _) <- variableProductions g, nameDotted c == cls
+                            , p <- grammarProductions g
+                            , Slot y (OfClass _ tn _) _ <- gproductionItems p
+                            , let t = nameDotted tn, y == classWord c ] of
   t : _ -> t
   [] -> "String"
 

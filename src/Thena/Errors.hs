@@ -133,9 +133,43 @@ data Warning
     -- repair is cheap, since renaming the theorem before @qed@ costs nothing
     -- and renaming it after costs the proof. @qed@ is silent for that reason:
     -- the forecast was given when the proof opened.
+  | PublicConsultIdle String
+    -- ^ **a rule file's @public consult ‹base›@, and the base it names** (MS11
+    -- phase 298, his ruling of 2026-11-06, @~ckp39@). A plain @consult@ in a
+    -- rule file fetches the base and hands it on to whoever consults this one,
+    -- so the word in front of it has nothing left to say. **Accepted and
+    -- warned rather than refused** — his /"accept public consult in instral
+    -- files but show warning"/, which is the second principle of 2026-09-01
+    -- doing its own work: the line does exactly what it says it does, and
+    -- taking the word out changes nothing.
+  | PublicImportUnlisted String [String]
+    -- ^ **a @public import@ whose names the header's @exporting@ clause does
+    -- not list, and the namespaces it would have to name to list them** (MS11
+    -- phase 307, his ruling of 2026-11-10, @~f8x53@).
+    --
+    -- **It still travels, and that is the point of warning rather than
+    -- refusing.** His ruling settled on 2026-11-10 that a header's clause never
+    -- gates what a @public import@ hands on, because gating it would mean
+    -- re-listing another module's namespaces as though they were your own. What
+    -- is left is that a reader of such a header does not see everything the file
+    -- offers — so the file is told, and the author may silence it by listing
+    -- those namespaces, which is the clunkiness he accepted deliberately.
+    --
+    -- **Only an @exporting@ clause raises it.** A header with @hiding ( … )@ or
+    -- with no clause at all claims to enumerate nothing, so there is nothing for
+    -- a passed-on name to be missing from.
+  | PublicIdleAtPrompt String
+    -- ^ **@public@ in front of an act typed at the prompt, and the act's own
+    -- word** (MS11 phase 298). Its twin for the other place the word is idle,
+    -- and the reason is one step simpler: @public@ says who /else/ is given
+    -- what a file brought in, and nothing imports or consults a session.
+    --
+    -- **It is accepted for his paste ruling**: a transcript is lines a user
+    -- could have typed, people paste a line out of a file, and a parse error
+    -- on the first word of it says nothing about what is wrong.
   | UnprimeableClass BlockKind String String
     -- ^ the block, the language's name, and its identifier class's name — a class no
-    -- single character extends, so a generated @L.fresh-\8249k\8250@ cannot rename a
+    -- single character extends, so a generated @L.fresh.\8249k\8250@ cannot rename a
     -- captured binder to a name the language can write back (MS6 closeout 23,
     -- phase 146). **It is a warning and not a refusal**: the language works, its
     -- substitution is correct, and only printing a renamed binder is lost — so

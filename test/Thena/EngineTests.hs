@@ -52,7 +52,7 @@ text = Lit . VText
 
 -- | A machine holding the program, with the session's opening development.
 machine :: [Instr] -> Machine
-machine is = load is (Machine (Exec [] [] []) ps [] emptyGlobals expectedBase [] [] rootScope n 0
+machine is = load is (Machine (Exec [] [] [] []) ps [] emptyGlobals expectedBase [] [] [] rootScope n [] 0
                               NoUndischargeableTrust)
   where
     (ps, n) = newDevelopment 0
@@ -153,8 +153,8 @@ tests =
             -- rest of the continuation. Both frames have one lifetime now:
             -- entered, returned, stepped over ever after.
             let resumed = [Do (Ops.Say (text "back"))]
-                entered = Call resumed [("x", VText "kept")] Nothing False
-                m = (machine []) { exec = Exec [] [] [entered] }
+                entered = Call resumed [("x", VText "kept")] Nothing [] False
+                m = (machine []) { exec = Exec [] [] [entered] [] }
              in case step m of
                   Continue m' ->
                     (pc (exec m'), envOf m', stack (exec m'))
@@ -269,7 +269,7 @@ tests =
             -- hole. It pins the rule, which is one sentence — everything from
             -- the focus down is discarded (§4.0 F6).
             let (v, n) = fresh 0
-                bare   = Machine (Exec [] [] []) (Development (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) [] emptyGlobals expectedBase [] [] rootScope n 0 NoUndischargeableTrust
+                bare   = Machine (Exec [] [] [] []) (Development (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) [] emptyGlobals expectedBase [] [] [] rootScope n [] 0 NoUndischargeableTrust
              in case fmap (flatten . development) (setGoal type0 bare) of
                   Right (Under (Claim x _ _) (Trailing (Free y))) -> x @?= y
                   other -> assertFailure ("wrong shape: " ++ show other)

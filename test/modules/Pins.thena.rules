@@ -1,0 +1,21 @@
+-- **A rule file's consult states how far it reaches** (MS11 phase 300, his
+-- ruling of 2026-11-06, `~k68d7`). `quiet` is pushed in front of the pool for
+-- the rules written in the block and is in no pool before or after them, so
+-- `inside` gets its `answer` and `outside` gets this file's.
+rule base pins where
+
+consult test.modules.Quiet where
+  rule inside :- do
+    call answer
+
+  rule peeks :- do
+    yield "look at the pool"
+
+  rule breaks :- do
+    call stumbles
+
+rule answer :- do
+  say "pins"
+
+rule outside :- do
+  call answer

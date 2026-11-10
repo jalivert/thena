@@ -1,0 +1,13 @@
+module test.modules.NestedConsult where
+
+-- **DEPTH IS PRIORITY, and it comes out of the stack** (MS11 phase 292, his
+-- observation of 2026-11-05): a file's consults are a stack since phase 288, so
+-- the innermost block pushes last and is searched first. `Louder` has a
+-- `marker` of its own, of arity one, and the inner block's call of two
+-- arguments reaches neither — what the pair below measures is that the inner
+-- base is in the pool at all, above the outer one.
+consult test.modules.Tooling where
+  consult test.modules.Mutters where
+    do
+      mutter
+      marker

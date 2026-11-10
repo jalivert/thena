@@ -54,6 +54,8 @@ import Thena.Core.Level (Level, Normal (..), levelVarName, normalise)
 import Thena.Core.Term (GlobalName (..), Literal (..), Var, nameDotted)
 import Thena.Instral.Concrete
   ( RawDecl (..)
+  , Reach (..)
+  , Selection (..)
   , RawOpen (..)
   , RawOpenSpec (..)
   , RawFunction (..)
@@ -407,7 +409,43 @@ rawDecl d = case d of
   -- declaration that is several lines keeps its shape.
   DeclOpen o -> [rawOpen o]
   DeclOpenIn o inner -> (rawOpen o ++ " in") : map ("  " ++) (rawDecl inner)
+  -- **An @import@ line, as written** (MS11 phase 276). A base printed without
+  -- it would read back and then be refused, because what it depends on would no
+  -- longer be stated. **And a @consult@ line beside it** (MS11 phase 289), for
+  -- that reason doubled: a base printed without one would read back and be
+  -- refused for the base it is written against.
+  DeclImport r ps x sel Nothing  -> [reach r ++ "import " ++ dotted ps x ++ clause sel]
+  -- **AND ITS BLOCK, INDENTED** (MS11 phase 299), which is 'DeclOpenIn''s shape
+  -- one line up: @where@ ends the line and the offside rule opens the block at
+  -- the next token, so what is printed reads back as what was written.
+  -- **An empty block round-trips too** — a layout keyword with nothing after it
+  -- opens an empty block ("Thena.Surface.Layout"), so @Just []@ prints as a
+  -- bare @where@ and parses back to @Just []@.
+  DeclImport r ps x sel (Just ds) ->
+    (reach r ++ "import " ++ dotted ps x ++ clause sel ++ " where")
+      : map ("  " ++) (concatMap rawDecl ds)
+  DeclConsult r ps x Nothing -> [reach r ++ "consult " ++ dotted ps x]
+  -- **AND A CONSULT'S BLOCK, THE SAME WAY** (MS11 phase 300).
+  DeclConsult r ps x (Just ds) ->
+    (reach r ++ "consult " ++ dotted ps x ++ " where")
+      : map ("  " ++) (concatMap rawDecl ds)
   where
+    dotted ps x = intercalate "." (ps ++ [x])
+
+    -- **One word in front of the line, as it is written** (MS11 phase 289), and
+    -- the only thing 'Reach' is for in a printer.
+    reach r = case r of { Own -> "" ; Public -> "public " }
+
+    -- **An import's own clause, printed where it was written** (MS11 phase 306,
+    -- @~htngj@) — between the module's name and the @where@, which is the order
+    -- the grammar reads it in. @SelectOnly []@ prints as @( )@ and round-trips:
+    -- an import that deliberately takes nothing is not the same line as one with
+    -- no clause.
+    clause sel = case sel of
+      SelectWide       -> ""
+      SelectOnly ns    -> " ( " ++ unwords (map (uncurry dotted) ns) ++ " )"
+      SelectHiding ns  -> " hiding ( " ++ unwords (map (uncurry dotted) ns) ++ " )"
+
     header lhs b = case b of
       BodyRhs r    -> [lhs ++ " = " ++ rawRhs r]
       BodyBlock is -> (lhs ++ " = do") : map (("  " ++) . rawInstruction) is
@@ -501,6 +539,7 @@ printBlock b =
 
     item i = case i of
       Word w       -> w
+      Literally w  -> w
       Binding w xs -> w ++ "[" ++ intercalate ", " xs ++ "]"
 
     -- **Two rule headers, and they are the reader's two tiers** (§6.1, §6.4):

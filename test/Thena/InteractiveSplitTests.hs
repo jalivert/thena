@@ -1,7 +1,7 @@
 -- | A split taken interactively, at a hole — @induction-core@ and @case-core@
 -- (MS9 phase 231).
 --
--- @examples\/split-at-a-hole.thena.script@ is the file, and it proves two
+-- @examples\/SplitAtAHole.thena.script@ is the file, and it proves two
 -- theorems: @belowRefl@ over a family with a dependent index telescope, by
 -- induction, and @vhead@ at a pinned index, by cases. **The end-to-end judge is
 -- @qed@**, which runs 'Thena.Kernel.certify' over the finished development, so a
@@ -37,7 +37,7 @@ import Thena.Render (rendering, renderCore, renderResponse)
 
 -- | Relative to the package root, which is where the suite runs.
 target :: FilePath
-target = "examples/split-at-a-hole.thena.script"
+target = "examples/SplitAtAHole.thena.script"
 
 -- | One command, and what the session said back.
 step :: Session -> String -> (Session, [String])
@@ -71,7 +71,7 @@ tests =
         (_, _, stopped) <- loadFile s target
         assertBool (unlines (map show stopped)) (null stopped)
 
-      -- The statement is the one `dependent-index.thena.script` proves by
+      -- The statement is the one `DependentIndex.thena.script` proves by
       -- hand, so the two paths are known to end in the same place.
     , testCase "and the inductive theorem is admitted at its written type" $ do
         (s, _) <- startingSession

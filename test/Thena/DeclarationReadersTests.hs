@@ -42,7 +42,7 @@ import Thena.Standard (expectedBase)
 -- left behind.
 machine :: [Instr] -> Machine
 machine is =
-  load is (Machine (Exec [] [] []) ps [] natVec expectedBase [] [] rootScope n 0
+  load is (Machine (Exec [] [] [] []) ps [] natVec expectedBase [] [] [] rootScope n [] 0
                    NoUndischargeableTrust)
   where
     (ps, n) = newDevelopment natVecCounter

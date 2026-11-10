@@ -1,0 +1,4 @@
+-- **Half of a publication loop** (MS11 phase 289), which is refused.
+rule base loopx where
+
+public consult test.modules.LoopY

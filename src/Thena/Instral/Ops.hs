@@ -176,7 +176,7 @@ data Value
   | VBool    Bool
     -- ^ **written @true@ and @false@, and they are reserved in @instral@ only**
     -- — his ruling, 2026-09-12. Not lexer keywords: one lexer serves every
-    -- language, and @examples\/determinacy-tactics.thena.script@ declares
+    -- language, and @examples\/DeterminacyTactics.thena.script@ declares
     -- @data Term … { true : Term ; false : Term ; … }@, so reserving them in
     -- the lexer would take two constructor names away from every object
     -- language. They are read where an operand is read, before a local is
@@ -1143,6 +1143,52 @@ data Op
     -- **Symmetric with 'LeaveNamespace' and not the same op**, because the two
     -- lists are not the same kind of thing: the namespaces are ordered rungs
     -- and the opens are a set.
+  | Reveal [GlobalName]
+    -- ^ @import ‹module› where { … }@, entered — **the module's names may be
+    -- written until the matching 'LeaveReveal'** (MS11 phase 291, his design of
+    -- 2026-11-05).
+    --
+    -- **A field and not an operand**, for 'Open'\'s reason: an import is
+    -- written down and never computed. The names are the module's exports,
+    -- worked out by 'Thena.Driver.exportedByModule' where the program is built,
+    -- because the session knows which module declared what and the machine does
+    -- not.
+    --
+    -- **It reveals rather than brings in**, which is why it is not a second
+    -- @open@: the keys are in the environment either way and what an import
+    -- settles is whether a written name may reach them —
+    -- 'Thena.Core.Term.scopeConcealed' is the subtraction and this pushes a
+    -- frame without these names in it.
+  | LeaveReveal
+    -- ^ the end of what @import ‹module› where { … }@ reaches (MS11 phase 291)
+    -- — puts back the concealment the matching 'Reveal' lifted.
+    --
+    -- **Symmetric with 'LeaveOpen' and not the same op.** An @open@ adds a way
+    -- to resolve a name and this removes a bar to one, so the two compose: a
+    -- scoped import emits both, since the module's own top-level @open@s reach
+    -- its importer and must reach no further than the block does.
+  | PushBase FilePath
+    -- ^ @consult ‹module› where { … }@, entered — **the base is at the top of
+    -- the pool until the matching 'PopBase'** (MS11 phase 292, his design of
+    -- 2026-11-05).
+    --
+    -- **The base's PATH and not the base**, because "Thena.Rules" is below this
+    -- module: the driver reads the file and leaves it in
+    -- 'Thena.Engine.held', and this is the name the two tables meet under —
+    -- which is 'Thena.Driver.moduleFile''s rule, a module name being a path.
+    --
+    -- **At the TOP, which is what makes depth priority.** A file's consults are
+    -- a stack (phase 288), so the innermost block's base is pushed last and is
+    -- searched first, and the shipped base — consulted onto an empty pool at
+    -- startup — stays at the bottom.
+  | PopBase
+    -- ^ the end of what @consult ‹module› where { … }@ reaches (MS11 phase 292)
+    -- — takes the newest 'PushBase' back out of the pool.
+    --
+    -- **'LeaveOpen''s shape for the other thing a file states.** What an
+    -- @import@ settles is which names a block may write and what a @consult@
+    -- settles is which rules answer in it; both are one frame on and one frame
+    -- off.
   | EnterNamespace Operand
     -- ^ @namespace ‹name› where { … }@, entered — **everything declared until
     -- the matching 'LeaveNamespace' goes inside this namespace** (MS10 phase
@@ -1574,6 +1620,10 @@ resultOf o = case o of
   Certify _    -> Nothing
   Open {} -> Nothing
   LeaveOpen -> Nothing
+  Reveal {} -> Nothing
+  LeaveReveal -> Nothing
+  PushBase {} -> Nothing
+  PopBase -> Nothing
   EnterNamespace {} -> Nothing
   LeaveNamespace -> Nothing
   DeclarePrimitive {} -> Nothing
@@ -1808,6 +1858,10 @@ operandTypes o = case o of
   Certify a    -> [(a, TCore)]
   Open _ -> []
   LeaveOpen -> []
+  Reveal _ -> []
+  LeaveReveal -> []
+  PushBase _ -> []
+  PopBase -> []
   EnterNamespace a -> [(a, TName)]
   LeaveNamespace -> []
   DeclarePrimitive a b -> [(a, TName), (b, TCore)]
@@ -2400,6 +2454,10 @@ opKeyword o = case o of
   Certify _    -> "certify"
   Open {} -> "open"
   LeaveOpen -> "leave-open"
+  Reveal {} -> "reveal"
+  LeaveReveal -> "leave-reveal"
+  PushBase {} -> "push-base"
+  PopBase -> "pop-base"
   EnterNamespace {} -> "namespace"
   LeaveNamespace -> "leave-namespace"
   DeclarePrimitive {} -> "declare-primitive"

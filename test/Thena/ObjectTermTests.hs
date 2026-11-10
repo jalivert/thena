@@ -22,10 +22,9 @@ import Thena.Driver
   ( Response (..)
   , Session
   , machineOf
-  , loadProofSource
-  , loadRuleBases
+  , loadRuleTexts
   )
-import Thena.Engine (Machine (..))
+import Thena.Engine (Machine (..), rules)
 import Thena.Instral.Ops
   ( Instr (..)
   , Op (..)
@@ -39,7 +38,7 @@ import Thena.Instral.Ops
   , operandIn
   )
 import Thena.Rules (RuleBase (..))
-import Thena.Files (rulesPath, startingSession)
+import Thena.Files (loadProofFile, rulesPath, startingSession)
 
 tests :: TestTree
 tests =
@@ -54,40 +53,39 @@ tests =
 
 -- ---------------------------------------------------------------------------
 
--- | The module that declares the language, and one term of it.
-languageModule :: String
-languageModule =
-  unlines
-    [ "module Lang where"
-    , ""
-    , "x : Token String"
-    , "x = /[a-z]+/"
-    , ""
-    , "language LC, M, N, E where"
-    , "  var : x as occurrence -> x"
-    , "  app                   -> ( M N )"
-    , "open LC"
-    , ""
-    , "fg : LC"
-    , "fg = LC`( f g )`"
-    ]
+-- | __The module that declares the language, and one term of it__ —
+-- @test\/modules\/Rooted.thena@.
+--
+-- **It is a file on disc and was a string here until MS11 phase 297.** A rule
+-- file states what it refers to now, so a base reaches a language only by
+-- importing the module that declares it — and a module has a name to import
+-- only when it was reached by one. 'Thena.Driver.loadProofSource' reaches a
+-- module by no name at all, so nothing loaded that way can be imported, which
+-- is 'Thena.Driver.sessionDeclaredBy''s own rule and not this phase's.
+languageModule :: FilePath
+languageModule = "test/modules/Rooted.thena"
+
+-- | What a base written against it has to say first.
+languageImport :: String
+languageImport = "import test.modules.Rooted"
 
 -- | The session with it loaded, and the shipped base's text beside it.
 loadedModule :: IO (Session, String)
 loadedModule = do
   (s0, _) <- startingSession
   shipped <- rulesPath >>= readFile
-  case loadProofSource s0 languageModule of
-    (s1, ProofLoaded {}) -> pure (s1, shipped)
-    (_, other) -> assertFailure (show other)
+  (s1, out, trouble) <- loadProofFile s0 languageModule
+  case (trouble, [ () | ProofLoaded {} <- out ]) of
+    ([], _ : _) -> pure (s1, shipped)
+    _           -> assertFailure (show out)
 
 -- | Load a rule base of one's own beside the shipped one, and hand back its
 -- rules — or the response, when it was refused.
 withRules :: IO (Session, String) -> String -> IO (Either Response [Rule])
 withRules io src = do
   (s, shipped) <- io
-  pure $ case loadRuleBases s [("shipped", shipped), ("mine", src)] of
-    (s', BasesLoaded _) ->
+  pure $ case loadRuleTexts s [("shipped", shipped), ("mine", src)] of
+    (s', BasesLoaded _ _) ->
       Right (concatMap baseRules (filter ((== "mine") . baseName) (rules (machineOf s'))))
     (_, other) -> Left other
 
@@ -104,7 +102,12 @@ refused io src = withRules io src >>= \r -> case r of
   Right _    -> assertFailure "it loaded, and should not have"
 
 base :: String -> String
-base body = "rule base mine where\n\n" ++ body ++ "\n"
+base = baseOf languageImport
+
+-- | The same, for a base written against some other module (MS11 phase 297).
+baseOf :: String -> String -> String
+baseOf stated body =
+  "rule base mine where\n\n" ++ stated ++ "\n\n" ++ body ++ "\n"
 
 -- ---------------------------------------------------------------------------
 
@@ -145,24 +148,8 @@ reading io =
     -- opens nothing reads exactly as it did when a tag had to be whole. The
     -- @open@ forms are in 'opening' below.
   , testCase "a rule file reaches a namespaced language by its path" $ do
-      (s0, _) <- startingSession
-      shipped <- rulesPath >>= readFile
-      s1 <- case loadProofSource s0 (unlines
-              [ "module Nested where", ""
-              , "namespace A where"
-              , "  x : Token String"
-              , "  x = /[a-z]+/"
-              , ""
-              , "  language LC, M, N where"
-              , "    var : x as occurrence -> x"
-              , "    app                   -> ( M N )"
-              , ""
-              , "  open LC"
-              , "" ]) of
-              (s, ProofLoaded {}) -> pure s
-              (_, other) -> assertFailure (show other)
-      r <- withRules (pure (s1, shipped))
-             (base "rule swap A.LC[app]`( ${f} ${a} )` :- do say \"x\"")
+      r <- inNamespaces oneNamespace
+             [ "rule swap A.LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
       case r of
         Right (x : _) -> ruleParams x
           @?= [ PObject (SNode (named "A.LC.app")
@@ -289,37 +276,27 @@ opening =
       Left other -> assertFailure (show other)
       Right _    -> assertFailure "it loaded, and should not have"
 
--- | One namespace holding one language, which is the shape the phase exists for.
-oneNamespace :: [String]
-oneNamespace = inside "A"
-
--- | Two, so that one word can be reached from both.
-twoNamespaces :: [String]
-twoNamespaces = inside "A" ++ inside "B"
-
-inside :: String -> [String]
-inside ns =
-  [ "namespace " ++ ns ++ " where"
-  , "  x : Token String"
-  , "  x = /[a-z]+/"
-  , ""
-  , "  language LC, M, N where"
-  , "    var : x as occurrence -> x"
-  , "    app                   -> ( M N )"
-  , ""
-  , "  open LC"
-  , ""
-  ]
+-- | One namespace holding one language, which is the shape the phase exists
+-- for; and two, so that one word can be reached from both.
+--
+-- **Files on disc since MS11 phase 297**, for 'languageModule''s reason: a base
+-- may only reach a language it imports, and there is nothing to import until
+-- the module has been reached by a name.
+oneNamespace, twoNamespaces :: (FilePath, String)
+oneNamespace  = ( "test/modules/OneNested.thena"
+                , "import test.modules.OneNested" )
+twoNamespaces = ( "test/modules/TwoNested.thena"
+                , "import test.modules.TwoNested" )
 
 -- | Load a module of namespaced languages, then a rule base written against it.
-inNamespaces :: [String] -> [String] -> IO (Either Response [Rule])
-inNamespaces decls body = do
+inNamespaces :: (FilePath, String) -> [String] -> IO (Either Response [Rule])
+inNamespaces (path, stated) body = do
   (s0, _) <- startingSession
   shipped <- rulesPath >>= readFile
-  case loadProofSource s0 (unlines ("module Nested where" : "" : decls)) of
-    (s1, ProofLoaded {}) ->
-      withRules (pure (s1, shipped)) ("rule base mine where\n\n" ++ unlines body)
-    (_, other) -> assertFailure (show other)
+  (s1, out, trouble) <- loadProofFile s0 path
+  case (trouble, [ () | ProofLoaded {} <- out ]) of
+    ([], _ : _) -> withRules (pure (s1, shipped)) (baseOf stated (unlines body))
+    _           -> assertFailure (show out)
 
 -- ---------------------------------------------------------------------------
 

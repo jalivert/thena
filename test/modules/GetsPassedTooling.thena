@@ -1,0 +1,6 @@
+module test.modules.GetsPassedTooling where
+
+import test.modules.PassesTooling
+
+do
+  marker

@@ -43,7 +43,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), Reach (..), Selection (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -99,6 +99,15 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   open    { Located _ TOpen }
   hiding  { Located _ THiding }
   renaming { Located _ TRenaming }
+  -- **And the word a dependency is stated with** (MS11 phase 276), reserved
+  -- project-wide by phase 274 for the surface language, the lexer being one
+  -- lexer.
+  import  { Located _ TImport }
+  -- **And the two more a rule file writes since MS11 phase 289**, both reserved
+  -- project-wide before it: @consult@ by phase 273 and @public@ by phase 287,
+  -- for the surface language.
+  consult { Located _ TConsult }
+  public  { Located _ TPublic }
   rule    { Located _ TRule }
   do      { Located _ TDo }
   when    { Located _ TWhen }
@@ -219,6 +228,42 @@ Decl :: { RawDecl }
   -- namespace and says how far its effect reaches.
   | open OpenHead                          { DeclOpen (uncurry RawOpen $2) }
   | open OpenHead in Decl                  { DeclOpenIn (uncurry RawOpen $2) $4 }
+  -- **What this base depends on** (MS11 phase 276, his ruling of 2026-11-03: a
+  -- file states what it refers to and never relies on the session). A @QName@
+  -- whose steps are directories, as the surface language's @import@ is.
+  | import QName ImportSel                 { DeclImport Own (fst $2) (snd $2) $3 Nothing }
+  -- **And the four combinations of his ruling of 2026-10-30 completed** (MS11
+  -- phase 289): a rule file states the bases it is written against and may
+  -- publish either act, which is the same two productions the surface language
+  -- has in "Thena.Surface.Parser" and the same one word's worth of difference.
+  | public import QName ImportSel          { DeclImport Public (fst $3) (snd $3) $4 Nothing }
+  -- **AND AN IMPORT STATES HOW FAR IT REACHES HERE TOO** (MS11 phase 299, his
+  -- ask for the parity: /"I still want Surface do-blocks and instral to have
+  -- scoped imports and consults, because it makes sense."/). The twin
+  -- production is @import QName where '{' Decls '}'@ in "Thena.Surface.Parser",
+  -- and @where@ is a layout keyword in this file's lexer as it is in that one,
+  -- so the braces are the offside rule's and an explicit spelling passes
+  -- through.
+  --
+  -- **@Decls@ and not a list of its own**: what a block holds is what the file
+  -- holds, which is what makes a scoped import nest with no mechanism.
+  | import QName ImportSel where '{' Decls '}'
+      { DeclImport Own (fst $2) (snd $2) $3 (Just (reverse $6)) }
+  | public import QName ImportSel where '{' Decls '}'
+      { DeclImport Public (fst $3) (snd $3) $4 (Just (reverse $7)) }
+  | consult QName                          { DeclConsult Own (fst $2) (snd $2) Nothing }
+  | public consult QName                   { DeclConsult Public (fst $3) (snd $3) Nothing }
+  -- **AND A CONSULT STATES HOW FAR IT REACHES** (MS11 phase 300, his ruling of
+  -- 2026-11-06, @~k68d7@), which completes the parity the two productions
+  -- above and the two @import@ ones are halves of. The twin is
+  -- @consult QName where '{' Items '}'@ in "Thena.Surface.Parser".
+  --
+  -- **What the block holds is what the file holds**, @Decls@ and not a list of
+  -- its own — the same thing that makes a scoped import nest.
+  | consult QName where '{' Decls '}'
+      { DeclConsult Own (fst $2) (snd $2) (Just (reverse $5)) }
+  | public consult QName where '{' Decls '}'
+      { DeclConsult Public (fst $3) (snd $3) (Just (reverse $6)) }
 
 -- | What an @open@ opens, and what it says about which names it brings in
 -- (MS10 phase 267). The surface language's 'Thena.Surface.Parser' has the same
@@ -231,6 +276,25 @@ OpenHead :: { ([([String], String)], RawOpenSpec) }
   | QName renaming '(' Renamings ')'       { ([$1], RawOpenRenaming (reverse $4)) }
 
 -- | One or more, for @open X Y Z@. Reversed by its caller.
+-- | __What an import takes from the module it names__ (MS11 phase 306,
+-- @~htngj@). **The twin of @ImportSel@ in "Thena.Surface.Parser"**, and the
+-- same nullable nonterminal for the same reason: it keeps the import at four
+-- productions instead of the cross product of @public@, three clauses and the
+-- @where@ block.
+--
+-- **@SelNames@ and not 'QNames' because @( )@ has to be writable** — an import
+-- that deliberately takes nothing, as @exporting ( )@ offers nothing — and
+-- 'QNames' is one-or-more.
+ImportSel :: { Selection }
+  :                                        { SelectWide }
+  | '(' SelNames ')'                       { SelectOnly (reverse $2) }
+  | hiding '(' SelNames ')'                { SelectHiding (reverse $3) }
+
+-- | Zero or more, for an import's clause. Reversed by its caller.
+SelNames :: { [([String], String)] }
+  :                                        { [] }
+  | SelNames QName                         { $2 : $1 }
+
 QNames :: { [([String], String)] }
   : QName                                  { [$1] }
   | QNames QName                           { $2 : $1 }

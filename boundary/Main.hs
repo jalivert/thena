@@ -28,7 +28,16 @@ module Main (main) where
 import Control.Monad (unless)
 import System.Exit (exitFailure)
 
-import Thena.Driver (Response (..), Session, Stop (..), fuelOf, oneLine, oneProgram)
+import Thena.Driver
+  ( Response (..)
+  , Session
+  , Stop (..)
+  , digestText
+  , filesRead
+  , fuelOf
+  , oneLine
+  , oneProgram
+  )
 import Thena.Files (startingSession)
 import Thena.Render (renderResponse)
 import Thena.View
@@ -124,6 +133,15 @@ checks =
     -- draws for almost every proof.
   , \s -> want "nothing is resting on it yet" (null (trustViewClaims (trustView budget s)))
   , \s -> want "a job runs in slices" (job s)
+    -- **Which files the session read, and what they said** (MS11 phase 295).
+    -- It is the one part of a session on disc that a frontend cannot work out
+    -- for itself — it knows which lines the user typed, and only the engine
+    -- knows which path a module name resolved to and what was actually opened —
+    -- so the claim that it crosses is a claim about this suite's imports. The
+    -- shipped prelude and standard base are what a booted session has read.
+  , \s -> want "filesRead reaches a frontend" (length (filesRead s) == 2)
+  , \s -> want "and a digest writes down"
+            (all ((== 16) . length . digestText . snd) (filesRead s))
   ]
   where
     budget = Budget 200

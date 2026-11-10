@@ -20,6 +20,8 @@ a bare word acts, a word with a colon looks.
   data ‹D› … where { … }        declare an inductive family
   open ‹namespace›              bring a namespace into view for the rest of the session
   declare ‹sig› ; ‹equation›    elaborate a surface declaration
+  import ‹module›               load a surface module by its name
+  consult ‹base›                push a rule base by its name
   certify core`‹type›`          ask the kernel about the development
   qed                           certify and admit the finished proof
 
@@ -53,8 +55,10 @@ a bare word acts, a word with a colon looks.
   :undo                         take back the last line
   :extract                      the term the development stands for
   :revalidate                   recheck the whole development
+  :replay ‹path›                run a proof-script, line by line, as if typed
   :load ‹path›                  a proof module, a script, or rule bases
   :load proof / rules / script  say which, rather than by extension
+  :consult ‹path›               push rule bases on top of the search stack
   :help                         this list
   :quit                         leave
 

@@ -1,0 +1,8 @@
+-- **A `private` declaration is not an importer's to name** (MS11 phase 286),
+-- although the file exports everything else and the session holds it.
+module test.modules.MissesKept where
+
+import test.modules.Kept
+
+mine : Shown -> Shown
+mine = helper

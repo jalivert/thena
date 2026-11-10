@@ -25,6 +25,11 @@ import Thena.Driver
   , command
   , commandSummary
   , newSession
+  , LoadKind (..)
+  , moduleName
+  , moduleText
+  , moduleFile
+  , moduleOfFile
   )
 import Thena.Development.Cursor (rebuild)
 import Thena.Engine (Development, Machine (..), Question (..), globals, development, flatten)
@@ -99,7 +104,7 @@ unknown w = case snd (command withRules w) of
 everyColonCommand :: [String]
 everyColonCommand =
   [ ":help", ":quit", ":core", ":surface", ":dev", ":show", ":elim", ":judgment", ":where", ":matches", ":accepts", ":produces"
-  , ":choices", ":goal", ":whnf", ":infer", ":parse", ":done", ":load", ":bases", ":rules"
+  , ":choices", ":goal", ":whnf", ":infer", ":parse", ":done", ":load", ":replay", ":consult", ":bases", ":rules"
   , ":revalidate", ":extract", ":theorem", ":suspend", ":resume", ":abandon"
   , ":proofs", ":undo", ":convert", ":step", ":run", ":trust"
   ]
@@ -124,11 +129,17 @@ notCommands =
   -- **@:open@ appears only in the comment that refuses it** (MS10 phase 249,
   -- his ruling): @open@ is a bare word because it acts, so the colon spelling
   -- was considered and not built.
-  [ ":yield", ":ops", ":open" ]
+  -- **@:import@ appears only in the comment that refuses it** (MS11 phase 284):
+  -- @import@ and @consult@ are the words a file writes, so the prompt takes the
+  -- same two bare words and there is no colon spelling of either.
+  [ ":yield", ":ops", ":open", ":import" ]
 
 everyBareCommand :: [String]
 everyBareCommand =
   [ "assume", "claim", "quantify", "data", "declare", "open"
+  -- Both bare, because they act (§2.4), and both the word a file writes
+  -- rather than a command that resembles it (MS11 phase 284).
+  , "import", "consult"
   , "along", "into", "back", "reduce", "unify"
   , "do", "yield"
   , "retry", "goto-named", "goto-root", "cross", "certify", "qed"
@@ -138,7 +149,8 @@ tests :: TestTree
 tests =
   testGroup
     "Thena.Driver"
-    [ testGroup
+    [ moduleNames
+    , testGroup
         "the command line"
         [ testCase "an empty line does nothing" $
             snd (command withRules "") @?= Blank
@@ -746,3 +758,103 @@ fittingNames :: Response -> [String]
 fittingNames r = case r of
   Fitting _ _ fs -> [ nameDotted g | (g, _, _, _) <- fs ]
   _              -> []
+
+-- --------------------------------------------------------------------------
+-- A file's name (MS11 phase 272)
+-- --------------------------------------------------------------------------
+
+-- | **What @import@ and @consult@ will write, and where it looks.**
+--
+-- Dots are directory separators and the path is relative to the project's
+-- source root, never to the file doing the importing — his, recorded in
+-- @~5x7f9@. The root is not the engine's business (§12 invariant 4), so these
+-- are relative paths and nothing here touches a disk.
+moduleNames :: TestTree
+moduleNames =
+  testGroup
+    "a module name, and the file it names"
+    [ testGroup
+        "what is a module name"
+        [ testCase "a dotted name of words" $
+            fmap moduleText (moduleName "Stlc.Terms") @?= Just "Stlc.Terms"
+
+        , testCase "one word is a module name too" $
+            fmap moduleText (moduleName "Prelude") @?= Just "Prelude"
+
+        , testCase "a word may hold a digit, a prime and an underscore" $
+            fmap moduleText (moduleName "Stlc2.Terms'_a") @?= Just "Stlc2.Terms'_a"
+
+        , -- A step is a word and a word begins with a letter, which is what
+          -- forced the corpus rename of 2026-11-05: @01-stlc-syntax@ was a
+          -- name nothing could reach.
+          testCase "a step may not begin with a digit" $
+            moduleName "01-stlc-syntax" @?= Nothing
+
+        , testCase "nor hold a hyphen" $
+            moduleName "stlc-syntax" @?= Nothing
+
+        , testCase "an empty step is refused, however it is spelled" $
+            map moduleName ["", ".A", "A.", "A..B"] @?= [Nothing, Nothing, Nothing, Nothing]
+        ]
+
+    , testGroup
+        "the file it names"
+        [ testCase "a surface module" $
+            fmap (moduleFile LoadProof) (moduleName "Stlc.Terms")
+              @?= Just "Stlc/Terms.thena"
+
+        , testCase "a rule base — the act supplies the extension" $
+            fmap (moduleFile LoadRules) (moduleName "Stlc.Tactics")
+              @?= Just "Stlc/Tactics.thena.rules"
+
+        , testCase "and a script" $
+            fmap (moduleFile LoadScript) (moduleName "Stlc.Proof")
+              @?= Just "Stlc/Proof.thena.script"
+        ]
+
+    , testGroup
+        "and the journey back"
+        [ testCase "a path a module name could have produced" $
+            fmap moduleText (moduleOfFile "Stlc/Terms.thena") @?= Just "Stlc.Terms"
+
+        , testCase "the extension is read, so a rule base comes back too" $
+            fmap moduleText (moduleOfFile "Stlc/Tactics.thena.rules")
+              @?= Just "Stlc.Tactics"
+
+        , testCase "a round trip, for each of the three kinds" $
+            [ moduleOfFile (moduleFile k m) == Just m
+            | k <- [LoadProof, LoadRules, LoadScript]
+            , Just m <- [moduleName "Stlc.Terms"]
+            ]
+              @?= [True, True, True]
+
+        , -- There is no relative form and no climbing: both come out as an
+          -- empty step, which 'moduleName' already refuses.
+          testCase "an absolute path is no module" $
+            moduleOfFile "/usr/Stlc/Terms.thena" @?= Nothing
+
+        , testCase "nor one that climbs" $
+            moduleOfFile "../Stlc/Terms.thena" @?= Nothing
+
+        , testCase "nor one written from here" $
+            moduleOfFile "./Terms.thena" @?= Nothing
+
+        , testCase "a path with no extension at all is no module" $
+            moduleOfFile "Stlc/Terms" @?= Nothing
+
+        , -- The corpus's own state since the rename of 2026-11-05, and the
+          -- whole point of it: every example in the series is reachable by
+          -- name, and the one that cannot be is the hyphenated spelling it
+          -- replaced.
+          testCase "and every numbered example is importable now" $
+            fmap moduleText (moduleOfFile "examples/Stlc01Syntax.thena")
+              @?= Just "examples.Stlc01Syntax"
+
+        , testCase "the rule file in the series too" $
+            fmap moduleText (moduleOfFile "examples/Stlc04TakingTermsApart.thena.rules")
+              @?= Just "examples.Stlc04TakingTermsApart"
+
+        , testCase "and the spelling it replaced is still no module" $
+            moduleOfFile "examples/01-stlc-syntax.thena" @?= Nothing
+        ]
+    ]

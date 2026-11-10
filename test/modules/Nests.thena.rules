@@ -1,0 +1,16 @@
+-- **Nesting is priority** (MS11 phase 300, his ruling of 2026-11-06, and a
+-- file's consults being a stack one gate out — phase 288). The innermost block
+-- pushes last and is searched first, so `inner` gets `loud`, `outer` gets
+-- `quiet` and anything outside both gets this file's own.
+rule base nests where
+
+consult test.modules.Quiet where
+  rule outer :- do
+    call answer
+
+  consult test.modules.Loud where
+    rule inner :- do
+      call answer
+
+rule answer :- do
+  say "nests"

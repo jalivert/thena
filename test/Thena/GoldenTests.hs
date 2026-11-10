@@ -808,7 +808,7 @@ tests =
         -- __The subgoal line is the whole of what this pins here__ — the motive
         -- is three nested transports and @:where@ would print several thousand
         -- characters of them, which is churn and not evidence.
-        -- @examples/chained-index-telescope.thena@ is where the term is judged,
+        -- @examples/ChainedIndexTelescope.thena@ is where the term is judged,
         -- by the kernel, with the arm's own payload reduced out of it.
         , "data Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀ where { c0 : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Chain n i b }"
           -- **No open: the declaration above it is refused today.** A datatype
@@ -1093,7 +1093,7 @@ tests =
         , ":show g"
           -- **A hypothesis, not a global.** A REPL argument is resolved in the
           -- context at the focus, so @apply@ works on anything in scope — which
-          -- is what @examples/determinacy-tactics.thena.script@ needs when it applies an
+          -- is what @examples/DeterminacyTactics.thena.script@ needs when it applies an
           -- induction hypothesis by hand.
           --
           -- Two anonymous domains, so two holes called @_@ and @_1@, and

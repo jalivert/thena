@@ -1,7 +1,7 @@
 #!/bin/sh
 # tc — type-check surface modules and rule bases, in the order given.
 #
-#   ./tc examples/01-stlc-syntax.thena examples/04-taking-terms-apart.thena.rules …
+#   ./tc examples/Stlc01Syntax.thena examples/Stlc04TakingTermsApart.thena.rules …
 #
 # The shipped rule base and the prelude are loaded first, then each file as
 # `:load` would take it; the extension says which kind it is. Exits non-zero at

@@ -106,6 +106,7 @@ import Thena.Driver
   , RuleFileError (..)
   , LoadError (..)
   , Response (..)
+  , moduleText
   , ChoicePoint (..)
   , Session
   , Stop (..)
@@ -196,7 +197,7 @@ import qualified Thena.Surface.Zipper as Zipper
 import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
-import Data.List (stripPrefix, intercalate, partition)
+import Data.List (isPrefixOf, stripPrefix, intercalate, nub, partition)
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
 
@@ -212,7 +213,14 @@ import Thena.Instral.Infer (renderInstralTypeError)
 -- That is a fact about how the lines read, and it lives nowhere but here:
 -- 'Trouble' does not know it and neither does "Thena.Files".
 renderTrouble :: Session -> Trouble -> [String]
-renderTrouble _ (Unreadable path e)  = [path ++ ": " ++ show e]
+-- **An 'IOException' names the file itself**, so prefixing the path printed it
+-- twice — @test/modules/Nowhere.thena: test/modules/Nowhere.thena: openFile:
+-- does not exist@ — which contradicted the promise above. The prefix is kept
+-- for an exception that does not name it (MS11 phase 284).
+renderTrouble _ (Unreadable path e)
+  | path `isPrefixOf` shown = [shown]
+  | otherwise               = [path ++ ": " ++ shown]
+  where shown = show e
 renderTrouble _ (Stopped path e)     = renderLoadError path e
 renderTrouble s (Unloadable path resp)  = case resp of
   RuleFileRefused {} -> renderResponse s resp
@@ -224,7 +232,11 @@ renderTrouble s (Unloadable path resp)  = case resp of
 renderLoadError :: FilePath -> LoadError -> [String]
 renderLoadError path e = case e of
   LoadStopped n        -> [at n ++ "stopped here"]
-  NestedLoad n         -> [at n ++ ":load inside a loaded file is not followed"]
+  -- **It said /a load or an import/ until MS11 phase 296**, when an @import@
+  -- and a @consult@ started being followed. The only 'NestedLoad' anything
+  -- renders comes from "Thena.Files".@loadFile@, which refuses @:load@ alone.
+  NestedLoad n         ->
+    [at n ++ "a :load inside a loaded file is not followed"]
   UnansweredQuestion n -> [at n ++ "the file ended while this was still asking"]
   where
     at n = path ++ ":" ++ show n ++ ": "
@@ -268,6 +280,9 @@ renderResponse s resp = let ren = renderingOf s in case resp of
           Just f  -> (q ++ "   no") : renderConversionFailure ren f
   -- Nothing to print: the caller reads the file and prints what that produced.
   LoadRequested _ -> []
+  -- **Nothing of its own, like the other five requests**: what a replay has to
+  -- say is the responses of the lines it submitted (MS11 phase 302).
+  ReplayRequested _ -> []
   Revalidated Nothing  -> ["valid"]
   Revalidated (Just e) -> renderKernelError ren e
   Extracted t          -> [renderCore ren [] t]
@@ -305,7 +320,57 @@ renderResponse s resp = let ren = renderingOf s in case resp of
       ++ map renderWarning ws
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
-  BasesLoaded bs   -> map loadedLine bs
+  -- **Only what the line itself had to say** (MS11 phase 298): the act's own
+  -- output comes from reading the file, and a @public@ in front of it is a
+  -- remark about the line — so it is printed where the line was typed, before
+  -- what the act produced.
+  ConsultRequested _ ws -> map renderWarning ws
+  -- **A caller's mistake, said plainly** (MS11 phase 273): a module that
+  -- consults something reached a door that cannot read a file.
+  ConsultsUnread ms ->
+    [ "this module consults " ++ intercalate ", " (map moduleText ms)
+        ++ ", and they were not read" ]
+  -- Its twin (MS11 phase 274), and the same mistake one step further out.
+  ImportsUnread ms ->
+    [ "this module imports " ++ intercalate ", " (map moduleText ms)
+        ++ ", and they were not read" ]
+  -- Nothing to print: the caller resolves the name, reads the files and prints
+  -- what that produced (MS11 phase 284).
+  ImportRequested _ ws -> map renderWarning ws
+  -- **It says so rather than saying nothing** (MS11 phase 284), for the reason
+  -- @open@ at the prompt says @opened ‹namespace›@: a word that answered
+  -- nothing would leave the user unable to tell it took.
+  ModuleAlreadyIn m -> ["module " ++ moduleText m ++ " is already in"]
+  -- **The path the walk took, so the loop is readable** (MS11 phase 274): the
+  -- module that closed it is named twice, once at each end.
+  ImportCycle ms ->
+    [ "these modules import each other: "
+        ++ intercalate " imports " (map moduleText ms) ]
+  -- **The same shape for the same loop one act over** (MS11 phase 289).
+  ConsultCycle ms ->
+    [ "these rule bases publish each other: "
+        ++ intercalate " publishes " (map moduleText ms) ]
+  -- **The path the replay took** (MS11 phase 302), the script that closed the
+  -- loop named at both ends. The paths as they were written, which is the only
+  -- form the user can act on.
+  ReplayCycle ps ->
+    [ "these scripts replay each other: " ++ intercalate " replays " ps ]
+  -- **Both names, because either one could be the typo** (MS11 phase 278): the
+  -- file may be in the wrong place or the header may be wrong, and nothing here
+  -- can tell which the user meant.
+  -- **The module and every name of the clause that missed** (MS11 phase 306,
+  -- @~htngj@), because a clause is written as a list and a reader fixing one
+  -- typo wants the rest of them in the same breath. **The module is named
+  -- first**, since what the clause asked for is only wrong relative to it.
+  ImportSelectsUnoffered m gs ->
+    [ moduleText m ++ " offers no " ++ intercalate ", " (map (nameString ren) gs) ]
+  ModuleMisnamed reached header ->
+    [ "imported as " ++ moduleText reached ++ ", but its header says "
+        ++ moduleText header ]
+  -- **The warnings come after the pool**, which is 'ProofLoaded''s rule for
+  -- the other kind of file (MS11 phase 298): what went in is the answer and a
+  -- warning is a footnote to it.
+  BasesLoaded bs ws -> map loadedLine bs ++ map renderWarning ws
   BasesListed bs   -> renderBases bs
   RulesListed bs   -> renderRuleBases ren bs
   RuleFileRefused p e -> renderRuleFileError ren p e
@@ -520,6 +585,11 @@ describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
   TOpen       -> "open"
+  TConsult    -> "consult"
+  TImport     -> "import"
+  TExporting  -> "exporting"
+  TPrivate    -> "private"
+  TPublic     -> "public"
   TNamespace  -> "namespace"
   THiding     -> "hiding"
   TRenaming   -> "renaming"
@@ -1374,6 +1444,9 @@ renderCommandError ren e = case e of
   LevelExpected u      -> u ++ " is not a universe, as in \"Type\8320\""
   NotThere m           -> renderMoveError m
   MixedLoad w          -> w ++ " takes either one script or any number of " ++ ruleSuffix ++ " files"
+  -- **The word is echoed, because what is wrong with it is in the text** (MS11
+  -- phase 284): a hyphen, a leading digit, a path somebody wrote by habit.
+  NotAModuleName t     -> t ++ " is not a module name — every step is a word, as in Stlc.Terms"
   ProofUnderway g      ->
     "a rule base may not be loaded while " ++ nameString ren g ++ " is being proved"
   ProofsSuspended names ->
@@ -1870,6 +1943,23 @@ renderWarning w = "warning: " ++ case w of
     "the name " ++ nameDotted g ++ " reaches " ++ nameDotted hid
       ++ " here, so proving it shadows that one — it is then reached by writing"
       ++ " it in full"
+  -- **It names the base, because the line to change is the one that names it**
+  -- (MS11 phase 298) — and it says what the word would have added, since that
+  -- is the thing the author believed they were asking for.
+  PublicConsultIdle b ->
+    "public consult " ++ b ++ " acts as a plain consult: a rule file's consult"
+      ++ " already hands the base on to whoever consults this one"
+  -- **One sentence for both acts**, the word being idle at the prompt for one
+  -- reason: nothing imports or consults a session (MS11 phase 298).
+  -- **The module, then the namespaces to list** (MS11 phase 307): the line to
+  -- change is the one that named the module, and what silences the warning is a
+  -- list of namespaces, so both halves of the remedy are in the sentence.
+  PublicImportUnlisted m ns ->
+    "public import " ++ m ++ " passes on " ++ intercalate ", " ns
+      ++ ", which this file's exporting clause does not list"
+  PublicIdleAtPrompt act ->
+    "public " ++ act ++ " acts as a plain " ++ act ++ ": nothing " ++ act
+      ++ "s a session"
   UnprimeableClass k g cls ->
     blockAt k g ++ ": no character may be appended to every name " ++ cls
       ++ " accepts, so a binder renamed to avoid capture will not print in this"
@@ -1920,14 +2010,6 @@ renderDeclareError ren e = case e of
         ++ " both read an occurrence at " ++ cls
         ++ ", and this grammar reaches both, so a substitution for " ++ cls
         ++ " has no one language to replace a name with"
-    -- **It names both classes in full**, because the word is what the author
-    -- wrote and the paths are the only thing that tells them apart (MS10 phase
-    -- 259).
-    ClassWordTwice w cs ->
-      blockAt k g ++ ": it reaches " ++ intercalate " and " (map (nameString ren) cs)
-        ++ ", which are both written " ++ w
-        ++ ", and a generated name is suffixed with a class's word \8212 so "
-        ++ "fv-" ++ w ++ " would mean two things"
     InProduction p why -> blockAt k g ++ ", production " ++ p ++ ": " ++ case why of
       NoItems -> "it has no items"
       -- MS8 phase 171: a notation names its own arguments.
@@ -2322,6 +2404,17 @@ renderRuleFileError ren path e = case e of
     [ path ++ ": needs a header line — rule base \8249name\8250 \8249description\8250 where" ]
   RuleSyntaxError se -> [path ++ ": " ++ renderSyntaxError se]
   RuleIllFormed es   -> map ((path ++ ": ") ++) (map (renderRuleError ren) es)
+  -- **A caller's mistake, said plainly** (MS11 phase 276), the twin of
+  -- 'ConsultsUnread': a base that states a dependency reached a door that
+  -- cannot read a file.
+  RuleImportsUnread ms ->
+    [ path ++ ": imports " ++ intercalate ", " (map moduleText ms)
+        ++ ", and they were not read" ]
+  -- **'ImportSelectsUnoffered' with the path in front of it** (MS11 phase 306):
+  -- the same sentence, because it is the same mistake in the other syntax.
+  RuleSelectsUnoffered m gs ->
+    [ path ++ ": " ++ moduleText m ++ " offers no "
+        ++ intercalate ", " (map (nameString ren) gs) ]
 
 renderRuleError :: Rendering -> RuleError -> String
 renderRuleError ren e = whereRuleError ren e ++ whatRuleError e
@@ -2606,7 +2699,12 @@ parseFailureReason text why = case why of
           ++ expecting expected
   where
     expecting [] = ""
-    expecting ss = ", expecting " ++ oneOf (map symbolText ss)
+    -- **BY THE TEXT, SO TWO SYMBOLS SPELLED ALIKE ARE SAID ONCE** (2026-11-10).
+    -- A class's qualified substitution puts a terminal and a name slot of the
+    -- same spelling in one position — @E[x: x -> N]@ for a class called @x@ —
+    -- and the message read /expecting x or x/, which tells a reader nothing and
+    -- reads as a defect. What a reader can act on is the text they would type.
+    expecting ss = ", expecting " ++ oneOf (nub (map symbolText ss))
     symbolText s = case s of
       Earley.Literal x -> x
       Earley.Scan n _ -> n

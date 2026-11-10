@@ -1,0 +1,14 @@
+module test.modules.Opener where
+
+-- **It declares a namespace and opens it at its own top level**, and the bare
+-- `off` below is what that buys it. **Whoever imports this gets the names and
+-- not the short spellings** — his ruling of 2026-11-06, and `Inherits.thena`
+-- is the refusal. See `Thena.Driver.openedFrom`.
+data Bit : Type₀ where
+  off : Bit
+  on : Bit
+
+open Bit
+
+mine : Bit.Bit
+mine = off

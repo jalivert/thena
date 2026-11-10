@@ -1,0 +1,9 @@
+-- **The leak — `~2kc72`.** A rule HEAD is a pattern: it needs the tag and the
+-- production key, and neither is a declared name, so the withheld language is
+-- still matchable. `./tc test/modules/TakesLang.thena.rules` loads.
+rule base takes where
+
+import test.modules.WithheldLang
+
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"

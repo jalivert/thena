@@ -1,0 +1,3 @@
+module test.modules.LoopA where
+
+import test.modules.LoopB

@@ -3,7 +3,7 @@
 -- and a constructor with a dependent /argument/ telescope, split through (MS9
 -- phase 215).
 --
--- @examples\/dependent-index.thena.script@ declares
+-- @examples\/DependentIndex.thena.script@ declares
 -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ — two indices, the second typed by
 -- the first — and proves a theorem about it by induction. Before phase 19 the
 -- elimination was refused outright, on a condition that only a /tied/ index can
@@ -17,7 +17,7 @@
 -- Same pattern as "Thena" "DeterminacyTests", and for the same reason.
 --
 -- __And the tied case, which is the one that states an equation — MS9 phase
--- 214, @~7gmvr@ step three.__ @examples\/tied-index-chain.thena@ declares
+-- 214, @~7gmvr@ step three.__ @examples\/TiedIndexChain.thena@ declares
 -- @Q : ∀ (n : N) -> Fin n -> Type₀@ and splits a @Q (s m) (fz m)@. Both indices
 -- are tied there, the second's type mentions the first, so the motive states the
 -- second equation only after transporting its side along the first — and the
@@ -26,7 +26,7 @@
 -- for it and the transports ι-contract.
 --
 -- __AND THE OTHER TELESCOPE, WHICH IS A DIFFERENT CHAIN IN A DIFFERENT PLACE —
--- MS9 phase 215.__ @examples\/dependent-argument-chain.thena@ declares
+-- MS9 phase 215.__ @examples\/DependentArgumentChain.thena@ declares
 -- @Pack@, whose one constructor's /own/ arguments are dependent — @i : Fin n@
 -- after @n : N@ — over a datatype with no indices at all. So the chain is in
 -- @Pack.lemmata.noConfusion@ rather than in the motive, and the transition that meets it
@@ -58,25 +58,25 @@ import Thena.Render
 
 -- | Relative to the package root, which is where the suite runs.
 target :: FilePath
-target = "examples/dependent-index.thena.script"
+target = "examples/DependentIndex.thena.script"
 
 tiedTarget :: FilePath
-tiedTarget = "examples/tied-index-chain.thena"
+tiedTarget = "examples/TiedIndexChain.thena"
 
 argumentTarget :: FilePath
-argumentTarget = "examples/dependent-argument-chain.thena"
+argumentTarget = "examples/DependentArgumentChain.thena"
 
 vectorTarget :: FilePath
-vectorTarget = "examples/vector-families.thena"
+vectorTarget = "examples/VectorFamilies.thena"
 
 chainedTarget :: FilePath
-chainedTarget = "examples/chained-index-telescope.thena"
+chainedTarget = "examples/ChainedIndexTelescope.thena"
 
 -- | One rung deeper, and __its own file because it is expensive__: the
 -- generated term grows about fourfold per chained index, so this split alone is
 -- most of a load. One test case reads it, where the shallow file has three.
 deepTarget :: FilePath
-deepTarget = "examples/chained-index-telescope-deep.thena"
+deepTarget = "examples/ChainedIndexTelescopeDeep.thena"
 
 tests :: TestTree
 tests =
@@ -182,7 +182,7 @@ tests =
               @?= "\8704 (m : N.N) (j : Fin.Fin m) -> Holds.Holds (Pack.pack m j) -> N.N"
 
       -- __The @Vec@-style families, which the corpus had never had — MS9 phase
-      -- 216.__ @examples\/vector-families.thena@ declares @Vec@ at a level
+      -- 216.__ @examples\/VectorFamilies.thena@ declares @Vec@ at a level
       -- parameter and @All@ over it, whose /index/ telescope is dependent and
       -- whose @allCons@ reaches back past an argument nothing mentions. That
       -- last shape is what the phase found: the chain's package holds an

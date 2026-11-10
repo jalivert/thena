@@ -48,7 +48,7 @@ import Thena.Driver
   , Response (..)
   , Session
   , loadProofSource
-  , loadRuleBases
+  , loadRuleTexts
   , loadSource
   , newSession
   , parseCore
@@ -396,12 +396,12 @@ omittedTests =
     -- case does arise, so the method stays open and the missing arm is refused
     -- exactly as it always was.
     -- __And all of it as the user meets it__, in a file he can read:
-    -- @examples\/omitted-cases.thena@ is the same four shapes with the prose
+    -- @examples\/OmittedCases.thena@ is the same four shapes with the prose
     -- that says what each one is, and the illegal arm commented out beside
     -- them.
   , testCase "the example file runs to the end" $ do
       (s, _) <- startingSession
-      (_, _, stopped) <- loadProofFile s "examples/omitted-cases.thena"
+      (_, _, stopped) <- loadProofFile s "examples/OmittedCases.thena"
       assertBool (unlines (map show stopped)) (null stopped)
 
     -- __The refusal names the case and not the rule since MS9 phase 230__, his
@@ -747,8 +747,8 @@ splitBase = unlines
 -- and errors loudly, because otherwise every script below would turn into an
 -- unrelated assertion about @split-one@ not existing.
 splitSession :: Session
-splitSession = case loadRuleBases newSession [("split.thena.rules", splitBase)] of
-  (s, BasesLoaded bs) -> withRuleBases (expectedBase ++ bs) s
+splitSession = case loadRuleTexts newSession [("split.thena.rules", splitBase)] of
+  (s, BasesLoaded bs _) -> withRuleBases (expectedBase ++ bs) s
   (_, other)          -> error ("the fixture's base did not load: " ++ show other)
 
 -- --------------------------------------------------------------------------

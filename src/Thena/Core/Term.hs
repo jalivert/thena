@@ -24,10 +24,14 @@ module Thena.Core.Term
   , inDeclarationOf
   , inLemmataOf
   , lemmataStep
+  , inFamilyOf
   , declarationOf
   , declarationNamed
+  , declarationWord
   , globalUnder
   , InScope (..)
+  , concealedHere
+  , revealing
   , innermostOf
   , rootScope
   , openingOnly
@@ -161,6 +165,31 @@ lemmataStep = "lemmata"
 inLemmataOf :: GlobalName -> String -> GlobalName
 inLemmataOf d word = GlobalName (declarationNamespace d ++ [lemmataStep]) word
 
+-- | A name for a generated family member, with the class it is /for/ spelled
+-- as a path inside the family's step: @LC.subst.Source.x@.
+--
+-- __His ruling of 2026-11-10.__ A generated substitution's name has to mention
+-- the token class it substitutes, and a class is a /parameter/ of that function
+-- and not its owner — so the class cannot be a step of the path the way
+-- 'inDeclarationOf' spells ownership. It used to be glued into the word,
+-- @LC.subst-x@, and a word may hold no dot (his ruling of 2026-10-30), so the
+-- class's path was dropped there and nowhere else: two classes of one word then
+-- collapsed onto one name and the grammar was refused.
+--
+-- __The family's own word becomes a step and the class's whole name goes
+-- inside__, which is the shape 'inLemmataOf' already uses for what a datatype
+-- derives: @subst@ is a namespace holding one entry per class reached, and the
+-- entry's path is the class's own. Two classes both written @x@ in two
+-- namespaces land on @LC.subst.A.x@ and @LC.subst.B.x@, so nothing collides and
+-- nothing is refused.
+--
+-- **The simultaneous substitution is not one of these** — it names no class, so
+-- it stays a word beside the namespace through 'inDeclarationOf'. A path step
+-- must begin a name, and the character that makes that word unforgeable cannot.
+inFamilyOf :: GlobalName -> String -> GlobalName -> GlobalName
+inFamilyOf d step cls =
+  GlobalName (declarationNamespace d ++ [step] ++ nameSteps cls) (nameWord cls)
+
 -- | A name as a user writes it, split on the reserved dot: @Nat.elim@ is
 -- @GlobalName ["Nat"] "elim"@, and a word with no dot comes back rooted.
 --
@@ -223,6 +252,26 @@ declarationOf (GlobalName ps _) = case reverse ps of
 declarationNamed :: GlobalName -> GlobalName
 declarationNamed (GlobalName ps w) = GlobalName (ps ++ [w]) w
 
+-- | __The word a declaration takes in the namespace that holds it.__
+--
+-- 'declarationNamed' backwards: @Foo.Foo@ is what a written @Foo@ reaches, so
+-- @declarationWord (GlobalName ["Foo"] "Foo")@ is @Just (GlobalName [] "Foo")@.
+-- A name whose last step is not its own word is nobody's alias and answers
+-- 'Nothing' — only a declaration mints one, which is why a class, a generated
+-- substitution function and a theorem have none.
+--
+-- __It is the one name a declaration takes and does not install__ (MS11 phase
+-- 305, HIS ruling of 2026-11-10). The alias is a resolution fact, so nothing in
+-- the environment holds it, and a door that asks the environment what the
+-- declaration took sees every name but this one. Both doors that care ask here:
+-- 'Thena.Global.Declare.checkNames' refuses a declaration whose alias is
+-- already somebody's name, and 'Thena.Driver.shadowings' announces the word
+-- when it takes one that was reachable.
+declarationWord :: GlobalName -> Maybe GlobalName
+declarationWord (GlobalName ps w) = case reverse ps of
+  s : rest | s == w -> Just (GlobalName (reverse rest) w)
+  _                 -> Nothing
+
 -- | __Where a written name is looked up from.__
 --
 -- **Two lists and they are not the same kind of thing** (MS10 phase 254).
@@ -240,6 +289,36 @@ data InScope = InScope
     -- @namespace X where { … }@ pushes for its declarations
   , scopeOpens  :: [Opened]
     -- ^ the namespaces an @open@ has brought into view, latest first
+  , scopeConcealed :: [[GlobalName]]
+    -- ^ __what the environment holds here and a written name may not reach__
+    -- (MS11 phase 282, @~xdt8c@, his ruling of 2026-11-05): a module resolves
+    -- its names against its own imports, its own declarations and the prelude,
+    -- never against the session.
+    --
+    -- **It subtracts, which is what makes a module's own declarations free.**
+    -- A frame is the session's declarations that the module did not import,
+    -- taken once when its load begins; everything the module itself declares
+    -- arrives afterwards and so is never in it. An allowed-list would have to
+    -- grow at every declaring op, and there are five of them.
+    --
+    -- **A STACK, because an @import@ may state how far it reaches** (MS11 phase
+    -- 291, his design of 2026-11-05): @import M where { … }@ reveals @M@'s
+    -- names for the length of its block and gives them back after it, which is
+    -- one frame pushed and dropped — 'Thena.Instral.Ops.Reveal' and
+    -- 'Thena.Instral.Ops.LeaveReveal', the shape @open@ and @LeaveOpen@ already
+    -- have. 'concealedHere' is the frame that holds, and the ones under it are
+    -- what the enclosing blocks concealed.
+    --
+    -- **Empty at the prompt** — a line typed there is not a module and is not
+    -- isolated, so it keeps the session, and 'concealedHere' of no frames is
+    -- the empty list, which costs a @notElem@ on nothing.
+    --
+    -- **Here and not beside the environment** because 'globalUnder' is the one
+    -- walk every door calls: the resolver's candidate list and
+    -- 'Thena.Engine.knownTo' are two different answers to /what is declared/
+    -- (one reads two tables, the other four), and writing the subtraction at
+    -- each of them is how a name comes to mean one thing in a surface term and
+    -- another in a command's argument.
   }
   deriving (Eq, Show)
 
@@ -316,13 +395,42 @@ innermostOf sc = case scopeWithin sc of
   ns : _ -> ns
   []     -> []
 
--- | At the root, with nothing opened — a prompt's scope before any @open@.
+-- | At the root, with nothing opened and nothing concealed — a prompt's scope
+-- before any @open@.
 rootScope :: InScope
-rootScope = InScope [] []
+rootScope = InScope [] [] []
+
+-- | __What a written name may not reach at this point__ (MS11 phase 291).
+--
+-- The innermost frame of 'scopeConcealed' and nothing under it: a block that
+-- revealed a module's names pushed a frame without them, and the frames beneath
+-- are what the enclosing blocks concealed, waiting for it to be dropped.
+--
+-- **No frames conceals nothing**, which is the prompt and every caller that
+-- builds a scope of its own.
+concealedHere :: InScope -> [GlobalName]
+concealedHere sc = case scopeConcealed sc of
+  f : _ -> f
+  []    -> []
+
+-- | __A module's names, revealed for the length of a block__ (MS11 phase 291).
+--
+-- One frame pushed, being what is concealed here less the names given: the
+-- shape @open@ has, so an @import@ that states how far it reaches needs no
+-- bookkeeping to put the concealment back — 'Thena.Instral.Ops.LeaveReveal'
+-- drops the frame.
+--
+-- **Revealing the same name twice is revealing it once**, so nesting is safe:
+-- @import M where { import M where { … } }@ drops one frame and the name is
+-- still out of the one below it.
+revealing :: [GlobalName] -> InScope -> InScope
+revealing gs sc =
+  sc { scopeConcealed = filter (`notElem` gs) (concealedHere sc)
+                          : scopeConcealed sc }
 
 -- | Only these namespaces open whole, at the root.
 openingOnly :: [[String]] -> InScope
-openingOnly ps = InScope [] (map openedWhole ps)
+openingOnly ps = InScope [] (map openedWhole ps) []
 
 -- | __Which global a written name means, in a scope.__
 --
@@ -361,12 +469,20 @@ globalUnder
   :: (GlobalName -> Bool) -> InScope -> GlobalName
   -> Either [GlobalName] GlobalName
 globalUnder known sc g =
-  case [ c | ns <- scopeWithin sc ++ [[]], c <- under ns, known c ] of
+  case [ c | ns <- scopeWithin sc ++ [[]], c <- under ns, reaches c ] of
     c : _ -> Right c
-    []    -> case nub (filter known (concatMap opened (scopeOpens sc))) of
+    []    -> case nub (filter reaches (concatMap opened (scopeOpens sc))) of
       [g'] -> Right g'
       gs   -> Left gs
   where
+    -- **A concealed name is not in scope, and the walk goes on past it** (MS11
+    -- phase 282, @~xdt8c@) — see 'scopeConcealed'. So inside @A@, a written @x@
+    -- whose @A.x@ the module did not import reaches the root's @x@ if the module
+    -- declared one, and otherwise is reported /not in scope/, which is what it
+    -- is. **Two concealed names cannot make an ambiguity** either: neither is a
+    -- candidate, so nothing is refused for being written twice over.
+    reaches c = known c && c `notElem` concealedHere sc
+
     -- **The whole written name under a prefix**, so @open A@ and a written
     -- @B.c@ tries @A.B.c@.
     --

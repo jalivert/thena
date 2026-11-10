@@ -1,0 +1,10 @@
+-- **The narrowing travelled** (MS11 phase 306): this file imports
+-- `PassesBitOnly` with no clause of its own and reaches `Bit`, which came
+-- through that file's `public import`. `MissesTriTravelled.thena` is the half
+-- that shows `Tri` did not come with it.
+module test.modules.GetsBitOnly where
+
+import test.modules.PassesBitOnly
+
+mine : Bit.Bit
+mine = Bit.on

@@ -1,0 +1,10 @@
+-- **An import that travels** (MS11 phase 287, his ruling of 2026-11-03): this
+-- file passes `Bit` on, so whoever imports this one may write `Bit.Bit` without
+-- importing `Bit` themselves. `Pair.thena` is the same file with a plain
+-- `import`, and `OnlyPair.thena` is what that costs an importer.
+module test.modules.PassesBit where
+
+public import test.modules.Bit
+
+mine : Bit.Bit
+mine = Bit.off

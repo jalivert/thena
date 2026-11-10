@@ -1,0 +1,7 @@
+-- **And the passer's own `exporting ( )` is obeyed** (MS11 phase 287).
+module test.modules.MissesPasser where
+
+import test.modules.PassesNothingOwn
+
+mine : Bit.Bit
+mine = ownThing
