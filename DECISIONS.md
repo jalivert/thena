@@ -6549,10 +6549,25 @@ everything else in the list passes: what is here is what a replay would have to 
 taken up again: read the paths, hash them, and say which have moved. Edit a file
 mid-session and nothing interrupts you.
 
-**It is a hash, not a signature.** Sixteen hex digits of a mixing function, enough to
-tell a file that has moved from one that has not. It is not evidence about who wrote
-the file, and nothing in Thena treats it as evidence — a proof's trustworthiness is
-`:trust`'s business and has nothing to do with this list.
+**It is change detection, and that is deliberate — decided 2026-11-10.** The digest is
+sixteen hex digits of a mixing function (FNV-1a), which is enough to tell a file that has
+moved from one that has not, and it is not forgery-resistant: somebody who wanted to could
+write a different file that hashes the same. **So the list answers *has this file changed
+since the proof was made*, and it is never an answer to *are these the sources this proof
+was checked against*.** The second is a claim about trust, and nothing in Thena makes it —
+a proof's trustworthiness is `:trust`'s business and has nothing to do with this list.
+
+**A frontend must not present the comparison as verification.** *Three of the files this
+session read have changed* is the sentence the list supports; *verified against the
+original sources* is not.
+
+**Why it stops there, since the stronger claim looks close.** It would need the recorded
+digests to be as hard to tamper with as the sources, and they are not: there is no `:save`
+in the engine, so a frontend stores a session — the digest list included — wherever it
+keeps its own data, typically beside the project. Whoever can edit a source file can edit
+the digest recorded for it. Making the hash cryptographic without also protecting the
+store would buy a stronger-sounding claim and no more actual assurance, so Thena makes the
+weaker claim and makes it honestly.
 
 ### The text printers take one rendering, not a grammar list and a counter
 
