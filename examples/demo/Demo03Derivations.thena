@@ -1,0 +1,69 @@
+-- Derivations and runs, written out. A judgment is a type, and a derivation is
+-- an ordinary value of it — so the type-checker checking this file is the same
+-- machine that would check the proof of a theorem.
+--
+--   ./tc examples/demo/Demo03Derivations.thena
+
+module examples.demo.Demo03Derivations where
+
+import examples.demo.Demo01Expressions
+import examples.demo.Demo02Judgments
+
+open Ty
+open Tm
+open typing
+open nvalue
+open value
+open step
+
+-- The term the rest of the file is about.
+prog : Tm
+prog = Tm`( if ( iszero 0 ) then ( succ 0 ) else 0 )`
+
+
+-- ---------------------------------------------------------------------------
+-- A typing derivation is a tree, and here it is as one.
+
+progTyped : typing`⊢ ( if ( iszero 0 ) then ( succ 0 ) else 0 ) : Nat`
+progTyped =
+  T-if Tm`( iszero 0 )` Tm`( succ 0 )` nat Tm`0`
+    (T-isZero Tm`0` T-zero)
+    (T-succ Tm`0` T-zero)
+    T-zero
+
+-- The statement may equally be written with the splice, which is the same type.
+progTypedAgain : typing`⊢ ${prog} : Nat`
+progTypedAgain = progTyped
+
+
+-- ---------------------------------------------------------------------------
+-- Many steps, so a run can be stated. This is the reflexive-transitive
+-- closure of `-->`, and it is an ordinary judgment built on another one.
+
+judgment steps = M -->* N where
+
+  S-done:   ----------------
+            M -->* M
+
+  S-more:   M --> N        N -->* P
+            ------------------------
+            M -->* P
+
+open steps
+
+-- One step: the guard reduces, under E-if.
+guardReduces : step`( if ( iszero 0 ) then ( succ 0 ) else 0 ) --> ( if true then ( succ 0 ) else 0 )`
+guardReduces = E-if Tm`( iszero 0 )` Tm`true` Tm`( succ 0 )` Tm`0` E-isZeroZero
+
+-- And the whole run, to a value.
+progRuns : steps`${prog} -->* ( succ 0 )`
+progRuns =
+  S-more prog Tm`( if true then ( succ 0 ) else 0 )` Tm`( succ 0 )`
+    guardReduces
+    (S-more Tm`( if true then ( succ 0 ) else 0 )` Tm`( succ 0 )` Tm`( succ 0 )`
+      (E-ifTrue Tm`( succ 0 )` Tm`0`)
+      (S-done Tm`( succ 0 )`))
+
+-- …and what it ran to really is finished.
+answerIsValue : value`( succ 0 ) value`
+answerIsValue = V-num Tm`( succ 0 )` (NV-succ Tm`0` NV-zero)

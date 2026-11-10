@@ -1,0 +1,49 @@
+-- THIS FILE DOES NOT LOAD YET, AND THAT IS WHAT IT IS FOR.
+--
+-- It is the demo's intended shape for "write the statement ahead of time,
+-- finish the proof interactively": leave a hole where the proof should be,
+-- load the file, and be looking at the unfinished proof.
+--
+--   ./tc examples/demo/pending/Demo07Holes.thena
+--   stuck: not finished: the hole goal is still open, so there is no term yet
+--
+-- That refusal is measured, not guessed. `?body` and `_` both elaborate by
+-- leaving the hole exactly where it is — that is the rule base's intent, two
+-- clauses of `elaborate` whose bodies are empty — and then the DECLARATION is
+-- refused, because a definition with an open hole has no term. The module is
+-- rolled back and nothing is left to work on.
+--
+-- A `do { … ; yield "…" }` block in a surface file does not get there either:
+-- the message prints, but the development is already gone by the time the
+-- prompt comes back, and a bare `yield` then answers "nothing has yielded".
+--
+-- This is item `~mgqwb` — a hole or yield left in a surface file should hand
+-- you the unfinished proof, not refuse the module — and it is defined in
+-- `.jalivert/agenda/`.
+--
+-- WHAT WORKS TODAY instead, and what the demo uses:
+--
+--   * `Demo05ByTactics.thena.script` — the statement is typed at the prompt
+--     with `:theorem` and the proof is driven by hand. Nothing is left open in
+--     a file.
+--   * `Demo06Trust.thena` — the statement goes in the file as a `trusted`
+--     claim, the theorem that needs it is built on top, and `:trust` is the
+--     list of what is still owed. The debt is discharged later.
+--   * A `do { … ; yield "…" }` block typed at the prompt INSIDE a `:theorem`
+--     does suspend and hand the proof over. It is the file case that does not.
+
+module examples.demo.pending.Demo07Holes where
+
+import examples.demo.Demo01Expressions
+import examples.demo.Demo02Judgments
+
+open Ty
+open Tm
+open typing
+open nvalue
+open value
+
+-- The statement is the interesting half, and it is written out in full.
+-- The proof is left for the session.
+succOfValueIsValue : forall (M : Tm) (n : nvalue`${M} nv`) -> value`( succ ${M} ) value`
+succOfValueIsValue = ?body

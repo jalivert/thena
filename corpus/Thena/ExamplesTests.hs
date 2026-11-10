@@ -117,6 +117,36 @@ tests =
         let (s'', r') = command s ":infer wkIsFalse"
         renderResponse s'' r' @?=
           [ "wkIsFalse : (∀ (G : Ctx) (Xn : String) (D : Ctx) (P : Ty) -> ok`⊢ ${G} , ${Xn} <: ${P} , ${D} ok` -> sub`${G} ⊢ ${P} <: ( ∀ Z <: ⊤ . ⊤ )` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: ( ∀ Z <: ⊤ . ⊤ )`) -> Empty {0}" ]
+    -- **THE DEMO SET — `examples/demo/`, its own session too.** It declares a
+    -- language called @Ty@, as the numbered series does, so the two cannot be
+    -- installed at once. It is here so the demo cannot rot: these files are
+    -- what gets shown to a room, and nothing else loads them.
+    --
+    -- The script is replayed as part of the walk, because its @:theorem@s are
+    -- the interactive half of the same proofs and a broken tactic line is
+    -- exactly the failure this is for.
+    , testCase "the demo set loads, and proves progress both ways" $ do
+        (s0, _) <- startingSession
+        s <- foldl (\ms p -> ms >>= \s1 -> do
+                      (s2, out, trouble) <- loadProofFile s1 p
+                      if null trouble then pure s2 else stopped p s2 out trouble)
+               (pure s0)
+               [ "examples/demo/Demo01Expressions.thena", "examples/demo/Demo02Judgments.thena"
+               , "examples/demo/Demo03Derivations.thena", "examples/demo/Demo04Progress.thena"
+               , "examples/demo/Demo06Trust.thena" ]
+        let script = "examples/demo/Demo05ByTactics.thena.script"
+        (s', out, halted) <- loadFile s script
+        if null halted then pure ()
+          else assertFailure
+                 (unlines ((script ++ " stopped:") : concatMap (renderResponse s') out))
+        let pin cmd expected =
+              let (s'', r) = command s' cmd in renderResponse s'' r @?= expected
+        -- Progress, proved ahead of time in the surface language.
+        pin ":infer progress"
+          [ "progress : ∀ (M : Tm) (T : Ty) -> typing`⊢ ${M} : ${T}` -> Or value`${M} value` (Steps M)" ]
+        -- And a lemma proved again by hand, through the interactive split.
+        pin ":infer predSteps-tactics"
+          [ "predSteps-tactics : ∀ (t : Tm) -> nvalue`${t} nv` -> Steps Tm`( pred ${t} )`" ]
     ]
   where
     numbered f = case stripPrefix "Stlc" f of

@@ -1,0 +1,129 @@
+-- Typing, values and small-step reduction — written the way a paper writes
+-- them, above and below a bar.
+--
+--   ./tc examples/demo/Demo02Judgments.thena
+--
+-- then try   :judgment typing      :show step
+--            :parse typing ⊢ ( succ 0 ) : Nat
+
+module examples.demo.Demo02Judgments where
+
+import examples.demo.Demo01Expressions
+
+-- An `open` does not travel with an `import`, so this file says which
+-- namespaces it is written against. A grammar's metavariables are names under
+-- it too, so a judgment written in them needs the same `open` a bare
+-- constructor does.
+open Ty
+open Tm
+
+-- A judgment is its notation and then its rules. The notation's slots are the
+-- judgment's indices, in order, so this declares
+--
+--   typing : Tm -> Ty -> Type₀
+--
+-- and one constructor per rule. Every metavariable is quantified, in the order
+-- it first appears.
+judgment typing = ⊢ M : T where
+
+  T-true:    -----------------
+             ⊢ true : Bool
+
+  T-false:   -----------------
+             ⊢ false : Bool
+
+  T-zero:    -------------
+             ⊢ 0 : Nat
+
+  T-succ:    ⊢ M : Nat
+             ---------------------
+             ⊢ ( succ M ) : Nat
+
+  T-pred:    ⊢ M : Nat
+             ---------------------
+             ⊢ ( pred M ) : Nat
+
+  T-isZero:  ⊢ M : Nat
+             -------------------------
+             ⊢ ( iszero M ) : Bool
+
+  T-if:      ⊢ M : Bool      ⊢ N : T      ⊢ P : T
+             ---------------------------------------
+             ⊢ ( if M then N else P ) : T
+
+open typing
+
+
+-- ---------------------------------------------------------------------------
+-- What counts as finished. The numbers come first, because `pred` and
+-- `iszero` only reduce when their argument is one.
+
+judgment nvalue = M nv where
+
+  NV-zero:   ----------
+             0 nv
+
+  NV-succ:   M nv
+             ----------------
+             ( succ M ) nv
+
+open nvalue
+
+judgment value = M value where
+
+  V-true:    ---------------
+             true value
+
+  V-false:   ----------------
+             false value
+
+  V-num:     M nv
+             ------------
+             M value
+
+open value
+
+
+-- ---------------------------------------------------------------------------
+-- Call-by-value reduction. A suffix makes another metavariable of the same
+-- language, so `M'` is a term wherever `M` is.
+
+judgment step = M --> N where
+
+  E-ifTrue:    -----------------------------------
+               ( if true then N else P ) --> N
+
+  E-ifFalse:   ------------------------------------
+               ( if false then N else P ) --> P
+
+  E-if:        M --> M'
+               ---------------------------------------------------------
+               ( if M then N else P ) --> ( if M' then N else P )
+
+  E-succ:      M --> M'
+               -----------------------------
+               ( succ M ) --> ( succ M' )
+
+  E-predZero:  ------------------
+               ( pred 0 ) --> 0
+
+  E-predSucc:  M nv
+               ----------------------------
+               ( pred ( succ M ) ) --> M
+
+  E-pred:      M --> M'
+               -----------------------------
+               ( pred M ) --> ( pred M' )
+
+  E-isZeroZero: --------------------------
+                ( iszero 0 ) --> true
+
+  E-isZeroSucc: M nv
+                ----------------------------------
+                ( iszero ( succ M ) ) --> false
+
+  E-isZero:     M --> M'
+                ---------------------------------
+                ( iszero M ) --> ( iszero M' )
+
+open step

@@ -1,0 +1,151 @@
+-- PROGRESS for the language of 01 and 02 — TAPL theorem 8.3.2.
+--
+-- "A well-typed term is either a value or it can take a step": nothing
+-- well-typed gets stuck. This is the file to point at when someone asks what
+-- the tool is FOR.
+--
+--   ./tc examples/demo/Demo04Progress.thena
+--
+-- then try   :infer progress      :trust
+--
+-- Compare it with `examples/Progress.thena`, which proves the same theorem for
+-- the same language over a HAND-WRITTEN `data Term`. Here the language is a
+-- grammar, the judgments are written as a paper writes them, and the proof is
+-- the same shape — which is the point.
+
+module examples.demo.Demo04Progress where
+
+import examples.demo.Demo01Expressions
+import examples.demo.Demo02Judgments
+
+open Ty
+open Tm
+open typing
+open nvalue
+open value
+open step
+
+data Or (A : Type₀) (B : Type₀) : Type₀ where
+  inl : forall (a : A) -> Or A B
+  inr : forall (b : B) -> Or A B
+
+open Or
+
+absurd : forall (C : Type₀) (e : Empty) -> C
+absurd = \ C e -> case e of { }
+
+trueNotNat : forall (d : typing`⊢ true : Nat`) -> Empty
+trueNotNat = \ d -> case d of { }
+
+falseNotNat : forall (d : typing`⊢ false : Nat`) -> Empty
+falseNotNat = \ d -> case d of { }
+
+zeroNotBool : forall (d : typing`⊢ 0 : Bool`) -> Empty
+zeroNotBool = \ d -> case d of { }
+
+succNotBool : forall (M : Tm) (d : typing`⊢ ( succ ${M} ) : Bool`) -> Empty
+succNotBool = \ M d -> case d of { }
+
+nvNotBool : forall (M : Tm) (n : nvalue`${M} nv`) (d : typing`⊢ ${M} : Bool`) -> Empty
+nvNotBool = \ M n -> case n of
+  { NV-zero -> \ dd -> zeroNotBool dd
+  ; NV-succ c1 nn -> \ dd -> succNotBool c1 dd }
+
+canonicalNat : forall (M : Tm) (p : value`${M} value`) (d : typing`⊢ ${M} : Nat`) -> nvalue`${M} nv`
+canonicalNat = \ M p -> case p of
+  { V-true -> \ dd -> absurd nvalue`true nv` (trueNotNat dd)
+  ; V-false -> \ dd -> absurd nvalue`false nv` (falseNotNat dd)
+  ; V-num c1 nn -> \ dd -> nn }
+
+
+-- ---------------------------------------------------------------------------
+-- "Can take a step" and "has not got stuck", as abbreviations.
+
+Steps : Tm -> Type₀
+Steps = \ M -> Sigma Tm (\ u -> step`${M} --> ${u}`)
+
+Progresses : Tm -> Type₀
+Progresses = \ M -> Or value`${M} value` (Steps M)
+
+
+-- ---------------------------------------------------------------------------
+-- Three lemmas that each PRODUCE a step. Each is a `case`, not an
+-- `induction`: none of them recurses, and writing `case` is what makes that a
+-- type rather than a reader's observation.
+
+ifSteps : forall (M : Tm) (N : Tm) (P : Tm) (p : value`${M} value`) (d : typing`⊢ ${M} : Bool`)
+          -> Steps Tm`( if ${M} then ${N} else ${P} )`
+ifSteps = \ M N P p -> case p of
+  { V-true  -> \ dd -> pair Tm (\ u -> step`( if true then ${N} else ${P} ) --> ${u}`) N (E-ifTrue N P)
+  ; V-false -> \ dd -> pair Tm (\ u -> step`( if false then ${N} else ${P} ) --> ${u}`) P (E-ifFalse N P)
+  ; V-num c1 nn -> \ dd -> absurd (Steps Tm`( if ${c1} then ${N} else ${P} )`) (nvNotBool c1 nn dd) }
+
+predSteps : forall (M : Tm) (n : nvalue`${M} nv`) -> Steps Tm`( pred ${M} )`
+predSteps = \ M n -> case n of
+  { NV-zero -> pair Tm (\ u -> step`( pred 0 ) --> ${u}`) Tm`0` E-predZero
+  ; NV-succ c1 nn -> pair Tm (\ u -> step`( pred ( succ ${c1} ) ) --> ${u}`) c1 (E-predSucc c1 nn) }
+
+isZeroSteps : forall (M : Tm) (n : nvalue`${M} nv`) -> Steps Tm`( iszero ${M} )`
+isZeroSteps = \ M n -> case n of
+  { NV-zero -> pair Tm (\ u -> step`( iszero 0 ) --> ${u}`) Tm`true` E-isZeroZero
+  ; NV-succ c1 nn -> pair Tm (\ u -> step`( iszero ( succ ${c1} ) ) --> ${u}`) Tm`false` (E-isZeroSucc c1 nn) }
+
+
+-- ---------------------------------------------------------------------------
+-- PROGRESS — TAPL theorem 8.3.2. A well-typed term is a value, or it steps.
+--
+-- It is an induction on the TYPING derivation, and `progress c1 Bool d1` in
+-- the `T-if` arm is NOT a call: elaboration ties it to the induction
+-- hypothesis the method already holds about `d1`. A call that is not about a
+-- subderivation has no hypothesis to tie to and is refused — so this reads
+-- like the recursive function it is, and nothing names a hypothesis binder.
+
+progress : forall (M : Tm) (T : Ty) (d : typing`⊢ ${M} : ${T}`) -> Progresses M
+progress = \ M T d -> induction d of
+  { T-true  -> inl value`true value` (Steps Tm`true`) V-true
+  ; T-false -> inl value`false value` (Steps Tm`false`) V-false
+
+  ; T-if c1 c2 U c3 d1 d2 d3 ->
+      case (progress c1 bool d1) of
+        { inl v1 -> inr value`( if ${c1} then ${c2} else ${c3} ) value`
+                        (Steps Tm`( if ${c1} then ${c2} else ${c3} )`)
+                        (ifSteps c1 c2 c3 v1 d1)
+        ; inr s1 ->
+            case s1 of
+              { pair a b -> inr value`( if ${c1} then ${c2} else ${c3} ) value`
+                                (Steps Tm`( if ${c1} then ${c2} else ${c3} )`)
+                                (pair Tm (\ u -> step`( if ${c1} then ${c2} else ${c3} ) --> ${u}`)
+                                   Tm`( if ${a} then ${c2} else ${c3} )` (E-if c1 a c2 c3 b)) } }
+
+  ; T-zero -> inl value`0 value` (Steps Tm`0`) (V-num Tm`0` NV-zero)
+
+  ; T-succ c1 dd ->
+      case (progress c1 nat dd) of
+        { inl v1 -> inl value`( succ ${c1} ) value` (Steps Tm`( succ ${c1} )`)
+                        (V-num Tm`( succ ${c1} )` (NV-succ c1 (canonicalNat c1 v1 dd)))
+        ; inr s1 ->
+            case s1 of
+              { pair a b -> inr value`( succ ${c1} ) value` (Steps Tm`( succ ${c1} )`)
+                                (pair Tm (\ u -> step`( succ ${c1} ) --> ${u}`)
+                                   Tm`( succ ${a} )` (E-succ c1 a b)) } }
+
+  ; T-pred c1 dd ->
+      case (progress c1 nat dd) of
+        { inl v1 -> inr value`( pred ${c1} ) value` (Steps Tm`( pred ${c1} )`)
+                        (predSteps c1 (canonicalNat c1 v1 dd))
+        ; inr s1 ->
+            case s1 of
+              { pair a b -> inr value`( pred ${c1} ) value` (Steps Tm`( pred ${c1} )`)
+                                (pair Tm (\ u -> step`( pred ${c1} ) --> ${u}`)
+                                   Tm`( pred ${a} )` (E-pred c1 a b)) } }
+
+  ; T-isZero c1 dd ->
+      case (progress c1 nat dd) of
+        { inl v1 -> inr value`( iszero ${c1} ) value` (Steps Tm`( iszero ${c1} )`)
+                        (isZeroSteps c1 (canonicalNat c1 v1 dd))
+        ; inr s1 ->
+            case s1 of
+              { pair a b -> inr value`( iszero ${c1} ) value` (Steps Tm`( iszero ${c1} )`)
+                                (pair Tm (\ u -> step`( iszero ${c1} ) --> ${u}`)
+                                   Tm`( iszero ${a} )` (E-isZero c1 a b)) } }
+  }
