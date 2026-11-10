@@ -1,7 +1,7 @@
 # Example programs
 
 Real Thena programs. **Every file here loads as it stands**, and together they
-show what the language can do at this point. There are two sets.
+show what the language can do at this point. There are three sets.
 
 ## The object-language series — numbered, read in order
 

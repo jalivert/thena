@@ -2012,7 +2012,7 @@ constraints and all; reduce, infer types and test convertibility, with smaller
 universes sitting inside larger ones; unify, including parking equations it
 cannot yet decide; prove theorems by hand at the REPL with full undo; do
 induction on data and on inductively defined relations; dispatch named rules
-with backtracking; check finished proofs with an independent kernel; and load
+with backtracking; check finished proofs with the kernel; and load
 files of commands.
 
 It also has a **surface language** — layout-sensitive, with implicit arguments
