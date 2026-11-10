@@ -27,8 +27,8 @@ one paragraph, not three; the full argument lives in the design notes.
 ### An identifier may contain almost anything
 
 *Decided 2026-08-25; consequences accepted 2026-08-29. The keyword list is
-reviewed whenever a word is reserved — most recently 2026-10-19. The dot was
-reserved on 2026-10-30, for namespaces.*
+reviewed whenever a word is reserved — most recently 2026-11-10, when the module
+system's five were accepted. The dot was reserved on 2026-10-30, for namespaces.*
 
 Most languages reserve a generous set of punctuation and give you the rest.
 Thena does the opposite: it reserves as little as it can, so you can name things
@@ -47,6 +47,14 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
+
+**Every keyword is unconditional — decided 2026-11-10.** A word in that row is never an
+identifier, anywhere, whatever surrounds it: `import` cannot name a theorem, a definition,
+a constructor, a rule, a metavariable, or a constructor of a language you are modelling.
+Some languages make a word a keyword only in the position that uses it; Thena does not,
+because the gain is five names nobody has asked for and the price is a special case per
+word in the grammar. **The module system's five — `consult`, `import`, `exporting`,
+`private`, `public` — were taken on that basis**, and the row above is the whole list.
 
 **The corners are reserved and spell nothing**, which is the one oddity in the
 table: they were the old notation for an embedded core term, removed on
