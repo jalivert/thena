@@ -625,7 +625,7 @@ def lam(bs, body):
 # about the copies instead of the entries. It cost 90 of the 157 `try-core`
 # lines, and it was paid again when phase 199 closed the closure backwards.
 #
-# **MS9 phase 211 removed the need for it** (`~84x46`): `eliminate-core` is
+# **MS9 phase 211 removed the need for it**: `eliminate-core` is
 # §3.7 again — the motive abstracts the target and its indices, every premise
 # stays fixed — and the generalising construction is `eliminate-generalising-core`,
 # which nothing here calls. So the mirror is deleted rather than maintained, and

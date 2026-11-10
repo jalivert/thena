@@ -43,7 +43,7 @@ regret : ()
 rule regret :- when focus-is-guess do prim-regret
 
 -- THE TWO ELIMINATIONS, AND THEY ARE TWO RULES BECAUSE THEY ARE TWO
--- CONSTRUCTIONS (MS9 phase 211, `~84x46`).
+-- CONSTRUCTIONS (MS9 phase 211).
 --
 -- `eliminate-core` is §3.7's: the motive abstracts the target and its indices,
 -- every premise stays fixed, and an equation about a variable bound before the
@@ -523,7 +523,7 @@ rule intro-arm-binders ps [(b, (some f)), ...bs] vs ds fs k :- when (binder-is-c
      ; r = intro-arm-binders ps bs vs ds2 fs k
      ; return r
 
--- WHAT A FRIENDLY INDEX'S AMBIENT NAME MEANS INSIDE THE ARM — `~8v3pg`. A split
+-- WHAT A FRIENDLY INDEX'S AMBIENT NAME MEANS INSIDE THE ARM. A split
 -- abstracts an index the target supplies as a plain variable OUTRIGHT, with no
 -- equation about it, because abstracting it already generalises everything that
 -- mentions it. So no copy is quantified, and the two clauses above have nothing
@@ -979,7 +979,7 @@ rule without-hypotheses [c, ...cs] :-
 --
 -- EACH ENDS WHERE IT WAS INVOKED, and that is deliberate: the author asked for a
 -- split here, and the walk's last step is wherever the last case happened to
--- leave it. Which goal to show next is `~g3qnw`'s question — focusing the next
+-- leave it. Which goal to show next is a separate question — focusing the next
 -- goal by itself — and is not answered by a tactic guessing.
 induction-core : Core -> ()
 rule induction-core t :- when focus-is-hole

@@ -1972,7 +1972,7 @@ one.** What the middle setting refuses is a claim that is provably false, and a
 claim can be discharged at every instance anybody has written down and still be
 nonsense: `Empty` is provable that way. It stops accidents, not adversaries.
 
-**`no trust` still admits a *discharged* claim — item `~xhf2g`, and this is the
+**`no trust` still admits a *discharged* claim, and this is the
 one part of the above that is a choice rather than a consequence.** A claim whose
 two types are convertible is met, so the body already has the type the node
 asserts and the node reduces away; refusing it would refuse a term that is sound.
@@ -2000,7 +2000,7 @@ So the strictest setting admits exactly what the reducer would contract away, an
 nothing else: at that setting every asserted type in a proof is one the system
 could have erased.
 
-**The alternative reading, kept as `~xhf2g`, is that the setting should mean *no
+**The alternative reading, kept open, is that the setting should mean *no
 asserted type reaches this proof at all*.** That is a stricter promise and a
 one-line change. **What it would cost is smaller than it first appears, and the
 earlier claim here was wrong**: it is not that the prelude becomes unusable

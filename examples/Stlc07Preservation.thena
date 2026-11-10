@@ -50,7 +50,7 @@
 --     rewrite the goal's own occurrences of it. That is what `with` is for,
 --     and `with` is not built.
 --   * `arrowInj`, whose equation has a compound term built from AMBIENT
---     variables on both sides (`~2d9xj`).
+--     variables on both sides.
 
 module examples.Stlc07Preservation where
 
@@ -229,7 +229,7 @@ ctxInvEmpty = \ y U i -> case i of { }
 -- `Stlc08PreservationByTactics.thena.script` replays this development by hand
 -- and still calls them.** `extendInj` and `appInj`/`absInj` are no-confusion
 -- for the reason `arrowInj` is: both sides of the equation are compound terms
--- over AMBIENT variables, so a split cannot solve either (`~2d9xj`).
+-- over AMBIENT variables, so a split cannot solve either.
 extendInj : forall (G0 : Ctx) (x : String) (T : Ty) (G : Ctx) (a : String) (S : Ty)
               (e : Eq Ctx (extend G0 x T) (extend G a S))
               -> And (Eq Ctx G0 G) (And (Eq String x a) (Eq Ty T S))
@@ -291,8 +291,7 @@ weaken : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (G1 : Ctx) (inc :
 -- writes, and what every other proof in this file now does — is refused by the
 -- kernel at the `T-abs` arm's recursive call, because the induction hypothesis
 -- there is pinned to the ambient `G` while the recursion is at `G , x : S`.
--- The decision behind it is his and is `~wk9qh` in
--- `.jalivert/agenda/UNALLOCATED.md`.
+-- That it is left this way is his decision, not an oversight.
 weaken = \ G t T d G1 inc -> induction d of
   { T-var x T0 G0 i -> T-var x T0 G1 (inc x T0 i)
   ; T-abs G0 x S E T0 d0 ->
@@ -577,8 +576,8 @@ substLemma = \ x S E T N d dn ->
 -- **`arrowInj` CANNOT be a split and stays no-confusion**: both sides of
 -- its equation are compound terms built from AMBIENT variables, and a split can
 -- solve only a binder of the method it is in — `case e of { refl k -> … }` is
--- refused with *A and C cannot be made equal*. That is `~2d9xj`, and it is the
--- one place in this file where the style does not reach.
+-- refused with *A and C cannot be made equal*. It is the one place in this
+-- file where the style does not reach.
 arrowInj : forall (A : Ty) (B : Ty) (C : Ty) (D : Ty) (e : Eq Ty (arrow A B) (arrow C D)) -> And (Eq Ty A C) (Eq Ty B D)
 arrowInj = \ A B C D e -> Ty.lemmata.noConfusion (arrow A B) (arrow C D) e
 
@@ -632,7 +631,7 @@ preservation : forall (M : LC) (M1 : LC) (T : Ty) (d : typing empty M T) (s : st
 preservation = \ M M1 T d s -> induction s of
   -- β: the function's body, typed under x : T1, with the argument put for x.
   --
-  -- **The β arm is where the style stops, and `~2d9xj` is why.** Splitting the
+  -- **The β arm is where the style stops, and here is why.** Splitting the
   -- function's own derivation directly — `case d1 of { T-abs … }` on a
   -- `typing empty ( λ x : T1 . E ) ( S -> T )` — would have to identify the
   -- `S` the application arm bound with the `T1` the step rule bound, and both
