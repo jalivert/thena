@@ -1,0 +1,10 @@
+-- **An import that narrows with a name list** (MS11 phase 306, `~htngj`, his
+-- design of 2026-11-05). `Twins` offers `Bit` and `Tri`; this file asks for
+-- `Bit` and writes it. `MissesTri.thena` is the other half: the same clause,
+-- and `Tri` refused.
+module test.modules.TakesBit where
+
+import test.modules.Twins ( Bit )
+
+mine : Bit.Bit
+mine = Bit.off

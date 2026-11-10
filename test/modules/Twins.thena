@@ -1,0 +1,11 @@
+-- **Two datatypes in one file**, so that an import's clause has something to
+-- narrow (MS11 phase 306, `~htngj`). It states no interface, so it offers both.
+module test.modules.Twins where
+
+data Bit : Type₀ where
+  off : Bit
+  on : Bit
+
+data Tri : Type₀ where
+  lo : Tri
+  hi : Tri

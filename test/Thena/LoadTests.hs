@@ -25,6 +25,7 @@ import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (Core (..), GlobalName (..), rootName)
 import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..), Warning (..))
 import Thena.Declared (declaredAs, named)
+import Thena.Instral.Concrete (Selection (..))
 import Thena.Driver
   ( CommandError (..)
   , LoadError (..)
@@ -133,6 +134,7 @@ tests =
     , testGroup "a header states the file's interface (MS11 phase 285)" exportTests
     , testGroup "a declaration may be the file's own (MS11 phase 286)" privateTests
     , testGroup "an import may travel (MS11 phase 287)" publicImportTests
+    , testGroup "an import may narrow (MS11 phase 306)" narrowedImportTests
     , testGroup "a consult may travel (MS11 phase 288)" publicConsultTests
     , testGroup "a rule base publishes too (MS11 phase 289)" publicBaseTests
     , testGroup "a header may withhold instead (MS11 phase 290)" hidingTests
@@ -998,7 +1000,7 @@ isolationTests =
     testCase "and an import takes that module's names out of it" $ do
       (s0, _) <- startingSession
       (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
-      let hidden = map nameDotted (concealedFrom [named' "test.modules.Bit"] s1)
+      let hidden = map nameDotted (concealedFrom [(named' "test.modules.Bit", SelectWide)] s1)
       assertBool (show hidden) ("Bit.Bit" `notElem` hidden)
       assertBool (show hidden) ("Bit.off" `notElem` hidden)
   ]
@@ -2927,6 +2929,144 @@ privateIn' src = case parseSurfaceModule src of
 -- @GetsBit@ imports @PassesBit@ and is not. A test that only showed the second
 -- could not tell a @public import@ that works from an import that was
 -- transitive all along.
+
+-- | __An import may narrow with a name list__ (MS11 phase 306, @~htngj@) — his
+-- design of 2026-11-05 and his ruling of 2026-11-10 that **a narrowed
+-- @public import@ passes on the narrowing**.
+--
+-- The fixtures are @Twins@ (two datatypes, offering both) and the files that
+-- take it apart. **Every case is a pair**: what the clause let through, and what
+-- it kept out, because a filter that quietly matched nothing would pass the
+-- first half of each on its own.
+narrowedImportTests :: [TestTree]
+narrowedImportTests =
+  [ testCase "a name list narrows what the importer may write" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/TakesBit.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= [ "test.modules.Twins", "test.modules.TakesBit" ]
+
+  , testCase "and what it kept out is concealed" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/MissesTri.thena"
+      assertBool (unwords (concatMap (renderResponse s0) out))
+                 (any (isInfixOf "not in scope: Tri.Tri")
+                      (concatMap (renderResponse s0) out))
+
+  , -- **The other word, and one clause either way** — a header's choice and an
+    -- @open@'s, said again on an import.
+    testCase "hiding is the same clause with the other word" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/HidesTri.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= [ "test.modules.Twins", "test.modules.HidesTri" ]
+
+  , -- **HIS RULING OF 2026-11-10**: /"User gets `off` and not `flip`. That's how
+    -- it should be."/
+    testCase "a narrowed public import passes the narrowing on" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsBitOnly.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= [ "test.modules.Twins", "test.modules.PassesBitOnly"
+            , "test.modules.GetsBitOnly" ]
+
+  , testCase "and what it narrowed away does not travel" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/MissesTriTravelled.thena"
+      assertBool (unwords (concatMap (renderResponse s0) out))
+                 (any (isInfixOf "not in scope: Tri.Tri")
+                      (concatMap (renderResponse s0) out))
+
+  , -- **Filters compose along a chain**, which is the walk being a tree now:
+    -- the clause is written one file further away and still holds.
+    testCase "a narrowing survives a second hop" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsTwoHopNarrowing.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= [ "test.modules.Twins", "test.modules.PassesBitOnly"
+            , "test.modules.PassesPasser", "test.modules.GetsTwoHopNarrowing" ]
+
+  , testCase "and the second hop does not widen it" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/MissesTriTwoHops.thena"
+      assertBool (unwords (concatMap (renderResponse s0) out))
+                 (any (isInfixOf "not in scope: Tri.Tri")
+                      (concatMap (renderResponse s0) out))
+
+  , -- **HIS CASE OF 2026-11-10** — a file that wants the whole module for itself
+    -- and re-exports part of it, written as two lines naming one module. **They
+    -- are independent facts and the record may not collapse them.**
+    testCase "a plain import beside a narrowed public import of one module" $ do
+      (s0, _) <- startingSession
+      (_, out, trouble) <- loadProofFile s0 "test/modules/BothLines.thena"
+      assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
+      [ nm | ProofLoaded nm _ _ _ <- out ]
+        @?= [ "test.modules.Twins", "test.modules.BothLines" ]
+
+  , testCase "and only the narrowed line's names travel" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/GetsOnlyWhatTravelled.thena"
+      assertBool (unwords (concatMap (renderResponse s0) out))
+                 (any (isInfixOf "not in scope: Tri.Tri")
+                      (concatMap (renderResponse s0) out))
+
+  , -- **A clause that asked for nothing the module has is REFUSED** — phase
+    -- 306's own call, and the message is why: without it the file was read with
+    -- everything the clause was about concealed and failed at its first name.
+    testCase "a clause naming what the module does not offer is refused" $ do
+      (s0, _) <- startingSession
+      (_, out, _) <- loadProofFile s0 "test/modules/TypoClause.thena"
+      assertBool (unwords (concatMap (renderResponse s0) out))
+                 (any (isInfixOf "test.modules.Twins offers no Nonesuch")
+                      (concatMap (renderResponse s0) out))
+
+  , -- **The clause is on both grammars' @import@**, so a rule file narrows the
+    -- same way and the grammar keys come through the same prefix test.
+    testCase "a rule file's import narrows too" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (_, out, trouble) <-
+        consultRuleFiles s1 ["test/modules/NarrowsTwins.thena.rules"]
+      assertBool (show (map (renderTrouble s1) trouble)) (null trouble)
+      assertBool (unwords (concatMap (renderResponse s1) out))
+                 (any (isInfixOf "narrows") (concatMap (renderResponse s1) out))
+
+  , testCase "and a rule file's clause is refused the same way" $ do
+      (s0, _) <- startingSession
+      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (_, out, trouble) <-
+        consultRuleFiles s1 ["test/modules/MissesLangInBase.thena.rules"]
+      let said = concatMap (renderResponse s1) out
+                   ++ concatMap (renderTrouble s1) trouble
+      assertBool (unwords said)
+                 (any (isInfixOf "test.modules.Lang offers no Nonesuch") said)
+
+  , -- **The clause is carried on the item**, which is what the printers write
+    -- back: an import whose clause were dropped would read back taking the
+    -- whole module.
+    testCase "the item carries the clause the line wrote" $ do
+      let src = "module M where\n\nimport test.modules.Twins ( Bit )\n"
+      case parseSurfaceModule src of
+        Right (_, items) ->
+          map snd (fileImports items) @?= [SelectOnly [([], "Bit")]]
+        Left e -> assertFailure (show e)
+
+  , -- **And the other word, and @( )@ is not no clause at all.**
+    testCase "hiding and an empty list are distinct clauses" $ do
+      let one w = "module M where\n\nimport test.modules.Twins " ++ w ++ "\n"
+      case ( parseSurfaceModule (one "hiding ( Tri )")
+           , parseSurfaceModule (one "( )")
+           , parseSurfaceModule (one "") ) of
+        (Right (_, a), Right (_, b), Right (_, c)) ->
+          map (map snd . fileImports) [a, b, c]
+            @?= [ [SelectHiding [([], "Tri")]], [SelectOnly []], [SelectWide] ]
+        _ -> assertFailure "one of the three did not parse"
+  ]
+
 publicImportTests :: [TestTree]
 publicImportTests =
   [ -- **The word is what makes the difference**, and @OnlyPair@ above is the
@@ -2978,7 +3118,7 @@ publicImportTests =
       case parseSurfaceModule src of
         Right (_, items) -> do
           map moduleText (moduleImports items) @?= ["test.modules.Bit"]
-          map moduleText (publicImports items) @?= ["test.modules.Bit"]
+          map (moduleText . fst) (publicImports items) @?= ["test.modules.Bit"]
         Left e -> assertFailure (show e)
 
   , -- **And a plain import is in the first list only.**
@@ -3041,7 +3181,7 @@ scopedImportTests =
       case parseSurfaceModule src of
         Right (_, items) ->
           ( map moduleText (moduleImports items)
-          , map moduleText (fileImports items) )
+          , map (moduleText . fst) (fileImports items) )
             @?= (["test.modules.Bit"], [])
         Left e -> assertFailure (show e)
 
@@ -3052,7 +3192,7 @@ scopedImportTests =
       case parseSurfaceModule src of
         Right (_, items) ->
           ( map moduleText (moduleImports items)
-          , map moduleText (fileImports items) )
+          , map (moduleText . fst) (fileImports items) )
             @?= (["test.modules.Bit"], ["test.modules.Bit"])
         Left e -> assertFailure (show e)
   ]
@@ -3296,9 +3436,9 @@ langInterfaceTests =
       withheld <- loaded "test/modules/WithheldLang.thena"
       shared   <- loaded "test/modules/SharesLang.thena"
       assertBool "withheld: the key is concealed"
-        (key `elem` concealedFrom [named' "test.modules.WithheldLang"] withheld)
+        (key `elem` concealedFrom [(named' "test.modules.WithheldLang", SelectWide)] withheld)
       assertBool "shared: the key is not"
-        (key `notElem` concealedFrom [named' "test.modules.SharesLang"] shared)
+        (key `notElem` concealedFrom [(named' "test.modules.SharesLang", SelectWide)] shared)
 
   , -- **The rule file is the case that leaked.** Refused at the TAG now, which
     -- is the refusal a base that never imported the language gets.

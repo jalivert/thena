@@ -29,6 +29,7 @@ import Thena.Driver (Item (..), moduleHiding, moduleText)
 import Thena.Surface.Concrete
   ( Surface (..)
   , Reach (..)
+  , Selection (..)
   , SurfaceConstructor (..)
   , SurfaceData (..)
   )
@@ -64,7 +65,12 @@ printItem i = case i of
   ItemConsult r m ds -> reaches (reaching r ++ "consult " ++ moduleText m) ds
   -- **The same, for the same reason** (MS11 phase 274): a file printed without
   -- its imports would read back and then not elaborate at all.
-  ItemImport r m ds -> reaches (reaching r ++ "import " ++ moduleText m) ds
+  -- **And its clause, between the name and the block** (MS11 phase 306,
+  -- @~htngj@) — the order the grammar reads it in, so a narrowed import printed
+  -- and read back narrows the same way. A file printed without it would read
+  -- back taking the whole module.
+  ItemImport r m sel ds ->
+    reaches (reaching r ++ "import " ++ moduleText m ++ importClause sel) ds
   -- **Never printed here** (MS11 phase 285) — it is the header's and
   -- 'printSurfaceModule' puts it back there. A module printed item by item
   -- without the header has no place for it.
@@ -96,6 +102,17 @@ printItem i = case i of
 -- **One printer for both acts again**, because how far an act reaches is said
 -- the same way by both — and it is a @namespace@ block's layout, two spaces in
 -- with the items a blank line apart, because that is what reads back.
+-- | An import's own clause, as written (MS11 phase 306). @SelectOnly []@ is
+-- @( )@ and round-trips: an import that deliberately takes nothing is not the
+-- same line as one with no clause at all.
+importClause :: Selection -> String
+importClause sel = case sel of
+  SelectWide      -> ""
+  SelectOnly ns   -> " ( " ++ unwords (map named ns) ++ " )"
+  SelectHiding ns -> " hiding ( " ++ unwords (map named ns) ++ " )"
+  where
+    named (ps, x) = nameDotted (GlobalName ps x)
+
 reaches :: String -> Maybe [Item] -> [String]
 reaches line Nothing   = [line]
 reaches line (Just is) =

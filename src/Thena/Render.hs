@@ -358,6 +358,12 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   -- **Both names, because either one could be the typo** (MS11 phase 278): the
   -- file may be in the wrong place or the header may be wrong, and nothing here
   -- can tell which the user meant.
+  -- **The module and every name of the clause that missed** (MS11 phase 306,
+  -- @~htngj@), because a clause is written as a list and a reader fixing one
+  -- typo wants the rest of them in the same breath. **The module is named
+  -- first**, since what the clause asked for is only wrong relative to it.
+  ImportSelectsUnoffered m gs ->
+    [ moduleText m ++ " offers no " ++ intercalate ", " (map (nameString ren) gs) ]
   ModuleMisnamed reached header ->
     [ "imported as " ++ moduleText reached ++ ", but its header says "
         ++ moduleText header ]
@@ -2398,6 +2404,11 @@ renderRuleFileError ren path e = case e of
   RuleImportsUnread ms ->
     [ path ++ ": imports " ++ intercalate ", " (map moduleText ms)
         ++ ", and they were not read" ]
+  -- **'ImportSelectsUnoffered' with the path in front of it** (MS11 phase 306):
+  -- the same sentence, because it is the same mistake in the other syntax.
+  RuleSelectsUnoffered m gs ->
+    [ path ++ ": " ++ moduleText m ++ " offers no "
+        ++ intercalate ", " (map (nameString ren) gs) ]
 
 renderRuleError :: Rendering -> RuleError -> String
 renderRuleError ren e = whereRuleError ren e ++ whatRuleError e

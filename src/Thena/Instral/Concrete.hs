@@ -26,6 +26,7 @@
 module Thena.Instral.Concrete
   ( RawDecl (..)
   , Reach (..)
+  , Selection (..)
   , RawOpen (..)
   , RawOpenSpec (..)
   , RawFunction (..)
@@ -113,7 +114,7 @@ data RawDecl
     -- ^ @open X@ — in force from here to the end of the file
   | DeclOpenIn RawOpen RawDecl
     -- ^ @open X in ‹declaration›@ — in force for that declaration alone
-  | DeclImport Reach [String] String (Maybe [RawDecl])
+  | DeclImport Reach [String] String Selection (Maybe [RawDecl])
     -- ^ @import ‹module›@, @public import ‹module›@ — **a surface module this
     -- base depends on** (MS11 phase 276, his ruling of 2026-11-03; the 'Reach'
     -- at phase 289; the block at phase 299).
@@ -195,6 +196,35 @@ data RawDecl
 data Reach
   = Own     -- ^ @import X@, @consult X@ — this module's own dependency
   | Public  -- ^ @public import X@, @public consult X@ — and its importers' too
+  deriving (Eq, Show)
+
+-- | __A clause that narrows a list of names: all of them, only these, or all
+-- but these__ (MS11 phase 306, @~htngj@).
+--
+-- **One type for the two places a file narrows**, which is why it is here
+-- beside 'Reach' and not beside either syntax's own trees:
+--
+--   * a header's @exporting ( … )@ or @hiding ( … )@ — what the file offers;
+--   * an import's own @( … )@ or @hiding ( … )@ — what the importer takes.
+--
+-- **They are the same operation on the same shape**, and the matching rule is
+-- one rule — a listed name covers everything under it, step for step
+-- ('Thena.Driver.selects'), so @( Bit )@ takes the whole @Bit@ namespace
+-- exactly as @hiding ( Tri )@ keeps constructors back with their type.
+--
+-- **'SelectWide' and @SelectOnly []@ are different clauses.** No clause at all
+-- is wide — every file written before MS11 phase 285, and every import written
+-- before phase 306; @( )@ is a clause that deliberately names nothing.
+--
+-- **One clause and either word, never both**, which is the choice phase 290
+-- settled for a header and @open X ( … )@ / @open X hiding ( … )@ made before
+-- it. A name the clause lists that the module does not offer is **refused**,
+-- which is phase 306's own call and is 'Thena.Driver.LoadError''s
+-- @SelectsUnoffered@.
+data Selection
+  = SelectWide                            -- ^ no clause — everything there is
+  | SelectOnly   [([String], String)]     -- ^ @( … )@ — these and no more
+  | SelectHiding [([String], String)]     -- ^ @hiding ( … )@ — everything but these
   deriving (Eq, Show)
 
 -- | What an @open@ line in a rule file said: the namespaces it names, and what

@@ -277,7 +277,7 @@ import Thena.Surface.Concrete
   , SurfaceOpenSpec (..)
   , Reach (..)
   , SurfaceModule (..)
-  , SurfaceExports (..)
+  , Selection (..)
   , PairingError (..)
   )
 import Thena.Surface.Layout (layout, layoutFile)
@@ -461,7 +461,7 @@ data Session = Session
     --
     -- **An entry only where there is a module name to key it by**, and **not in
     -- a 'Snapshot'**, both for 'sessionDeclaredBy''s reasons.
-  , sessionPublicImports :: [(ModuleName, [ModuleName])]
+  , sessionPublicImports :: [(ModuleName, [(ModuleName, Selection)])]
     -- ^ __Which of each module's imports travel on to its importers__ (MS11
     -- phase 287, @~jmw4k@) — what its @public import@ lines named.
     --
@@ -1217,6 +1217,22 @@ data Response
     -- moment a walk resolves a name to a file. A module loaded by a path, or
     -- typed at the prompt, is never asked — so this refusal can only come out
     -- of "Thena.Files"'s walk.
+  | ImportSelectsUnoffered ModuleName [GlobalName]
+    -- ^ **an import's clause named something the module does not offer** (MS11
+    -- phase 306, @~htngj@) — the module, then every name of the clause that
+    -- covers nothing it hands over.
+    --
+    -- **Refused rather than ignored, and that was the phase's call to make.** A
+    -- clause is a filter, so an unmatched name narrows nothing and says nothing:
+    -- @import Twins ( Nonesuch )@ took everything out and the file then failed
+    -- three lines later with /not in scope: Bit.Bit/, which names neither the
+    -- clause nor the typo. **@open X ( … )@ still behaves the old way** — it is
+    -- left exactly as it is, which is also his — so this is the one clause that
+    -- is checked.
+    --
+    -- **Both tables are asked**, names and grammar keys, because a clause
+    -- narrows both (phase 303's ruling): @( LC )@ naming a language the module
+    -- offers is not a typo.
   | ConsultRequested [FilePath] [Warning]
     -- ^ @:consult@ on one or more rule-base paths (MS11 phase 271). Like
     -- 'RulesRequested' it only names them — reading is "Thena.Files"'s (§12
@@ -1751,9 +1767,9 @@ parseSurfaceModule src = do
   -- **And a @hiding ( … )@ clause the same way** (MS11 phase 290): one slot on
   -- the header, two words, so exactly one of these items can arise.
   let hdr = case surfaceModuleExports m of
-        ExportsWide       -> []
-        ExportsOnly   es  -> [ItemExporting (map resolvedName es)]
-        ExportsHiding es  -> [ItemHiding (map resolvedName es)]
+        SelectWide       -> []
+        SelectOnly   es  -> [ItemExporting (map resolvedName es)]
+        SelectHiding es  -> [ItemHiding (map resolvedName es)]
       resolvedName (ps, x) = GlobalName ps x
   Right (moduleFromSteps (surfaceModuleSteps m) (surfaceModuleWord m), hdr ++ is)
 
@@ -1819,7 +1835,7 @@ data Item
     -- file is searched against is 'consultPushes', and whether a base travels
     -- is 'publicPushes'. 'moduleConsults' — the list the door with no IO
     -- refuses on — ignores it, because an unread base is unread either way.
-  | ItemImport Reach ModuleName (Maybe [Item])
+  | ItemImport Reach ModuleName Selection (Maybe [Item])
     -- ^ @import ‹module›@ (MS11 phase 274) — **a surface module this one depends
     -- on**, named as a file and not as a namespace — **and how far it reaches**
     -- (phase 291).
@@ -1930,9 +1946,9 @@ regroup = go
       inner <- traverse go ds
       Right ([ItemConsult r (moduleFromSteps ps x) inner], rest)
     -- A file's name again, and the steps are directories again (MS11 phase 274).
-    one (SurfaceImport r ps x ds : rest) = do
+    one (SurfaceImport r ps x sel ds : rest) = do
       inner <- traverse go ds
-      Right ([ItemImport r (moduleFromSteps ps x) inner], rest)
+      Right ([ItemImport r (moduleFromSteps ps x) sel inner], rest)
     one (SurfaceNamespace ps x ds : rest) = do
       inner <- go ds
       Right ([ItemNamespace (GlobalName ps x) inner], rest)
@@ -1975,9 +1991,11 @@ regroup = go
 -- not travel at all now, so there is one route into a file and one list here —
 -- 'openedFrom' says why.
 data Brought = Brought
-  { broughtImport  :: ModuleName -> [GlobalName]
+  { broughtImport  :: ModuleName -> Selection -> [GlobalName]
     -- ^ what @import M where { … }@ reveals: @M@'s exports and the closure over
-    -- its @public import@s.
+    -- its @public import@s, **narrowed by the import's own clause** (MS11 phase
+    -- 306) — a scoped import narrows exactly as a file-wide one does, which is
+    -- what 'reachedBy' being one function already guaranteed.
   , broughtConsult :: ModuleName -> ([RuleBase], [GlobalName])
     -- ^ what @consult B where { … }@ brings: the bases to push, **in search
     -- order**, and the names they publish — a base's @public import@ hands its
@@ -1998,7 +2016,7 @@ data Brought = Brought
 -- never been anything but ignored — @:consult@ is the command that pushes a
 -- base.
 broughtNothing :: Brought
-broughtNothing = Brought (const []) (const ([], []))
+broughtNothing = Brought (\_ _ -> []) (const ([], []))
 
 -- | Compile a run of surface items into the instructions that admit them.
 --
@@ -2067,7 +2085,7 @@ surfaceProgram brought n0 items = foldl (item []) ([], n0) items
   -- **An import emits nothing either** (MS11 phase 274), and for the same
   -- reason one step further out: it says which /modules/ run before this one,
   -- so by the time this program starts they are already in the environment.
-  item _ acc (ItemImport _ _ Nothing) = acc
+  item _ acc (ItemImport _ _ _ Nothing) = acc
   -- **AND AN IMPORT THAT STATES A BLOCK EMITS THE PAIR THAT REVEALS ITS NAMES**
   -- (MS11 phase 291, his design of 2026-11-05). The module is in the
   -- environment before this program starts, as every import's is; what the
@@ -2081,9 +2099,9 @@ surfaceProgram brought n0 items = foldl (item []) ([], n0) items
   -- inherited spelling and popped them with the frame. An @open@ does not
   -- travel at all now — 'openedFrom' says why — so there is one route into a
   -- file and one pair of ops to scope.
-  item ns (acc, n) (ItemImport _ m (Just is)) =
+  item ns (acc, n) (ItemImport _ m sel (Just is)) =
     let (inner, n1) = foldl (item ns) ([], n) is
-        gs = broughtImport brought m
+        gs = broughtImport brought m sel
      in (acc ++ [Do (Reveal gs)] ++ inner ++ [Do LeaveReveal], n1)
   -- **An export list emits nothing** (MS11 phase 285). It is not a step of the
   -- program at all: it says what an /importer/ may name, which is read when
@@ -2416,7 +2434,7 @@ loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
 -- because the prompt is not a module and is not concealed.
 data Pool = Pool
   { poolBases     :: [RuleBase]
-  , poolPublished :: [ModuleName]
+  , poolPublished :: [(ModuleName, Selection)]
   , poolHeld      :: [Held]
     -- ^ **the bases a @consult … where@ named, read and not installed** (MS11
     -- phase 292). They are in the machine's 'Thena.Engine.held' for the length
@@ -2508,7 +2526,7 @@ groupsFor s groups path m =
 data Held = Held
   { heldName      :: ModuleName
   , heldBase      :: RuleBase
-  , heldPublishes :: [ModuleName]
+  , heldPublishes :: [(ModuleName, Selection)]
   }
   -- **ONE PER BASE AND SEVERAL PER NAME, SINCE MS11 PHASE 298.** A plain
   -- @consult@ in a rule file fetches what it names, so @consult B where { … }@
@@ -2559,7 +2577,15 @@ data Held = Held
 -- written against @LC@ may write @LC@ without importing it. 'Pool' carries the
 -- two halves together because they come out of the same texts.
 loadProofItemsConsulting :: Pool -> Session -> String -> [Item] -> (Session, Response)
-loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items =
+loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
+    -- **A clause that asked for something the module does not offer stops the
+    -- load before anything runs** (MS11 phase 306, @~htngj@), which is where
+    -- @~r58qh@'s header check sits for the same reason: the imported modules are
+    -- in by now, so what each one offers is known, and a filter that matched
+    -- nothing would otherwise conceal everything and fail at the first name.
+    -- **The first clause that misses is the answer**, as a refusal always is.
+  | ((m, missing) : _) <- unofferedBy s items = (s, ImportSelectsUnoffered m missing)
+  | otherwise =
     let inherited = openedFrom s
         machine  = (sessionMachine s)
                      { pool  = poolOf
@@ -2582,7 +2608,7 @@ loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items =
         -- 'Imported' and the two ops around the inner program.
         (is, n1) = surfaceProgram
                      (Brought
-                        (\m -> reachedBy [m] s)
+                        (\m sel -> reachedBy [(m, sel)] s)
                         (\m -> ( [ heldBase h | h <- heldBases, heldName h == m ]
                                , reachedBy (concat [ heldPublishes h
                                                    | h <- heldBases
@@ -2877,7 +2903,7 @@ preludeModule = ModuleName ["Prelude"]
 --
 -- **The prompt gets no concealment at all**: nothing calls this for a typed
 -- line, and 'Thena.Core.Term.rootScope' conceals nothing.
-concealedFrom :: [ModuleName] -> Session -> [GlobalName]
+concealedFrom :: [(ModuleName, Selection)] -> Session -> [GlobalName]
 concealedFrom ims s =
   nub ([ g | g <- Env.declaredNames env
            , g `notElem` map fst (Env.primitives env)
@@ -2885,7 +2911,7 @@ concealedFrom ims s =
          ++ tags)
   where
     env     = globals (sessionMachine s)
-    visible = reachedBy (preludeModule : ims) s
+    visible = reachedBy ((preludeModule, SelectWide) : ims) s
 
     -- **AND THE GRAMMAR TABLE IS SUBTRACTED TOO** (MS11 phase 297). A tag is
     -- resolved by the same outward walk a name is —
@@ -2912,7 +2938,7 @@ concealedFrom ims s =
     -- the prompt's and not something a module may rely on.
     tags =
       [ g | g <- map grammarName (grammars (sessionMachine s))
-          , g `notElem` grammarsReachedBy (preludeModule : ims) s ]
+          , g `notElem` grammarsReachedBy ((preludeModule, SelectWide) : ims) s ]
 
 -- | __Which grammars importing these modules reaches__ (MS11 phase 297).
 --
@@ -2933,16 +2959,21 @@ concealedFrom ims s =
 -- the datatype @LC.LC@ together, because 'exports' tests a prefix — so a module
 -- that means to share its language names it once and gets both halves, and one
 -- that does not name it withholds both.
-grammarsReachedBy :: [ModuleName] -> Session -> [GlobalName]
-grammarsReachedBy ms0 s = reach [] ms0
+grammarsReachedBy :: [(ModuleName, Selection)] -> Session -> [GlobalName]
+grammarsReachedBy ms0 s = concatMap (one []) ms0
   where
-    reach _    []       = []
-    reach seen (m : ms)
-      | m `elem` seen = reach seen ms
+    -- **An import's clause narrows the grammar table too** (MS11 phase 306),
+    -- which is phase 303's ruling said once rather than twice: a key and its
+    -- datatype are granted together because the test is a prefix, so a clause
+    -- that keeps @LC@ out keeps the language out of both tables and a term
+    -- written in it is refused at the tag.
+    one seen (m, sel)
+      | m `elem` seen = []
       | otherwise     =
-          filter (interfaceAdmits m s)
-                 (concat [ gs | (m', gs) <- sessionGrammarsBy s, m' == m ])
-            ++ reach (m : seen) (publicImportsOf m s ++ ms)
+          selects sel
+            (filter (interfaceAdmits m s)
+                    (concat [ gs | (m', gs) <- sessionGrammarsBy s, m' == m ])
+               ++ concatMap (one (m : seen)) (publicImportsOf m s))
 
 -- | __What importing these modules reaches__ (MS11 phase 291).
 --
@@ -2957,15 +2988,27 @@ grammarsReachedBy ms0 s = reach [] ms0
 -- and the frame an @import … where@ pushes are the same question asked of
 -- different imports, and asking it twice over is how the two would come to
 -- differ.
-reachedBy :: [ModuleName] -> Session -> [GlobalName]
-reachedBy ms0 s = reach [] ms0
+reachedBy :: [(ModuleName, Selection)] -> Session -> [GlobalName]
+reachedBy ms0 s = concatMap (one []) ms0
   where
-    reach _    []       = []
-    reach seen (m : ms)
-      | m `elem` seen = reach seen ms
+    -- **The clause applies to everything the module offers, its own passed-on
+    -- imports included** (MS11 phase 306, @~htngj@) — @import M ( a b )@ takes
+    -- @a@ and @b@ out of whatever @M@ hands over, whether @M@ declared them or
+    -- passed them on. So the filter is outside the recursion and the recursion
+    -- carries each @public import@'s own clause, which is how **filters compose
+    -- along a chain**: @A@ doing @public import B ( x )@ hands @C@ only @x@.
+    one seen (m, sel)
+      | m `elem` seen = []
       | otherwise     =
-          exportedByModule m s
-            ++ reach (m : seen) (publicImportsOf m s ++ ms)
+          selects sel (exportedByModule m s
+                         ++ concatMap (one (m : seen)) (publicImportsOf m s))
+
+    -- **The guard is per PATH now and no longer across the whole walk** (phase
+    -- 306). It was one flat worklist, which deduplicated a module reached by
+    -- two routes; two routes may now narrow it differently, so a shared module
+    -- has to contribute under each clause that reached it. **The guard's job was
+    -- never termination** — the import graph is acyclic — so this costs repeated
+    -- work on a diamond and changes no answer.
 
 -- | __What a rule file's scoped @import@ reveals for its block__ (MS11 phase
 -- 299).
@@ -2979,8 +3022,8 @@ reachedBy ms0 s = reach [] ms0
 -- there means naming its datatype in a signature; a rule file's signatures are
 -- @instral@'s own types, so nothing in @rule describe LC[app]\`…\`@ names a
 -- global and the key is the only route.
-revealedToBase :: Session -> ModuleName -> [GlobalName]
-revealedToBase s m = reachedBy [m] s ++ grammarsReachedBy [m] s
+revealedToBase :: Session -> (ModuleName, Selection) -> [GlobalName]
+revealedToBase s w = reachedBy [w] s ++ grammarsReachedBy [w] s
 
 -- | __Which @open@s a module starts with__ (MS11 phase 283, @~w46f8@; narrowed
 -- to the prelude at phase 293, his ruling of 2026-11-06).
@@ -3138,7 +3181,7 @@ interfaceAdmits n s g = exports clause g && not (exports deny g)
 --
 -- Empty has the two meanings 'declaredByModule''s has: a module that passed
 -- nothing on, and a module that is not in.
-publicImportsOf :: ModuleName -> Session -> [ModuleName]
+publicImportsOf :: ModuleName -> Session -> [(ModuleName, Selection)]
 publicImportsOf n s = concat [ ms | (m, ms) <- sessionPublicImports s, m == n ]
 
 -- | __What a module's items say its interface is__ (MS11 phase 286).
@@ -3168,7 +3211,7 @@ data Interface = Interface
     -- writers**, because the test is one test — 'exports' read the other way —
     -- and nothing downstream has a use for which word a name was kept back by;
     -- 'privateIn' and 'moduleHiding' answer that off the items
-  , interfacePublic    :: [ModuleName]
+  , interfacePublic    :: [(ModuleName, Selection)]
     -- ^ which of its imports travel on
   , interfacePublishes :: [Published]
     -- ^ what it hands on to its importers, in written order (phase 288)
@@ -3217,7 +3260,7 @@ declaredNames = go []
     -- **And a declaration inside a block an act states is the module's** (MS11
     -- phases 291 and 292): where its names could be written is the act's
     -- business, and what the file declared is this list's.
-    go ns (ItemImport _ _ ds)  = concatMap (go ns) (concat ds)
+    go ns (ItemImport _ _ _ ds)  = concatMap (go ns) (concat ds)
     go ns (ItemConsult _ _ ds) = concatMap (go ns) (concat ds)
     go ns i = [ intercalate "." (ns ++ [n]) | Just n <- [declaredName i] ]
 
@@ -3228,7 +3271,7 @@ blocksIn i = case i of
   ItemNamespace _ is -> sum (map blocksIn is)
   ItemOpenIn _ is    -> sum (map blocksIn is)
   ItemPrivate is     -> sum (map blocksIn is)
-  ItemImport _ _ ds  -> sum (map blocksIn (concat ds))
+  ItemImport _ _ _ ds  -> sum (map blocksIn (concat ds))
   ItemConsult _ _ ds -> sum (map blocksIn (concat ds))
   _                  -> 0
 
@@ -3244,7 +3287,7 @@ moduleConsults = concatMap go
   where
     go i = case i of
       ItemConsult _ m ds -> m : inside ds
-      ItemImport _ _ ds  -> inside ds
+      ItemImport _ _ _ ds  -> inside ds
       ItemNamespace _ is -> moduleConsults is
       ItemOpenIn _ is    -> moduleConsults is
       ItemPrivate is     -> moduleConsults is
@@ -3270,7 +3313,7 @@ scopedConsults = concatMap go
     go i = case i of
       ItemConsult _ m (Just is) -> m : scopedConsults is
       ItemConsult _ _ Nothing   -> []
-      ItemImport _ _ ds         -> maybe [] scopedConsults ds
+      ItemImport _ _ _ ds         -> maybe [] scopedConsults ds
       ItemNamespace _ is        -> scopedConsults is
       ItemOpenIn _ is           -> scopedConsults is
       ItemPrivate is            -> scopedConsults is
@@ -3295,17 +3338,64 @@ scopedConsults = concatMap go
 --
 -- **'moduleImports' is the other question** — what has to be loaded before this
 -- module — and it answers it for every import, scoped or not.
-fileImports :: [Item] -> [ModuleName]
+fileImports :: [Item] -> [(ModuleName, Selection)]
 fileImports = concatMap go
   where
     go i = case i of
-      ItemImport _ m Nothing  -> [m]
-      ItemImport _ _ (Just is) -> fileImports is
+      ItemImport _ m sel Nothing  -> [(m, sel)]
+      ItemImport _ _ _ (Just is) -> fileImports is
       ItemConsult _ _ ds      -> maybe [] fileImports ds
       ItemNamespace _ is      -> fileImports is
       ItemOpenIn _ is         -> fileImports is
       ItemPrivate is          -> fileImports is
       _                       -> []
+
+-- | __Every import in the file with the clause it wrote__, blocks included
+-- (MS11 phase 306, @~htngj@).
+--
+-- **'moduleImports'\' walk and not 'fileImports'\'**, because a clause is
+-- checked wherever it is written: a scoped @import M ( a b ) where { … }@ can
+-- name a typo exactly as a file-wide one can, and how far the import reaches
+-- has nothing to do with whether what it asked for exists.
+importClauses :: [Item] -> [(ModuleName, Selection)]
+importClauses = concatMap go
+  where
+    go i = case i of
+      ItemImport _ m sel ds -> (m, sel) : maybe [] importClauses ds
+      ItemConsult _ _ ds    -> maybe [] importClauses ds
+      ItemNamespace _ is    -> importClauses is
+      ItemOpenIn _ is       -> importClauses is
+      ItemPrivate is        -> importClauses is
+      _                     -> []
+
+-- | __Which names an import's clause asked for that the module does not
+-- offer__ (MS11 phase 306).
+--
+-- Empty is a file whose every clause matched, which includes every file that
+-- writes no clause at all.
+unofferedBy :: Session -> [Item] -> [(ModuleName, [GlobalName])]
+unofferedBy s = unoffered s . importClauses
+
+-- | __The check itself, over imports already paired with their clauses__ (MS11
+-- phase 306).
+--
+-- **One function for the two syntaxes**, which is why 'Selection' is one type:
+-- a rule file's clause and a surface file's are the same clause and get the
+-- same answer.
+unoffered :: Session -> [(ModuleName, Selection)] -> [(ModuleName, [GlobalName])]
+unoffered s ims =
+  [ (m, missing)
+  | (m, sel) <- ims
+  , ns <- [ case sel of
+              SelectWide      -> []
+              SelectOnly cs   -> cs
+              SelectHiding cs -> cs ]
+  , let offered = reachedBy [whole m] s ++ grammarsReachedBy [whole m] s
+  , let missing = [ GlobalName ps x
+                  | (ps, x) <- ns
+                  , not (any (coversName (ps, x)) offered) ]
+  , not (null missing)
+  ]
 
 -- | Every surface module this one imports, in written order (MS11 phase 274).
 --
@@ -3318,7 +3408,7 @@ moduleImports :: [Item] -> [ModuleName]
 moduleImports = concatMap go
   where
     go i = case i of
-      ItemImport _ m ds   -> m : maybe [] moduleImports ds
+      ItemImport _ m _ ds   -> m : maybe [] moduleImports ds
       ItemConsult _ _ ds  -> maybe [] moduleImports ds
       ItemNamespace _ is -> moduleImports is
       ItemOpenIn _ is    -> moduleImports is
@@ -3331,12 +3421,12 @@ moduleImports = concatMap go
 -- **'moduleImports'\' walk, filtered**: @public@ changes who may name what came
 -- and never what is loaded, so the load walk uses the unfiltered list and this
 -- is read only by the resolver's subtraction.
-publicImports :: [Item] -> [ModuleName]
+publicImports :: [Item] -> [(ModuleName, Selection)]
 publicImports = concatMap go
   where
     go i = case i of
-      ItemImport Public m ds -> m : maybe [] publicImports ds
-      ItemImport Own _ ds    -> maybe [] publicImports ds
+      ItemImport Public m sel ds -> (m, sel) : maybe [] publicImports ds
+      ItemImport Own _ _ ds    -> maybe [] publicImports ds
       ItemConsult _ _ ds     -> maybe [] publicImports ds
       ItemNamespace _ is  -> publicImports is
       ItemOpenIn _ is     -> publicImports is
@@ -3370,8 +3460,8 @@ publicPushes = concatMap go
     go i = case i of
       ItemConsult Public m ds -> PublishedBase m : inside ds
       ItemConsult Own _ ds    -> inside ds
-      ItemImport Public m ds  -> PublishedFrom m : inside ds
-      ItemImport Own _ ds     -> inside ds
+      ItemImport Public m _ ds  -> PublishedFrom m : inside ds
+      ItemImport Own _ _ ds     -> inside ds
       ItemNamespace _ is   -> publicPushes is
       ItemOpenIn _ is      -> publicPushes is
       ItemPrivate is       -> publicPushes is
@@ -3435,7 +3525,7 @@ consultedPool s done = reverse . concatMap go
       -- once. 'moduleConsults' is still the list of files to read.
       ItemConsult _ m Nothing  -> [m]
       ItemConsult _ _ (Just _) -> []
-      ItemImport _ m ds        -> published m ++ maybe [] (concatMap go) ds
+      ItemImport _ m _ ds        -> published m ++ maybe [] (concatMap go) ds
       ItemNamespace _ is -> concatMap go is
       ItemOpenIn _ is    -> concatMap go is
       ItemPrivate is     -> concatMap go is
@@ -3525,6 +3615,34 @@ privateIn = concatMap (go [])
 --   no eliminator**
 --
 -- **Step for step and not as text**, so @Nat@ does not cover @Natural.x@.
+-- | __A clause applied to a list of names__ (MS11 phase 306, @~htngj@).
+--
+-- **One function for the two places a file narrows**, which is why 'Selection'
+-- is one type: a header's clause and an import's clause are the same operation,
+-- and 'interfaceAdmits' is this test asked of the exporter's side.
+--
+-- **Step for step and not as text**, which is 'exports'\' rule and the reason
+-- @( Bit )@ takes the whole @Bit@ namespace and @hiding ( Tri )@ keeps the
+-- constructors back with their type. **The names are taken AS WRITTEN and are
+-- not resolved**: a header's clause names the file's own declarations, which may
+-- be written relative to an enclosing @namespace@, but an import's clause names
+-- another module's, which are only ever absolute.
+selects :: Selection -> [GlobalName] -> [GlobalName]
+selects SelectWide        gs = gs
+selects (SelectOnly ns)   gs = filter (\g -> any (`coversName` g) ns) gs
+selects (SelectHiding ns) gs = filter (\g -> not (any (`coversName` g) ns)) gs
+
+-- | Does this written name cover that global, step for step?
+coversName :: ([String], String) -> GlobalName -> Bool
+coversName (ps, x) g = steps (GlobalName ps x) `isPrefixOf` steps g
+  where
+    steps (GlobalName qs y) = qs ++ [y]
+
+-- | A module reached with no clause on it (MS11 phase 306) — the prelude, and
+-- anything that is not an @import@ line.
+whole :: ModuleName -> (ModuleName, Selection)
+whole m = (m, SelectWide)
+
 exports :: Maybe [GlobalName] -> GlobalName -> Bool
 exports Nothing   _ = True
 exports (Just es) g = any covers es
@@ -4781,6 +4899,13 @@ data RuleFileError
     -- line: the header is blanked rather than dropped so that nothing shifts
   | RuleIllFormed [RuleError]
     -- ^ it parsed, and one or more rules did not resolve or did not validate
+  | RuleSelectsUnoffered ModuleName [GlobalName]
+    -- ^ **an import's clause named something the module does not offer** (MS11
+    -- phase 306, @~htngj@) — 'Thena.Driver.ImportSelectsUnoffered' for a rule
+    -- file, and the same call for the same reason: an unmatched name narrows
+    -- nothing, so without this the base was read in a scope that concealed
+    -- everything the clause was about and failed at its first tag with /no
+    -- language is called LC/, which names neither the clause nor the typo
   | RuleImportsUnread [ModuleName]
     -- ^ **it imports these and nobody read them** (MS11 phase 276).
     -- 'ConsultsUnread'\'s counterpart for a rule base: a base is resolved
@@ -4893,7 +5018,8 @@ breakOn needle = go ""
 -- with no session passes @[]@**, which is the prompt's scope and conceals
 -- nothing.
 ruleBaseOfDecls
-  :: (ModuleName -> [GlobalName]) -> (ModuleName -> ([FilePath], [GlobalName]))
+  :: ((ModuleName, Selection) -> [GlobalName])
+  -> (ModuleName -> ([FilePath], [GlobalName]))
   -> [Grammar] -> [GlobalName] -> FilePath
   -> String -> Maybe String
   -> [RawDecl] -> Either RuleFileError RuleBase
@@ -4974,7 +5100,8 @@ parseInstralType src = do
 -- the one @~xdt8c@ made for a surface module at phase 282 — the same ruling, a
 -- table further over.
 scopedDecls
-  :: (ModuleName -> [GlobalName]) -> (ModuleName -> ([FilePath], [GlobalName]))
+  :: ((ModuleName, Selection) -> [GlobalName])
+  -> (ModuleName -> ([FilePath], [GlobalName]))
   -> [Grammar] -> [GlobalName] -> [RawDecl]
   -> [(Reading, [FilePath], RawDecl)]
 scopedDecls reveals brought gs conc = go rootScope { scopeConcealed = [conc] } []
@@ -4991,7 +5118,7 @@ scopedDecls reveals brought gs conc = go rootScope { scopeConcealed = [conc] } [
       -- happened before this walk started. **A consult is the same** (MS11
       -- phase 289): what it names is a pool, which is assembled before a rule
       -- of this file is ever searched.
-      DeclImport _ _ _ Nothing -> go sc ps rest
+      DeclImport _ _ _ _ Nothing -> go sc ps rest
       -- **AND A SCOPED IMPORT IS A FRAME OVER ITS BLOCK** (MS11 phase 299, his
       -- design of 2026-11-05). The module is loaded before this file is read,
       -- as every import's is; what the block settles is where its names may be
@@ -5000,8 +5127,11 @@ scopedDecls reveals brought gs conc = go rootScope { scopeConcealed = [conc] } [
       -- **'Thena.Core.Term.revealing' is the frame and 'LeaveReveal' is this
       -- @++ go sc rest@**: a walk needs no op to put a concealment back, where
       -- a surface program does because its declarations run.
-      DeclImport _ pth x (Just inner) ->
-        go (revealing (reveals (moduleFromSteps pth x)) sc) ps inner
+      -- **And its clause narrows the frame** (MS11 phase 306, @~htngj@), which
+      -- is 'reachedBy' being one function again: a scoped import reveals
+      -- exactly what a file-wide one does, less what its clause keeps out.
+      DeclImport _ pth x sel (Just inner) ->
+        go (revealing (reveals (moduleFromSteps pth x, sel)) sc) ps inner
           ++ go sc ps rest
       DeclConsult _ _ _ Nothing -> go sc ps rest
       -- **AND A SCOPED CONSULT IS TWO FRAMES OVER ITS BLOCK** (MS11 phase 300,
@@ -5055,7 +5185,8 @@ openedOf (RawOpen ns spec) = [ said (ps ++ [x]) | (ps, x) <- ns ]
 -- that stands where it is written and not against one scope for the file.
 -- 'scopedDecls' is the walk that pairs the two.
 resolveAll
-  :: (ModuleName -> [GlobalName]) -> (ModuleName -> ([FilePath], [GlobalName]))
+  :: ((ModuleName, Selection) -> [GlobalName])
+  -> (ModuleName -> ([FilePath], [GlobalName]))
   -> [Grammar] -> [GlobalName] -> [RawDecl]
   -> Either RuleFileError
        ([(String, Signature)], [Rule], [Rule])
@@ -5317,9 +5448,35 @@ readStated s gs group held' path src = do
   (nm, desc, raws) <- rawRuleDecls src
   case filter (\m -> not (moduleLoaded m s)) (rawImports raws) of
     ms@(_ : _) -> Left (RuleImportsUnread ms)
-    []         -> ruleBaseOfDecls (revealedToBase s) (groupsFor s held' path) gs
+    -- **The clause is checked after the dependency is in and before the base is
+    -- read** (MS11 phase 306), which is the only order in which both questions
+    -- can be answered: what a module offers is known once it is loaded, and a
+    -- clause that missed would otherwise conceal what the file is about.
+    []         -> case rawUnofferedBy s raws of
+      ((m, missing) : _) -> Left (RuleSelectsUnoffered m missing)
+      []                 ->
+        ruleBaseOfDecls (revealedToBase s) (groupsFor s held' path) gs
                     (concealedFrom (rawFileImports raws ++ handedTo group src) s)
                     path nm desc raws
+
+-- | __'unofferedBy' over a rule file's own declarations__ (MS11 phase 306).
+--
+-- **Every import, block ones included**, for 'importClauses'\' reason: a clause
+-- can name a typo wherever it is written, and how far the import reaches is a
+-- different question from whether what it asked for exists.
+rawUnofferedBy :: Session -> [RawDecl] -> [(ModuleName, [GlobalName])]
+rawUnofferedBy s raws = unoffered s (rawImportClauses raws)
+
+-- | Every import a rule file writes, with the clause it wrote (MS11 phase 306).
+rawImportClauses :: [RawDecl] -> [(ModuleName, Selection)]
+rawImportClauses = concatMap go
+  where
+    go d = case d of
+      DeclImport _ ps x sel blk ->
+        (moduleFromSteps ps x, sel) : concatMap go (concat blk)
+      DeclConsult _ _ _ blk     -> concatMap go (concat blk)
+      DeclOpenIn _ cov          -> go cov
+      _                         -> []
 
 -- | Every surface module a rule file imports, in written order (MS11 phase
 -- 276).
@@ -5339,7 +5496,7 @@ ruleBaseImports src = do
 -- 'rawFileImports'' door, for the one consumer that asks what the file's text
 -- may name throughout rather than what it depends on: the file-wide
 -- concealment. **The load reads 'ruleBaseImports' and never this.**
-ruleBaseFileImports :: String -> Either RuleFileError [ModuleName]
+ruleBaseFileImports :: String -> Either RuleFileError [(ModuleName, Selection)]
 ruleBaseFileImports src = do
   (_, _, raws) <- rawRuleDecls src
   Right (rawFileImports raws)
@@ -5380,7 +5537,7 @@ ruleBaseScopedConsults src = do
 -- The two halves of what a base publishes, read off the text by the caller with
 -- the disc: the bases go in the pool of whoever consults this one and the
 -- modules come out of their concealment.
-ruleBasePublishes :: String -> Either RuleFileError ([ModuleName], [ModuleName])
+ruleBasePublishes :: String -> Either RuleFileError ([ModuleName], [(ModuleName, Selection)])
 ruleBasePublishes src = do
   (_, _, raws) <- rawRuleDecls src
   Right (rawPublicConsults raws, rawPublicImports raws)
@@ -5395,7 +5552,7 @@ ruleBasePublishes src = do
 --
 -- **A base that does not parse publishes nothing here**, and the install
 -- refuses it with the position in it — 'statedConcealment''s bargain.
-publishedTo :: [(FilePath, String)] -> [ModuleName]
+publishedTo :: [(FilePath, String)] -> [(ModuleName, Selection)]
 publishedTo texts =
   concat [ ms | (_, src) <- texts, Right (_, ms) <- [ruleBasePublishes src] ]
 
@@ -5413,7 +5570,7 @@ publishedTo texts =
 -- (his ruling of 2026-11-03) and a name is reachable or it is not. A loop
 -- cannot arrive — 'Thena.Files.fetching' refuses one — and @seen@ is here so
 -- that this terminates on its own if one ever did.
-handedTo :: [(FilePath, String)] -> String -> [ModuleName]
+handedTo :: [(FilePath, String)] -> String -> [(ModuleName, Selection)]
 handedTo group = go []
   where
     go seen src =
@@ -5437,7 +5594,7 @@ rawImports :: [RawDecl] -> [ModuleName]
 rawImports = concatMap go
   where
     go d = case d of
-      DeclImport _ ps x blk -> moduleFromSteps ps x : concatMap go (concat blk)
+      DeclImport _ ps x _ blk -> moduleFromSteps ps x : concatMap go (concat blk)
       DeclOpenIn _ cov      -> go cov
       _                     -> []
 
@@ -5454,12 +5611,12 @@ rawImports = concatMap go
 -- so the walk goes into a block only for what a line there states file-wide —
 -- which, inside a block, is nothing. An @open … in@ is walked into for
 -- 'rawImports'' reason.
-rawFileImports :: [RawDecl] -> [ModuleName]
+rawFileImports :: [RawDecl] -> [(ModuleName, Selection)]
 rawFileImports = concatMap go
   where
     go d = case d of
-      DeclImport _ ps x Nothing  -> [moduleFromSteps ps x]
-      DeclImport _ _ _ (Just _)  -> []
+      DeclImport _ ps x sel Nothing  -> [(moduleFromSteps ps x, sel)]
+      DeclImport _ _ _ _ (Just _)  -> []
       DeclOpenIn _ cov           -> go cov
       _                          -> []
 
@@ -5491,7 +5648,7 @@ rawConsults = concatMap go
   where
     go d = case d of
       DeclConsult _ ps x blk -> moduleFromSteps ps x : concatMap go (concat blk)
-      DeclImport _ _ _ blk   -> concatMap go (concat blk)
+      DeclImport _ _ _ _ blk   -> concatMap go (concat blk)
       DeclOpenIn _ cov       -> go cov
       _                      -> []
 
@@ -5512,7 +5669,7 @@ rawFileConsults = concatMap go
     go d = case d of
       DeclConsult _ ps x Nothing -> [moduleFromSteps ps x]
       DeclConsult _ _ _ (Just _) -> []
-      DeclImport _ _ _ blk       -> concatMap go (concat blk)
+      DeclImport _ _ _ _ blk       -> concatMap go (concat blk)
       DeclOpenIn _ cov           -> go cov
       _                          -> []
 
@@ -5529,7 +5686,7 @@ rawScopedConsults = concatMap go
     go d = case d of
       DeclConsult _ ps x (Just blk) -> moduleFromSteps ps x : concatMap go blk
       DeclConsult _ _ _ Nothing     -> []
-      DeclImport _ _ _ blk          -> concatMap go (concat blk)
+      DeclImport _ _ _ _ blk          -> concatMap go (concat blk)
       DeclOpenIn _ cov              -> go cov
       _                             -> []
 
@@ -5556,7 +5713,7 @@ rawPublicConsults = concatMap go
     go d = case d of
       DeclConsult Public ps x blk -> moduleFromSteps ps x : concatMap go (concat blk)
       DeclConsult Own _ _ blk     -> concatMap go (concat blk)
-      DeclImport _ _ _ blk        -> concatMap go (concat blk)
+      DeclImport _ _ _ _ blk        -> concatMap go (concat blk)
       DeclOpenIn _ cov            -> go cov
       _                           -> []
 
@@ -5574,12 +5731,12 @@ rawPublicConsults = concatMap go
 -- 'publicImports'' reading for a surface file and not a second rule: the block
 -- says how far the module reaches in THIS file, and @public@ says who else gets
 -- it — two questions, so one does not answer the other.
-rawPublicImports :: [RawDecl] -> [ModuleName]
+rawPublicImports :: [RawDecl] -> [(ModuleName, Selection)]
 rawPublicImports = concatMap go
   where
     go d = case d of
-      DeclImport Public ps x blk -> moduleFromSteps ps x : concatMap go (concat blk)
-      DeclImport Own _ _ blk     -> concatMap go (concat blk)
+      DeclImport Public ps x sel blk -> (moduleFromSteps ps x, sel) : concatMap go (concat blk)
+      DeclImport Own _ _ _ blk     -> concatMap go (concat blk)
       DeclOpenIn _ cov           -> go cov
       _                          -> []
 

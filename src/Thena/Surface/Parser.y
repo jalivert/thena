@@ -34,7 +34,7 @@ import Thena.Surface.Concrete
   , SurfaceOpenSpec (..)
   , Reach (..)
   , SurfaceModule (..)
-  , SurfaceExports (..)
+  , Selection (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , SurfaceArg (..)
@@ -129,20 +129,20 @@ Module :: { SurfaceModule }
   -- A @QName@, so a header may say the path it sits at (MS11 phase 278): the
   -- steps are directories, exactly as @import@ reads them.
   : module QName where '{' Decls '}'
-      { SurfaceModule (fst $2) (snd $2) ExportsWide (reverse $5) }
+      { SurfaceModule (fst $2) (snd $2) SelectWide (reverse $5) }
   -- **And a header may state the file's interface** (MS11 phase 285), which is
   -- his ruling of 2026-10-30: the export list attaches to the header, one place
   -- per file. The list is 'ExportNames' and not 'QNames' because @exporting ( )@
   -- is a module that exports nothing and has to be writable — the empty list is
   -- a statement, where a missing clause is the absence of one.
   | module QName exporting '(' ExportNames ')' where '{' Decls '}'
-      { SurfaceModule (fst $2) (snd $2) (ExportsOnly (reverse $5)) (reverse $9) }
+      { SurfaceModule (fst $2) (snd $2) (SelectOnly (reverse $5)) (reverse $9) }
   -- **Or say what it withholds instead** (MS11 phase 290), the other half of
   -- the same ruling. **One slot and not two clauses**: a file narrows by naming
   -- what it keeps or by naming what it withholds, which is the choice an @open@
   -- already makes between @( … )@ and @hiding ( … )@.
   | module QName hiding '(' ExportNames ')' where '{' Decls '}'
-      { SurfaceModule (fst $2) (snd $2) (ExportsHiding (reverse $5)) (reverse $9) }
+      { SurfaceModule (fst $2) (snd $2) (SelectHiding (reverse $5)) (reverse $9) }
 
 -- | A block of the **instruction** language (MS4 phase 45).
 --
@@ -364,22 +364,22 @@ Decl :: { SurfaceDecl }
   -- **Which surface modules this file depends on** (MS11 phase 274, his ruling
   -- of 2026-11-03). A @QName@ again, and the steps are directories again: a
   -- file states what it refers to and never relies on the session.
-  | import QName                           { SurfaceImport Own (fst $2) (snd $2) Nothing }
+  | import QName ImportSel                 { SurfaceImport Own (fst $2) (snd $2) $3 Nothing }
   -- **An import that travels** (MS11 phase 287, his ruling of 2026-11-03):
   -- whoever imports this file gets what this file got from that one.
   -- **@public@ is an attribute of the import and not a second kind of import**,
   -- so it is one production\'s worth of difference and one constructor.
-  | public import QName                    { SurfaceImport Public (fst $3) (snd $3) Nothing }
+  | public import QName ImportSel          { SurfaceImport Public (fst $3) (snd $3) $4 Nothing }
   -- **AN IMPORT STATES HOW FAR IT REACHES** (MS11 phase 291, his design of
   -- 2026-11-05) — @import M where { … }@, a layout block exactly as
   -- @namespace … where@ is, and the module's names are writable in it and not
   -- after it. **It is why no existing construct had to gain a scope**: the act
   -- carries its own extent, so what a @do@ or a @data@ block does to an
   -- @import@ written in it is nothing.
-  | import QName where '{' Decls '}'
-      { SurfaceImport Own (fst $2) (snd $2) (Just (reverse $5)) }
-  | public import QName where '{' Decls '}'
-      { SurfaceImport Public (fst $3) (snd $3) (Just (reverse $6)) }
+  | import QName ImportSel where '{' Decls '}'
+      { SurfaceImport Own (fst $2) (snd $2) $3 (Just (reverse $6)) }
+  | public import QName ImportSel where '{' Decls '}'
+      { SurfaceImport Public (fst $3) (snd $3) $4 (Just (reverse $7)) }
   -- **A layout block, where @open@ is a line** (MS10 phase 254): a namespace
   -- says which declarations are in it, so it has to hold them. Nesting is a
   -- longer prefix and costs no mechanism, and @namespace A.B where { … }@ is
@@ -469,6 +469,23 @@ OpenHead :: { ([([String], String)], SurfaceOpenSpec) }
 -- selection**: an entry names a namespace or one member of one, and the unit of
 -- export is the namespace, so @Nat@ covers everything under it and @Nat.Nat@ is
 -- the type alone. Reversed by its caller.
+-- | __What an import takes from the module it names__ (MS11 phase 306,
+-- @~htngj@) — his design of 2026-11-05, the half phases 291 and 292 left out.
+--
+-- **Nullable, which is what keeps the import at four productions and not
+-- twelve.** The alternative was the cross product of @public@, the three
+-- clauses and the @where@ block. An empty clause is decided by LALR's single
+-- token of lookahead — @'('@ and @hiding@ shift into a clause, anything else
+-- reduces the empty one — so each import production gained one symbol and
+-- nothing else.
+--
+-- **'SelectWide' is no clause at all and @SelectOnly []@ is @( )@**, an import
+-- that deliberately takes nothing, exactly as @exporting ( )@ offers nothing.
+ImportSel :: { Selection }
+  :                                        { SelectWide }
+  | '(' ExportNames ')'                    { SelectOnly (reverse $2) }
+  | hiding '(' ExportNames ')'             { SelectHiding (reverse $3) }
+
 ExportNames :: { [([String], String)] }
   :                                        { [] }
   | ExportNames QName                      { $2 : $1 }

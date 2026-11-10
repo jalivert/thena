@@ -17,6 +17,7 @@ import Thena.Core.Term (rootName, nameDotted)
 import Thena.Instral.Concrete
   ( RawDecl (..)
   , Reach (..)
+  , Selection (..)
   , RawOpen (..)
   , RawOpenSpec (..)
   )
@@ -143,13 +144,13 @@ imports =
   testGroup
     "what a rule file states it is written against (MS11 phases 276 and 289)"
     [ testCase "import X" $
-        decls ["import Stlc"] @?= Right [DeclImport Own [] "Stlc" Nothing]
+        decls ["import Stlc"] @?= Right [DeclImport Own [] "Stlc" SelectWide Nothing]
 
       -- **The steps are directories**, which is what makes this a file's name
       -- and not a namespace's — the same spelling meaning something else.
     , testCase "and the module name is a path" $
         decls ["import Stlc.Syntax.Terms"]
-          @?= Right [DeclImport Own ["Stlc", "Syntax"] "Terms" Nothing]
+          @?= Right [DeclImport Own ["Stlc", "Syntax"] "Terms" SelectWide Nothing]
 
       -- **The other act, and the other word on both** (MS11 phase 289, his
       -- ruling of 2026-10-30 that @public@ is available to both acts and to
@@ -160,7 +161,7 @@ imports =
           @?= Right [DeclConsult Own ["Stlc"] "Tactics" Nothing]
 
     , testCase "public import X" $
-        decls ["public import Stlc"] @?= Right [DeclImport Public [] "Stlc" Nothing]
+        decls ["public import Stlc"] @?= Right [DeclImport Public [] "Stlc" SelectWide Nothing]
 
     , testCase "public consult X" $
         decls ["public consult Stlc.Tactics"]
@@ -171,7 +172,7 @@ imports =
       -- @Nothing@ above is the line with none and this is the same constructor.
     , testCase "import X where { … }" $
         decls ["import Stlc where", "  r : Core"]
-          @?= Right [DeclImport Own [] "Stlc" (Just [DeclSignature (signatureOf "r")])]
+          @?= Right [DeclImport Own [] "Stlc" SelectWide (Just [DeclSignature (signatureOf "r")])]
 
       -- **@where@ with nothing after it is an EMPTY block and not a line with
       -- no block**, which is the layout rule and not a case of its own
@@ -179,22 +180,22 @@ imports =
       -- mean different things: the first reveals the module to nothing, the
       -- second to the rest of the file.
     , testCase "and an empty block is Just []" $
-        decls ["import Stlc where"] @?= Right [DeclImport Own [] "Stlc" (Just [])]
+        decls ["import Stlc where"] @?= Right [DeclImport Own [] "Stlc" SelectWide (Just [])]
 
       -- **@public@ and a block are two questions**, so a line may state both:
       -- the block says how far the module reaches here, @public@ says who else
       -- gets it.
     , testCase "public import X where { … }" $
         decls ["public import Stlc where", "  r : Core"]
-          @?= Right [DeclImport Public [] "Stlc" (Just [DeclSignature (signatureOf "r")])]
+          @?= Right [DeclImport Public [] "Stlc" SelectWide (Just [DeclSignature (signatureOf "r")])]
 
       -- **Nesting costs no mechanism**, because a block holds what the file
       -- holds — the production takes @Decls@.
     , testCase "and a block may hold another scoped import" $
         decls ["import Stlc where", "  import Stlc.Terms where", "    r : Core"]
           @?= Right
-                [ DeclImport Own [] "Stlc"
-                    (Just [ DeclImport Own ["Stlc"] "Terms"
+                [ DeclImport Own [] "Stlc" SelectWide
+                    (Just [ DeclImport Own ["Stlc"] "Terms" SelectWide
                               (Just [DeclSignature (signatureOf "r")]) ]) ]
 
     , testCase "it survives being printed and read again" $ do

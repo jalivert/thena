@@ -1716,8 +1716,10 @@ the way. That is how one file can be the thing you import instead of a list of t
 imports — and why a file's internal dependencies stay internal unless you say otherwise.
 
 `exporting` on your header is about *your* declarations; `public import` is about what
-travels through you. They do not interact, so a file can export nothing of its own and
-still pass a dependency on.
+travels through you. **They do not interact**, so a file can export nothing of its own
+and still pass a dependency on — the alternative would make you re-list another module's
+namespaces as though they were yours. To hand on only part of what you imported, narrow
+the import line itself: see *An import can say which names it takes* below.
 
 **Your own file always sees all of itself**, and so does the prompt — after loading
 `Bits` you can still `:infer flip`. What the list changes is only what *another file*
@@ -1726,6 +1728,75 @@ may name.
 > **It hides names; it does not make anything abstract.** A term carries its real
 > names however you wrote the header, so a constructor you kept back can still appear
 > in a goal, spelled with a name you are not allowed to type.
+
+### An import can say which names it takes
+
+The header says what a file *offers*. The import line says what you *take*, with the
+same two words. Say `Shapes` offers both of its datatypes:
+
+```
+module Shapes where
+
+data Bit : Type₀ where
+  off : Bit
+  on : Bit
+
+data Tri : Type₀ where
+  lo : Tri
+  hi : Tri
+```
+
+Then an importer can ask for part of it:
+
+```
+import Shapes ( Bit )          -- this namespace and no more
+import Shapes hiding ( Tri )   -- everything but this
+import Shapes                  -- everything Shapes offers
+```
+
+**One clause, either word, never both** — the choice `open X ( … )` and a header
+already make — and **you name namespaces, not names** here too, so `( Bit )` takes
+the type and its constructors together. Write the names the way `Shapes` writes them.
+Write `Tri.lo` under the first line and you get `not in scope: Tri.lo`.
+
+**A clause that names something the module does not offer is refused**, and it says
+which name missed:
+
+```
+thena spine> :load Takes.thena
+Takes.thena: Shapes offers no Nonsuch
+```
+
+That is the one list Thena checks this way. `open X ( … )` still ignores a word that
+is not there.
+
+**Put `public` in front and the narrowing travels.** What goes on to whoever imports
+you is what you took, not what you were offered:
+
+```
+module Middle where
+public import Shapes ( Bit )   -- Bit is what Middle hands on
+
+module User where
+import Middle
+x : Bit.Bit                    -- fine
+y : Tri.Tri                    -- not in scope: Middle narrowed Tri away
+```
+
+It keeps narrowing however long the chain is — a file that public-imports `Middle`
+hands on `Bit` alone, and nothing downstream widens it back.
+
+**So you can take a whole module for yourself and re-export part of it**, by writing
+both lines. They are two statements about one module and do not cancel:
+
+```
+import Shapes                  -- all of Shapes, for my own use
+public import Shapes ( Bit )   -- but only Bit travels
+```
+
+**A rule file's `import` takes the same clause**, and it narrows the object languages
+a module offers along with its names: keep `LC` out and a rule written in `LC` is
+refused at the tag. `consult` takes no clause.
 
 ### `import` and `consult` are typed at the prompt too
 

@@ -22,7 +22,7 @@ module Thena.Surface.Concrete
   , SurfaceOpenSpec (..)
   , Reach (..)
   , SurfaceModule (..)
-  , SurfaceExports (..)
+  , Selection (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , PairingError (..)
@@ -46,7 +46,7 @@ import Thena.Core.Term (GlobalName (..), Literal (..))
 -- this import crosses no language boundary — it is the machinery's own syntax,
 -- and a @do@ block in a surface program is `instral` written in place
 -- (@discussion\/the-five-languages.md@ §0b, table F).
-import Thena.Instral.Concrete (RawInstr (..), Reach (..))
+import Thena.Instral.Concrete (RawInstr (..), Reach (..), Selection (..))
 import Thena.Syntax.Lexer (BlockKind)
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
@@ -318,7 +318,7 @@ data SurfaceBinder = SurfaceBinder Plicity String (Maybe Surface)
 data SurfaceModule = SurfaceModule
   { surfaceModuleSteps :: [String]
   , surfaceModuleWord  :: String
-  , surfaceModuleExports :: SurfaceExports
+  , surfaceModuleExports :: Selection
     -- ^ what the header says about its interface, as written (MS11 phase 285
     -- for @exporting@, 290 for @hiding@, @~jmw4k@).
   , surfaceModuleDecls :: [SurfaceDecl]
@@ -362,8 +362,9 @@ data SurfaceOpenSpec
 -- lives there and is listed in this module's exports beside the trees that
 -- carry it.
 
--- | __What a header says about its interface__ (MS11 phase 285 for
--- @exporting ( … )@, 290 for @hiding ( … )@, @~jmw4k@).
+-- | __What a header says about its interface__ is a 'Selection' and nothing of
+-- this module's own (MS11 phase 285 for @exporting ( … )@, 290 for
+-- @hiding ( … )@, @~jmw4k@; moved to 'Selection' at phase 306, @~htngj@).
 --
 -- His ruling of 2026-10-30: **exports are wide by default, narrowed by
 -- @exporting@ or @hiding@ on the file's @module@ clause.** So there are three
@@ -371,15 +372,13 @@ data SurfaceOpenSpec
 -- shape and deliberately its three words: a file narrows by naming what it keeps
 -- or by naming what it withholds, never both at once.
 --
--- **'ExportsWide' and @ExportsOnly []@ are different modules.** No clause at all
--- is a file that states no interface and exports everything it declares, which
--- is every file written before phase 285; @exporting ( )@ is a file that
--- deliberately exports nothing.
-data SurfaceExports
-  = ExportsWide                            -- ^ no clause — everything it declares
-  | ExportsOnly   [([String], String)]     -- ^ @exporting ( … )@ — these and no more
-  | ExportsHiding [([String], String)]     -- ^ @hiding ( … )@ — everything but these
-  deriving (Eq, Show)
+-- **It became a shared type when an import gained the same clause** (phase
+-- 306): @import M ( a b )@ narrows what the importer takes exactly as a header
+-- narrows what the file offers, so it is re-exported from
+-- "Thena.Instral.Concrete" beside 'Reach', for 'Reach''s own reason — both
+-- concrete syntaxes write the clause. @exporting ( )@ is still a file that
+-- deliberately exports nothing, where no clause at all exports everything it
+-- declares.
 
 data SurfaceDecl
   = SurfaceSignature [String] String Surface   -- ^ @foo : T@, @Ns.foo : T@
@@ -455,7 +454,7 @@ data SurfaceDecl
     -- this file is searched against a @public consult@\'s base too, at the
     -- position of the @import@ line that brought it in. A surface file still
     -- has no rules of its own — it hands on a base and never contains one.
-  | SurfaceImport Reach [String] String (Maybe [SurfaceDecl])
+  | SurfaceImport Reach [String] String Selection (Maybe [SurfaceDecl])
     -- ^ @import ‹module›@, or @public import ‹module›@ — **which surface
     -- modules this file depends on** (MS11 phase 274, his ruling of
     -- 2026-11-03), and whether what they gave it travels on (phase 287).

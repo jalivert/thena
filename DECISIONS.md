@@ -1004,8 +1004,11 @@ be an aggregator you import instead of a list of twelve imports — and what kee
 private scaffolding from leaking out of it.
 
 An `exporting` list on your header governs *your own* declarations; a `public import`
-governs what travelled through you. The two do not interact: a file may export nothing of
-its own and still pass a dependency on.
+governs what travelled through you. **The two do not interact** — his ruling of
+2026-11-10: a file may export nothing of its own and still pass a dependency on, because
+a header that gated a `public import` would make you re-list another module's namespaces
+as if they were yours. What a `public import` hands on is narrowed by its own clause and
+by nothing else — see *An import may say which of a module's names it takes*.
 
 **Two things it is not.** Your own file is never narrowed by its own list — `Bits`
 above uses `Bit.on` freely — and the prompt is never narrowed by anybody's, so after
@@ -1013,6 +1016,68 @@ loading `Bits` you can still `:infer flip`. And this is name-hiding, not abstrac
 a term carries its real names, so a constructor you did not export can still turn up
 in a goal, printed with a name you are not allowed to type.
 
+
+### An import may say which of a module's names it takes
+
+*Decided 2026-11-10. Built — MS11 phase 306.*
+
+A header says what a file *offers*. An import line says what the importer *takes*,
+with the same two words and the same meaning. Over a `Shapes` that offers two
+datatypes, `Bit` and `Tri`:
+
+```
+import Shapes ( Bit )          -- this namespace and no more
+import Shapes hiding ( Tri )   -- everything but this
+import Shapes                  -- everything Shapes offers
+```
+
+**One clause, either word, never both** — the choice `open X ( … )` and a header's
+clause already make. **The unit is the namespace here too**, so `( Bit )` takes the
+type and its constructors together, and the names are written as `Shapes` itself
+writes them.
+
+**A narrowed `public import` passes the narrowing on.** This is the whole of how the
+two clauses meet: what travels through you is what you took, not what you were
+offered.
+
+```
+module Middle where
+public import Shapes ( Bit )   -- Middle took Bit; Bit is what Middle hands on
+
+module User where
+import Middle                  -- reaches Bit, and never Tri
+```
+
+**And it composes along a chain.** If a third file public-imports `Middle`, the
+narrowing is still in force four files away; nothing re-widens it.
+
+**So a file can take a module for itself and re-export part of it**, by writing both
+lines:
+
+```
+import Shapes                  -- all of Shapes, for my own use
+public import Shapes ( Bit )   -- but only Bit travels
+```
+
+The two are independent statements about one module and do not cancel.
+
+**A clause that names something the module does not offer is refused**, naming the
+module and every name that missed:
+
+```
+thena spine> :load Takes.thena
+Takes.thena: Shapes offers no Nonsuch
+```
+
+That is deliberate and it is the one place a list is checked: a clause is a filter,
+so an unmatched name would otherwise narrow silently to nothing and the file would
+fail several lines later at a name the message never mentions. **`open X ( … )` is
+unchanged** and still ignores a word that is not there.
+
+**It is on `import` in a rule file too**, with the same spelling and the same
+refusal, and it narrows the languages a module offers as well as its names — a
+clause that keeps `LC` out leaves a rule written in `LC` refused at the tag.
+**`consult` takes no clause.**
 ### A rule file writes its own `open` lines
 
 *Decided 2026-11-03, built the same day. The piece of the decision above that
