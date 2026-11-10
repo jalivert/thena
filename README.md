@@ -268,6 +268,9 @@ cabal run thena
 cabal run thena-check -- examples/Preservation.thena
 ```
 
+`./tc ‹file› …` is a shorthand for that last one: it builds quietly first, so it
+chains with `&&` like any other type-checker.
+
 `cabal test` runs the unit suites. **The example corpus is its own suite behind
 a flag** and is worth running after any change to a grammar or the elaborator:
 
