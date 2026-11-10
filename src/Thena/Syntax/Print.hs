@@ -539,6 +539,7 @@ printBlock b =
 
     item i = case i of
       Word w       -> w
+      Literally w  -> w
       Binding w xs -> w ++ "[" ++ intercalate ", " xs ++ "]"
 
     -- **Two rule headers, and they are the reader's two tiers** (§6.1, §6.4):

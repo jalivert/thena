@@ -280,11 +280,47 @@ while `subst-*` itself begins with a letter and is ordinary to type.
 wherever the language is open. The full name is absolute: a class declared beside
 its language inside `namespace A` is `A.LC.subst.A.x`.
 
-**One thing is not settled.** The generated bracket notation — `E[x->N]` — is
-still spelled with the class's bare word, so in a language that reaches two
-classes both written `x` a term written that way **parses two ways and is
-refused as ambiguous**, naming both readings. The functions are reachable by
-name; only the bracket is unavailable in that one case.
+**And a written substitution says which class it is for**, which is the decision
+below.
+
+---
+
+### A written substitution says which class it is for
+
+*Decided 2026-11-10.* A substitution written in a term or a rule may carry the
+class's name in front of the name it replaces, in the one-pair bracket and in
+each pair of a comma list:
+
+```
+E[x->M]                      the bare spelling, unchanged
+E[LC.x: x->M]                the same substitution, saying which class
+C[Source.x: x->M, Target.x: x->P]   a comma list, one pair per class
+```
+
+**Why there is anything to say.** Neither bare spelling names a class. What you
+write between the brackets is a *name* — a metavariable in a rule, an identifier
+in a concrete term — and the class was taken from the production that matched,
+or, for a comma list, from the class's word. For every language that reaches one
+class of each word that is enough. For a language reaching `Source.x` and
+`Target.x` it is not: the two brackets have the same text, so a concrete term
+written with one **parsed two ways**, and a comma list could reach only the
+first class's owning language. Those are the files two-language metatheory is
+made of — a compilation relation, an elaboration relation, a bisimulation.
+
+**The qualifier is the class's whole name.** It is generated for every class,
+beside the bare spelling rather than instead of it, so nothing written before
+this decision reads differently and the bare form stays what a reader writes
+whenever it is unambiguous. In that position the class's name is text, not a
+name to look up — a word that names something in scope would be read as a slot,
+which is exactly what the bare bracket's middle item is.
+
+**What it costs.** A grammar carries two notation productions per class instead
+of one, so a list of what a language offers shows one name twice with two
+shapes, and a parse error at that position names both. The qualified spelling is
+the only way to write a substitution in a language that reaches two classes of
+one word; the alternative, leaving that case to the per-class function by name
+(`Compiles.subst.Source.x E x N`), was refused because a comma list has no such
+fallback at all.
 
 ---
 

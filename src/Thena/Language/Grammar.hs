@@ -671,6 +671,10 @@ constructorShape sortOf binds universes p = do
         Nothing  -> reservedTerminal w >> Right (Terminal w)
         Just (OfUniverse n) | not universes -> Left (UniverseSlot w n)
         Just srt -> reservedScan w srt >> Right (Slot w srt [])
+      -- **A generated block may say that an item is text**, which is the only
+      -- way to write a class's own name in a notation: resolving it would make
+      -- it a slot wherever the class is reachable by that spelling.
+      Literally w -> reservedTerminal w >> Right (Terminal w)
       Binding hd _ | not binds -> Left (NotationBinds hd)
       Binding hd bs -> case sortOf hd of
         Just srt@(OfLanguage _) -> Right (Slot hd srt bs)

@@ -197,7 +197,7 @@ import qualified Thena.Surface.Zipper as Zipper
 import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
-import Data.List (isPrefixOf, stripPrefix, intercalate, partition)
+import Data.List (isPrefixOf, stripPrefix, intercalate, nub, partition)
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
 
@@ -2699,7 +2699,12 @@ parseFailureReason text why = case why of
           ++ expecting expected
   where
     expecting [] = ""
-    expecting ss = ", expecting " ++ oneOf (map symbolText ss)
+    -- **BY THE TEXT, SO TWO SYMBOLS SPELLED ALIKE ARE SAID ONCE** (2026-11-10).
+    -- A class's qualified substitution puts a terminal and a name slot of the
+    -- same spelling in one position — @E[x: x -> N]@ for a class called @x@ —
+    -- and the message read /expecting x or x/, which tells a reader nothing and
+    -- reads as a defect. What a reader can act on is the text they would type.
+    expecting ss = ", expecting " ++ oneOf (nub (map symbolText ss))
     symbolText s = case s of
       Earley.Literal x -> x
       Earley.Scan n _ -> n

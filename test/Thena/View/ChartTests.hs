@@ -419,7 +419,13 @@ productionCases =
       -- chart offers it: an @LC@ really can begin an @LC.subst.w@ reading, and
       -- the chart says what the grammar says. It comes last because a notation
       -- block's productions are appended.
-      named gs [] [] >>= (@?= ["LC.var", "LC.abs", "LC.app", "LC.subst.w"])
+      -- **AND IT IS OFFERED TWICE, under one name** — his ruling of 2026-11-10
+      -- gave every class a bare spelling and a qualified one, @e [ w -> n ]@ and
+      -- @e [ w: w -> n ]@, and both are productions of @LC.subst.w@. The chart
+      -- says what the grammar says, so a frontend listing them sees one name
+      -- twice and two different shapes; which of the two it offers a reader is
+      -- the frontend's to decide.
+      named gs [] [] >>= (@?= ["LC.var", "LC.abs", "LC.app", "LC.subst.w", "LC.subst.w"])
   , testCase "with their shapes, which is what a list shows" $ do
       gs <- loaded
       shapeOf gs [] [] "LC.app" >>= (@?= Just ["(", "LC", "LC", ")"])

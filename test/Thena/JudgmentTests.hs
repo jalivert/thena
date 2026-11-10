@@ -138,6 +138,14 @@ load body = do
 loaded :: [String] -> IO Session
 loaded body = load body >>= either assertFailure pure
 
+-- | A printed constructor from its quantifier on, with a closing brace and the
+-- spaces before it dropped: what two rules of one judgment share when they
+-- differ only in their names. **Not a lexical convenience** — it is how a test
+-- says /these two spellings elaborate to the same thing/ without pinning the
+-- whole line, which `:show`'s own tests already do.
+quantified :: String -> String
+quantified = reverse . dropWhile (`elem` " }") . reverse . dropWhile (/= '∀')
+
 said :: Session -> String -> [String]
 said s line = let (s', r) = command s line in renderResponse s' r
 
@@ -443,6 +451,34 @@ substitution =
           -- has no production to print back as.
         , "  { sub.S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${subst-* {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))} [ ${x1} -> ${N'} ]` }" ]
     -- §6.3's CHECK: the left of -> is a binder-sorted name.
+  , -- **A WRITTEN SUBSTITUTION MAY NAME ITS CLASS — HIS RULING OF 2026-11-10**,
+    -- in the bracket and in a comma list's pair alike: @E[x: x->N]@ and
+    -- @E[x: x->M, x: x'->N]@, the qualifier being the class's whole name. It is
+    -- the only spelling a language reaching two classes of one word has, since
+    -- neither bare form says which class it is for. **Here there is one class,
+    -- so the two spellings must mean exactly the same thing** — the qualifier
+    -- picks a class, it does not change what is elaborated — and the printer
+    -- takes the bare production, so nothing printed before prints differently.
+    testCase "a bracket may name its class, and means the same as the bare one" $ do
+      s <- loaded (header ++
+        [ "judgment one = M ~> N where", ""
+        , "  Bare:  ---------------"
+        , "         M ~> E[x->N]", ""
+        , "  Qual:  ---------------"
+        , "         M ~> E[x: x->N]", "" ])
+      case drop 1 (said s ":show one") of
+        [bare, qual] -> quantified qual @?= quantified bare
+        other -> assertFailure (unlines ("not two constructors:" : other))
+  , testCase "and so may each pair of a comma list" $ do
+      s <- loaded (header ++
+        [ "judgment two = M ~> N where", ""
+        , "  Bare:  -------------------------"
+        , "         M ~> E[x->M, x'->N]", ""
+        , "  Qual:  -------------------------"
+        , "         M ~> E[x: x->M, x: x'->N]", "" ])
+      case drop 1 (said s ":show two") of
+        [bare, qual] -> quantified qual @?= quantified bare
+        other -> assertFailure (unlines ("not two constructors:" : other))
   , refusal "the left of -> is not a name"
       ["judgment sub = M ~> N where", "", "  S:  ---", "      M ~> E[M->N]", ""]
       "refused: in the judgment sub, rule S: its conclusion `M ~> E[M->N]` is not a sub judgment: unexpected 'M' at character 8, expecting x"

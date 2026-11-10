@@ -442,6 +442,22 @@ So it is an ordinary production — it works in a term literal, not only in a ru
 and a stuck substitution prints in it. **The comma list `E[x -> M, y -> N]` is
 not**: simultaneous substitution takes a list per class, which no grammar spells,
 so that form stays sugar inside a rule.
+**And it comes in two spellings, because the bare one names no class.** What you
+write between the brackets is a name, not a class, so for a language that reaches
+two classes sharing a word — `Source.x` and `Target.x`, which is what a relation
+between two modelled languages reaches — the two brackets have the same text and
+a term written with one parses two ways. The second spelling says which class:
+
+```
+E[x -> M]                            the bare one, unchanged
+E[LC.x: x -> M]                      the same substitution, saying which class
+C[Source.x: x -> M, Target.x: x -> P]   a comma list, one pair per class
+```
+
+The qualifier is the class's **whole name**, and it is written in front of the
+name being replaced. Every class gets both spellings, so the bare one stays what
+you write whenever it is unambiguous — which is every language that reaches one
+class of each word.
 
 ## 7. Splices: holes in a written core term
 

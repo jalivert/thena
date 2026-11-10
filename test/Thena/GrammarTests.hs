@@ -165,6 +165,31 @@ scoped =
              , "" ]) of
         (_, ProofLoaded _ ds _ ws) -> (ds, ws) @?= (["A.x", "A.LC", "sw"], [])
         (_, other) -> assertFailure (show other)
+    -- **A WRITTEN SUBSTITUTION MAY NAME ITS CLASS — HIS RULING OF 2026-11-10.**
+    -- Neither written form said which class it substituted for: the bracket's
+    -- middle item is a slot that reads a name, and a comma list's pair was
+    -- built from the class's word. So this file — a compilation relation over
+    -- two languages whose identifier classes are both written @x@, which
+    -- phase 304 made loadable — could write no substitution at all. **Both
+    -- forms take a qualifier now**, the class's whole name, and the bare
+    -- spelling is unchanged wherever it is unambiguous.
+  , testCase "a substitution names its class, so two classes of one word are both writable" $ do
+      (s0, _) <- startingSession
+      s <- either assertFailure pure (loadOrSay s0 oneWordTwoClasses)
+      said s ":parse Compiles ( a ~> b ) [ Source.x: y -> c ]"
+        @?= [ "Compiles.subst.Source.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Source.LC.var(c))" ]
+      said s ":parse Compiles ( a ~> b ) [ Target.x: y -> c ]"
+        @?= [ "Compiles.subst.Target.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Target.Mach.ref(c))" ]
+      -- **The bare spelling is still two readings here, and that is what the
+      -- qualifier is for** — not a defect left behind. It names both.
+      said s ":parse Compiles ( a ~> b ) [ y -> c ]"
+        @?= [ "in Compiles`( a ~> b ) [ y -> c ]`: this term parses two ways, as Compiles.subst.Source.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Source.LC.var(c)) and as Compiles.subst.Target.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Target.Mach.ref(c))" ]
+      -- **And a comma list qualifies each pair**, so the simultaneous
+      -- substitution gets one list per class with that class's pair in it —
+      -- where before the second class's language could not appear in a pair at
+      -- all and the two lists were keyed by the one word.
+      drop 1 (said s ":show ok")
+        @?= [ "  { ok.R-both : ∀ (C : Compiles) (x : String) (N : LC) (P : Mach) -> ok`${Compiles.subst-* {0 0 0 0 0 0} C (cons {0} (And {0 0} String LC) (both {0 0} String LC x N) (nil {0} (And {0 0} String LC))) (cons {0} (And {0 0} String Mach) (both {0 0} String Mach x P) (nil {0} (And {0 0} String Mach)))} good` }" ]
 
     -- **A block's own word opens where it is written** (MS10 phase 258): the
     -- @open Ty@ inside the namespace is what every one of those blocks needs,
@@ -650,6 +675,39 @@ loadOrSay s0 src = case loadProofSource s0 src of
   (s1, ProofLoaded {}) -> Right s1
   (s1, other) -> Left (last (renderResponse s1 other))
 
+-- | **Two languages whose identifier classes are both written @x@, and a
+-- relation between them** — the shape of two-language metatheory, and the file
+-- phase 304 made loadable by giving a generated name the class's path. Its
+-- judgment writes a comma list that qualifies each pair with its class.
+oneWordTwoClasses :: String
+oneWordTwoClasses = unlines
+  [ "module Two where", ""
+  , "namespace Source where"
+  , "  x : Token String"
+  , "  x = /[a-z][a-zA-Z0-9']*/"
+  , "  language LC, M, N, E where"
+  , "    var : x as occurrence -> x"
+  , "    abs : x as binder     -> ( λ x . E[x] )"
+  , "    app                   -> ( M N )"
+  , ""
+  , "namespace Target where"
+  , "  x : Token String"
+  , "  x = /[a-z][a-zA-Z0-9']*/"
+  , "  language Mach, P, Q, B where"
+  , "    ref  : x as occurrence -> x"
+  , "    lam  : x as binder     -> ( fn x . B[x] )"
+  , "    call                   -> ( P @ Q )"
+  , ""
+  , "open Source.LC"
+  , "open Target.Mach", ""
+  , "language Compiles, C where"
+  , "  step -> ( M ~> P )", ""
+  , "open Compiles", ""
+  , "judgment ok = C good where", ""
+  , "  R-both: ------------------------------------------"
+  , "          C[Source.x: x -> N, Target.x: x -> P] good"
+  , "" ]
+
 -- | A judgment indexed by a judgment, declared by hand and then spelled — the
 -- shape `~wkv37` said a @judgment@ block cannot generate (MS8 phase 160).
 validSource :: String
@@ -918,9 +976,23 @@ meaning =
         [g] -> do
           [ (gproductionName p, gproductionItems p)
             | p <- grammarProductions g, gproductionKind p == Function ]
+            -- **TWO SPELLINGS, BOTH GENERATED** — his ruling of 2026-11-10.
+            -- The qualified one carries the class's whole name as a terminal,
+            -- which is the only thing in either production that says which
+            -- class is substituted for; here the class is at the top level, so
+            -- that terminal is the bare @x@ and the slot beside it reads a name.
             @?= [ ( GlobalName ["LC", "subst"] "x"
                   , [ Slot "e" (lang "LC") []
                     , Terminal "["
+                    , Slot "x" str []
+                    , Terminal "->"
+                    , Slot "n" (lang "LC") []
+                    , Terminal "]" ] )
+                , ( GlobalName ["LC", "subst"] "x"
+                  , [ Slot "e" (lang "LC") []
+                    , Terminal "["
+                    , Terminal "x"
+                    , Terminal ":"
                     , Slot "x" str []
                     , Terminal "->"
                     , Slot "n" (lang "LC") []
@@ -1111,10 +1183,12 @@ notating =
       -- the notation builds exactly the hand-written constructor application.
       map gproductionKind (concat [ grammarProductions g | g <- grammars (machineOf byHand)
                                                          , grammarName g == rootName "Lam" ])
-        -- Three constructors, and the 'Function' is the generated substitution's
-        -- own notation block (phase 159) — so the equipment arrived with its
-        -- spelling, exactly as a @language@ block's does.
-        @?= [Constructor, Constructor, Constructor, Function]
+        -- Three constructors, and the two 'Function's are the generated
+        -- substitution's own notation block (phase 159) — so the equipment
+        -- arrived with its spelling, exactly as a @language@ block's does.
+        -- **Two, because a class gets a bare spelling and a qualified one**
+        -- (his ruling of 2026-11-10).
+        @?= [Constructor, Constructor, Constructor, Function, Function]
     -- **A role belongs to the block that installs the grammar** — HIS ruling,
     -- 2026-10-11. The family is generated once, from the roles the grammar was
     -- installed with, and a block that edits a grammar cannot add to a family

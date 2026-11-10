@@ -476,11 +476,37 @@ substitutionNotations gs g
       -- because the bare @x@ reached nothing. 'Thena.Language.Grammar.checkNotation'
       -- resolves it through the same door a written @notation@ block's goes
       -- through, which since this phase takes a path.
-      [ Production 0 (nameDotted (substOf (grammarWritten g) k))
-          [ Param (target k) Nothing, Param (classWord k) (Just (nameDotted k)), Param (replacement k) Nothing ]
-          Nothing
-          (map Word [target k, "[", classWord k, "->", replacement k, "]"])
+      -- **TWO SPELLINGS PER CLASS, AND BOTH ARE ALWAYS GENERATED — HIS RULING
+      -- OF 2026-11-10.** The bare bracket @E[x -> N]@ says nothing about which
+      -- class it substitutes for: the middle item is a /slot/ that reads a name,
+      -- so a language reaching two classes of one word installed two brackets
+      -- with the same text, so a concrete term written with one parsed two ways
+      -- — measured on a compilation relation between two languages whose
+      -- identifier classes are both written @x@. The
+      -- qualified bracket @E[‹class›: x -> N]@ carries the class's whole name as
+      -- text, so there is a spelling for every class a language reaches.
+      --
+      -- **Unconditionally, not only when a word is reached twice**: generating
+      -- the qualified form only on a clash would be the generator asking whether
+      -- it is in the awkward case, which is the special-casing the first design
+      -- principle forbids. The bare form keeps working wherever it is
+      -- unambiguous, which is everything the corpus writes.
+      --
+      -- **The qualifier is 'Literally' and not a 'Word'** because a word that
+      -- names something in scope is a slot (§4.2): under @namespace Source@ the
+      -- qualifier @Source.x@ read as text, while at the top level the same
+      -- qualifier @x@ read as a second name slot — the same spelling meaning two
+      -- things, which is exactly what this item set out to remove.
+      concat
+      [ [ Production 0 nm params Nothing
+            (map Word [target k, "[", classWord k, "->", replacement k, "]"])
+        , Production 0 nm params Nothing
+            ( [ Word (target k), Word "[", Literally (nameDotted k), Literally ":" ]
+              ++ map Word [classWord k, "->", replacement k, "]"] )
+        ]
       | k <- classesSubstituted gs g
+      , let nm = nameDotted (substOf (grammarWritten g) k)
+            params = [ Param (target k) Nothing, Param (classWord k) (Just (nameDotted k)), Param (replacement k) Nothing ]
       ]
 
     -- **Three parameters: the term, the name replaced, and what replaces it.**
