@@ -18,6 +18,7 @@
 module Thena.GrammarTests (tests) where
 
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
+import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
@@ -119,15 +120,21 @@ scoped =
 
     -- **The generated equipment is placed once, not twice.** A definition is
     -- minted relative to the namespace and the declaring op supplies the
-    -- prefix, so an absolute mint would have landed at @A.A.LC.subst-x@.
+    -- prefix, so an absolute mint would have landed at @A.A.LC.subst.A.x@.
+    --
+    -- **THE CLASS'S PATH IS ABSOLUTE INSIDE THE FAMILY** (his ruling of
+    -- 2026-11-10), so a class in the same namespace as the language repeats
+    -- that namespace: @A.LC.subst.A.x@ for @A.x@. Relative would need a
+    -- relative-to-what, and the shortest-ending printer is what a reader
+    -- actually sees.
   , testCase "and a language's substitution is placed under the namespace" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 blocksInANamespace
           env = globals (machineOf s1)
-      ( isDeclared (named "A.LC.subst-x") env
-        , isDeclared (named "A.LC.fv-x") env
-        , isDeclared (named "A.A.LC.subst-x") env
-        , isDeclared (named "LC.subst-x") env ) @?= (True, True, False, False)
+      ( isDeclared (named "A.LC.subst.A.x") env
+        , isDeclared (named "A.LC.fv.A.x") env
+        , isDeclared (named "A.A.LC.subst.A.x") env
+        , isDeclared (named "LC.subst.A.x") env ) @?= (True, True, False, False)
 
     -- **A block's own word opens where it is written** (MS10 phase 258): the
     -- @open Ty@ inside the namespace is what every one of those blocks needs,
@@ -208,54 +215,80 @@ scoped =
           (ds, ws) @?= (["Source.x", "Source.LC", "Wrap", "swapped"], [])
         (_, other) -> assertFailure (show other)
 
-    -- **And the generated family is the reaching language's, suffixed with the
-    -- reached class's word** — @Wrap.subst-x@ for a class @Source.x@, which is
-    -- the one place in the module system where a path is dropped. `~ps4c7` is
-    -- the ruling that owes.
-  , testCase "and the generated family hangs off the reached class's word" $ do
+    -- **And the generated family is the reaching language's, with the reached
+    -- class's WHOLE NAME inside the family's step** — @Wrap.subst.Source.x@
+    -- for a class @Source.x@, his ruling of 2026-11-10. It used to be
+    -- @Wrap.subst-x@, the one place in the module system where a path was
+    -- dropped, and `~ps4c7` is the item that ruling closed.
+  , testCase "and the generated family hangs off the reached class's path" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 classAcrossANamespace
           env = globals (machineOf s1)
-      ( isDeclared (named "Wrap.subst-x") env
-        , isDeclared (named "Wrap.fv-x") env
-        , isDeclared (named "Wrap.subst-Source.x") env ) @?= (True, True, False)
+      ( isDeclared (named "Wrap.subst.Source.x") env
+        , isDeclared (named "Wrap.fv.Source.x") env
+        , isDeclared (named "Wrap.subst.x") env ) @?= (True, True, False)
 
-    -- **TWO CLASSES OF ONE WORD ARE REFUSED, because a generated name is
-    -- suffixed with the WORD** (MS10 phase 259): @fv-x@ would mean two things.
-    -- It cannot arise at the root — one word there is one class — so the paths
-    -- are what made it possible, and the refusal names both.
-  , testCase "one language reaching two classes of one word is refused" $ do
+    -- **TWO CLASSES OF ONE WORD ARE ACCEPTED — HIS RULING OF 2026-11-10,
+    -- `~ps4c7`.** They were refused from MS10 phase 259 until phase 304,
+    -- because a generated name was suffixed with the class's WORD and @fv-x@
+    -- would have meant two things. The class's whole name sits inside the
+    -- family's step now, so @Top.fv.B.x@ and @Top.fv.C.x@ are two names and
+    -- there is nothing to refuse. **This is the file the item was measured on.**
+  , testCase "one language reaching two classes of one word is accepted" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines
-             [ "module Twice where", ""
-             , "namespace B where"
-             , "  x : Token String"
-             , "  x = /[a-z][a-zA-Z0-9']*/"
-             , ""
-             , "  language L1, P where"
-             , "    v : x as occurrence -> x"
-             , "    pp -> ( P P )"
-             , ""
-             , "namespace C where"
-             , "  x : Token String"
-             , "  x = /[a-z][a-zA-Z0-9']*/"
-             , ""
-             , "  language L2, Q where"
-             , "    w : x as occurrence -> x"
-             , "    qq -> [ Q Q ]"
-             , ""
-             , "open B.L1"
-             , "open C.L2"
-             , ""
-             , "language Top, R where"
-             , "  pair -> ( P , Q )"
-             , "" ])
+      let (s1, r) = loadProofSource s0 twoClassesOneWord
       case r of
-        ProofLoaded {} -> assertFailure "two classes of one word were accepted"
-        _ -> last (renderResponse s1 r) @?=
-               "refused: in the grammar of Top: it reaches B.x and C.x, which are"
-                 ++ " both written x, and a generated name is suffixed with a"
-                 ++ " class's word \8212 so fv-x would mean two things"
+        ProofLoaded _ ds _ _ -> do
+          ds @?= ["B.x", "B.L1", "C.x", "C.L2", "Top"]
+          let env = globals (machineOf s1)
+          ( isDeclared (named "Top.subst.B.x") env
+            , isDeclared (named "Top.subst.C.x") env
+            , isDeclared (named "Top.fv.B.x") env
+            , isDeclared (named "Top.fv.C.x") env
+            , isDeclared (named "Top.subst-*") env ) @?= (True, True, True, True, True)
+        _ -> assertFailure (unlines (renderResponse s1 r))
+
+    -- **AND THE BRACKET NOTATION OF THOSE TWO IS AMBIGUOUS — `~5659b`, OPEN.** The
+    -- generated notation's own text is still the class's bare word, so both classes
+    -- install @e [ x -> n ]@ and a term written that way parses two ways. **It is
+    -- reported and names both readings**, and the functions are reachable by name — the
+    -- test above declares them. Pinned here so the residue is not mistaken for a
+    -- regression, and so a fix has something to change.
+  , testCase "but the bracket notation of two classes of one word is ambiguous" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 twoClassesOneWord
+          out = last (said s1 ":parse Top ( a , b ) [ y -> c ]")
+      assertBool out ("parses two ways" `isInfixOf` out)
+      assertBool out ("Top.subst.B.x" `isInfixOf` out && "Top.subst.C.x" `isInfixOf` out)
+
+    -- **A TOKEN CLASS MAY BE CALLED `all` — `~xrq7t`, phase 304.** It could not before:
+    -- the simultaneous substitution was @L.subst-all@ and the per-class one was
+    -- @subst-@ plus the class's word, so the two names coincided, **the file was
+    -- accepted**, and a use of it failed with a mismatch naming neither. The
+    -- simultaneous one is @L.subst-*@ now and `*` cannot begin a name, so no class can
+    -- be spelled it. **The `refl` is the point**: the substitution is not merely
+    -- declared, it computes.
+  , testCase "a token class may be called all, and its substitution computes" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (unlines
+             [ "module AllClass where", ""
+             , "all : Token String"
+             , "all = /[a-z][a-zA-Z0-9']*/"
+             , ""
+             , "language LC, M, N, E where"
+             , "  var : all as occurrence -> all"
+             , "  abs : all as binder     -> ( \955 all . E[all] )"
+             , "  app                     -> ( M N )"
+             , ""
+             , "replaces : Eq LC (LC.subst.all LC`( \955 y . ( x y ) )` \"x\" LC`z`)"
+             , "                 LC`( \955 y . ( z y ) )`"
+             , "replaces = refl LC LC`( \955 y . ( z y ) )`", "" ]) of
+        (s1, ProofLoaded _ ds _ _) -> do
+          ds @?= ["all", "LC", "replaces"]
+          let env = globals (machineOf s1)
+          ( isDeclared (named "LC.subst-*") env
+            , isDeclared (named "LC.subst.all") env ) @?= (True, True)
+        (s1, other) -> assertFailure (unlines (renderResponse s1 other))
 
     -- **A TAG RESOLVES LIKE ANY OTHER NAME — MS10 PHASE 260, `~zjkvd`, HIS
     -- RULING OF 2026-10-30.** Until this phase a tag was matched against a
@@ -379,7 +412,7 @@ scoped =
     -- **The token class is INSIDE the namespace** (MS10 phase 259, the last
     -- piece of `~g4k5g`): a class resolves by the same outward walk a
     -- metavariable and a function name do, and what the generated names hang
-    -- off is the class's word, so @A.x@ still gives @A.LC.fv-x@.
+    -- off is the class's word, so @A.x@ still gives @A.LC.fv.x@.
     -- Two namespaces, each declaring a language of the same word and opening
     -- it beside itself, which is the shape phase 255 requires.
     twoNamespacesOneWord = unlines
@@ -622,6 +655,36 @@ loadProofSession s0 = case loadProofSource s0 validSource of
   (s1, ProofLoaded {}) -> Right s1
   (s1, other) -> Left (unlines (renderResponse s1 other))
 
+-- | **Two namespaces whose token classes are both written @x@, and a third language
+-- that reaches both** — the shape of all two-language metatheory, and the file `~ps4c7`
+-- was measured on. **Refused from MS10 phase 259 until MS11 phase 304**, when his ruling
+-- of 2026-11-10 made the class a path inside the family's step.
+twoClassesOneWord :: String
+twoClassesOneWord = unlines
+  [ "module Twice where", ""
+  , "namespace B where"
+  , "  x : Token String"
+  , "  x = /[a-z][a-zA-Z0-9']*/"
+  , ""
+  , "  language L1, P where"
+  , "    v : x as occurrence -> x"
+  , "    pp -> ( P P )"
+  , ""
+  , "namespace C where"
+  , "  x : Token String"
+  , "  x = /[a-z][a-zA-Z0-9']*/"
+  , ""
+  , "  language L2, Q where"
+  , "    w : x as occurrence -> x"
+  , "    qq -> [ Q Q ]"
+  , ""
+  , "open B.L1"
+  , "open C.L2"
+  , ""
+  , "language Top, R where"
+  , "  pair -> ( P , Q )"
+  , "" ]
+
 said :: Session -> String -> [String]
 said s line = let (s', r) = command s line in renderResponse s' r
 
@@ -825,7 +888,7 @@ meaning =
         [g] -> do
           [ (gproductionName p, gproductionItems p)
             | p <- grammarProductions g, gproductionKind p == Function ]
-            @?= [ ( GlobalName ["LC"] "subst-x"
+            @?= [ ( GlobalName ["LC", "subst"] "x"
                   , [ Slot "e" (lang "LC") []
                     , Terminal "["
                     , Slot "x" str []
@@ -870,7 +933,7 @@ meaning =
         (_, other) -> assertFailure (show other)
     -- **A binder scoping into another language installs and says nothing**
     -- (MS8 phase 154 lifted the refusal; 155 made the generator walk the slot).
-    -- It warned in between, because a method of @L.subst-all@ was given a
+    -- It warned in between, because a method of @L.subst-*@ was given a
     -- recursive result only for an argument of its own language and rebuilt a
     -- foreign one as written.
   , testCase "a binder free in another language's slot installs, and nothing is owed" $ do
@@ -1011,9 +1074,9 @@ notating =
       said byHand ":show Lam" @?= said byBlock ":show Lam"
       -- The family, which the hand-written route generated from the roles its
       -- @notation@ block declared.
-      said byHand ":infer Lam.subst-w"
-        @?= ["Lam.subst-w : Lam -> String -> Lam -> Lam"]
-      said byHand ":infer Lam.subst-w" @?= said byBlock ":infer Lam.subst-w"
+      said byHand ":infer Lam.subst.w"
+        @?= ["Lam.subst.w : Lam -> String -> Lam -> Lam"]
+      said byHand ":infer Lam.subst.w" @?= said byBlock ":infer Lam.subst.w"
       -- And @same@ in the fixture is `refl`, so the load itself asserts that
       -- the notation builds exactly the hand-written constructor application.
       map gproductionKind (concat [ grammarProductions g | g <- grammars (machineOf byHand)

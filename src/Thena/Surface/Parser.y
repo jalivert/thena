@@ -324,7 +324,7 @@ Decls :: { [SurfaceDecl] }
 -- that follows it.
 --
 -- **What is declared may be written with a path** (MS10 phase 243), which is
--- how a generated name is placed in its namespace: @Ty.subst-X : …@ is the
+-- how a generated name is placed in its namespace: @Ty.subst.X : …@ is the
 -- shape 'Thena.Language.Substitution' emits.
 Decl :: { SurfaceDecl }
   : QName ':' Term                         { SurfaceSignature (fst $1) (snd $1) $3 }

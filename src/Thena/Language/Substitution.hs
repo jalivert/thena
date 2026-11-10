@@ -6,10 +6,10 @@
 -- definitions and elaborated like any other — §1: nothing a block generates is
 -- out of reach of a hand-written file.
 --
--- > L.fresh-‹k›  : String -> List String -> String      -- for each class L owns
--- > L.fv-‹k›     : L -> List String                     -- for each class L reaches
--- > L.subst-all  : L -> List (And String O₁) -> … -> L   -- one map per class
--- > L.subst-‹k›  : L -> String -> O‹k› -> L              -- for each class L reaches
+-- > L.fresh.‹k›  : String -> List String -> String      -- for each class L owns
+-- > L.fv.‹k›     : L -> List String                     -- for each class L reaches
+-- > L.subst-*  : L -> List (And String O₁) -> … -> L   -- one map per class
+-- > L.subst.‹k›  : L -> String -> O‹k› -> L              -- for each class L reaches
 --
 -- @O‹k›@ is the language that /owns/ class @k@ — the one whose variable
 -- production reads an occurrence at it. For a one-class language that owns its
@@ -23,7 +23,7 @@
 -- a term that is not a subterm.
 --
 -- **And it is simultaneous across classes too, which is why there is one
--- @L.subst-all@ and not one per class — his correction, 2026-10-04.**
+-- @L.subst-*@ and not one per class — his correction, 2026-10-04.**
 -- Substituting for one class renames binders of /every/ class, so the recursive
 -- call needs every map: substituting @λ y : X . y@, which has a free type
 -- variable, for @x@ in @Λ X <: Top . x@ captures that @X@ unless the type binder
@@ -31,14 +31,14 @@
 -- @j@-names of the images of /every/ map, which is what @avoid-‹j›@ is.
 --
 -- **A binder is renamed only when keeping it would capture** — his choice,
--- 2026-09-21 — and @L.fresh-‹k› x avoid@ is the first of @x@, @x'@, @x''@, … not
+-- 2026-09-21 — and @L.fresh.‹k› x avoid@ is the first of @x@, @x'@, @x''@, … not
 -- among them, so @x@ itself whenever nothing would be captured. **A binder at a
 -- class no language owns is never renamed at all**, because nothing can occur at
 -- it; that falls out of the class not being in the set, with no branch of its own.
 --
 -- **A slot of another language is walked through that language's own
--- substitution** (MS8 phase 155, @ms8\/CLOSEOUT.md@ 25): @L.subst-all@ calls
--- @P.subst-all@ with the maps for the classes @P@ reaches, extended by any binder
+-- substitution** (MS8 phase 155, @ms8\/CLOSEOUT.md@ 25): @L.subst-*@ calls
+-- @P.subst-*@ with the maps for the classes @P@ reaches, extended by any binder
 -- of @L@ that scopes over the slot. @P@ is declared before @L@, so this is not
 -- mutual recursion — which `~m5dvd` would need.
 --
@@ -59,7 +59,7 @@ module Thena.Language.Substitution
 
 import qualified Data.List.NonEmpty as NE
 
-import Data.List (nub)
+import Data.List (intercalate, nub)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Thena.Core.Term (GlobalName (..), declarationNamed, inDeclarationOf, nameDotted, rootName, Literal (..))
 import Thena.Global.Env (ArgRole (..))
@@ -86,20 +86,39 @@ import Thena.Language.Regex (primingChar)
 import Thena.Syntax.Lexer (BlockKind (..))
 import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..), surfaceName)
 
+-- | A class's name as ONE LEXABLE WORD, injectively — the local binder a
+-- generated body holds that class's map in.
+--
+-- __His ruling of 2026-11-10 made this necessary.__ A grammar may reach two
+-- classes both written @x@ now, so @"s-" ++ word@ bound one body's two maps to
+-- one name and the second shadowed the first — measured as
+-- @Target.Mach.Mach and Source.LC.LC cannot be made equal@, a type error naming
+-- neither the class nor the binder. The class's dotted name cannot be used
+-- either: a local is a lexable identifier and @.@ is reserved.
+--
+-- __The steps and the word joined by @-@, with any @-@ inside one doubled__, so
+-- the encoding is injective and @A.x@ and a root class called @A-x@ do not
+-- collide. **A class whose word holds no dash is unchanged** — @x@ is @x@ —
+-- which is every class in the corpus, so no existing generated body moved.
+classLocal :: GlobalName -> String
+classLocal k = intercalate "-" (map escape (nameSteps k ++ [nameWord k]))
+  where
+    escape = concatMap (\ch -> if ch == '-' then "--" else [ch])
+
 -- | The definitions, as name, type and body, in the order they are declared —
 -- each uses only the ones before it, and the ones of a language declared
 -- earlier. None for a language that reaches no class with an owner.
 --
 -- @gs@ is the dependency graph: the grammars installed, including this one.
 -- **Each is named in the language's own namespace** (MS10 phase 244), and a
--- reference to one is written with its path — @LC.fv-x@ — because that is what
+-- reference to one is written with its path — @LC.fv.x@ — because that is what
 -- the ordinary declaration path now admits and what the environment holds.
 substitutionDefinitions :: [Grammar] -> Grammar -> [(GlobalName, Surface, Surface)]
 substitutionDefinitions gs g =
-  [ (freshOf langName (classWord k), arrows [string, listOf string] string, freshBody k) | k <- owned ]
-    ++ [ (fvOf langName (classWord k), arrows [self] (listOf string), fvBody k) | k <- reached ]
+  [ (freshOf langName k, arrows [string, listOf string] string, freshBody k) | k <- owned ]
+    ++ [ (fvOf langName k, arrows [self] (listOf string), fvBody k) | k <- reached ]
     ++ [ (allOf langName, arrows (self : map mapType reached) self, allBody) | not (null reached) ]
-    ++ [ (substOf langName (classWord k), arrows [self, string, ownerSelf k] self, oneBody k) | k <- reached ]
+    ++ [ (substOf langName k, arrows [self, string, ownerSelf k] self, oneBody k) | k <- reached ]
   where
     -- **MINTED RELATIVE, WRITTEN AS A WORD** (MS10 phase 258). @langName@ is
     -- what the generated names hang off and it must carry no namespace, because
@@ -210,7 +229,7 @@ substitutionDefinitions gs g =
         ys
 
     -- ---------------------------------------------------------------------
-    -- L.fresh-‹k›: the fuel is the list itself. Among x, xc, …, xc⁽ⁿ⁾ one is not
+    -- L.fresh.‹k›: the fuel is the list itself. Among x, xc, …, xc⁽ⁿ⁾ one is not
     -- among n names, so n primings are enough and the recursion is on the list.
     --
     -- **The priming character comes from the class, not from a hardcoded @'@**
@@ -239,7 +258,7 @@ substitutionDefinitions gs g =
              [v "y"])
 
     -- ---------------------------------------------------------------------
-    -- L.fv-‹k›: an accumulator and the names bound on the way down, so that
+    -- L.fv.‹k›: an accumulator and the names bound on the way down, so that
     -- neither an append nor a removal is needed for this language's own
     -- subterms. A name may be listed twice; it is a list, not a set, and
     -- everything that reads it only asks membership.
@@ -266,20 +285,20 @@ substitutionDefinitions gs g =
             -- A slot of another language that can hold a free k-name: ask that
             -- language, then take out the names bound on the way in.
             (Scope bs, Nothing, OfLanguage l) | k `elem` reachedBy l ->
-              without (app (global (fvOf l (classWord k))) [v a]) (under bs) acc
+              without (app (global (fvOf l k)) [v a]) (under bs) acc
             (Plain, Nothing, OfLanguage l) | k `elem` reachedBy l ->
-              without (app (global (fvOf l (classWord k))) [v a]) (v "bound") acc
+              without (app (global (fvOf l k)) [v a]) (v "bound") acc
             _ -> acc
        in lamL (as ++ rs ++ ["bound", "acc"]) (foldr step (v "acc") (zip as args))
 
     -- ---------------------------------------------------------------------
-    -- L.subst-all.
+    -- L.subst-*.
     allBody =
       lamL ["t"]
         (elimOn lang [] (lamL ["u"] (arrows (map mapType reached) self))
            (map allMethod prods) (v "t"))
 
-    mapVar k = "s-" ++ classWord k
+    mapVar k = "s-" ++ classLocal k
 
     -- What the class-k map sends @y@ to: the first pair that names it, or @y@
     -- itself as a term of the class's owning language.
@@ -304,7 +323,7 @@ substitutionDefinitions gs g =
           binderClasses = nub [ c | i <- binders, Just c <- [binderAt args i] ]
           bindersAt c = [ i | i <- binders, binderAt args i == Just c ]
           renamed i = "z" ++ show i
-          avoidName c = "avoid-" ++ classWord c
+          avoidName c = "avoid-" ++ classLocal c
           -- A renaming for each binder of the class, and each avoids the names
           -- already chosen for the ones before it and the names of the ones
           -- after — the ones of its own class only, since no other can capture.
@@ -351,16 +370,16 @@ substitutionDefinitions gs g =
                        , lamL ["y", "ys", "ry"]
                            (elimOn "List" [string] (lamL ["l"] (listOf string))
                               [ v "ry", lamL ["h", "hs", "rh"] (consOf string (v "h") (v "rh")) ]
-                              (app (global (fvOf (grammarName (owner k)) (classWord c))) [lookupIn k (v "y") (v (mapVar k))]))
+                              (app (global (fvOf (grammarName (owner k)) c)) [lookupIn k (v "y") (v (mapVar k))]))
                        ]
-                       (app (global (fvOf langName (classWord k))) [app (global (gproductionName p)) (map v as)]))
+                       (app (global (fvOf langName k)) [app (global (gproductionName p)) (map v as)]))
                   (nilOf string)
                   [ k | k <- reached, c `elem` reachedBy (grammarName (owner k)) ]
           withRenamings =
             foldr (\i body ->
                      let c = fromMaybe (rootName "") (binderAt args i)
                       in SurfaceLet (local (renamed i)) (Just string)
-                           (app (global (freshOf (grammarWritten (owner c)) (classWord c))) [v (as !! i), avoidTerm i c]) body)
+                           (app (global (freshOf (grammarWritten (owner c)) c)) [v (as !! i), avoidTerm i c]) body)
                   rebuilt binders
        in lamL (as ++ rs ++ map mapVar reached) $ case (map argumentRole args, as) of
             -- A variable production: the whole node is what its class's map says.
@@ -427,7 +446,7 @@ binderAt args i = case drop i args of
 --
 -- **Only the one-pair form.** @E[x -> M, y -> N]@ is simultaneous substitution and
 -- builds a /list/ per class, which no object grammar spells, so it stays what it
--- was: sugar in a rule's own grammar, elaborating to @L.subst-all@. The split is
+-- was: sugar in a rule's own grammar, elaborating to @L.subst-*@. The split is
 -- principled rather than arbitrary — the one-pair form /is/ a function applied to
 -- what its slots hold, which is exactly what a notation production is, and the
 -- list form constructs an argument instead.
@@ -453,11 +472,11 @@ substitutionNotations gs g
       -- says which class whatever the reader has open. Writing the word there
       -- made a generated block depend on an @open@ the author never wrote for
       -- it: a @language@ inside @namespace Source@ needs only @open Source.LC@
-      -- for its metavariables, and the generated @subst-x@ would then be refused
+      -- for its metavariables, and the generated @subst.x@ would then be refused
       -- because the bare @x@ reached nothing. 'Thena.Language.Grammar.checkNotation'
       -- resolves it through the same door a written @notation@ block's goes
       -- through, which since this phase takes a path.
-      [ Production 0 (nameDotted (substOf (grammarWritten g) (classWord k)))
+      [ Production 0 (nameDotted (substOf (grammarWritten g) k))
           [ Param (target k) Nothing, Param (classWord k) (Just (nameDotted k)), Param (replacement k) Nothing ]
           Nothing
           (map Word [target k, "[", classWord k, "->", replacement k, "]"])
@@ -496,8 +515,8 @@ qname = SurfaceName
 --
 -- **Qualified and never short**, because the short word would be looked for in
 -- the context first and the recursion assumption of the declaration being
--- elaborated is the one local there — @LC.subst-all@ reaching for @subst-all@
--- while @LC.subst-x@ is being declared would find nothing at all.
+-- elaborated is the one local there — @LC.subst-*@ reaching for @subst-*@
+-- while @LC.subst.x@ is being declared would find nothing at all.
 global :: GlobalName -> Surface
 global = surfaceName
 

@@ -1553,7 +1553,7 @@ importTests =
       -- The language's productions and its generated substitution, none of
       -- which is written as a declaration anywhere in the file.
       assertBool (show mine)
-        (all (`elem` mine) ["A.LC.var", "A.LC.app", "A.LC.subst-x"])
+        (all (`elem` mine) ["A.LC.var", "A.LC.app", "A.LC.subst.A.x"])
 
   , testCase "a global says which module declared it" $ do
       (s0, _) <- startingSession

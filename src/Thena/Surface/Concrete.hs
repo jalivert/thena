@@ -333,7 +333,7 @@ data SurfaceModule = SurfaceModule
 -- with no equation is a diagnosable mistake rather than an unparseable one.
 -- **What a declaration names may be written with a path** (MS10 phase 243):
 -- the steps, then the base word, exactly as 'SurfaceName' carries a written
--- name. @Ty.subst-X : …@ declares into @Ty@'s namespace, and a name with no
+-- name. @Ty.subst.X : …@ declares into @Ty@'s namespace, and a name with no
 -- steps is every declaration anything wrote before MS10. **It is the written
 -- pieces and not a resolved 'Thena.Core.Term.GlobalName'**, because a
 -- declaration inside an enclosing namespace will be relative to it.
@@ -590,6 +590,6 @@ blocksIn t = case t of
 -- **For a generator**: what the substitution family and a reading of an object
 -- term write is a name that is already resolved, and a reference to one in a
 -- namespace has to carry its path or the context would be searched for its base
--- word first. Writing it is the same thing a user does with @Ty.subst-X@.
+-- word first. Writing it is the same thing a user does with @Ty.subst.X@.
 surfaceName :: GlobalName -> Surface
 surfaceName n = SurfaceName (nameSteps n) (nameWord n)

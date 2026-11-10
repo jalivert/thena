@@ -79,7 +79,7 @@ import Data.Maybe (isJust, isNothing, listToMaybe)
 
 import Thena.Core.Level (Normal (..), normalise)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), Opened (..), declarationNamed, globalUnder, inDeclarationOf, innermostOf, nameDotted, shortestEnding, nameFromText, rootName, Ident (..), Literal (..), instantiate, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), InScope (..), Opened (..), declarationNamed, globalUnder, inDeclarationOf, inFamilyOf, innermostOf, nameDotted, shortestEnding, nameFromText, rootName, Ident (..), Literal (..), instantiate, tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Regex (Regex, andThen, fromRanges, matches, oneOf, parseRegex, primingChar, singleChar, star)
@@ -248,15 +248,6 @@ data GrammarProblem
     -- substituting for it is a map into that language's terms — reach two and
     -- neither is determined. Two /unrelated/ languages reading one token class
     -- is ordinary and not this
-  | ClassWordTwice String [GlobalName]
-    -- ^ the word, and two classes this grammar reaches that are both written it
-    -- (MS10 phase 259). **A class carries a path since this phase and a
-    -- generated name hangs off its WORD** — @LC.fv-x@ — because a word may hold
-    -- no dot (his ruling of 2026-10-30), so reaching @A.x@ and @B.x@ would mint
-    -- one @LC.fv-x@ for two classes. It is refused where 'ClassOwnedTwice' is,
-    -- and for the same kind of reason: the generator has one name and two things
-    -- to mean by it. **Two /unrelated/ languages each reading an @x@ of their
-    -- own is ordinary and not this**
   | NoSuchGrammar
     -- ^ §4.8: a @notation@ block naming no installed grammar. **The one block
     -- that does not declare its own name** — it adds productions to a grammar
@@ -598,8 +589,8 @@ checkGrammar sc installed env b = do
     -- A global, or a name a grammar already installed will generate.
     --
     -- **Read as a name and not rooted** (MS10 phase 244): what is checked is a
-    -- written spelling, and a generated one is dotted — @L.fv-x@ is already
-    -- declared when the environment holds @fv-x@ in @L@, which a root-level
+    -- written spelling, and a generated one is dotted — @L.fv.x@ is already
+    -- declared when the environment holds @x@ in @L.fv@, which a root-level
     -- name whose word held the dots would never have matched.
     taken x =
       isDeclared (nameFromText x) env
@@ -809,8 +800,8 @@ grammarWord = nameWord . grammarName
 -- | __A grammar's name for MINTING a generated declaration — relative.__
 --
 -- **'Thena.Engine.declaredIn' places what an op declares**, so a generated name
--- minted absolutely would be placed twice: @A.Ty.fv-x@ becomes @A.A.Ty.fv-x@.
--- So the generator mints @Ty.fv-x@ and the op supplies the @A@ — the same
+-- minted absolutely would be placed twice: @A.Ty.fv.x@ becomes @A.A.Ty.fv.x@.
+-- So the generator mints @Ty.fv.x@ and the op supplies the @A@ — the same
 -- division 'Thena.Driver.datatypeProgram' already has for the datatype.
 grammarWritten :: Grammar -> GlobalName
 grammarWritten = rootName . grammarWord
@@ -866,8 +857,8 @@ isGrammar gs c = any ((== c) . grammarName) gs
 -- **The class's own name is what tells two classes apart** (MS10 phase 259):
 -- resolved in scope, @A.x@ and @B.x@ are two classes and the generators compare
 -- the names. **What a generated name hangs off is the word**, because
--- @LC.fv-\8249k\8250@ is one word and a word may hold no dot — his ruling of
--- 2026-10-30 — so a class @A.x@ gives @LC.fv-x@ and not @LC.fv-A.x@.
+-- @LC.fv.\8249k\8250@ is one word and a word may hold no dot — his ruling of
+-- 2026-10-30 — so a class @A.x@ gives @LC.fv.x@ and not @LC.fv.A.x@.
 --
 -- It is also the word a slot and a rule are WRITTEN with, which is the same
 -- fact: the author writes @x@ wherever the outward walk reaches the class.
@@ -1071,7 +1062,7 @@ checkNotation sc installed env b = do
 
     -- **A FUNCTION A NOTATION NAMES RESOLVES IN SCOPE** (MS10 phase 258), by
     -- the one walk. A @language@ block inside @namespace A@ declares
-    -- @A.LC.subst-x@ and generates a @notation@ production naming @LC.subst-x@,
+    -- @A.LC.subst.x@ and generates a @notation@ production naming @LC.subst.x@,
     -- because a generated declaration is written the way the author would have
     -- written it — so the lookup has to be the one an author's own @notation@
     -- block gets. **Unresolved is left as written**, so the refusal still names
@@ -1364,16 +1355,6 @@ substitutable gs g = do
   case [ (cls, hs) | cls <- classesReached gs g, let hs = owners cls, length hs > 1 ] of
     (cls, hs) : _ -> Left (ClassOwnedTwice cls hs)
     [] -> Right ()
-  -- **Two classes of one word, which the paths made possible** (MS10 phase
-  -- 259): the generated names are suffixed with a class's word, so this grammar
-  -- would declare one @fv-x@ meaning two things. Refused here rather than left
-  -- to collide at declaration, where the message would name a generated word
-  -- nobody wrote.
-  case [ (w, cs) | w <- nub (map classWord substituted)
-                 , let cs = [ c | c <- substituted, classWord c == w ]
-                 , length cs > 1 ] of
-    (w, cs) : _ -> Left (ClassWordTwice w cs)
-    [] -> Right ()
   case [ (p, a, l, cls)
        | p <- constructorProductions g
        , a <- gproductionArguments p
@@ -1396,9 +1377,6 @@ substitutable gs g = do
       a : _ | Binder cls <- argumentRole a -> Just cls
       _ -> Nothing
     reachedBy l = concat [ classesReached gs h | h <- gs, grammarName h == l ]
-    -- **Only the classes something is generated for.** A class no language owns
-    -- mints no name, so two of them sharing a word collides with nothing.
-    substituted = classesSubstituted gs g
     owners cls = [ grammarName h | h <- grammarsReached gs g, cls `elem` map fst (variableProductions h) ]
     nameOf = nameDotted
     inProduction p why = let n = nameDotted (gproductionName p) in Left (InProduction n why)
@@ -1407,25 +1385,36 @@ substitutable gs g = do
 -- the order they are declared; none for a language that reaches no class with
 -- an owner.
 --
--- **One per class, and the class is in the name — MS8 phase 155.** The names
--- used to come from the language alone (@LC.fv@, @LC.subst@), which two classes
--- collide on, and keeping the unsuffixed name when there happens to be one class
--- would be a special case in the naming rule. His ruling on the context's lookup
--- relation, 2026-10-04, settled the same question the same way and accepted the
--- migration.
+-- **One per class, and the class is a PATH INSIDE the family's step — his
+-- ruling of 2026-11-10.** The names used to come from the language alone
+-- (@LC.fv@, @LC.subst@), which two classes collide on; MS8 phase 155 glued the
+-- class's word on instead, @LC.fv-x@, which two classes of one word collide on
+-- in turn, and that was refused until this phase. @fv@, @fresh@ and @subst@ are
+-- namespaces now and the class's own name is what sits inside, so the paths do
+-- the distinguishing and nothing is refused.
 --
--- * @L.fresh-‹k›@ for each class @L@ **owns**, because minting a name of a class
+-- * @L.fresh.‹k›@ for each class @L@ **owns**, because minting a name of a class
 --   belongs to the language whose notation can write one — so a grammar that
 --   reaches a class without owning it calls the owner's.
--- * @L.fv-‹k›@ and @L.subst-‹k›@ for each class @L@ **reaches**, owning it or
+-- * @L.fv.‹k›@ and @L.subst.‹k›@ for each class @L@ **reaches**, owning it or
 --   not: a class can occur free inside a slot of another language.
--- * one @L.subst-all@, taking one map per class reached. Simultaneous
+-- * one @L.subst-*@, taking one map per class reached. Simultaneous
 --   substitution is the primitive one, and now across classes too — renaming a
 --   binder of one class to avoid capture needs the map of every class.
--- **They live in the LANGUAGE'S OWN NAMESPACE since MS10 phase 244** — @LC.fv-x@
--- and not @LC.fv-x@ — through 'Thena.Core.Term.inDeclarationOf', the one helper
--- every generated name is minted by, so none of these four decides a placement
--- of its own.
+--
+-- __Why the simultaneous one is a word and not a step.__ It names no class, so
+-- it has nothing to put inside @subst@, and a literal step there would be
+-- forgeable: a root-level class called @all@ would generate the very same
+-- @L.subst.all@. @*@ cannot begin a name, so no token class can ever be spelled
+-- it, while @subst-*@ itself starts with a letter and is perfectly typeable —
+-- measured 2026-11-10, a class called @*@ is refused by the lexer and a
+-- definition called @subst-*@ is accepted. Before this phase it was @subst-*@
+-- and a class called @all@ collided with it silently.
+--
+-- **They live in the LANGUAGE'S OWN NAMESPACE since MS10 phase 244**, through
+-- 'Thena.Core.Term.inFamilyOf' and 'Thena.Core.Term.inDeclarationOf', the
+-- helpers every generated name is minted by, so none of these four decides a
+-- placement of its own.
 substitutionFamily :: [Grammar] -> Grammar -> [GlobalName]
 substitutionFamily gs g
   | null reached = []
@@ -1436,20 +1425,20 @@ substitutionFamily gs g
         ++ [ substOf n k | k <- reached ]
   where
     n = grammarName g
-    reached = map classWord (classesSubstituted gs g)
-    owned = map (classWord . fst) (variableProductions g)
+    reached = classesSubstituted gs g
+    owned = map fst (variableProductions g)
 
 -- | …and their spellings, which is what a clash is checked against: a written
 -- word is compared with the whole dotted name, so a production may no more be
--- called @LC.fv-x@ than it could be called @LC.fv-x@ before.
+-- called @LC.fv.x@ than it could be called @LC.fv.x@ before.
 substitutionNames :: [Grammar] -> Grammar -> [String]
 substitutionNames gs g = map nameDotted (substitutionFamily gs g)
 
 -- | A production's name as written, **split on the reserved dot** (MS10 phase
 -- 244) — so a production may name something in a namespace, which is what
--- generated substitution's own notation does: @LC.subst-x@ is the function
--- @subst-x@ in @LC@ and not a root-level name with a dot in its word, the one
--- shape his ruling of 2026-10-30 forbids.
+-- generated substitution's own notation does: @LC.subst.x@ is the function @x@
+-- in @LC.subst@ and not a root-level name with a dot in its word, the one shape
+-- his ruling of 2026-10-30 forbids.
 productionGlobal :: Production -> GlobalName
 productionGlobal = nameFromText . productionName
 
@@ -1461,13 +1450,13 @@ productionGlobal = nameFromText . productionName
 -- (MS10 phase 248): @grammarName@ is the written @LC@ and the datatype it
 -- declares is @LC.LC@, whose namespace is what these belong in. Said here, in
 -- the four, rather than at the dozen call sites that have a grammar in hand.
-freshOf, fvOf, substOf :: GlobalName -> String -> GlobalName
-freshOf l k = inDeclarationOf (declarationNamed l) ("fresh-" ++ k)
-fvOf l k = inDeclarationOf (declarationNamed l) ("fv-" ++ k)
-substOf l k = inDeclarationOf (declarationNamed l) ("subst-" ++ k)
+freshOf, fvOf, substOf :: GlobalName -> GlobalName -> GlobalName
+freshOf l k = inFamilyOf (declarationNamed l) "fresh" k
+fvOf l k = inFamilyOf (declarationNamed l) "fv" k
+substOf l k = inFamilyOf (declarationNamed l) "subst" k
 
 allOf :: GlobalName -> GlobalName
-allOf l = inDeclarationOf (declarationNamed l) "subst-all"
+allOf l = inDeclarationOf (declarationNamed l) "subst-*"
 
 -- | **Every occurrence class the language reads, with the production that
 -- reads it** — one entry per class, in declaration order (MS8 phase 153).
@@ -1583,7 +1572,7 @@ grammarsReached gs g = walk [] [g]
 --
 -- **A context as well as a language — MS8 phase 157, `~mnr39`.** It is the same
 -- question and the same answer: a context reaches the classes of the languages
--- in its slots, so F-sub's Γ reaches the type class and gets @Ctx.subst-X@,
+-- in its slots, so F-sub's Γ reaches the type class and gets @Ctx.subst.X@,
 -- which is the @[X↦P]Δ@ of the type-substitution lemma. Nothing special had to
 -- be written for it — a context simply /owns/ no class, so it generates no
 -- @fresh@, and its name slots are neither occurrences nor binders, so nothing in
@@ -1616,11 +1605,11 @@ classOwner gs g cls = case
     _ -> Nothing
 
 -- | **The regular expression of one of a language's occurrence classes** — the
--- class's own, so that a generated @L.fresh-‹k›@ mints names that class accepts
+-- class's own, so that a generated @L.fresh.‹k›@ mints names that class accepts
 -- (MS6 closeout 23, per class at MS8 phase 155).
 --
 -- 'Nothing' for a class this language reads no occurrence at, or one whose
--- occurrence is not at a class — neither has an @L.fresh-‹k›@ to name.
+-- occurrence is not at a class — neither has an @L.fresh.‹k›@ to name.
 variableRegex :: Grammar -> GlobalName -> Maybe Regex
 variableRegex g cls =
   listToMaybe [ re | (c, p) <- variableProductions g, c == cls

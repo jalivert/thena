@@ -153,7 +153,7 @@ data Warning
     -- on the first word of it says nothing about what is wrong.
   | UnprimeableClass BlockKind String String
     -- ^ the block, the language's name, and its identifier class's name — a class no
-    -- single character extends, so a generated @L.fresh-\8249k\8250@ cannot rename a
+    -- single character extends, so a generated @L.fresh.\8249k\8250@ cannot rename a
     -- captured binder to a name the language can write back (MS6 closeout 23,
     -- phase 146). **It is a warning and not a refusal**: the language works, its
     -- substitution is correct, and only printing a renamed binder is lost — so

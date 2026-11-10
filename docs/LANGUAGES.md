@@ -329,9 +329,11 @@ terminal — a legitimate notation — and you are warned rather than refused.
 **A token class is scoped the same way.** `x : Token String` may be written
 inside a `namespace` beside the block that reads it, and a block that cannot see
 a class reads its word as a terminal and is warned, exactly as for a letter. The
-names generated from a class are suffixed with the class's **word** — `A.LC.fv-x`
-for a class `A.x` — so one language reaching two classes both written `x` is
-refused and names both.
+names generated from a class carry the class's **whole name**, path included —
+`A.LC.fv.A.x` for a class `A.x` — so **one language may reach two classes both
+written `x`**, which is what a relation between two modelled languages needs.
+What you see is the shortest ending that still means it, so `fv.x` wherever the
+language is open.
 
 `language` in a rule file is a syntax error. MS5 declared languages there, with a
 type of their own and a coercion `surface-of`; both are gone.
@@ -430,11 +432,11 @@ the generator writes for you, beside the substitution functions themselves:
 
 ```
 notation LC where
-  LC.subst-x e (x : x) n -> e [ x -> n ]
+  LC.subst.x e (x : x) n -> e [ x -> n ]
 ```
 
 The middle parameter is the one that is ascribed: it reads a *name* of the class
-`x`, and `LC.subst-x`'s declaration says only `String` there.
+`x`, and `LC.subst.x`'s declaration says only `String` there.
 
 So it is an ordinary production — it works in a term literal, not only in a rule,
 and a stuck substitution prints in it. **The comma list `E[x -> M, y -> N]` is

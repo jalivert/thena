@@ -242,6 +242,44 @@ written `∀ {A : Type₀} -> A -> A`.
 
 ## Modules and namespaces
 
+### A generated substitution names its class as a path, not as a suffix
+
+*Decided 2026-11-10.* A language's substitution family is **three namespaces and
+one word**: `LC.fresh.x`, `LC.fv.x`, `LC.subst.x` per class, and one
+`LC.subst-*` for the simultaneous substitution. What sits inside `fresh`, `fv`
+and `subst` is the class's **whole name**, path included, so a language reaching
+`Source.x` and `Target.x` declares `Compiles.subst.Source.x` and
+`Compiles.subst.Target.x`.
+
+**What this buys you is two-language metatheory with the obvious names.** A
+compilation relation, an elaboration relation or a bisimulation between two
+modelled languages is a third language whose terms mention a term of each, and
+both languages calling their identifiers `x` is the natural thing to write. Until
+this decision the family's name was `LC.subst-x`, with the class glued into the
+word; a word may hold no dot, so the class's path was dropped there and nowhere
+else, two classes of one word collapsed onto one name, and **that third language
+was refused**. The only way round it was to rename one of the classes, which is
+the collision namespaces exist to remove.
+
+**The simultaneous one is `subst-*` and not `subst-all`.** It names no class, so
+it has nothing to put inside `subst` and stays a word beside that namespace. A
+literal step would be forgeable — a token class called `all` generates the very
+same `LC.subst.all`, and against the old `subst-all` that collision was real and
+silent. **`*` cannot begin a name**, so no token class can ever be spelled it,
+while `subst-*` itself begins with a letter and is ordinary to type.
+
+**What a reader sees is the shortest ending that still means it**, so `subst.x`
+wherever the language is open. The full name is absolute: a class declared beside
+its language inside `namespace A` is `A.LC.subst.A.x`.
+
+**One thing is not settled.** The generated bracket notation — `E[x->N]` — is
+still spelled with the class's bare word, so in a language that reaches two
+classes both written `x` a term written that way **parses two ways and is
+refused as ambiguous**, naming both readings. The functions are reachable by
+name; only the bracket is unavailable in that one case.
+
+---
+
 ### A name is qualified, and a `data` declaration opens a namespace of its own
 
 *Decided 2026-10-30. **Being built.** A name carries its path, the dot is
@@ -251,8 +289,8 @@ equipment is already in its namespace** — `Nat.elim` and `Nat.case` — so
 `:show Nat.case` is how you ask for one, and **the relations and proofs a
 declaration derives are one step deeper, in `Nat.lemmata`**:
 `Nat.lemmata.noConfusion`, `Nat.lemmata.Below` and the rest, reached short with
-`open Nat.lemmata`. **A language's generated substitution is too**, as `LC.fv-x`,
-`LC.subst-x`, `LC.subst-all` and `LC.fresh-x`, and **a declaration of your own
+`open Nat.lemmata`. **A language's generated substitution is too**, as `LC.fv.x`,
+`LC.subst.x`, `LC.subst-*` and `LC.fresh.x`, and **a declaration of your own
 may be written with a path**: `Ty.lemma : …` declares `lemma` in `Ty`. **The four
 primitive functions have moved in too** — `String.eq`, `Char.eq`, `Int.eq` and
 `String.append`, where they were `eqString`, `eqChar`, `eqInt` and `appendString` — **and so have the prelude's own nine theorems about them**, which
@@ -268,14 +306,13 @@ built, and resolution walks outward through it. All five forms of `open` are
 built, and a name prints as the shortest ending that still means it.** **A `language`,
 `context`, `judgment` or `notation` block may be written inside a `namespace`
 block**, and what it declares and generates lands there: inside `namespace A`,
-`language Ty` is `A.Ty.Ty` with `A.Ty.base`, `A.Ty.subst-x` and the rest, and
+`language Ty` is `A.Ty.Ty` with `A.Ty.base`, `A.Ty.subst.x` and the rest, and
 `open Ty` beside it brings them in — a namespace resolves by the same outward
 walk a name does, and **that includes a token class**, so `x : Token String` may
 be written inside the namespace with the block that reads it. A class carries
-its path like anything else, while **the name generated from it is suffixed with
-the class's word** — `A.LC.fv-x` for a class `A.x`, because a word holds no dot
-— so one language reaching two classes both written `x` is refused. **And a tag
-resolves like any other name**: see below.*
+its path like anything else, and **the name generated from it carries that path**
+— `A.LC.fv.A.x` for a class `A.x` — so one language may reach two classes both
+written `x`. **And a tag resolves like any other name**: see below.*
 
 **A TAG RESOLVES LIKE ANY OTHER NAME.** `` LC`( f g )` `` reaches `A.LC` wherever
 `A` is open — inside the `namespace` block itself, or after an `open A` — and the
@@ -1476,7 +1513,7 @@ preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 
 ```
 
 in the surface language, with `elim` and no proof sugar. **It is about the
-generated `LC.subst-all`**, not a substitution written for the proof: the
+generated `LC.subst-*`**, not a substitution written for the proof: the
 proof names the generated function's pieces, checks with `refl` that they are
 the same terms, and follows its `String.dec` decisions case by case.
 
@@ -1559,11 +1596,11 @@ name nobody knows can follow the decision:
 
 ```
 varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty)
-            -> Eq LC (LC.subst-x (var y) x N) (var y)
+            -> Eq LC (LC.subst.x (var y) x N) (var y)
 ```
 
 **Generated substitution decides with `String.dec`**, which is what lets a
-proof about `LC.subst-x` follow it at all. What is trusted is the same as for
+proof about `LC.subst.x` follow it at all. What is trusted is the same as for
 `String.eq`: the verdict on two literals. The refutation it writes is built
 from `String.dec` itself and checked by the kernel.
 
@@ -2227,14 +2264,14 @@ Generated substitution now writes the block a user would have written —
 
 ```
 notation LC where
-  LC.subst-x -> M [ x -> N ]
+  LC.subst.x -> M [ x -> N ]
 ```
 
 — as a surface item, checked the same way. Two things follow and both are gains.
 It **parses outside a rule**, so `` LC`x[x -> y]` `` is an ordinary term literal
 where it used to be a parse error; and it **prints back**, so a rule whose index
 substitutes reads ``sub`${Γ} [ ${X} -> ${T} ] ⊢ …` `` instead of splicing
-`${Ctx.subst-X Γ X T}`.
+`${Ctx.subst.X Γ X T}`.
 
 **The comma list stays sugar**, because `E[x -> M, y -> N]` builds a *list* per
 class and no object grammar spells a list. So the one-pair form is a production
@@ -2352,11 +2389,11 @@ namespace Source where
 open Source.LC                -- all that M needs, and all that is needed
 
 language Wrap, W where
-  box -> [ M ]                -- reaches Source.x through M, so Wrap.subst-x
+  box -> [ M ]                -- reaches Source.x through M, so Wrap.subst.x
 ```
 
 works with no `open Source`. **The generated function's name is still suffixed
-with the class's *word*** — `Wrap.subst-x` for a class `Source.x` — because a
+with the class's *word*** — `Wrap.subst.x` for a class `Source.x` — because a
 word holds no dot, which is why two classes both written `x` still cannot both
 be reached.
 
@@ -2825,8 +2862,8 @@ the first premise continues the one above:
 
 A premise may be named, `d : Γ ⊢ M : T`; one that is
 not is `d1`, `d2`, … by position. A premise is never named like a
-metavariable, so `x : T ∈ Γ` is always the lookup. `E[x->N]` is `LC.subst-x E x
-N`; `E[x->M, y->N]` is `LC.subst-all`, simultaneous; `E[x->M][y->N]` is one
+metavariable, so `x : T ∈ Γ` is always the lookup. `E[x->N]` is `LC.subst.x E x
+N`; `E[x->M, y->N]` is `LC.subst-*`, simultaneous; `E[x->M][y->N]` is one
 after the other.
 
 **The annotated tier writes the quantification**, which fixes the argument
@@ -2929,14 +2966,14 @@ kind of name its entries can hold, it gets the free-variables function and the
 substitution — so F-sub's Γ, whose entries hold types, gets:
 
 ```
-Ctx.fv-X     : Ctx -> List String
-Ctx.subst-X  : Ctx -> String -> Ty -> Ctx
-Ctx.subst-all : Ctx -> List (And String Ty) -> Ctx
+Ctx.fv.X     : Ctx -> List String
+Ctx.subst.X  : Ctx -> String -> Ty -> Ctx
+Ctx.subst-* : Ctx -> List (And String Ty) -> Ctx
 ```
 
-`Ctx.subst-X` is the `[X↦P]Δ` that System F's type-substitution lemma is written
+`Ctx.subst.X` is the `[X↦P]Δ` that System F's type-substitution lemma is written
 with, and a rule may write it in notation: `Γ[X -> T]` elaborates to
-`Ctx.subst-X Γ X T`.
+`Ctx.subst.X Γ X T`.
 
 It is a plain fold with **no capture avoidance and no renaming**, because a
 context's name slot is an ordinary name and not a binder: `Γ , x : T` has no body
@@ -2956,10 +2993,10 @@ for every kind of name it can contain, right after its datatype — here the one
 kind, `x`:
 
 ```
-LC.fresh-x   : String -> List String -> String
-LC.fv-x      : LC -> List String
-LC.subst-all : LC -> List (And String LC) -> LC     -- simultaneous
-LC.subst-x   : LC -> String -> LC -> LC             -- LC.subst-x E x N is E[x->N]
+LC.fresh.x   : String -> List String -> String
+LC.fv.x      : LC -> List String
+LC.subst-* : LC -> List (And String LC) -> LC     -- simultaneous
+LC.subst.x   : LC -> String -> LC -> LC             -- LC.subst.x E x N is E[x->N]
 ```
 
 **The kind is in the name even when there is only one**, because leaving it out
@@ -2970,7 +3007,7 @@ They are ordinary definitions, written by `elim` and elaborated like anything
 you write. They compute, so a substitution's answer is provable by `refl`:
 
 ```
-captured : Eq LC (LC.subst-x (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
+captured : Eq LC (LC.subst.x (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
 captured = refl LC (abs "y'" base (var "y"))
 ```
 
@@ -2984,7 +3021,7 @@ What it needs of the language, each refused at the block with a message: one
 variable production **per kind of name**, taking only its occurrence; and a
 binder free only in an argument of a language that reads names of that binder's
 kind — see the next entry. A language that can contain no name at all (`Ty` in
-the example above) gets nothing. The four names are yours to keep free — declaring `LC.fv-x` first
+the example above) gets nothing. The four names are yours to keep free — declaring `LC.fv.x` first
 is refused.
 
 A binder of one kind does not bind names of another: the kinds are separate
@@ -2995,7 +3032,7 @@ Two things arrived with it. **`List`, with `nil` and `cons`, is in the
 prelude**, so those names are taken from every object language until imports
 exist. **`String.append : String -> String -> String`** is the one way to build
 a `String`, and it computes only on two literals. The types that mention `List`
-carry a level parameter, `LC.fv-x {ℓ}`, because a list of names is a list at any
+carry a level parameter, `LC.fv.x {ℓ}`, because a list of names is a list at any
 level and nothing is defaulted.
 
 ### A binder may scope into another language, if that language reads that kind of name
@@ -3034,13 +3071,13 @@ way now is nothing.
 substitution for each:
 
 ```
-Tm.subst-x   : Tm -> String -> Tm -> Tm     -- a term for a term variable
-Tm.subst-X   : Tm -> String -> Ty -> Tm     -- a TYPE for a type variable
-Tm.subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
+Tm.subst.x   : Tm -> String -> Tm -> Tm     -- a term for a term variable
+Tm.subst.X   : Tm -> String -> Ty -> Tm     -- a TYPE for a type variable
+Tm.subst-* : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
 ```
 
 **A kind of name belongs to the language whose variable production reads it**, and
-that is what a substitution for it replaces a name *with* — so `Tm.subst-X` takes
+that is what a substitution for it replaces a name *with* — so `Tm.subst.X` takes
 a type. Two unrelated languages may both read `x : Token String`, each the owner
 for itself; what is refused is one language reaching two that read the same kind,
 where the substitution would have no single language to replace a name with.

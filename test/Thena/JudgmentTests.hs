@@ -422,26 +422,26 @@ premises =
 substitution :: [TestTree]
 substitution =
   [ -- **The elaborated constructor is unchanged by MS8 phase 159 and the
-    -- PRINTING is not.** @E[x->N]@ still elaborates to @LC.subst-x E x N@, with
+    -- PRINTING is not.** @E[x->N]@ still elaborates to @LC.subst.x E x N@, with
     -- the same implicit quantification in the same order; what moved is that the
     -- bracket form is now a generated @notation@ production of @LC@ (§4.8), so
     -- the printer spells the stuck application instead of splicing it. Before
-    -- 159 the tail of this line read @${LC.subst-x E x N}@.
-    testCase "E[x->N] is LC.subst-x" $ do
+    -- 159 the tail of this line read @${LC.subst.x E x N}@.
+    testCase "E[x->N] is LC.subst.x" $ do
       s <- loaded (header ++ valueAndStep)
       said s ":show step" !! 1
         @?= "  { E-beta : ∀ (N : LC) (x : String) (T : Ty) (E : LC) -> value`${N} value` -> step`( ( λ ${x} : ${T} . ${E} ) ${N} ) --> ${E} [ ${x} -> ${N} ]`"
-  , testCase "a list is simultaneous, LC.subst-all, and chained brackets are sequential" $ do
+  , testCase "a list is simultaneous, LC.subst-*, and chained brackets are sequential" $ do
       s <- loaded (header ++
         [ "judgment sub = M ~> N where", ""
         , "  S:  ---"
         , "      M ~> E[x->M, x'->N][x1->N']", "" ])
       said s ":show sub" @?=
         [ "data sub : LC -> LC -> Type₀ where"
-          -- The outer bracket prints in the notation; the inner @L.subst-all@
+          -- The outer bracket prints in the notation; the inner @L.subst-*@
           -- is spliced, because a comma list stays rule-level sugar (§6.3) and
           -- has no production to print back as.
-        , "  { sub.S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${subst-all {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))} [ ${x1} -> ${N'} ]` }" ]
+        , "  { sub.S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${subst-* {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))} [ ${x1} -> ${N'} ]` }" ]
     -- §6.3's CHECK: the left of -> is a binder-sorted name.
   , refusal "the left of -> is not a name"
       ["judgment sub = M ~> N where", "", "  S:  ---", "      M ~> E[M->N]", ""]

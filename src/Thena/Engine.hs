@@ -854,8 +854,8 @@ namespaceOf = innermostOf . scope
 
 -- | A written name, placed in the namespace the declaration is written in.
 --
--- **The steps the writer wrote nest inside it**, so @Ty.subst-X@ inside
--- @namespace A@ declares @A.Ty.subst-X@ — the same nesting a constructor
+-- **The steps the writer wrote nest inside it**, so @Ty.subst.X@ inside
+-- @namespace A@ declares @A.Ty.subst.X@ — the same nesting a constructor
 -- written with a path already gets inside its datatype's namespace.
 --
 -- **Every declaring op goes through this and none of them knows what a

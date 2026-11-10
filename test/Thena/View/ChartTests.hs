@@ -416,10 +416,10 @@ productionCases =
       -- Declaration order, which is the order the author reads their own file
       -- in. This fixture's LC has three constructors, and **since MS8 phase 159
       -- the generated @E[w -> M]@ notation is a production too** (§4.8), so the
-      -- chart offers it: an @LC@ really can begin an @LC.subst-w@ reading, and
+      -- chart offers it: an @LC@ really can begin an @LC.subst.w@ reading, and
       -- the chart says what the grammar says. It comes last because a notation
       -- block's productions are appended.
-      named gs [] [] >>= (@?= ["LC.var", "LC.abs", "LC.app", "LC.subst-w"])
+      named gs [] [] >>= (@?= ["LC.var", "LC.abs", "LC.app", "LC.subst.w"])
   , testCase "with their shapes, which is what a list shows" $ do
       gs <- loaded
       shapeOf gs [] [] "LC.app" >>= (@?= Just ["(", "LC", "LC", ")"])

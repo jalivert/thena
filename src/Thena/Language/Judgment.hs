@@ -398,11 +398,11 @@ term gs self@(selfRule, selfWord) rename t = case t of
   -- **Not renamed** (MS8 phase 172): the premise binder carries the user's own
   -- name, so this is the name of the thing it reaches.
   Node n _ | [PremiseRef x] <- special n -> Right (SurfaceName [] x)
-  -- §6.3: a comma list is @L.subst-all@ — simultaneous, and across classes, so
+  -- §6.3: a comma list is @L.subst-*@ — simultaneous, and across classes, so
   -- each class's map takes the pairs written at it and the rest are empty (MS8
   -- phase 155). **A single pair never reaches here since MS8 phase 159**: it is
   -- a generated @notation@ production, so it is an ordinary 'Node' and the
-  -- clause below builds @L.subst-‹k›@ applied without knowing anything about it.
+  -- clause below builds @L.subst.‹k›@ applied without knowing anything about it.
   Node n [e, s] | [SubstituteIn l] <- special n -> do
     e' <- go e
     ps <- pairs s

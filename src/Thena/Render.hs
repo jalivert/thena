@@ -1998,14 +1998,6 @@ renderDeclareError ren e = case e of
         ++ " both read an occurrence at " ++ cls
         ++ ", and this grammar reaches both, so a substitution for " ++ cls
         ++ " has no one language to replace a name with"
-    -- **It names both classes in full**, because the word is what the author
-    -- wrote and the paths are the only thing that tells them apart (MS10 phase
-    -- 259).
-    ClassWordTwice w cs ->
-      blockAt k g ++ ": it reaches " ++ intercalate " and " (map (nameString ren) cs)
-        ++ ", which are both written " ++ w
-        ++ ", and a generated name is suffixed with a class's word \8212 so "
-        ++ "fv-" ++ w ++ " would mean two things"
     InProduction p why -> blockAt k g ++ ", production " ++ p ++ ": " ++ case why of
       NoItems -> "it has no items"
       -- MS8 phase 171: a notation names its own arguments.

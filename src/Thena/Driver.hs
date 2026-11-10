@@ -514,7 +514,7 @@ data Session = Session
     --
     -- **The names are the keys that ARRIVED, not the ones the file wrote.** It
     -- is the difference between 'declaredNames' of the environment before the
-    -- module and after it, so a datatype's generated names — @LC.subst-x@,
+    -- module and after it, so a datatype's generated names — @LC.subst.x@,
     -- @Nat.elim@, everything under @‹D›.lemmata@ — belong to the module whose
     -- @data@ block produced them, which is the only answer an export list can
     -- use. The items a module /wrote/ are 'declaredNames'\' business and are
@@ -1947,7 +1947,7 @@ regroup = go
     -- a @language@ block above it is exactly such a declaration. It is
     -- resolved, checked and played where it stands, by @run-block@.
     one (SurfaceBlock b : rest) = Right ([ItemBlock b], rest)
-    -- **Paired on the whole name, path included** (MS10 phase 243): @Ty.fv-X@
+    -- **Paired on the whole name, path included** (MS10 phase 243): @Ty.fv.X@
     -- and @fv-X@ are two names, so a signature written with a path wants its
     -- equation written with the same one.
     one (SurfaceSignature ps x ty : SurfaceEquation qs y body : rest)
@@ -2212,7 +2212,7 @@ surfaceProgram brought n0 items = foldl (item []) ([], n0) items
               -- turned out to be.
               -- **The name goes out whole, path and all** (MS10 phase 243):
               -- @define-global@ takes a name and not the text of one, so a
-              -- declaration written @Ty.subst-X@ installs @Ty.subst-X@.
+              -- declaration written @Ty.subst.X@ installs @Ty.subst.X@.
             , Do (DefineGlobal (plicitiesIn ty) (Lit (VName x))
                     (Ref ("ty" ++ show n)) (Ref ("tm" ++ show n)))
             ]

@@ -24,6 +24,7 @@ module Thena.Core.Term
   , inDeclarationOf
   , inLemmataOf
   , lemmataStep
+  , inFamilyOf
   , declarationOf
   , declarationNamed
   , globalUnder
@@ -162,6 +163,31 @@ lemmataStep = "lemmata"
 -- competing with their own names.
 inLemmataOf :: GlobalName -> String -> GlobalName
 inLemmataOf d word = GlobalName (declarationNamespace d ++ [lemmataStep]) word
+
+-- | A name for a generated family member, with the class it is /for/ spelled
+-- as a path inside the family's step: @LC.subst.Source.x@.
+--
+-- __His ruling of 2026-11-10.__ A generated substitution's name has to mention
+-- the token class it substitutes, and a class is a /parameter/ of that function
+-- and not its owner — so the class cannot be a step of the path the way
+-- 'inDeclarationOf' spells ownership. It used to be glued into the word,
+-- @LC.subst-x@, and a word may hold no dot (his ruling of 2026-10-30), so the
+-- class's path was dropped there and nowhere else: two classes of one word then
+-- collapsed onto one name and the grammar was refused.
+--
+-- __The family's own word becomes a step and the class's whole name goes
+-- inside__, which is the shape 'inLemmataOf' already uses for what a datatype
+-- derives: @subst@ is a namespace holding one entry per class reached, and the
+-- entry's path is the class's own. Two classes both written @x@ in two
+-- namespaces land on @LC.subst.A.x@ and @LC.subst.B.x@, so nothing collides and
+-- nothing is refused.
+--
+-- **The simultaneous substitution is not one of these** — it names no class, so
+-- it stays a word beside the namespace through 'inDeclarationOf'. A path step
+-- must begin a name, and the character that makes that word unforgeable cannot.
+inFamilyOf :: GlobalName -> String -> GlobalName -> GlobalName
+inFamilyOf d step cls =
+  GlobalName (declarationNamespace d ++ [step] ++ nameSteps cls) (nameWord cls)
 
 -- | A name as a user writes it, split on the reserved dot: @Nat.elim@ is
 -- @GlobalName ["Nat"] "elim"@, and a word with no dot comes back rooted.

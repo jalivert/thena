@@ -807,8 +807,8 @@ moduleTests =
   , -- **A declaration may be named with a path** (MS10 phase 243): the steps
     -- and the word, exactly as a written name in a term carries them.
     testCase "a declaration is named with a path" $
-      fmap snd (parseSurfaceModule "module M where { Ty.subst-X : A ; Ty.subst-X = a }")
-        @?= Right [ ItemTheorem (GlobalName ["Ty"] "subst-X")
+      fmap snd (parseSurfaceModule "module M where { Ty.subst.X : A ; Ty.subst.X = a }")
+        @?= Right [ ItemTheorem (GlobalName ["Ty", "subst"] "X")
                       (SurfaceName [] "A") (SurfaceName [] "a") ]
 
   , -- **The path is part of the name being paired on**, so these are a
