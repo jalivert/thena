@@ -36,6 +36,7 @@ import examples.demo.Demo04Progress
 | `Demo05ByTactics.thena.script` | **The interactive half.** The smallest possible proof in three lines, then a lemma proved by `case-core` — one hole per surviving case, inside that case's own binders, equations already discharged |
 | `Demo06Trust.thena` | `trusted` and `:trust`: a claim that is met and reduces away to nothing, and one that is **pending** and is still load-bearing. `qed` admits the theorem and prints what it rests on |
 | `pending/Demo07Holes.thena` | **Does not load, deliberately.** The shape the demo wants — a hole left where a proof should be, picked up interactively on load — and the measured account of what happens instead. Item `~mgqwb` |
+| `Demo08Pausing.thena.rules` | **One rule that makes the elaborator hand you the hole.** A clause of `elaborate` whose body is `yield`, where the shipped base's is empty. `:consult` it and `declare two : Nat ; two = succ _` stops on the placeholder's own hole with the declaration's context in scope; fill it, `yield`, and the declaration lands. **At the prompt only** — a module load throws the suspension away, which is all `~mgqwb` is |
 
 ## The two documents beside them
 

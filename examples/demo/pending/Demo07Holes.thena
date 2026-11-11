@@ -13,13 +13,15 @@
 -- refused, because a definition with an open hole has no term. The module is
 -- rolled back and nothing is left to work on.
 --
--- A `do { … ; yield "…" }` block in a surface file does not get there either:
--- the message prints, but the development is already gone by the time the
--- prompt comes back, and a bare `yield` then answers "nothing has yielded".
+-- AND THE INTERESTING PART: consult `../Demo08Pausing.thena.rules` first, and
+-- a clause of `elaborate` hands you the hole instead of leaving it. **That
+-- rule fires for this file too** — the message prints — but the suspension is
+-- gone by the time the prompt comes back, because a module elaborates in an
+-- isolated session; a bare `yield` then answers "nothing has yielded".
 --
--- This is item `~mgqwb` — a hole or yield left in a surface file should hand
--- you the unfinished proof, not refuse the module — and it is defined in
--- `.jalivert/agenda/`.
+-- So the feature already exists and works at the prompt. **The whole of item
+-- `~mgqwb` is that a suspended machine does not survive a module load**, and
+-- it is defined in `.jalivert/agenda/`.
 --
 -- WHAT WORKS TODAY instead, and what the demo uses:
 --

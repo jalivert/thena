@@ -1,0 +1,36 @@
+rule base pausing where
+
+-- HANDING THE PROOF OVER AT A PLACEHOLDER — four lines, in user space.
+--
+--   :consult examples/demo/Demo08Pausing.thena.rules
+--
+-- The shipped base has two clauses of `elaborate` for a hole you wrote
+-- yourself, and both have an EMPTY body: "those elaborate just by not
+-- elaborating. The hole is already there." The hole is then still open when
+-- the declaration finishes, so the declaration is refused and the module is
+-- rolled back — there is nothing left to work on.
+--
+-- This base adds one clause that hands control to you instead. `:consult`
+-- puts it on top of the search stack, so it is reached before the shipped
+-- one, and then:
+--
+--   declare two : Nat ; two = succ _
+--   a placeholder: fill it and `yield` to carry on
+--   (yield to hand control back)
+--
+-- …and you are standing on the placeholder's own hole, with the declaration's
+-- own context in scope. Fill it, type `yield`, and the elaboration carries on
+-- and the declaration lands.
+--
+-- **IT DOES NOT SURVIVE A MODULE LOAD, AND THAT IS THE WHOLE OF ITEM
+-- `~mgqwb`.** The rule fires when a `.thena` file reaches a placeholder — the
+-- message prints — but a module elaborates in an isolated session, and the
+-- suspended machine is gone by the time the prompt comes back: `yield`
+-- answers `nothing has yielded`. So this works at the prompt and only at the
+-- prompt.
+--
+-- There is no `Nat` in the prelude; declare one, or consult this alongside a
+-- module that has the datatype you want to use.
+
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t)
+  do yield "a placeholder: fill it and `yield` to carry on"

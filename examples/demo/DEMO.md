@@ -218,21 +218,51 @@ What to say, in this order:
 - `qed` — **and say that `qed` re-checks the finished term with the kernel.**
   The tactics are not trusted; the term they built is checked.
 
-Then the mixed mode, which is the thing he asked for:
+Then the mixed mode — **and this is the beat to spend time on, because it is
+one rule in a text file.**
 
 ```
-:theorem predSteps-handover : forall (t : Tm) (n : nvalue`${t} nv`) -> Steps Tm`( pred ${t} )`
-do { attack ; intro ; intro ; into ; along ; along ; yield "over to you" }
+:consult examples/demo/Demo08Pausing.thena.rules
 ```
 
-**A rule can hand control to you mid-elaboration.** It suspended, you are
-standing in its development, you drive, and a bare `yield` hands it back and
-lets it finish. Say what that means: *the automation and the human are in the
-same loop, not in two phases.*
+Read the rule out; it is two lines. The shipped base has two clauses of
+`elaborate` for a hole you wrote yourself and **both have an empty body** —
+*"those elaborate just by not elaborating. The hole is already there."* This
+base adds a clause that says `yield` instead. Then:
 
-> **Wart, know it before you hit it:** while a yield is suspended, its message
-> reprints after every line you type. Harmless, noisy on a projector. Item
-> `~28czj`.
+```
+data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+open Nat
+declare two : Nat ; two = succ _
+```
+
+**The elaborator stops and hands you the placeholder's own hole** — `:where`
+shows `let ? a : Nat`, path `root ▸ two`, the declaration's own context in
+scope. Fill it, `yield` to carry on, and the declaration lands:
+
+```
+try-core core`succ zero`
+solve
+yield
+:whnf two
+```
+
+What to say, and it is the strongest claim in the hour: *I did not change the
+system. I added one rule to a text file, and now the elaborator asks me for
+help. The automation and the human are in the same loop, and the loop is in
+user space.*
+
+> **Two things to know before you hit them.** The suspension **does not survive
+> a module load** — put the placeholder in a `.thena` file and the rule still
+> fires, but the development is gone when the prompt returns and `yield` answers
+> `nothing has yielded`. That is item `~mgqwb`, and it is why this beat is typed
+> at the prompt. And while a yield is suspended its message **reprints after
+> every line you type** — harmless, noisy on a projector, item `~28czj`.
+
+A `do { … ; yield "…" }` block typed at the prompt suspends the same way, but
+the thing yielding is then the block you just typed rather than the elaborator,
+so it makes a much weaker point. **Nothing in the shipped rule base yields** —
+`Demo08Pausing.thena.rules` is the only yielding rule there is.
 
 ---
 
