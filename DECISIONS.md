@@ -888,6 +888,55 @@ half an import graph.
 see *A header says what the file exports* below. An import reaches what that file
 exports, and nothing it imported unless it said `public import`.
 
+### An import can stop in the middle and hand you the proof it got stuck on
+
+*Decided 2026-11-11, built MS12 phase 309.*
+
+Importing a module is not a special operation. **A module's declarations are turned
+into one program and that program is run by the same machine, through the same loop,
+as a line you type** — so an import is one line whose program happens to be long. The
+consequence is the feature: a program can stop, so an import can stop.
+
+It stops when a rule says `yield`. The shipped rule base never does; a rule base you
+consult may, and four lines are enough:
+
+```
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t)
+  do yield "a placeholder: fill it and `yield` to carry on"
+```
+
+With that consulted, importing a file that leaves a hole hands you **that
+declaration's own goal**, in that module's own scope — not a scratch goal, and not the
+session's scope. Fill it, type `yield`, and the import carries on and finishes,
+including any further modules the closure still had to load.
+
+**Nothing is declared until the whole import finishes.** A module that does not load
+whole declares nothing — the 2026-09-30 rule — and a suspended load is one command
+that has not come back, not a module that half went in. So `:abandon` while it is
+standing puts the session back exactly as it was. **It takes anything you declared at
+the prompt in the meantime with it, and says so**: a lemma you proved during the
+suspension may rest on the module's earlier declarations, and taking only the
+module's would leave a reference dangling.
+
+**What is in scope while you hold the wheel is what the elaboration had**, which is
+the module's imports and what it has declared so far — not the rest of your session.
+You are standing inside that file's elaboration, so the session's other names stay
+concealed exactly as they are concealed from the file itself.
+
+Three things are refused while a load is standing still:
+
+- a second `import` — one in flight;
+- `:theorem` — a proof boundary empties the machine's program, so opening a theorem
+  would throw the suspended elaboration away. The refusal names the way out;
+- a `yield` out of a file reached by `thena-check` or by a rule base's own imports,
+  because there is no prompt there to hand control to.
+
+**A name you declare at the prompt during a suspension is yours, not the module's.**
+What a module declared is what its text wrote; a lemma proved to get unstuck is not
+one of those, so a module with no `exporting` clause does not pass it on to whoever
+imports it. Otherwise one file would offer different names depending on how a session
+happened to go.
+
 ### A file's header must match its path, and it is checked when you import it
 
 *Decided 2026-11-05. Built — MS11 phase 278.*
