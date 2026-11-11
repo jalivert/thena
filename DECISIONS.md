@@ -5522,6 +5522,19 @@ elimination that stated them is the only thing that knows.
 
 ## The REPL and the session
 
+### An argument that is a name is read with the spaces off both ends
+
+*Decided 2026-11-11.*
+
+`open Nat `, `:show Nat ` and `import A.B ` name what the unspaced lines name. A
+trailing space is invisible in an editor and survives in a saved
+`.thena.script`, so without this a line could silently do nothing and take every
+line below it out of scope with nothing on screen to say why.
+
+**An argument that is a path is not reshaped** — it is split on spaces instead —
+and one that is a term or a statement goes to the parser, which has its own
+answer about whitespace.
+
 ### There are three kinds of file, and the extension says which
 
 *Decided 2026-09-02.*
@@ -6540,6 +6553,26 @@ parser's offers in its own vocabulary.
 
 So a frontend never learns what a de Bruijn index is, when a Π is dependent, or
 what distinguishes a guess from a claim. It renders what it is handed.
+
+### A proof's name crosses as text, and so does where its lines are
+
+*Decided 2026-11-11.*
+
+A frontend that stores a session writes down the transcript it already has; what
+it cannot work out is which theorems that transcript proved and where each proof
+is in it. `provedSlices` answers that — the name in full, and the first and last
+index into the submitted lines — and `nameDotted` spells any global name as
+declared.
+
+**The shortest-ending printer is deliberately not that function.** What is drawn
+on screen is the shortest ending that is unambiguous under what is open, which
+is right for a pane and wrong for a key that is written to disc and read back
+when something else is open.
+
+**A proof is a run of consecutive lines and not one span**, because a proof
+suspended and resumed is two runs under one name; submitting the runs in the
+order given replays it. Only names the session sealed are listed, so an
+abandoned attempt does not appear.
 
 **The enforcement is cabal's.** A frontend's `build-depends` names `thena:view`,
 which is a re-export list and has no modules of its own; `thena` is then a
