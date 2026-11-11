@@ -35,8 +35,10 @@ import Network.HTTP.Client
   , requestBody
   , requestHeaders
   , responseBody
+  , responseStatus
   , responseTimeoutMicro
   )
+import Network.HTTP.Types.Status (statusCode)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import System.Directory (XdgDirectory (XdgCache), createDirectoryIfMissing, getXdgDirectory)
 import System.Environment (lookupEnv)
@@ -101,15 +103,25 @@ loadJevConfig = do
 -- isn't mutually exclusive) — the dropdown's candidates are, you accept
 -- exactly one, so a single 'Choice' over all of them in one request is
 -- both the right shape and the one that bills once.
+--
+-- **At most 'choiceOptionLimit' candidates go out, and that is the API's
+-- rule, not ours** — see that constant.
 rankCandidates :: JevConfig -> Text -> [(Text, Text)] -> IO (Either String (Map.Map Text Double))
-rankCandidates cfg typedSoFar candidates = do
-  jevLog ("request: " <> show (length candidates) <> " candidates, model=" <> Text.unpack (jevModel cfg))
+rankCandidates cfg typedSoFar offered = do
+  jevLog
+    ( "request: " <> show (length candidates) <> " candidates"
+        <> (if dropped > 0 then " (" <> show dropped <> " over the 255 limit, not sent)" else "")
+        <> ", model=" <> Text.unpack (jevModel cfg)
+    )
   result <- either (Left . show) id <$> (try go :: IO (Either SomeException (Either String (Map.Map Text Double))))
   jevLog $ case result of
     Left e  -> "answer: FAILED — " <> e
     Right m -> "answer: ok, " <> show (Map.size m) <> " scored"
   pure result
   where
+    candidates = take choiceOptionLimit offered
+    dropped = length offered - length candidates
+
     go :: IO (Either String (Map.Map Text Double))
     go = do
       manager <- newManager tlsSettings
@@ -124,7 +136,14 @@ rankCandidates cfg typedSoFar candidates = do
               , requestBody = RequestBodyLBS (encode (requestPayload cfg typedSoFar candidates))
               }
       resp <- httpLbs req manager
-      pure (parseRankAnswer (responseBody resp))
+      -- **The status is read before the body is decoded.** It was not, and
+      -- that is what made a plain 422 — too many options, below — arrive in
+      -- the log as @key "answers" not found@: the error body went to the
+      -- answer decoder, which complained about the wrong thing entirely.
+      let code = statusCode (responseStatus resp)
+      pure $ if code >= 200 && code < 300
+        then parseRankAnswer (responseBody resp)
+        else Left ("HTTP " <> show code <> ": " <> take 400 (show (responseBody resp)))
 
     -- 1.5s: generous next to the documented 70-300ms, strict enough that a
     -- hung connection can never outlive the dropdown it was scoring for.
@@ -149,6 +168,22 @@ requestPayload cfg typedSoFar candidates =
                 ]
           ]
     ]
+
+-- | **A 'Choice' question takes at most 255 options, and the dropdown can
+-- offer more.** Measured against the live API, 2026-11-11: 287 candidates
+-- — the launch dropdown's own count — come back
+-- @422 Dictionary should have at most 255 items after validation, not 287@,
+-- so before this cap existed EVERY ranking request failed and the feature
+-- was silently off for anyone with a key.
+--
+-- **The 255 kept are the first 255 the engine offered**, which is already a
+-- relevance order (tokens before productions). The alternative — splitting
+-- into several questions — is wrong rather than merely bigger: a 'Choice'
+-- normalises its probabilities within its own option set, so scores from two
+-- questions cannot be compared, and floating a top three across them would
+-- be arithmetic on unrelated distributions.
+choiceOptionLimit :: Int
+choiceOptionLimit = 255
 
 newtype RankAnswer = RankAnswer (Map.Map Text Double)
 
