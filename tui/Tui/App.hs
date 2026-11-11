@@ -1791,7 +1791,9 @@ tuiHelpLines =
     , ("",                  "  re-runs from the caret down (from the top, if the caret is")
     , ("",                  "  past the end) and says what changed on disc, :script drop")
     , ("",                  "  discards this line and the lines below it, :script save")
-    , ("",                  "  [name] writes the file")
+    , ("",                  "  writes back to the file the document was opened from and")
+    , ("",                  "  :script save ‹name› writes a new one — naming a file that")
+    , ("",                  "  exists asks once, and :script save! ‹name› replaces it")
     ]
   where
     width = 28
@@ -2606,7 +2608,11 @@ scriptBarSubmit st text = case words text of
   -- rather than reassigned: once plain Enter re-runs the tail (@~bxmsc@),
   -- `rerun` would name the one gesture that re-runs nothing.
   [":script", "cut"] -> closeScriptBar >> scriptCutAndRun
-  (":script" : "save" : rest) -> scriptSave st (listToMaybe rest)
+  (":script" : "save" : rest) -> scriptSave st (listToMaybe rest) False
+  -- | **`save!` replaces, `save` asks** — his ruling of 2026-11-11
+  -- (@~kqfbp@). The bang is only ever needed for a path the document was
+  -- not opened from, because save-back never asks.
+  (":script" : "save!" : rest) -> scriptSave st (listToMaybe rest) True
   [":script", "reload"] -> closeScriptBar >> scriptReload
   [":script", "open", path] -> do
     ok <- openScriptFile st path 0
@@ -2643,28 +2649,51 @@ insertScriptLine st text = do
       put (reseated st at (take at (stScript st) ++ rebuilt ++ unrun)) { stScriptBar = Nothing }
       afterScriptEdit
 
--- | `:script save [name]` — writes the committed lines and nothing else.
+-- | `:script save [name]` — writes the document's lines and nothing else.
 -- **No modal.** His spec wanted one because there was nowhere to type a
 -- filename; the command bar is that place, so the modal is a widget the
 -- design no longer needs.
 --
--- **An existing file is refused rather than overwritten.** The pre-filled
--- name is five letters off the clock, and is explicitly a placeholder — his
--- words, *"later I would like something better."*
-scriptSave :: St -> Maybe String -> EventM Name St ()
-scriptSave st given = do
-  name <- case given of
-    Just n -> pure n
-    Nothing -> liftIO randomStem
-  let path = if ".thena.script" `isSuffixOf` name then name else name <> ".thena.script"
-  exists <- liftIO (doesFileExist path)
-  if exists
-    then put st { stScriptBar = Nothing, stScriptNote = Just ("refusing to overwrite " <> path) }
-    else if null (stScript st)
-      then put st { stScriptBar = Nothing, stScriptNote = Just "nothing to save" }
-      else do
-        liftIO (writeFile path (unlines (map slText (stScript st))))
-        put st { stScriptBar = Nothing, stScriptNote = Just ("saved " <> path) }
+-- **Save means save — his ruling, 2026-11-11, which is `~kqfbp`.** With no
+-- name the document goes back to the file it was opened from, silently and
+-- with no confirmation, the way Cmd+S does everywhere else: *"Do you see
+-- editors preventing saving a file for whatever stupid reason?"* Opening
+-- keeps every line of the file, blanks and comments included, so a save-back
+-- is the file as it was written plus the edit.
+--
+-- **The one case that is not that is Save-As onto something else.** Typing a
+-- path the document did not come from, which already exists, means the lines
+-- about to be written are not that file's lines — so it asks once, and
+-- `:script save!` is the answer. That is the whole of what the old refusal
+-- was protecting: before a proof-script could be opened (@~22qjj@), *every*
+-- existing path was somebody else's content, which is why the guard read as a
+-- blanket refusal and had to go rather than be tuned.
+--
+-- With no name and nothing to save back to — a document typed from scratch —
+-- the name is still five letters off the clock, explicitly a placeholder:
+-- his *"later I would like something better."*
+scriptSave :: St -> Maybe String -> Bool -> EventM Name St ()
+scriptSave st given force
+  | null (stScript st) = say "nothing to save"
+  | otherwise = do
+      name <- case (given, openedFrom) of
+        (Just n, _) -> pure n
+        (Nothing, Just p) -> pure p
+        (Nothing, Nothing) -> liftIO randomStem
+      let path = if ".thena.script" `isSuffixOf` name then name else name <> ".thena.script"
+      -- **Where the document came from is never an overwrite.** It is the
+      -- same file, and asking about it is the behaviour he threw out.
+      ask <- if force || Just path == openedFrom
+        then pure False
+        else liftIO (doesFileExist path)
+      if ask
+        then say (path <> " exists — :script save! " <> path <> " to replace")
+        else do
+          liftIO (writeFile path (unlines (map slText (stScript st))))
+          say ("saved " <> path)
+  where
+    openedFrom = stStored st >>= stFrom
+    say note = put st { stScriptBar = Nothing, stScriptNote = Just note }
 
 -- | Five lowercase letters off the CPU clock. A placeholder name, and no new
 -- dependency for one — @random@ is not in this library's build-depends and a
