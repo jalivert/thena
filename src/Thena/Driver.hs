@@ -64,6 +64,14 @@ module Thena.Driver
   , loadProofItems
   , loadProofItemsConsulting
   , loadProofModules
+  , walkProofModules
+  , Walked (..)
+    -- * A suspended import (MS12 phase 309, @~4qgxx@)
+  , Importing (..)
+  , importSuspended
+  , finishImport
+  , abandonImport
+  , refuseSuspension
   , ReadModule (..)
   , moduleConsults
   , moduleImports
@@ -584,6 +592,83 @@ data Session = Session
     -- **Not in a 'Snapshot', and carried forward by 'rolledBack'** — the one
     -- field that survives a rollback along with the name counter, because a
     -- refusal does not unread a file.
+  , sessionImporting :: Maybe Importing
+    -- ^ __the import standing in a yield, if one is__ (MS12 phase 309,
+    -- @~4qgxx@).
+    --
+    -- **One at a time, his ruling of 2026-11-11**: a second @import@ while this
+    -- is set is refused, the way @:theorem@ is refused while a proof is open.
+    --
+    -- **Not in a 'Snapshot'**, like 'sessionLoaded' beside it and for the same
+    -- reason: what modules are in is not a thing @:undo@ takes back, and the
+    -- suspended load's own position is in the live machine rather than in here.
+  }
+  deriving (Eq, Show)
+
+-- | __An import that reached a @yield@ and is standing still__ (MS12 phase 309,
+-- @~4qgxx@, his ruling of 2026-11-11).
+--
+-- **The suspended load stays in the LIVE machine**, which is what makes this
+-- small: its pool, its held bases, its scope, its program and its development
+-- are all already where they need to be, because a load runs in the machine like
+-- any other program and nothing here had to copy them out. **What this record
+-- holds is only what the load's own tail would have needed** — what to put back
+-- when it finishes, what to roll back to if it is given up, and how much of the
+-- closure has not run yet.
+--
+-- **So the session's own names stay concealed while it stands, and that is his
+-- ruling, not an accident**: /"what is in scope for the prompt, is what was in
+-- scope for the elaboration… you are now at the wheel for the sub-process that
+-- elaborates this file."/ Nothing in here lifts the concealment.
+data Importing = Importing
+  { importingBefore :: Session
+    -- ^ the session as it stood before any of the closure ran. **What
+    -- @:abandon@ goes back to**, through 'rolledBack', which takes everything
+    -- the user declared during the suspension with it — his ruling of
+    -- 2026-11-11, /"I want the abandoning of the import to take everything. The
+    -- honest way."/
+    --
+    -- **Its own 'sessionImporting' is 'Nothing'**, since one is in flight at a
+    -- time, so this does not nest.
+  , importingAt     :: Session
+    -- ^ the session as the suspended module's own load began — **the pool, the
+    -- held bases and the scope that go back when it completes**, which is what
+    -- @poolBack@ in 'loadProofItemsConsulting' closes over. Not the same as
+    -- 'importingBefore' when the closure had modules before this one.
+  , importingName   :: Maybe ModuleName
+    -- ^ the name the suspended module is reached by, where it has one. **A file
+    -- loaded by a path that is no module name has none**, exactly as
+    -- 'sessionLoaded' does not list one.
+    --
+    -- **Filled in by 'loadProofModules' and not by the load itself**, which is
+    -- handed the header's text and never the name: the two doors know different
+    -- amounts and this says which.
+  , importingText   :: String
+    -- ^ the header's text, for the 'ProofLoaded' the completion answers with
+  , importingItems  :: [Item]
+    -- ^ the suspended module's items — what its interface and its declared
+    -- names are read off when it completes
+  , importingRest   :: [ReadModule]
+    -- ^ the closure past this module, still to run. **An @import@ may be a
+    -- graph**, so a suspension lands in the middle of a fold and the rest of the
+    -- walk has to be carried or it is lost.
+  , importingWarns  :: [Warning]
+    -- ^ what the suspended run had warned about before it stopped
+  , importingTheirs :: [GlobalName]
+    -- ^ __what the MODULE's own program declared__ (@~3c2db@, his ruling of
+    -- 2026-11-11), as against what the user typed at the prompt while it stood
+    -- suspended. **The module's are the ones its text wrote; a lemma proved to
+    -- get unstuck is the user's**, and a module with no @exporting@ clause
+    -- publishes what it declared — so without this one file would offer
+    -- different names depending on how a session went.
+    --
+    -- **ATTRIBUTED BY WHICH RUN DECLARED IT, AND THAT IS THE ONLY SOUND TEST.**
+    -- A line typed during the suspension runs /in front of/ the yield and the
+    -- module's remaining program runs /behind/ it, so the two never declare in
+    -- the same run: this is seeded with what the load's own first run added and
+    -- extended by each @yield@ that hands control back. **Per line it cannot be
+    -- done** — a @declare@ during the suspension and a @yield@ that reaches the
+    -- next yield both leave the machine yielding with new names behind them.
   }
   deriving (Eq, Show)
 
@@ -604,6 +689,15 @@ workingOn = sessionWork
 -- | Attempts left and re-enterable, most recently suspended first (§2.4).
 parked :: Session -> [Parked]
 parked = sessionSuspended
+
+-- | __The import standing in a yield, if one is__ (MS12 phase 309, @~4qgxx@).
+--
+-- **What a frontend reads to know it is holding one**, and what the batch
+-- checker reads to refuse: @thena-check@ goes through the same loader a @:load@
+-- does, so the difference between handing the wheel over and refusing to is made
+-- by the caller and not inside the load.
+importSuspended :: Session -> Maybe Importing
+importSuspended = sessionImporting
 
 -- | How many instructions a run may do before handing control back — @Nothing@
 -- to run on, @Just n@ for at most @n@ (phase 128).
@@ -1001,6 +1095,7 @@ newSession = Session
   , sessionGrammarsBy = []
   , sessionOpenedBy  = []
   , sessionFilesRead = []
+  , sessionImporting = Nothing
   }
   where
     (ps, n) = newDevelopment 0
@@ -1169,6 +1264,37 @@ data Response
     -- **And the warnings are 'ConsultRequested''s** (MS11 phase 298): a
     -- @public import@ written at the prompt has no importer to pass anything to,
     -- so the word is idle there for the reason it is idle in a rule file.
+  | ImportSuspended String [Message] [Warning] Message
+    -- ^ **a module's elaboration reached a @yield@ and the load is standing
+    -- still** (MS12 phase 309, @~4qgxx@). The header's text, whatever the run
+    -- printed before it stopped, its warnings, and the yield's own message.
+    --
+    -- **Its own response and not a 'Ran' with a 'Yielded' in it**, which is what
+    -- the un-built behaviour answered: a frontend has to be able to tell /a rule
+    -- handed you the wheel/ from /a rule handed you the wheel and an import is
+    -- waiting on you/, because only the second has an @:abandon@ that takes a
+    -- whole module and a @yield@ that finishes a load. The messages are carried
+    -- through so what the run said is still shown.
+  | ImportResumed String [Message] [Warning] Message
+    -- ^ **a suspended import was handed back the wheel and reached ANOTHER
+    -- yield** (MS12 phase 309). 'ImportSuspended''s twin, and a separate
+    -- constructor so that a second stop does not read as a second import
+    -- starting.
+  | ImportAbandoned String Int [GlobalName]
+    -- ^ **@:abandon@ on a suspended import** (MS12 phase 309): the module, how
+    -- many declarations went, and **which of them were the user's own.**
+    --
+    -- **It says what went, because his ruling is that it takes everything** —
+    -- /"I want the abandoning of the import to take everything. The honest
+    -- way."/ — so a lemma proved at the prompt during the suspension goes with
+    -- it, and a message that did not say so would be the silent half of exactly
+    -- the data loss the second principle is about.
+    --
+    -- **The user's are named and the module's are counted, which is not
+    -- laziness.** A closure of three modules generates hundreds of names, and
+    -- the first thing printed was a seventy-line list nobody could read. That a
+    -- module's own declarations go when its import is given up is the obvious
+    -- half; **that your lemma goes is the half worth printing in full.**
   | ModuleAlreadyIn ModuleName
     -- ^ **@import ‹module›@ naming a module the session already holds** (MS11
     -- phase 284). A module is loaded once however many files reach it, so this
@@ -1394,6 +1520,32 @@ data CommandError
     -- ^ @yield@ typed when no rule has handed control over (MS4 phase 45b).
     -- 'NotAsking''s twin, and it exists for the same reason: a word that did
     -- nothing would be worse than one that says so.
+  | ImportInFlight String
+    -- ^ **a second @import@ while one is standing in a yield** (MS12 phase 309,
+    -- @~4qgxx@, his ruling of 2026-11-11: one in flight). Named for the module
+    -- that is waiting, not the one refused — that is the one the user has to do
+    -- something about. @:theorem@ refusing while a proof is open is the
+    -- precedent for the wording.
+  | NobodyToYieldTo String
+    -- ^ **a module's elaboration yielded where there is no prompt to hand it
+    -- to** (MS12 phase 309, @~4qgxx@), naming the module. Two callers refuse
+    -- this way: @thena-check@, which is a batch checker, and a module pulled in
+    -- by a /rule base/, where the user asked for a base and never named the
+    -- file that stopped.
+    --
+    -- **It is the caller's refusal and not the load's**, which is the whole
+    -- reason 'Walked' has three cases: the load does the same thing either way
+    -- and whoever asked for it decides whether there is a wheel to hand over.
+  | ProvingWhileYielding
+    -- ^ **@:theorem@ typed while a rule is standing in a yield** (MS12 phase
+    -- 309, his ruling of 2026-11-11).
+    --
+    -- **It used to be allowed and it silently destroyed the suspended
+    -- elaboration**: the four proof boundaries go through 'atRest', which empties
+    -- the program, so the lemma landed and the thing it was for was gone —
+    -- @yield@ afterwards answered @nothing has yielded@. **Refusing is the
+    -- second principle, not against it**: going wrong is permitted, not being
+    -- able to see it coming is not, and the message names the way out.
   | NoSuchGlobal String
   | NoSuchLanguage String
   | NotParsing
@@ -2651,6 +2803,47 @@ loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
                              -- kind of file.
                              (ws ++ unlistedTravelling s' items)
             )
+          -- **A YIELD IS NOT A FAILURE TO COMPLETE — IT IS THE LOAD ASKING FOR
+          -- THE WHEEL** (MS12 phase 309, @~4qgxx@, his ruling of 2026-11-11).
+          -- The arm below rolls back everything that did not finish, and until
+          -- here that took a yielding load with it: the message printed, so the
+          -- user was told control had been handed over, and then the session was
+          -- put back — told a thing that had not happened.
+          --
+          -- **So this arm does the one thing the feature needs, which is to NOT
+          -- put it back.** No @poolBack@ either: the module's pool, held bases
+          -- and scope stay in force, which is his ruling and not an oversight —
+          -- /"what is in scope for the prompt, is what was in scope for the
+          -- elaboration."/ The program, the development and the frames are
+          -- already standing in the live machine, so there is nothing to carry.
+          --
+          -- **ATOMICITY IS UNTOUCHED.** Nothing is declared until the load
+          -- completes, @globals@ is still the same before the command and after
+          -- it, and the arm below is still what a load that genuinely stopped
+          -- gets. A suspended load is one command that has not finished, which
+          -- is what a @yield@ at the prompt already was.
+          --
+          -- **'importingName', 'importingRest' and 'importingDone' are filled in
+          -- by 'loadProofModules'**, which is the caller that walked the graph;
+          -- this knows only its own module. 'loadProofItems' never reaches here
+          -- with a closure, because it refuses a module that names anything on
+          -- disc.
+          (s', Ran msgs ws (Yielded msg)) ->
+            ( s' { sessionImporting = Just Importing
+                     { importingBefore = s
+                     , importingAt     = s
+                     , importingName   = Nothing
+                     , importingText   = nm
+                     , importingItems  = items
+                     , importingRest   = []
+                     , importingWarns  = ws
+                       -- What this run declared before it stopped — the
+                       -- module's own, every one of them.
+                     , importingTheirs = declaredSince s s'
+                     }
+                 }
+            , ImportSuspended nm msgs ws msg
+            )
           -- **A load that does not complete declares nothing** (MS6 closeout 15,
           -- his ruling 2026-09-30: /"Atomic from now on."/). Before this, the
           -- partial run's declarations stayed: a module whose third definition
@@ -2706,9 +2899,8 @@ loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
 -- replay of these lines will open again — 'sessionFilesRead' has why a file
 -- that was read and then refused still counts, and 'rolledBack' is what keeps
 -- these notes when the install does not take.
-loadProofModules
-  :: Session -> [ReadModule] -> (Session, Either (ReadModule, Response) [Response])
-loadProofModules s00 ms0 = go s0 [] ms0
+loadProofModules :: Session -> [ReadModule] -> (Session, Walked)
+loadProofModules s00 ms0 = walkProofModules s0 s0 [] ms0
   where
     s0 = foldl' readsOf s00 ms0
 
@@ -2718,20 +2910,51 @@ loadProofModules s00 ms0 = go s0 [] ms0
              (concat [ spreadPool sp ++ concatMap heldTexts (spreadHeld sp)
                      | sp <- fromMaybe [] (readModulePool m) ])
 
-    go s acc [] = (s, Right (reverse acc))
+-- | __The walk itself, enterable in the middle__ (MS12 phase 309, @~4qgxx@).
+--
+-- 'loadProofModules' with the fold's own state handed in: the session to roll
+-- back to, the session as it stands, the modules already in, and the modules
+-- still to run. **It is one function and not two because a suspension lands in
+-- the middle of the fold** — a @yield@ out of the third module of a closure has
+-- to be picked up with the first two in and the fourth still to go, and a second
+-- walk written for that case would be the one that drifts.
+--
+-- **'finishImport' is the other caller**, with the rest of the closure it was
+-- carrying.
+walkProofModules
+  :: Session -> Session -> [Response] -> [ReadModule] -> (Session, Walked)
+walkProofModules s0 = go
+  where
+    go s acc [] = (s, WalkedAll (reverse acc))
     go s acc (m : rest) = case poolFor s m of
       -- **A base that will not resolve refuses the module it was consulted
       -- by** (MS11 phase 288), which is what names the file: a base reached
       -- through an @import@ fails against the module that published it, and
       -- "Thena.Files" already splits the one the user named from the rest.
-      Left bad   -> (rolledBack s0 s, Left (m, bad))
+      Left bad   -> (rolledBack s0 s, WalkedStopped m bad)
       Right pool -> case loadProofItemsConsulting pool s
                                         (moduleText (readModuleHeader m))
                                         (readModuleItems m) of
         (s', r@(ProofLoaded {})) -> go (marked m s (readModuleName m) s') (r : acc) rest
+        -- **A suspended load keeps the rest of the walk** (MS12 phase 309).
+        -- 'loadProofItemsConsulting' recorded what it knew — its own module's
+        -- text and items, and the session its pool goes back to; this fills in
+        -- the three things only the walk knows. **'importingBefore' is @s0@ and
+        -- not @s@**, because abandoning takes the whole closure: a module that
+        -- went in because this one imported it does not stay behind.
+        (s', r@(ImportSuspended {}))
+          | Just imp <- sessionImporting s' ->
+              ( s' { sessionImporting = Just imp
+                       { importingBefore = s0
+                       , importingName   = readModuleName m
+                       , importingRest   = rest
+                       }
+                   }
+              , WalkedSuspended (reverse acc) r
+              )
         -- 'loadProofItemsConsulting' has already put this module's own
         -- declarations back; this takes the closure's with them.
-        (s', bad)                -> (rolledBack s0 s', Left (m, bad))
+        (s', bad)                -> (rolledBack s0 s', WalkedStopped m bad)
 
     -- | The pool this module is elaborated against, resolved here rather than
     -- when the file was read — 'readModulePool' says why.
@@ -2810,7 +3033,160 @@ loadProofModules s00 ms0 = go s0 [] ms0
 
     marked _ _      Nothing  s = s
     marked m before (Just n) s =
-      moduleDeclared n (interfaceOf (readModuleItems m)) before s
+      moduleDeclared n (interfaceOf (readModuleItems m)) [] before s
+
+-- | __How a walk over a closure came out__ (MS12 phase 309, @~4qgxx@).
+--
+-- **Three ways and not two**, which is the whole of what this phase changed
+-- about the shape: a load used to either go in or not, and a @yield@ had to be
+-- squeezed into /not/. **A caller must now decide what to do about a load that
+-- is standing still**, and the two kinds of caller decide differently — a prompt
+-- hands the user the wheel, and a batch checker has nobody to hand it to and
+-- refuses. Making it a third case is what forces that choice to be made rather
+-- than defaulted.
+data Walked
+  = WalkedAll [Response]
+    -- ^ every module of the closure is in, one response each, in the order they
+    -- went
+  | WalkedStopped ReadModule Response
+    -- ^ **nothing went in**, and this is the module it stopped on. The session
+    -- is already rolled back.
+  | WalkedSuspended [Response] Response
+    -- ^ **the load is standing in a yield** and the session carries the
+    -- 'Importing' that says how to finish it or give it up.
+    --
+    -- **The modules of the closure that are already in come with it**, because
+    -- they really are in: a module the suspended one imported was elaborated
+    -- before it, its declarations are in the environment, and the user is about
+    -- to write code against them. Holding their responses back until the import
+    -- completes would report them minutes after they landed.
+    --
+    -- **The suspended module itself is not among them** — it is what the second
+    -- response is about, and nothing of it is declared until it finishes.
+  deriving (Eq, Show)
+
+-- | __A suspended import whose program has run out, finished off__ (MS12 phase
+-- 309, @~4qgxx@).
+--
+-- **This is the piece with no precedent in the system** — the user's @yield@
+-- resumes the suspended program inside /that line's/ run, and that line has no
+-- idea it is finishing a load. So the completion is noticed after the line, by
+-- whoever sees that the machine's program ran out while an import was standing,
+-- and this is what it calls.
+--
+-- **It answers several responses, which is why it goes out through the same door
+-- a @:load@ does.** Finishing one module may put the next one in, and the next,
+-- and any of them may yield again — so one line can land a whole closure.
+-- "Thena.Files"\'s @following@ is that door and it already carries a list.
+--
+-- **The module's own declarations are what the file wrote, LESS what the user
+-- typed** (@~3c2db@, his ruling of 2026-11-11). 'moduleDeclared' works the
+-- module's declarations out as a set difference of the global environment, which
+-- cannot tell a name the file declared from a lemma proved at the prompt to get
+-- unstuck; 'importingMine' is that subtraction.
+finishImport :: Session -> (Session, Walked)
+finishImport s = case sessionImporting s of
+  Nothing  -> (s, WalkedAll [])
+  Just imp ->
+    let at    = importingAt imp
+        items = importingItems imp
+        -- The pool, the held bases and the concealment the module's load
+        -- replaced, put back now that it really has finished — 'poolBack' in
+        -- 'loadProofItemsConsulting', with the session it closed over handed
+        -- over in 'importingAt' instead.
+        inherited = openedFrom at
+        final     = scopeOpens (scope (sessionMachine s))
+        back = s { sessionMachine = (sessionMachine s)
+                     { pool  = pool (sessionMachine at)
+                     , held  = held (sessionMachine at)
+                     , scope = (scope (sessionMachine s))
+                                 { scopeConcealed =
+                                     scopeConcealed (scope (sessionMachine at))
+                                 , scopeOpens =
+                                     take (length final - length inherited) final
+                                       ++ scopeOpens (scope (sessionMachine at))
+                                 }
+                     }
+                 , sessionImporting = Nothing
+                 }
+        -- **Everything new that the module's own program did not declare**
+        -- (@~3c2db@) — what the user typed at the prompt while it stood.
+        usersOwn = filter (`notElem` importingTheirs imp) (declaredSince at s)
+        landed = ProofLoaded (importingText imp)
+                             (concatMap declaredNames items)
+                             (sum (map blocksIn items))
+                             (importingWarns imp ++ unlistedTravelling back items)
+        s'  = case importingName imp of
+          Nothing -> back
+          Just n  -> moduleDeclared n (interfaceOf items) usersOwn at back
+        -- **The accumulator starts with this module alone.** What the closure
+        -- had already put in was reported at the suspension, by
+        -- 'WalkedSuspended', so repeating it here would say it twice.
+     in walkProofModules (importingBefore imp) s' [landed] (importingRest imp)
+
+-- | __What the environment gained between two sessions__ (MS12 phase 309).
+--
+-- 'moduleDeclared''s @arrived@, said once so that the three places asking the
+-- same question cannot come to disagree about it — what a suspended load had
+-- declared before it stopped, what a @yield@ put in when it carried on, and what
+-- an @:abandon@ took away.
+--
+-- **Deduplicated, for 'moduleDeclared''s reason**: @declaredNames@ is four
+-- tables concatenated and a constructor is in two of them.
+declaredSince :: Session -> Session -> [GlobalName]
+declaredSince before after =
+  nub (filter (`notElem` had) (Env.declaredNames (globals (sessionMachine after))))
+  where
+    had = Env.declaredNames (globals (sessionMachine before))
+
+-- | __Give a suspended import up because there is nobody to hand it to__ (MS12
+-- phase 309, @~4qgxx@).
+--
+-- 'abandonImport' with the refusal in front of it, for a caller with no prompt
+-- behind it. **The session is put back as it stood**, so a batch run that met a
+-- yield leaves nothing half-installed.
+refuseSuspension :: Session -> (Session, Response)
+refuseSuspension s = case sessionImporting s of
+  -- Cannot arise: the callers ask only when a walk answered 'WalkedSuspended',
+  -- which is the one thing that sets it. Written out rather than left to a
+  -- pattern-match failure.
+  Nothing  -> (s, Rejected NotYielding)
+  Just imp ->
+    ( fst (abandonImport s imp)
+    , Rejected (NobodyToYieldTo (importingText imp))
+    )
+
+-- | __Give a suspended import up, and everything that came with it__ (MS12 phase
+-- 309, @~4qgxx@, his ruling of 2026-11-11).
+--
+-- **It takes the user's own work too, and that is the ruling** — /"I want the
+-- abandoning of the import to take everything. The honest way."/ A module's
+-- earlier declarations are in @globals@ while the load runs, so anything
+-- declared at the prompt during the suspension may be built on them; taking only
+-- the module's would leave a reference dangling, which is the problem revoking
+-- was refused over in @~mgqwb@, in miniature.
+--
+-- **'rolledBack' already does the whole of it**: it restores the session as it
+-- stood before the closure and carries only the fresh-name counter and what was
+-- read. So nothing here had to be written except the message, which names what
+-- went.
+abandonImport :: Session -> Importing -> (Session, Response)
+abandonImport s imp =
+  ( (rolledBack (importingBefore imp) s) { sessionImporting = Nothing }
+  , ImportAbandoned (importingText imp) (length took) mine
+  )
+  where
+    took = declaredSince (importingBefore imp) s
+    -- **What the user typed, as against what the files did** (@~3c2db@): the
+    -- module's own program recorded its names in 'importingTheirs', so what is
+    -- left over is the prompt's — and the prompt's is what a user did not
+    -- expect to lose.
+    --
+    -- **It is the whole closure's names less this module's program's**, so a
+    -- declaration from a module that went in earlier is not called the user's.
+    -- 'declaredSince' against 'importingAt' is that earlier part.
+    mine = [ g | g <- declaredSince (importingAt imp) s
+               , g `notElem` importingTheirs imp ]
 
 -- | __Which module these declarations are__ (MS11 phase 280).
 --
@@ -2832,8 +3208,8 @@ loadProofModules s00 ms0 = go s0 [] ms0
 -- thing here that is read off the items rather than off the two environments,
 -- because an export list names declarations rather than making any:
 -- 'moduleExporting' is what the caller passes.
-moduleDeclared :: ModuleName -> Interface -> Session -> Session -> Session
-moduleDeclared n face before after
+moduleDeclared :: ModuleName -> Interface -> [GlobalName] -> Session -> Session -> Session
+moduleDeclared n face notMine before after
   | moduleLoaded n after = after
   | otherwise =
       after { sessionLoaded     = n : sessionLoaded after
@@ -2853,9 +3229,21 @@ moduleDeclared n face before after
     -- **Deduplicated, because 'Env.declaredNames' is four tables concatenated**
     -- and a constructor is in two of them: a key naming its module twice would
     -- make any count taken off this list wrong.
+    -- **AND WHAT THE USER TYPED IS NOT THE MODULE'S** (MS12 phase 309,
+    -- @~3c2db@, his ruling of 2026-11-11). A name declared at the prompt while
+    -- this module's load stood suspended in a yield arrives in the same
+    -- difference and the difference cannot tell them apart: what the file
+    -- /wrote/ is the module's, and a lemma proved to get unstuck is the user's.
+    -- **The caller is what knows which** — 'finishImport' carries them on
+    -- 'importingMine' — and @notMine@ is empty for every load that never
+    -- suspended, which is all of them before this phase.
+    --
+    -- **It matters because a module with no @exporting@ clause exports what it
+    -- declared**, so without this one file would offer different names
+    -- depending on how a session happened to go.
     arrived =
       let had = Env.declaredNames (globals (sessionMachine before))
-       in nub (filter (`notElem` had)
+       in nub (filter (\g -> g `notElem` had && g `notElem` notMine)
                       (Env.declaredNames (globals (sessionMachine after))))
 
     -- **The same difference over the grammar table** (MS11 phase 297), and it
@@ -3938,7 +4326,12 @@ dispatch s name arg = case name of
   -- op program and is written as the op is written. That also keeps @:abandon@
   -- (this proof) apart from @abandon@ (this hole), which are two different
   -- operations that thesis §2 gives one name.
-  ":theorem" -> withArgument theorem
+  -- **Refused while a rule is standing in a yield** (MS12 phase 309, his ruling
+  -- of 2026-11-11). It is here and not inside 'theorem' because the refusal is
+  -- about the machine rather than about the argument, so it is answered before
+  -- the name is even parsed.
+  ":theorem" | Engine.isYielding machine -> (s, Rejected ProvingWhileYielding)
+             | otherwise -> withArgument theorem
   "qed"      -> noArgument closeProof
   ":suspend" -> noArgument suspend
   ":resume"  -> withArgument (resume arg)
@@ -3986,7 +4379,14 @@ dispatch s name arg = case name of
     -- **Nothing is refused for an already-loaded module**: it is the no-op a
     -- diamond in the import graph gets, and "Thena.Files" answers it, because
     -- the walk that knows about deduplication is the one that reads files.
-    Just m  -> (s, ImportRequested m [])
+    Just m
+      -- **One import in flight — his ruling of 2026-11-11** (MS12 phase 309).
+      -- A suspended load holds the machine's program, its pool and its
+      -- concealment; a second one would have to displace all three and there
+      -- would be nothing to go back to.
+      | Just imp <- sessionImporting s ->
+          (s, Rejected (ImportInFlight (importingText imp)))
+      | otherwise -> (s, ImportRequested m [])
   -- **Refused while a proof is open, as @:consult@ is** — the base may not
   -- change under a half-built proof (the user, 2026-08-25). An @import@ is not,
   -- for the reason @:load proof@ is not: it declares and does not touch the
@@ -4087,8 +4487,30 @@ dispatch s name arg = case name of
   -- after it. @retry@ is the precedent for a bare driver word that is not an op.
   "yield" -> noArgument $
     if Engine.isYielding machine
-      then progress (sessionFuel s)
-                    s { sessionMachine = Engine.resumeYield machine } [] []
+      then case progress (sessionFuel s)
+                         s { sessionMachine = Engine.resumeYield machine } [] [] of
+             -- **What the resumed program declared is the MODULE's** (MS12 phase
+             -- 309, @~3c2db@). This is the only word that hands a suspended
+             -- program control back, so it is the only line during which a
+             -- module's own program can declare anything — 'importingTheirs'
+             -- says why that is the test rather than something per line.
+             (s', r) | Just imp <- sessionImporting s' ->
+                         ( s' { sessionImporting = Just imp
+                                  { importingTheirs =
+                                      importingTheirs imp ++ declaredSince s s'
+                                  }
+                              }
+                           -- **A second stop says the import is STILL waiting**
+                           -- (MS12 phase 309). A bare yield message here would
+                           -- read as an ordinary rule handing control over, and
+                           -- the user would not know a module was still on the
+                           -- hook. Every other stop is left exactly as it came.
+                         , case r of
+                             Ran msgs ws (Yielded msg) ->
+                               ImportResumed (importingText imp) msgs ws msg
+                             _ -> r
+                         )
+                     | otherwise -> (s', r)
       else (s, Rejected NotYielding)
   "retry"  -> case arg of
     "" -> retryAt Nothing
@@ -4411,9 +4833,14 @@ dispatch s name arg = case name of
 
     -- Abandoning drops the proof; suspending keeps it. Same exit, different
     -- list — which is the whole difference between the two commands.
+    -- **Innermost first** (MS12 phase 309): a lemma opened inside a suspended
+    -- import is what @:abandon@ gives up while it is open, and the import is
+    -- what it gives up once there is no lemma. One word for /give up what I am
+    -- on/, and nothing has to say which kind of thing that is.
     abandonProof = case sessionWork s of
-      Scratch -> (s, Rejected NotProving)
       Attempting att -> (cleared, Abandoned (attemptName att))
+      Scratch | Just imp <- sessionImporting s -> abandonImport s imp
+              | otherwise -> (s, Rejected NotProving)
 
     -- Leave proof mode, putting the machine back on a fresh scratch
     -- development. **The environment and the counter are not touched**, which

@@ -60,6 +60,7 @@ import qualified Thena.JudgmentTests
 import qualified Thena.ObjectTermTests
 import qualified Thena.TokenTests
 import qualified Thena.LoadTests
+import qualified Thena.SuspendedImportTests
 import qualified Thena.ManualTests
 import qualified Thena.NoConfusionTests
 import qualified Thena.NoCycleTests
@@ -138,6 +139,7 @@ main =
       , Thena.ObjectTermTests.tests
       , Thena.TokenTests.tests
       , Thena.LoadTests.tests
+      , Thena.SuspendedImportTests.tests
   , Thena.ManualTests.tests
       , Thena.NoConfusionTests.tests
       , Thena.NoCycleTests.tests

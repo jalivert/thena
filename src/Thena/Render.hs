@@ -318,6 +318,36 @@ renderResponse s resp = let ren = renderingOf s in case resp of
       : map ("  declared " ++) ds
       ++ [ "  and " ++ plural blocks "do block" | blocks > 0 ]
       ++ map renderWarning ws
+  -- **A load that is standing still, and both ways out of it** (MS12 phase 309,
+  -- @~4qgxx@). What the run printed before it stopped comes first, as it would
+  -- have on its own; then the yield's own message; then what to type.
+  --
+  -- **It says the module is waiting, which a bare yield message did not.** The
+  -- un-built behaviour answered a plain 'Yielded' here and the session had
+  -- already been rolled back, so the user was told control had been handed over
+  -- and it had not been.
+  ImportSuspended nm msgs ws msg ->
+    msgs
+      ++ map renderWarning ws
+      ++ [ msg
+         , "  elaborating " ++ nm ++ " \8212 yield to carry on, :abandon to give the import up"
+         ]
+  -- Its twin for a second stop in the same load (MS12 phase 309): the wording
+  -- says it carried on, so a user cannot read it as a second import starting.
+  ImportResumed nm msgs ws msg ->
+    msgs
+      ++ map renderWarning ws
+      ++ [ msg
+         , "  still elaborating " ++ nm ++ " \8212 yield to carry on, :abandon to give the import up"
+         ]
+  -- **It names what went** (MS12 phase 309, his ruling of 2026-11-11 that
+  -- abandoning takes everything): a user who declared a lemma at the prompt
+  -- during the suspension loses it with the module, and a message that did not
+  -- say so would be the silent half of that.
+  ImportAbandoned nm n mine ->
+    ("abandoned the import of " ++ nm ++ ", and took " ++ plural n "declaration")
+      : [ "  including yours: " ++ intercalate ", " (map (nameString ren) mine)
+        | not (null mine) ]
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
   -- **Only what the line itself had to say** (MS11 phase 298): the act's own
@@ -1431,6 +1461,16 @@ renderCommandError ren e = case e of
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
   NotYielding          -> "nothing has yielded"
+  -- **It names the import that is waiting and both ways out of it** (MS12 phase
+  -- 309), which is 'AlreadyProving''s shape: a refusal that does not say what to
+  -- do next leaves the user stuck in the state it refused from.
+  ImportInFlight nm    -> "the import of " ++ nm
+                            ++ " is still waiting \8212 yield to carry on with it, or :abandon to give it up"
+  -- **The one refusal this phase added that is about saving work** (MS12 phase
+  -- 309, his ruling of 2026-11-11). Until here a proof opened inside a yield
+  -- silently threw the suspended elaboration away.
+  ProvingWhileYielding -> "a rule has handed control over \8212 yield to hand it back before starting a proof"
+  NobodyToYieldTo nm   -> nm ++ " handed control over, and nothing here can take it \8212 nothing was loaded"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
   NoSuchLanguage x     -> "no language called " ++ x ++ " has been declared"
   NotParsing           -> ":done leaves :parse's mode, and this is not it"

@@ -1,0 +1,9 @@
+-- A script that reaches a yield out of an imported module, for checking that
+-- `thena-check` refuses one: a batch checker has nobody to hand control to
+-- (MS12 phase 309, `~4qgxx`).
+--
+-- It is a script and not a bare module because `thena-check`'s rule-file door
+-- replaces the pool, which drops the shipped base the yielding clause is layered
+-- over; `:consult` pushes.
+:consult test/modules/Pausing.thena.rules
+import test.modules.Pauses

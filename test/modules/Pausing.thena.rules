@@ -1,0 +1,10 @@
+rule base pausing where
+
+-- Hands control to the prompt where an author wrote a placeholder, instead of
+-- elaborating it. The shipped base has two clauses for a hole and both have
+-- empty bodies, so a declaration left with one is refused; this one yields.
+--
+-- MS12 phase 309 (`~4qgxx`) is what reaches it from inside a module load.
+
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t)
+  do yield "a placeholder: fill it and `yield` to carry on"

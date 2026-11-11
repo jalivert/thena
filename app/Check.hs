@@ -42,6 +42,7 @@ import Thena.Files
   , rulesPath
   , startingSession
   )
+import Thena.Driver (importSuspended, refuseSuspension)
 import Thena.Render (renderResponse, renderTrouble)
 
 main :: IO ()
@@ -83,12 +84,43 @@ walk s bases (path : more) = case kindOf path of
     (s', out, trouble) <- loadFile s path
     step s' bases out trouble True
   where
+    -- **A yield out of a file being checked is refused, and said plainly**
+    -- (MS12 phase 309, @~4qgxx@). A module may hand control to a prompt; there
+    -- is no prompt here, so there is nobody to hand it to. **The refusal is the
+    -- caller's and not the load's** — @:load@ reaches the same loader and does
+    -- hand it over — and 'refuseSuspension' puts the session back so nothing is
+    -- left half-installed.
+    --
+    -- **Said here rather than left to @accepted@.** Without this the batch run
+    -- printed the suspension's own message, which tells the reader to type
+    -- @yield@, and then failed for an unrelated-looking reason.
+    step s' _ out _ _
+      | Just _ <- importSuspended s' = do
+          let (_, why) = refuseSuspension s'
+          -- **The suspension's own message is dropped here**, because it tells
+          -- the reader to type @yield@ and there is nobody to type it. What
+          -- landed before the load stopped is still worth printing: those
+          -- modules really did go in, and the refusal below is what says they
+          -- are being taken back out.
+          mapM_ putStrLn
+                (concatMap (renderResponse s')
+                           [ r | r <- out, not (standingStill r) ])
+          mapM_ putStrLn (renderResponse s' why)
+          complain (path ++ ": not accepted") >> pure False
     step s' bases' out trouble kept = do
       mapM_ putStrLn (concatMap (renderResponse s') out)
       mapM_ putStrLn (concatMap (renderTrouble s') trouble)
       if kept && null trouble
         then walk s' bases' more
         else complain (path ++ ": not accepted") >> pure False
+
+    -- | A load that is waiting on a prompt (MS12 phase 309). Its message names
+    -- the two words that would get the user out of it, neither of which means
+    -- anything in a batch run.
+    standingStill r = case r of
+      ImportSuspended {} -> True
+      ImportResumed {}   -> True
+      _                  -> False
 
     -- | The response a load gives when it took the file. A proof module's
     -- failure is in its own response rather than in trouble, which is why this

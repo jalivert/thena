@@ -51,6 +51,11 @@ import Thena.Driver
   , Session
   , loadProofSource
   , loadProofModules
+  , Walked (..)
+  , Stop (..)
+  , refuseSuspension
+  , importSuspended
+  , finishImport
   , readModulePath
   , ruleBaseImports
   , rolledBack
@@ -130,7 +135,7 @@ loadPrelude s = do
       -- cannot do it, 'loadProofSource' taking contents and no path.
       (s', ProofLoaded {}) ->
         ( noteRead path (digestOf c)
-            (moduleDeclared preludeModule (interfaceOf []) s s')
+            (moduleDeclared preludeModule (interfaceOf []) [] s s')
         , [] )
       (s', resp)           -> (noteRead path (digestOf c) s', [Unloadable path resp])
 
@@ -248,10 +253,18 @@ imported
 imported s contents = go [] contents
   where
     go done [] = pure $ case loadProofModules s done of
-      (s', Right rs)      -> Right (s', rs)
+      (s', WalkedAll rs)      -> Right (s', rs)
       -- A module nobody named: the path is the only thing that says which it
       -- was (MS11 phase 275).
-      (_, Left (m, bad))  -> Left (Unloadable (readModulePath m) bad)
+      (_, WalkedStopped m bad)  -> Left (Unloadable (readModulePath m) bad)
+      -- **A yield out of a module a RULE BASE imported is refused** (MS12 phase
+      -- 309). Nobody typed this module's name: the user asked for a base, and a
+      -- suspension here would hand them the wheel inside a file they did not
+      -- mention, with the base they asked for not installed. 'suspensionRefused'
+      -- puts the session back.
+      (s', WalkedSuspended _ _) ->
+        Left (Unloadable (case contents of { (p, _) : _ -> p ; [] -> "" })
+                         (snd (refuseSuspension s')))
     go done ((_, src) : rest) = case ruleBaseImports src of
       -- It did not parse. **Said by the read and not here**, so the position is
       -- in the message: this hands the file on untouched.
@@ -463,13 +476,21 @@ loadProofFile s path = do
         pure $ case gathered of
           Left t   -> (s, [], [t])
           Right ms -> case loadProofModules s ms of
-            (s', Right rs)       -> (s', rs, [])
+            (s', WalkedAll rs)       -> (s', rs, [])
+            -- **A yield suspends the load and the session keeps it** (MS12
+            -- phase 309, @~4qgxx@). It is a response and not trouble whichever
+            -- file it came out of: the user is being handed the wheel, which is
+            -- a thing that happened rather than a thing that went wrong.
+            -- **@thena-check@ is what refuses it**, because a batch checker has
+            -- nobody to hand control to — the decision belongs to the caller
+            -- with or without a prompt, not to the load.
+            (s', WalkedSuspended done resp) -> (s', done ++ [resp], [])
             -- **The file the user named answers with a response and an imported
             -- one with trouble** (MS11 phase 275) — the same split 'gather' makes
             -- for a file that will not read, now made for one that will not
             -- elaborate. Without it a failure inside an imported module arrives
             -- as a bare refusal about a file nobody mentioned.
-            (s', Left (m, bad))
+            (s', WalkedStopped m bad)
               | readModulePath m == path -> (s', [bad], [])
               | otherwise -> (s', [], [Unloadable (readModulePath m) bad])
 
@@ -699,7 +720,22 @@ following s resp = case resp of
   -- is the point of entry: a line typed at the prompt is nested inside nothing,
   -- so no replay it starts can close a loop that was already open.
   ReplayRequested path -> Just (replayFile s path)
+  -- **A line whose run finished a suspended import** (MS12 phase 309,
+  -- @~4qgxx@). The user typed @yield@, the module's own program carried on and
+  -- ran out, and /that line/ has no idea it just finished a load — so the
+  -- completion is noticed here, after the line, by the one door that can answer
+  -- with several responses. Finishing one module may put the next of the closure
+  -- in, and the next, and any of them may yield again.
+  --
+  -- **It needs no disc, and comes through this door anyway**: this is the door
+  -- that carries a list of responses, and a completion lands a whole closure.
+  Ran _ _ Completed | Just _ <- importSuspended s -> Just (pure (finished s))
   _                    -> Nothing
+  where
+    finished sess = case finishImport sess of
+      (s', WalkedAll rs)           -> (s', rs, [])
+      (s', WalkedSuspended done r) -> (s', done ++ [r], [])
+      (s', WalkedStopped m r)      -> (s', [], [Unloadable (readModulePath m) r])
 
 -- | __@import ‹module›@ typed at the prompt__ (MS11 phase 284, his ruling of
 -- 2026-11-03 that both acts are writable there).
@@ -725,7 +761,8 @@ importModule s m = do
     Left t   -> (s, [], [t])
     Right [] -> (s, [ModuleAlreadyIn m], [])
     Right ms -> case loadProofModules s ms of
-      (s', Right rs) -> (s', rs, [])
-      (s', Left (bad, resp))
+      (s', WalkedAll rs) -> (s', rs, [])
+      (s', WalkedSuspended done resp) -> (s', done ++ [resp], [])
+      (s', WalkedStopped bad resp)
         | readModuleName bad == Just m -> (s', [resp], [])
         | otherwise -> (s', [], [Unloadable (readModulePath bad) resp])
