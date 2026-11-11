@@ -1051,7 +1051,17 @@ handleBarEvent st bar ev = case ev of
 -- rewrites function keys should not be able to strand someone in a mode whose
 -- only exit is the bar.
 -- | **Editing a committed line drops every line below it, the instant it is
--- edited** — his ruling, 2026-10-21 (@~sv5v8@). The lines after line @i@ were
+-- edited** — his ruling, 2026-10-21 (@~sv5v8@).
+--
+-- **ITS TIMING IS OVERRULED — his ruling of 2026-11-11 — and this code has not
+-- caught up yet.** The tail is still /invalid/ the moment the line is edited, which
+-- is what the paragraph below argues. What changed is that invalid no longer means
+-- destroyed: the tail must survive, drawn dim, until the Enter that decides it —
+-- soft Enter re-running it (@~bxmsc@) and the dropping Enter discarding it. **So
+-- @~bxmsc@ cannot be built while 'severBelow' is called from here.** See
+-- @.jalivert/DESIGN-PRINCIPLES.md@, /A reload re-runs the transcript/.
+--
+-- The lines after line @i@ were
 -- produced by running against the session line @i@ left behind; change line
 -- @i@ at all and they describe a session nothing is going to produce, so
 -- leaving them on screen is the document telling a lie until Enter. His own
