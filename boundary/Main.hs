@@ -29,7 +29,8 @@ import Control.Monad (unless)
 import System.Exit (exitFailure)
 
 import Thena.Driver
-  ( Response (..)
+  ( Entry (..)
+  , Response (..)
   , Session
   , Stop (..)
   , digestText
@@ -37,6 +38,8 @@ import Thena.Driver
   , fuelOf
   , oneLine
   , oneProgram
+  , provedSlices
+  , recordOf
   )
 import Thena.Files (startingSession)
 import Thena.Render (renderResponse)
@@ -49,6 +52,7 @@ import Thena.View
   , focusTypeView
   , machineView
   , matchesView
+  , nameDotted
   , offerView
   , statementOfferView
   , parseView
@@ -153,6 +157,20 @@ checks =
     -- knows which path a module name resolved to and what was actually opened —
     -- so the claim that it crosses is a claim about this suite's imports. The
     -- shipped prelude and standard base are what a booted session has read.
+    -- **Which theorems the session proved, and where each one is in its own
+    -- transcript** (MS12 phase 311). It is the other half of what a session
+    -- stored on disc is keyed by: the lines are 'recordOf''s and the frontend
+    -- has them, but the name is a 'Thena.Driver.Entry''s @entryProof@, whose
+    -- type crosses here with no fields a frontend can reach — so without these
+    -- two the index can say where a proof is and not which one it is. @t@
+    -- arrives open and is given up, so the one slice is the proof that sealed,
+    -- and an abandoned attempt is not one.
+  , \s -> want "provedSlices says which proof and where"
+            (case provedSlices (proved s) of
+               [("arr", i, j)] -> j == i + 2
+               _               -> False)
+  , \s -> want "and a name crosses as the text an index is keyed by"
+            ((nameDotted <$> entryProof (last (recordOf (proved s)))) == Just "arr")
   , \s -> want "filesRead reaches a frontend" (length (filesRead s) == 2)
   , \s -> want "and a digest writes down"
             (all ((== 16) . length . digestText . snd) (filesRead s))
@@ -160,6 +178,14 @@ checks =
   where
     budget = Budget 200
     want name ok = [ "FAILED: " <> name | not ok ]
+    -- One sealed proof, from the session the checks are handed: it arrives
+    -- with @t@ open, so that is given up first and @arr@ is three lines.
+    proved s = foldl (\acc l -> fst (oneLine acc l)) s
+      [ ":abandon"
+      , ":theorem arr : Type\8321"
+      , "elaborate surface`Type\8320 -> Type\8320`"
+      , "qed"
+      ]
     isSession :: Session -> Bool
     isSession _ = True
     -- At rest the program is empty, so \"non-empty\" is the wrong shape of check;

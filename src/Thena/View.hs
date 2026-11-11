@@ -44,6 +44,11 @@ module Thena.View
   , sessionContext
   , sessionNames
   , sessionTrust
+    -- | __A global name as text__, in full and with no printer policy on it —
+    -- what an index written to disc is keyed by. @Thena.Render.nameString@
+    -- applies the shortest ending that is unambiguous under what is open,
+    -- which is right on screen and wrong in a file.
+  , nameDotted
     -- ** and the driver's own reads, so that one import serves a frontend
   , workingOn
   , parked

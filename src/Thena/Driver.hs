@@ -46,6 +46,7 @@ module Thena.Driver
   , standing
   , submittedLines
   , provedUnder
+  , provedSlices
   , Digest
   , digestOf
   , digestText
@@ -165,7 +166,7 @@ import Thena.Language.Regex
   )
 import Data.Bits ((.&.), shiftR, xor)
 import Data.Char (intToDigit, isAlpha, isAlphaNum, isSpace, ord)
-import Data.List ((\\), intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, stripPrefix)
+import Data.List ((\\), groupBy, intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, stripPrefix)
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
 import Thena.Development.Partial (Partial (..), extract, termsIn)
@@ -869,6 +870,50 @@ submittedLines = mapMaybe entrySubmitted . recordOf
 -- not a second kind of artifact.
 provedUnder :: GlobalName -> Session -> [Entry]
 provedUnder n = filter ((== Just n) . entryProof) . recordOf
+
+-- | __Which theorems the session proved, and where each one is in the
+-- transcript__ (MS12 phase 311): the name in full, and the first and last
+-- index into 'submittedLines'.
+--
+-- **The name is the only part a caller could not work out**, which is why this
+-- is a read here rather than a walk over 'recordOf' on the other side of the
+-- boundary: 'GlobalName' crosses as a type whose fields nothing out there can
+-- reach, and 'Thena.Render.nameString' is the wrong answer anyway — it applies
+-- the printer\'s shortest-ending policy, and a key written down and read back
+-- later has to mean the same thing whatever happens to be open then.
+--
+-- **A proof is a /run/ of consecutive entries under one name** rather than a
+-- single span from @:theorem@ to @qed@, and that is @:suspend@'s doing: a proof
+-- that was parked and picked up again is two runs with other lines between
+-- them, and submitting the runs in the order given replays it — the
+-- @:suspend@ and @:resume@ lines included, since each has the proof open on
+-- one side of it.
+--
+-- **Only names the session sealed appear.** @isDeclared@ is the test, so an
+-- attempt that was abandoned and never closed is absent entirely; a name that
+-- was abandoned and then proved on a second attempt lists both runs, because
+-- nothing in the record says which boundary ended a run — and replaying them
+-- in order is still right, an abandoned run replaying as an abandoned run.
+--
+-- **A line a frontend ran through 'oneProgram' takes no index**, having never
+-- been submitted; a run made only of those is not reported.
+provedSlices :: Session -> [(String, Int, Int)]
+provedSlices s =
+  [ (nameDotted n, minimum ks, maximum ks)
+  | run <- groupBy (\a b -> fst a == fst b) (numbered 0 (recordOf s))
+  , (Just n, _) <- take 1 run
+  , isDeclared n (globals (sessionMachine s))
+  , let ks = [ k | (_, Just k) <- run ]
+  , not (null ks)
+  ]
+  where
+    -- The proof each entry is under, paired with its index among the submitted
+    -- entries — which is what 'submittedLines' numbers.
+    numbered :: Int -> [Entry] -> [(Maybe GlobalName, Maybe Int)]
+    numbered _ []       = []
+    numbered k (e : es) = case entrySubmitted e of
+      Just _  -> (entryProof e, Just k) : numbered (k + 1) es
+      Nothing -> (entryProof e, Nothing) : numbered k es
 
 -- | __What a file said when it was read__ (MS11 phase 295).
 --
@@ -4287,9 +4332,12 @@ dispatch s name arg = case name of
       | otherwise -> (s, parseObject machine lang (dropWhile (== ' ') rest))
   -- The only command that means two things, and they do not overlap: with no
   -- argument it is the development, with one it is a global (§9, phase 6).
-  ":show"  -> case arg of
-    "" -> (s, Shown (cursor (development machine)))
-    _  -> showGlobal arg
+  -- **Both halves read the argument trimmed** (MS12 phase 311), for
+  -- 'opening''s reason: @:show@ takes a name, and @:show Nat @ asked after a
+  -- global whose word was @Nat @.
+  ":show"  -> case trimmed arg of
+    ""   -> (s, Shown (cursor (development machine)))
+    what -> showGlobal what
   -- The eliminator is not a global, so it is not reachable through @:show@
   -- (§3.7, reversed by the user 2026-08-22). Its own word, and its own second
   -- argument: the level comes from the motive at every use site, so there is
@@ -4297,7 +4345,7 @@ dispatch s name arg = case name of
   -- Only a datatype has rules, so this is not reachable through @:show@ and
   -- takes its own word, as @:elim@ does. **Not @:rules@**: that is the engine's
   -- rule base, and an instral rule is not an inference rule.
-  ":judgment" -> withArgument (showRules arg)
+  ":judgment" -> withArgument (showRules (trimmed arg))
   ":elim"  -> withArgument (eliminator arg)
   ":where" -> noArgument (s, Where (cursor (development machine)))
   -- Autocomplete, and it is a read-only query on the iterator (§7.6): the
@@ -5047,11 +5095,19 @@ dispatch s name arg = case name of
     -- @:step@ can watch it as it watches @data@. The argument is raw text taken
     -- from a line, which is 'Thena.Core.Term.nameFromText''s one job.
     --
+    -- **Through 'trimmed', because @open@ takes a name** (MS12 phase 311). It
+    -- dropped the leading spaces only, so @open Nat @ asked for a namespace
+    -- whose word was @Nat @ and was refused — and a trailing space is invisible
+    -- in an editor and survives in a saved script, so the line below it failed
+    -- as out of scope with nothing on screen to say why. @import@ and
+    -- @consult@ took their name through 'trimmed' already; this is the same
+    -- convention and not a second one.
+    --
     -- **Its effect runs to the end of the session** (phase 247) — @opened@ is not
     -- backtrackable — so a prompt @open@ behaves as the last @open@ in a loaded
     -- file does, and nothing distinguishes the two.
     opening = withArgument $
-      let g  = nameFromText (dropWhile (== ' ') arg)
+      let g  = nameFromText (trimmed arg)
           -- **It says so, as @data@ does.** A file's @open@ is silent because the
           -- load reports per declaration; a line typed at the prompt that answered
           -- nothing at all would leave the user unable to tell it took, and the

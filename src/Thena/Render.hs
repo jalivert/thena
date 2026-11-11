@@ -1582,7 +1582,13 @@ renderFailReason ren r = case r of
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
-  NoSuchNamespace n -> "nothing is named " ++ n ++ ".…, so there is no namespace " ++ n ++ " to open"
+  -- **The name is quoted and the dotted form is spelled out** (MS12 phase
+  -- 311). It read @nothing is named Nat .…@, where the @.…@ looks like an
+  -- elision the renderer leaked rather than anything a user wrote, and an
+  -- unquoted name with a space in it says nothing about what went wrong.
+  NoSuchNamespace n ->
+    "no name begins with " ++ show (n ++ ".")
+      ++ ", so there is no namespace " ++ show n ++ " to open"
   AmbiguousName n gs ->
     n ++ " is ambiguous here: it could be " ++ intercalate " or " gs
       ++ "\n  write the one you mean"

@@ -604,6 +604,24 @@ tests =
             case snd (say [natCommand, "open Nat", ":show succ"]) of
               ShownGlobal (GlobalName ["Nat"] "succ") _ _ _ _ (Just _) -> pure ()
               other -> assertFailure ("expected ShownGlobal, got " ++ show other)
+          -- **A trailing space is invisible in an editor and survives in a
+          -- saved script** (MS12 phase 311), so a line that silently does
+          -- nothing takes the lines below it out of scope with nothing on
+          -- screen to say why. @open@ dropped the leading spaces only; the
+          -- commands that take a name read it trimmed now, as @import@ and
+          -- @consult@ always have.
+        , testCase "a trailing space after open does not go into the name" $
+            case snd (say [natCommand, "open Nat ", ":show succ"]) of
+              ShownGlobal (GlobalName ["Nat"] "succ") _ _ _ _ (Just _) -> pure ()
+              other -> assertFailure ("expected ShownGlobal, got " ++ show other)
+        , testCase "nor one after :show" $
+            case snd (say [natCommand, "open Nat", ":show succ "]) of
+              ShownGlobal (GlobalName ["Nat"] "succ") _ _ _ _ (Just _) -> pure ()
+              other -> assertFailure ("expected ShownGlobal, got " ++ show other)
+        , testCase "nor one after :judgment" $
+            case snd (say [natCommand, ":judgment Nat "]) of
+              ShownRules _ -> pure ()
+              other       -> assertFailure ("expected ShownRules, got " ++ show other)
         , testCase "a global is in scope for an ordinary term" $
             case snd (say [natCommand, "open Nat", ":core succ zero"]) of
               Rendered _ -> pure ()

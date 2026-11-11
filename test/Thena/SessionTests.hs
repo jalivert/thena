@@ -37,6 +37,7 @@ import Thena.Driver
   , loadSource
   , oneLine
   , newSession
+  , provedSlices
   , provedUnder
   , Session
   , recordOf
@@ -101,11 +102,56 @@ recordTests =
   , testCase "and the declaration before it belongs to no proof" $
       map entryProof (take 1 (recordOf (afterLines ["data N : Type0 where { z : N }"])))
         @?= [Nothing]
+
+    -- **What a session on disc is keyed by** (MS12 phase 311): the proof's name
+    -- as text and where its lines are, which is the half of the index the
+    -- frontend cannot work out for itself — it has the lines and the engine has
+    -- the names. The indices are into 'submittedLines'.
+  , testCase "a sealed proof is a name and a span of the transcript" $
+      provedSlices
+        (afterLinesProving
+           [ "data " ++ natDecl
+           , "open Nat"
+           , ":theorem t : Type\8320"
+           , "try-core core`Nat`"
+           , "solve"
+           , "qed"
+           ])
+        @?= [("t", 2, 5)]
+
+    -- **An attempt that was given up is not a proof**, so it is absent rather
+    -- than present and empty: @isDeclared@ is the test, and @:abandon@ leaves
+    -- nothing declared.
+  , testCase "an abandoned attempt is not one" $
+      provedSlices (afterLines [":theorem t : Type\8320", ":abandon"]) @?= []
+
+    -- **A parked proof is two runs and not one span**, which is why this is a
+    -- list of slices rather than a single pair per name: the lines between them
+    -- belong to no proof, and submitting the runs in the order given — the
+    -- @:suspend@ and @:resume@ lines included — replays it.
+  , testCase "a proof parked and picked up again is two runs under one name" $
+      provedSlices
+        (afterLinesProving
+           [ ":theorem t : Type\8320"
+           , ":suspend"
+           , "data " ++ natDecl
+           , "open Nat"
+           , ":resume t"
+           , "try-core core`Nat`"
+           , "solve"
+           , "qed"
+           ])
+        @?= [("t", 0, 1), ("t", 4, 7)]
   ]
 
 -- | A session the given lines have been typed into, in order.
 afterLines :: [String] -> Session
 afterLines = foldl (\s l -> fst (oneLine s l)) newSession
+
+-- | The same, from a session that has the standard base — which the tactic
+-- words need, so a test that has to seal a proof starts here.
+afterLinesProving :: [String] -> Session
+afterLinesProving = foldl (\s l -> fst (oneLine s l)) withRules
 
 -- --------------------------------------------------------------------------
 -- Undo, over generated scripts (2026-09-13)
