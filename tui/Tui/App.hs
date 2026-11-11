@@ -67,7 +67,6 @@ import qualified Data.Text.Zipper as Zip
 import qualified Graphics.Vty as V
 import Graphics.Vty.Platform.Unix (mkVty)
 import Lens.Micro (Lens', lens)
-import System.CPUTime (getCPUTime)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStr, readFile', stdout)
@@ -104,6 +103,7 @@ import Tui.Render
 import Tui.Config (Config (..), loadConfig, saveConfig)
 import Tui.Database
   ( Stored (..)
+  , clockName
   , databaseDir
   , freshStored
   , loadIndex
@@ -1791,9 +1791,11 @@ tuiHelpLines =
     , ("",                  "  re-runs from the caret down (from the top, if the caret is")
     , ("",                  "  past the end) and says what changed on disc, :script drop")
     , ("",                  "  discards this line and the lines below it, :script save")
-    , ("",                  "  writes back to the file the document was opened from and")
-    , ("",                  "  :script save ‹name› writes a new one — naming a file that")
-    , ("",                  "  exists asks once, and :script save! ‹name› replaces it")
+    , ("",                  "  writes back to the file the document was opened from, or")
+    , ("",                  "  names it off the clock if there is none —")
+    , ("",                  "  Wednesday-11-11-2026-at-22-15.thena.script. :script save")
+    , ("",                  "  ‹name› writes a new one; naming a file that exists asks")
+    , ("",                  "  once, and :script save! ‹name› replaces it")
     ]
   where
     width = 28
@@ -2670,20 +2672,22 @@ insertScriptLine st text = do
 -- blanket refusal and had to go rather than be tuned.
 --
 -- With no name and nothing to save back to — a document typed from scratch —
--- the name is still five letters off the clock, explicitly a placeholder:
--- his *"later I would like something better."*
+-- the name is the clock in words: @Wednesday-11-11-2026-at-22-15.thena.script@,
+-- which is 'clockName'. It is not the session's slug: see that function for
+-- why a thing you read and a thing you type a prefix of differ.
 scriptSave :: St -> Maybe String -> Bool -> EventM Name St ()
 scriptSave st given force
   | null (stScript st) = say "nothing to save"
   | otherwise = do
-      name <- case (given, openedFrom) of
-        (Just n, _) -> pure n
-        (Nothing, Just p) -> pure p
-        (Nothing, Nothing) -> liftIO randomStem
-      let path = if ".thena.script" `isSuffixOf` name then name else name <> ".thena.script"
+      path <- liftIO $ case (given, openedFrom) of
+        (Just n, _) -> pure (suffixed n)
+        (Nothing, Just p) -> pure (suffixed p)
+        (Nothing, Nothing) -> freeClockPath
       -- **Where the document came from is never an overwrite.** It is the
-      -- same file, and asking about it is the behaviour he threw out.
-      ask <- if force || Just path == openedFrom
+      -- same file, and asking about it is the behaviour he threw out. An
+      -- invented name is never one either, because 'freeClockPath' only ever
+      -- answers a path that is free.
+      ask <- if force || Just path == fmap suffixed openedFrom
         then pure False
         else liftIO (doesFileExist path)
       if ask
@@ -2695,15 +2699,26 @@ scriptSave st given force
     openedFrom = stStored st >>= stFrom
     say note = put st { stScriptBar = Nothing, stScriptNote = Just note }
 
--- | Five lowercase letters off the CPU clock. A placeholder name, and no new
--- dependency for one — @random@ is not in this library's build-depends and a
--- throwaway stem is not a reason to add it.
-randomStem :: IO String
-randomStem = do
-  t <- getCPUTime
-  let go 0 _ = []
-      go k n = toEnum (fromEnum 'a' + fromIntegral (n `mod` 26)) : go (k - 1 :: Int) (n `div` 26)
-  pure (go 5 (t `div` 1000))
+suffixed :: String -> FilePath
+suffixed n = if ".thena.script" `isSuffixOf` n then n else n <> ".thena.script"
+
+-- | **The name a save invents: 'clockName', stepped until it is free.**
+-- @Wednesday-11-11-2026-at-22-15.thena.script@, and @…-at-22-15-2.thena.script@
+-- if that one is already there — two saves in one minute is a thing that
+-- happens, and 'freshStored' steps a slug the same way. **Nothing it answers
+-- exists yet**, which is why an invented name never asks before writing.
+freeClockPath :: IO FilePath
+freeClockPath = do
+  stem <- clockName
+  let tries = stem : [stem <> "-" <> show n | n <- [2 .. 99 :: Int]]
+      -- A hundred saves in one minute is not a state to have a plan for, and
+      -- overwriting the first is better than refusing to save — the same
+      -- call 'freshStored' makes about a slug.
+      go [] = pure (suffixed stem)
+      go (t : rest) = do
+        there <- doesFileExist (suffixed t)
+        if there then go rest else pure (suffixed t)
+  go tries
 
 -- | The slice of 'St' that 'Tui.Config' persists, read off whichever state
 -- a `:theme`/`:preselect`/`:whisper` command just produced.

@@ -36,6 +36,8 @@ module Tui.Database
   , writeTranscript
   , readTranscript
   , freshStored
+  , clockStem
+  , clockName
   , storedNamed
   ) where
 
@@ -217,8 +219,8 @@ readTranscript slug = do
 freshStored :: [Stored] -> Maybe FilePath -> IO Stored
 freshStored existing from = do
   now <- getZonedTime
+  stem <- clockStem
   let name = formatTime defaultTimeLocale "%A %H:%M %-d.%-m.%Y" now
-      stem = formatTime defaultTimeLocale "%Y-%m-%d-%H%M" now
       taken s = s `elem` map stSlug existing
       stepped = [stem <> "-" <> show n | n <- [2 .. 99 :: Int]]
       slug = case filter (not . taken) (stem : stepped) of
@@ -236,6 +238,35 @@ freshStored existing from = do
       , stFrom = from
       , stProofs = []
       }
+
+-- | **A session's slug off the clock**: @2026-11-11-2215@. This one is a
+-- HANDLE, not prose — `:script resume 2026-11-11` takes a prefix of it, and
+-- prefix-matching is why it stays year-first: a date is what you remember a
+-- session by and what narrows the list. It also names the transcript file
+-- inside @.thena\/sessions\/@, which nobody reads by eye.
+--
+-- **It is deliberately not 'clockName'.** A slug you type a prefix of and a
+-- filename you read are different jobs, and his ruling of 2026-11-11 is about
+-- the second: a weekday-first slug would prefix-match every Wednesday ever
+-- and would not match the year at all.
+clockStem :: IO String
+clockStem = formatTime defaultTimeLocale "%Y-%m-%d-%H%M" <$> getZonedTime
+
+-- | **The name a saved proof-script gets: readable, and one word**:
+-- @Wednesday-11-11-2026-at-22-15@. His, 2026-11-11, and the sketch is his
+-- too: *"I would much prefer it it read something like: \"Wednesday Evening
+-- (11-11-2026-at-22-15)\""*, answering the *"later I would like something
+-- better"* that the five random letters stood in for.
+--
+-- **Three things it is not, each ruled rather than guessed.** No day-part
+-- word — @Evening@ says what @22-15@ beside it already says, and every
+-- boundary (17:00, 12:00, 23:00) is a judgment that will read wrong to
+-- somebody. No spaces or parentheses, because the bar's open command matches
+-- two words, so a saved file has to be typeable back in. And it does not
+-- sort chronologically, which he was told and chose: these are files named
+-- and reopened by name, not a log to scan.
+clockName :: IO String
+clockName = formatTime defaultTimeLocale "%A-%d-%m-%Y-at-%H-%M" <$> getZonedTime
 
 -- | **The session a handle names: its slug, by prefix, case ignored.** The
 -- readable name is not a handle — it has spaces in it, and `:script resume` is
