@@ -129,10 +129,22 @@ data Name
 data ScriptLine = ScriptLine
   { slText    :: String
     -- ^ exactly what will be written to the @.thena.script@.
-  , slSession :: Session
+  , slSession :: Maybe Session
     -- ^ the session after this line ran; **unchanged from the line before
     -- when the engine refused it**, which is what lets a refused line stay
     -- in the document without lying about the state beneath it.
+    --
+    -- **'Nothing' is a line of the document that has not been run in this
+    -- session** — @~22qjj@. It is text and nothing else: opened from a
+    -- `.thena.script` on disc, or left below the caret by a reload. The
+    -- engine's own record only ever holds lines that were submitted, so there
+    -- is nowhere else for these to live; `Session` is opaque and `flattened`
+    -- is not exported, which is the design saying the same thing.
+    --
+    -- **The sessions form a prefix**: lines @[0, F)@ have run and @[F, n)@
+    -- have not, for the frontier @F@ 'scriptFrontier' reads off. Every
+    -- rebuild in this module is written to keep that true — it is what makes
+    -- "the session above this line" a lookup rather than a search.
   , slOutput  :: [String]
   , slOk      :: Bool
   }
@@ -712,15 +724,21 @@ renderScript st inputLine =
   where
     row i sl
       | stScriptPos st == Just i = [marker <+> inputLine] <> refusal sl
-      | stale i = [marker <+> withAttr (attrName "script.stale") (str (slText sl))] <> refusal sl
+      | dim i = [marker <+> withAttr (attrName "script.stale") (str (slText sl))] <> refusal sl
       | otherwise = [marker <+> str (slText sl)] <> refusal sl
       where
         marker
           | stScriptPos st == Just i = withAttr (attrName "script.marker") (str "⟩ ")
           | otherwise = str "  "
-    -- | Below the edited line, not including it: the edited line is the one
-    -- the caret is standing in and is being typed, not stale.
-    stale i = case stScriptStale st of
+    -- | **One dim, two causes** — the design's own words. A line is drawn
+    -- dim when it has not run in this session (below the frontier, which is
+    -- every line of a freshly opened proof-script) or when it ran against a
+    -- session the line being edited no longer produces.
+    --
+    -- Stale is /below/ the edited line and not the line itself: that one is
+    -- the caret's, drawn by the editor, and is being typed rather than
+    -- waiting for a verdict.
+    dim i = i >= scriptFrontier st || case stScriptStale st of
       Just j -> i > j
       Nothing -> False
     refusal sl
@@ -1222,7 +1240,10 @@ handleScriptEvent ev = do
 markTailStale :: Int -> EventM Name St ()
 markTailStale i = do
   st <- get
-  let below = length (stScript st) - (i + 1)
+  -- | **Only the lines that have run can go stale**, so the count stops at
+  -- the frontier: in a proof-script opened from disc the lines below it are
+  -- text that has not run against anything and an Enter does not reach them.
+  let below = scriptFrontier st - (i + 1)
       edited = case nthOf i (stScript st) of
         Just sl -> slText sl /= concatMap Text.unpack (getEditContents (stInput st))
         Nothing -> False
@@ -1338,6 +1359,14 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- command bar's `:script`, because once the mode is on, what you type
         -- is the document and never a command.
         [":script"] -> enterScriptMode st0
+        -- | **`:script ‹path›` opens a proof-script into the mode** —
+        -- `~22qjj`. One gesture rather than two, and the path completes as
+        -- it is typed, `":script "` being in 'pathCommands'. The bar's
+        -- `:script open ‹path›` is the same call for when the mode is
+        -- already on.
+        [":script", path] -> do
+          ok <- openScriptFile st0 path 0
+          if ok then pure () else appendTurn st0 Nothing ["no such file: " <> path]
         -- | Two more TUI-local toggles, his `.jalivert/TUI.md` #23 — same
         -- standing as `:theme`/`:fold` (not instral, so special-casing them
         -- here is his own ruling already covers this). Disabling either is
@@ -1699,7 +1728,10 @@ tuiHelpLines =
     [ (":theme ‹name›",     intercalate ", " (map themeName themes))
     , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
-    , (":script",           "live-script mode: the pane becomes an editable document")
+    , (":script [path]",    "live-script mode: the pane becomes an editable document")
+    , ("",                  "  with a path, that proof-script is opened into it as text:")
+    , ("",                  "  its lines are dim until Down walks into them, one run per")
+    , ("",                  "  keypress. :script open ‹path› in the bar does the same")
     , ("",                  "  in it: Up/Down walk the document, every other key edits")
     , ("",                  "  text. Editing a committed line makes the lines below it")
     , ("",                  "  stale, drawn dim, until an Enter decides them:")
@@ -1744,23 +1776,36 @@ recordHistory line st
 -- up the document walks the proof-term, goals and machine panes back with it.
 -- Standing on line @i@ shows the state /after/ @i@ ran — where you are in the
 -- document, not what the line was about to see.
+-- **A caret on a line that has not run shows the state that line is about to
+-- see**, which under the prefix invariant means nothing has run at all and
+-- the answer is the base — the state a freshly opened proof-script is in
+-- before its first Down.
 activeSession :: St -> Session
 activeSession st
   | not (stScriptMode st) = stSession st
   | otherwise = case stScriptPos st of
-      Just i | Just sl <- nthOf i (stScript st) -> slSession sl
-      _ -> maybe (stSession st) id (scriptTip st)
+      Just i
+        | Just sl <- nthOf i (stScript st) ->
+            maybe (fallback (scriptSessionBefore st i)) id (slSession sl)
+      _ -> fallback (scriptTip st)
+  where
+    fallback = maybe (stSession st) id
 
 nthOf :: Int -> [a] -> Maybe a
 nthOf i xs
   | i < 0 = Nothing
   | otherwise = listToMaybe (drop i xs)
 
--- | The session a new line past the end of the script runs against.
+-- | **How many of the document's lines have run in this session** — the
+-- frontier of 'slSession'. Read rather than stored: a second copy of it in
+-- 'St' would be one more thing every rebuild has to remember.
+scriptFrontier :: St -> Int
+scriptFrontier st = length (takeWhile (isJust . slSession) (stScript st))
+
+-- | The session a new line past the end of the script runs against: the last
+-- line that has run, or the base.
 scriptTip :: St -> Maybe Session
-scriptTip st = case stScript st of
-  [] -> stScriptBase st
-  ls -> Just (slSession (last ls))
+scriptTip st = scriptSessionBefore st (scriptFrontier st)
 
 -- | The session line @i@ runs against — line 0's is the base the mode was
 -- entered on. **This is the whole of the rewind**: no `:undo`, no replay, no
@@ -1768,7 +1813,23 @@ scriptTip st = case stScript st of
 scriptSessionBefore :: St -> Int -> Maybe Session
 scriptSessionBefore st i
   | i <= 0 = stScriptBase st
-  | otherwise = slSession <$> nthOf (i - 1) (stScript st)
+  | otherwise = case nthOf (i - 1) (stScript st) of
+      -- An un-run line above can only happen when nothing has run at all,
+      -- the sessions being a prefix, so the base is the right answer and
+      -- there is nothing to search backwards for.
+      Just sl -> maybe (stScriptBase st) Just (slSession sl)
+      Nothing -> stScriptBase st
+
+-- | The tail below line @i@, split where the frontier is: the part that has
+-- run in this session, as text to re-run, and the part that has not, which
+-- stays exactly as it is. **Every rebuild goes through this**, which is how
+-- the prefix invariant survives an edit in the middle of an opened
+-- proof-script: re-running stops at the frontier instead of running the rest
+-- of the file as a side effect of one Enter.
+tailFrom :: St -> Int -> ([String], [ScriptLine])
+tailFrom st at =
+  let (ran, unrun) = span (isJust . slSession) (drop at (stScript st))
+   in (map slText ran, unrun)
 
 -- | Run one line and keep everything it produced. The IO is 'following''s,
 -- the same half 'runEngineLine' takes for the ordinary REPL — a `:load` names
@@ -1783,8 +1844,8 @@ runScriptLine s line = do
             renderResponse s' resp
               ++ concatMap (renderResponse sLoaded) responses
               ++ concatMap (renderTrouble sLoaded) trouble
-      pure (ScriptLine line sLoaded out (responseTook resp))
-    _ -> pure (ScriptLine line s' (renderResponse s' resp) (responseTook resp))
+      pure (ScriptLine line (Just sLoaded) out (responseTook resp))
+    _ -> pure (ScriptLine line (Just s') (renderResponse s' resp) (responseTook resp))
 
 -- | Whether a response means the line actually advanced the session.
 --
@@ -1824,6 +1885,70 @@ enterScriptMode st = do
     }
   closeDropdowns
   followInput
+
+-- | **Open a proof-script from disc into the mode** — `~22qjj`, and the
+-- design's *one code path at three speeds*
+-- (@.jalivert/discussion/the-session-in-the-tui.md@ §8). Its lines become the
+-- document as text; @upto@ of them are run before you get the keyboard, and
+-- the caret is left on the last one that ran.
+--
+--   * **opening a `.thena.script`** is @upto = 0@: nothing runs, every line is
+--     dim, and Down walks into it a line at a time.
+--   * **resuming a stored session** will be @upto = its stored caret@, which
+--     is the only difference between the two.
+--   * **reloading** is the same call again on a document already open.
+--
+-- **It does not read the engine's record and cannot.** A record only ever
+-- holds lines that were submitted, so the lines below the caret have nowhere
+-- to live but here — `Session` is opaque and `flattened` is not exported,
+-- which is the boundary saying the same thing.
+--
+-- **Every line of the file is kept, comments and blanks included.** Measured
+-- against `lib:thena`: `oneLine` answers `Blank` for @""@, @"   "@ and
+-- @"-- a comment"@ and renders nothing, so they cost a no-op apiece and the
+-- file round-trips through `:script save` as it was written. Dropping them
+-- would silently reformat somebody's proof.
+-- **It answers whether it opened anything**, because a missing path is
+-- reported differently depending on where the command was typed: the REPL has
+-- turns, the command bar has the pane's foot.
+openScriptFile :: St -> FilePath -> Int -> EventM Name St Bool
+openScriptFile st path upto = do
+  there <- liftIO (doesFileExist path)
+  if not there
+    then pure False
+    else do
+      src <- liftIO (readFile path)
+      base <- case stScriptBase st of
+        -- A base is a session nothing has advanced, so the one already in
+        -- hand is the same session a new boot would produce, a second of
+        -- prelude-reading later.
+        Just s -> pure s
+        Nothing -> fst <$> liftIO startingSession
+      let texts = lines src
+          (runNow, rest) = splitAt (max 0 upto) texts
+      ran <- liftIO (foldRun base runNow)
+      let doc = ran ++ [ScriptLine t Nothing [] True | t <- rest]
+      put st
+        { stScriptMode = True
+        , stScriptBase = Just base
+        , stScript = doc
+        , stScriptPos = if null doc then Nothing else Just (max 0 (length ran - 1))
+        , stScriptStale = Nothing
+        , stScriptDraft = ""
+        , stScriptBar = Nothing
+        , stScriptNote =
+            Just
+              ( "opened " <> path <> " — " <> show (length doc) <> " lines, "
+                  <> show (length ran)
+                  <> " run; Down runs the next"
+              )
+        , stInput = case doc of
+            [] -> emptyInput
+            _ -> E.editorText Input (Just 1) (Text.pack (slText (doc !! max 0 (length ran - 1))))
+        }
+      closeDropdowns
+      followInput
+      pure True
 
 -- | Back to the ordinary REPL, whose 'stSession'/'stTurns' were never touched.
 -- The script itself stays in memory, so toggling out to check something and
@@ -1906,27 +2031,49 @@ scriptSubmit = do
     Just i | all isSpace line -> case scriptSessionBefore st i of
       Nothing -> pure ()
       Just s -> do
-        rebuilt <- liftIO (foldRun s (map slText (drop (i + 1) (stScript st))))
-        put st
-          { stScript = take i (stScript st) ++ rebuilt
-          , stScriptPos = Nothing
-          , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
-          , stScriptDraft = ""
-          , stScriptNote = Nothing
-          }
+        let (ran, unrun) = tailFrom st (i + 1)
+        rebuilt <- liftIO (foldRun s ran)
+        put (reseated st i (take i (stScript st) ++ rebuilt ++ unrun))
         afterScriptEdit
     Just i -> case scriptSessionBefore st i of
       Nothing -> pure ()
       Just s -> do
-        rebuilt <- liftIO (foldRun s (line : map slText (drop (i + 1) (stScript st))))
-        put st
-          { stScript = take i (stScript st) ++ rebuilt
-          , stScriptPos = Nothing
-          , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
-          , stScriptDraft = ""
-          , stScriptNote = Nothing
-          }
+        let (ran, unrun) = tailFrom st (i + 1)
+        rebuilt <- liftIO (foldRun s (line : ran))
+        put (reseated st i (take i (stScript st) ++ rebuilt ++ unrun))
         afterScriptEdit
+
+-- | The document after a commit on line @i@, and where the caret goes with
+-- it.
+--
+-- **It un-parks to the composing line, as it always has, when every line of
+-- the document has run.** That was the only possible answer while an edit
+-- severed the tail: there was nothing below to stand on.
+--
+-- **It stays on line @i@ when lines below have not run** — an opened
+-- proof-script, @~22qjj@. There is no composing line past the end of a
+-- document whose last lines have never been submitted; un-parking there would
+-- seat the caret below the frontier, which is the one position the prefix
+-- invariant does not allow. **A splice is the one case where line @i@ is a
+-- different line afterwards**, so the text is read back out of the new
+-- document rather than carried over.
+reseated :: St -> Int -> [ScriptLine] -> St
+reseated st i doc = case (all (isJust . slSession) doc, nthOf i doc) of
+  (False, Just sl) ->
+    st
+      { stScript = doc
+      , stScriptPos = Just i
+      , stInput = E.editorText Input (Just 1) (Text.pack (slText sl))
+      , stScriptNote = Nothing
+      }
+  _ ->
+    st
+      { stScript = doc
+      , stScriptPos = Nothing
+      , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
+      , stScriptDraft = ""
+      , stScriptNote = Nothing
+      }
 
 -- | Shift+Enter's operation: **the caret's line is run and everything after
 -- it is discarded.** On the composing line there is no tail, so it is an
@@ -1959,7 +2106,7 @@ foldRun :: Session -> [String] -> IO [ScriptLine]
 foldRun _ [] = pure []
 foldRun s (l : ls) = do
   sl <- runScriptLine s l
-  rest <- foldRun (slSession sl) ls
+  rest <- foldRun (maybe s id (slSession sl)) ls
   pure (sl : rest)
 
 -- | **How every script-mode event that is not typing ends: the dropdown
@@ -2050,13 +2197,30 @@ scriptUp = do
     Just i | i > 0 -> loadScriptAt st (i - 1) (stScriptDraft st)
     _ -> pure ()
 
+-- | **Down is also how a line that has never run gets run** — his design,
+-- @~22qjj@: a proof-script opened from disc is text until the arrow keys
+-- walk into it, one line per keypress, and the engine's record grows to
+-- exactly the caret and no further.
+--
+-- So Down means one of three things, in this order: move to the next line
+-- that has already run; otherwise run the first line that has not; otherwise
+-- there is nothing below and the caret leaves the document for the composing
+-- line, as it always did.
+--
+-- **The caret standing on the frontier is what makes it one rule rather than
+-- two.** Walking down a 500-line script and walking down a three-line one you
+-- typed are the same keypress — in the second, every line has run, so the
+-- first clause answers every time.
 scriptDown :: EventM Name St ()
 scriptDown = do
   st <- get
+  let n = length (stScript st)
+      f = scriptFrontier st
   case stScriptPos st of
     Nothing -> pure ()
     Just i
-      | i + 1 < length (stScript st) -> loadScriptAt st (i + 1) (stScriptDraft st)
+      | i + 1 < f -> loadScriptAt st (i + 1) (stScriptDraft st)
+      | f < n -> runNextScriptLine st f
       | otherwise -> do
           put st
             { stScriptPos = Nothing
@@ -2064,6 +2228,24 @@ scriptDown = do
             , stScriptDraft = ""
             }
           afterScriptEdit
+
+-- | Run the document's line @at@ — which has not run in this session — from
+-- the session above it, and leave the caret on it. **One line, not a loop**:
+-- a refusal stops the walk where it happened, with the complaint under the
+-- line and the caret on it, which is the whole of the error handling this
+-- needs.
+runNextScriptLine :: St -> Int -> EventM Name St ()
+runNextScriptLine st at = case (scriptSessionBefore st at, nthOf at (stScript st)) of
+  (Just s, Just sl) -> do
+    ran <- liftIO (runScriptLine s (slText sl))
+    put st
+      { stScript = take at (stScript st) ++ [ran] ++ drop (at + 1) (stScript st)
+      , stScriptPos = Just at
+      , stInput = E.editorText Input (Just 1) (Text.pack (slText ran))
+      , stScriptNote = Nothing
+      }
+    afterScriptEdit
+  _ -> pure ()
 
 -- | Puts line @i@'s own text under the caret for editing in place.
 loadScriptAt :: St -> Int -> String -> EventM Name St ()
@@ -2112,6 +2294,11 @@ scriptBarSubmit st text = case words text of
   -- `rerun` would name the one gesture that re-runs nothing.
   [":script", "cut"] -> closeScriptBar >> scriptCutAndRun
   (":script" : "save" : rest) -> scriptSave st (listToMaybe rest)
+  [":script", "open", path] -> do
+    ok <- openScriptFile st path 0
+    if ok
+      then pure ()
+      else put st { stScriptBar = Nothing, stScriptNote = Just ("no such file: " <> path) }
   [":theme", name] | Just th <- themeByName name -> do
     let st' = st { stTheme = th, stScriptBar = Nothing, stScriptNote = Just ("theme: " <> name) }
     liftIO (saveConfig (configOf st'))
@@ -2137,15 +2324,9 @@ insertScriptLine st text = do
   case scriptSessionBefore st at of
     Nothing -> put st { stScriptBar = Nothing }
     Just s -> do
-      rebuilt <- liftIO (foldRun s (text : map slText (drop at (stScript st))))
-      put st
-        { stScript = take at (stScript st) ++ rebuilt
-        , stScriptPos = Nothing
-        , stScriptBar = Nothing
-        , stScriptNote = Nothing
-        , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
-        , stScriptDraft = ""
-        }
+      let (ran, unrun) = tailFrom st at
+      rebuilt <- liftIO (foldRun s (text : ran))
+      put (reseated st at (take at (stScript st) ++ rebuilt ++ unrun)) { stScriptBar = Nothing }
       afterScriptEdit
 
 -- | `:script save [name]` — writes the committed lines and nothing else.
@@ -2583,7 +2764,7 @@ loadPathPrefix line
 -- `:consult` is a statement question like any other, and 'lastWord' would
 -- otherwise read the command itself as the path being written.
 pathCommands :: [String]
-pathCommands = [":load ", ":consult ", ":replay "]
+pathCommands = [":load ", ":consult ", ":replay ", ":script "]
 
 lastWord :: String -> String
 lastWord = reverse . takeWhile (/= ' ') . reverse
