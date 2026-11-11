@@ -2096,10 +2096,11 @@ refreshDropdown = do
 -- | Recomputes the completion dropdown from 'Thena.View.statementOfferView'
 -- — called from the same places 'refreshDropdown' is, same reasoning.
 --
--- **Only ':load''s own line gets none from here** — its path is a
--- directory listing, not a grammar question, and 'refreshDropdown' already
--- owns that answer ('stDropdown'); asking the statement grammar about
--- ":load foo" too would just be asking the wrong question a second time.
+-- **Only a path-taking command's own line gets none from here**
+-- ('pathCommands') — its path is a directory listing, not a grammar
+-- question, and 'refreshDropdown' already owns that answer ('stDropdown');
+-- asking the statement grammar about ":load foo" too would just be asking
+-- the wrong question a second time.
 -- Every other colon line, including a bare ":" or one still being typed
 -- towards ":load" itself, goes to 'statementOfferView' exactly like a
 -- non-colon line now does. **This used to blank on any colon prefix
@@ -2377,11 +2378,13 @@ acceptOfferEdit start len ins = Zip.insertMany (Text.pack ins) . deleteForward l
     deleteForward 0 z = z
     deleteForward n z = deleteForward (n - 1) (Zip.deleteChar z)
 
--- | Tab-completion for `:load`'s path only — his ruling, 2026-09-29:
--- *"it is not instral. Therefore special casing it in our TUI's repl is
--- ok."* Scoped to a single trailing path (several comma/space-separated
--- paths completing independently is the old experiment's finer-grained
--- version of this and not built here yet — narrower, not a hack).
+-- | Tab-completion for a path-taking command's path only — his ruling,
+-- 2026-09-29: *"it is not instral. Therefore special casing it in our TUI's
+-- repl is ok."* 'pathCommands' is which lines those are. Scoped to a single
+-- trailing path (several comma/space-separated paths completing independently
+-- is the old experiment's finer-grained version of this and not built here yet
+-- — narrower, not a hack), which is also the whole of what `:consult`'s list
+-- needs: the path being typed is the last one.
 --
 -- **Back to silent on an ambiguous or missing match, 2026-09-29** — his
 -- `.jalivert/TUI.md` feedback: once the live dropdown exists, printing
@@ -2406,8 +2409,26 @@ completeLoadPath = do
 
 loadPathPrefix :: String -> Maybe String
 loadPathPrefix line
-  | ":load " `isPrefixOf` line = Just (lastWord line)
+  | any (`isPrefixOf` line) pathCommands = Just (lastWord line)
   | otherwise = Nothing
+
+-- | The colon commands whose argument is a path on this machine, and so the
+-- lines this listing answers for. **It is not only `:load` any more** — MS11
+-- added `:consult ‹path›` (phase 271) and `:replay ‹path›` (phase 302), the
+-- two of the three words that replace `:load` which take a path rather than a
+-- module name. A path argument is a directory listing wherever it is written,
+-- so the affordance is the same one and the gate is a membership test.
+--
+-- **`import` is deliberately absent, and it is not an oversight**: it takes a
+-- module NAME, resolved by the engine against its own search, and it is a bare
+-- line at the prompt rather than a colon command. Offering `examples/` base
+-- names against it would complete the wrong vocabulary.
+--
+-- The trailing space is part of each prefix: a line still being typed towards
+-- `:consult` is a statement question like any other, and 'lastWord' would
+-- otherwise read the command itself as the path being written.
+pathCommands :: [String]
+pathCommands = [":load ", ":consult ", ":replay "]
 
 lastWord :: String -> String
 lastWord = reverse . takeWhile (/= ' ') . reverse
@@ -2422,8 +2443,9 @@ pathStartOff :: String -> Int
 pathStartOff line = length line - length (lastWord line)
 
 -- | How far past the path's start the segment being typed begins: the typed
--- directory and its slash ('examples/' in 'examples/01'), or zero when the
--- path has no slash yet. The dropdown shows base names, so its text anchors
+-- directory and its slash ('examples/' in 'examples/Stlc01Syntax.thena'), or
+-- zero when the path has no slash yet. The dropdown shows base names, so its
+-- text anchors
 -- here rather than at the whole path's start — and typing or deleting a
 -- slash moves the segment, recomputing the position exactly when a
 -- directory is entered or left (his `.jalivert/TUI.md` #2).
