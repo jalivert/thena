@@ -290,6 +290,42 @@ data St = St
   , stScriptNote :: Maybe String
     -- ^ what the bar last had to say — a refusal, or a saved path. Shown at
     -- the pane's foot until the next thing happens.
+  , stScriptStale :: Maybe Int
+    -- ^ @'Just' i@ means line @i@ has been edited in place and **every line
+    -- below it is stale**: it was run against the session line @i@ used to
+    -- leave behind, and line @i@ no longer says what it said. The lines are
+    -- still there and still run — they are drawn dim ('renderScript') and
+    -- nothing has been destroyed.
+    --
+    -- **His ruling, 2026-11-11, overruling @~sv5v8@'s timing**: the tail is
+    -- invalid the instant the line is edited, which is the half that
+    -- survives, but invalid and deleted are no longer the same event. The
+    -- tail lives until the Enter that decides it — plain Enter re-runs it
+    -- (@~bxmsc@), Option+Enter cuts it. Arrowing off the line or pressing
+    -- Esc leaves it alone.
+    --
+    -- 'Nothing' also means "the edit was taken back": typing a character and
+    -- deleting it again restores the line's own text, so there is nothing
+    -- stale any more. The mark is a comparison against 'slText', not a flag
+    -- that any key was pressed.
+  , stEscRun :: Maybe String
+    -- ^ **The only thing standing between a Shift+Enter and a corrupted
+    -- proof line.** vty decodes neither of the two standard encodings and
+    -- hands the bytes over as a 'V.KEsc' followed by the rest as literal
+    -- characters — measured, not assumed, with a vty event dump under the
+    -- pty: @ESC [ 13;2u@ (kitty) and @ESC [ 27;2;13~@ (xterm
+    -- @modifyOtherKeys@, his own terminal) both arrive that way.
+    --
+    -- @'Just' p@ means an Esc was just handled and @p@ is the literal text
+    -- seen since, still a prefix of one of those two sequences, held back
+    -- rather than typed. A prefix that completes is swallowed whole; one
+    -- that diverges is typed, in order, as though it had never been held.
+    -- 'Nothing' is the ordinary state, where every character goes straight
+    -- through.
+    --
+    -- **Anchored on the Esc, which is what makes it exact**: ordinary typing
+    -- never follows an Esc with @[13;2u@, so nothing a user means to type is
+    -- ever delayed by more than the one keystroke that diverges.
   , stHistoryDraft :: String
     -- ^ the live line 'historyBack' interrupted, restored by
     -- 'historyForward' on the way back past the newest entry — the same
@@ -337,6 +373,8 @@ runTui = do
         , stScriptDraft = ""
         , stScriptBar   = Nothing
         , stScriptNote  = Nothing
+        , stScriptStale = Nothing
+        , stEscRun      = Nothing
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
         , stArrowsReleased = False
@@ -414,6 +452,21 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- the line is still in the document and still yours to fix, which is not
   -- an alarm.
   , (attrName "script.refused", ink (themeDim th))
+  -- **A line below an edit, still there and no longer true of anything** —
+  -- his ruling of 2026-11-11, that the tail survives an edit and says so by
+  -- colour rather than by vanishing. The same dim ink a refusal wears, and
+  -- deliberately: both are "this line is in your document and is not
+  -- carrying the session", which is one fact with two causes. It is a
+  -- separate attribute so a theme can part them later without touching the
+  -- drawing.
+  -- **A surface, not an ink**: 'ink' leaves the background at 'V.defAttr',
+  -- which brick resolves against the map's default — the *stage* colour, not
+  -- the panel the pane is filled with. On a short run of output that is a
+  -- near-black seam nobody notices; on a stale document line, which is as
+  -- wide as the line is long, it is a black band behind every character.
+  -- Measured under the pty: @bg:0;0;0@ where the line above reads
+  -- @bg:16;10;14@.
+  , (attrName "script.stale",   surface (themePanel th) (themeDim th))
   -- **The command bar is a surface, not a line of text** — his report,
   -- 2026-10-20: *"it is just almost invisible."* Measured under a pty, the
   -- whole of it on screen was a single @:@ in the pane's last row: the bar
@@ -646,17 +699,30 @@ renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
 -- does show its complaint**, dimmed beneath it, because that is the one case
 -- the panes cannot express: the line is in the document, it changed nothing,
 -- and it is yours to fix.
+--
+-- **A line below an in-place edit is drawn dim and is still drawn** — his
+-- ruling of 2026-11-11 ('stScriptStale'). It was run against a session the
+-- line above no longer produces, so it is telling you about a state nothing
+-- holds; the dim says exactly that, and the Enter that follows decides
+-- whether it is re-run or cut. Before that ruling the lines were gone from
+-- the screen and from memory on the first keystroke.
 renderScript :: St -> Widget Name -> [Widget Name]
 renderScript st inputLine =
   concat (zipWith row [0 ..] (stScript st)) <> tail'
   where
     row i sl
       | stScriptPos st == Just i = [marker <+> inputLine] <> refusal sl
+      | stale i = [marker <+> withAttr (attrName "script.stale") (str (slText sl))] <> refusal sl
       | otherwise = [marker <+> str (slText sl)] <> refusal sl
       where
         marker
           | stScriptPos st == Just i = withAttr (attrName "script.marker") (str "⟩ ")
           | otherwise = str "  "
+    -- | Below the edited line, not including it: the edited line is the one
+    -- the caret is standing in and is being typed, not stale.
+    stale i = case stScriptStale st of
+      Just j -> i > j
+      Nothing -> False
     refusal sl
       | slOk sl = []
       | otherwise =
@@ -1013,12 +1079,65 @@ handleEvent ev = do
 -- ordinary REPL exactly as it always was.
 handleEventInner :: BrickEvent Name e -> EventM Name St ()
 handleEventInner ev = do
+  held <- stEscRun <$> get
+  case held of
+    Nothing -> do
+      handleEventFor ev
+      armEscRun ev
+    Just p -> continueEscRun p ev
+
+handleEventFor :: BrickEvent Name e -> EventM Name St ()
+handleEventFor ev = do
   st <- get
   case stScriptBar st of
     Just bar -> handleBarEvent st bar ev
     Nothing
       | stScriptMode st -> handleScriptEvent ev
       | otherwise -> handleReplEvent ev
+
+-- | The two encodings of Shift+Enter that vty hands over as literal text.
+-- Both measured with a vty event dump under the pty, 2026-11-11: an
+-- 'V.KEsc', then one 'V.KChar' per byte of the rest.
+shiftEnterRuns :: [String]
+shiftEnterRuns = ["[13;2u", "[27;2;13~"]
+
+-- | Esc has just been handled, so the characters that follow it /may/ be the
+-- tail of a Shift+Enter. Start holding them back ('stEscRun').
+--
+-- **Esc's own meaning is untouched and the dismissal has already happened by
+-- the time this runs.** Nothing can be known about what follows an Esc at the
+-- moment the Esc arrives, so a Shift+Enter does dismiss an open dropdown as a
+-- side effect. That is the whole of the cost, and it is the right trade: the
+-- alternative is delaying every Esc by a keystroke, which would break the one
+-- key the mode uses to get out of things.
+armEscRun :: BrickEvent Name e -> EventM Name St ()
+armEscRun (VtyEvent (V.EvKey V.KEsc [])) = do
+  st <- get
+  put st { stEscRun = Just "" }
+armEscRun _ = pure ()
+
+-- | A character arriving while a sequence is being held: extend it, and
+--
+--   * a complete sequence is swallowed — this is the Shift+Enter, and the
+--     line is left exactly as it was;
+--   * a still-possible prefix keeps being held, invisibly, for one more key;
+--   * anything else is **typed, in order** — the held characters and then
+--     this one — so a user who presses Esc and then genuinely types @[1@ has
+--     lost nothing but the frame it took to know that.
+--
+-- A non-character event (an arrow, Enter, a resize) also ends the run: the
+-- held text is typed first, then the event is handled, because the text was
+-- typed before the key was pressed.
+continueEscRun :: String -> BrickEvent Name e -> EventM Name St ()
+continueEscRun p ev = do
+  st <- get
+  case ev of
+    VtyEvent (V.EvKey (V.KChar c) []) | p' <- p ++ [c], any (p' `isPrefixOf`) shiftEnterRuns ->
+      put st { stEscRun = if p' `elem` shiftEnterRuns then Nothing else Just p' }
+    _ -> do
+      put st { stEscRun = Nothing }
+      mapM_ (\c -> handleEventFor (VtyEvent (V.EvKey (V.KChar c) []))) p
+      handleEventFor ev
 
 -- | The command bar owns every key while it is open. Enter submits it, Esc
 -- closes it unused, everything else edits its one line — no completion, no
@@ -1050,15 +1169,14 @@ handleBarEvent st bar ev = case ev of
 -- the pty, not assumed. Ctrl+X is the second way in, because a terminal that
 -- rewrites function keys should not be able to strand someone in a mode whose
 -- only exit is the bar.
--- | **Editing a committed line drops every line below it, the instant it is
--- edited** — his ruling, 2026-10-21 (@~sv5v8@).
---
--- **ITS TIMING IS OVERRULED — his ruling of 2026-11-11 — and this code has not
--- caught up yet.** The tail is still /invalid/ the moment the line is edited, which
--- is what the paragraph below argues. What changed is that invalid no longer means
--- destroyed: the tail must survive, drawn dim, until the Enter that decides it —
--- soft Enter re-running it (@~bxmsc@) and the dropping Enter discarding it. **So
--- @~bxmsc@ cannot be built while 'severBelow' is called from here.** See
+-- | **Editing a committed line makes every line below it stale, the instant it
+-- is edited — and leaves them standing.** His ruling of 2026-10-21 (@~sv5v8@)
+-- said the lines were *dropped* on that keystroke; **his ruling of 2026-11-11
+-- overruled the timing** and this is it: the half that survives is that the tail
+-- is invalid at once, which is what the paragraph below argues. What is gone is
+-- that invalid and deleted were the same event. The tail now lives — dim, and
+-- marked by 'stScriptStale' — until the Enter that decides it: plain Enter
+-- re-runs it (@~bxmsc@), Option+Enter cuts it. See
 -- @.jalivert/DESIGN-PRINCIPLES.md@, /A reload re-runs the transcript/.
 --
 -- The lines after line @i@ were
@@ -1084,38 +1202,43 @@ handleScriptEvent ev = do
   after <- get
   case (stScriptPos before, stScriptPos after) of
     (Just i, Just j)
-      | i == j, textOf before /= textOf after -> severBelow i
+      | i == j, textOf before /= textOf after -> markTailStale i
     _ -> pure ()
   where
     textOf st = concatMap Text.unpack (getEditContents (stInput st))
 
--- | Cuts the document off above line @i@ and leaves what the editor now holds
--- as the composing line. The panes follow for free: 'activeSession' reads
--- 'stScript' and 'stScriptPos', so a truncation /is/ the rewind, the same way
--- every other rewind in this mode is indexing rather than undo.
+-- | Marks the lines below line @i@ stale, or takes the mark off again when
+-- the editor holds line @i@'s own text once more — deleting the character you
+-- just typed is not an edit, and the tail it was about to invalidate is fine.
+--
+-- **Nothing is removed and nothing is moved.** 'stScriptPos' stays on @i@, so
+-- the caret does not jump to the foot of the document the way it did while
+-- this severed, and the panes keep drawing the session at the caret.
 --
 -- **The dropdown is deliberately left alone.** 'afterScriptEdit' closes it
 -- because its callers are commits and navigation, where nobody is typing into
 -- the line any more; here somebody is, mid-keystroke, and closing it would
 -- make the completion box flicker shut on every edit of an older line.
---
--- **Nothing here can bring the cut lines back, and that is `~ns58j`** in
--- `.claude/CLOSEOUT.md` — his to rule on, not assumed either way.
-severBelow :: Int -> EventM Name St ()
-severBelow i = do
+markTailStale :: Int -> EventM Name St ()
+markTailStale i = do
   st <- get
-  let cut = length (stScript st) - (i + 1)
+  let below = length (stScript st) - (i + 1)
+      edited = case nthOf i (stScript st) of
+        Just sl -> slText sl /= concatMap Text.unpack (getEditContents (stInput st))
+        Nothing -> False
   put st
-    { stScript = take i (stScript st)
-    , stScriptPos = Nothing
-    , stScriptDraft = ""
-    -- Editing the newest line drops nothing after it, so it says nothing.
+    { stScriptStale = if edited then Just i else Nothing
+    -- Editing the newest line has nothing below it, so it says nothing.
     , stScriptNote =
-        if cut <= 0
+        if not edited || below <= 0
           then Nothing
-          else Just (show cut <> (if cut == 1 then " line" else " lines") <> " dropped below the edit")
+          else
+            Just
+              ( show below
+                  <> (if below == 1 then " line" else " lines")
+                  <> " below went stale — Enter re-runs them, Option+Enter cuts them"
+              )
     }
-  followInput
 
 dispatchScriptEvent :: BrickEvent Name e -> EventM Name St ()
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
@@ -1143,13 +1266,14 @@ dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 -- 27;2;13~@ both arrive as *literal text* and get typed into the line —
 -- the caret's line read @bbb[13;2u@ afterwards. So the 'V.MShift' clause
 -- below is unreachable on this vty today; it is kept because it costs
--- nothing and is already correct if vty gains the kitty protocol, and
--- because a binding that silently types punctuation into a proof script is
--- worth a comment either way.
+-- nothing and is already correct if vty gains the kitty protocol.
+-- **The bytes no longer reach the line**: they are swallowed by
+-- 'stEscRun', which is not a workaround for the missing binding but a
+-- refusal to let a keypress write punctuation into a proof.
 --
 -- **Option+Enter is the one that works** — it arrives as @ESC CR@ and
 -- decodes to 'V.KEnter' with 'V.MMeta', verified under the pty. **And
--- `:script rerun` in the command bar does the same thing with no modifier
+-- `:script cut` in the command bar does the same thing with no modifier
 -- at all**, so no terminal can strand the feature — the same belt-and-
 -- braces F2 and Ctrl+X already have.
 -- | **Backspace with nothing to its left wraps to the end of the line
@@ -1576,12 +1700,15 @@ tuiHelpLines =
     , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
     , (":script",           "live-script mode: the pane becomes an editable document")
-    , ("",                  "  in it: Up/Down walk the document, Enter re-runs a line,")
-    , ("",                  "  every other key edits text. F2 or Ctrl+X opens the command")
-    , ("",                  "  bar — :script leaves, :script drop discards from the caret")
-    , ("",                  "  down, :script save [name] writes the file. Option+Enter, or")
-    , ("",                  "  :script rerun, runs the caret's line and discards everything")
-    , ("",                  "  below it; plain Enter re-runs the lines below instead")
+    , ("",                  "  in it: Up/Down walk the document, every other key edits")
+    , ("",                  "  text. Editing a committed line makes the lines below it")
+    , ("",                  "  stale, drawn dim, until an Enter decides them:")
+    , ("",                  "  Enter runs this line and re-runs the lines below it,")
+    , ("",                  "  Option+Enter runs this line and discards the lines below it.")
+    , ("",                  "  F2 or Ctrl+X opens the command bar — :script leaves,")
+    , ("",                  "  :script cut is Option+Enter with no modifier, :script drop")
+    , ("",                  "  discards this line and the lines below it, :script save")
+    , ("",                  "  [name] writes the file")
     ]
   where
     width = 28
@@ -1690,6 +1817,7 @@ enterScriptMode st = do
     { stScriptMode = True
     , stScriptBase = base
     , stScriptPos = Nothing
+    , stScriptStale = Nothing
     , stScriptBar = Nothing
     , stScriptNote = Nothing
     , stInput = emptyInput
@@ -1707,6 +1835,7 @@ leaveScriptMode = do
     { stScriptMode = False
     , stScriptBar = Nothing
     , stScriptPos = Nothing
+    , stScriptStale = Nothing
     , stInput = emptyInput
     }
   closeDropdowns
@@ -1859,8 +1988,21 @@ foldRun s (l : ls) = do
 --     never happened. Enter was never broken; it was being eaten.
 --   * And the dropdown standing open over a line nobody is writing to, which
 --     is what he said about the command bar and is the same principle.
+--
+-- **And it is where a stale tail stops being stale** ('stScriptStale'), for
+-- the same reason and in one place rather than at eight puts: every caller is
+-- a commit or a move, and both settle the question the mark was holding open.
+-- A commit has just re-run or cut the tail, so there is nothing stale left; a
+-- move takes the edit back, because 'loadScriptAt' puts the stored 'slText'
+-- under the caret and the line the mark was about never changed. **Typing
+-- does not come through here**, which is exactly what lets the mark survive
+-- from the keystroke to the Enter.
 afterScriptEdit :: EventM Name St ()
-afterScriptEdit = closeDropdowns >> followInput
+afterScriptEdit = do
+  st <- get
+  put st { stScriptStale = Nothing }
+  closeDropdowns
+  followInput
 
 -- | **Discard the line under the caret and everything after it**, no
 -- replacement run. Reached by @:script drop@ in the command bar; a no-op
@@ -1965,7 +2107,10 @@ scriptBarSubmit st text = case words text of
   [] -> closeScriptBar
   [":script"] -> leaveScriptMode
   [":script", "drop"] -> closeScriptBar >> scriptTruncate
-  [":script", "rerun"] -> closeScriptBar >> scriptCutAndRun
+  -- | **`cut`, not `rerun` — his rename, 2026-11-11.** The word is retired
+  -- rather than reassigned: once plain Enter re-runs the tail (@~bxmsc@),
+  -- `rerun` would name the one gesture that re-runs nothing.
+  [":script", "cut"] -> closeScriptBar >> scriptCutAndRun
   (":script" : "save" : rest) -> scriptSave st (listToMaybe rest)
   [":theme", name] | Just th <- themeByName name -> do
     let st' = st { stTheme = th, stScriptBar = Nothing, stScriptNote = Just ("theme: " <> name) }
