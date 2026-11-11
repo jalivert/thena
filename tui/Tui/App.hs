@@ -2718,8 +2718,8 @@ refreshDropdown = do
     then put st { stDropdown = Nothing }
     else case loadPathPrefix line of
       Nothing -> put st { stDropdown = Nothing, stDismissed = Nothing }
-      Just prefix -> do
-        entries <- liftIO (loadDropdownEntries prefix)
+      Just _ -> do
+        entries <- liftIO (dropdownRows line)
         -- A shown dropdown always highlights one row (his `.jalivert/TUI.md`
         -- #9): the first, so Enter on a fresh list accepts rather than
         -- submitting the partial line — Esc clears it first when submitting
@@ -3042,6 +3042,11 @@ acceptOfferEdit start len ins = Zip.insertMany (Text.pack ins) . deleteForward l
 -- already shows, and he asked for it to print nothing. This supersedes the
 -- previous session's `stHistory` message, which existed only because the
 -- dropdown didn't yet.
+-- **Tab answers from the same vocabulary the dropdown is showing**
+-- ('dropdownRows'), so the two can never offer different things. Only the
+-- directory listing has a second trick — a typed name that is itself a
+-- directory completes to its slash — and that is 'completePath'; for a list of
+-- words there is nothing to extend past what they have in common.
 completeLoadPath :: EventM Name St ()
 completeLoadPath = do
   st <- get
@@ -3049,7 +3054,12 @@ completeLoadPath = do
   case loadPathPrefix line of
     Nothing -> pure ()
     Just prefix -> do
-      matched <- liftIO (completePath prefix)
+      matched <-
+        if pathArgument line
+          then liftIO (completePath prefix)
+          else do
+            rows <- liftIO (dropdownRows line)
+            pure (extended prefix rows)
       case matched of
         Nothing -> pure ()
         Just full -> do
@@ -3057,10 +3067,73 @@ completeLoadPath = do
           refreshDropdown
   followInput
 
+-- | Whether this line's argument is a path on this machine, which is every
+-- line 'dropdownRows' answers for except `:script`'s own two words and the
+-- slug after `:script resume`.
+pathArgument :: String -> Bool
+pathArgument line =
+  not (resumeArgument `isPrefixOf` line)
+    && not (scriptCommand `isPrefixOf` line && notElem ' ' (drop (length scriptCommand) line))
+
+-- | What all the offered rows agree on past what is typed, or 'Nothing' when
+-- that is nothing — Tab's shell-style extension over a plain list.
+extended :: String -> [String] -> Maybe String
+extended typed rows =
+  let common = longestCommonPrefix rows
+   in if length common > length typed then Just common else Nothing
+
 loadPathPrefix :: String -> Maybe String
 loadPathPrefix line
   | any (`isPrefixOf` line) pathCommands = Just (lastWord line)
   | otherwise = Nothing
+
+-- | **What the dropdown offers on this line**, which is not always a
+-- directory listing — his ask, 2026-11-11: *"does `:script resume`
+-- autocomplete? it should."* It did not, and worse, it looked for a file named
+-- after the slug, because `":script "` is one of 'pathCommands' and the path
+-- listing answered for every argument that followed it.
+--
+-- Three vocabularies, and which one a line wants is decided by the line:
+--
+--   * **`:script resume ‹slug›`** — the stored sessions in the project
+--     database, which is the only list where a slug can come from.
+--   * **`:script ‹word›`** — the two words that are not paths, @sessions@ and
+--     @resume@, offered beside whatever paths match, because `:script` takes
+--     either and a user typing @:script re@ means the word.
+--   * **anything else in 'pathCommands'** — the directory listing, unchanged.
+--
+-- **Every row is exactly what an accept inserts** (`~bkzw9`), which is why a
+-- stored session is offered by its slug and not by its readable name: the name
+-- has spaces in it and `:script resume` is a word-split command line. The
+-- names are what `:script sessions` is for.
+dropdownRows :: String -> IO [String]
+dropdownRows line
+  | resumeArgument `isPrefixOf` line = do
+      index <- loadIndex
+      pure (settled [stSlug st | st <- index, typed `isPrefixOf` stSlug st])
+  | scriptCommand `isPrefixOf` line, notElem ' ' (drop (length scriptCommand) line) = do
+      paths <- loadDropdownEntries typed
+      pure (settled ([w | w <- scriptWords, typed `isPrefixOf` w] <> paths))
+  | otherwise = loadDropdownEntries typed
+  where
+    typed = lastWord line
+    -- | One row, and it is already typed in full: there is nothing left to
+    -- offer, which is exactly what the directory listing answers in the same
+    -- position. A dropdown standing open over its own answer is noise.
+    settled rows = if rows == [typed] then [] else rows
+
+scriptCommand :: String
+scriptCommand = ":script "
+
+resumeArgument :: String
+resumeArgument = ":script resume "
+
+-- | The words `:script` takes in place of a path. **`resume` carries its
+-- space**, because it is not the end of the line — accepting it should leave
+-- the caret where the slug goes, the same courtesy a completed directory's
+-- slash is.
+scriptWords :: [String]
+scriptWords = ["sessions", "resume "]
 
 -- | The colon commands whose argument is a path on this machine, and so the
 -- lines this listing answers for. **It is not only `:load` any more** — MS11
