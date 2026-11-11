@@ -1,0 +1,10 @@
+-- **A narrowed import that travels** (MS11 phase 306, his ruling of
+-- 2026-11-10: *"User gets `off` and not `flip`. That's how it should be."*).
+-- This file takes `Bit` out of `Twins` and passes on what it took, so an
+-- importer of this one reaches `Bit` and not `Tri`.
+module test.modules.PassesBitOnly where
+
+public import test.modules.Twins ( Bit )
+
+mine : Bit.Bit
+mine = Bit.off

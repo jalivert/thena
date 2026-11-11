@@ -1,4 +1,4 @@
-thena spine> assume "A" ⌜ Type₀ ⌝
+thena spine> assume "A" core`Type₀`
 thena spine> :goal A -> A
   λ (A : Type₀) ->
 ▶ let ? goal : A -> A in
@@ -7,7 +7,7 @@ thena spine> :show
   λ (A : Type₀) ->
 ▶ let ? goal : A -> A in
   goal
-thena spine> assume ⌜ A ⌝
+thena spine> assume core`A`
 name for the assumption?
 > x
 assumed x

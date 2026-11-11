@@ -207,6 +207,18 @@ executable thena
         haskeline >=0.8.4 && <0.9,
         thena
 
+-- | **The batch type-checker** (2026-10-29, his): the files named, loaded in
+-- order, no terminal and no line editor.  `app/Check.hs` says what it is and
+-- the one place it is not a sequence of `:load` commands.
+executable thena-check
+    import:             warnings
+    hs-source-dirs:     app
+    default-language:   GHC2024
+    main-is:            Check.hs
+    build-depends:
+        base ^>=4.21.2.0,
+        thena
+
 -- | The TUI's own library, `tui` track, SP1's first skeleton.
 --
 -- Depends on `thena:view` only, same as `thena-boundary` — never `thena`

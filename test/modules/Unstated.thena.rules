@@ -1,0 +1,6 @@
+rule base unstated where
+
+open A
+
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"

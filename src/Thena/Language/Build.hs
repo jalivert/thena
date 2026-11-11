@@ -26,6 +26,7 @@ module Thena.Language.Build
   , production
   , languageNames
   , productionNames
+  , productionRule
   , objectInput
   , objectText
   , atCharacters
@@ -39,7 +40,7 @@ module Thena.Language.Build
 import Data.List (elemIndex, intercalate)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
+import Thena.Core.Term (Core (..), GlobalName (..), InScope, nameDotted, nameFromText, rootName, rootScope, Literal (..))
 import Thena.Errors (BuildError (..))
 import Thena.Language.Earley (Piece (..), Tree (..), placeholderChar)
 import qualified Thena.Language.Earley as Earley
@@ -52,12 +53,13 @@ import Thena.Language.Grammar
   , Item (..)
   , Sort (..)
   , earleyRules
+  , tagText
   )
 import Thena.Core.Level (levelOfNat)
 import Thena.Syntax.Lexer (rawEscapes)
 import Thena.Instral.Pattern (Skeleton (..), Slot (..))
 import Thena.Language.Regex (matches)
-import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..))
+import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), surfaceName)
 
 -- | The term a reading denotes.
 --
@@ -77,7 +79,9 @@ buildCore gs splices = build
       Node name children -> do
         p <- maybe (Left (NoSuchProduction name)) Right (production gs name)
         args <- traverse (slot name) =<< arguments p children
-        Right (foldl App (Global (GlobalName name) []) args)
+        -- **The production's own name**, which carries its path (MS10 phase
+        -- 244) — re-deriving it from the node's word would root it.
+        Right (foldl App (Global (gproductionName p) []) args)
       _ -> Left (NotForSlot "" (shapeOf tree))
 
     slot name (a, child) = case (argumentSort a, child) of
@@ -95,7 +99,9 @@ buildCore gs splices = build
       -- an exception to it.
       (OfUniverse _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfUniverse _, Node n kids) | Just r <- typeReading n kids -> case r of
-        TypeCalled l  -> Right (Global (GlobalName l) [])
+        -- **A KEY, SO IT IS SPLIT ON ITS DOTS** (MS10 phase 258): the node
+        -- carries @A.Ty@ and the term wants the name @Ty@ in @A@.
+        TypeCalled l  -> Right (Global (nameFromText l) [])
         AtUniverse k  -> Right (Universe (levelOfNat k))
         TypeInside t  -> build t
       (OfUniverse _, _) -> Left (NotForSlot (argumentName a) (shapeOf child))
@@ -124,10 +130,10 @@ buildSurface gs splices = build
       Node name children -> do
         p <- maybe (Left (NoSuchProduction name)) Right (production gs name)
         args <- traverse (slot name) =<< arguments p children
-        Right $ case args of
-          [] -> SurfaceName name
-          a : as -> SurfaceApp (SurfaceName name)
-                      (NE.map (SurfaceArg Explicit) (a NE.:| as))
+        let f = surfaceName (gproductionName p)
+         in Right $ case args of
+              [] -> f
+              a : as -> SurfaceApp f (NE.map (SurfaceArg Explicit) (a NE.:| as))
       _ -> Left (NotForSlot "" (shapeOf tree))
 
     slot name (a, child) = case (argumentSort a, child) of
@@ -137,7 +143,7 @@ buildSurface gs splices = build
       (OfLanguage _, _) -> build child
       (OfUniverse _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfUniverse _, Node n kids) | Just r <- typeReading n kids -> case r of
-        TypeCalled l  -> Right (SurfaceName l)
+        TypeCalled l  -> Right (SurfaceName [] l)
         AtUniverse k  -> Right (SurfaceUniverse k)
         TypeInside t  -> build t
       (OfUniverse _, _) -> Left (NotForSlot (argumentName a) (shapeOf child))
@@ -166,7 +172,7 @@ skeletonOf gs holes = go
       Node name children -> do
         p <- maybe (Left (NoSuchProduction name)) Right (production gs name)
         kids <- traverse (slot name) =<< arguments p children
-        Right (SNode (GlobalName name) kids)
+        Right (SNode (gproductionName p) kids)
       _ -> Left (NotForSlot "" (shapeOf tree))
 
     slot name (a, child) = case (argumentSort a, child) of
@@ -194,7 +200,7 @@ arguments :: GProduction -> [Tree] -> Either BuildError [(Argument, Tree)]
 arguments p children = traverse one (gproductionArguments p)
   where
     names = [ x | Slot x _ _ <- gproductionItems p ]
-    name = case gproductionName p of GlobalName n -> n
+    name = nameDotted (gproductionName p)
     one a = case elemIndex (argumentName a) names of
       Just k | child : _ <- drop k children -> Right (a, child)
       _ -> Left (NotForSlot name (argumentName a))
@@ -202,9 +208,9 @@ arguments p children = traverse one (gproductionArguments p)
 -- | What a token class matched, as the literal it stands for.
 literal :: String -> String -> GlobalName -> Tree -> Either BuildError Literal
 literal name x t child = case (child, t) of
-  (Token s, GlobalName "String") -> Right (LString s)
-  (Token [c], GlobalName "Char") -> Right (LChar c)
-  (Token s, GlobalName "Int") | [(k, "")] <- reads s -> Right (LInt k)
+  (Token s, GlobalName [] "String") -> Right (LString s)
+  (Token [c], GlobalName [] "Char") -> Right (LChar c)
+  (Token s, GlobalName [] "Int") | [(k, "")] <- reads s -> Right (LInt k)
   (PlaceholderAt _, _) -> Left (Incomplete x)
   _ -> Left (NotForSlot name x)
 
@@ -228,16 +234,16 @@ shapeOf tree = case tree of
 --
 -- @render@ prints what the notation cannot — it is the host's own printer, and
 -- what it returns stands inside a splice.
-printTerm :: [Grammar] -> (Core -> String) -> Core -> Maybe String
-printTerm gs render t = do
+printTerm :: [Grammar] -> InScope -> (Core -> String) -> Core -> Maybe String
+printTerm gs sc render t = do
   d <- draft gs t
-  txt <- settle gs render d
-  let GlobalName lang = draftLanguage d
+  txt <- settle gs sc render d
+  let lang = tagText gs sc (draftLanguage d)
   pure (lang ++ "`" ++ txt ++ "`")
 
 -- | What stands inside the region, without the tag and the backticks.
-printRegion :: [Grammar] -> (Core -> String) -> Core -> Maybe String
-printRegion gs render t = settle gs render =<< draft gs t
+printRegion :: [Grammar] -> InScope -> (Core -> String) -> Core -> Maybe String
+printRegion gs sc render t = settle gs sc render =<< draft gs t
 
 -- | **The paper's form: no tag, no backticks, and no @${\8230}@ round a splice**
 -- (MS8 phase 174).
@@ -286,7 +292,7 @@ draftLanguage :: Draft -> GlobalName
 draftLanguage d = case d of
   DNode _ g _ _ -> g
   DFenced g _ _ -> g
-  _             -> GlobalName ""
+  _             -> rootName ""
 
 -- | A term laid out, with nothing fenced yet.
 --
@@ -295,8 +301,8 @@ draftLanguage d = case d of
 -- printer never writes a text the reader would take apart differently.
 draft :: [Grammar] -> Core -> Maybe Draft
 draft gs term = do
-  (name@(GlobalName n), args) <- spineOf term
-  p <- production gs n
+  (name, args) <- spineOf term
+  p <- production gs (nameDotted name)
   g <- grammarOf gs name
   let names = map argumentName (gproductionArguments p)
       slotOf (x, sort) = do
@@ -350,10 +356,10 @@ grammarOf gs name =
 --
 -- 'Nothing' when fencing everything still does not read back. The caller then
 -- prints the term in the host's syntax, which always reads.
-settle :: [Grammar] -> (Core -> String) -> Draft -> Maybe String
-settle gs render d = do
+settle :: [Grammar] -> InScope -> (Core -> String) -> Draft -> Maybe String
+settle gs sc render d = do
   d' <- settled gs render d
-  let (chunks, _, _) = laid gs render d'
+  let (chunks, _, _) = laid gs sc render d'
   pure (concatMap escaped chunks)
 
 -- | The fencing loop alone, stopping at the draft rather than its text (MS7
@@ -363,9 +369,15 @@ settled :: [Grammar] -> (Core -> String) -> Draft -> Maybe Draft
 settled gs render = go
   where
     rules = earleyRules gs
+    -- **The scope is 'rootScope' and nothing is lost by that**: a tag's
+    -- spelling reaches the chunks only, and the chunks are what this discards.
+    -- A fenced subterm is one opaque 'Earley.Splice' in the input and a
+    -- 'SpliceOf' in the tree, so no spelling can change which fences the round
+    -- trip settles on (MS10 phase 268) \8212 the same reason a stub renderer is
+    -- exact here.
     go d =
-      let (_, input, tree) = laid gs render d
-          GlobalName lang  = draftLanguage d
+      let (_, input, tree) = laid gs rootScope render d
+          lang = nameDotted (draftLanguage d)
        in if Earley.parse rules (Earley.StartAt lang) input == Right tree
             then Just d
             else case loose d of
@@ -399,14 +411,14 @@ escaped c = case c of
 
 -- | The text, the input the parser is given for it, and the tree it must come
 -- back as. One traversal, because the splice indices have to agree.
-laid :: [Grammar] -> (Core -> String) -> Draft -> ([Chunk], [Piece], Tree)
-laid gs render d0 = let (cs, ps, tr, _) = go 0 d0 in (cs, ps, tr)
+laid :: [Grammar] -> InScope -> (Core -> String) -> Draft -> ([Chunk], [Piece], Tree)
+laid gs sc render d0 = let (cs, ps, tr, _) = go 0 d0 in (cs, ps, tr)
   where
     go k d = case d of
       DToken s   -> ([Written s], map Char s, Token s, k)
       DForeign c -> splice k (render c)
-      DFenced (GlobalName lang) c inner -> case settle gs render inner of
-        Just txt -> splice k (lang ++ "`" ++ txt ++ "`")
+      DFenced langName c inner -> case settle gs sc render inner of
+        Just txt -> splice k (tagText gs sc langName ++ "`" ++ txt ++ "`")
         Nothing  -> splice k (render c)
       DNode p _ children _ ->
         let step (cs, ps, trs, k1, rest) i = case i of
@@ -417,7 +429,7 @@ laid gs render d0 = let (cs, ps, tr, _) = go 0 d0 in (cs, ps, tr)
                 []       -> (cs, ps, trs, k1, rest)
             (css, pss, trs', k', _) =
               foldl step ([], [], [], k, children) (gproductionItems p)
-            GlobalName name = gproductionName p
+            name = nameDotted (gproductionName p)
          in ( intercalate [Written " "] css
             , intercalate [Char ' '] pss
             , Node name trs'
@@ -468,7 +480,7 @@ fenceAt (i : is) d = case d of
 
 production :: [Grammar] -> String -> Maybe GProduction
 production gs name =
-  case [ p | g <- gs, p <- grammarProductions g, gproductionName p == GlobalName name ] of
+  case [ p | g <- gs, p <- grammarProductions g, gproductionName p == nameFromText name ] of
     p : _ -> Just p
     [] -> Nothing
 
@@ -498,17 +510,35 @@ spineOf t = case t of
 
 -- | The languages installed, by the name a tag would write.
 languageNames :: [Grammar] -> [String]
-languageNames gs = [ n | g <- gs, let GlobalName n = grammarName g ]
+languageNames gs = map (nameDotted . grammarName) gs
 
--- | The productions of one installed language, by name.
+-- | The productions of one installed language, **by the word a user writes**.
 --
--- **Of that language and not of any**, which is what @LC[app]@ asks: a
--- production name is unique across grammars (phase 101), so the filter changes
--- no accepted literal and it is what lets the refusal name the language.
+-- **Of that language and not of any**, which is what @LC[app]@ asks: the fence
+-- pins the language, so the bracket is a lookup inside it.
+--
+-- __Words since MS10 phase 248__, where a production's own name is @LC.app@.
+-- The fence already said @LC@, so repeating it in the bracket would be the one
+-- place the user had to write a path they had just written; 'productionRule'
+-- is what turns the word back into the name the parser knows.
 productionNames :: [Grammar] -> String -> [String]
 productionNames gs lang =
-  [ n | g <- gs, GlobalName lang == grammarName g
-      , p <- grammarProductions g, let GlobalName n = gproductionName p ]
+  [ n | g <- gs, nameFromText lang == grammarName g
+      , p <- grammarProductions g, let n = nameWord (gproductionName p) ]
+
+-- | The parser's name for one of them \u2014 @LC[app]@ is the rule @LC.app@.
+--
+-- **The Earley rule name has to stay the full name** (MS10 phase 248): it is
+-- also the 'Thena.Language.Earley.Node' name that 'production' looks a reading
+-- up by, and that lookup runs across every installed grammar, so two languages
+-- spelling a production the same way would be one nonterminal.
+productionRule :: [Grammar] -> String -> String -> Maybe String
+productionRule gs lang w =
+  case [ nameDotted (gproductionName p)
+       | g <- gs, nameFromText lang == grammarName g
+       , p <- grammarProductions g, nameWord (gproductionName p) == w ] of
+    n : _ -> Just n
+    []    -> Nothing
 
 -- | The pieces the object parser reads. A region is text and splices, and
 -- both readers have it that way — @Left@ text, @Right@ what fills a slot — so

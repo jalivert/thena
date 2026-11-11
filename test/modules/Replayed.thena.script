@@ -1,0 +1,3 @@
+import test.modules.Bit
+open Bit
+claim "h" core`Bit`

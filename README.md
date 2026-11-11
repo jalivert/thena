@@ -13,10 +13,12 @@ The proof engine re-implements the *development calculus* of Conor McBride's
 departs from it on interaction, where it takes its own approach.
 
 > **Status.** Research prototype, under active development. The type theory, the
-> proof engine, a surface language and a rule-based elaborator are implemented
-> and covered by around 1,300 tests. The graphical interface and the
-> mixed-initiative proof search described below are in progress. The interface
-> today is a REPL.
+> proof engine, a surface language, a rule-based elaborator and a module system
+> are implemented and covered by around 3,300 tests. The graphical interface and
+> the mixed-initiative proof search described below are in progress. The
+> interface today is the REPL, `cabal run thena`; `cabal run thena-check`
+> type-checks files in batch with no terminal, and an experimental terminal UI,
+> `cabal run thena-tui`, is being built on a separate track.
 
 ## What is different about it
 
@@ -31,25 +33,31 @@ in a proof.
 
 **The logic lives in user space.** The rules that drive elaboration and search
 are an ordinary text file, loaded at startup, written in a small readable
-language — not compiled into the binary. The whole elaborator is a single rule
-with one clause per surface construct, plus three short helper rules. Two
-clauses, in full:
+language — not compiled into the binary. It holds 120 rules, and the elaborator
+is one of them: `elaborate`, with a clause per surface construct — 22 of them —
+while the rest are the tactics and the helpers they share. Two clauses of
+`elaborate`, in full:
 
 ```
 -- E⟦x⟧ — a bare name: resolve it, fill the goal, discharge it.
+elaborate : Surface -> ()
 rule elaborate t :- when focus-is-hole (surface-is-name t)
-  then w = surface-name t
+  do w = surface-name t
      ; x = resolve-name w
      ; fill x
      ; solve
 
--- E⟦\ x => e⟧ — introduce the binders, elaborate the body, discharge.
+-- E⟦\ x => e⟧ — introduce the binders, elaborate the body, discharge. The
+-- group is walked by recursion: intro-binders peels one binder off and calls
+-- itself on the tail, so the term is its own counter.
 rule elaborate t :- when focus-is-hole (surface-is-lambda t)
-  then h = here
+  do h = here
      ; prim-attack
-     ; call intro-binders t
      ; into
-     ; call enter-binders t
+     ; k = here
+     ; back
+     ; body = call intro-binders t k
+     ; goto body
      ; b = lambda-body t
      ; call elaborate b
      ; goto h
@@ -96,7 +104,7 @@ thena spine> :show
 thena spine> into
 thena spine> along
 thena spine> along
-thena spine> try-core ⌜ _ ⌝
+thena spine> try-core core`_`
 thena spine> solve
 thena spine> back
 thena spine> back
@@ -106,16 +114,19 @@ thena spine> qed
 id : ∀ (A : Type₀) -> A -> A   ∎
 ```
 
-`qed` re-checks the finished term with an independent kernel before admitting
-it. If it does not check, nothing is admitted.
+`qed` re-checks the finished term with the kernel before admitting it, trusting
+nothing the engine recorded along the way. If it does not check, nothing is
+admitted. The kernel re-derives the typing itself, but shares its reduction and
+conversion code with the elaborator, so it is a separate check and not yet a
+separate implementation.
 
 ## Examples
 
 Thena's developments live in [`examples/`](examples/README.md) — every file
 loads as it stands, and [`examples/README.md`](examples/README.md) is the
-file-by-file index. There are three sets, each with its own load order. Thena
-has no module imports yet: globals declared by one file stay in scope for the
-next loaded in the same session, so "load in order" means what it says.
+file-by-file index. There are three sets, and **every file in all three imports
+what it depends on**, so any one of them loads on its own. The three are grouped
+by what they show, not by what has to be loaded first.
 
 ### 1. Type safety for TAPL's arithmetic language — by hand
 
@@ -130,78 +141,84 @@ two files are also test fixtures, so the suite fails if one stops loading.
 
 | theorem | file | statement |
 |---|---|---|
-| determinacy, TAPL 3.5.4 | [`examples/determinacy-surface.thena`](examples/determinacy-surface.thena) | `determinacy : forall (t t1 : Term) -> Step t t1 -> forall (t2 : Term) -> Step t t2 -> Eq Term t1 t2` |
-| canonical forms, TAPL 8.3.1 | [`examples/canonical.thena`](examples/canonical.thena) | `canonicalBool : forall (v : Term) -> Value v -> HasType v bool -> Or (Eq Term v true) (Eq Term v false)`, and `canonicalNat` for `nat` |
-| progress, TAPL 8.3.2 | [`examples/progress.thena`](examples/progress.thena) | `progress : forall (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)` |
-| preservation, TAPL 8.3.3 | [`examples/preservation.thena`](examples/preservation.thena) | `preservation : forall (t t' : Term) -> Step t t' -> forall (U : Ty) -> HasType t U -> HasType t' U` |
-| exclusivity | [`examples/normal.thena`](examples/normal.thena) | `valueNoStep : forall (v : Term) -> Value v -> forall (u : Term) -> Step v u -> Empty` — a value takes no step, so the disjunction `progress` returns is a real case split |
+| determinacy, TAPL 3.5.4 | [`examples/DeterminacySurface.thena`](examples/DeterminacySurface.thena), generated and `elim` throughout, beside [`examples/DeterminacyPatterns.thena`](examples/DeterminacyPatterns.thena), the same theorem with every lemma a split | `determinacy : forall (t t1 : Term) -> Step t t1 -> forall (t2 : Term) -> Step t t2 -> Eq Term t1 t2` |
+| canonical forms, TAPL 8.3.1 | [`examples/Canonical.thena`](examples/Canonical.thena) | `canonicalBool : forall (v : Term) -> Value v -> HasType v bool -> Or (Eq Term v true) (Eq Term v false)`, and `canonicalNat` for `nat` |
+| progress, TAPL 8.3.2 | [`examples/Progress.thena`](examples/Progress.thena) | `progress : forall (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)` |
+| preservation, TAPL 8.3.3 | [`examples/Preservation.thena`](examples/Preservation.thena) | `preservation : forall (t t' : Term) -> Step t t' -> forall (U : Ty) -> HasType t U -> HasType t' U` |
+| exclusivity | [`examples/Normal.thena`](examples/Normal.thena) | `valueNoStep : forall (v : Term) -> Value v -> forall (u : Term) -> Step v u -> Empty` — a value takes no step, so the disjunction `progress` returns is a real case split |
 
 The determinacy proof is **generated** (by
 [`examples/determinacy.py`](examples/determinacy.py) — regenerate it, never
 patch it) and exists in two forms: as a program in the surface language
 (`determinacy-surface`) and as a tactic-driven script
-([`examples/determinacy-tactics.thena.script`](examples/determinacy-tactics.thena.script)).
+([`examples/DeterminacyTactics.thena.script`](examples/DeterminacyTactics.thena.script)).
 The canonical-forms proof beside it is a third of the size and **written by
-hand**. Load the safety chain in order:
+hand**. The safety chain loads in one line, because each file imports what it
+stands on:
 
 ```
 cabal run thena
-thena spine> :load examples/canonical.thena
-thena spine> :load examples/progress.thena
-thena spine> :load examples/preservation.thena
+thena spine> import examples.Preservation
 ```
 
 ### 2. Preservation for STLC — as an object language
 
 The numbered series
-([`01`](examples/01-stlc-syntax.thena)–[`10`](examples/10-preservation-any-context.thena))
+([`01`](examples/Stlc01Syntax.thena)–[`10`](examples/Stlc10PreservationAnyContext.thena))
 declares STLC itself — syntax, contexts, typing, and call-by-value reduction in
 paper notation — then proves preservation about the substitution Thena
 generates. This is the current showcase: grammars with binders, splices,
 judgment blocks, capture-avoiding substitution proved by `refl`, and a rule
 base that matches object terms in their own notation.
 
-- [`01-stlc-syntax.thena`](examples/01-stlc-syntax.thena) — `Ty` and `LC`
+- [`Stlc01Syntax.thena`](examples/Stlc01Syntax.thena) — `Ty` and `LC`
   declared as grammars; terms written ``LC`( λ x : ι . x )` ``; generated
   substitution with capture avoidance proved by `refl`.
-- [`02-contexts.thena`](examples/02-contexts.thena) — a `context` block, its
+- [`Stlc02Contexts.thena`](examples/Stlc02Contexts.thena) — a `context` block, its
   lookup relation `x : T ∈ Γ`, and lookups proved with `extend-here` /
   `extend-there-extend`.
-- [`03-typing-and-reduction.thena`](examples/03-typing-and-reduction.thena) —
+- [`Stlc03TypingAndReduction.thena`](examples/Stlc03TypingAndReduction.thena) —
   typing, values, and reduction as `judgment` blocks; typing derivations stated
   as judgment literals.
-- [`04-taking-terms-apart.thena.rules`](examples/04-taking-terms-apart.thena.rules)
+- [`Stlc04TakingTermsApart.thena.rules`](examples/Stlc04TakingTermsApart.thena.rules)
   — a rule base matching `LC` terms in their own notation.
-- [`05-grouping-by-splicing.thena`](examples/05-grouping-by-splicing.thena) and
-  [`06-more-judgments.thena`](examples/06-more-judgments.thena) — splices,
+- [`Stlc05GroupingBySplicing.thena`](examples/Stlc05GroupingBySplicing.thena) and
+  [`Stlc06MoreJudgments.thena`](examples/Stlc06MoreJudgments.thena) — splices,
   multi-step judgments, the annotated tier.
-- [`07-preservation.thena`](examples/07-preservation.thena) — **preservation
+- [`Stlc07Preservation.thena`](examples/Stlc07Preservation.thena) — **preservation
   for closed terms**, the series' goal:
   `preservation : forall (M : LC) (M1 : LC) (T : Ty) (d : typing empty M T) (s : step M M1) -> typing empty M1 T`,
   via weakening, the substitution lemma, and inversion.
-- [`08-preservation-by-tactics.thena.script`](examples/08-preservation-by-tactics.thena.script)
+- [`Stlc08PreservationByTactics.thena.script`](examples/Stlc08PreservationByTactics.thena.script)
   — **the same proof by tactics**: each lemma a `:theorem`, inductions and case
-  splits with `eliminate-core`, cases filled with `elaborate ⟨ … ⟩`.
-- [`10-preservation-any-context.thena`](examples/10-preservation-any-context.thena)
+  splits with `eliminate-core`, cases filled with `` elaborate surface`…` ``.
+- [`Stlc10PreservationAnyContext.thena`](examples/Stlc10PreservationAnyContext.thena)
   — **preservation for any context**:
   `preservationAny : forall (G : Ctx) (M : LC) (M1 : LC) (T : Ty) (d : typing G M T) (s : step M M1) -> typing G M1 T`.
   An open argument can capture, so the generated substitution renames the
   binder, and the file **proves** that the name it mints is fresh — from three
   trusted laws about `appendString`, with no arithmetic anywhere in it.
-- [`09-printing.thena`](examples/09-printing.thena) — terms shown in their own
+- [`Stlc09Printing.thena`](examples/Stlc09Printing.thena) — terms shown in their own
   notation, the printer writing the splices `05` writes by hand.
+
+**Each file imports what it depends on**, so load whichever one you want and the
+ones under it come in with it:
 
 ```
 cabal run thena
-thena spine> :load examples/01-stlc-syntax.thena
-thena spine> :load examples/02-contexts.thena
-thena spine> :load examples/03-typing-and-reduction.thena
-thena spine> :load rules rules/standard.thena.rules examples/04-taking-terms-apart.thena.rules
-thena spine> :load examples/05-grouping-by-splicing.thena
-thena spine> :load examples/06-more-judgments.thena
-thena spine> :load examples/07-preservation.thena
-thena spine> :load examples/08-preservation-by-tactics.thena.script
-thena spine> :load examples/09-printing.thena
+thena spine> import examples.Stlc07Preservation
+```
+
+**Every file loads on its own**, so there is no order to get right. For the whole
+series, three of the surface modules import everything else between them, the rule
+base states its own dependency, and the script states its own imports:
+
+```
+thena spine> import examples.Stlc10PreservationAnyContext
+thena spine> import examples.Stlc09Printing
+thena spine> import examples.Stlc06MoreJudgments
+thena spine> consult examples.Stlc04TakingTermsApart
+thena spine> :replay examples/Stlc08PreservationByTactics.thena.script
 ```
 
 ### 3. Transitivity for System F-sub — POPLMark 1A
@@ -211,17 +228,13 @@ the POPLMark challenge (Aydemir et al., *Mechanized Metatheory for the Masses*,
 2005): transitivity of subtyping for pure System F-sub. Six files, read in
 order — syntax, contexts, well-formedness, subtyping, typing, transitivity —
 with [`examples/poplmark/README.md`](examples/poplmark/README.md) as the
-account. **Load these in a fresh session**: the series above declares its own
-`Ty`, and two languages of one name cannot be installed at once.
+account. Each file imports the ones under it, so the last one brings the whole
+series. **Load it in a fresh session**: the STLC series above declares its own
+`Ty`, and two declarations of one name cannot be installed at once.
 
 ```
 cabal run thena
-thena spine> :load examples/poplmark/01-syntax.thena
-thena spine> :load examples/poplmark/02-contexts.thena
-thena spine> :load examples/poplmark/03-wellformed.thena
-thena spine> :load examples/poplmark/04-subtyping.thena
-thena spine> :load examples/poplmark/05-typing.thena
-thena spine> :load examples/poplmark/06-transitivity.thena
+thena spine> import examples.poplmark.Fsub06Transitivity
 ```
 
 What is proved is the mutual induction at the heart of 1A — transitivity and
@@ -252,6 +265,17 @@ automatically by Cabal).
 cabal build
 cabal test
 cabal run thena
+cabal run thena-check -- examples/Preservation.thena
+```
+
+`./tc ‹file› …` is a shorthand for that last one: it builds quietly first, so it
+chains with `&&` like any other type-checker.
+
+`cabal test` runs the unit suites. **The example corpus is its own suite behind
+a flag** and is worth running after any change to a grammar or the elaborator:
+
+```
+cabal test thena-examples --flags=examples
 ```
 
 `:help` lists the REPL commands. `docs/LANGUAGES.md` says what can be written
@@ -263,6 +287,7 @@ sessions and an honest account of what the system can and cannot currently do.
 | path | |
 |---|---|
 | `src/` | the implementation — core calculus, engine, elaborator, parser, kernel |
+| `app/` | the entry points — the REPL, the batch checker `thena-check`, the TUI |
 | `rules/standard.thena.rules` | the rule base: elaboration and search, in full |
 | `prelude/prelude.thena` | the standard prelude, itself a surface module |
 | `examples/` | worked developments, including the determinacy proof |

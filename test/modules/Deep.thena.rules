@@ -1,0 +1,17 @@
+-- **A base a block holds reaches its own rules and its own consults** (MS11
+-- phase 301). It is reached only by a push of the whole group it was
+-- fetched with, so it runs with that group in front of the pool exactly as the
+-- block's rules do — `own` calls a rule of this file and `reaches` calls one of
+-- `Quiet`, which this file consults and the fetch brings in beneath it.
+rule base deep where
+
+consult test.modules.Quiet
+
+rule reaches :- do
+  call stumbles
+
+rule own :- do
+  call greets
+
+rule greets :- do
+  say "deep"

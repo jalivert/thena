@@ -16,9 +16,11 @@ module Thena.Engine
     Machine (..)
   , Exec (..)
   , Frame (..)
+  , rules
   , Development (..)
   , newDevelopment
   , focusContext
+  , knownTo
   , flatten
   , setGoal
   , newDevelopmentNamed
@@ -46,7 +48,7 @@ module Thena.Engine
   ) where
 
 import Data.List (intercalate, nub)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
@@ -55,10 +57,17 @@ import Thena.Core.Term
   ( Core (..)
   , close
   , GlobalName (..)
+  , globalUnder
+  , InScope (..)
+  , revealing
+  , Opened (..)
+  , nameDotted
+  , rootName
   , Ident (..)
   , Var
   , fresh
   , instantiate
+  , innermostOf
   )
 -- Only for 'Core'\'s @Eliminate@, which "Thena.Instral.Ops" also has a constructor
 -- named: the op that builds one and the node it builds must be told apart.
@@ -104,13 +113,13 @@ import qualified Thena.Language.Earley as Earley
 import Thena.Language.Build
   ( atCharacters
   , buildSurface
-  , languageNames
   , objectInput
   , objectText
   , productionNames
+  , productionRule
   )
 import Thena.Language.Grammar
-  (Grammar (..), earleyRules)
+  (Grammar (..), earleyRules, grammarForTag, grammarKey)
 import Thena.Language.Reader (Block)
 import Thena.Instral.Ops
   ( AnswerKind
@@ -128,9 +137,10 @@ import Thena.Global.Env
   , InductiveDefinition
   , Scheme (..)
   , declaredNames
+  , namespaceInhabited
   , recursiveArgument
   , definitionLevels
-  , isDeclared
+  , knownIn
   , lookupDefinition
   , eliminatorName
   , constructorArguments
@@ -153,7 +163,7 @@ import Thena.Tactics.Recurse (resolveRecursion)
 import Thena.Tactics.Specialise
   (Binder (..), Specialisation (..), specialise, survivingEquations)
 import Thena.Rules
-  (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
+  (RuleBase, RuleError (..), RuleIter, arities, basePath, clauses, dispatch, hasNext, next, resolveBlock, rootReading)
 import Thena.Syntax.Lexer (isIdentifier)
 import Thena.Surface.Zipper (SurfaceZipper)
 import qualified Thena.Surface.Zipper as Zipper
@@ -212,8 +222,27 @@ data Machine = Machine
     --
     -- **Backtrackable, like 'development' and unlike everything below it.**
   , globals     :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
-  , rules       :: [RuleBase] -- ^ NOT backtrackable (§7.4) — phase 15; a list
-                              -- of loaded bases, leftmost searched first (phase 22)
+  , pool        :: [RuleBase]
+    -- ^ **the bases this session has consulted**, leftmost searched first
+    -- (phase 15, the order at phase 22). NOT backtrackable (§7.4).
+    --
+    -- **IT IS NOT THE WHOLE POOL — 'rules' IS** (MS11 phase 300). What a
+    -- running body pushed stands in front of this, and 'rules' is the two put
+    -- together: every search, @:bases@ and inference read that and never this,
+    -- so there is one pool and not two.
+  , held        :: [RuleBase]
+    -- ^ **bases read and not in the pool** (MS11 phase 292) —
+    -- what a @consult ‹module› where { … }@ names, waiting for the block it
+    -- reaches: 'Thena.Instral.Ops.PushBase' moves one into 'Exec'\'s @pushes@
+    -- and 'Thena.Instral.Ops.PopBase' takes it back out.
+    --
+    -- **An op cannot carry a 'RuleBase'** — "Thena.Rules" is below
+    -- "Thena.Instral.Ops" and a @RuleBase@ is read off the disc by the driver —
+    -- so the op names the base's path and this is where it is found. NOT
+    -- backtrackable, like 'rules' beside it.
+    --
+    -- **Emptied with the pool when the load ends**, since a base read for one
+    -- module's blocks is not the session's.
   , signatures  :: [(GlobalName, [Plicity])]
     -- ^ **which of a global's argument positions were written implicit** (MS4
     -- phase 44b) — Brady's system state @(C, A, I)@, the @I@ of it. NOT
@@ -235,7 +264,37 @@ data Machine = Machine
     -- not in 'GlobalEnv' — his ruling, 2026-09-19**, for 'signatures'\' reason:
     -- a grammar is notation for a declared name, which the surface and
     -- elaboration read and the kernel never does.
+  , scope       :: InScope
+    -- ^ **where a written name is looked up from** (MS10 phase 247, a record
+    -- since phase 254): the namespaces @open@ has brought into view, and the
+    -- ones the point being elaborated is inside. NOT backtrackable, like
+    -- 'signatures' and 'grammars', and here for their reason: it is a fact
+    -- about what a written name may mean, which the surface and elaboration
+    -- read and the kernel never does.
+    --
+    -- **A list of prefixes and not a table of contents — his ruling,
+    -- 2026-10-30.** @GlobalEnv@ gains no namespace table, because what a
+    -- namespace holds is whatever keys sit under its prefix, and a second copy
+    -- of that could disagree with it. So @open@ costs one path here and the
+    -- work happens at the lookup.
   , names       :: Int        -- ^ NOT backtrackable (§7.4)
+  , floorPushes :: [RuleBase]
+    -- ^ **and what the pool was then** (MS11 phase 300) — 'lineFloor''s twin
+    -- for the other thing a line's work can grow, set from the same place by
+    -- 'load'.
+    --
+    -- **What it is for is the one exit a body has that restores nothing.** A
+    -- @consult … where@ block's push comes back on a @return@, on running off
+    -- the end and on backtracking, each time out of the frame being left
+    -- ('Frame''s @savedPushes@). A line that /halts/ leaves its frames standing
+    -- — that is what makes @retry@ after a failed line possible — so there is
+    -- no frame being left and nothing to restore from. Without this the base a
+    -- failed rule had pushed would answer every line typed afterwards, which
+    -- is the opposite of /it should always be predictable what gets used/.
+    --
+    -- **It is the line's floor and not zero**, so a line typed inside a yield
+    -- that halts goes back to the pool the suspended program was running
+    -- with, not to the session's.
   , lineFloor   :: Int
     -- ^ **how many frames were already on the stack when this line's program
     -- was loaded** (MS5 phase 95) — the depth below which a failure will not
@@ -278,8 +337,42 @@ data Exec = Exec
   { pc    :: [Instr]
   , env   :: Env
   , stack :: [Frame]
+  , pushes :: [RuleBase]
+    -- ^ **what the bodies now running have consulted, newest first** (MS11
+    -- phase 300, his ruling of 2026-11-06) — 'Thena.Instral.Ops.PushBase'
+    -- puts one on and 'Thena.Instral.Ops.PopBase' takes it off, and 'rules'
+    -- searches these in front of 'pool'.
+    --
+    -- **It is execution state and that is why it lives here**, beside the
+    -- frame stack rather than beside 'pool': a @consult B where { … }@ in a
+    -- rule file compiles to a push at the front of each of the block's rule
+    -- bodies and a pop at the end, so what is pushed belongs to a body that is
+    -- running and not to the session. Being in 'Exec' is what makes @:undo@
+    -- put it back — "Thena.Driver"\'s @Snapshot@ carries an 'Exec' — and what
+    -- makes 'load' keep it while a program is suspended in a yield.
+    --
+    -- **A @:consult@ typed at the prompt never touches this**, which is why
+    -- the two cannot be confused when they interleave: that line adds to
+    -- 'pool', so a body's pop takes back exactly what its push put on and
+    -- §7.4's /@pool@ is not backtrackable/ still holds.
   }
   deriving (Eq, Show)
+
+-- | __The pool a search is run against__ (MS11 phase 300).
+--
+-- **One pool, and this is it.** What a running body pushed stands in front of
+-- what the session consulted, so a @consult B where { … }@ block gets @B@
+-- first and a block nested inside it gets its own base firster — the stack
+-- rule, which a file's consults already follow one gate out (phase 288).
+--
+-- **Everything that reads the pool reads this**: 'dispatch', 'clauses',
+-- 'arities', inference, and @:bases@ ("Thena.Driver"). So a base a block
+-- pushed is listed like any other while the block's rules run, which is his
+-- own observation of 2026-11-06 — /"you could yield into the repl and there
+-- you would run :bases"/ — and at rest it is genuinely absent rather than
+-- hidden.
+rules :: Machine -> [RuleBase]
+rules m = pushes (exec m) ++ pool m
 
 -- | Phase 4 pushes none of these — nothing nests until @Prove@ dispatches the
 -- rule engine (phase 16) — but 'Exec' carries the stack because that is the
@@ -307,6 +400,17 @@ data Frame
         -- A 'Op.Block' frame always carries 'Nothing': a block produces
         -- nothing ('Thena.Instral.Ops.produces'), so @validate@ refuses a @Bind@ on one
         -- before it can get here.
+      , savedPushes :: [RuleBase]
+        -- ^ **the push stack as it stood when the body inside this frame
+        -- began** (MS11 phase 300) — 'Exec'\'s @pushes@ restored whenever
+        -- control leaves that body, which is the one thing that makes a block's
+        -- pop unmissable: 'Op.Return' drops the rest of @pc@ and 'failure'
+        -- never reaches the end of a body at all, so a @PopBase@ written after
+        -- the last instruction would be skipped on both of those exits.
+        --
+        -- **'savedEnclosing''s shape, for the other stack a body can grow**,
+        -- and here on 'Call' as well as on 'Choice' because returning from an
+        -- ordinary call is an exit too.
       , returned  :: Bool
         -- ^ has control already passed back out of this call? See 'resumeFrom',
         -- and it means for a 'Call' exactly what it means for a 'Choice'.
@@ -335,6 +439,11 @@ data Frame
         -- ^ and the developments it was nested inside (MS4 phase 42). A body
         -- that pushes a development and then fails must unwind to the stack it
         -- had, not to the one it left.
+      , savedPushes :: [RuleBase]
+        -- ^ **and the bases it was searched against** (MS11 phase 300) — the
+        -- same field a 'Call' carries and the same sentence one line over: a
+        -- body that pushes a base and then fails must leave the pool it found,
+        -- not the one it made.
       , choiceId  :: Int         -- ^ what @retry ‹n›@ names it by
       , chosen    :: GlobalName  -- ^ the rule this frame is currently running
       , returned  :: Bool
@@ -474,9 +583,9 @@ newDevelopment' ty n =
    in (Development (enter (goalAt v ty)), n1)
 
 newDevelopmentNamed :: GlobalName -> Core -> Int -> (Development, Int)
-newDevelopmentNamed (GlobalName x) ty n =
+newDevelopmentNamed g ty n =
   let (v, n1) = fresh n
-   in (Development (enter (goalAtNamed (Ident x) v ty)), n1)
+   in (Development (enter (goalAtNamed (Ident (nameDotted g)) v ty)), n1)
 
 setGoal :: Core -> Machine -> Either MoveError Machine
 setGoal = goalNamed (Ident "goal")
@@ -580,7 +689,11 @@ load is m
   | isYielding m = (floored m) { exec = (exec m) { pc = is ++ pc (exec m) } }
   | otherwise    = (floored m) { exec = (exec m) { pc = is, env = [] } }
   where
-    floored k = k { lineFloor = length (stack (exec k)) }
+    -- **AND WHAT THE POOL IS, FOR THE SAME REASON** (MS11 phase 300):
+    -- 'floorPushes' says what a halt goes back to, and a line's floor is where
+    -- its work begins whichever of the two is being measured.
+    floored k = k { lineFloor   = length (stack (exec k))
+                  , floorPushes = pushes (exec k) }
 
 -- | Is the machine waiting for an answer? The driver asks this before it calls
 -- 'resumeAt', so that a line typed when nothing was asked is reported rather
@@ -636,7 +749,10 @@ step m = case pc (exec m) of
       -- 'Thena.Instral.Ops.produces' saying 'True' for every call: which clauses a name
       -- has is not known when a body is read.
       Just n  -> failure (NothingReturned n) m
-      Nothing -> Continue m { exec = Exec is e stk' }
+      -- **The pool the body found, put back** (MS11 phase 300): running off
+      -- the end is one of a body's three exits and 'savedPushes' is what every
+      -- one of them restores.
+      Nothing -> Continue m { exec = Exec is e stk' (savedPushes fr) }
   instr : rest -> perform instr rest m
 
 -- | Where control goes when a body runs out of instructions.
@@ -704,6 +820,56 @@ resumeAt a m = case pc (exec m) of
 --
 -- **A choice point THIS line made is reached exactly as before** — a rule
 -- driving its own search is what rules do, and nothing here changes it.
+-- | **Which global a written name means** (MS10 phases 247 and 248).
+--
+-- **The name as written wins outright.** An @open@ and a declaration's short
+-- name can only ever /add/ a way for a name to resolve, so a name that already
+-- denotes something cannot be changed by either — which is what makes @open@
+-- safe to write above code that was already working.
+--
+-- **Then each open namespace, and two hits is a refusal and not a choice.**
+-- @open Source@ and @open Target@ both holding an @Expr@ is the situation
+-- `~7x8rt` lists, and either would type-check; picking one would be the system
+-- deciding something the user did not write. The refusal names both, and
+-- writing the path repairs it.
+--
+-- __One function, because @resolve-name@ is not the only thing that reads a
+-- written name__ (phase 248): @elim-spine@ reads the datatype @elim@ names, and
+-- a @data@ declaration putting the type inside its own namespace is what forced
+-- the two together. Anything else that takes a word and wants a global belongs
+-- here too, and Γ is the caller's business — this is only about the globals.
+globalNamed :: Machine -> GlobalName -> Either FailReason GlobalName
+globalNamed m g = case globalUnder (knownTo m) (scope m) g of
+  Right g' -> Right g'
+  Left []  -> Left (CannotRead (ResolveFailed (NotInScope (nameDotted g))))
+  Left gs  -> Left (AmbiguousName (nameDotted g) (map nameDotted gs))
+
+-- | The namespace a declaration made here goes into — the innermost rung of
+-- the walk, or the root (MS10 phase 254).
+-- **One definition, shared with 'Thena.Language.Grammar.checkGrammar' since
+-- MS10 phase 258** — 'Thena.Core.Term.innermostOf' is the rule, and a block and
+-- an op must place a declaration in the same namespace.
+namespaceOf :: Machine -> [String]
+namespaceOf = innermostOf . scope
+
+-- | A written name, placed in the namespace the declaration is written in.
+--
+-- **The steps the writer wrote nest inside it**, so @Ty.subst.X@ inside
+-- @namespace A@ declares @A.Ty.subst.X@ — the same nesting a constructor
+-- written with a path already gets inside its datatype's namespace.
+--
+-- **Every declaring op goes through this and none of them knows what a
+-- namespace is**, which is what keeps one rule for where a name lands: a
+-- @data@, a @define-global@ a rule emitted, a primitive and a @language@
+-- block's datatype all take their place from the machine.
+declaredIn :: Machine -> GlobalName -> GlobalName
+declaredIn m (GlobalName ps w) = GlobalName (namespaceOf m ++ ps) w
+
+-- | What this machine's environment answers to, which is what
+-- 'Thena.Core.Term.globalUnder' asks.
+knownTo :: Machine -> GlobalName -> Bool
+knownTo m = knownIn (globals m)
+
 failure :: FailReason -> Machine -> Outcome
 failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
   where
@@ -711,7 +877,7 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
     -- frame at the head belongs to an earlier line exactly when @depth@ has
     -- fallen to the floor. Counted down rather than measured with 'length' at
     -- each step, which would be quadratic in the stack.
-    unwind _ [] = Stuck r0 m
+    unwind _ [] = Stuck r0 (atFloor m)
     unwind depth frames@(fr : stk)
       | depth <= lineFloor m = declined frames
       | otherwise = case fr of
@@ -734,10 +900,14 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
             -- stepped over must be entered again. Without this the alternative
             -- would run and the caller\'s remaining program would not — which
             -- is the same hole from the other side.
+            -- **And the pool goes back with it** (MS11 phase 300): the
+            -- branch being abandoned may have pushed a base, and the
+            -- alternative about to run is one on which that body never ran.
             Just (r, it') -> Saying (took "backtracking to" fr r) m
               { development = saved fr
               , exec  = Exec (ruleBody r) (seedFor (globals m) fr r)
                              (demote fr r it' : map unreturned stk)
+                             (savedPushes fr)
               }
 
     -- **Below the floor: report, do not run** (MS5 phase 95). The first live
@@ -751,8 +921,15 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
     -- no test — and it is written out for the same reason the neighbour is,
     -- rather than left to name a dead frame if that ever stops being true.
     declined frames = case [ fr | fr@Choice {} <- frames, hasNext (alts fr) ] of
-      fr : _ -> Stuck (WouldLeaveTheLine r0 (choiceId fr)) m
-      []     -> Stuck r0 m
+      fr : _ -> Stuck (WouldLeaveTheLine r0 (choiceId fr)) (atFloor m)
+      []     -> Stuck r0 (atFloor m)
+
+    -- **The pool the line began with** (MS11 phase 300). The frames stay — a
+    -- halted line is still standing where it stopped, and @retry@ reaches its
+    -- choice points — but what a body of this line pushed does not answer the
+    -- next line typed. A @retry@ that re-enters one of those frames puts its
+    -- own pushes back ('savedPushes'), so nothing is lost by this.
+    atFloor k = k { exec = (exec k) { pushes = floorPushes k } }
 
     took verb fr r = verb ++ " " ++ show (choiceId fr) ++ ": " ++ nameOfRule r
 
@@ -779,6 +956,7 @@ choicePoint m dest rest it' r vs seed =
     , alts           = it'
     , saved          = development m
     , savedEnclosing = enclosing m
+    , savedPushes    = pushes (exec m)
     , choiceId       = names m
     , chosen         = ruleName r
     , returned       = False
@@ -798,6 +976,7 @@ demote fr r it'
         , alts           = it'
         , saved          = saved fr
         , savedEnclosing = savedEnclosing fr
+        , savedPushes    = savedPushes fr
         , choiceId       = choiceId fr
         , chosen         = ruleName r
         , returned       = False
@@ -809,7 +988,9 @@ demote fr r it'
     -- would demote a frame that had already returned into one that is stepped
     -- straight over, and its @resume@ — the caller\'s leftovers — would never
     -- run (MS4 phase 57).
-  | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr) (destination fr) False
+  | otherwise =
+      Thena.Engine.Call (resume fr) (resumeEnv fr) (destination fr)
+                        (savedPushes fr) False
 
 -- --------------------------------------------------------------------------
 -- Performing one instruction
@@ -833,7 +1014,11 @@ perform instr rest m = case operation instr of
   -- arguments: a block's bindings are its own, and the surface term around it
   -- has none to pass in.
   Op.Block body ->
-    Continue m { exec = Exec body [] (Thena.Engine.Call rest (env (exec m)) Nothing False : stack (exec m)) }
+    Continue m { exec = Exec body []
+                          (Thena.Engine.Call rest (env (exec m)) Nothing
+                                             (pushes (exec m)) False
+                             : stack (exec m))
+                          (pushes (exec m)) }
 
   -- **The data structures** (MS5 phase 65). A list and a pair are built by the
   -- operand itself — 'Thena.Instral.Ops.operandIn' does it, because neither runs
@@ -909,11 +1094,15 @@ perform instr rest m = case operation instr of
       -- **Matched into the destination** (MS5 phase 84), so
       -- @(x, y) = some-rule@ takes the answer apart where it lands. A frame
       -- with no destination drops the value, as it always did.
+      -- **And the pool the body found, put back** (MS11 phase 300). @return@
+      -- drops the rest of @pc@, so a @PopBase@ written at the end of the body
+      -- would never run on this exit — 'savedPushes' is what makes the pop
+      -- belong to the body rather than to a position in it.
       Just (fr, is, e, stk') -> case destination fr of
-        Nothing -> Continue m { exec = Exec is e stk' }
+        Nothing -> Continue m { exec = Exec is e stk' (savedPushes fr) }
         Just p  -> case Op.matchPattern (globals m) p v of
           Nothing -> failure (BindingDidNotMatch p) m
-          Just bs -> Continue m { exec = Exec is (bs ++ e) stk' }
+          Just bs -> Continue m { exec = Exec is (bs ++ e) stk' (savedPushes fr) }
 
   -- **Hand control over, and stay put** (MS4 phase 45b). @pc@ is deliberately
   -- unchanged — see 'Op.Yield' and 'resumeYield'.
@@ -947,7 +1136,7 @@ perform instr rest m = case operation instr of
     Right (VRaw raw) -> case (,) <$> traverse (filling (env (exec m))) (termSplicesIn raw)
                                  <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw) of
       Left r   -> failure r m
-      Right (ts, ns) -> case resolveWith (grammars m) (ts ++ ns) (globals m) contextAt (names m) raw of
+      Right (ts, ns) -> case resolveWith (grammars m) (ts ++ ns) (globals m) (scope m) contextAt (names m) raw of
         Left e        -> failure (CannotResolve e) m
         Right (t, n1) -> produce (VTerm t) m { names = n1 }
     Right _          -> failure ExpectedRaw m
@@ -1005,6 +1194,15 @@ perform instr rest m = case operation instr of
   -- **A surface datatype reaches the driver as a written one does** (MS4 phase
   -- 42b): this assembles the record and 'Declaring' carries it out, so
   -- @Thena.Global.Declare.declare@ checks both by the same code.
+  --
+  -- **Its name is absolute where @define-global@'s is relative to the namespace
+  -- in hand, and the reason is the constructors** (MS10 phase 254): a
+  -- constructor's type is elaborated with the datatype assumed under its own
+  -- name and then applied to it, so the name is fixed /before/ anything is
+  -- elaborated — and placing it afterwards would leave the elaborated types
+  -- mentioning a global that is not the one being declared.
+  -- 'Thena.Driver.datatypeProgram' takes the namespace for that reason, and it
+  -- is handed the same prefix this machine holds.
   MakeData d nps cns roles tys -> case traverse term tys of
     Left r -> failure r m
     Right ts -> case ts of
@@ -1019,15 +1217,114 @@ perform instr rest m = case operation instr of
 
   -- Out through the channel, exactly as 'DefineGlobal' goes: the driver checks
   -- the name is one with a reduction rule and installs the constant.
+  --
+  -- **A block cannot be written inside a @namespace@ block yet** (MS10 phase
+  -- 254), and the lexer is what says so: it takes a block whole only at column
+  -- 1, so an indented one does not reach here at all. **The metavariable half
+  -- of `~g4k5g` is built** (phase 255): a letter is scoped to its language's
+  -- namespace, which 'Thena.Language.Grammar.checkGrammar' reads off the scope
+  -- this machine carries. What is left is the placement half — a grammar's own
+  -- name still roots.
   DeclareGrammar b -> DeclaringGrammar b (advance m)
 
-  DeclarePrimitive nm ty -> case (,) <$> text nm <*> term ty of
-    Left r -> failure r m
-    Right (x, t) -> Primitively (GlobalName x) t (advance m)
+  -- **Both read their name as a name, path and all** (MS10 phase 243). Each
+  -- operand is typed @TName@ and each used to be read as /text/ and rooted,
+  -- which put every declaration at the root however it was written — so nothing
+  -- could be declared into a namespace by the path that admits a written
+  -- module, a generated definition or a primitive. 'operandName' accepts a
+  -- string literal as a rooted name, so a rule that writes one is unaffected.
+  -- **Nothing is installed and nothing is checked against the environment
+  -- here** (MS10 phase 247): the namespace is a prefix, and whether anything
+  -- sits under it is 'namespaceInhabited'\'s question, asked right here so that
+  -- @open Foo@ with no @Foo.…@ anywhere is refused where it is written rather
+  -- than becoming a silent no-op that makes every later name fail on its own.
+  --
+  -- **A NAMESPACE IS RESOLVED BY THE SAME WALK A NAME IS** (MS10 phase 258).
+  -- The written path used to be taken absolutely, so a @language@ block inside
+  -- @namespace A@ could not be opened by the word it was written with: @open Ty@
+  -- there asked for @Ty.…@ and the namespace is @A.Ty@. Since a block may now be
+  -- written inside a @namespace@ — and since phase 255 a block that writes its
+  -- letters with its own language shut installs them as literal text — that
+  -- @open@ is exactly what an author must write, so it has to resolve.
+  --
+  -- **'Thena.Core.Term.globalUnder' is the walk and it is not written a second
+  -- time here**: a path is a name whose last step is its word, @known@ is
+  -- /something is declared under this prefix/, and the enclosing rungs, the
+  -- @open@s and the two-answers refusal all come with it.
+  Open o -> case globalUnder inhabited (scope m) (asName (openedPath o)) of
+    Right c -> Continue (advance m { scope = (scope m)
+                 { scopeOpens = o { openedPath = asPath c } : scopeOpens (scope m) } })
+    Left [] -> failure (NoSuchNamespace (intercalate "." (openedPath o))) m
+    Left gs -> failure (AmbiguousName (intercalate "." (openedPath o))
+                         (map (intercalate "." . asPath) gs)) m
+    where
+      inhabited c = namespaceInhabited (asPath c) (globals m)
+      asName ws = case reverse ws of
+        w : before -> GlobalName (reverse before) w
+        []         -> GlobalName [] ""
+      asPath c = nameSteps c ++ [nameWord c]
 
-  DefineGlobal ps nm ty tm -> case (,,) <$> text nm <*> term ty <*> term tm of
+  -- **A namespace is entered by pushing a prefix and nothing else** (MS10
+  -- phase 254). Nothing is checked: a namespace holds whatever keys sit under
+  -- it, and entering an empty one is how it stops being empty — where @open@ of
+  -- an empty one is refused, because there it could only be a silent no-op.
+  EnterNamespace nm -> case nameOf nm of
+    Left r  -> failure r m
+    Right g ->
+      let ns = namespaceOf m ++ nameSteps g ++ [nameWord g]
+       in Continue (advance m { scope = (scope m) { scopeWithin = ns : scopeWithin (scope m) } })
+
+  LeaveOpen ->
+    Continue (advance m { scope = (scope m) { scopeOpens = drop 1 (scopeOpens (scope m)) } })
+
+  -- **A frame of concealment without the module's names in it** (MS11 phase
+  -- 291). Nothing is checked and nothing is installed: the keys are in the
+  -- environment already — the module was loaded before this one ran — and what
+  -- this settles is whether a written name may reach them.
+  --
+  -- **A name the module does not export is not in the list**, so a scoped
+  -- import reveals exactly what a file-wide one does; and a name that was never
+  -- concealed is revealed for nothing, which is the prompt and costs a
+  -- @filter@ over an empty frame.
+  Reveal gs -> Continue (advance m { scope = revealing gs (scope m) })
+
+  LeaveReveal ->
+    Continue (advance m { scope = (scope m)
+                { scopeConcealed = drop 1 (scopeConcealed (scope m)) } })
+
+  -- **The base goes on top of the pool** (MS11 phase 292), so the rules a block
+  -- is searched against are the block's first and the file's underneath.
+  --
+  -- **A path that names nothing held pushes nothing**, and the lowering is what
+  -- makes that unreachable where it would matter: a module's load reads every
+  -- base it names before the program is built, and refuses the module if the
+  -- disc cannot answer. At the prompt there is nothing to read and a typed
+  -- @consult@ has never done anything, so the pair is not emitted at all —
+  -- which is why this is not a refusal.
+  -- **ONE BASE PER OP, WHICH IS WHAT MAKES THE PAIR BALANCE** (MS11 phase
+  -- 298). A path identifies a base's file and not an occurrence of it, so a
+  -- module with two blocks consulting the same base holds it twice — and
+  -- pushing both for one op would leave the second for the 'PopBase' of
+  -- whatever ran next. The copies are the same file read in the same load, so
+  -- taking the first is taking the base.
+  PushBase p -> Continue (advance m
+    { exec = (exec m)
+               { pushes = take 1 [ b | b <- held m, basePath b == p ]
+                            ++ pushes (exec m) } })
+
+  PopBase -> Continue (advance m
+    { exec = (exec m) { pushes = drop 1 (pushes (exec m)) } })
+
+  LeaveNamespace ->
+    Continue (advance m { scope = (scope m) { scopeWithin = drop 1 (scopeWithin (scope m)) } })
+
+  DeclarePrimitive nm ty -> case (,) <$> declaredNameOf nm <*> term ty of
     Left r -> failure r m
-    Right (x, t, v) -> Defining (GlobalName x) ps t v (advance m)
+    Right (x, t) -> Primitively x t (advance m)
+
+  DefineGlobal ps nm ty tm -> case (,,) <$> declaredNameOf nm <*> term ty <*> term tm of
+    Left r -> failure r m
+    Right (x, t, v) -> Defining x ps t v (advance m)
 
   Certify stated -> case term stated of
     Left r   -> failure r m
@@ -1170,7 +1467,8 @@ perform instr rest m = case operation instr of
           Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
                  (entering r (choicePoint m Nothing rest it' r [] []) m { names = names m + 1 })
       | otherwise ->
-          Continue (entering r (Thena.Engine.Call rest (env (exec m)) Nothing False) m)
+          Continue (entering r (Thena.Engine.Call rest (env (exec m)) Nothing
+                                                  (pushes (exec m)) False) m)
     where
       it = dispatch (rules m) (globals m) (cursor (development m))
 
@@ -1180,7 +1478,7 @@ perform instr rest m = case operation instr of
       -- snapshot and no identifier. The cost is Prolog's own: one more head
       -- match is computed than is used.
       entering r fr k =
-        k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) }
+        k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) (pushes (exec m)) }
 
   -- **Call by name: the same search as @Prove@, over a narrower candidate
   -- list** (§8, phase 23). The user's own framing, and it is why this case now
@@ -1226,22 +1524,25 @@ perform instr rest m = case operation instr of
             -- destination all work without a second mechanism.
             Continue m
               { exec = Exec body (fromMaybe [] (Op.matchPatterns (globals m) ps vs) ++ cl)
-                         (Thena.Engine.Call rest (env (exec m)) wants False
+                         (Thena.Engine.Call rest (env (exec m)) wants
+                                            (pushes (exec m)) False
                             : stack (exec m))
+                         (pushes (exec m))
               }
 
   Op.Call nm args -> case traverse (operandValue (env (exec m))) args of
     Left e   -> failure e m
     Right vs -> case next (it vs) of
-      Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) (GlobalName nm))) m
+      Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) (rootName nm))) m
       Just (r, it')
         | hasNext it' ->
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
                    (entering vs r (choicePoint m wants rest it' r vs []) m { names = names m + 1 })
         | otherwise ->
-            Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) wants False) m)
+            Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) wants
+                                                       (pushes (exec m)) False) m)
     where
-      it vs = clauses (rules m) (globals m) (cursor (development m)) (GlobalName nm) vs
+      it vs = clauses (rules m) (globals m) (cursor (development m)) (rootName nm) vs
 
       -- The callee's parameters, bound to the arguments. 'clauses' has already
       -- filtered on arity, so the two lists agree by construction — and the
@@ -1253,7 +1554,7 @@ perform instr rest m = case operation instr of
       -- total, which is what the one-matcher design is for.
       entering vs r fr k =
         k { exec = Exec (ruleBody r) (fromMaybe [] (matchClause (globals m) r vs))
-                     (fr : stack (exec m)) }
+                     (fr : stack (exec m)) (pushes (exec m)) }
 
   -- §3.7's elimination tactic (phase 17). The goal is the focus, as with the
   -- six hole ops; the target is an operand, for the reason 'Try' takes one —
@@ -1311,7 +1612,7 @@ perform instr rest m = case operation instr of
   -- the impossible case vanishing — and then nothing is claimed and the guess
   -- mentions nothing.
   Op.Specialise c hyps gk ->
-    case (,,) <$> text c
+    case (,,) <$> nameOf c
               <*> operandValue (env (exec m)) hyps
               <*> operandValue (env (exec m)) gk of
     Left e -> failure e m
@@ -1333,8 +1634,8 @@ perform instr rest m = case operation instr of
     Right (w, VList hs, VMethodShape shape) ->
       case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
-        case specialise (globals m) contextAt (names m) (GlobalName w)
-                        [ Ident n | VText n <- hs ] shape s of
+        case specialise (globals m) contextAt (names m) w
+                        [ Ident (nameWord n) | VName n <- hs ] shape s of
           (Left e,  n1) -> failure (CannotSpecialise e) m { names = n1 }
           (Right sp, n1) ->
             let (holes, named) = claimSubgoals (cursor (development m)) (specialisedGoal sp)
@@ -1376,7 +1677,7 @@ perform instr rest m = case operation instr of
                                     -- with @define@ once its telescope is
                                     -- bound, which is what makes the name mean
                                     -- the refined thing (@~8v3pg@).
-                                    (VList [ VPair (VText nm) (VTerm t)
+                                    (VList [ VPair (VName (rootName nm)) (VTerm t)
                                            | (Ident nm, t) <- specialisedRebound sp ])))
                               m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
@@ -1418,10 +1719,17 @@ perform instr rest m = case operation instr of
   ElimSpine x -> case operandSurface (env (exec m)) x of
     Left r  -> failure r m
     Right z -> case outerArgs (Zipper.focus z) of
-      (Concrete.SurfaceElim d ps mot ms is tgt, extra) ->
-        case lookupInductive (GlobalName d) (globals m) of
+      -- **The datatype's written name goes through 'globalNamed'** (MS10 phase
+      -- 248), because @elim Nat@ names the type and the type is @Nat.Nat@. An
+      -- @open@ reaches it here too, which it has to: there is one rule for what
+      -- a written name means. **And it is written with its path if the user
+      -- wrote one** (phase 254), like every other reference.
+      (Concrete.SurfaceElim dps dw ps mot ms is tgt, extra)
+        | let d = nameDotted (GlobalName dps dw) ->
+        case either (const Nothing) Just (globalNamed m (GlobalName dps dw))
+               >>= \dn -> (,) dn <$> lookupInductive dn (globals m) of
           Nothing  -> failure (CannotRead (ResolveFailed (NotADatatype d))) m
-          Just def
+          Just (dn, def)
             | length ps /= wantP ->
                 arity (WrongNumberOfEliminationParameters d wantP (length ps))
             | length ms /= wantM ->
@@ -1447,12 +1755,16 @@ perform instr rest m = case operation instr of
               -- fact stated elsewhere.
               spine =
                 Concrete.SurfaceApp
-                  (Concrete.SurfaceName e)
+                  (Concrete.SurfaceName (nameSteps e) (nameWord e))
                   (foldr NE.cons
                          (explicit mot
                             NE.:| map explicit (ms ++ is ++ [tgt]) ++ extra)
                          (map explicit ps))
-              GlobalName e = eliminatorName (GlobalName d)
+              -- **The path, not its dotted spelling** (MS10): the wrapper is
+              -- @Nat.elim@ now, and a root surface name whose word held the dots
+              -- is the one shape §3.6 forbids — it resolved only while a name
+              -- was a piece of text.
+              e = eliminatorName dn
               explicit = Concrete.SurfaceArg Concrete.Explicit
       _ -> failure (ExpectedSurfaceShape "an elimination") m
     where
@@ -1483,12 +1795,14 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right v -> produce v m
 
-  -- **The identity at run time** (MS5 phase 66b). Both a 'Op.Name' and a
-  -- 'Op.VText' are text; this op exists so that the conversion is a thing the
-  -- type system sees and the author writes down. See 'Op.NameText'.
-  NameText a -> case text a of
+  -- **It stopped being the identity at MS10** — a name is a path and a word and
+  -- text is text, so this is where the dotted spelling is made. It existed from
+  -- MS5 phase 66b as a conversion with no run-time content, so that the type
+  -- system saw it and the author wrote it down; the content arrived with the
+  -- path. See 'Op.NameText'.
+  NameText a -> case nameOf a of
     Left e  -> failure e m
-    Right t -> produce (VText t) m
+    Right g -> produce (VText (nameDotted g)) m
 
   Assume name ty -> component Component.Assume name ty
   Claim  name ty -> component Component.Claim  name ty
@@ -1504,13 +1818,26 @@ perform instr rest m = case operation instr of
   -- A name nothing has taken (phase 24c). Avoids the development's own
   -- identifiers **and** the globals, so a generated hole never shadows a
   -- datatype or a theorem.
+  --
+  -- **A global contributes both of its spellings** (MS10): the dotted one, and
+  -- the base word on its own. The hole is a local, and a local beats the
+  -- outward walk, so a hole called @A@ is exactly what stops @A@ from reaching
+  -- @A.A@ for the rest of the elaboration — and a datatype called @A@ used to
+  -- make every rule that mints @fresh-name \"A\"@ fail.
+  --
+  -- **The base word is avoided whether or not it resolves today**, which is
+  -- stronger than the resolution question and is the point: @open@ is a session
+  -- command, so a word that reaches nothing when the hole is minted can start
+  -- reaching a datatype one line later, and a name already written down cannot
+  -- be re-chosen then.
   FreshName hint -> case operandIdent (env (exec m)) hint of
     Left r  -> failure r m
     Right i ->
       let inUse = Cursor.identsIn (cursor (development m))
-                    ++ [ Ident g | GlobalName g <- declaredNames (globals m) ]
+                    ++ concat [ [Ident (nameDotted g), Ident (nameWord g)]
+                              | g <- declaredNames (globals m) ]
           Ident n = Cursor.freshIdent inUse i
-       in produce (VText n) m
+       in produce (VName (rootName n)) m
 
   -- **Which component am I standing on?** (MS4 phase 41c) — the companion to
   -- @goal@, which answers what it is claimed /at/. Yielded as a term so that
@@ -1591,9 +1918,9 @@ perform instr rest m = case operation instr of
   Op.DatatypeOf a -> case term a of
     Left e  -> failure e m
     Right t -> case spineOf (whnf (globals m) contextAt t) of
-      Just (GlobalName w, _, _)
-        | isDatatype w -> produce (VText w) m
-        | otherwise    -> failure (NotDeclaredAs w "a datatype") m
+      Just (gn, _, _)
+        | isDatatype gn -> produce (VName gn) m
+        | otherwise     -> failure (NotDeclaredAs (nameDotted gn) "a datatype") m
       Nothing -> failure (NotDeclaredAs "that type" "a datatype") m
 
   Op.DatatypeParameters a -> datatypeCount a inductiveParameters
@@ -1603,20 +1930,20 @@ perform instr rest m = case operation instr of
   -- the eliminator's methods are in, so a rule walking methods and a rule
   -- walking constructors agree without either being told.
   Op.ConstructorsOf a -> withDatatype a $ \d ->
-    produce (VList [ VText c
-                   | GlobalName c <- map constructorName (inductiveConstructors d) ]) m
+    produce (VList [ VName c
+                   | c <- map constructorName (inductiveConstructors d) ]) m
 
   -- **Failing here IS the answer "that name is not a constructor"**, which is
   -- how a splitting rule tells a constructor pattern from a variable one
   -- without a test of its own.
   Op.ConstructorDatatype a -> withConstructor a $ \d _ ->
-    case inductiveName d of GlobalName dn -> produce (VText dn) m
+    produce (VName (inductiveName d)) m
 
   -- Names, so a split can name its pattern variables after them — the courtesy
   -- 'Op.Eliminate' already does for its method holes. Their count is this
   -- list's length, which is the pattern's arity.
   Op.ConstructorArguments a -> withConstructor a $ \_ k ->
-    produce (VList [ VText i
+    produce (VList [ VName (rootName i)
                    | Ident i <- map entryIdent (constructorArguments k) ]) m
 
   -- **The recursive ones, which is one induction hypothesis each** (MS9 phase
@@ -1625,7 +1952,7 @@ perform instr rest m = case operation instr of
   -- so a clause counting hypotheses and the generator making them cannot
   -- disagree.
   Op.ConstructorRecursiveArguments a -> withConstructor a $ \d k ->
-    produce (VList [ VText i
+    produce (VList [ VName (rootName i)
                    | e <- constructorArguments k
                    , let Ident i = entryIdent e
                    , Just _ <- [ recursiveArgument (inductiveName d)
@@ -1638,20 +1965,20 @@ perform instr rest m = case operation instr of
   --
   -- Deliberately the same order "Thena.Syntax.Resolve" uses — a binder shadows a global of the
   -- same name, which is what one namespace (§3.6) requires.
-  ResolveName x -> case operandText (env (exec m)) x of
+  ResolveName x -> case operandName (env (exec m)) x of
     Left r  -> failure r m
-    Right w -> case inScopeAt w of
+    Right g -> case inScopeAt g of
       Just v  -> produce (VTerm (Free v)) m
-      Nothing -> case lookupDefinition (GlobalName w) (globals m) of
-        Just d ->
-          let (ls, n1) = levelArgsFor (length (definitionLevels d)) (names m)
-           in produce (VTerm (Global (GlobalName w) ls)) m { names = n1 }
-        Nothing
-          | isDeclared (GlobalName w) (globals m) ->
-              produce (VTerm (Global (GlobalName w) [])) m
-          | otherwise ->
-              failure (CannotRead (ResolveFailed (NotInScope w))) m
+      Nothing -> case globally g of
+        Left r   -> failure r m
+        Right g' -> case lookupDefinition g' (globals m) of
+          Just d ->
+            let (ls, n1) = levelArgsFor (length (definitionLevels d)) (names m)
+             in produce (VTerm (Global g' ls)) m { names = n1 }
+          Nothing -> produce (VTerm (Global g' [])) m
     where
+      globally = globalNamed m
+
       -- **The INNERMOST binding of that name**, which is what shadowing means
       -- and what "Thena.Syntax.Resolve" gives. Γ runs outermost-first, so this
       -- folds rather than taking the head.
@@ -1660,9 +1987,18 @@ perform instr rest m = case operation instr of
       -- the binding it was shadowing. Nothing had asked: phase 48 shipped the
       -- op with a test that had only one binding of the name in scope, and no
       -- rule used it until the leaf clauses did.
-      inScopeAt w =
-        foldl (\acc e -> if entryIdent e == Ident w then Just (entryVar e) else acc)
-              Nothing contextAt
+      --
+      -- **A QUALIFIED NAME SKIPS Γ ENTIRELY** (MS10). The context's entries are
+      -- 'Ident's in the development's own scope, which has no namespaces, so
+      -- @Nat.zero@ cannot be a local — and a path is how the writer says they
+      -- did not mean one. Only a root name can be shadowed, which is what makes
+      -- a path a way out of a shadowing.
+      inScopeAt g = case nameSteps g of
+        _ : _ -> Nothing
+        []    ->
+          foldl (\acc e -> if entryIdent e == Ident (nameWord g)
+                             then Just (entryVar e) else acc)
+                Nothing contextAt
 
   -- **The two surface readers** (MS4 phase 49). Each is paired with the test
   -- that makes it total in the clause that uses it, and fails rather than
@@ -1670,7 +2006,12 @@ perform instr rest m = case operation instr of
   Op.SurfaceNameOf x -> case surfaceAt x of
     Left r  -> failure r m
     Right s -> case s of
-      Concrete.SurfaceName w -> produce (VText w) m
+      -- **The path as it was written, not its dotted spelling** (MS10). This
+      -- line flattened the name until here, which is why @String.append "a" "b"@
+      -- was refused /not in scope: String.append/ with the lexer and the parser
+      -- both working: the pieces got as far as the tree and were glued back
+      -- together on the way into a rule.
+      Concrete.SurfaceName ps w -> produce (VName (GlobalName ps w)) m
       _                      -> failure (ExpectedSurfaceShape "a name") m
 
   -- The literal at the focus, as the term it elaborates to (MS6 phase 97c).
@@ -1693,14 +2034,29 @@ perform instr rest m = case operation instr of
   Op.ObjectTerm x -> case surfaceAt x of
     Left r  -> failure r m
     Right s -> case s of
-      Concrete.SurfaceObject lang prod ps
-        | lang `notElem` languageNames (grammars m) ->
-            failure (ObjectFailed (NoSuchObjectLanguage lang)) m
-        | Just w <- prod, w `notElem` productionNames (grammars m) lang ->
-            failure (ObjectFailed (NoSuchObjectProduction lang w)) m
-        | otherwise ->
+      -- **THE TAG RESOLVES BY THE WALK** (MS10 phase 260, `~zjkvd`, his ruling
+      -- of 2026-10-30), through the same 'Thena.Core.Term.InScope' the machine
+      -- carries for every other name — so after @open A@ a term of @A.Ty@ is
+      -- written @Ty`ι`@, and the key the parser wants comes off the grammar
+      -- that answered.
+      Concrete.SurfaceObject lang prod ps -> case grammarForTag (scope m) (grammars m) lang of
+        Left [] -> failure (ObjectFailed (NoSuchObjectLanguage lang)) m
+        Left amb ->
+          failure (ObjectFailed (ObjectLanguageAmbiguous lang (map nameDotted amb))) m
+        Right gr'
+          | Just w <- prod, w `notElem` productionNames (grammars m) (grammarKey gr') ->
+              failure (ObjectFailed (NoSuchObjectProduction lang w)) m
+          | otherwise ->
+            -- **The bracket is a word and the parser wants the rule's name**
+            -- (MS10 phase 248): @LC[app]@ starts at @LC.app@. The guard above
+            -- has already refused a word this language has no production for,
+            -- so the fallback cannot be reached.
+            let key = grammarKey gr' in
             case Earley.parse (earleyRules (grammars m))
-                              (maybe (Earley.StartAt lang) Earley.StartRule prod)
+                              (maybe (Earley.StartAt key)
+                                     (\w -> maybe (Earley.StartAt key) Earley.StartRule
+                                              (productionRule (grammars m) key w))
+                                     prod)
                               (objectInput (regionBits ps)) of
               Left why ->
                 failure (ObjectFailed (ObjectNotParsed lang (objectText (regionBits ps)) (atCharacters (regionBits ps) why))) m
@@ -1774,17 +2130,32 @@ perform instr rest m = case operation instr of
     Right _ -> failure (ExpectedSurfaceShape "a split with at least one arm") m
   Op.PatternHead x -> case patternAt x of
     Left r -> failure r m
-    Right (Concrete.PatternName w _) -> produce (VText w) m
+    -- **A pattern's head is a word, and what it denotes is the constructor it
+    -- names or nothing at all** (MS10 phase 248). 'Concrete.PatternName' holds
+    -- a word and not a path, so a constructor pattern cannot be written
+    -- qualified; but a constructor now /has/ a path, and an arm written @refl@
+    -- has to come back as @Eq.refl@ or no walk could pair it with the
+    -- constructor it is an arm for.
+    --
+    -- **Resolved only as far as a constructor**, which is what keeps this
+    -- total: a pattern head is a constructor of the family or a binder, and a
+    -- binder lives in the arm's own scope, which has no namespaces. So a word
+    -- that resolves to something that is not a constructor is left exactly as
+    -- written — it is a binder — and 'Op.ConstructorDatatype' failing on it
+    -- goes on being how a splitting rule tells the two apart.
+    Right (Concrete.PatternName w _) -> produce (VName (headName (rootName w))) m
     Right _ -> failure (ExpectedSurfaceShape "a pattern written as a word") m
   -- **The one pattern op that builds** (MS9 phase 231). @pattern-for-name@ is
   -- 'Op.PatternHead'\'s inverse: the interactive spelling of a split has no
   -- written patterns, so it names each position after the method's own binder
   -- and hands that name over as a pattern, which is what lets it walk the same
   -- @intro-arm-binders@ the written arms walk.
-  Op.PatternForName x -> case operandValue (env (exec m)) x of
+  Op.PatternForName x -> case wordOf x of
     Left e -> failure e m
-    Right (VText w) -> produce (VPattern (Concrete.PatternName w [])) m
-    Right _ -> failure ExpectedText m
+    -- **A qualified name is refused, not truncated** — 'operandWord'. A pattern
+    -- holds a word, so a path given here has nowhere to go, and dropping it
+    -- would build a pattern for a different constructor.
+    Right w -> produce (VPattern (Concrete.PatternName w [])) m
   Op.PatternArguments x -> case patternAt x of
     Left r -> failure r m
     Right (Concrete.PatternName _ ps) -> produce (VList (map VPattern ps)) m
@@ -1809,8 +2180,8 @@ perform instr rest m = case operation instr of
   -- which is the whole of what the walk over the report does.
   Op.BinderName x -> case operandValue (env (exec m)) x of
     Left e -> failure e m
-    Right (VBinder (Binder _ (Ident w))) -> produce (VText w) m
-    Right _ -> failure ExpectedText m
+    Right (VBinder (Binder _ (Ident w))) -> produce (VName (rootName w)) m
+    Right _ -> failure ExpectedName m
 
   -- **A plain binder only** — no annotation and no braces. That is the whole of
   -- what the λ case cannot elaborate, and saying it here means the clause finds
@@ -1846,8 +2217,8 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right z -> case Zipper.focus z of
       Concrete.SurfaceApp h as
-        | Concrete.SurfaceName g <- h
-        , Just as' <- expand (plicitiesOf g) (NE.toList as) ->
+        | Concrete.SurfaceName ps w <- h
+        , Just as' <- expand (plicitiesOf (GlobalName ps w)) (NE.toList as) ->
             case as' of
               []     -> failure (ExpectedSurfaceShape "an application") m
               a : bs -> produce
@@ -1892,7 +2263,7 @@ perform instr rest m = case operation instr of
       -- (MS8): @lambda-annot-type@ reads it, and the plicity refusal below stays
       -- the one place a λ shape the elaborator cannot take is named.
       | Concrete.SurfaceBinder Concrete.Explicit w _ <- NE.head bs ->
-          produce (VText w) m
+          produce (VName (rootName w)) m
     Right _ -> failure (ExpectedSurfaceShape "a λ whose first binder is explicit") m
   -- **Answered only where a type was written**, so the bare clause and the
   -- annotated one cannot both apply: a λ with no written type on its first
@@ -1915,7 +2286,7 @@ perform instr rest m = case operation instr of
 
   Op.LetName x -> case surfaceAt x of
     Left r  -> failure r m
-    Right (Concrete.SurfaceLet w _ _ _) -> produce (VText w) m
+    Right (Concrete.SurfaceLet w _ _ _) -> produce (VName (rootName w)) m
     Right _ -> failure (ExpectedSurfaceShape "a let") m
   Op.LetType x -> surfaceMove x "an annotated let" $ \s -> case s of
     Concrete.SurfaceLet w (Just ty) v b -> Just (Zipper.intoLetType w v b ty)
@@ -1930,7 +2301,7 @@ perform instr rest m = case operation instr of
   Op.ForallName x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfacePi bs _)
-      | Concrete.SurfaceBinder _ w _ <- NE.head bs -> produce (VText w) m
+      | Concrete.SurfaceBinder _ w _ <- NE.head bs -> produce (VName (rootName w)) m
     Right _ -> failure (ExpectedSurfaceShape "a ∀") m
   Op.ForallDomain x -> surfaceMove x "a ∀ whose first binder has a type" $ \s ->
     case s of
@@ -1969,7 +2340,16 @@ perform instr rest m = case operation instr of
   Op.Play x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceDo body) ->
-      case resolveBlock (grammars m) (GlobalName "do") [] body of
+      -- **In no scope, which is what it was read in** (MS10 phase 267, and it
+      -- is unchanged). A block played here is the load-time twin of
+      -- 'Thena.Rules.surfaceBlocks', and the two must answer the same: this one
+      -- has the session's scope and that one has the file's, so the only scope
+      -- both can agree on is none. A tag in a played block is therefore written
+      -- whole. The seam is older and wider than this phase — the surface
+      -- literal around the block already resolves its own tags under
+      -- @scope m@ — and closing it is `~jmw4k`'s, which is where a rule base
+      -- stating its own dependencies belongs.
+      case resolveBlock (rootReading (grammars m)) (rootName "do") [] body of
         Left errs -> failure (blockFailureOf errs) m
         Right is  -> Playing is (advance m)
     Right _ -> failure (ExpectedSurfaceShape "a do block") m
@@ -2022,7 +2402,7 @@ perform instr rest m = case operation instr of
   -- hole is reachable from anywhere. The user's correction, phase 24b: *"This
   -- instruction is supposed to be useful always, not only when you already can
   -- see the hole right above you."* It is what a person types at the REPL.
-  GotoNamed v -> case operandText (env (exec m)) v of
+  GotoNamed v -> case operandWord (env (exec m)) v of
     Left r  -> failure r m
     Right n -> moveTo (Cursor.gotoNamed (Ident n))
 
@@ -2116,27 +2496,37 @@ perform instr rest m = case operation instr of
       Do     o -> o
 
     text    = operandText (env (exec m))
+    nameOf  = operandName (env (exec m))
+    -- **What a declaring op installs**, which is what was written placed in the
+    -- namespace it is written in — see 'declaredIn'.
+    declaredNameOf o = declaredIn m <$> nameOf o
+    wordOf  = operandWord (env (exec m))
     term    = operandTerm (env (exec m))
 
     -- **The three readers' shared plumbing** (MS9 phase 176). Each takes the
     -- operand that names a declaration and hands the declaration to its
     -- caller, so the six cases above say what they read and nothing about how
     -- the name was got or how the failure is shaped.
-    isDatatype w = case lookupInductive (GlobalName w) (globals m) of
+    isDatatype g = case lookupInductive g (globals m) of
       Just _  -> True
       Nothing -> False
 
-    withDatatype a k = case text a of
+    withDatatype a k = case nameOf a of
       Left e  -> failure e m
-      Right w -> case lookupInductive (GlobalName w) (globals m) of
+      Right g -> case lookupInductive g (globals m) of
         Just d  -> k d
-        Nothing -> failure (NotDeclaredAs w "a datatype") m
+        Nothing -> failure (NotDeclaredAs (nameDotted g) "a datatype") m
 
-    withConstructor a k = case text a of
+    -- | The constructor a written pattern head names, or the word as written.
+    headName g = case globalNamed m g of
+      Right g' | isJust (lookupConstructor g' (globals m)) -> g'
+      _ -> g
+
+    withConstructor a k = case nameOf a of
       Left e  -> failure e m
-      Right w -> case lookupConstructor (GlobalName w) (globals m) of
+      Right g -> case lookupConstructor g (globals m) of
         Just (d, c) -> k d c
-        Nothing     -> failure (NotDeclaredAs w "a constructor") m
+        Nothing     -> failure (NotDeclaredAs (nameDotted g) "a constructor") m
 
     -- A count off a telescope, which is what both of the counting readers are.
     datatypeCount a f = withDatatype a (\d -> produce (VInt (length (f d))) m)
@@ -2251,7 +2641,7 @@ perform instr rest m = case operation instr of
     -- What the machine recorded about this name\'s argument positions, if it
     -- recorded anything. A name with no entry — every DC-declared global, and
     -- every local — takes what was written and nothing more.
-    plicitiesOf g = case lookup (GlobalName g) (signatures m) of
+    plicitiesOf g = case lookup g (signatures m) of
       Just ps -> ps
       Nothing -> []
 
@@ -2513,6 +2903,40 @@ operandText e o = operandValue e o >>= \v -> case v of
   VText s -> Right s
   _       -> Left ExpectedText
 
+-- | Only a name is a name — a namespace path and a base word (MS10).
+--
+-- **A string literal reads as a name at the root**, which is his ruling of
+-- 2026-09-12 that a literal is accepted at either type, now that the two types
+-- have different values. Inference refuses a /variable/ of
+-- 'Thena.Instral.Type.TString' in a name position, so a 'VText' arrives here
+-- only from something written down.
+--
+-- **A dotted literal is refused rather than split** (MS10 phase 245). The dot
+-- is reserved, so no /written name/ can be dotted — but a string literal is not
+-- read by the lexer, so @"String.eq"@ was rooted and became a name whose word
+-- held the dots, which is the one shape a path forbids. Nothing refused it, so
+-- @define-global "A.b"@ installed a forbidden name. A rule that means a path
+-- writes @String.eq@, a name literal, which carries one.
+operandName :: Env -> Operand -> Either FailReason GlobalName
+operandName e o = operandValue e o >>= \v -> case v of
+  VName g -> Right g
+  VText s | '.' `elem` s -> Left (DottedTextName s)
+          | otherwise    -> Right (rootName s)
+  _       -> Left ExpectedName
+
+-- | …and the bare word of one, where only a name in the development can stand.
+--
+-- **A qualified name is refused rather than flattened or truncated.** A
+-- component of a development, a λ's binder and a hole all live in the
+-- development's own scope, which has no namespaces (§3.6) — so @assume
+-- String.append : S@ names nothing, and a path dropped silently here would make
+-- it name the wrong thing instead. @NotAnIdentifier@ is the refusal because
+-- that is what a dotted name is: the lexer reads it as three tokens.
+operandWord :: Env -> Operand -> Either FailReason String
+operandWord e o = operandName e o >>= \g -> case nameSteps g of
+  [] -> Right (nameWord g)
+  _  -> Left (NotAnIdentifier (nameDotted g))
+
 -- | Only a 'VTerm' is a term; every other 'Value' fails here (§7.2).
 operandTerm :: Env -> Operand -> Either FailReason Core
 operandTerm e o = operandValue e o >>= \v -> case v of
@@ -2529,8 +2953,12 @@ filling :: Env -> String -> Either FailReason (String, Filling)
 filling e x = (,) x . FillTerm <$> operandTerm e (Ref x)
 
 -- | …and one that stands in a name position (MS5 phase 88).
+--
+-- **A splice in a name position supplies a BINDER's name, so a path is refused**
+-- (MS10) — 'operandWord'. @core`λ ${x} : A -> ${x}`@ binds, and the development's
+-- scope has no namespaces for a path to name anything in.
 nameFilling :: Env -> String -> Either FailReason (String, Filling)
-nameFilling e x = (,) x . FillName . Ident <$> operandText e (Ref x)
+nameFilling e x = (,) x . FillName . Ident <$> operandWord e (Ref x)
 
 -- | An unelaborated tree and the place it sits at (§7.2). Shaped like
 -- 'operandText' and 'operandTerm', and phase 17b's reason for existing at all:
@@ -2568,7 +2996,7 @@ regionBits = map piece
 -- cannot print back (§2.6).
 operandIdent :: Env -> Operand -> Either FailReason Ident
 operandIdent e o = do
-  s <- operandText e o
+  s <- operandWord e o
   if isIdentifier s then Right (Ident s) else Left (NotAnIdentifier s)
 
 -- | Which component stopped 'extract'. Purely a translation from
@@ -2746,7 +3174,7 @@ choicePoints m =
 -- | A rule's name as text. 'Thena.Repl' owns display, but a 'Message' is text
 -- by the time it leaves here — the same bargain 'unifyMessage' already struck.
 nameOfRule :: Rule -> String
-nameOfRule r = case ruleName r of GlobalName g -> g
+nameOfRule = nameDotted . ruleName
 
 drainIter :: RuleIter -> [Rule]
 drainIter it = case next it of
@@ -2800,6 +3228,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
         Just (r, it') -> Right
           ( m { development = saved fr
               , exec  = Exec (ruleBody r) (seedFor (globals m) fr r) (demote fr r it' : stk)
+                             (savedPushes fr)
                 -- **@retry@ lowers the floor to the frame it entered** (MS5
                 -- phase 95). 'lineFloor' records where /this line's/ work
                 -- begins, and this is a line that deliberately begins its work
@@ -2819,8 +3248,8 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
           )
       _ -> go (popped + 1) stk
 
-    note i (GlobalName g) popped =
-      "retrying " ++ show i ++ ": " ++ g
+    note i gn popped =
+      "retrying " ++ show i ++ ": " ++ nameDotted gn
         ++ (if popped == 0 then "" else " (" ++ show popped ++ " frame(s) dropped)")
 
 -- | The variable a component binds. What @here@ answers.

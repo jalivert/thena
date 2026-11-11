@@ -125,6 +125,14 @@ data RawItem
     -- ^ @E[x, y]@: a word followed at once by a bracket. **The bracket must be
     -- adjacent** — @E [ x ]@ is four words — and that is what keeps @[@ and
     -- @]@ available to object languages. Inside it, whitespace is allowed.
+  | Literally String
+    -- ^ **text, whatever it resolves to — and nothing a user writes reads as
+    -- one.** A 'Word' is a slot when it names something in scope and a terminal
+    -- when it does not (§4.2), which is right for a block somebody wrote and
+    -- wrong for a generated one that already knows which it means: the
+    -- qualifier in a generated substitution's notation is the class's own name,
+    -- and under @namespace Source@ it read as text while at the top level the
+    -- very same qualifier read as a second name slot.
   deriving (Eq, Show)
 
 data ReadError

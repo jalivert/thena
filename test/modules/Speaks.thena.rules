@@ -1,0 +1,9 @@
+-- **A base that publishes the object language it is written against** (MS11
+-- phase 289, his ruling of 2026-10-30 — `04-taking-terms-apart.thena.rules`
+-- needing `LC`): whoever consults it may name what `Bit` declares.
+rule base speaks where
+
+public import test.modules.Bit
+
+rule bitly :- do
+  say "bit"

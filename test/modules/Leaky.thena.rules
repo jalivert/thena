@@ -1,0 +1,12 @@
+-- **A rule reaches the base a block holds only where the block does** (MS11
+-- phase 301). `inside` is written in the block and may call
+-- `stumbles`; `outside` is written after it and may not, so the file is refused
+-- when it loads rather than at the moment `outside` is run.
+rule base leaky where
+
+consult test.modules.Quiet where
+  rule inside :- do
+    call stumbles
+
+rule outside :- do
+  call stumbles

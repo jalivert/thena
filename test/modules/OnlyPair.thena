@@ -1,0 +1,9 @@
+module test.modules.OnlyPair where
+
+import test.modules.Pair
+
+-- **`Bit` is what `Pair` imports and this file does not**, so `Bit.Bit` is not
+-- in scope here: an import is not transitive until `public import` exists. The
+-- file is a fixture for that refusal — see `Thena.LoadTests`.
+borrowed : Bit.Bit
+borrowed = Bit.off

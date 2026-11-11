@@ -1,0 +1,12 @@
+module test.modules.BareOpen where
+
+import test.modules.Bit
+
+-- **Refused, and `Inherits.thena` is its twin rather than its control.** `Bit`
+-- is imported, so `Bit.off` is in scope and `off` is not. Before MS11 phase 283
+-- it loaded or failed according to whether a file whose top level wrote
+-- `open Bit` had gone in first; since the ruling of 2026-11-06 a file that
+-- imports such a module is refused in just this way too — see
+-- `Thena.LoadTests`.
+b : Bit.Bit
+b = off

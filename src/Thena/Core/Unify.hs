@@ -122,7 +122,7 @@ unify = related Same
 -- after, which is @check@, which subsumes — so the relation is enforced one
 -- instruction later, correctly and with the right variance. Before this,
 -- @unify@ refused where it merely had nothing to solve, and elaboration was
--- strictly weaker than the core it elaborates into: @try-core ⌜ Nat ⌝@ at a
+-- strictly weaker than the core it elaborates into: @try-core core\`Nat\`@ at a
 -- claim of @Type₁@ succeeded and @elaborate Nat@ did not.
 --
 -- **What it does not do is carry the direction past a deferral.** A 'Constraint'

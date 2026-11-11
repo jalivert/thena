@@ -1,4 +1,4 @@
-module Determinacy
+module examples.DeterminacyPatterns
   declared Term
   declared NV
   declared Step

@@ -1,0 +1,8 @@
+-- **What `Kept` did not mark is still exported** (MS11 phase 286): it writes no
+-- `exporting` clause, so `Shown` comes whole.
+module test.modules.SeesKept where
+
+import test.modules.Kept
+
+mine : Shown
+mine = Shown.yes

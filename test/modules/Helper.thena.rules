@@ -1,0 +1,7 @@
+-- **The base another base is written against** (MS11 phase 289): `helped` is a
+-- rule here and nowhere else, so a call to it resolves exactly when this base
+-- is in the pool.
+rule base helper where
+
+rule helped :- do
+  say "helped"

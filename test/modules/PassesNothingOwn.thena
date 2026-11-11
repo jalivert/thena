@@ -1,0 +1,11 @@
+-- **A public import is its own statement, and this file's own list does not
+-- filter it** (MS11 phase 287). It exports nothing of its own and passes
+-- `Guarded` on, so an importer gets `Guarded`'s exports and none of this file's
+-- declarations: a `public import` says what travels, and an `exporting` clause
+-- says which of this file's OWN declarations do.
+module test.modules.PassesNothingOwn exporting ( ) where
+
+public import test.modules.Guarded
+
+ownThing : Bit.Bit
+ownThing = Bit.off

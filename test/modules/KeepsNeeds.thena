@@ -1,0 +1,9 @@
+-- **And the remedy is one line** (MS11 phase 289): `Needs` is satisfied by this
+-- file consulting `Helper` itself, and the file says where it sits.
+module test.modules.KeepsNeeds where
+
+consult test.modules.Helper
+consult test.modules.Needs
+
+do
+  needed

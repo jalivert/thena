@@ -1,0 +1,8 @@
+rule base tooling where
+
+import test.modules.Lang
+
+open A
+
+rule marker :- do
+  say "tooling"

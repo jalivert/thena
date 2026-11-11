@@ -11,6 +11,7 @@ module Thena.Fixtures
   , shadowedBinders
   , guessShadowing
   , trailingLam
+  , trailingPi
   , richTypes
   ) where
 
@@ -140,3 +141,12 @@ trailingLam :: Partial
 trailingLam =
   let (v, _) = fresh 0
    in Trailing (Lam (Ident "A") type0 (close v (Free v)))
+
+-- | The same thing with a Π, which is the case 'Thena.Render.trailing'
+-- forgot (MS10 phase 266). A leading @∀@ run is components exactly as a
+-- leading @λ@ run is, so a trailing Π printed bare re-reads as a quantify
+-- link and a trailing variable — a different development.
+trailingPi :: Partial
+trailingPi =
+  let (v, _) = fresh 0
+   in Trailing (Pi (Ident "A") type0 (close v (Free v)))

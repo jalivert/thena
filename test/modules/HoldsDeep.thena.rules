@@ -1,0 +1,7 @@
+-- **Its holder** (MS11 phase 301): the block pushes `Deep` and `Quiet`
+-- together, which is what makes `Deep`'s own two rules type-check.
+rule base holds-deep where
+
+consult test.modules.Deep where
+  rule go :- do
+    call own

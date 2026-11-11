@@ -1,0 +1,6 @@
+rule base absentee where
+
+import test.modules.Nowhere
+
+rule nothing :- do
+  say "x"

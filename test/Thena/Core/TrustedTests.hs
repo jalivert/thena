@@ -36,7 +36,7 @@ import Thena.Core.Context (Context)
 import Thena.Core.Convert (convert)
 import Thena.Core.Level (Level (..), LevelVar (..))
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..))
+import Thena.Core.Term (Core (..), rootName)
 import Thena.Core.Typing (infer)
 import Thena.Development.Cursor
   ( Cursor
@@ -55,9 +55,10 @@ import Thena.Global.Env
   , GlobalEnv
   , addDefinition
   )
-import Thena.Render (Rendering (..), renderCore)
+import Thena.Render (rendering, renderCore)
 
-import Thena.Declared (eqNat, eqNatCounter)
+import Thena.Declared ( opensIn
+  ,eqNat, eqNatCounter)
 
 -- --------------------------------------------------------------------------
 -- Fixtures
@@ -68,7 +69,7 @@ import Thena.Declared (eqNat, eqNatCounter)
 env :: GlobalEnv
 env =
   addDefinition
-    (GlobalName "Alias")
+    (rootName "Alias")
     MkDefinition
       { definitionLevels = []
       , definitionConstraints = []
@@ -84,7 +85,7 @@ ctx = []
 -- in the fixture, so it stops the suite rather than failing a test about
 -- something else.
 core :: GlobalEnv -> String -> Core
-core e src = case parseCore [] e ctx eqNatCounter src of
+core e src = case parseCore [] e (opensIn e) ctx eqNatCounter src of
   Left err     -> error ("fixture does not parse: " ++ show err)
   Right (t, _) -> t
 
@@ -224,8 +225,8 @@ printing =
     -- still load-bearing** (his observation, 2026-10-05). A printer showing the
     -- claim alone would hide it.
     testCase "all three operands, in the node's own order" $
-      renderCore (Rendering [] eqNatCounter) ctx (trustedRefl eqZeroOne eqZeroZero)
-        @?= "trusted (Eq {0} Nat zero (succ zero)) (Eq {0} Nat zero zero) (refl {0} Nat zero)"
+      renderCore (rendering [] eqNatCounter) ctx (trustedRefl eqZeroOne eqZeroZero)
+        @?= "trusted (Eq.Eq {0} Nat.Nat Nat.zero (Nat.succ Nat.zero)) (Eq.Eq {0} Nat.Nat Nat.zero Nat.zero) (Eq.refl {0} Nat.Nat Nat.zero)"
   ]
 
 -- --------------------------------------------------------------------------

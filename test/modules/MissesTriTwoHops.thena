@@ -1,0 +1,9 @@
+-- **A narrowing survives a second hop** (MS11 phase 306): the clause was
+-- written one file further away than `MissesTriTravelled.thena`'s and `Tri` is
+-- still refused.
+module test.modules.MissesTriTwoHops where
+
+import test.modules.PassesPasser
+
+mine : Tri.Tri
+mine = Tri.hi

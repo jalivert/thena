@@ -1,0 +1,10 @@
+-- **And the names the base handed on reach the block and stop** (MS11 phase
+-- 300): `Lends` says `public import test.modules.Lang`, so a consumer may
+-- write `LC` — and a consumer whose line states a block may write it there.
+rule base scoped-borrows where
+
+consult test.modules.Lends where
+  open A
+
+  rule describe LC[app]`( ${f} ${a} )` :- do
+    say "an application"

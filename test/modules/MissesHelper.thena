@@ -1,0 +1,8 @@
+-- **The control for `GetsHelper`** (MS11 phase 289): `Needs` states what it is
+-- written against with a plain `consult`, so consulting it alone is refused.
+module test.modules.MissesHelper where
+
+consult test.modules.Needs
+
+do
+  needed

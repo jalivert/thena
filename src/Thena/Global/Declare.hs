@@ -46,6 +46,7 @@ import Thena.Core.Term
   , GlobalName
   , Ident
   , close
+  , declarationWord
   , levelMetasIn
   , fresh
   , instantiate
@@ -346,7 +347,7 @@ universes env n0 d = do
 -- @P (vnil {0} A) …@ — and the kernel refuses it as soon as anyone
 -- eliminates above @Type₀@. A family whose index telescope is
 -- level-polymorphic was unusable, in silence, and
--- @examples\/vector-families.thena@ has carried one since MS9 phase 216.
+-- @examples\/VectorFamilies.thena@ has carried one since MS9 phase 216.
 --
 -- Checking each index at the type the telescope declares for it is what relates
 -- the two metas, and what it owes goes where 'argumentLevels'' does —
@@ -521,12 +522,37 @@ checkNames env d =
     : caseName (inductiveName d)
     : map constructorName (inductiveConstructors d)
     )
+    >> alias
   where
     go _ [] = Right ()
     go seen (g : gs)
       | g `elem` seen    = Left (RepeatedName g)
       | isDeclared g env = Left (AlreadyDeclared g)
       | otherwise        = go (g : seen) gs
+
+    -- | __The word the declaration takes, which is not one of the names above.__
+    --
+    -- **HIS ruling of 2026-11-10, and the rule is about reachability**: a name
+    -- that would be born unreachable by any spelling is refused, and a name
+    -- that merely makes an older one harder to reach is allowed and announced.
+    -- Every name in the list above lands inside the declaration's own
+    -- namespace, so none of them can take a word — but the alias
+    -- 'Thena.Core.Term.declarationWord' names does, and it is the spelling the
+    -- author actually writes.
+    --
+    -- **Nothing in the environment holds the alias**, so the check is a probe
+    -- of what the word already means rather than a clash between two entries.
+    -- When a definition or a theorem is installed at exactly that name, the
+    -- declaration's own type former could be reached only by its full path and
+    -- by nothing else: an @open@ of the namespace cannot shorten it, because an
+    -- @open@ is consulted only after the walk's rungs have failed and the exact
+    -- name answers on the first rung. That is the unreachable name the ruling
+    -- refuses, and refusing it here covers every door that declares a datatype
+    -- — a @data@ line, a surface block, a @language@ block's own former, a
+    -- judgment and a lookup relation — because 'declare' is the one entry.
+    alias = case declarationWord (inductiveName d) of
+      Just w | isDeclared w env -> Left (AlreadyDeclared w)
+      _                         -> Right ()
 
 -- | One constructor: it must target the family at the right number of indices,
 -- and every argument must be strictly positive.
@@ -774,15 +800,53 @@ peelAll = peelToUniverse
 targetIndices
   :: GlobalName -> Context -> Int -> String -> Core
   -> Either ResolveError [Core]
-targetIndices dn params want cn t = case spine t of
-  (Global g _, as)
-    | g == dn ->
-        if length as /= length params + want
-          then Left (TargetArgumentCount cn (length params + want) (length as))
-          else passed params (take (length params) as)
-                 >> Right (drop (length params) as)
-  _ -> Left (TargetIsNotTheDatatype cn)
+targetIndices dn params want cn t = case applied t of
+  Nothing -> Left (TargetIsNotTheDatatype cn (headName t) dn)
+  Just as
+    | length as /= length params + want ->
+        Left (TargetArgumentCount cn (length params + want) (length as))
+    | otherwise ->
+        passed params (take (length params) as)
+          >> Right (drop (length params) as)
   where
+    -- | The datatype's arguments, in either of the two shapes a target has.
+    --
+    -- **A saturated former is the same target as a spine of applications**, and
+    -- reading only the spine is the 'Canonical' trap: the elaborated path hands
+    -- back @Canonical dn [] []@ whenever @dn@ is /already declared/, because
+    -- resolution answers a declared datatype with its saturated former, where an
+    -- undeclared one can only be @Global dn@ waiting for its arguments.
+    --
+    -- **What that cost was a message blaming the wrong thing**: a
+    -- surface module redeclaring a datatype the session has — @data Unit@ over
+    -- the prelude's, or the same @data@ twice in one file — failed here, so the
+    -- user was told /unit's target is not the datatype applied to its
+    -- parameters/ when the truth is that the name is taken. Reading both shapes
+    -- lets the definition be built and 'checkNames' refuse it for the reason it
+    -- is refused. Nothing legal reaches the second shape, since a constructor's
+    -- target names the datatype being declared and that name is free.
+    --
+    -- **Not 'Thena.Language.Build.spineOf', which is the general answer to
+    -- /what datatype is this/ and the one to reach for elsewhere.** It answers
+    -- only where there are no level arguments, which is right for an
+    -- object-language reading and wrong here: this check has ignored a target's
+    -- levels since it was written, and a datatype whose declared level
+    -- generalised carries them.
+    applied u = case spine u of
+      (Global g _, as)        | g == dn -> Just as
+      (Canonical g _ as, [])  | g == dn -> Just as
+      _                                 -> Nothing
+
+    -- | The name the target does produce, where it produces a name at all.
+    --
+    -- **It is the shadowing case that makes this worth saying** (MS10 phase
+    -- 264): the head is a perfectly good global whose word is the one the
+    -- author wrote, so the refusal has to name it or it names nothing.
+    headName u = case fst (spine u) of
+      Global g _      -> Just g
+      Canonical g _ _ -> Just g
+      _               -> Nothing
+
     passed [] _ = Right ()
     passed (p : more) (a : as)
       | a == Free (entryVar p) = passed more as

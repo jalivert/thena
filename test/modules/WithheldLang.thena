@@ -1,0 +1,15 @@
+-- **A module that withholds its language — MS11 phase 297, `~2kc72`.** The
+-- header exports `keep` and nothing else, so `LC` and its constructors are this
+-- file's. `TakesLang.thena.rules`, `NamesLang.thena` and `WritesLang.thena` are
+-- what an importer can and cannot do with that.
+module test.modules.WithheldLang exporting ( keep ) where
+
+x : Token String
+x = /[a-z]+/
+
+language LC, M, N where
+  var : x as occurrence -> x
+  app                   -> ( M N )
+
+keep : Type₁
+keep = Type₀

@@ -57,15 +57,19 @@ header =
   , "language Ty, T, S where"
   , "  base  -> ι"
   , "  arrow -> ( T -> S )"
+  , "open Ty"
   , ""
   , "language LC, M, N, E where"
   , "  var : x as occurrence -> x"
   , "  abs : x as binder     -> ( λ x : T . E[x] )"
   , "  app                   -> ( M N )"
+  , "open LC"
   , ""
   , "context Ctx, Γ where"
   , "  empty  -> ·"
   , "  extend -> Γ , x : T"
+  , "open Ctx"
+  , "open extend-in"
   , ""
   ]
 
@@ -97,6 +101,8 @@ typing =
   , "          --------------------------------"
   , "          Γ ⊢ ( M N ) : T"
   , ""
+  , "open typing"
+  , ""
   ]
 
 valueAndStep :: [String]
@@ -116,6 +122,9 @@ valueAndStep =
   , "           --------------------"
   , "           ( M N ) --> ( M' N )"
   , ""
+  , "open value"
+  , "open step"
+  , ""
   ]
 
 -- | Load a module and answer with the session, or the refusal's last line.
@@ -129,15 +138,30 @@ load body = do
 loaded :: [String] -> IO Session
 loaded body = load body >>= either assertFailure pure
 
+-- | A printed constructor from its quantifier on, with a closing brace and the
+-- spaces before it dropped: what two rules of one judgment share when they
+-- differ only in their names. **Not a lexical convenience** — it is how a test
+-- says /these two spellings elaborate to the same thing/ without pinning the
+-- whole line, which `:show`'s own tests already do.
+quantified :: String -> String
+quantified = reverse . dropWhile (`elem` " }") . reverse . dropWhile (/= '∀')
+
 said :: Session -> String -> [String]
 said s line = let (s', r) = command s line in renderResponse s' r
 
 -- | The names a constructor's arguments are bound under. @:show@ prints an
 -- argument nothing depends on as an arrow, so a premise's name is seen here.
+-- | The argument names of one constructor of a judgment's relation.
+--
+-- **Both names carry the relation's namespace** (MS10 phase 243): a judgment
+-- @j@ declares @j.j@ with constructors @j.R@, so asking at the root finds no
+-- inductive at all and the answer is the empty list — which reads as a
+-- constructor with no arguments rather than as a lookup that missed.
 argumentNames :: Session -> String -> String -> [String]
 argumentNames s d c =
-  [ n | Just ind <- [lookupInductive (GlobalName d) (globals (machineOf s))]
-      , con <- inductiveConstructors ind, constructorName con == GlobalName c
+  [ n | Just ind <- [lookupInductive (GlobalName [d] d) (globals (machineOf s))]
+      , con <- inductiveConstructors ind
+      , constructorName con == GlobalName [d] c
       , Ident n <- map entryIdent (constructorArguments con) ]
 
 refusal :: String -> [String] -> String -> TestTree
@@ -219,7 +243,7 @@ generated =
         ]
   , testCase "a rule with no premises and no metavariable of its own" $ do
       s <- loaded (header ++ ["judgment okTy = T ok where", "", "  U:  ---", "      ι ok", ""])
-      said s ":show okTy" @?= ["data okTy : Ty -> Type₀ where", "  { U : okTy`ι ok` }"]
+      said s ":show okTy" @?= ["data okTy : Ty -> Type₀ where", "  { okTy.U : okTy`ι ok` }"]
   , testCase "suffixed metavariables are further ones of the same sort" $ do
       s <- loaded (header ++
         [ "judgment alike = T ~ S where", ""
@@ -228,7 +252,7 @@ generated =
         , "       T ~ T_r'", "" ])
       said s ":show alike" @?=
         [ "data alike : Ty -> Ty -> Type₀ where"
-        , "  { Tr : ∀ (T : Ty) (T' : Ty) (T₁ : Ty) (T2 : Ty) (T_1 : Ty) (T_r' : Ty) -> alike`${T} ~ ${T'}` -> alike`${T'} ~ ${T₁}` -> alike`${T₁} ~ ${T2}` -> alike`${T2} ~ ${T_1}` -> alike`${T_1} ~ ${T_r'}` -> alike`${T} ~ ${T_r'}` }" ]
+        , "  { alike.Tr : ∀ (T : Ty) (T' : Ty) (T₁ : Ty) (T2 : Ty) (T_1 : Ty) (T_r' : Ty) -> alike`${T} ~ ${T'}` -> alike`${T'} ~ ${T₁}` -> alike`${T₁} ~ ${T2}` -> alike`${T2} ~ ${T_1}` -> alike`${T_1} ~ ${T_r'}` -> alike`${T} ~ ${T_r'}` }" ]
     -- §6.1: the language's own name is one of its metavariables, and a binder
     -- named like the type it ranges over would shadow it.
   , testCase "a metavariable named like a type is primed, away from the others too" $ do
@@ -239,20 +263,20 @@ generated =
         , "      ( LC LC' ) twice", "" ])
       said s ":show again" @?=
         [ "data again : LC -> Type₀ where"
-        , "  { A : ∀ (LC'' : LC) (LC' : LC) -> again`${LC''} twice` -> again`${LC'} twice` -> again`( ${LC''} ${LC'} ) twice` }" ]
+        , "  { again.A : ∀ (LC'' : LC) (LC' : LC) -> again`${LC''} twice` -> again`${LC'} twice` -> again`( ${LC''} ${LC'} ) twice` }" ]
   , testCase "the notation is installed: a judgment literal is a type, and :parse reads one" $ do
       s <- loaded (header ++ typing)
       said s ":infer typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`"
         @?= ["typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )` : Type₀"]
       said s ":parse typing · ⊢ x : ι"
-        @?= ["typing(empty, var(x), base)"]
+        @?= ["typing.typing(Ctx.empty, LC.var(x), Ty.base)"]
   ]
 
 premises :: [TestTree]
 premises =
   [ testCase "premises separated by whitespace alone are told apart by parsing" $ do
       s <- loaded (header ++ typing)
-      -- T-app's two premises are one line; the constructor has both.
+      -- typing.T-app's two premises are one line; the constructor has both.
       said s ":show typing" !! 3
         @?= "  ; T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC) -> typing`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typing`${Γ} ⊢ ${N} : ${S}` -> typing`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
   , testCase "one premise per line, and one continued onto the next" $ do
@@ -264,7 +288,7 @@ premises =
         , "          ---------------"
         , "          Γ ⊢ ( M N ) : T", "" ])
       said s ":show typed" !! 1
-        @?= "  { T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC) -> typed`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typed`${Γ} ⊢ ${N} : ${S}` -> typed`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
+        @?= "  { typed.T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC) -> typed`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typed`${Γ} ⊢ ${N} : ${S}` -> typed`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
   , testCase "a named premise binds its name; an unnamed one is d‹k›" $ do
       s <- loaded (header ++ typing ++
         [ "judgment twice = Γ ⊢ M :: T where", ""
@@ -273,7 +297,7 @@ premises =
         , "      Γ ⊢ M :: T", "" ])
       said s ":show twice" @?=
         [ "data twice : Ctx -> LC -> Ty -> Type₀ where"
-        , "  { B : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> twice`${Γ} ⊢ ${M} :: ${T}` }" ]
+        , "  { twice.B : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> twice`${Γ} ⊢ ${M} :: ${T}` }" ]
       argumentNames s "twice" "B" @?= ["Γ", "M", "T", "left", "d2"]
     -- **A NAMED PREMISE IS IN SCOPE FOR EVERY PREMISE AFTER IT** (MS8 phase 172,
     -- across lines; phase 173 within one. HIS
@@ -294,7 +318,7 @@ premises =
       -- whole of the phase: the fourth argument is the derivation @p1@, and the
       -- fifth is a @Valid@ about that very derivation.
       said s ":show check" !! 1
-        @?= "  { CheckRule : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> check`${Γ} ⊢ ${M} ⇐ ${T}` }"
+        @?= "  { check.CheckRule : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> check`${Γ} ⊢ ${M} ⇐ ${T}` }"
       argumentNames s "check" "CheckRule" @?= ["Γ", "M", "T", "p1", "p2"]
     -- **The conclusion is parsed with every name in scope too**, and a premise
     -- at a bare type is where that is reachable: a judgment's own statement has
@@ -306,7 +330,7 @@ premises =
         , "          ------------"
         , "          Γ ⊩ m : T", "" ])
       said s ":show fits" !! 1
-        @?= "  { F-any : ∀ (Γ : Ctx) (T : Ty) (m : LC) -> fits`${Γ} ⊩ ${m} : ${T}` }"
+        @?= "  { fits.F-any : ∀ (Γ : Ctx) (T : Ty) (m : LC) -> fits`${Γ} ⊩ ${m} : ${T}` }"
       -- @M@ is not quantified: the conclusion's term slot is the named premise,
       -- so there is no metavariable there to collect.
       argumentNames s "fits" "F-any" @?= ["Γ", "T", "m"]
@@ -322,7 +346,7 @@ premises =
         , "      --------------------------"
         , "      Γ ⊢ M ⇚ T", "" ])
       said s ":show oneline" !! 1
-        @?= "  { S : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> oneline`${Γ} ⊢ ${M} ⇚ ${T}` }"
+        @?= "  { oneline.S : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> oneline`${Γ} ⊢ ${M} ⇚ ${T}` }"
       argumentNames s "oneline" "S" @?= ["Γ", "M", "T", "p1", "p2"]
     -- **@:judgment@ shows a rule back in the form it was written in** (MS8
     -- phase 174). A @judgment@ block's rules go in above a bar and nothing ever
@@ -356,7 +380,7 @@ premises =
       s <- loaded (header ++ typing ++ valid)
       said s ":judgment Valid" @?=
         [ "  d : G ⊢ M : T"
-        , "  ---------------------- validAny"
+        , "  ---------------------- Valid.validAny"
         , "  ⊢ G , M , T by d valid" ]
     -- x is a metavariable, so `x : T ∈ Γ` is never a premise named x.
   , testCase "a lookup premise is not read as a premise named by its metavariable" $ do
@@ -377,7 +401,7 @@ premises =
         , "           Γ ⊩ M : T", "" ])
       said s ":show odd" @?=
         [ "data odd : Ctx -> LC -> Ty -> Type₀ where"
-        , "  { O-term : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> LC -> typing`${Γ} ⊢ ${M} : ${T}` -> odd`${Γ} ⊩ ${M} : ${T}` }" ]
+        , "  { odd.O-term : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> LC -> typing`${Γ} ⊢ ${M} : ${T}` -> odd`${Γ} ⊩ ${M} : ${T}` }" ]
       -- The type mentions no metavariable, so it adds nothing to the implicit
       -- ∀ and the argument it binds is an unnamed premise like any other.
       argumentNames s "odd" "O-term" @?= ["Γ", "M", "T", "d1", "d2"]
@@ -394,7 +418,7 @@ premises =
         , "  B-any:  𝕌₀    Γ ⊢ M : T"
         , "          -------------------"
         , "          Γ ⊫ M : T", "" ])
-      "refused: the argument d1 of B-any lives in Type₁, which the datatype's own Type₀ does not contain"
+      "refused: the argument d1 of big.B-any lives in Type₁, which the datatype's own Type₀ does not contain"
   , refusal "a premise named like a metavariable"
       (typing ++ ["judgment bad = M bad where", "", "  B:  M' : · ⊢ M : ι", "      ---", "      M bad", ""])
       "refused: in the judgment bad, rule B: a premise may not be named M', which is a metavariable"
@@ -406,27 +430,55 @@ premises =
 substitution :: [TestTree]
 substitution =
   [ -- **The elaborated constructor is unchanged by MS8 phase 159 and the
-    -- PRINTING is not.** @E[x->N]@ still elaborates to @LC-subst-x E x N@, with
+    -- PRINTING is not.** @E[x->N]@ still elaborates to @LC.subst.x E x N@, with
     -- the same implicit quantification in the same order; what moved is that the
     -- bracket form is now a generated @notation@ production of @LC@ (§4.8), so
     -- the printer spells the stuck application instead of splicing it. Before
-    -- 159 the tail of this line read @${LC-subst-x E x N}@.
-    testCase "E[x->N] is LC-subst-x" $ do
+    -- 159 the tail of this line read @${LC.subst.x E x N}@.
+    testCase "E[x->N] is LC.subst.x" $ do
       s <- loaded (header ++ valueAndStep)
       said s ":show step" !! 1
         @?= "  { E-beta : ∀ (N : LC) (x : String) (T : Ty) (E : LC) -> value`${N} value` -> step`( ( λ ${x} : ${T} . ${E} ) ${N} ) --> ${E} [ ${x} -> ${N} ]`"
-  , testCase "a list is simultaneous, LC-subst-all, and chained brackets are sequential" $ do
+  , testCase "a list is simultaneous, LC.subst-*, and chained brackets are sequential" $ do
       s <- loaded (header ++
         [ "judgment sub = M ~> N where", ""
         , "  S:  ---"
         , "      M ~> E[x->M, x'->N][x1->N']", "" ])
       said s ":show sub" @?=
         [ "data sub : LC -> LC -> Type₀ where"
-          -- The outer bracket prints in the notation; the inner @L-subst-all@
+          -- The outer bracket prints in the notation; the inner @L.subst-*@
           -- is spliced, because a comma list stays rule-level sugar (§6.3) and
           -- has no production to print back as.
-        , "  { S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${LC-subst-all {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))} [ ${x1} -> ${N'} ]` }" ]
+        , "  { sub.S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${subst-* {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))} [ ${x1} -> ${N'} ]` }" ]
     -- §6.3's CHECK: the left of -> is a binder-sorted name.
+  , -- **A WRITTEN SUBSTITUTION MAY NAME ITS CLASS — HIS RULING OF 2026-11-10**,
+    -- in the bracket and in a comma list's pair alike: @E[x: x->N]@ and
+    -- @E[x: x->M, x: x'->N]@, the qualifier being the class's whole name. It is
+    -- the only spelling a language reaching two classes of one word has, since
+    -- neither bare form says which class it is for. **Here there is one class,
+    -- so the two spellings must mean exactly the same thing** — the qualifier
+    -- picks a class, it does not change what is elaborated — and the printer
+    -- takes the bare production, so nothing printed before prints differently.
+    testCase "a bracket may name its class, and means the same as the bare one" $ do
+      s <- loaded (header ++
+        [ "judgment one = M ~> N where", ""
+        , "  Bare:  ---------------"
+        , "         M ~> E[x->N]", ""
+        , "  Qual:  ---------------"
+        , "         M ~> E[x: x->N]", "" ])
+      case drop 1 (said s ":show one") of
+        [bare, qual] -> quantified qual @?= quantified bare
+        other -> assertFailure (unlines ("not two constructors:" : other))
+  , testCase "and so may each pair of a comma list" $ do
+      s <- loaded (header ++
+        [ "judgment two = M ~> N where", ""
+        , "  Bare:  -------------------------"
+        , "         M ~> E[x->M, x'->N]", ""
+        , "  Qual:  -------------------------"
+        , "         M ~> E[x: x->M, x: x'->N]", "" ])
+      case drop 1 (said s ":show two") of
+        [bare, qual] -> quantified qual @?= quantified bare
+        other -> assertFailure (unlines ("not two constructors:" : other))
   , refusal "the left of -> is not a name"
       ["judgment sub = M ~> N where", "", "  S:  ---", "      M ~> E[M->N]", ""]
       "refused: in the judgment sub, rule S: its conclusion `M ~> E[M->N]` is not a sub judgment: unexpected 'M' at character 8, expecting x"
@@ -443,7 +495,7 @@ annotated =
         , "      Γ ⊢ M :: T", "" ])
       said s ":show ann" @?=
         [ "data ann : Ctx -> LC -> Ty -> Type₀ where"
-        , "  { A : ∀ (T : Ty) (M : LC) (Γ : Ctx) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> ann`${Γ} ⊢ ${M} :: ${T}` }" ]
+        , "  { ann.A : ∀ (T : Ty) (M : LC) (Γ : Ctx) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> ann`${Γ} ⊢ ${M} :: ${T}` }" ]
       argumentNames s "ann" "A" @?= ["T", "M", "Γ", "d", "d1"]
   , refusal "a name quantified twice — a rule's ∀ lists its metavariables, it does not nest"
       (typing ++
@@ -505,9 +557,15 @@ refused =
   , refusal "a notation that binds"
       ["judgment bad = E[x] ok where", "", "  B:  ---", "      E ok", ""]
       "refused: in the judgment bad, production bad: E is written as a binding form, and a judgment's notation binds nothing"
-  , refusal "a rule named like something declared"
-      ["judgment bad = M ok where", "", "  var:  ---", "        M ok", ""]
-      "refused: bad's constructor var is already declared"
+    -- **A RULE MAY NOW TAKE A WORD ANOTHER BLOCK'S PRODUCTION HAS** — this was
+    -- refused until MS10 phase 248 put a production in its block's namespace:
+    -- @LC@'s is @LC.var@ and this rule installs @bad.var@, so the clash the
+    -- refusal was pinned on cannot be reached. Two languages both calling a
+    -- production @var@ is what the milestone is for.
+  , testCase "a rule may take a word another block's production has" $ do
+      r <- load (header ++
+             ["judgment bad = M ok where", "", "  var:  ---", "        M ok", ""])
+      either assertFailure (const (pure ())) r
   , refusal "a judgment named like something declared"
       ["judgment LC = M ok where", "", "  B:  ---", "      M ok", ""]
       "refused: LC is already declared"

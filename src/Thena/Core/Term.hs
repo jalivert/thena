@@ -18,6 +18,31 @@ module Thena.Core.Term
   , fresh
   , Ident (..)
   , GlobalName (..)
+  , rootName
+  , nameDotted
+  , declarationNamespace
+  , inDeclarationOf
+  , inLemmataOf
+  , lemmataStep
+  , inFamilyOf
+  , declarationOf
+  , declarationNamed
+  , declarationWord
+  , globalUnder
+  , InScope (..)
+  , concealedHere
+  , revealing
+  , innermostOf
+  , rootScope
+  , openingOnly
+  , Opened (..)
+  , openedWhole
+  , openedWord
+  , shortestEnding
+  , Spelling (..)
+  , wholePath
+  , spelledIn
+  , nameFromText
 
     -- * Terms
   , Core (..)
@@ -41,7 +66,7 @@ module Thena.Core.Term
   , levelMetasIn
   ) where
 
-import Data.List (nub)
+import Data.List (intercalate, nub)
 
 import Thena.Core.Level (Level (..), LevelVar, metasIn, substLevel)
 
@@ -68,13 +93,464 @@ fresh n = (Var n, n + 1)
 newtype Ident = Ident String
   deriving (Eq, Ord, Show)
 
--- | A name in the global environment (§3.6, decided 2026-08-11).
+-- | A name in the global environment (§3.6, decided 2026-08-11; given a path
+-- 2026-10-30, MS10's module system).
 --
--- Flat. No namespace tag — the node position already says which kind of thing is
+-- __The steps of a namespace path, then the base word.__ @Nat.elim@ is
+-- @GlobalName ["Nat"] "elim"@, and a name in no namespace has no steps — which
+-- is every name the system had before MS10, and what 'rootName' makes.
+--
+-- No namespace /tag/ — the node position already says which kind of thing is
 -- being named, so a tag would be data derivable from its own context and able to
--- disagree with it. One namespace, shared with generated names.
-newtype GlobalName = GlobalName String
+-- disagree with it. One namespace, shared with generated names. A path is not a
+-- tag: it says where a name lives, not what kind of thing it names, so the 2026-08-11
+-- ruling stands except for the word "flat" (his ruling of 2026-10-29).
+--
+-- __The word is unrestricted; only the path has structure.__ @‹x›@ and
+-- @", do block 2"@ are words containing brackets and spaces, so nothing may
+-- assume a name is lexable. 'nameDotted' is therefore a printed form and not
+-- always something that can be typed back.
+data GlobalName = GlobalName
+  { nameSteps :: [String]  -- ^ the namespace path, outermost first; empty at the root
+  , nameWord  :: String    -- ^ the base word, unrestricted
+  }
   deriving (Eq, Ord, Show)
+
+-- | A name in no namespace — what every global name was before MS10.
+rootName :: String -> GlobalName
+rootName = GlobalName []
+
+-- | The full path, dotted: @Nat.elim@, and @elim@ for a name at the root.
+--
+-- **This is the whole name and not what a user is shown.** The printer's policy
+-- (his ruling of 2026-10-30) is to print the shortest ending of the path that
+-- re-resolves to the same name in the scope being printed from, so this is what
+-- that policy falls back to and what a name with nothing open prints as.
+nameDotted :: GlobalName -> String
+nameDotted (GlobalName ps w) = concatMap (++ ".") ps ++ w
+
+-- | The namespace a declaration of this name opens.
+--
+-- __The declaration's own steps, because the declaration lives inside its own
+-- namespace__ (MS10 phase 248): a datatype is @Nat.Nat@, so the namespace it
+-- opens is @["Nat"]@ and its equipment is @Nat.elim@, @Nat.Below@ and so on.
+-- **This is the line that moved the constructors in** — not the twelve sites
+-- that mint a name, which all go through 'inDeclarationOf' and said nothing
+-- about placement. Before phase 248 a datatype was @Nat@ at the root and this
+-- appended its word.
+declarationNamespace :: GlobalName -> [String]
+declarationNamespace = nameSteps
+
+-- | A name for @word@ in the namespace @d@\'s declaration opens.
+inDeclarationOf :: GlobalName -> String -> GlobalName
+inDeclarationOf d word = GlobalName (declarationNamespace d) word
+
+-- | The step a datatype\'s generated relations and proofs live under.
+--
+-- __His ruling of 2026-11-01.__ A datatype\'s namespace holds what the user
+-- wrote plus the eliminator pair; everything the system /derives/ sits one step
+-- deeper, so the two levels can never answer the same word. Before this,
+-- @data Below@ was refused — the datatype wanted @Below.Below@ and so did its
+-- own generated structural order — and the word @Below@ was ambiguous six ways
+-- in a bare session, the prelude\'s datatypes having each put one in scope.
+lemmataStep :: String
+lemmataStep = "lemmata"
+
+-- | A name for @word@ among @d@\'s generated lemmata: @Nat.lemmata.Below@.
+--
+-- **Not 'inDeclarationOf'** — that is for what the declaration itself names,
+-- which is the datatype, its constructors, @elim@ and @case@. A word minted
+-- here is one no user wrote, so it is reached by @open Nat.lemmata@ rather than
+-- competing with their own names.
+inLemmataOf :: GlobalName -> String -> GlobalName
+inLemmataOf d word = GlobalName (declarationNamespace d ++ [lemmataStep]) word
+
+-- | A name for a generated family member, with the class it is /for/ spelled
+-- as a path inside the family's step: @LC.subst.Source.x@.
+--
+-- __His ruling of 2026-11-10.__ A generated substitution's name has to mention
+-- the token class it substitutes, and a class is a /parameter/ of that function
+-- and not its owner — so the class cannot be a step of the path the way
+-- 'inDeclarationOf' spells ownership. It used to be glued into the word,
+-- @LC.subst-x@, and a word may hold no dot (his ruling of 2026-10-30), so the
+-- class's path was dropped there and nowhere else: two classes of one word then
+-- collapsed onto one name and the grammar was refused.
+--
+-- __The family's own word becomes a step and the class's whole name goes
+-- inside__, which is the shape 'inLemmataOf' already uses for what a datatype
+-- derives: @subst@ is a namespace holding one entry per class reached, and the
+-- entry's path is the class's own. Two classes both written @x@ in two
+-- namespaces land on @LC.subst.A.x@ and @LC.subst.B.x@, so nothing collides and
+-- nothing is refused.
+--
+-- **The simultaneous substitution is not one of these** — it names no class, so
+-- it stays a word beside the namespace through 'inDeclarationOf'. A path step
+-- must begin a name, and the character that makes that word unforgeable cannot.
+inFamilyOf :: GlobalName -> String -> GlobalName -> GlobalName
+inFamilyOf d step cls =
+  GlobalName (declarationNamespace d ++ [step] ++ nameSteps cls) (nameWord cls)
+
+-- | A name as a user writes it, split on the reserved dot: @Nat.elim@ is
+-- @GlobalName ["Nat"] "elim"@, and a word with no dot comes back rooted.
+--
+-- __For text that has not been through the lexer, which is a REPL command's
+-- argument and nothing else.__ Every other name in the system arrives as the
+-- pieces the lexer made — @.@ is reserved, so @Nat.elim@ in a /term/ is three
+-- tokens before anything sees it. A command's argument is the one name taken
+-- from a raw line, and @:show Nat.elim@ has to work, so the split happens here
+-- rather than each command inventing it.
+--
+-- **It is not a check**: a word the lexer would refuse comes back as a word, and
+-- the lookup that follows is what reports it. @nameDotted@ is the inverse where
+-- the word holds no dot of its own, which a generated name's does not.
+nameFromText :: String -> GlobalName
+nameFromText t = case reverse (steps t) of
+  w : rs -> GlobalName (reverse rs) w
+  []     -> rootName t
+  where
+    steps u = case break (== '.') u of
+      (a, '.' : b) -> a : steps b
+      (a, _)       -> [a]
+
+-- | 'inDeclarationOf' backwards: whose declaration's namespace is this name in?
+--
+-- @declarationOf (GlobalName ["Nat"] "elim")@ is @Just (GlobalName ["Nat"] "Nat")@,
+-- and a name at the root is in nobody's, so 'Nothing'. **The last step names the
+-- declaration** (MS10 phase 248), because a declaration's word is the step it
+-- contributed.
+--
+-- __It is what replaces reading a generated name's spelling.__ Recovering the
+-- datatype from @elimNat@ meant stripping the four characters @elim@ off the
+-- front and hoping the rest named one, which is a test on how a name is spelled
+-- rather than on what it is; the path says it outright. The word is still
+-- compared — a name is @elim@ or it is not — but that is one equality against a
+-- fixed word, not arithmetic on a string the user may also have written.
+declarationOf :: GlobalName -> Maybe GlobalName
+declarationOf (GlobalName ps _) = case reverse ps of
+  []    -> Nothing
+  w : _ -> Just (GlobalName ps w)
+
+-- | The declaration a written short name denotes: @Nat@ is @Nat.Nat@.
+--
+-- __The resolver-level short name a declaration mints__ (HIS ruling,
+-- 2026-10-29; MS10 phase 248). A @data Nat@ declaration puts everything it
+-- produces inside the namespace @Nat@, **the type among them**, so the one name
+-- it adds to the enclosing scope is the namespace — and @Nat@ written in a
+-- signature is this.
+--
+-- **It is a resolution fact and not a definition.** Nothing enters the
+-- environment, so δ has nothing to unfold and no stored term can carry the
+-- short name instead of the real one: a 'Core' term says @Nat.Nat@ and always
+-- did say the real name.
+--
+-- **And it is derived rather than recorded**, which is the same argument that
+-- kept a namespace table out of 'Thena.Global.Env' (HIS ruling, 2026-10-30): a
+-- table of aliases would hold a second copy of what the environment's keys
+-- already say and could disagree with them. The two sites that need it are
+-- resolution, which probes it, and 'Thena.Driver.datatypeProgram', which mints
+-- the name it points at — one function, so they cannot drift apart.
+declarationNamed :: GlobalName -> GlobalName
+declarationNamed (GlobalName ps w) = GlobalName (ps ++ [w]) w
+
+-- | __The word a declaration takes in the namespace that holds it.__
+--
+-- 'declarationNamed' backwards: @Foo.Foo@ is what a written @Foo@ reaches, so
+-- @declarationWord (GlobalName ["Foo"] "Foo")@ is @Just (GlobalName [] "Foo")@.
+-- A name whose last step is not its own word is nobody's alias and answers
+-- 'Nothing' — only a declaration mints one, which is why a class, a generated
+-- substitution function and a theorem have none.
+--
+-- __It is the one name a declaration takes and does not install__ (MS11 phase
+-- 305, HIS ruling of 2026-11-10). The alias is a resolution fact, so nothing in
+-- the environment holds it, and a door that asks the environment what the
+-- declaration took sees every name but this one. Both doors that care ask here:
+-- 'Thena.Global.Declare.checkNames' refuses a declaration whose alias is
+-- already somebody's name, and 'Thena.Driver.shadowings' announces the word
+-- when it takes one that was reachable.
+declarationWord :: GlobalName -> Maybe GlobalName
+declarationWord (GlobalName ps w) = case reverse ps of
+  s : rest | s == w -> Just (GlobalName (reverse rest) w)
+  _                 -> Nothing
+
+-- | __Where a written name is looked up from.__
+--
+-- **Two lists and they are not the same kind of thing** (MS10 phase 254).
+-- 'scopeWithin' is ordered and a nearer rung wins outright; 'scopeOpens' is a
+-- set, and two of them answering one written word is a refusal rather than a
+-- choice — his ruling of 2026-10-30.
+--
+-- **One record rather than two parameters**, for the reason
+-- 'Thena.Syntax.Resolve.Globals' already gives about the opens: a caller saying
+-- what is in scope says it in full, instead of every door having to remember a
+-- second argument.
+data InScope = InScope
+  { scopeWithin :: [[String]]
+    -- ^ the namespaces this point is inside, **innermost first** — what
+    -- @namespace X where { … }@ pushes for its declarations
+  , scopeOpens  :: [Opened]
+    -- ^ the namespaces an @open@ has brought into view, latest first
+  , scopeConcealed :: [[GlobalName]]
+    -- ^ __what the environment holds here and a written name may not reach__
+    -- (MS11 phase 282, @~xdt8c@, his ruling of 2026-11-05): a module resolves
+    -- its names against its own imports, its own declarations and the prelude,
+    -- never against the session.
+    --
+    -- **It subtracts, which is what makes a module's own declarations free.**
+    -- A frame is the session's declarations that the module did not import,
+    -- taken once when its load begins; everything the module itself declares
+    -- arrives afterwards and so is never in it. An allowed-list would have to
+    -- grow at every declaring op, and there are five of them.
+    --
+    -- **A STACK, because an @import@ may state how far it reaches** (MS11 phase
+    -- 291, his design of 2026-11-05): @import M where { … }@ reveals @M@'s
+    -- names for the length of its block and gives them back after it, which is
+    -- one frame pushed and dropped — 'Thena.Instral.Ops.Reveal' and
+    -- 'Thena.Instral.Ops.LeaveReveal', the shape @open@ and @LeaveOpen@ already
+    -- have. 'concealedHere' is the frame that holds, and the ones under it are
+    -- what the enclosing blocks concealed.
+    --
+    -- **Empty at the prompt** — a line typed there is not a module and is not
+    -- isolated, so it keeps the session, and 'concealedHere' of no frames is
+    -- the empty list, which costs a @notElem@ on nothing.
+    --
+    -- **Here and not beside the environment** because 'globalUnder' is the one
+    -- walk every door calls: the resolver's candidate list and
+    -- 'Thena.Engine.knownTo' are two different answers to /what is declared/
+    -- (one reads two tables, the other four), and writing the subtraction at
+    -- each of them is how a name comes to mean one thing in a surface term and
+    -- another in a command's argument.
+  }
+  deriving (Eq, Show)
+
+-- | __One @open@, with whatever it said about which names it brings in.__
+--
+-- **His ruling of 2026-10-30 gives five forms and this is all of them**:
+-- @open X@, @open X Y Z@ (which is three of these), @open X ( a b )@,
+-- @open X hiding ( … )@ and @open X renaming ( e -\> c )@.
+--
+-- **Hiding and renaming are a filter on the WORD, not on a path.** A namespace
+-- is a prefix, so what an @open@ can say something about is the word that
+-- follows the prefix — and for a deeper name it is the first step, so
+-- @open A ( B )@ brings in @B.c@ and nothing else of @A@'s.
+--
+-- **Renaming replaces the word rather than adding one**, as Agda's does: after
+-- @open Expr renaming ( e -\> expr )@ a written @expr@ is @Expr.e@ and a written
+-- @e@ is not in scope. Which is what makes it the tie-break when two opened
+-- languages use one letter.
+--
+-- **Visibility, and not opacity.** A name an @open@ hid is still a key in the
+-- environment and still what a term carries, so a hidden constructor can appear
+-- in a printed goal. Making it genuinely opaque would mean the printer and the
+-- kernel respecting an @open@, which is not what this is.
+data Opened = Opened
+  { openedPath     :: [String]
+    -- ^ the namespace's whole path
+  , openedOnly     :: Maybe [String]
+    -- ^ @Just ws@ for @open X ( ws )@ — only these words. 'Nothing' is every
+    -- word under the prefix, which is what @open X@ says.
+  , openedHiding   :: [String]
+    -- ^ the words @open X hiding ( … )@ keeps out
+  , openedRenaming :: [(String, String)]
+    -- ^ @(original, as written)@ — @open X renaming ( e -\> c )@ is @("e", "c")@
+  }
+  deriving (Eq, Show)
+
+-- | @open X@ — the whole namespace, nothing hidden and nothing renamed.
+openedWhole :: [String] -> Opened
+openedWhole p = Opened p Nothing [] []
+
+-- | The word an @open@ answers a written name with, if it answers it at all.
+--
+-- **The written name's first step is what is filtered**, and a renaming
+-- replaces it. 'Nothing' means this @open@ says nothing about the name.
+openedWord :: Opened -> GlobalName -> Maybe GlobalName
+openedWord o g = case lookup first [ (w, orig) | (orig, w) <- openedRenaming o ] of
+  Just orig -> Just (under (orig : rest))
+  Nothing
+    | first `elem` map fst (openedRenaming o) -> Nothing
+      -- **a word that was renamed is no longer in scope under its own
+      -- spelling**, which is what makes a renaming a tie-break rather than a
+      -- second way in
+    | first `elem` openedHiding o -> Nothing
+    | maybe False (notElem first) (openedOnly o) -> Nothing
+    | otherwise -> Just (under (first : rest))
+  where
+    -- 'nameSteps' may be empty; the word never is, so this list never is.
+    (first, rest) = case nameSteps g of
+      st : sts -> (st, sts ++ [nameWord g])
+      []       -> (nameWord g, [])
+    under ws = case reverse ws of
+      w : before -> GlobalName (openedPath o ++ reverse before) w
+      []         -> GlobalName (openedPath o) (nameWord g)
+
+-- | The namespace a declaration written at this point goes into — the
+-- innermost rung of the walk, or the root (MS10 phase 254, shared at 258).
+--
+-- **One definition, because two things place a declaration**: an op, through
+-- 'Thena.Engine.declaredIn', and a block, through
+-- 'Thena.Language.Grammar.checkGrammar' — which is handed the same scope the
+-- machine carries and must agree with it exactly.
+innermostOf :: InScope -> [String]
+innermostOf sc = case scopeWithin sc of
+  ns : _ -> ns
+  []     -> []
+
+-- | At the root, with nothing opened and nothing concealed — a prompt's scope
+-- before any @open@.
+rootScope :: InScope
+rootScope = InScope [] [] []
+
+-- | __What a written name may not reach at this point__ (MS11 phase 291).
+--
+-- The innermost frame of 'scopeConcealed' and nothing under it: a block that
+-- revealed a module's names pushed a frame without them, and the frames beneath
+-- are what the enclosing blocks concealed, waiting for it to be dropped.
+--
+-- **No frames conceals nothing**, which is the prompt and every caller that
+-- builds a scope of its own.
+concealedHere :: InScope -> [GlobalName]
+concealedHere sc = case scopeConcealed sc of
+  f : _ -> f
+  []    -> []
+
+-- | __A module's names, revealed for the length of a block__ (MS11 phase 291).
+--
+-- One frame pushed, being what is concealed here less the names given: the
+-- shape @open@ has, so an @import@ that states how far it reaches needs no
+-- bookkeeping to put the concealment back — 'Thena.Instral.Ops.LeaveReveal'
+-- drops the frame.
+--
+-- **Revealing the same name twice is revealing it once**, so nesting is safe:
+-- @import M where { import M where { … } }@ drops one frame and the name is
+-- still out of the one below it.
+revealing :: [GlobalName] -> InScope -> InScope
+revealing gs sc =
+  sc { scopeConcealed = filter (`notElem` gs) (concealedHere sc)
+                          : scopeConcealed sc }
+
+-- | Only these namespaces open whole, at the root.
+openingOnly :: [[String]] -> InScope
+openingOnly ps = InScope [] (map openedWhole ps) []
+
+-- | __Which global a written name means, in a scope.__
+--
+-- **The one walk, and every door calls it** (MS10 phase 249, repairing
+-- `~7zn7k`). It lives here, at the bottom of the import graph, because the two
+-- doors cannot both reach either of their own modules:
+-- 'Thena.Engine.globalNamed' had the only copy and 'Thena.Syntax.Resolve' — a
+-- REPL command's argument, a core term, a tagged term literal — could not call
+-- it, since 'Thena.Engine' imports 'Thena.Syntax.Resolve'. **A name meaning two
+-- things depending on which door the text came in by is exactly what the first
+-- design principle forbids**, and it was a live defect: after @open Ctx@,
+-- @:infer empty@ answered @empty : Ctx.Ctx@ while @:theorem foo : … empty …@
+-- answered @not in scope: empty@.
+--
+-- The caller supplies @known@, because what counts as in scope differs
+-- legitimately: the engine asks its environment, and a declaration resolving
+-- its own constructors adds the datatype being declared, which is not in the
+-- environment and cannot be.
+--
+-- * @Right g@ — this is the name.
+-- * @Left []@ — nothing answers it.
+-- * @Left gs@, two or more — **refused and not chosen** (2026-10-30): either
+--   would type-check, so picking one would be the system deciding what the user
+--   did not write. The caller names them all.
+--
+-- **The enclosing namespaces are walked innermost outward, and nearer wins
+-- outright** (MS10 phase 254, his ruling of 2026-10-30). Inside @A.B@ a written
+-- @x@ is tried as @A.B.x@, then @A.x@, then @x@ — the root is the last rung of
+-- the walk and not the first. The @open@s are tried only once every rung has
+-- failed, which is what makes an @open@ able to add a way to resolve and never
+-- change one: a name that the walk answers is never reconsidered under one.
+--
+-- **A path the writer wrote says what they meant**, so the whole written name
+-- goes under each prefix: inside @A@, a written @B.c@ tries @A.B.c@ first.
+globalUnder
+  :: (GlobalName -> Bool) -> InScope -> GlobalName
+  -> Either [GlobalName] GlobalName
+globalUnder known sc g =
+  case [ c | ns <- scopeWithin sc ++ [[]], c <- under ns, reaches c ] of
+    c : _ -> Right c
+    []    -> case nub (filter reaches (concatMap opened (scopeOpens sc))) of
+      [g'] -> Right g'
+      gs   -> Left gs
+  where
+    -- **A concealed name is not in scope, and the walk goes on past it** (MS11
+    -- phase 282, @~xdt8c@) — see 'scopeConcealed'. So inside @A@, a written @x@
+    -- whose @A.x@ the module did not import reaches the root's @x@ if the module
+    -- declared one, and otherwise is reported /not in scope/, which is what it
+    -- is. **Two concealed names cannot make an ambiguity** either: neither is a
+    -- candidate, so nothing is refused for being written twice over.
+    reaches c = known c && c `notElem` concealedHere sc
+
+    -- **The whole written name under a prefix**, so @open A@ and a written
+    -- @B.c@ tries @A.B.c@.
+    --
+    -- **Then the same as a declaration's short name**: @Nat@ is the datatype
+    -- @Nat.Nat@, the alias 'declarationNamed' derives. It is applied under the
+    -- prefixes too, so @open A@ and a written @Nat@ reaches @A.Nat.Nat@ — the
+    -- alias is a fact about a name, not about the scope it was found in.
+    --
+    -- **The exact name comes first and the alias second**, which is what makes
+    -- a rung answer with one name rather than two: a theorem called @Nat@ and a
+    -- datatype @Nat.Nat@ both answer a written @Nat@, and the theorem wins
+    -- because it is what the word names exactly (`~s89ch`).
+    under ns = let q = GlobalName (ns ++ nameSteps g) (nameWord g)
+                in [q, declarationNamed q]
+    -- **An @open@ may say nothing about this name at all** — hidden, not in its
+    -- selection, or spelled under a word it renamed — and then it offers no
+    -- candidate, so it cannot make an ambiguity either.
+    opened o = case openedWord o g of
+      Nothing -> []
+      Just q  -> [q, declarationNamed q]
+
+-- | __Where a name is being written from, and what answers there.__
+--
+-- The two arguments 'shortestEnding' takes, travelling together — because they
+-- always do: a scope with no environment answers nothing, and an environment
+-- with no scope answers the whole path. 'Thena.Render.Rendering' holds the same
+-- pair beside the grammars, and **the view\'s shapes take one of these** (MS10
+-- phase 256, `~fjrrr`), so that a name has one spelling whichever door the
+-- reader came in by.
+data Spelling = Spelling
+  { spellingKnown :: GlobalName -> Bool
+  , spellingScope :: InScope
+  }
+
+-- | A spelling that knows no environment and has nothing open — every name is
+-- written whole. What a caller with no session to ask gets.
+wholePath :: Spelling
+wholePath = Spelling (const False) rootScope
+
+-- | The shortest ending of this name that still means it here.
+spelledIn :: Spelling -> GlobalName -> String
+spelledIn sp = shortestEnding (spellingKnown sp) (spellingScope sp)
+
+-- | __How to write a name here: the shortest ending of it that still means
+-- it.__
+--
+-- **The inverse of 'globalUnder', and it asks that function rather than
+-- reasoning about it** (MS10 phase 254): an ending is right exactly when
+-- resolving it in this scope gives back the name we started from. So the
+-- printer cannot drift from the reader, and an ending that two namespaces
+-- would answer is rejected for free — 'globalUnder' calls that an ambiguity
+-- and does not return a name at all.
+--
+-- @Nat.Nat@ prints as @Nat@ with nothing open, because a declaration's short
+-- name resolves to it; @Nat.zero@ prints as @zero@ after @open Nat@ and as
+-- @Nat.zero@ before it. **With nothing declared and nothing open the answer is
+-- the whole path**, which is what a caller that knows no environment gets.
+shortestEnding :: (GlobalName -> Bool) -> InScope -> GlobalName -> String
+shortestEnding known sc g = case [ e | e <- endings, means e ] of
+  e : _ -> intercalate "." e
+  []    -> nameDotted g
+  where
+    ws = nameSteps g ++ [nameWord g]
+    -- Shortest first, and the whole name last.
+    endings = [ drop k ws | k <- [length ws - 1, length ws - 2 .. 0] ]
+    means e = case reverse e of
+      w : before -> globalUnder known sc (GlobalName (reverse before) w) == Right g
+      []         -> False
 
 -- | The body of a binder, with the bound variable replaced by a de Bruijn index.
 --
@@ -125,14 +601,14 @@ data Literal
 -- cannot be unsound because nothing eliminates a @Token@.
 primitiveType :: Literal -> Core
 primitiveType l = case l of
-  LString{} -> Global (GlobalName "String") []
-  LChar{}   -> Global (GlobalName "Char") []
-  LInt{}    -> Global (GlobalName "Int") []
+  LString{} -> Global (rootName "String") []
+  LChar{}   -> Global (rootName "Char") []
+  LInt{}    -> Global (rootName "Int") []
   LRegex{}  -> Pi (Ident "T") (Universe LZero) (MkScope (App (Global tokenName []) (Bound 0)))
 
 -- | @Token : Type₀ -> Type₀@, the type former of token classes (MS6 phase 100).
 tokenName :: GlobalName
-tokenName = GlobalName "Token"
+tokenName = rootName "Token"
 
 -- | 'tokenName'\'s type. Seeded by 'Thena.Global.Env.emptyGlobals'; written
 -- here because 'Scope' can only be built in this module.

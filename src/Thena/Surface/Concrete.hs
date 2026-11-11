@@ -19,7 +19,10 @@ module Thena.Surface.Concrete
   ( Surface (..)
   , ObjectPiece (..)
   , SurfaceDecl (..)
+  , SurfaceOpenSpec (..)
+  , Reach (..)
   , SurfaceModule (..)
+  , Selection (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , PairingError (..)
@@ -30,11 +33,12 @@ module Thena.Surface.Concrete
   , Analysis (..)
   , Plicity (..)
   , blocksIn
+  , surfaceName
   ) where
 
 import Data.List.NonEmpty (NonEmpty, toList)
 
-import Thena.Core.Term (Literal (..))
+import Thena.Core.Term (GlobalName (..), Literal (..))
 
 -- | **`instral` is shared, and it is term-free**, which is what makes sharing it
 -- possible: a 'Thena.Instral.Concrete.RawOperand' is an identifier, a number or
@@ -42,7 +46,7 @@ import Thena.Core.Term (Literal (..))
 -- this import crosses no language boundary — it is the machinery's own syntax,
 -- and a @do@ block in a surface program is `instral` written in place
 -- (@discussion\/the-five-languages.md@ §0b, table F).
-import Thena.Instral.Concrete (RawInstr (..))
+import Thena.Instral.Concrete (RawInstr (..), Reach (..), Selection (..))
 import Thena.Syntax.Lexer (BlockKind)
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
@@ -58,7 +62,7 @@ data Plicity = Explicit | Implicit
 
 -- | A written surface term.
 data Surface
-  = SurfaceName String
+  = SurfaceName [String] String
     -- ^ what a name denotes is elaboration's answer, not the tree's
   | SurfaceUniverse Int          -- ^ @Type₀@
   | SurfaceLiteral Literal
@@ -153,7 +157,7 @@ data Surface
     -- His proposal, and it is what removes the need for a surface term meaning
     -- /no proof given, search for one/: the user writes @do { prove }@, and a
     -- search strategy is then a rule name rather than syntax.
-  | SurfaceElim String [Surface] Surface [Surface] [Surface] Surface
+  | SurfaceElim [String] String [Surface] Surface [Surface] [Surface] Surface
     -- ^ @elim d (params) motive (methods) (indices) target@ — the same
     -- positional shape 'Thena.Syntax.Concrete.RawElim' has, because there is no
     -- pattern matching in the surface language yet and this is how a proof by
@@ -305,13 +309,18 @@ data SurfaceBinder = SurfaceBinder Plicity String (Maybe Surface)
 -- word in the shared lexer and identifiers narrow project-wide, exactly as they
 -- did for @data@ at 42b.
 --
--- **The name is recorded and not yet used for anything.** Nothing imports a
--- proof module until after MS4, and a module whose name disagreed with its path
--- would be a rule this phase has no reason to invent. What the header buys now
--- is that the file says what it is, which is how @:load@ tells a proof module
--- from a script without opening it further than the first line.
+-- **The name is qualified, and it is checked against the path when the file is
+-- reached by name** — his ruling of 2026-11-05, @~r58qh@. So the shape is
+-- 'SurfaceImport'\'s: the steps are the directories and the last is the file, and
+-- @module Stlc.Terms where@ is legal where it was one word before (MS11 phase
+-- 278). The check is only on the way in: a file @:load@ed by path, or typed at
+-- the prompt, is never asked to agree with anything.
 data SurfaceModule = SurfaceModule
-  { surfaceModuleName  :: String
+  { surfaceModuleSteps :: [String]
+  , surfaceModuleWord  :: String
+  , surfaceModuleExports :: Selection
+    -- ^ what the header says about its interface, as written (MS11 phase 285
+    -- for @exporting@, 290 for @hiding@, @~jmw4k@).
   , surfaceModuleDecls :: [SurfaceDecl]
   }
   deriving (Eq, Show)
@@ -322,10 +331,176 @@ data SurfaceModule = SurfaceModule
 -- phase 39. The signature and the equation are separate items and 'paired'
 -- puts them together, which is what those languages do and why a signature
 -- with no equation is a diagnosable mistake rather than an unparseable one.
+-- **What a declaration names may be written with a path** (MS10 phase 243):
+-- the steps, then the base word, exactly as 'SurfaceName' carries a written
+-- name. @Ty.subst.X : …@ declares into @Ty@'s namespace, and a name with no
+-- steps is every declaration anything wrote before MS10. **It is the written
+-- pieces and not a resolved 'Thena.Core.Term.GlobalName'**, because a
+-- declaration inside an enclosing namespace will be relative to it.
+-- | What an @open@ said about which of a namespace's names it brings in (MS10
+-- phase 254).
+--
+-- **Only one of these at a time**, which is his ruling's shape: the forms are
+-- @open X@, @open X ( a b )@, @open X hiding ( … )@ and
+-- @open X renaming ( e -> c )@, and nothing combines two. A combination would
+-- have to say which applied first, and nothing wants it yet.
+data SurfaceOpenSpec
+  = OpenWhole                      -- ^ @open X@, and @open X Y Z@
+  | OpenOnly [String]              -- ^ @open X ( a b )@
+  | OpenHiding [String]            -- ^ @open X hiding ( a b )@
+  | OpenRenaming [(String, String)]
+    -- ^ @open X renaming ( e -> c )@ — @(original, as written)@
+    --
+    -- **@-\>@ and not @→@**, which is a legal identifier character here: making
+    -- the glyph a token would narrow what a name may contain, and that is a
+    -- decision about identifiers rather than about @open@.
+  deriving (Eq, Show)
+
+-- __'Reach' — whether an @import@ or a @consult@ passes on what it brought__ —
+-- is re-exported from "Thena.Instral.Concrete" (MS11 phase 289). Both concrete
+-- syntaxes write @public@ and that module is the one below this, so the flag
+-- lives there and is listed in this module's exports beside the trees that
+-- carry it.
+
+-- | __What a header says about its interface__ is a 'Selection' and nothing of
+-- this module's own (MS11 phase 285 for @exporting ( … )@, 290 for
+-- @hiding ( … )@, @~jmw4k@; moved to 'Selection' at phase 306, @~htngj@).
+--
+-- His ruling of 2026-10-30: **exports are wide by default, narrowed by
+-- @exporting@ or @hiding@ on the file's @module@ clause.** So there are three
+-- states and not two flags — the clause is one slot, which is 'SurfaceOpenSpec''s
+-- shape and deliberately its three words: a file narrows by naming what it keeps
+-- or by naming what it withholds, never both at once.
+--
+-- **It became a shared type when an import gained the same clause** (phase
+-- 306): @import M ( a b )@ narrows what the importer takes exactly as a header
+-- narrows what the file offers, so it is re-exported from
+-- "Thena.Instral.Concrete" beside 'Reach', for 'Reach''s own reason — both
+-- concrete syntaxes write the clause. @exporting ( )@ is still a file that
+-- deliberately exports nothing, where no clause at all exports everything it
+-- declares.
+
 data SurfaceDecl
-  = SurfaceSignature String Surface   -- ^ @foo : T@
-  | SurfaceEquation  String Surface   -- ^ @foo = e@
+  = SurfaceSignature [String] String Surface   -- ^ @foo : T@, @Ns.foo : T@
+  | SurfaceEquation  [String] String Surface   -- ^ @foo = e@, @Ns.foo = e@
   | SurfaceDatatype  SurfaceData      -- ^ @data D … where { … }@ (phase 42b)
+  | SurfaceOpen      [([String], String)] SurfaceOpenSpec
+    -- ^ @open ‹namespace›@ — **bring namespaces into view** (MS10 phase 247,
+    -- all five forms at 254).
+    --
+    -- The steps and the last word of each namespace's own path, so @open A.B@
+    -- is @[(["A"], "B")]@ and the namespace is @A.B@. **A namespace is a prefix
+    -- and not a thing that is declared**, so there is nothing here but the
+    -- path: what it contains is whatever keys the environment has under it.
+    --
+    -- **Several paths, because @open X Y Z@ is one line and three opens** — it
+    -- is pulled apart by 'Thena.Driver.regroup', so nothing below this carries
+    -- the plural.
+    --
+    -- **Its effect runs from where it is written to the end of the enclosing
+    -- namespace**, which for a file with no @namespace@ block is the rest of
+    -- the file — so a declaration above it does not see it.
+  | SurfacePrivate SurfaceDecl
+    -- ^ @private ‹declaration›@ — **the declaration is the file's own and no
+    -- importer may name it** (MS11 phase 286, his ruling of 2026-10-30, the
+    -- fine-grained escape from the header's @exporting@ list).
+    --
+    -- **It takes a declaration, not a block**, which is 'SurfaceOpenIn'\'s shape
+    -- and for its reason: a signature and its equation are two of these and one
+    -- declaration, so the pass that pairs them is the one that can say how far
+    -- a @private@ in front of the signature reaches.
+    --
+    -- **A mark and not a scope.** Where the declaration lands, what it may see
+    -- and what it generates are all exactly what they are without the word; the
+    -- only thing that changes is whether another file may write the names.
+  | SurfaceOpenIn [([String], String)] SurfaceOpenSpec SurfaceDecl
+    -- ^ @open X in ‹one declaration›@ — **the open reaches that declaration and
+    -- stops** (MS10 phase 254), which is his *"one local let-like"*.
+    --
+    -- **One declaration means the signature and the equation**, because that is
+    -- what a declaration is in this language — 'SurfaceDecl' is half of one.
+    -- 'Thena.Driver.regroup' takes the pair, so
+    --
+    -- > open Nat in two : Nat.Nat
+    -- > two = succ zero
+    --
+    -- is one declaration under one @open@, and @succ@ resolves in both lines.
+  | SurfaceConsult Reach [String] String (Maybe [SurfaceDecl])
+    -- ^ @consult ‹module›@, or @public consult ‹module›@ — **what this file's
+    -- proofs are searched against** (MS11 phase 273, his ruling of
+    -- 2026-11-03), and whether that base travels to whoever imports this file
+    -- (phase 288).
+    --
+    -- **AND HOW FAR IT REACHES** (MS11 phase 292, his design of 2026-11-05),
+    -- which is 'SurfaceImport'\'s field and the same rule: @consult M where
+    -- { … }@ searches the proofs in its block against @M@ and the proofs after
+    -- it against what the file had, so a base wanted for one proof is written
+    -- around that proof. **Nesting is priority**: a file's consults are a stack
+    -- (phase 288), so the innermost line is pushed last and is tried first.
+    --
+    -- The steps and the last word of a **file's** name, the same shape
+    -- 'SurfaceOpen' uses for a namespace's and meaning something different by
+    -- it: here the steps are directories under the project's source root, and
+    -- @consult Stlc.Tactics@ reaches @Stlc\/Tactics.thena.rules@. **A file's
+    -- name and a namespace are different spaces** — his model of 2026-10-29 —
+    -- which is why the two constructors share a shape and not a type.
+    --
+    -- **Its effect is the file's, not the session's**: a consult applies
+    -- whenever this module is elaborated and does not leak to whoever loaded
+    -- it, which is what makes a module that type-checks in isolation type-check
+    -- for whoever imports it.
+    --
+    -- **@public@ is the one way it reaches further** (phase 288): an importer of
+    -- this file is searched against a @public consult@\'s base too, at the
+    -- position of the @import@ line that brought it in. A surface file still
+    -- has no rules of its own — it hands on a base and never contains one.
+  | SurfaceImport Reach [String] String Selection (Maybe [SurfaceDecl])
+    -- ^ @import ‹module›@, or @public import ‹module›@ — **which surface
+    -- modules this file depends on** (MS11 phase 274, his ruling of
+    -- 2026-11-03), and whether what they gave it travels on (phase 287).
+    --
+    -- **AND HOW FAR IT REACHES, WHICH THE ACT STATES ITSELF** (MS11 phase 291,
+    -- his design of 2026-11-05). @import M where { … }@ reaches the block and
+    -- stops; 'Nothing' is the rest of the file, which is what a line with no
+    -- block says. **So no surrounding construct scopes an import** — a @do@
+    -- block, a @data@ block and a declaration's body all leave it alone — and
+    -- the one rule has no cases: an act says its own extent, as @open X in
+    -- ‹declaration›@ already did.
+    --
+    -- **A field and not a second constructor**, which is 'Reach'\'s precedent
+    -- at phase 287: the block is an attribute of the import, so everything that
+    -- walks imports for the load, the graph or a display still matches one
+    -- constructor and walks into the block for what is declared inside it.
+    --
+    -- 'SurfaceConsult'\'s shape and 'SurfaceConsult'\'s meaning of it: the steps
+    -- are directories, so @import Stlc.Terms@ reaches @Stlc\/Terms.thena@ — the
+    -- act supplies the extension, which is the only thing that tells the two
+    -- apart on disk.
+    --
+    -- **What it does is load**, and that is all it does today: the module it
+    -- names is elaborated before this one, so a file states what it refers to
+    -- rather than relying on the session having loaded it. **Which of the
+    -- module's names the importer may then write is not settled** — that is
+    -- @exporting ( … )@ and @public import@, and until they are built
+    -- everything the imported module declared is reachable.
+  | SurfaceNamespace [String] String [SurfaceDecl]
+    -- ^ @namespace ‹name› where { … }@ — **declare a namespace and put these
+    -- declarations in it** (MS10 phase 254).
+    --
+    -- **A namespace is a prefix, so nesting is a longer prefix and needs no
+    -- mechanism of its own**: @namespace A where { namespace B where { … } }@
+    -- puts a @foo@ inside at @A.B.foo@. Written with a path, @namespace A.B@ is
+    -- the same thing said in one line.
+    --
+    -- **Open-ended, like Lean's and unlike a Haskell module** — his ruling of
+    -- 2026-10-30: two files may both add to @A@, because the environment is
+    -- keyed by a qualified name and two keys sharing a prefix is not a conflict.
+    -- A check would have to be /added/ to forbid it.
+    --
+    -- **What the declarations inside can see is the walk, not an @open@**: a
+    -- written word is tried in @A.B@, then in @A@, then at the root, and a
+    -- nearer rung wins outright. 'Thena.Core.Term.InScope' carries the two
+    -- apart.
   | SurfaceGrammar   BlockKind Int String
     -- ^ a @language@ or @context@ block (MS6 phase 101): its kind, the line of
     -- its keyword, and its text, raw. "Thena.Driver.regroup" reads it.
@@ -349,14 +524,15 @@ data SurfaceDecl
 -- type right of it. Keeping it syntactic is what lets the elaborated form be
 -- taken apart again by /counting/ — 'Thena.Global.Declare.buildInductive'.
 data SurfaceData = SurfaceData
-  { surfaceDataName         :: String
+  { surfaceDataSteps        :: [String]   -- ^ the path written before the name
+  , surfaceDataName         :: String
   , surfaceDataParameters   :: [(String, Surface)]
   , surfaceDataType         :: Surface   -- ^ the part right of the @:@
   , surfaceDataConstructors :: [SurfaceConstructor]
   }
   deriving (Eq, Show)
 
-data SurfaceConstructor = SurfaceConstructor String Surface
+data SurfaceConstructor = SurfaceConstructor [String] String Surface
   deriving (Eq, Show)
 
 -- | What went wrong pairing a signature with its equation
@@ -391,12 +567,12 @@ blocksIn t = case t of
   SurfaceLet _ mt v b -> maybe [] blocksIn mt ++ blocksIn v ++ blocksIn b
   SurfaceAnnot e ty   -> blocksIn e ++ blocksIn ty
   SurfaceTrusted ty e -> blocksIn ty ++ blocksIn e
-  SurfaceElim _ ls m is ms tg ->
+  SurfaceElim _ _ ls m is ms tg ->
     concatMap blocksIn ls ++ blocksIn m ++ concatMap blocksIn is
       ++ concatMap blocksIn ms ++ blocksIn tg
   -- A splice is a term like any other, so a block inside one is found here.
   SurfaceObject _ _ ps -> concatMap piece ps
-  SurfaceName _       -> []
+  SurfaceName _ _     -> []
   SurfaceUniverse _   -> []
   SurfaceLiteral _    -> []
   SurfaceUniverseOpen -> []
@@ -407,3 +583,12 @@ blocksIn t = case t of
     piece pc = case pc of
       ObjectText _   -> []
       ObjectSplice e -> blocksIn e
+
+-- | A global's name, written out as a name (MS10 phase 244).
+--
+-- **For a generator**: what the substitution family and a reading of an object
+-- term write is a name that is already resolved, and a reference to one in a
+-- namespace has to carry its path or the context would be searched for its base
+-- word first. Writing it is the same thing a user does with @Ty.subst.X@.
+surfaceName :: GlobalName -> Surface
+surfaceName n = SurfaceName (nameSteps n) (nameWord n)

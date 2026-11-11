@@ -1,0 +1,11 @@
+-- **A clause that asked for something the module does not offer** (MS11 phase
+-- 306, `~htngj`). Refused, and that was the phase's call: a clause is a filter,
+-- so `( Nonesuch )` matched nothing, concealed everything `Twins` offers, and
+-- this file then failed at `Bit.Bit` with a message naming neither the clause
+-- nor the typo. `open X ( … )` is left as it was.
+module test.modules.TypoClause where
+
+import test.modules.Twins ( Nonesuch )
+
+mine : Bit.Bit
+mine = Bit.off

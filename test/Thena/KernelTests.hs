@@ -33,7 +33,8 @@ import Thena.Core.Term
   , freeVars
   , fresh
   )
-import Thena.Declared (natVec, natVecCounter)
+import Thena.Declared ( opensIn
+  ,natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Impure (..), Partial (..), extract)
@@ -377,4 +378,4 @@ nat src = case parse src of
   Left e       -> error ("fixture does not resolve: " ++ show e)
   Right (t, _) -> t
   where
-    parse = parseCore [] natVec [] natVecCounter
+    parse = parseCore [] natVec (opensIn natVec) [] natVecCounter

@@ -1,0 +1,9 @@
+-- **What `Guarded` did NOT export is concealed** (MS11 phase 285): its header
+-- names `Bit` and not `flip`, so an importer that writes `flip` is refused
+-- although the module declared it and the session holds it.
+module test.modules.MissesExport where
+
+import test.modules.Guarded
+
+mine : Bit.Bit -> Bit.Bit
+mine = flip

@@ -1,0 +1,26 @@
+-- | Two namespaces, so that one word can be reached from both — MS11 phase 297.
+--
+-- `Thena.ObjectTermTests` reads it to show that two opened namespaces
+-- answering one tag is refused and not chosen, and that a path still says
+-- which was meant.
+module test.modules.TwoNested where
+
+namespace A where
+  x : Token String
+  x = /[a-z]+/
+
+  language LC, M, N where
+    var : x as occurrence -> x
+    app                   -> ( M N )
+
+  open LC
+
+namespace B where
+  x : Token String
+  x = /[a-z]+/
+
+  language LC, M, N where
+    var : x as occurrence -> x
+    app                   -> ( M N )
+
+  open LC

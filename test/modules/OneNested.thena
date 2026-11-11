@@ -1,0 +1,16 @@
+-- | One namespace holding one language — MS11 phase 297.
+--
+-- `Thena.ObjectTermTests`' `open` forms are written against this: what those
+-- tests are for is a language that lives inside a `namespace`, which
+-- `Rooted.thena` declares at the root.
+module test.modules.OneNested where
+
+namespace A where
+  x : Token String
+  x = /[a-z]+/
+
+  language LC, M, N where
+    var : x as occurrence -> x
+    app                   -> ( M N )
+
+  open LC

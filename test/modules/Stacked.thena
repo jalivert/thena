@@ -1,0 +1,8 @@
+module test.modules.Stacked where
+
+consult test.modules.Tooling
+consult test.modules.Louder
+
+do
+  marker
+  marker "x"

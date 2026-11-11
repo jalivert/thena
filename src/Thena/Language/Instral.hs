@@ -36,12 +36,12 @@ module Thena.Language.Instral
 
 import Data.List (nub)
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (nameDotted)
 import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Thena.Language.Earley as E
 import Thena.Instral.Commands (Argument (..), Command (..), commands)
-import Thena.Language.Build (languageNames, productionNames)
+import Thena.Language.Build (languageNames, productionNames, productionRule)
 import qualified Thena.Language.Builtin as Builtin
 import Thena.Language.Grammar (Grammar, earleyRules, productionBody)
 import Thena.Language.Lexemes (charRegex, identRegex, numberRegex, stringRegex)
@@ -124,12 +124,24 @@ instralRules gs bs =
     -- is a block/. Contributed from here for the dependency's sake:
     -- "Thena.Language.Builtin" may not import this module, and the statement
     -- head is this module's.
+    -- **THE EMPTY BLOCK IS A PRODUCTION OF ITS OWN AND NOT A NULLABLE
+    -- NONTERMINAL** (MS10 phase 270, `~z4trb`). @do { }@ is writable in both
+    -- instruction grammars, so it is offerable, but
+    -- "Thena.Language.Earley" rests on /no nonterminal is nullable/ — its
+    -- predictor is the textbook one for exactly that reason — so an empty
+    -- @blockHead@ would break the parser rather than widen the advice. Writing
+    -- the braces out costs one rule and keeps that invariant.
     surfaceBlock =
       [ E.Rule "surface atom do" Builtin.surfaceAtomHead
           [E.Literal "do", E.Literal "{", E.Nonterminal blockHead, E.Literal "}"] []
+      , E.Rule "surface atom do empty" Builtin.surfaceAtomHead
+          [E.Literal "do", E.Literal "{", E.Literal "}"] []
       , E.Rule "instral block one" blockHead [E.Nonterminal statementHead] []
       , E.Rule "instral block more" blockHead
           [E.Nonterminal blockHead, E.Literal ";", E.Nonterminal statementHead] []
+        -- A trailing @;@ is MS5 phase 78's, in the running grammar since then.
+      , E.Rule "instral block trailing" blockHead
+          [E.Nonterminal blockHead, E.Literal ";"] []
       ]
 
     -- **A phrase, like the heads "Thena.Language.Builtin" uses**, and not
@@ -182,7 +194,7 @@ ruleForms bs =
   nub
     [ Form nm (paramsFor nm arity) (resultFor nm arity)
     | r <- allCallable bs
-    , let GlobalName nm = Ops.ruleName r
+    , let nm = nameDotted (Ops.ruleName r)
     , let arity = length (Ops.ruleParams r)
     ]
   where
@@ -335,9 +347,9 @@ literalProductions gs types =
       [ tagRule t "core" Builtin.coreHead | t <- coreish ]
 
     -- **Corners are not offered, and the phase's own test is why** (@AGENDA.md@
-    -- 56). @⌜ t ⌝@ is an operand in @Thena.Syntax.Parser@ and **is not one in
+    -- 56). A @core@ region is an operand in @Thena.Syntax.Parser@ and **is not one in
     -- @Thena.Surface.Parser@** — the two instral grammars differ in exactly this
-    -- place — so offering them put @do { prim-try ⌜ x ⌝ }@ in reach of a surface
+    -- place — so offering them put @do { prim-try core\`x\` }@ in reach of a surface
     -- @do@ block, which Happy refuses. @neverWiderSurface@ caught it. @core\`t\`@
     -- is the spelling both grammars accept and says the same thing, which is
     -- item 56's own conclusion, so nothing a user needs is lost by leaving the
@@ -361,9 +373,18 @@ literalProductions gs types =
     -- @fill LC[var]\`@ answered with @At:LC:var@ — a name this module invented,
     -- handed to a frontend to draw. Inlined, the answer is the production's own
     -- first symbols, which is what the user is being asked for.
+    --
+    -- **The body is looked up by the production's FULL name** (MS10 phase 253).
+    -- @p@ is the word the user writes between the brackets and the Earley rule is
+    -- @LC.var@, so searching for @var@ found nothing and @LC[abs]\`@ offered the
+    -- empty set. 'productionRule' resolves it inside the language, which is also
+    -- what makes two languages both declaring @var@ harmless — the search used to
+    -- have no language filter and rested on a refusal MS10 removed.
     atRule t l p =
       E.Rule (renderTy t ++ "/`" ++ l ++ "[" ++ p ++ "]") (operandHead t)
-        ( E.Literal (l ++ "[" ++ p ++ "]`") : productionBody gs p ++ [E.Literal "`"] ) []
+        ( E.Literal (l ++ "[" ++ p ++ "]`")
+            : maybe [] (productionBody gs) (productionRule gs l p)
+            ++ [E.Literal "`"] ) []
 
 
 -- | **The @:@-command productions, as a rule set of their own** (MS7 phase 142).

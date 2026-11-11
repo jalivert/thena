@@ -1,5 +1,5 @@
 # Revision history for thena
 
-## 0.1.0.0 -- YYYY-mm-dd
-
-* First version. Released on an unsuspecting world.
+Thena has not been released. It is a research prototype under active
+development: the history is the repository's own, and `DECISIONS.md` is the
+account of what was decided and why.

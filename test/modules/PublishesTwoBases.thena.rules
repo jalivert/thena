@@ -1,0 +1,6 @@
+-- **Two publications are a stack between themselves** (MS11 phase 289, his
+-- ruling of 2026-11-05): the last line written is tried first.
+rule base publishestwobases where
+
+public consult test.modules.Helper
+public consult test.modules.Louder

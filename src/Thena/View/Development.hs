@@ -19,7 +19,7 @@ module Thena.View.Development
   ) where
 
 import Thena.Core.Context (Entry (..))
-import Thena.Core.Term (Ident (..), Var)
+import Thena.Core.Term (Spelling, Ident (..), Var)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Focus, Step (..))
 import Thena.Development.Partial
@@ -106,32 +106,33 @@ data ConstraintView = ConstraintView
 -- whether a Π is dependent cannot collide with a 'Var' the development
 -- already uses.
 displayDevelopment
-  :: [Grammar]
+  :: Spelling
+  -> [Grammar]
   -> Budget
   -> Int
   -> Address
   -> Maybe ([Step], Focus)
   -> Partial
   -> [LinkView]
-displayDevelopment gs budget n0 at0 route0 p0 = go [] [] n0 at0 route0 p0
+displayDevelopment sp gs budget n0 at0 route0 p0 = go [] [] n0 at0 route0 p0
   where
     go :: Env -> [(Var, Address)] -> Int -> Address -> Maybe ([Step], Focus) -> Partial -> [LinkView]
     go env bs n at route p = case p of
       Trailing t ->
-        [LinkView at (isHere route) (AResult (displayCore gs budget env bs n at t))]
+        [LinkView at (isHere route) (AResult (displayCore sp gs budget env bs n at t))]
 
       Pending k rest ->
         LinkView at (isHere route) (APending (constraintView env n at k))
           : go env bs n (extend at GoAlong) (past route) rest
 
       Under c rest ->
-        let ty       = displayCore gs budget env bs n (extend at GoCrossType) (typeOf c)
+        let ty       = displayCore sp gs budget env bs n (extend at GoCrossType) (typeOf c)
             (v, name, env', bs') = bind env bs at c
             shape = case c of
               Assume {}   -> AnAssumption name ty
               Quantify {} -> AQuantifier  name ty
               Define _ _ val _ ->
-                ADefinition name ty (displayCore gs budget env bs n (extend at GoCrossValue) val)
+                ADefinition name ty (displayCore sp gs budget env bs n (extend at GoCrossValue) val)
               Claim {} -> AClaimLink name ty (mentioned v rest)
               Guess _ _ g _ ->
                 AGuessLink name ty (pureGuess g) (mentioned v rest)
@@ -170,9 +171,9 @@ displayDevelopment gs budget n0 at0 route0 p0 = go [] [] n0 at0 route0 p0
       let (groups, env') = telescope env n at xi
        in ConstraintView
             groups
-            (displayCore gs budget env' [] n at s)
-            (displayCore gs budget env' [] n at t)
-            (displayCore gs budget env' [] n at ty)
+            (displayCore sp gs budget env' [] n at s)
+            (displayCore sp gs budget env' [] n at t)
+            (displayCore sp gs budget env' [] n at ty)
 
     -- Ξ's own binders are likewise addressed at the constraint's link — see
     -- 'ConstraintView'.
@@ -184,7 +185,7 @@ displayDevelopment gs budget n0 at0 route0 p0 = go [] [] n0 at0 route0 p0
           name = freshen hint env
           env' = (v, name) : env
           (groups, env'') = telescope env' n at rest
-       in ((name, displayCore gs budget env [] n at ty) : groups, env'')
+       in ((name, displayCore sp gs budget env [] n at ty) : groups, env'')
 
 isHere :: Maybe ([Step], Focus) -> Bool
 isHere (Just ([], _)) = True

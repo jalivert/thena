@@ -32,10 +32,14 @@ import Thena.Core.Term
   , close
   , fresh
   , open
+  , rootName
   )
 import Data.List (isPrefixOf)
 
 import Thena.Core.Typing (check, infer)
+import Thena.Declared ( opensIn
+  , declaredAs
+  ,named)
 import Thena.Driver
   ( Response (..)
   , Session
@@ -79,7 +83,9 @@ import Thena.Global.Env
   , generalised
   )
 import Thena.Files (startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
+  , renderingFor
   ,renderTrouble, renderEliminator, renderInductive)
 
 tests :: TestTree
@@ -124,14 +130,14 @@ computedLevels =
     , atLevel "two constructors, the join is over both" ["Nat"] 0
     , testCase "nothing contributes, so the level stays a parameter" $ do
         env <- declaredWith []
-        case lookupInductive (GlobalName "D") env of
+        case lookupInductive (declaredAs "D") env of
           Just d | not (null (inductiveLevels d)) -> pure ()
           other -> assertFailure ("expected a level parameter, got " ++ show other)
     ]
   where
     atLevel what args want = testCase what $ do
       env <- declaredWith args
-      case lookupInductive (GlobalName "D") env of
+      case lookupInductive (declaredAs "D") env of
         Nothing -> assertFailure "D was not declared"
         Just d  -> inductiveLevel d @?= levelOfNat want
 
@@ -201,11 +207,11 @@ equipment =
         let printed =
               [ length l
               | (_, d) <- inductives env
-              , l <- renderInductive (Rendering [] 0) d
+              , l <- renderInductive (rendering [] 0) d
               ]
                 ++ [ length l
                    | (g, d) <- inductives env
-                   , l <- renderEliminator (Rendering [] 0) g (fst (eliminatorType d LZero (pastEverything env)))
+                   , l <- renderEliminator (rendering [] 0) g (fst (eliminatorType d LZero (pastEverything env)))
                    ]
         (sum printed >= 0) @?= True
     ]
@@ -259,32 +265,42 @@ corpus = do
     -- A skipped no-confusion table is a stated limitation, not a failure to
     -- declare: three of the corpus's datatypes have a dependent telescope on
     -- purpose, which is what @Skipped@ is for.
-    expected o = "no noConfusion" `isPrefixOf` o || "declared " `isPrefixOf` o
+    expected o =
+      "no noConfusion" `isPrefixOf` o
+        || "declared " `isPrefixOf` o
+        || "opened " `isPrefixOf` o
 
 corpusLines :: [String]
 corpusLines =
   [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+  , "open Nat"
     -- Parameters AND two indices AND recursion AND a level parameter, in one
     -- datatype, with a constructor of five arguments. Nothing in the fixtures
     -- combines more than two of those.
   , "data Chain (A : Type) : A -> A -> Type where \
     \{ link : \8704 (x : A) -> Chain A x x \
     \; hop : \8704 (x : A) (y : A) (z : A) -> Chain A x y -> Chain A y z -> Chain A x z }"
+  , "open Chain"
     -- A parameterised datatype with NO constructors: the eliminator's method
     -- telescope is empty and the motive still has to be abstracted correctly.
   , "data Void2 (A : Type) : Type where { }"
+  , "open Void2"
     -- An index whose type is another datatype, applied to its level argument.
   , "data Wrap (A : Type) : Type where { wrap : A -> Wrap A }"
+  , "open Wrap"
   , "data Uses : Wrap {0} Nat -> Type\8320 where \
     \{ uses : \8704 (w : Wrap {0} Nat) -> Uses w }"
+  , "open Uses"
     -- A family whose index telescope is dependent, which is where the
     -- eliminator's index generalisation is hardest.
   , "data Fin : Nat -> Type\8320 where \
     \{ fz : \8704 (n : Nat) -> Fin (succ n) \
     \; fs : \8704 (n : Nat) (i : Fin n) -> Fin (succ n) }"
+  , "open Fin"
     -- A datatype above Type\8320, whose constructor argument lives below it —
     -- cumulativity is what makes its equations conjoinable (MS3 §2 item 2).
   , "data Box1 : Type\8321 where { box1 : \8704 (A : Type\8320) -> A -> Box1 }"
+  , "open Box1"
   ]
 
 -- --------------------------------------------------------------------------
@@ -313,7 +329,7 @@ declareAll = foldl one (Right (emptyGlobals, 0))
   where
     one acc src = do
       (env, n)  <- acc
-      (d, n1)      <- shown (parseDeclaration [] env n src)
+      (d, n1)      <- shown (parseDeclaration [] env (opensIn env) n src)
       (env', n2)   <- shown (declare env n1 d)
       Right (env', n2)
 
@@ -338,9 +354,6 @@ natVec = fst (after [natDecl, vecDecl])
 natVecCounter :: Int
 natVecCounter = snd (after [natDecl, vecDecl])
 
-named :: String -> GlobalName
-named = GlobalName
-
 -- --------------------------------------------------------------------------
 -- What a declaration writes
 -- --------------------------------------------------------------------------
@@ -348,26 +361,28 @@ named = GlobalName
 tablesTests :: [TestTree]
 tablesTests =
   [ testCase "the datatype has a record" $
-      fmap inductiveName (lookupInductive (named "Nat") nat) @?= Just (named "Nat")
+      fmap inductiveName (lookupInductive (named "Nat.Nat") nat) @?= Just (named "Nat.Nat")
   , testCase "the type former is a constant at its declared universe" $
-      fmap constantType (lookupConstant (named "Nat") nat) @?= Just (Universe LZero)
+      fmap constantType (lookupConstant (named "Nat.Nat") nat) @?= Just (Universe LZero)
   , testCase "a former is in two tables under one name (§3.3.1)" $
       sequence_
         [ fmap constantType (lookupConstant (named g) natVec)
             @?= fmap definitionType (lookupDefinition (named g) natVec)
-        | g <- ["Nat", "zero", "succ", "Vec", "nil", "cons"]
+        | g <- [ "Nat.Nat", "Nat.zero", "Nat.succ"
+               , "Vec.Vec", "Vec.nil", "Vec.cons"
+               ]
         ]
   , testCase "a datatype with no constructors is a datatype" $
       fmap (length . inductiveConstructors)
-           (lookupInductive (named "Empty") (fst (after [emptyDecl])))
+           (lookupInductive (declaredAs "Empty") (fst (after [emptyDecl])))
         @?= Just 0
   , testCase "the parameters and the indices are told apart" $
       fmap (\d -> (length (inductiveParameters d), length (inductiveIndices d)))
-           (lookupInductive (named "Vec") natVec)
+           (lookupInductive (declaredAs "Vec") natVec)
         @?= Just (1, 1)
   , testCase "an index is not a parameter of the record it is declared with" $
       fmap (\d -> (length (inductiveParameters d), length (inductiveIndices d)))
-           (lookupInductive (named "Nat") natVec)
+           (lookupInductive (named "Nat.Nat") natVec)
         @?= Just (0, 0)
   ]
 
@@ -378,19 +393,19 @@ tablesTests =
 wrapperTests :: [TestTree]
 wrapperTests =
   [ testCase "a nullary former's wrapper is the bare Canonical" $
-      fmap definitionBody (lookupDefinition (named "zero") nat)
-        @?= Just (Canonical (named "zero") [] [])
+      fmap definitionBody (lookupDefinition (named "Nat.zero") nat)
+        @?= Just (Canonical (named "Nat.zero") [] [])
   , testCase "a unary former's wrapper abstracts and applies" $
-      fmap definitionBody (lookupDefinition (named "succ") nat)
-        @?= Just (Lam (Ident "n") natTy (close v (Canonical (named "succ") [] [Free v])))
+      fmap definitionBody (lookupDefinition (named "Nat.succ") nat)
+        @?= Just (Lam (Ident "n") natTy (close v (Canonical (named "Nat.succ") [] [Free v])))
   , testCase "the type former gets a wrapper too" $
-      fmap definitionBody (lookupDefinition (named "Nat") nat)
-        @?= Just (Canonical (named "Nat") [] [])
+      fmap definitionBody (lookupDefinition (named "Nat.Nat") nat)
+        @?= Just (Canonical (named "Nat.Nat") [] [])
   , testCase "every wrapper body is a saturated Canonical (§12 invariant 6)" $
       sequence_ (map saturated (formerNames natVec))
   ]
   where
-    natTy   = Global (named "Nat") []
+    natTy   = Global (named "Nat.Nat") []
     (v, _)  = fresh 0
 
     -- Peel the wrapper's λs, counting them, and check the body applies the
@@ -436,17 +451,17 @@ formerNames env =
 -- is one call to the term resolver on a Π-chain.
 agreesWithTheResolver :: [TestTree]
 agreesWithTheResolver =
-  [ testCase name $ case parseCore [] natVec [] 0 written of
+  [ testCase name $ case parseCore [] natVec (opensIn natVec) [] 0 written of
       Left e  -> assertFailure (show e)
       Right (t, _) -> fmap constantType (lookupConstant (named name) natVec) @?= Just t
   | (name, written) <-
-      [ ("Nat",  "Type\8320")
-      , ("zero", "Nat")
-      , ("succ", "Nat -> Nat")
-      , ("Vec",  "Type\8320 -> Nat -> Type\8320")
-      , ("nil",  "forall (A : Type\8320) -> Vec A zero")
-      , ("cons", "forall (A : Type\8320) (n : Nat) (a : A) (as : Vec A n) \
-                 \-> Vec A (succ n)")
+      [ ("Nat.Nat",  "Type\8320")
+      , ("Nat.zero", "Nat")
+      , ("Nat.succ", "Nat -> Nat")
+      , ("Vec.Vec",  "Type\8320 -> Nat -> Type\8320")
+      , ("Vec.nil",  "forall (A : Type\8320) -> Vec A zero")
+      , ("Vec.cons", "forall (A : Type\8320) (n : Nat) (a : A) (as : Vec A n) \
+                     \-> Vec A (succ n)")
       ]
   ]
 
@@ -463,16 +478,16 @@ positivityTests =
   , accepted "several recursive arguments" "T : Type\8320 where { c : T -> T -> T }"
   , refused "the datatype left of an arrow"
       "T : Type\8320 where { c : (T -> T) -> T }"
-      (NotStrictlyPositive (named "c") (Ident "x"))
+      (NotStrictlyPositive (named "T.c") (Ident "x"))
   , refused "a higher-order recursive argument (thesis §4.1.3)"
       "T : Type\8320 where { c : (Nat -> T) -> T }"
-      (HigherOrderRecursion (named "c") (Ident "x"))
+      (HigherOrderRecursion (named "T.c") (Ident "x"))
   , refused "the datatype under another former"
       "T : Type\8320 where { c : Vec T zero -> T }"
-      (NestedRecursion (named "c") (Ident "x"))
+      (NestedRecursion (named "T.c") (Ident "x"))
   , refused "the argument is named in the message when it has a name"
       "T : Type\8320 where { c : forall (f : T -> T) -> T }"
-      (NotStrictlyPositive (named "c") (Ident "f"))
+      (NotStrictlyPositive (named "T.c") (Ident "f"))
   ]
 
 -- --------------------------------------------------------------------------
@@ -492,20 +507,20 @@ universeTests =
       "T : Type\8321 where { c : Type\8320 -> T }"
   , refused "a large argument in a small datatype"
       "T : Type\8320 where { c : Type\8320 -> T }"
-      (ArgumentTooLarge (named "c") (Ident "x") (levelOfNat 1) (LZero))
+      (ArgumentTooLarge (named "T.c") (Ident "x") (levelOfNat 1) (LZero))
   , accepted "a recursive argument, which needs the former in scope already"
       "T : Type\8320 where { c : T -> T }"
   , accepted "a parameter used as an argument's type"
       "Box (A : Type\8320) : Type\8320 where { box : A -> Box A }"
   , refused "a parameter from a larger universe than the datatype"
       "Box (A : Type\8321) : Type\8320 where { box : A -> Box A }"
-      (ArgumentTooLarge (named "box") (Ident "x") (levelOfNat 1) (LZero))
+      (ArgumentTooLarge (named "Box.box") (Ident "x") (levelOfNat 1) (LZero))
   , accepted "an argument whose type mentions an earlier argument"
       "T : Type\8320 where { c : forall (n : Nat) (v : Vec Nat n) -> T }"
   , refused "an argument whose type is not a type at all"
       "T : Type\8320 where { c : zero -> T }"
-      (ArgumentNotAType (named "c") (Ident "x")
-         (NotAType [] (Global (named "zero") []) (Canonical (named "Nat") [] [])))
+      (ArgumentNotAType (named "T.c") (Ident "x")
+         (NotAType [] (Global (named "Nat.zero") []) (Canonical (named "Nat.Nat") [] [])))
 
   -- **A level a constructor argument's own typing determines** (phase 50).
   -- 'Thena.Global.Declare.argumentLevels' used to drop these obligations and
@@ -521,7 +536,7 @@ universeTests =
       case declareAll [natDecl, eqDecl, "E : Type where { k : Eq {1} Type Nat Nat -> E }"] of
         Left e         -> assertFailure e
         Right (env, _) ->
-          fmap inductiveLevels (lookupInductive (named "E") env) @?= Just []
+          fmap inductiveLevels (lookupInductive (declaredAs "E") env) @?= Just []
   , -- **And one the bounds only constrain is defaulted** (phase 51). @suc ?ℓ ≤ 2@
     -- leaves @?ℓ@ free below 1; phase 50 refused it, because a datatype has
     -- nowhere to carry a conditional constraint, and minimisation is what gives
@@ -530,7 +545,7 @@ universeTests =
       case declareAll [natDecl, eqDecl, "E : Type where { k : Eq {2} Type Nat Nat -> E }"] of
         Left e         -> assertFailure e
         Right (env, _) ->
-          fmap inductiveLevels (lookupInductive (named "E") env) @?= Just []
+          fmap inductiveLevels (lookupInductive (declaredAs "E") env) @?= Just []
   ]
 
 -- --------------------------------------------------------------------------
@@ -541,27 +556,42 @@ nameTests :: [TestTree]
 nameTests =
   [ refused "a datatype that is already declared"
       "Nat : Type\8320 where { z : Nat }"
-      (AlreadyDeclared (named "Nat"))
-  , refused "a constructor whose name is taken"
-      "T : Type\8320 where { zero : T }"
-      (AlreadyDeclared (named "zero"))
+      (AlreadyDeclared (named "Nat.Nat"))
+    -- **A CONSTRUCTOR WORD ANOTHER DATATYPE ALREADY HAS IS FREE SINCE MS10**,
+    -- where it was refused before: @zero@ is @Nat.zero@ and a @T@ declaring
+    -- @zero@ installs @T.zero@, so the clash this was pinned on cannot be
+    -- reached through a declaration at all. The refusal itself is still live
+    -- where a name is seeded ("Thena.NoConfusionTests"), as below.
+  , testCase "a constructor word another datatype has is free" $
+      afterFixtures "T : Type\8320 where { zero : T }" @?= Right ()
   , refused "a declaration that uses one name twice"
       "T : Type\8320 where { c : T ; c : T }"
-      (RepeatedName (named "c"))
+      (RepeatedName (named "T.c"))
     -- **The eliminator\'s wrapper is one of the names introduced** (MS4 phase
     -- 49e): §3.7 item 2 generates a global for it the way it does for a former
     -- and a constructor, which is what lets @elim D …@ elaborate as an
     -- ordinary application.
-    -- **And @caseD@ is another of them** (MS9 phase 178), generated the same
+    -- **And @D.case@ is another of them** (MS9 phase 178), generated the same
     -- way and so able to clash the same way.
-  , refused "a constructor named after the case analysis"
-      "T : Type\8320 where { caseT : T }"
-      (RepeatedName (named "caseT"))
+    --
+    -- **AND SINCE MS10 A CONSTRUCTOR CANNOT REACH EITHER NAME, so the clash is
+    -- gone rather than refused.** The equipment is @T.elim@ and @T.case@, in the
+    -- namespace @T@\'s declaration opens; a constructor written in that
+    -- declaration is a word at the root. So the two flat spellings a user could
+    -- once collide with are now ordinary free names, which is what this asserts.
+    -- **The refusal itself is not dead code** — "Thena.NoConfusionTests"
+    -- exercises it with the name seeded, and a @namespace T@ block is what will
+    -- let a user write into that namespace again.
+  , testCase "a constructor spelled like the old flat equipment is now free" $
+      sequence_
+        [ afterFixtures ("T : Type\8320 where { " ++ c ++ " : T }") @?= Right ()
+        | c <- ["elimT", "caseT"]
+        ]
   , testCase "everything a declaration introduces is declared afterwards" $
       sequence_
         [ isDeclared (named g) natVec @?= True
-        | g <- [ "Nat", "zero", "succ", "elimNat", "caseNat"
-               , "Vec", "nil", "cons", "elimVec", "caseVec"
+        | g <- [ "Nat.Nat", "Nat.zero", "Nat.succ", "Nat.elim", "Nat.case"
+               , "Vec.Vec", "Vec.nil", "Vec.cons", "Vec.elim", "Vec.case"
                ]
         ]
   , testCase "and nothing else is" $
@@ -577,9 +607,13 @@ nameTests =
 -- not, and would slip past a string comparison of the header alone.
 roundTripTests :: [TestTree]
 roundTripTests =
-  [ testCase name $ case lookupInductive (named name) natVec of
+  [ testCase name $ case lookupInductive (declaredAs name) natVec of
       Nothing -> assertFailure (name ++ " was not declared")
-      Just d  -> case reread (renderInductive (Rendering [] natVecCounter) d) of
+      -- **Printed in the scope it is read back in** (MS10 phase 254), which is
+      -- what a round trip is: the printer writes the shortest ending that still
+      -- resolves, so printing with no scope and reading with one would be two
+      -- different questions. @data Nat.Nat@ prints @data Nat@ here.
+      Just d  -> case reread (renderInductive (renderingFor [] natVecCounter natVec (opensIn natVec)) d) of
         Left e   -> assertFailure e
         Right d' -> do
           formerType d' @?= formerType d
@@ -592,7 +626,7 @@ roundTripTests =
   where
     -- The printer emits the whole command; the parser is handed what follows
     -- the command word, and the grammar does not care about the line breaks.
-    reread ls = case parseDeclaration [] natVec natVecCounter (drop 5 (unwords ls)) of
+    reread ls = case parseDeclaration [] natVec (opensIn natVec) natVecCounter (drop 5 (unwords ls)) of
       Left e       -> Left (show e)
       Right (d, _) -> Right d
 
@@ -613,7 +647,7 @@ refused name src expect = testCase name $ case afterFixtures src of
 -- | Run one declaration against the fixtures' environment, keeping the
 -- 'DeclareError' rather than rendering it.
 afterFixtures :: String -> Either DeclareError ()
-afterFixtures src = case parseDeclaration [] natVec 0 src of
+afterFixtures src = case parseDeclaration [] natVec (opensIn natVec) 0 src of
   Left e       -> error ("fixture does not parse: " ++ show e)
   Right (d, n) -> () <$ declare natVec n d
 
@@ -744,7 +778,7 @@ declareDoorTests =
     -- hole was that the name went in and only a later proof found out.
   , testCase "and nothing of it reaches the environment" $
       let (s, _) = driveTo [":trust none", liarLine]
-       in isDeclared (GlobalName "liar") (globals (machineOf s)) @?= False
+       in isDeclared (rootName "liar") (globals (machineOf s)) @?= False
 
     -- The rung is the user's own setting, so saying so lets it in.
   , testCase "the same line is admitted at any trust" $
@@ -753,7 +787,7 @@ declareDoorTests =
         r -> assertFailure ("expected Completed, got " ++ show r)
   , testCase "and then it is there" $
       let (s, _) = driveTo [":trust any", liarLine]
-       in isDeclared (GlobalName "liar") (globals (machineOf s)) @?= True
+       in isDeclared (rootName "liar") (globals (machineOf s)) @?= True
 
     -- **The check must not refuse what it has no business refusing.**
     -- @honest@'s claim is pending at its declaration — the declared type's
@@ -800,7 +834,7 @@ driveTo ls = foldl one (setUp, Blank) ls
     -- **The rule base comes from "Thena.Standard", not from IO.** @declare@
     -- runs the @elaborate@ rule, so a bare 'newSession' halts with
     -- @NoClauseMatched@ before it ever reaches the trust check.
-    setUp = foldl step withRules [natLine, eqLine]
+    setUp = foldl step withRules [natLine, "open Nat", eqLine, "open Eq"]
     step s l = case command s l of
       (s', Ran _ _ Completed) -> s'
       (_, r) -> error ("fixture line failed: " ++ l ++ " => " ++ show r)

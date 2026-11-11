@@ -31,7 +31,10 @@ import Thena.Surface.Concrete
   , Surface (..)
   , ObjectPiece (..)
   , SurfaceDecl (..)
+  , SurfaceOpenSpec (..)
+  , Reach (..)
   , SurfaceModule (..)
+  , Selection (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , SurfaceArg (..)
@@ -81,6 +84,15 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   block   { Located _ (TBlock _ _) }
   '...'   { Located _ TSpread }
   '.'     { Located _ TDot }
+  open    { Located _ TOpen }
+  consult { Located _ TConsult }
+  import  { Located _ TImport }
+  exporting { Located _ TExporting }
+  private { Located _ TPrivate }
+  public { Located _ TPublic }
+  namespace { Located _ TNamespace }
+  hiding  { Located _ THiding }
+  renaming { Located _ TRenaming }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
   ','     { Located _ TComma }
@@ -93,6 +105,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   '}$'     { Located _ TEscapeClose }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
+  qident  { Located _ (TQIdent $$) }
 
 %right '->'
 
@@ -113,7 +126,23 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
 -- written with indentation and one written with explicit braces reach this
 -- production as the same token stream.
 Module :: { SurfaceModule }
-  : module ident where '{' Decls '}'       { SurfaceModule $2 (reverse $5) }
+  -- A @QName@, so a header may say the path it sits at (MS11 phase 278): the
+  -- steps are directories, exactly as @import@ reads them.
+  : module QName where '{' Decls '}'
+      { SurfaceModule (fst $2) (snd $2) SelectWide (reverse $5) }
+  -- **And a header may state the file's interface** (MS11 phase 285), which is
+  -- his ruling of 2026-10-30: the export list attaches to the header, one place
+  -- per file. The list is 'ExportNames' and not 'QNames' because @exporting ( )@
+  -- is a module that exports nothing and has to be writable — the empty list is
+  -- a statement, where a missing clause is the absence of one.
+  | module QName exporting '(' ExportNames ')' where '{' Decls '}'
+      { SurfaceModule (fst $2) (snd $2) (SelectOnly (reverse $5)) (reverse $9) }
+  -- **Or say what it withholds instead** (MS11 phase 290), the other half of
+  -- the same ruling. **One slot and not two clauses**: a file narrows by naming
+  -- what it keeps or by naming what it withholds, which is the choice an @open@
+  -- already makes between @( … )@ and @hiding ( … )@.
+  | module QName hiding '(' ExportNames ')' where '{' Decls '}'
+      { SurfaceModule (fst $2) (snd $2) (SelectHiding (reverse $5)) (reverse $9) }
 
 -- | A block of the **instruction** language (MS4 phase 45).
 --
@@ -133,9 +162,30 @@ Module :: { SurfaceModule }
 -- **The instruction language is term-free**, which is why it can be mirrored at
 -- all: an operand is an identifier, a number or a string, so neither copy
 -- mentions a term grammar and neither can drift towards one.
+-- **FOUR ALTERNATIVES, WHICH IS WHAT @Thena.Syntax.Parser@'s @Body@ HAS**
+-- (MS10 phase 270, `~z4trb`). It had two, so @do { }@ and @do { a ; }@ were
+-- accepted in a rule file and parse errors in a surface term — **the fourth
+-- drift of this mirror**, after the lambda of MS5 phase 73 and the two of MS6
+-- phase 104c, and the one a user meets by pasting a rule body into a surface
+-- literal.
+--
+-- **Both alternatives were decided over there and neither was about rule
+-- files.** An empty body is MS4 phase 49 and his own argument — @E⟦_⟧@ /is/ do
+-- nothing, /"those elaborate just by not elaborating"/, so a clause that does
+-- nothing and a clause that does not match are different answers. A trailing
+-- @;@ is MS5 phase 78, so that @a ;@ at the end of a block is not a parse error
+-- naming a @}@ the author never wrote. Neither reason stops at the file it was
+-- found in.
+--
+-- **A block that fills no hole is caught where every other unfilled hole is**:
+-- @x = do { }@ answers /not finished: the hole goal is still open, so there is
+-- no term yet/, which is the repair being visible rather than the writing being
+-- prevented.
 Block :: { [RawInstr] }
-  : Instr                                  { [$1] }
+  :                                        { [] }
+  | Instr                                  { [$1] }
   | Block ';' Instr                        { $3 : $1 }
+  | Block ';'                              { $1 }
 
 -- **A binding's left is a pattern** (MS5 phase 84) — @Thena.Syntax.Parser@'s
 -- @Instr@, one grammar over, and §7b's registered duplication for the fourth
@@ -230,6 +280,8 @@ InstrOperand :: { RawOperand }
 -- grammar over.
 InstrValueOperand :: { RawOperand }
   : '(' InstrLambda ')'                    { $2 }
+  -- @Thena.Syntax.Parser@\'s name literal, one grammar over (MS10 phase 245).
+  | qident                                 { RawGlobal (init $1) (last $1) }
   | num                                    { RawPos (fromInteger $1) }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }
@@ -270,10 +322,70 @@ Decls :: { [SurfaceDecl] }
 -- | **Agda\/Haskell-style: a declaration is two of these.**
 -- 'Thena.Surface.Concrete.paired' puts a signature together with the equation
 -- that follows it.
+--
+-- **What is declared may be written with a path** (MS10 phase 243), which is
+-- how a generated name is placed in its namespace: @Ty.subst.X : …@ is the
+-- shape 'Thena.Language.Substitution' emits.
 Decl :: { SurfaceDecl }
-  : ident ':' Term                         { SurfaceSignature $1 $3 }
-  | ident '=' Term                         { SurfaceEquation $1 $3 }
+  : QName ':' Term                         { SurfaceSignature (fst $1) (snd $1) $3 }
+  | QName '=' Term                         { SurfaceEquation (fst $1) (snd $1) $3 }
   | Datatype                               { SurfaceDatatype $1 }
+  -- **A declaration, not a layout block** (MS10 phase 247, his ruling): it
+  -- names a namespace and its effect runs to the end of the enclosing one.
+  -- **The five forms his ruling of 2026-10-30 gives.** Four say what the line
+  -- brings in and do not combine; the fifth says how far it reaches, and it
+  -- composes with any of them.
+  | open OpenHead                          { SurfaceOpen (fst $2) (snd $2) }
+  | open OpenHead in Decl                  { SurfaceOpenIn (fst $2) (snd $2) $4 }
+  -- **The fine-grained escape from the header list** (MS11 phase 286, his
+  -- ruling of 2026-10-30). It takes a declaration the way @open … in@ does, so
+  -- a @private@ in front of a signature covers the equation under it too, and
+  -- it marks rather than scopes: nothing about where the declaration lands or
+  -- what it may see changes.
+  | private Decl                           { SurfacePrivate $2 }
+  -- **What this file's proofs are searched against** (MS11 phase 273, his ruling
+  -- of 2026-11-03). It names a /file/ and not a namespace, which is why it takes
+  -- a @QName@ and means something else by it: the steps are directories.
+  | consult QName                          { SurfaceConsult Own (fst $2) (snd $2) Nothing }
+  -- **A consult that travels** (MS11 phase 288, his ruling of 2026-10-30 that
+  -- @public@ is available to both acts): whoever imports this file is searched
+  -- against this base too. The @public import@ production below is the twin,
+  -- and @public@ is one word's worth of difference in both.
+  | public consult QName                   { SurfaceConsult Public (fst $3) (snd $3) Nothing }
+  -- **AND EITHER MAY SAY HOW FAR IT REACHES** (MS11 phase 292, his design of
+  -- 2026-11-05): the base is in the pool for the block's proofs and out of it
+  -- after, which is what a base wanted for one proof needs. Its twin is the
+  -- @import … where@ production below, and the two are the same extension of
+  -- the same shape.
+  | consult QName where '{' Decls '}'
+      { SurfaceConsult Own (fst $2) (snd $2) (Just (reverse $5)) }
+  | public consult QName where '{' Decls '}'
+      { SurfaceConsult Public (fst $3) (snd $3) (Just (reverse $6)) }
+  -- **Which surface modules this file depends on** (MS11 phase 274, his ruling
+  -- of 2026-11-03). A @QName@ again, and the steps are directories again: a
+  -- file states what it refers to and never relies on the session.
+  | import QName ImportSel                 { SurfaceImport Own (fst $2) (snd $2) $3 Nothing }
+  -- **An import that travels** (MS11 phase 287, his ruling of 2026-11-03):
+  -- whoever imports this file gets what this file got from that one.
+  -- **@public@ is an attribute of the import and not a second kind of import**,
+  -- so it is one production\'s worth of difference and one constructor.
+  | public import QName ImportSel          { SurfaceImport Public (fst $3) (snd $3) $4 Nothing }
+  -- **AN IMPORT STATES HOW FAR IT REACHES** (MS11 phase 291, his design of
+  -- 2026-11-05) — @import M where { … }@, a layout block exactly as
+  -- @namespace … where@ is, and the module's names are writable in it and not
+  -- after it. **It is why no existing construct had to gain a scope**: the act
+  -- carries its own extent, so what a @do@ or a @data@ block does to an
+  -- @import@ written in it is nothing.
+  | import QName ImportSel where '{' Decls '}'
+      { SurfaceImport Own (fst $2) (snd $2) $3 (Just (reverse $6)) }
+  | public import QName ImportSel where '{' Decls '}'
+      { SurfaceImport Public (fst $3) (snd $3) $4 (Just (reverse $7)) }
+  -- **A layout block, where @open@ is a line** (MS10 phase 254): a namespace
+  -- says which declarations are in it, so it has to hold them. Nesting is a
+  -- longer prefix and costs no mechanism, and @namespace A.B where { … }@ is
+  -- the same thing written in one line.
+  | namespace QName where '{' Decls '}'
+      { SurfaceNamespace (fst $2) (snd $2) (reverse $5) }
   -- **A top-level block is an item, not an expression** — his, 2026-09-03.
   -- Same syntax, different role: at the top of a module it plays where the
   -- other items declare.
@@ -288,8 +400,8 @@ Decl :: { SurfaceDecl }
 -- binder groups left of the @:@, the indices the arrow prefix of what is right
 -- of it.
 Datatype :: { SurfaceData }
-  : data ident DataParams ':' Term where '{' Constructors '}'
-      { SurfaceData $2 (reverse $3) $5 (reverse $8) }
+  : data QName DataParams ':' Term where '{' Constructors '}'
+      { SurfaceData (fst $2) (snd $2) (reverse $3) $5 (reverse $8) }
 
 DataParams :: { [(String, Surface)] }
   :                                        { [] }
@@ -305,7 +417,7 @@ SomeConstructors :: { [SurfaceConstructor] }
   | SomeConstructors ';' Constructor       { $3 : $1 }
 
 Constructor :: { SurfaceConstructor }
-  : ident ':' Term                         { SurfaceConstructor $1 $3 }
+  : QName ':' Term                         { SurfaceConstructor (fst $1) (snd $1) $3 }
 
 -- | A whole surface term.
 --
@@ -337,8 +449,68 @@ Arg :: { SurfaceArg }
   : Atom                                   { SurfaceArg Explicit $1 }
   | '{' Term '}'                           { SurfaceArg Implicit $2 }
 
+-- | A name as written: its path's steps, then its base word (MS10 phase 240).
+-- The lexer has already cut a qualified name into its pieces.
+QName :: { ([String], String) }
+  : ident                                  { ([], $1) }
+  | qident                                 { (init $1, last $1) }
+
+-- | What an @open@ opens, and what it says about which names it brings in
+-- (MS10 phase 254). Several namespaces only in the plain form: a selection is
+-- about one namespace's words, so naming two would not say whose they are.
+OpenHead :: { ([([String], String)], SurfaceOpenSpec) }
+  : QNames                                 { (reverse $1, OpenWhole) }
+  | QName '(' Words ')'                    { ([$1], OpenOnly (reverse $3)) }
+  | QName hiding '(' Words ')'             { ([$1], OpenHiding (reverse $4)) }
+  | QName renaming '(' Renamings ')'       { ([$1], OpenRenaming (reverse $4)) }
+
+-- | What a header\'s @exporting ( … )@ names: zero or more whole names (MS11
+-- phase 285). **Names and not 'Words', which is the difference from an @open@\'s
+-- selection**: an entry names a namespace or one member of one, and the unit of
+-- export is the namespace, so @Nat@ covers everything under it and @Nat.Nat@ is
+-- the type alone. Reversed by its caller.
+-- | __What an import takes from the module it names__ (MS11 phase 306,
+-- @~htngj@) — his design of 2026-11-05, the half phases 291 and 292 left out.
+--
+-- **Nullable, which is what keeps the import at four productions and not
+-- twelve.** The alternative was the cross product of @public@, the three
+-- clauses and the @where@ block. An empty clause is decided by LALR's single
+-- token of lookahead — @'('@ and @hiding@ shift into a clause, anything else
+-- reduces the empty one — so each import production gained one symbol and
+-- nothing else.
+--
+-- **'SelectWide' is no clause at all and @SelectOnly []@ is @( )@**, an import
+-- that deliberately takes nothing, exactly as @exporting ( )@ offers nothing.
+ImportSel :: { Selection }
+  :                                        { SelectWide }
+  | '(' ExportNames ')'                    { SelectOnly (reverse $2) }
+  | hiding '(' ExportNames ')'             { SelectHiding (reverse $3) }
+
+ExportNames :: { [([String], String)] }
+  :                                        { [] }
+  | ExportNames QName                      { $2 : $1 }
+
+-- | One or more, for @open X Y Z@ (MS10 phase 254). Reversed by its caller.
+QNames :: { [([String], String)] }
+  : QName                                  { [$1] }
+  | QNames QName                           { $2 : $1 }
+
+-- | The words an @open@ selects, hides, or renames from. **Words and not
+-- names**: a namespace is a prefix, so what an @open@ can speak about is the
+-- step that follows it.
+Words :: { [String] }
+  : ident                                  { [$1] }
+  | Words ident                            { $2 : $1 }
+
+Renamings :: { [(String, String)] }
+  : Renaming                               { [$1] }
+  | Renamings Renaming                     { $2 : $1 }
+
+Renaming :: { (String, String) }
+  : ident '->' ident                       { ($1, $3) }
+
 Atom :: { Surface }
-  : ident                                  { name $1 }
+  : QName                                  { qualifiedName (fst $1) (snd $1) }
   -- **@?foo@ is two tokens, not one.** @?@ cannot start an identifier —
   -- @.claude\/spec\/interface.md@ §2.6's @$idstart@ is a letter, @_@, or a character
   -- above ASCII — so the lexer hands over @TQuery@ and then the name. Writing
@@ -366,8 +538,12 @@ Atom :: { Surface }
   -- **An atom, so it needs no parentheses in an argument run** — @try (do { … })@
   -- and @try do { … }@ both read, the same way a parenthesised term does.
   | do '{' Block '}'                       { SurfaceDo (reverse $3) }
-  | elim ident '(' Terms ')' Atom '(' Terms ')' '(' Terms ')' Atom
-      { SurfaceElim $2 (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+  -- **The datatype takes a path, like every other reference** (MS10 phase
+  -- 254, his ruling of 2026-11-02): @elim Nat.Nat@ names the type the way the
+  -- printer writes it, and @elim Nat@ still reads because a written name is
+  -- resolved the one way every written name is.
+  | elim QName '(' Terms ')' Atom '(' Terms ')' '(' Terms ')' Atom
+      { SurfaceElim (fst $2) (snd $2) (reverse $4) $6 (reverse $8) (reverse $11) $13 }
   -- **Two atoms, and an atom itself** (MS8 phase 150) — a keyword and a fixed
   -- number of operands is self-delimiting, so it stands where a name stands.
   -- The third field of the core node is not written here: it is derived, and
@@ -529,7 +705,18 @@ name :: String -> Surface
 name x = case x of
   "_"      -> SurfacePlaceholder
   '?' : h  -> SurfaceHole h
-  _        -> SurfaceName x
+  _        -> SurfaceName [] x
+
+-- | A name with its path (MS10 phase 240).
+--
+-- **A qualified name is never a placeholder or a hole.** @_@ and @?foo@ are
+-- spellings of one word, and @A._@ is a name in @A@ whose word happens to be
+-- @_@ — nothing is declared under it, so elaboration refuses it, which is
+-- 'patternName''s reason for not special-casing a wildcard either.
+qualifiedName :: [String] -> String -> Surface
+qualifiedName ps x
+  | null ps   = name x
+  | otherwise = SurfaceName ps x
 
 -- | @_@ is a wildcard; everything else is a name.
 --

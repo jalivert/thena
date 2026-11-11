@@ -23,11 +23,13 @@ import Test.Tasty.HUnit (assertFailure, testCase)
 import Thena.Core.Term (Literal (..))
 import Thena.Driver
   ( Item (..)
+  , moduleText
   , parseSurfaceModule
   , parseSurfaceTerm
   )
 import Thena.Instral.Ops (Value (..))
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderSurface, renderValue)
 import Thena.Language.Reader
   ( Block (..)
@@ -49,11 +51,12 @@ tests =
     , testCase "every module in the corpus re-parses from its printing" modules
     , testCase "a printed value re-reads, tabs and all" valueReReads
     , testCase "and the corpus really holds terms" notVacuous
+    , testCase "a namespace block survives printing, nesting and all" namespaces
     ]
 
 -- | **A green test over an empty corpus is the failure @CLAUDE.md@ records three
 -- goldens once having**, and this one collects its terms through a function that
--- returns @[]@ for two of the four item kinds — so the count is asserted rather
+-- returns @[]@ for three of the five item kinds — so the count is asserted rather
 -- than assumed. The number is a floor, not a fact about today.
 notVacuous :: IO ()
 notVacuous = do
@@ -74,7 +77,7 @@ notVacuous = do
 valueReReads :: IO ()
 valueReReads = mapM_ one ["a\tb", "\8704", "quote \" and \\ back", "\n", "ℓ≐⌜x⌝"]
   where
-    one txt = case parseSurfaceTerm (renderValue (Rendering [] 0) [] (VText txt)) of
+    one txt = case parseSurfaceTerm (renderValue (rendering [] 0) [] (VText txt)) of
       Right (SurfaceLiteral (LString back))
         | back == txt -> pure ()
         | otherwise   -> assertFailure ("came back as " <> show back <> " from " <> show txt)
@@ -87,9 +90,17 @@ termsOf i = case i of
   ItemData d ->
     surfaceDataType d
       : map snd (surfaceDataParameters d)
-      <> map (\(SurfaceConstructor _ t) -> t) (surfaceDataConstructors d)
+      <> map (\(SurfaceConstructor _ _ t) -> t) (surfaceDataConstructors d)
   ItemBlock _ -> []
   ItemGrammar _ -> []
+  ItemOpen _ -> []
+  ItemConsult _ _ ds -> concatMap termsOf (concat ds)
+  ItemImport _ _ _ ds -> concatMap termsOf (concat ds)
+  ItemExporting _ -> []
+  ItemHiding _ -> []
+  ItemPrivate is -> concatMap termsOf is
+  ItemNamespace _ is -> concatMap termsOf is
+  ItemOpenIn _ is -> concatMap termsOf is
 
 -- | Every surface file the project ships.
 paths :: IO [FilePath]
@@ -159,10 +170,10 @@ modules = do
       case parseSurfaceModule src of
         Left e -> pure [p <> ": did not parse: " <> take 120 (show e)]
         Right (nm, items) ->
-          case parseSurfaceModule (printSurfaceModule nm items) of
+          case parseSurfaceModule (printSurfaceModule (moduleText nm) items) of
             Left e -> pure [p <> ": its printing did not parse: " <> take 200 (show e)]
             Right (nm', items')
-              | nm' /= nm -> pure [p <> ": came back as module " <> nm']
+              | nm' /= nm -> pure [p <> ": came back as module " <> moduleText nm']
               | map unlined items' /= map unlined items ->
                   pure (p <> ": items differ" : firstDifference (map unlined items) (map unlined items'))
               | otherwise -> pure []
@@ -170,6 +181,34 @@ modules = do
       | a == b = firstDifference as bs
       | otherwise = ["    was:  " <> take 200 (show a), "    came: " <> take 200 (show b)]
     firstDifference as bs = ["    lengths differ: " <> show (length as) <> " vs " <> show (length bs)]
+
+-- | A @namespace@ block printed back and read again (MS10 phase 254).
+--
+-- **Written out here rather than left to the corpus**, which has no namespaced
+-- file yet: the printer indents the block and the layout pass is what has to
+-- read that back, so nesting is the case worth pinning.
+namespaces :: IO ()
+namespaces = case parseSurfaceModule src of
+  Left e -> assertFailure ("did not parse: " <> take 200 (show e))
+  Right (nm, items) -> case parseSurfaceModule (printSurfaceModule (moduleText nm) items) of
+    Left e -> assertFailure ("its printing did not parse: " <> take 300 (show e))
+    Right (nm', items')
+      | nm' /= nm -> assertFailure ("came back as module " <> moduleText nm')
+      | items' /= items -> assertFailure ("items differ: " <> take 400 (show items'))
+      | otherwise -> pure ()
+  where
+    src =
+      "module NS where\n\
+      \namespace A where\n\
+      \  data Leaf : Type\8320 where\n\
+      \    leaf : Leaf\n\
+      \\n\
+      \  namespace B where\n\
+      \    inner : A.Leaf.Leaf\n\
+      \    inner = Leaf.leaf\n\
+      \\n\
+      \  outer : Leaf.Leaf\n\
+      \  outer = Leaf.leaf\n"
 
 -- | An item with every recorded source line set to zero.
 unlined :: Item -> Item
@@ -180,4 +219,6 @@ unlined i = case i of
         { blockProductions = [ pr { productionLine = 0 } | pr <- blockProductions b ]
         , blockRules = [ r { ruleLine = 0 } | r <- blockRules b ]
         }
+  ItemNamespace g is -> ItemNamespace g (map unlined is)
+  ItemOpenIn os is -> ItemOpenIn os (map unlined is)
   other -> other

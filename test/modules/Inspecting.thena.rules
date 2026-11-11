@@ -1,0 +1,8 @@
+rule base inspecting where
+
+import test.modules.Lang
+
+open A
+
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"

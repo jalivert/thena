@@ -1,0 +1,8 @@
+-- **And the unit is the namespace** (MS11 phase 290): `hiding ( Inner )` keeps
+-- the constructors and the eliminator back with the type.
+module test.modules.MissesWithheldData where
+
+import test.modules.Withholds
+
+mine : Inner.Inner
+mine = Inner.in'

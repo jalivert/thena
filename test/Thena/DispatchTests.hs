@@ -14,7 +14,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..))
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), fresh)
+import Thena.Core.Term (Core (..), Ident (..), fresh, rootName, rootScope, nameDotted)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
 import qualified Thena.Development.Cursor as Cursor
@@ -65,7 +65,7 @@ hole = enter (Under (Claim v (Ident "goal") type0) (Trailing (Free v)))
   where v = fst (fresh 0)
 
 rule :: String -> [Instr] -> Rule
-rule n = Rule (GlobalName n) [] [FocusIsHole]
+rule n = Rule (rootName n) [] [FocusIsHole]
 
 -- | Succeeds, and changes the development: the hole becomes a guess.
 works :: Rule
@@ -98,7 +98,7 @@ only r = bases [r]
 
 machine :: [RuleBase] -> Cursor -> [Instr] -> Machine
 machine base cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] [] 1000 0
+  load is (Machine (Exec [] [] [] []) (Development cur) [] emptyGlobals base [] [] [] rootScope 1000 [] 0
                    NoUndischargeableTrust)
 
 -- | Run as the driver does, following every channel, and keep the messages.
@@ -160,7 +160,7 @@ peekTests =
       -- can ask for a different solution after one has been found.
     , testCase "the frame survives the program running out" $
         map pointAlts (choicePoints (ranTo (machine (bases [works, fails]) hole [Do Ops.Prove])))
-          @?= [[GlobalName "fails"]]
+          @?= [[rootName "fails"]]
 
       -- No Choice frame ever exists without a live alternative (§7.3): taking
       -- the last one demotes the frame on the spot, so "that choice is
@@ -252,7 +252,7 @@ retryTests =
         let base = bases [works, fails]
             -- A Call frame between the choice point and the top of the stack.
             m0 = (ranTo (machine base hole [Do Ops.Prove]))
-            m1 = m0 { exec = (exec m0) { stack = Call [] [] Nothing False : stack (exec m0) } }
+            m1 = m0 { exec = (exec m0) { stack = Call [] [] Nothing [] False : stack (exec m0) } }
         case retryFrom Nothing m1 of
           Right (_, note) -> note @?= "retrying 1000: fails (1 frame(s) dropped)"
           Left e          -> assertFailure ("expected a retry, got " ++ show e)
@@ -354,10 +354,10 @@ dispatchableTests =
       -- unbound @Ref@ rather than offering @abandon@.
     , testCase "so the alternative after attack is abandon" $
         map pointAlts (choicePoints (ranTo (machine expectedBase hole [Do Ops.Prove])))
-          @?= [[GlobalName "abandon", GlobalName "prove"]]
+          @?= [[rootName "abandon", rootName "prove"]]
     ]
   where
-    names' it = [ n | r <- drainIt it, let GlobalName n = ruleName r ]
+    names' it = [ nameDotted (ruleName r) | r <- drainIt it ]
     drainIt it = case Thena.Rules.next it of
       Nothing        -> []
       Just (r, rest) -> r : drainIt rest

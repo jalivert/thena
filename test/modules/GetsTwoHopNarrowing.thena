@@ -1,0 +1,9 @@
+-- **The far end of the two-hop chain** (MS11 phase 306): `Bit` arrived through
+-- two `public import`s, the first of which narrowed. `MissesTriTwoHops.thena`
+-- is what did not arrive.
+module test.modules.GetsTwoHopNarrowing where
+
+import test.modules.PassesPasser
+
+mine : Bit.Bit
+mine = Bit.off

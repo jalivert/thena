@@ -1,0 +1,13 @@
+-- **Its twin, and the measurement is that this one is refused** (MS11 phase
+-- 299): the import's block ends, so the rule below it may not write `LC` even
+-- though the file imports `Lang` and the module is loaded.
+rule base scoped-hides where
+
+import test.modules.Lang where
+  rule inside :- do
+    say "inside"
+
+open A
+
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"

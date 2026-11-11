@@ -1,0 +1,4 @@
+module test.modules.PublishesTwo where
+
+public consult test.modules.Tooling
+public consult test.modules.Louder

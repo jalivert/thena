@@ -1,0 +1,9 @@
+-- **A base whose import states how far it reaches** (MS11 phase 299): the block
+-- may write `Lang`'s language, and there is nothing after it that may not.
+rule base scoped-reveals where
+
+import test.modules.Lang where
+  open A
+
+  rule describe LC[app]`( ${f} ${a} )` :- do
+    say "an application"

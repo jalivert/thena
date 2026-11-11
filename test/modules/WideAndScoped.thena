@@ -1,0 +1,15 @@
+module test.modules.WideAndScoped where
+
+-- **A file-wide line and a block-scoped one, where the scoped base brings a
+-- second base with it** (MS11 phase 298). `helped` is the file's own throughout
+-- and `needed` only inside the block: the two are told apart by the length of
+-- each line's group, and an arithmetic over the count of lines got this wrong
+-- as soon as a scoped base brought anything.
+consult test.modules.Helper
+
+consult test.modules.Needs where
+  do
+    needed
+
+do
+  helped

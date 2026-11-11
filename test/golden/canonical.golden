@@ -1,4 +1,4 @@
-module Canonical
+module examples.Canonical
   declared Term
   declared Ty
   declared NV

@@ -1,0 +1,8 @@
+-- **The control** (MS11 phase 290): `scratch` is named on the header's `hiding`
+-- clause, so it is not an importer's to name.
+module test.modules.MissesWithheld where
+
+import test.modules.Withholds
+
+mine : Outer.Outer -> Outer.Outer
+mine = scratch

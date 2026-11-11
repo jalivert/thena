@@ -1,0 +1,9 @@
+-- **What a public import passes on** (MS11 phase 287): this file imports
+-- `PassesBit` and writes `Bit.Bit`, which `OnlyPair.thena` is refused for doing
+-- through a plain import.
+module test.modules.GetsBit where
+
+import test.modules.PassesBit
+
+mine : Bit.Bit
+mine = Bit.on

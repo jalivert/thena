@@ -1,6 +1,6 @@
 -- | Rule-base files: the header, the ordered list, and what a load refuses.
 --
--- All of it is pure — 'Thena.Driver.loadRuleBases' takes file /contents/, not
+-- All of it is pure — 'Thena.Driver.loadRuleTexts' takes file /contents/, not
 -- paths (§12 invariant 4) — so the paths here are made up and nothing is read.
 -- The one test that touches the real file is "Thena.RuleSyntaxTests"; the one
 -- that drives the real REPL is "Thena.GoldenTests".
@@ -13,7 +13,15 @@ module Thena.RuleFileTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName, nameDotted)
+import Thena.Instral.Concrete
+  ( RawDecl (..)
+  , Reach (..)
+  , Selection (..)
+  , RawOpen (..)
+  , RawOpenSpec (..)
+  )
+import Thena.Syntax.Print (printRuleFile)
 import Thena.Driver
   ( CommandError (..)
   , Stop (..)
@@ -22,22 +30,210 @@ import Thena.Driver
   , Session
   , machineOf
   , command
-  , loadRuleBases
+  , loadRuleTexts
+  , consultRuleTexts
+  , loadProofItems
+  , loadProofItemsConsulting
+  , Pool (..)
+  , moduleConsults
+  , moduleText
+  , parseSurfaceModule
   , newSession
   , baseHead
+  , rawRuleDecls
   )
-import Thena.Engine (Machine (rules))
+import Thena.Engine (rules)
 import qualified Thena.Engine as Engine
 import Thena.Instral.Ops (Value (..))
 import Thena.Errors (FailReason (..))
 import Thena.Instral.Ops (Rule (..), Pattern (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
+import Thena.View.Source (printItem)
 
 tests :: TestTree
 tests =
   testGroup
     "rule files (§8)"
-    [headers, loading, ordering, refusals, commands, argumentHeads, returning, primitives, walking]
+    [headers, opens, imports, loading, ordering, theStack, consulting, refusals, commands, argumentHeads, returning, primitives, walking]
+
+-- --------------------------------------------------------------------------
+-- An @open@ line, as written
+-- --------------------------------------------------------------------------
+
+-- | **The five forms a rule file may write** (MS10 phase 267), read without a
+-- session: what each line parses to, and that the printer writes it back.
+--
+-- What the lines /mean/ is "Thena.ObjectTermTests"' — these say only that the
+-- grammar reads each form and keeps what it said, which is what the printer
+-- needs to be able to invert.
+opens :: TestTree
+opens =
+  testGroup
+    "an open line in a rule file (MS10 phase 267)"
+    [ testCase "open X" $
+        decls ["open A"] @?= Right [DeclOpen (RawOpen [([], "A")] RawOpenWhole)]
+
+      -- **Several namespaces, and only in the plain form**: a selection speaks
+      -- about one namespace's words, so naming two would not say whose.
+    , testCase "open X Y Z is one line and three namespaces" $
+        decls ["open A B.C D"]
+          @?= Right [ DeclOpen (RawOpen [([], "A"), (["B"], "C"), ([], "D")]
+                                  RawOpenWhole) ]
+
+    , testCase "open X ( a b )" $
+        decls ["open A ( LC Ty )"]
+          @?= Right [DeclOpen (RawOpen [([], "A")] (RawOpenOnly ["LC", "Ty"]))]
+
+    , testCase "open X hiding ( a )" $
+        decls ["open A hiding ( LC )"]
+          @?= Right [DeclOpen (RawOpen [([], "A")] (RawOpenHiding ["LC"]))]
+
+    , testCase "open X renaming ( a -> b )" $
+        decls ["open A renaming ( LC -> L )"]
+          @?= Right [DeclOpen (RawOpen [([], "A")] (RawOpenRenaming [("LC", "L")]))]
+
+      -- **The one that covers a declaration rather than the rest of the file**,
+      -- and the declaration it covers is nested inside it.
+    , testCase "open X in a declaration holds that declaration" $
+        decls ["open A in", "  r : Core"]
+          @?= Right [ DeclOpenIn (RawOpen [([], "A")] RawOpenWhole)
+                        (DeclSignature (signatureOf "r")) ]
+
+      -- **A path is written where a word is**, since a namespace may be nested.
+    , testCase "the namespace may be a path" $
+        decls ["open A.B.C"]
+          @?= Right [DeclOpen (RawOpen [(["A", "B"], "C")] RawOpenWhole)]
+
+      -- **Printed back and read again gives the same lines**, which is what
+      -- says the written form kept everything the line said.
+    , testCase "every form survives being printed and read again" $ do
+        let written = [ "open A"
+                      , "open A B.C D"
+                      , "open A ( LC Ty )"
+                      , "open A hiding ( LC )"
+                      , "open A renaming ( LC -> L )"
+                      ]
+        case decls written of
+          Left e   -> assertFailure e
+          Right ds -> decls' (printRuleFile "mine" Nothing ds) @?= Right ds
+    ]
+  where
+    decls ls = decls' (unlines ("rule base mine where" : "" : ls))
+
+    decls' src = case rawRuleDecls src of
+      Right (_, _, ds) -> Right ds
+      Left e           -> Left (show e)
+
+    -- The signature @r : Core@ as the parser builds it, reached by parsing it
+    -- rather than written out: 'RawTy' is a type this module has no other
+    -- reason to import.
+    signatureOf n = case decls [n ++ " : Core"] of
+      Right [DeclSignature g] -> g
+      other -> error ("the fixture signature did not parse: " ++ show other)
+
+-- | **An `import` line in a rule file** (MS11 phase 276), **a `consult` line
+-- and `public` on either** (MS11 phase 289), read without a session: what the
+-- line parses to, and that the printer writes it back.
+--
+-- What they /do/ is 'Thena.LoadTests'' — it needs the disc — and these say only
+-- that the grammar reads them and keeps the name, which is what the printer has
+-- to be able to invert. **A base printed without its imports would read back and
+-- then be refused**, and since phase 289 the same is true of its consults.
+imports :: TestTree
+imports =
+  testGroup
+    "what a rule file states it is written against (MS11 phases 276 and 289)"
+    [ testCase "import X" $
+        decls ["import Stlc"] @?= Right [DeclImport Own [] "Stlc" SelectWide Nothing]
+
+      -- **The steps are directories**, which is what makes this a file's name
+      -- and not a namespace's — the same spelling meaning something else.
+    , testCase "and the module name is a path" $
+        decls ["import Stlc.Syntax.Terms"]
+          @?= Right [DeclImport Own ["Stlc", "Syntax"] "Terms" SelectWide Nothing]
+
+      -- **The other act, and the other word on both** (MS11 phase 289, his
+      -- ruling of 2026-10-30 that @public@ is available to both acts and to
+      -- both kinds of file). @public@ is an attribute and not a second kind of
+      -- act, which is what 'Reach' on one constructor says.
+    , testCase "consult X" $
+        decls ["consult Stlc.Tactics"]
+          @?= Right [DeclConsult Own ["Stlc"] "Tactics" Nothing]
+
+    , testCase "public import X" $
+        decls ["public import Stlc"] @?= Right [DeclImport Public [] "Stlc" SelectWide Nothing]
+
+    , testCase "public consult X" $
+        decls ["public consult Stlc.Tactics"]
+          @?= Right [DeclConsult Public ["Stlc"] "Tactics" Nothing]
+
+      -- **AND AN IMPORT MAY STATE HOW FAR IT REACHES** (MS11 phase 299, his ask
+      -- for the parity with the surface language). The block is the field, so
+      -- @Nothing@ above is the line with none and this is the same constructor.
+    , testCase "import X where { … }" $
+        decls ["import Stlc where", "  r : Core"]
+          @?= Right [DeclImport Own [] "Stlc" SelectWide (Just [DeclSignature (signatureOf "r")])]
+
+      -- **@where@ with nothing after it is an EMPTY block and not a line with
+      -- no block**, which is the layout rule and not a case of its own
+      -- ("Thena.Surface.Layout"). It matters because @Just []@ and @Nothing@
+      -- mean different things: the first reveals the module to nothing, the
+      -- second to the rest of the file.
+    , testCase "and an empty block is Just []" $
+        decls ["import Stlc where"] @?= Right [DeclImport Own [] "Stlc" SelectWide (Just [])]
+
+      -- **@public@ and a block are two questions**, so a line may state both:
+      -- the block says how far the module reaches here, @public@ says who else
+      -- gets it.
+    , testCase "public import X where { … }" $
+        decls ["public import Stlc where", "  r : Core"]
+          @?= Right [DeclImport Public [] "Stlc" SelectWide (Just [DeclSignature (signatureOf "r")])]
+
+      -- **Nesting costs no mechanism**, because a block holds what the file
+      -- holds — the production takes @Decls@.
+    , testCase "and a block may hold another scoped import" $
+        decls ["import Stlc where", "  import Stlc.Terms where", "    r : Core"]
+          @?= Right
+                [ DeclImport Own [] "Stlc" SelectWide
+                    (Just [ DeclImport Own ["Stlc"] "Terms" SelectWide
+                              (Just [DeclSignature (signatureOf "r")]) ]) ]
+
+    , testCase "it survives being printed and read again" $ do
+        let written = [ "import Stlc", "import Stlc.Syntax.Terms"
+                      , "public import Stlc.Terms"
+                      , "consult Stlc.Tactics", "public consult Stlc.Crush"
+                      , "open Stlc" ]
+        case decls written of
+          Left e   -> assertFailure e
+          Right ds -> decls' (printRuleFile "mine" Nothing ds) @?= Right ds
+
+      -- **The block goes round too** (MS11 phase 299), the empty one included:
+      -- a stored project holds the tree as written, so a base printed without
+      -- its block would read back with the module reaching the rest of the file.
+    , testCase "and so does a scoped import, empty block and all" $ do
+        let written = [ "import Stlc where"
+                      , "  r : Core"
+                      , "  import Stlc.Terms where"
+                      , "    q : Core"
+                      , "public import Stlc.Other where"
+                      , "import Stlc.Nothing where"
+                      , "open Stlc" ]
+        case decls written of
+          Left e   -> assertFailure e
+          Right ds -> decls' (printRuleFile "mine" Nothing ds) @?= Right ds
+    ]
+  where
+    decls ls = decls' (unlines ("rule base mine where" : "" : ls))
+
+    decls' src = case rawRuleDecls src of
+      Right (_, _, ds) -> Right ds
+      Left e           -> Left (show e)
+
+    -- Reached by parsing it, as the group above does: 'RawSignature' is a type
+    -- this module has no other reason to import.
+    signatureOf n = case decls [n ++ " : Core"] of
+      Right [DeclSignature g] -> g
+      other -> error ("the fixture signature did not parse: " ++ show other)
 
 -- --------------------------------------------------------------------------
 -- The header
@@ -111,13 +307,13 @@ oneRule :: String
 oneRule = "rule base tiny where\nrule solve :- when focus-is-guess do prim-solve\n"
 
 load1 :: [(FilePath, String)] -> (Session, Response)
-load1 = loadRuleBases newSession
+load1 = loadRuleTexts newSession
 
 basesOf :: Session -> [RuleBase]
 basesOf = rules . machineOf
 
 ruleNames :: RuleBase -> [String]
-ruleNames b = [ n | Rule (GlobalName n) _ _ _ <- baseRules b ]
+ruleNames b = [ nameDotted g | Rule g _ _ _ <- baseRules b ]
 
 loading :: TestTree
 loading =
@@ -129,7 +325,7 @@ loading =
         map basePath (basesOf s) @?= ["tiny.thena.rules"]
         map ruleNames (basesOf s) @?= [["solve"]]
         case resp of
-          BasesLoaded bs -> map baseName bs @?= ["tiny"]
+          BasesLoaded bs _ -> map baseName bs @?= ["tiny"]
           other          -> assertFailure (show other)
 
     , -- Rules may span lines — DECIDED by the user 2026-08-25 — and what ends
@@ -160,11 +356,11 @@ loading =
       -- too as of MS5 phase 62b — an op word at an arity the op does not have
       -- is a call. So the mistake left here is the scope one: @x@ is bound by
       -- nothing, which 'validate' catches when the file loads.
-      testCase "a rule that does not resolve [] is refused, naming every mistake" $
+      testCase "a rule that does not resolve is refused, naming every mistake" $
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do frobnicate; prim-solve x")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [UnboundInRule (GlobalName "r") 1 "x"]
+                , RuleIllFormed [UnboundInRule (rootName "r") 1 "x"]
                 )
 
     , -- The load-time pass §2.4 asked for, now running at load rather than in
@@ -173,7 +369,7 @@ loading =
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do prim-try nothing")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [UnboundInRule (GlobalName "r") 0 "nothing"] )
+                , RuleIllFormed [UnboundInRule (rootName "r") 0 "nothing"] )
     ]
   where
     refusal fs = case snd (load1 fs) of
@@ -215,7 +411,7 @@ ordering =
 
     , testCase "a load replaces the whole list" $
         let s1 = fst (load1 [a, b])
-            s2 = fst (loadRuleBases s1 [b])
+            s2 = fst (loadRuleTexts s1 [b])
          in map baseName (basesOf s2) @?= ["b"]
     ]
   where
@@ -238,11 +434,11 @@ refusals =
     "the base may not change under a proof"
     [ testCase "while one is being proved" $
         rejected (proving ":load extra.thena.rules")
-          @?= Just (ProofUnderway (GlobalName "t"))
+          @?= Just (ProofUnderway (rootName "t"))
 
     , testCase "or while one is suspended" $
         rejected (suspended ":load extra.thena.rules")
-          @?= Just (ProofsSuspended [GlobalName "t"])
+          @?= Just (ProofsSuspended [rootName "t"])
 
     , testCase "but between theorems it is allowed" $
         case snd (command newSession ":load extra.thena.rules") of
@@ -299,9 +495,9 @@ argumentHeads =
   testGroup
     "a loaded head may ask about its argument"
     [ testCase "a name takes the clause that asks for one" $
-        said "pick \10216 foo \10217" @?= Just "that is a name"
+        said "pick surface`foo`" @?= Just "that is a name"
     , testCase "and anything else falls through to the other" $
-        said "pick \10216 Type\8320 -> Type\8320 \10217" @?= Just "that is not a name"
+        said "pick surface`Type\8320 -> Type\8320`" @?= Just "that is not a name"
     ]
   where
     picking =
@@ -501,3 +697,126 @@ walking =
               m : _ -> Just m
               []    -> Nothing
             other -> error ("expected Ran, got " ++ show other)
+
+-- --------------------------------------------------------------------------
+-- The stack (MS11 phase 271)
+-- --------------------------------------------------------------------------
+
+-- | **Consults form a stack — his ruling of 2026-11-03.** The last thing
+-- consulted is tried first, and the pool is walked in definition order, so what
+-- these assert is the order of 'Thena.Engine.rules' after each act.
+--
+-- They are written against 'consultRuleTexts' and not against @:consult@
+-- because the command only /names/ files (§12 invariant 4): what the command
+-- does is one case in 'refusals', and what the install does is here.
+theStack :: TestTree
+theStack =
+  testGroup
+    "a consult pushes, a load replaces"
+    [ testCase "the last base consulted is tried first" $
+        names (pushing [["one"], ["two"]]) @?= ["two", "one"]
+
+    , testCase "a load replaces the whole pool" $
+        names (fst (loadRuleTexts (pushing [["one"]]) (sources ["two"])))
+          @?= ["two"]
+
+    , -- His, 2026-11-03: not a move to the top and not a no-op, because the
+      -- upper copy can go out of scope while the lower one is still in force.
+      testCase "consulting the same base twice is a second independent push" $
+        names (pushing [["one"], ["one"]]) @?= ["one", "one"]
+
+    , -- One line is one push, in the order written, so the leftmost of a group
+      -- is searched first within it and the group sits above what was there.
+      testCase "a group keeps its written order and sits on top" $
+        names (pushing [["a", "b"], ["c"]]) @?= ["c", "a", "b"]
+
+    , testCase "a consult of nothing leaves the pool alone" $
+        names (pushing [["one"], []]) @?= ["one"]
+    ]
+  where
+    -- A base with a header and no rules: this group is about the order of the
+    -- list and nothing in it calls anything.
+    sources ns = [ (n ++ ".thena.rules", "rule base " ++ n ++ " where\n\n") | n <- ns ]
+
+    -- Each inner list is one @:consult@, left to right.
+    pushing = foldl (\s ns -> fst (consultRuleTexts s (sources ns))) newSession
+
+    names = map baseName . rules . machineOf
+
+-- --------------------------------------------------------------------------
+-- A consult written in a surface file (MS11 phase 273)
+-- --------------------------------------------------------------------------
+
+-- | **A file says what its proofs are searched against — his ruling of
+-- 2026-11-03** — and the effect is the file's, not the session's.
+consulting :: TestTree
+consulting =
+  testGroup
+    "consult, written in a module"
+    [ testCase "it parses, and it prints back as it was written" $
+        printed "consult Stlc.Tactics" @?= Right ["consult Stlc.Tactics"]
+
+    , testCase "one word is a module name here too" $
+        printed "consult Tactics" @?= Right ["consult Tactics"]
+
+    , testCase "every one of them, in written order" $
+        consults (unlines ["consult B.Two", "consult A.One"])
+          @?= Right ["B.Two", "A.One"]
+
+    , -- A namespace does not change which bases the module is searched
+      -- against, so a consult inside one is still the module's.
+      testCase "and one inside a namespace block is the module's" $
+        consults (unlines [ "consult Top"
+                          , "namespace N where"
+                          , "  consult Inner"
+                          ])
+          @?= Right ["Top", "Inner"]
+
+    , -- The door with no IO refuses rather than elaborating the module
+      -- against whatever the session happened to have.
+      testCase "the door that cannot read a file refuses the module" $
+        case itemsOf "consult Stlc.Tactics" of
+          Left e -> assertFailure e
+          Right (nm, is) -> case snd (loadProofItems newSession (moduleText nm) is) of
+            ConsultsUnread ms -> map moduleText ms @?= ["Stlc.Tactics"]
+            other             -> assertFailure (show other)
+
+    , -- **The claim the whole design rests on**: the pool is the module's
+      -- while it loads and the session's again afterwards, so a module that
+      -- type-checks in isolation type-checks for whoever imports it.
+      testCase "the pool is the module's for the load and the session's after" $
+        case itemsOf "consult Stlc.Tactics" of
+          Left e -> assertFailure e
+          Right (nm, is) ->
+            -- The session has "mine"; the module is loaded against "extra"
+            -- on top of it, and afterwards the session has "mine" alone.
+            let (s', _) = loadProofItemsConsulting (Pool (pool extra) [] [] []) consulted (moduleText nm) is
+             in (map baseName (pool extra), map baseName (pool s'))
+                  @?= (["extra", "mine"], ["mine"])
+
+    , testCase "and the module does load" $
+        case itemsOf "consult Stlc.Tactics" of
+          Left e -> assertFailure e
+          Right (nm, is) ->
+            case snd (loadProofItemsConsulting (Pool (pool extra) [] [] []) consulted (moduleText nm) is) of
+              ProofLoaded n ds _ _ -> (n, ds) @?= ("M", [])
+              other                -> assertFailure (show other)
+    ]
+  where
+    moduleOf body = unlines (["module M where", ""] ++ [body])
+
+    itemsOf body = case parseSurfaceModule (moduleOf body) of
+      Left e  -> Left (show e)
+      Right r -> Right r
+
+    printed body = fmap (concatMap printItem . snd) (itemsOf body)
+
+    consults body = fmap (map moduleText . moduleConsults . snd) (itemsOf body)
+
+    pool = rules . machineOf
+
+    consulted =
+      fst (consultRuleTexts newSession [("mine.thena.rules", "rule base mine where\n\n")])
+
+    extra =
+      fst (consultRuleTexts consulted [("extra.thena.rules", "rule base extra where\n\n")])

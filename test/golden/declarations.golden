@@ -1,5 +1,7 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
+thena spine> open Nat
+opened Nat
 thena spine> declare one : Nat ; one = succ zero
 solved: ?ℓ16
 already equal
@@ -35,8 +37,8 @@ solved: ?ℓ85
 solved: ?ℓ85
 thena spine> :show Bool
 data Bool : Type₀ where
-  { true : Bool
-  ; false : Bool }
+  { Bool.true : Bool
+  ; Bool.false : Bool }
 thena spine> declare data Box (A : Type₀) : Type₀ where { box : A -> Box A }
 solved: ?ℓ108
 solved: ?ℓ113
@@ -47,7 +49,7 @@ already equal
 solved: ?ℓ129
 thena spine> :show Box
 data Box (A : Type₀) : Type₀ where
-  { box : A -> Box A }
+  { Box.box : A -> Box A }
 thena spine> declare idty : forall {A : Type₀} -> A -> A ; idty = \ A x -> x
 solved: ?ℓ155
 solved: ?ℓ160

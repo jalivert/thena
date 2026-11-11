@@ -1,0 +1,12 @@
+-- **The base a block of `Pins` holds** (MS11 phase 300, his ruling of
+-- 2026-11-06). `answer` is a clause `Pins` also has, so what the block settles
+-- is which of the two is tried first; `stumbles` is one that fails, so that
+-- what the pool looks like after a body that never reached its pop can be
+-- measured.
+rule base quiet where
+
+rule answer :- do
+  say "quiet"
+
+rule stumbles :- do
+  pop-development

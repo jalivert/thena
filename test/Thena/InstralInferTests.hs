@@ -10,22 +10,23 @@ module Thena.InstralInferTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (GlobalName (..), rootName, nameDotted)
 import Thena.Driver
   ( Response (..)
   , RuleFileError (..)
   , Stop (..)
   , command
-  , loadRuleBases
+  , loadRuleTexts
   , newSession
   )
-import Thena.Engine (Machine (..))
+import Thena.Engine (Machine (..), rules)
 import Thena.Driver (Session
   , machineOf)
 import Thena.Instral.Infer
   ( InstralTypeError (..)
   , Site (..)
   , inferProgram
+  , reachingAll
   , renderInstralTypeError
   )
 import Thena.Instral.Type (Signature (..), Ty (..), renderSignature)
@@ -34,7 +35,8 @@ import Thena.Errors (SyntaxError (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Rules (RuleBase (..), RuleError (..), writtenPositions)
 import Data.List (isInfixOf, sort)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCursor, renderRuleError)
 import Thena.Repl (transcriptFrom)
 import Thena.Standard (expectedBase, expectedStandard, standardBases)
@@ -79,17 +81,17 @@ writtenLines =
     "an instruction number names the line as written"
     [ testCase "a nested call is part of the line that wanted it" $
         case load "twice s = concat s s\nrule go t :- do\n  m = twice (twice t)\n  prim-try m" of
-          BasesIllTyped (Clash (InBody (GlobalName "go") 1) _ _ : _) -> pure ()
+          BasesIllTyped (Clash (InBody (GlobalName [] "go") 1) _ _ : _) -> pure ()
           other -> assertFailure ("expected a clash at the second line, got " ++ show other)
 
     , testCase "an annotation is a line of its own" $
         case load "rule go :- do\n  k : String\n  k = \"x\"\n  prim-try k" of
-          BasesIllTyped (Clash (InBody (GlobalName "go") 2) _ _ : _) -> pure ()
+          BasesIllTyped (Clash (InBody (GlobalName [] "go") 2) _ _ : _) -> pure ()
           other -> assertFailure ("expected a clash at the third line, got " ++ show other)
 
     , testCase "the scope check counts the same lines" $
         case loadRaw "rule base a where\ntwice s = concat s s\nrule go t :- do\n  m = twice (twice t)\n  say nope\n" of
-          RuleFileRefused _ (RuleIllFormed [UnboundInRule (GlobalName "go") 1 "nope"]) -> pure ()
+          RuleFileRefused _ (RuleIllFormed [UnboundInRule (GlobalName [] "go") 1 "nope"]) -> pure ()
           other -> assertFailure ("expected nope refused at the second line, got " ++ show other)
 
       -- **Inside a lambda, the lambda's own line is what is named** — the
@@ -98,7 +100,7 @@ writtenLines =
       -- the two counts differ and only one of them is right.
     , testCase "a mistake inside a lambda names the lambda's line" $
         case load "rule go :- do\n  say \"a\"\n  say \"b\"\n  f = \\ z -> do { say \"in\" ; prim-try \"s\" ; return z }" of
-          BasesIllTyped (TextNotTextual (InBody (GlobalName "go") 2) _ : _) -> pure ()
+          BasesIllTyped (TextNotTextual (InBody (GlobalName [] "go") 2) _ : _) -> pure ()
           other -> assertFailure ("expected a refusal at the third line, got " ++ show other)
 
       -- **The one function both passes go through**, on a body built by hand:
@@ -118,11 +120,11 @@ writtenLines =
     , testCase "a rule error and a type error print the same number" $
         assertBool "both say instruction 2"
           (all ("instruction 2" `isInfixOf`)
-             [ renderRuleError (UnboundInRule (GlobalName "go") 1 "nope")
-             , renderInstralTypeError (Clash (InBody (GlobalName "go") 1) TCore TString) ])
+             [ renderRuleError (rendering [] 0) (UnboundInRule (rootName "go") 1 "nope")
+             , renderInstralTypeError (Clash (InBody (rootName "go") 1) TCore TString) ])
     ]
   where
-    loadRaw src = snd (loadRuleBases newSession [("a.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("a.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- Generalisation, per strongly connected component (MS5 phase 76)
@@ -175,12 +177,12 @@ generalisation =
         case load "rule aaa :- do h = here ; say h ; zzz\n\
                   \rule zzz :- do g = here ; say g" of
           BasesIllTyped [Clash (InBody a _) _ _, Clash (InBody z _) _ _] ->
-            (a, z) @?= (GlobalName "aaa", GlobalName "zzz")
+            (a, z) @?= (rootName "aaa", rootName "zzz")
           other -> assertFailure ("expected two clashes, got " ++ show other)
     ]
   where
     loads what src = testCase what $ case load src of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
     clashes what src = testCase what $ case load src of
@@ -255,7 +257,7 @@ annotatedLocals =
     , testCase "a mistake in a local's type names the rule, the line and the local" $
         case loadRaw "rule base a where\nrule go :- do\n  k : Nope\n  k = \"x\"\n" of
           RuleFileRefused _ (RuleIllFormed es)
-            | [InAnnotation (GlobalName "go") 0 "k" (UnknownType _ "Nope")] <- es -> pure ()
+            | [InAnnotation (GlobalName [] "go") 0 "k" (UnknownType _ "Nope")] <- es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **…and () is impossible for a local**, not merely misplaced: a local
@@ -263,19 +265,19 @@ annotatedLocals =
     , testCase "a local's type may not give ()" $
         case loadRaw "rule base a where\nrule go :- do\n  k : a -> ()\n  k = \\ x -> \"k\"\n" of
           RuleFileRefused _ (RuleIllFormed es)
-            | [InAnnotation (GlobalName "go") 0 "k" (UnitInsideAType _)] <- es -> pure ()
+            | [InAnnotation (GlobalName [] "go") 0 "k" (UnitInsideAType _)] <- es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
     ]
   where
     loads what src = testCase what $ case load src of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
     clashes what src = testCase what $ case load src of
       BasesIllTyped (Clash{} : _) -> pure ()
       other -> assertFailure ("expected a clash, got " ++ show other)
 
-    loadRaw src = snd (loadRuleBases newSession [("a.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("a.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A do block in a surface term is typed (MS5 phase 79)
@@ -324,10 +326,10 @@ surfaceBlockTyping =
     loads what src = testCase what $ do
       r <- loadWithStandard src
       case r of
-        BasesLoaded _ -> pure ()
+        BasesLoaded _ _ -> pure ()
         other         -> assertFailure ("expected a load, got " ++ show other)
 
-    loadRaw src = snd (loadRuleBases newSession [("b.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("b.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A function is called, a rule is searched (MS5 phase 80)
@@ -342,7 +344,7 @@ surfaceBlockTyping =
 -- Before this phase it was reached by the FIRST clause failing, which is a
 -- rule\'s behaviour wearing a function\'s spelling.
 --
--- **Refusing the second clause is the whole change.** "Thena.Engine" decides
+-- **Refusing the second clause is the whole change.** "Thena" "Engine" decides
 -- @Choice@ against @Call@ by @hasNext@ alone and never asks what kind of
 -- callable it has, so with one clause it already builds a @Call@ frame — which
 -- is why the last two cases here pass without a line of engine code.
@@ -420,10 +422,10 @@ functionsAreFunctions =
     ]
   where
     loads what src = testCase what $ case load src of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
-    loadRaw src = snd (loadRuleBases newSession [("f.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("f.thena.rules", src)])
 
     -- **Two clauses that OVERLAP**, and that is the whole point of the
     -- fixture: @["a"]@ matches both @[_]@ and @[_, ..._]@. A non-overlapping
@@ -435,14 +437,14 @@ functionsAreFunctions =
 
     -- Load, run @go@, and report what the machine said.
     ranBy src =
-      let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
+      let s0 = fst (loadRuleTexts newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
        in case snd (command s0 "go") of
             Ran ms _ _ -> Just ms
             _        -> Nothing
 
     -- Load, run @go@, and ask what decisions are left standing.
     choicesAfter src =
-      let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
+      let s0 = fst (loadRuleTexts newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
        in case snd (command (fst (command s0 "go")) ":choices") of
             Choices cs -> Just cs
             _          -> Nothing
@@ -541,14 +543,14 @@ destructuringRuns =
       -- thing it is about uniquely.
     , testCase "…reported against the instruction, not a parameter" $
         siteOf (pairs ++ "rule go :- do p = mk \"l\" \"r\" ; [x] = p ; prim-prove")
-          @?= Just (InBody (GlobalName "go") 1)
+          @?= Just (InBody (rootName "go") 1)
     ]
   where
     pairs = "mk a b = (a, b)\n"
     lists = "three = do { return [\"alpha\", \"beta\", \"gamma\"] }\n"
 
     run src = snd (command
-      (fst (loadRuleBases newSession
+      (fst (loadRuleTexts newSession
               [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])) "go")
 
     ranBy src = case run src of
@@ -570,7 +572,7 @@ destructuringRuns =
     -- Drive the prompt, and assert on the lines it printed rather than on the
     -- shape of the session: what is being tested is what the user sees.
     asking ls src prompts final =
-      let s0 = fst (loadRuleBases newSession
+      let s0 = fst (loadRuleTexts newSession
                      [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
           out = lines (transcriptFrom s0 ls)
           n   = length [ () | l <- out, "say yes: " `isInfixOf` l ]
@@ -658,13 +660,13 @@ bareWordRightOfEquals =
     firstOr = "firstOr d [] = d\nfirstOr _ [x, ..._] = x\n"
 
     ranBy src =
-      let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
+      let s0 = fst (loadRuleTexts newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
        in case snd (command s0 "go") of
             Ran ms _ _ -> Just ms
             _        -> Nothing
 
     loads what src = testCase what $ case load (src ++ "\n") of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
     clashes what src = testCase what $ case load (src ++ "\n") of
@@ -735,7 +737,7 @@ patternTyping =
     ]
   where
     loads what src = testCase what $ case load (src ++ "\n") of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
     clashes what src = testCase what $ case load (src ++ "\n") of
@@ -802,7 +804,7 @@ spliceTemplates =
       -- @ms5\/CLOSEOUT.md@ 22, not one more. Pinned because it works, and
       -- untested working behaviour is what this project keeps being bitten by.
     , testCase "and the two core spellings agree" $ do
-        a <- builtBy "ar = resolve-core \8988 ${d} -> ${c} \8989"
+        a <- builtBy "ar = resolve-core core`${d} -> ${c}`"
         b <- builtBy "ar = resolve-core core`${d} -> ${c}`"
         a @?= b
 
@@ -828,7 +830,7 @@ spliceTemplates =
         "n = fresh-name \"z\" ; d = goal ; t = resolve-core core`let ${n} = ${d} : ${d} in ${d}`"
 
     , loadsWith "…and the corner spelling agrees"
-        "n = fresh-name \"z\" ; d = goal ; t = resolve-core \8988 \955 (${n} : ${d}) -> ${d} \8989"
+        "n = fresh-name \"z\" ; d = goal ; t = resolve-core core`\955 (${n} : ${d}) -> ${d}`"
 
       -- **THE POSITION DECIDES THE TYPE, and these two are what says so.**
       -- Nothing is annotated: the same @${x}@ demands a @Core@ in one place and
@@ -873,7 +875,7 @@ spliceTemplates =
     , testCase "…and fresh-universe still reads as it always did" $ do
         r <- loadWithStandard "rule go :- do u = fresh-universe ; t = resolve-core core`${u} -> ${u}` ; prim-prove"
         case r of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **The types are what keep the two apart.** A level is not a term and
@@ -898,7 +900,7 @@ spliceTemplates =
   where
     loadsWith what body = testCase what $
       case load ("rule go :- do " ++ body ++ " ; prim-prove") of
-        BasesLoaded _ -> pure ()
+        BasesLoaded _ _ -> pure ()
         other -> assertFailure ("expected a load, got " ++ show other)
 
     clashesWith what body = testCase what $
@@ -935,10 +937,10 @@ spliceTemplates =
       let s1 = fst (command s0 ":theorem t : Type")
           s2 = fst (command s1 "go")
       case snd (command s2 ":show") of
-        Shown c -> pure (renderCursor (Rendering [] (names (machineOf s2))) c)
+        Shown c -> pure (renderCursor (rendering [] (names (machineOf s2))) c)
         other   -> assertFailure ("the test rule built nothing: " ++ show other) >> pure ""
 
-    loadRaw src = snd (loadRuleBases newSession [("s.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("s.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A function body may be a block (MS5 phase 75b)
@@ -992,16 +994,16 @@ blockBodies =
       -- inference reads it with no case of its own.
     , testCase "and inference types it like any other body" $
         case load "f : String -> String\nf s = do { a = concat s s ; return a }" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
-    said src = case snd (command (fst (loadRuleBases newSession
+    said src = case snd (command (fst (loadRuleTexts newSession
                  [("b.thena.rules", "rule base b where\n" ++ src ++ "\n")])) "go") of
       Ran msgs _ _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
 
-    loadRaw src = snd (loadRuleBases newSession [("b.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("b.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A signature needs no keyword (MS5 phase 74)
@@ -1061,7 +1063,7 @@ noKeyword =
     ]
   where
     loads what src = testCase what $ case load src of
-      BasesLoaded _ -> pure ()
+      BasesLoaded _ _ -> pure ()
       other         -> assertFailure ("expected a load, got " ++ show other)
 
 -- --------------------------------------------------------------------------
@@ -1076,7 +1078,7 @@ shippedBase =
   testGroup
     "the shipped base"
     [ testCase "infers with no errors at all" $
-        map renderInstralTypeError (snd (inferProgram [] shipped)) @?= []
+        map renderInstralTypeError (snd (inferProgram [] (reachingAll shipped))) @?= []
 
       -- **What it inferred, handed back as a DECLARATION** (2026-09-13).
       -- Inference and checking are two modes over one program — §6.5 — and
@@ -1090,8 +1092,8 @@ shippedBase =
       -- not stay distinct variables, so an inferred signature that could not be
       -- written down fails here.
     , testCase "and declaring exactly what it inferred changes nothing" $
-        let inferred = [ (n, sg) | ((GlobalName n, _), sg) <- fst (inferProgram [] shipped) ]
-         in map renderInstralTypeError (snd (inferProgram inferred shipped)) @?= []
+        let inferred = [ (nameDotted g, sg) | ((g, _), sg) <- fst (inferProgram [] (reachingAll shipped)) ]
+         in map renderInstralTypeError (snd (inferProgram inferred (reachingAll shipped))) @?= []
 
       -- **Written out, not counted — and written in the base itself** (MS5
       -- phase 93). Every callable in @rules/standard.thena.rules@ carries a
@@ -1104,7 +1106,7 @@ shippedBase =
         let written  = [ n ++ "/" ++ show (length (sigParams sg)) ++ " : " ++ renderSignature sg
                        | b <- bases, (n, sg) <- baseSignatures b ]
             inferred = [ n ++ "/" ++ show a ++ " : " ++ renderSignature sg
-                       | ((GlobalName n, a), sg) <- fst (inferProgram [] shipped) ]
+                       | ((gn, a), sg) <- fst (inferProgram [] (reachingAll shipped)), let n = nameDotted gn ]
         sort written @?= sort inferred
 
       -- **…and every callable has one**, so a rule added without a signature
@@ -1112,21 +1114,21 @@ shippedBase =
     , testCase "and every callable in it is annotated" $ do
         bases <- standardBases
         length [ () | b <- bases, _ <- baseSignatures b ]
-          @?= length (fst (inferProgram [] shipped))
+          @?= length (fst (inferProgram [] (reachingAll shipped)))
 
       -- **`elaborate`'s parameter is a Surface term and nothing says so.** It
       -- comes from the head predicates: sixteen clauses each ask a
       -- `surface-is-…` question of `t`, and 'Thena.Rules.testTypes' is what
       -- makes that an answer.
     , testCase "elaborate's parameter came from its head" $
-        lookup (GlobalName "elaborate", 1) (fst (inferProgram [] expectedStandard))
+        lookup (rootName "elaborate", 1) (fst (inferProgram [] (reachingAll expectedStandard)))
           @?= Just (Signature [TSurface] Nothing)
 
       -- **`spine-arguments` has no head test about `h` or `f` at all.** Their
       -- types come from the body — `goto h` wants a Core, `apply-next f n` wants
       -- one — which is the part a head-only reading would miss.
     , testCase "and spine-arguments' came from its body" $
-        lookup (GlobalName "spine-arguments", 3) (fst (inferProgram [] expectedStandard))
+        lookup (rootName "spine-arguments", 3) (fst (inferProgram [] (reachingAll expectedStandard)))
           @?= Just (Signature [TCore, TCore, TSurface] Nothing)
     ]
 
@@ -1141,7 +1143,7 @@ illTyped =
     [ -- The head says Surface, the body hands it to an op that wants Core.
       refused "a parameter used at two types"
         "rule bad t :- when (surface-is-name t) do prim-try t"
-        [ Clash (InBody (GlobalName "bad") 0) TCore TSurface ]
+        [ Clash (InBody (rootName "bad") 0) TCore TSurface ]
 
       -- **A literal is checked against the position**, and this one cannot be.
       -- 'Thena.Instral.Ops.Try' wants a term; a number is not one. **This is one of the
@@ -1149,13 +1151,13 @@ illTyped =
       -- phase 66 is where it comes back, and this is it.
     , refused "a numeral where a term was wanted"
         "rule bad :- do prim-try 3"
-        [ Clash (InBody (GlobalName "bad") 0) TCore TInt ]
+        [ Clash (InBody (rootName "bad") 0) TCore TInt ]
 
       -- …and its text sibling, which is a separate error because a string
       -- literal is the one whose type the position decides.
     , refused "a string where a term was wanted"
         "rule bad :- do prim-try \"x\""
-        [ TextNotTextual (InBody (GlobalName "bad") 0) TCore ]
+        [ TextNotTextual (InBody (rootName "bad") 0) TCore ]
 
       -- **The other deferred check** (MS5 phase 63): binding a call to a rule
       -- no clause of which returns. It was 'Thena.Errors.NothingReturned' at run
@@ -1164,7 +1166,7 @@ illTyped =
     , refused "binding a call that cannot return"
         "rule mute t :- do say \"nothing\"\n\
         \rule bad t :- do x = mute t ; say x"
-        [ BindsNothing (InBody (GlobalName "bad") 0) (GlobalName "mute") ]
+        [ BindsNothing (InBody (rootName "bad") 0) (rootName "mute") ]
 
       -- **Two clauses of one name must agree**, because they are one callable:
       -- dispatch chooses between them at run time and a caller cannot know
@@ -1172,13 +1174,13 @@ illTyped =
     , refused "two clauses that disagree about a parameter"
         "rule two t :- when (surface-is-name t) do prim-prove\n\
         \rule two t :- do prim-try t"
-        [ Clash (InBody (GlobalName "two") 0) TCore TSurface ]
+        [ Clash (InBody (rootName "two") 0) TCore TSurface ]
 
       -- A list is homogeneous, and the literal is where that is enforced.
     , refused "a list of two different things"
         "rule bad :- do prim-try [3, 'c']"
-        [ Clash (InBody (GlobalName "bad") 0) TInt TChar
-        , Clash (InBody (GlobalName "bad") 0) TCore (TList TInt)
+        [ Clash (InBody (rootName "bad") 0) TInt TChar
+        , Clash (InBody (rootName "bad") 0) TCore (TList TInt)
         ]
     ]
   where
@@ -1210,7 +1212,7 @@ wellTyped =
       -- from MS2 phase 23 that a base loaded later might define it.
     , testCase "a call to a rule nothing defines is refused" $
         load "rule fine t :- do call nowhere t"
-          @?= BasesIllTyped [Undefined (InBody (GlobalName "fine") 0) "nowhere" 1 []]
+          @?= BasesIllTyped [Undefined (InBody (rootName "fine") 0) "nowhere" 1 []]
 
       -- **A rule used before it is written**, which is why the pass is over the
       -- whole program rather than one rule at a time.
@@ -1226,7 +1228,7 @@ wellTyped =
       -- arity the op does take.
     , testCase "an op word at the wrong arity is refused, and says what it takes" $
         load "rule fine t :- do call say t t"
-          @?= BasesIllTyped [Undefined (InBody (GlobalName "fine") 0) "say" 2 [1]]
+          @?= BasesIllTyped [Undefined (InBody (rootName "fine") 0) "say" 2 [1]]
 
       -- **…and a rule's own arities, whatever order the callables are walked
       -- in.** Unrelated callables are walked in an order the call graph does
@@ -1235,7 +1237,7 @@ wellTyped =
       -- checked is that a call draws an edge to every arity of its name.
     , testCase "a rule at the wrong arity says what it takes, whichever is walked first" $
         load "rule zeta :- do alpha 1 2\nrule alpha x :- do prim-prove"
-          @?= BasesIllTyped [Undefined (InBody (GlobalName "zeta") 0) "alpha" 2 [1]]
+          @?= BasesIllTyped [Undefined (InBody (rootName "zeta") 0) "alpha" 2 [1]]
 
     , accepted "a rule that calls itself"
         "rule walk t :- when (surface-is-app t) do a = app-tail t ; call walk a"
@@ -1244,7 +1246,7 @@ wellTyped =
   where
     accepted label src =
       testCase label $ case load src of
-        BasesLoaded bs -> length (concatMap baseRules bs) > 0 @?= True
+        BasesLoaded bs _ -> length (concatMap baseRules bs) > 0 @?= True
         other -> assertFailure ("expected a load, got " ++ show other)
 
 -- | **A @return@ inside a @do@ block ends the BLOCK, not the rule** — see
@@ -1258,12 +1260,12 @@ wellTyped =
 blockReturn :: TestTree
 blockReturn =
   testCase "a return inside a block is not the rule's" $
-    let blocked = Rule (GlobalName "blocked") [] []
+    let blocked = Rule (rootName "blocked") [] []
                     [Do (Block [Do (Return (Lit (VText "x")))])]
-        bad     = Rule (GlobalName "bad") [] []
+        bad     = Rule (rootName "bad") [] []
                     [Bind (PVar "y") Nothing (Call "blocked" []), Do (Say (Ref "y"))]
-     in snd (inferProgram [] [blocked, bad])
-          @?= [BindsNothing (InBody (GlobalName "bad") 0) (GlobalName "blocked")]
+     in snd (inferProgram [] (reachingAll [blocked, bad]))
+          @?= [BindsNothing (InBody (rootName "bad") 0) (rootName "blocked")]
 
 -- --------------------------------------------------------------------------
 -- Declared signatures (MS5 phase 67)
@@ -1283,7 +1285,7 @@ annotations =
     [ -- @ignore@ is used at a Name and at a Core, and a signature says so.
       testCase "makes a rule usable at two types" $
         case load polymorphic of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **AND SO DOES INFERENCE, SINCE MS5 PHASE 76** — his ruling, take the
@@ -1295,15 +1297,15 @@ annotations =
       -- copy — exactly as the declared version does.
     , testCase "…and now so does the same base without one" $
         case load (unlines (drop 1 (lines polymorphic))) of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **What the annotation still buys is the promise**, which is the whole
       -- of its remaining job: the inferred scheme and the written one agree.
     , testCase "…and the two agree on what it is" $
         case load (unlines (drop 1 (lines polymorphic))) of
-          BasesLoaded (b : _) ->
-            lookup (GlobalName "ignore", 1) (fst (inferProgram [] (baseRules b)))
+          BasesLoaded (b : _) _ ->
+            lookup (rootName "ignore", 1) (fst (inferProgram [] (reachingAll (baseRules b))))
               @?= Just (Signature [TVar 0] Nothing)
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1314,19 +1316,19 @@ annotations =
     , testCase "that promises more than the body delivers is refused at the signature" $
         load "f : a -> ()\nrule f x :- do prim-try x"
           @?= BasesIllTyped
-                [AnnotationTooGeneral (InSignature (GlobalName "f") 1) TCore]
+                [AnnotationTooGeneral (InSignature (rootName "f") 1) TCore]
 
       -- …and a signature that is simply the wrong type is still reported in the
       -- body, which is §6.5(a) — the author's own rule, local and clear.
     , testCase "that names the wrong type is refused in the body" $
         load "f : Core -> ()\nrule f x :- when (surface-is-name x) do prim-prove"
-          @?= BasesIllTyped [Clash (InHead (GlobalName "f") 0) TSurface TCore]
+          @?= BasesIllTyped [Clash (InHead (rootName "f") 0) TSurface TCore]
 
       -- A signature is a claim about a callable, so a claim nothing answers is
       -- a mistake — most likely a typo or a changed arity.
     , testCase "for a callable nothing defines is refused" $
         load "nobody : Core -> ()\nrule f :- do prim-prove"
-          @?= BasesIllTyped [SignatureUnanswered (GlobalName "nobody") 1]
+          @?= BasesIllTyped [SignatureUnanswered (rootName "nobody") 1]
 
       -- **The arity is the arrow chain's**, so this signature is about @f@ at
       -- one argument and says nothing about the @f@ of none — a different
@@ -1340,7 +1342,7 @@ annotations =
         case load "ignore2 : a -> b -> ()\n\
                   \rule ignore2 x y :- do prim-prove\n\
                   \rule use :- do h = here ; n = fresh-name \"k\" ; ignore2 h n" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **A NESTED arrow's variables too** — `(a -> b)` had the same collapse as
@@ -1348,7 +1350,7 @@ annotations =
       -- signature is made of.
     , testCase "and keeps a nested arrow's apart as well" $
         case load "f : (a -> b) -> a -> b\nf g x = g x" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- …and a body that forces two of them TOGETHER breaks the promise as
@@ -1364,7 +1366,7 @@ annotations =
 
     , testCase "is about one arity only" $
         case load "f : Core -> ()\nrule f x :- do prim-try x\nrule f :- do prim-prove" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **A lambda's body is scoped at load** (found in the long hunt,
@@ -1376,21 +1378,21 @@ annotations =
     , testCase "an unbound name inside a lambda is a load error, like anywhere else" $
         case load "rule go :- do g = \\ z -> concat z nosuchname ; prim-prove" of
           RuleFileRefused _ (RuleIllFormed es)
-            | UnboundInRule (GlobalName "go") 0 "nosuchname" `elem` es -> pure ()
+            | UnboundInRule (rootName "go") 0 "nosuchname" `elem` es -> pure ()
           other -> assertFailure ("expected an unbound name, got " ++ show other)
 
       -- …and one that IS bound by the lambda is not reported, which is the
       -- half a walk that simply refused every lambda would get wrong.
     , testCase "and a name the lambda binds is not" $
         case load "rule go :- do g = \\ z -> concat z z ; prim-prove" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- Nested one level down, so the walk has to recurse rather than peek.
     , testCase "and it looks inside a lambda inside a lambda" $
         case load "rule go :- do g = \\ z -> (\\ w -> concat w deepermissing) ; prim-prove" of
           RuleFileRefused _ (RuleIllFormed es)
-            | UnboundInRule (GlobalName "go") 0 "deepermissing" `elem` es -> pure ()
+            | UnboundInRule (rootName "go") 0 "deepermissing" `elem` es -> pure ()
           other -> assertFailure ("expected an unbound name, got " ++ show other)
 
       -- **A RESULT may be a function, and could not be said until 2026-09-12.**
@@ -1402,7 +1404,7 @@ annotations =
     , testCase "may give a function, not only take one" $
         case load "mk : String -> (String -> String)\n\
                   \mk s = \\ z -> concat s z" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- …and it is not the same signature as the flat one, which is the whole
@@ -1416,7 +1418,7 @@ annotations =
       -- A group around something that is not an arrow is nothing at all.
     , testCase "a group around a plain type changes nothing" $
         case load "f : (Core) -> (())\nrule f x :- do prim-try x" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
@@ -1426,7 +1428,7 @@ annotations =
       \rule usesName :- do n = fresh-name \"h\" ; ignore n\n\
       \rule usesTerm :- do h = here ; ignore h\n"
 
--- | A signature that does not resolve [] is refused when the FILE is read, before
+-- | A signature that does not resolve is refused when the FILE is read, before
 -- anything is inferred — it is a question one file can answer.
 badSignatures :: TestTree
 badSignatures =
@@ -1486,7 +1488,7 @@ functions =
       -- **A file indented as a whole is a file**, which is the half that is new.
     , testCase "…but a file that lines up at another column loads" $
         case loadRaw "rule base i where\n  rule f :- do prim-prove\n  rule g :- do prim-prove\n" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **It is not offered as a tactic.** A function has no head, and a
@@ -1495,13 +1497,13 @@ functions =
       -- are a separate list.
     , testCase "is not listed among the rules" $
         case load "twice x = concat x x\nrule go :- do prim-prove" of
-          BasesLoaded bs -> map (map ruleNameOf . baseRules) bs @?= [["go"]]
+          BasesLoaded bs _ -> map (map ruleNameOf . baseRules) bs @?= [["go"]]
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- …and its type is inferred like any rule's, because it is one.
     , testCase "is inferred like a rule" $
         case load "twice x = concat x x" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **A function must produce.** Refused where it is written rather than by
@@ -1514,7 +1516,7 @@ functions =
     , testCase "is validated like a rule" $
         case load "f x = concat x y" of
           RuleFileRefused _ (RuleIllFormed es)
-            | UnboundInRule (GlobalName "f") 0 "y" `elem` es -> pure ()
+            | UnboundInRule (rootName "f") 0 "y" `elem` es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **A name may not be a rule and a function at one arity** (MS5 review).
@@ -1530,7 +1532,7 @@ functions =
       -- rules.
     , testCase "but may share one at a different arity" $
         case load "rule dup x :- do say \"rule\"\ndup = concat \"a\" \"b\"" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
     , testCase "that leaves nothing is refused" $
@@ -1548,23 +1550,23 @@ functions =
       -- called false/.
     , testCase "and a boolean on the right of an = is the literal" $
         case load "rule go :- do b = false ; prim-prove" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     , testCase "and a literal can be bound to a name at last" $
         case load "rule go :- do p = (1, true) ; l = [1, 2, 3] ; n = 42 ; prim-prove" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
-    ruleNameOf r = case ruleName r of GlobalName n -> n
+    ruleNameOf = nameDotted . ruleName
 
-    said line = case snd (command (fst (loadRuleBases newSession
+    said line = case snd (command (fst (loadRuleTexts newSession
                   [("f.thena.rules", "rule base f where\ntwice x = concat x x\n" ++ line ++ "\n")]))
                   "go") of
       Ran msgs _ _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
 
-    loadRaw src = snd (loadRuleBases newSession [("i.thena.rules", src)])
+    loadRaw src = snd (loadRuleTexts newSession [("i.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- Lambdas (MS5 phase 68b)
@@ -1588,7 +1590,7 @@ lambdas =
       -- (MS5 phase 94, @ms5\/CLOSEOUT.md@ 23). @\\ -> e@ built a closure of no
       -- arguments whose type nothing could write; it is a parse error now.
     , testCase "of no parameters does not parse" $
-        case snd (loadRuleBases newSession [("i.thena.rules", "rule base i where\nrule go :- do d = \\ -> concat \"a\" \"b\"\n")]) of
+        case snd (loadRuleTexts newSession [("i.thena.rules", "rule base i where\nrule go :- do d = \\ -> concat \"a\" \"b\"\n")]) of
           RuleFileRefused _ (RuleSyntaxError _) -> pure ()
           other -> assertFailure ("expected a syntax error, got " ++ show other)
 
@@ -1597,7 +1599,7 @@ lambdas =
       -- used, and that needs no @call@.
     , testCase "a local called with no arguments is refused, not typed" $
         load "rule go :- do d = \"text\" ; call d"
-          @?= BasesIllTyped [NotCallable (InBody (GlobalName "go") 1) "d"]
+          @?= BasesIllTyped [NotCallable (InBody (rootName "go") 1) "d"]
     , testCase "…and a local used as a value needs no call" $
         said "rule go :- do d = \"text\" ; r = d ; say r"
           @?= Just "text"
@@ -1632,7 +1634,7 @@ lambdas =
       -- could be hidden in.
     , testCase "has its body type checked too" $
         load "rule go :- do f = \\ z -> concat z 3 ; prim-prove"
-          @?= BasesIllTyped [Clash (InBody (GlobalName "go") 0) TString TInt]
+          @?= BasesIllTyped [Clash (InBody (rootName "go") 0) TString TInt]
 
     , testCase "whose body leaves nothing is refused" $
         case load "rule go :- do d = \\ s -> prim-try s ; prim-prove" of
@@ -1644,17 +1646,17 @@ lambdas =
       -- before this phase — @TypeIsAFunction@ refused it and is deleted.
     , testCase "and a function type is writable in a signature" $
         case load "f : (a -> b) -> a -> b\nf g x = g x" of
-          BasesLoaded _ -> pure ()
+          BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
-    said src = case snd (command (fst (loadRuleBases newSession
+    said src = case snd (command (fst (loadRuleTexts newSession
                  [("l.thena.rules", "rule base l where\n" ++ src ++ "\n")])) "go") of
       Ran msgs _ _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
 
 load :: String -> Response
-load src = snd (loadRuleBases newSession [("t.thena.rules", "rule base t where\n" ++ src)])
+load src = snd (loadRuleTexts newSession [("t.thena.rules", "rule base t where\n" ++ src)])
 
 -- | A session holding the shipped base AND these files, loaded together as
 -- @:load rules standard.thena.rules …@ does (MS5 phase 92). A rule file that
@@ -1663,12 +1665,12 @@ load src = snd (loadRuleBases newSession [("t.thena.rules", "rule base t where\n
 withStandard :: [(FilePath, String)] -> IO Session
 withStandard files = do
   std <- readFile "rules/standard.thena.rules"
-  pure (fst (loadRuleBases newSession (("standard.thena.rules", std) : files)))
+  pure (fst (loadRuleTexts newSession (("standard.thena.rules", std) : files)))
 
 loadWithStandard :: String -> IO Response
 loadWithStandard src = do
   std <- readFile "rules/standard.thena.rules"
-  pure (snd (loadRuleBases newSession
+  pure (snd (loadRuleTexts newSession
     [("standard.thena.rules", std), ("t.thena.rules", "rule base t where\n" ++ src)]))
 
 -- | The shipped base as one program: its rules AND its function. The rules alone

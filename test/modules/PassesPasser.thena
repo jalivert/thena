@@ -1,0 +1,10 @@
+-- **Two hops, and the clauses compose** (MS11 phase 306). This file passes on
+-- `PassesBitOnly` whole; that file had already narrowed `Twins` to `Bit`, so
+-- an importer of this one reaches `Bit` and not `Tri` with no clause written
+-- anywhere on this line.
+module test.modules.PassesPasser where
+
+public import test.modules.PassesBitOnly
+
+mine : Bit.Bit
+mine = Bit.on

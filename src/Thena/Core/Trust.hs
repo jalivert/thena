@@ -298,10 +298,10 @@ hopeless env ctx claimed actual = fst (go ctx seed claimed actual)
     -- cost a false @Undischargeable@** (MS8 phase 152). A primitive's rule
     -- reads its arguments' /shape/ rather than their number
     -- ("Thena.Core.Reduce"'s @primitiveStep@ fires when both are literals), so
-    -- substituting a literal for a variable changes the head: @eqString a a@
-    -- stands with @eqString@ at the head and @eqString "x" "x"@ is the
+    -- substituting a literal for a variable changes the head: @String.eq a a@
+    -- stands with @String.eq@ at the head and @String.eq "x" "x"@ is the
     -- constructor @same@. Calling the first rigid made the prelude's own
-    -- @eqString a a ≡ same@ claim impossible-by-position at its definition
+    -- @String.eq a a ≡ same@ claim impossible-by-position at its definition
     -- site, which at 'NoUndischargeableTrust' refuses every proof that decides
     -- a string equality. The rule above is answer 'False' unless certain, and
     -- about a primitive this is never certain.
@@ -513,7 +513,7 @@ trustIn env ctx n t
 -- breadth-first search out from the term through every definition it mentions,
 -- every definition those mention, and so on, reading each body in full. That is
 -- the same answer, and it cost **4.4 s of an 8.5 s load** of
--- @examples\/07-preservation.thena@ — the largest single cost in it, paid again
+-- @examples\/Stlc07Preservation.thena@ — the largest single cost in it, paid again
 -- on every @certify@, with 167 million association-list lookups beneath it.
 --
 -- **Whether a definition rests on a trusted claim never changes once it is in

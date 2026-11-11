@@ -1,7 +1,7 @@
 -- | The prelude's products, and what the no-confusion generator does with them
 -- (phase 20).
 --
--- @examples\/products.thena.script@ is the deliverable: @Sigma@ with its projections,
+-- @examples\/Products.thena.script@ is the deliverable: @Sigma@ with its projections,
 -- @And@ with its own, and §3.7's no-confusion table at @Type₀@ where phase 14
 -- had to write it in continuation-passing style at @Type₁@. Loaded the way
 -- phase 11 loads any file, and for 'Thena.DeterminacyTests'\'s reason — the
@@ -17,18 +17,19 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=), assertBool)
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Declared (named)
 import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore, renderTrouble, renderResponse)
 
 target :: FilePath
-target = "examples/products.thena.script"
+target = "examples/Products.thena.script"
 
 tests :: TestTree
 tests =
@@ -51,7 +52,7 @@ tests =
       -- the method's @b : B a@ is accepted only because
       -- @fst A B (pair A B a b)@ δ-then-ι-reduces to @a@.
     , statementOf "snd"
-        "∀ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> B (fst A B s)"
+        "∀ (A : Type₀) (B : A -> Type₀) (s : Sigma.Sigma A B) -> B (fst A B s)"
 
       -- **@Sigma@ gets its lemma since MS9 phase 212**, and it asserted the
       -- opposite until then: @b@'s type mentions @a@, which is the shape the
@@ -59,19 +60,19 @@ tests =
       -- now states the second equation after transporting along the first.
       -- @And@ is still a declaration of its own rather than @Sigma A (λ _ . B)@,
       -- and keeps its own lemma.
-    , declares "NoConfusionAnd" True
-    , declares "NoConfusionSigma" True
-    , declares "NoConfusionDPair" True
+    , declares "And.lemmata.NoConfusion" True
+    , declares "Sigma.lemmata.NoConfusion" True
+    , declares "DPair.lemmata.NoConfusion" True
     ]
   where
     statementOf g ty = testCase ("the prelude's " ++ g ++ " has its dependent type") $ do
       (s, _) <- startingSession
-      case lookupDefinition (GlobalName g) (globals (machineOf s)) of
+      case lookupDefinition (named g) (globals (machineOf s)) of
         Nothing -> assertFailure (g ++ " is not in the prelude")
-        Just d  -> renderCore (Rendering [] (names (machineOf s))) [] (definitionType d) @?= ty
+        Just d  -> renderCore (rendering [] (names (machineOf s))) [] (definitionType d) @?= ty
 
     declares g want =
       testCase (g ++ (if want then " is generated" else " is not")) $ do
         (s, _) <- startingSession
-        let there = lookupDefinition (GlobalName g) (globals (machineOf s))
+        let there = lookupDefinition (named g) (globals (machineOf s))
         (there /= Nothing) @?= want

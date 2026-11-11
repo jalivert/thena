@@ -1,0 +1,8 @@
+-- **And a rule file may match a language that WAS exported — MS11 phase 303.**
+-- `TakesLang.thena.rules` is this file over `WithheldLang`, and it is refused.
+rule base usesshared where
+
+import test.modules.SharesLang
+
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"

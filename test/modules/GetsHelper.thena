@@ -1,0 +1,8 @@
+-- **What a base's `public consult` hands over** (MS11 phase 289): `built` is in
+-- `Builds` and calls `helped`, which is in `Helper` — nothing here names it.
+module test.modules.GetsHelper where
+
+consult test.modules.Builds
+
+do
+  built

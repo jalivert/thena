@@ -1,0 +1,9 @@
+-- **What came through is the passed module's, not the passer's** (MS11 phase
+-- 287): `Bit.off` is `Guarded`'s and arrives; `ownThing` is
+-- `PassesNothingOwn`'s and does not.
+module test.modules.GetsThrough where
+
+import test.modules.PassesNothingOwn
+
+mine : Bit.Bit
+mine = Bit.on

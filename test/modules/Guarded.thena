@@ -1,0 +1,11 @@
+-- **A file that states its interface** (MS11 phase 285). It declares `Bit` and
+-- `flip`, and exports the datatype's namespace alone: an importer may write
+-- `Bit.off` and may not write `flip` — see `Thena.LoadTests`.
+module test.modules.Guarded exporting ( Bit ) where
+
+data Bit : Type₀ where
+  off : Bit
+  on : Bit
+
+flip : Bit -> Bit
+flip = λ b -> elim Bit () (λ _ -> Bit) (Bit.on Bit.off) () b

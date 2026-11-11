@@ -13,9 +13,11 @@
 -- having to work out which is which.
 --
 -- **It imports nothing, and must keep importing nothing** (@.claude\/spec\/interface.md@
--- §2.5): "Thena.Syntax.Lexer" and "Thena.Syntax.Parser" sit beside @Core@ and
--- between them import only the concrete-syntax modules, which is what keeps
--- "Thena.Errors"' /nothing above Core/ rule true.
+-- §2.5) \8212 and from MS10 phase 269 that is true of the file and not only of
+-- the rule: the one import left was @Raw@, for the corner operand that
+-- `~3t63k` deleted. "Thena.Syntax.Lexer" and "Thena.Syntax.Parser" sit beside
+-- @Core@ and between them import only the concrete-syntax modules, which is
+-- what keeps "Thena.Errors"' /nothing above Core/ rule true.
 --
 -- The constructors keep their @Raw@ prefix. It no longer names the type they
 -- used to live beside; it says /named and unresolved/, which is what they are —
@@ -23,6 +25,10 @@
 -- "Thena.Rules".
 module Thena.Instral.Concrete
   ( RawDecl (..)
+  , Reach (..)
+  , Selection (..)
+  , RawOpen (..)
+  , RawOpenSpec (..)
   , RawFunction (..)
   , RawRhs (..)
   , RawBody (..)
@@ -35,8 +41,6 @@ module Thena.Instral.Concrete
   , RawOperand (..)
   , RawTest (..)
   ) where
-
-import Thena.Syntax.Concrete (Raw)
 
 -- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› do ‹body›@.
 --
@@ -95,10 +99,154 @@ data RawPattern
 -- his choice, 2026-09-12. It has to be: a callable has several clauses and one
 -- type, so a type written on a clause would be written once and read as
 -- belonging to all of them, or written on each and able to disagree.
+-- **An @open@ is a declaration here too** (MS10 phase 267), which is the
+-- pulled-forward piece of @\`~jmw4k\`@: a rule file that talks about a language
+-- living inside a namespace had no way to name it short, and no way to name it
+-- at all once the generated spelling of a tag was the namespace's. It is the
+-- same five forms the surface language has and it is read the same way — what
+-- the line says becomes a 'Thena.Core.Term.Opened' at resolution, and the walk
+-- that answers a tag is the one a surface term already uses.
 data RawDecl
   = DeclRule RawRule
   | DeclSignature RawSignature
   | DeclFunction RawFunction
+  | DeclOpen RawOpen
+    -- ^ @open X@ — in force from here to the end of the file
+  | DeclOpenIn RawOpen RawDecl
+    -- ^ @open X in ‹declaration›@ — in force for that declaration alone
+  | DeclImport Reach [String] String Selection (Maybe [RawDecl])
+    -- ^ @import ‹module›@, @public import ‹module›@ — **a surface module this
+    -- base depends on** (MS11 phase 276, his ruling of 2026-11-03; the 'Reach'
+    -- at phase 289; the block at phase 299).
+    --
+    -- **AND HOW FAR IT REACHES, WHICH THE ACT STATES ITSELF** (MS11 phase 299,
+    -- his design of 2026-11-05 and his ask for the parity).
+    -- @import M where { … }@ reaches the declarations in its block and stops;
+    -- 'Nothing' is the rest of the file, which is what a line with no block
+    -- says. 'Thena.Surface.Concrete.SurfaceImport' is the twin and this is the
+    -- same field, so the two concrete syntaxes say the same thing by the same
+    -- shape.
+    --
+    -- **WHAT IT REVEALS HERE IS NAMES AND GRAMMAR KEYS, WHERE A SURFACE FILE'S
+    -- REVEALS NAMES ALONE** — not a second rule but phase 297's asymmetry read
+    -- out: writing a tagged term in surface text means naming its datatype in a
+    -- signature, so a surface block that may write the name may write the term,
+    -- while a rule file's signatures are @instral@'s own types and
+    -- @rule describe LC[app]\`…\`@ names no global at all.
+    -- 'Thena.Driver.scopedDecls' is where the frame is pushed, and
+    -- 'Thena.Core.Term.revealing' is the frame.
+    --
+    -- The steps and the last word of a /file's/ name, 'RawOpen'\'s shape and not
+    -- its meaning: there the steps are a namespace's, here they are
+    -- directories. **This module imports nothing**, which is why the name is
+    -- not @Thena.Driver.ModuleName@ here and is built into one at the door.
+    --
+    -- **It resolves to nothing and declares nothing.** What it does happens
+    -- before the base is read: whoever has the disc loads the module it names,
+    -- so the grammars this file's tags are resolved against are there because
+    -- the file said so and not because the session happened to hold them.
+    --
+    -- **Under @public@ its names travel to whoever consults this base** (MS11
+    -- phase 289) — the object language a base is written against, which is his
+    -- ruling of 2026-10-30.
+  | DeclConsult Reach [String] String (Maybe [RawDecl])
+    -- ^ @consult ‹base›@, @public consult ‹base›@ — **another rule base this
+    -- one is written against** (MS11 phase 289, his ruling of 2026-10-30 that
+    -- @public@ is available to both acts and to both kinds of file; the block
+    -- at phase 300).
+    --
+    -- 'DeclImport'\'s shape and the same spelling of a file's name. A plain
+    -- @consult@ /fetches/ the base and splices it directly beneath this one
+    -- (his ruling of 2026-11-06, @~ckp39@), so 'Reach' has nothing left to add
+    -- to it and @public consult@ is accepted with a warning
+    -- ('Thena.Driver.idlePublic').
+    --
+    -- **AND HOW FAR IT REACHES, WHICH THE ACT STATES ITSELF** (MS11 phase 300,
+    -- his ruling of 2026-11-06, @~k68d7@). @consult B where { … }@ reaches the
+    -- declarations in its block and stops; 'Nothing' is the rest of the file.
+    -- **What the block settles is a region of TIME** — the running of its
+    -- rules — and not a region of text: each rule in it is compiled with a
+    -- push of @B@ at the front of its body and a pop at the end, so @B@ is
+    -- searched first for whatever those rules do, however deep. His words:
+    -- /"this is not a matter of attaching some new thing, this is about that
+    -- rule being compiled such that there is the instruction that pushes the
+    -- rule base and then pops it."/ 'Thena.Driver.scopedDecls' is where the
+    -- pushes are collected and 'Thena.Instral.Ops.PushBase' is the op.
+  deriving (Eq, Show)
+
+-- | __Whether an @import@ or a @consult@ passes on what it brought__ (MS11
+-- phase 287 for the import, 288 for the consult, 289 for a rule file's own,
+-- @~jmw4k@).
+--
+-- **His ruling of 2026-11-03 is the whole of transitivity**: under @public@,
+-- and only under @public@, you get what the file you imported or consulted got
+-- (@DECISIONS.md@, /\`public\` is how a dependency travels/). So 'Public' is one
+-- word on one line and there is nothing else to say about it.
+--
+-- **An attribute of the act and not a second kind of act**: what @public@
+-- changes is who else gets what came, never what is loaded or read, so
+-- everything that walks imports or collects a file's own consults ignores it.
+-- On an @import@ only the resolver's subtraction reads it; on a @consult@ only
+-- the pool assembly does.
+--
+-- **It lives here and not beside the surface language's own trees** (MS11
+-- phase 289), because both concrete syntaxes write the word and
+-- "Thena.Surface.Concrete" imports this module: one flag with one meaning,
+-- re-exported there so a reader of either syntax finds it where the trees are.
+data Reach
+  = Own     -- ^ @import X@, @consult X@ — this module's own dependency
+  | Public  -- ^ @public import X@, @public consult X@ — and its importers' too
+  deriving (Eq, Show)
+
+-- | __A clause that narrows a list of names: all of them, only these, or all
+-- but these__ (MS11 phase 306, @~htngj@).
+--
+-- **One type for the two places a file narrows**, which is why it is here
+-- beside 'Reach' and not beside either syntax's own trees:
+--
+--   * a header's @exporting ( … )@ or @hiding ( … )@ — what the file offers;
+--   * an import's own @( … )@ or @hiding ( … )@ — what the importer takes.
+--
+-- **They are the same operation on the same shape**, and the matching rule is
+-- one rule — a listed name covers everything under it, step for step
+-- ('Thena.Driver.selects'), so @( Bit )@ takes the whole @Bit@ namespace
+-- exactly as @hiding ( Tri )@ keeps constructors back with their type.
+--
+-- **'SelectWide' and @SelectOnly []@ are different clauses.** No clause at all
+-- is wide — every file written before MS11 phase 285, and every import written
+-- before phase 306; @( )@ is a clause that deliberately names nothing.
+--
+-- **One clause and either word, never both**, which is the choice phase 290
+-- settled for a header and @open X ( … )@ / @open X hiding ( … )@ made before
+-- it. A name the clause lists that the module does not offer is **refused**,
+-- which is phase 306's own call and is 'Thena.Driver.LoadError''s
+-- @SelectsUnoffered@.
+data Selection
+  = SelectWide                            -- ^ no clause — everything there is
+  | SelectOnly   [([String], String)]     -- ^ @( … )@ — these and no more
+  | SelectHiding [([String], String)]     -- ^ @hiding ( … )@ — everything but these
+  deriving (Eq, Show)
+
+-- | What an @open@ line in a rule file said: the namespaces it names, and what
+-- it brings in from them (MS10 phase 267).
+--
+-- **The written form, and the surface language has its own**
+-- ('Thena.Surface.Concrete.SurfaceOpenSpec'). The two concrete syntaxes keep
+-- their own as-written types throughout — @RawData@ beside @SurfaceData@ — and
+-- what they share is the resolved form, 'Thena.Core.Term.Opened', which is the
+-- mechanism. This module imports nothing, which is the other reason.
+data RawOpen = RawOpen [([String], String)] RawOpenSpec
+  deriving (Eq, Show)
+
+-- | The four things a line may say about which words it brings in (MS10 phase
+-- 267). **Several namespaces only in the plain form**, for the surface's
+-- reason: a selection speaks about one namespace's words, so naming two would
+-- not say whose they are.
+data RawOpenSpec
+  = RawOpenWhole                        -- ^ @open X@, and @open X Y Z@
+  | RawOpenOnly [String]                -- ^ @open X ( a b )@
+  | RawOpenHiding [String]              -- ^ @open X hiding ( a b )@
+  | RawOpenRenaming [(String, String)]  -- ^ @open X renaming ( e -> c )@
   deriving (Eq, Show)
 
 -- | @‹name› ‹params› = ‹expression›@ — a global function (MS5 phase 68a).
@@ -125,7 +273,7 @@ data RawFunction = RawFunction String [RawPattern] RawBody
 -- waits for this phase).
 data RawRhs
   = RhsOp RawOp        -- ^ @concat x x@ — an op or a call
-  | RhsValue RawOperand -- ^ @[1, 2]@, @(a, b)@, @42@, @⌜ t ⌝@
+  | RhsValue RawOperand -- ^ @[1, 2]@, @(a, b)@, @42@, @core\`t\`@
   deriving (Eq, Show)
 
 -- | What stands right of a function's @=@ or a lambda's @->@ (MS5 phase 75b).
@@ -235,16 +383,12 @@ data RawTest = RawTest String [RawOperand]
 -- 'RawText' arrives at phase 22b, at the user's instruction: *"Rules absolutely
 -- need a string literal."* Without it @say@, @ask@ and @concat@ had keywords
 -- that resolved and no way to be given anything to say.
+-- **A core term is a region like any other, and was two things until MS10
+-- phase 269** (`~3t63k`): @⌜ t ⌝@ held a parsed 'Raw' and @core\`t\`@ holds
+-- text, and they denoted the same operand. The corners are gone, so a written
+-- term reaches here one way.
 data RawOperand
-  = RawQuoted Raw
-    -- ^ @⌜ t ⌝@ — **a core term written in corners** (MS5 phase 62).
-    --
-    -- The same operand a @core@ region denotes, by the other spelling. It holds
-    -- a parsed tree rather than raw text because **Core shares Thena's lexer**:
-    -- a region carries text so that a /foreign/ language may keep its own
-    -- lexical rules, and Core has no need of that
-    -- (@discussion\/the-five-languages.md@ §7b, the permanent entry).
-  | RawRegion String (Maybe String) String
+  = RawRegion String (Maybe String) String
     -- ^ @tag\`…\`@ — a **tagged region** (MS5 phase 61b): the tag, and the raw
     -- text between the fences. Which language the text is in is the tag's to
     -- say, and the text is parsed by that tag's parser during resolution.
@@ -275,6 +419,21 @@ data RawOperand
     -- is made in, which is a thing that happens at run time, so it cannot be a
     -- literal.
   | RawRef String
+  | RawGlobal [String] String
+    -- ^ @String.eq@ — **a global name written out**: its path's steps, then its
+    -- base word (MS10 phase 245).
+    --
+    -- **A dotted word is a literal where a bare one is a 'RawRef'**, and that
+    -- is not a special case: a binding in a body lives in the body's own scope,
+    -- which has no namespaces (§3.6), so only a /global/ name can have a path
+    -- at all. The dot is therefore the whole of what distinguishes them, and a
+    -- name with no path is still written as a string where a literal is wanted.
+    --
+    -- It exists because @declare-primitive@ and @define-global@ read their name
+    -- operand as a name, and until this phase the only two things writable
+    -- there were a bare word and a string literal — so a rule could not name
+    -- @String.eq@ at all, and the primitives could not move into their type's
+    -- namespace.
   | RawPos Int
     -- ^ a numeral. **It is a /position/ only where a field word wants one** —
     -- @arg 2@, @param 0@ — and an 'Thena.Instral.Ops.VInt' literal everywhere else (MS5

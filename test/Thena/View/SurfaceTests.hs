@@ -17,6 +17,7 @@ module Thena.View.SurfaceTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck (forAll, testProperty, withNumTests, (===))
 
+import Thena.Core.Term (wholePath)
 import Thena.View.Redraw (redrawSurface)
 import Thena.View.Surface (displaySurface)
 import Thena.Render (renderSurface)
@@ -30,4 +31,4 @@ tests =
         (withNumTests 500 (forAll genSurface prop))
     ]
   where
-    prop t = redrawSurface (displaySurface t) === renderSurface t
+    prop t = redrawSurface (displaySurface wholePath t) === renderSurface t

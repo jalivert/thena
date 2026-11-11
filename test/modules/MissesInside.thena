@@ -1,0 +1,8 @@
+-- **The marked one is not an importer's to name** (MS11 phase 286), and its
+-- neighbour in the same block is.
+module test.modules.MissesInside where
+
+import test.modules.KeptInside
+
+mine : Type₁
+mine = A.hid

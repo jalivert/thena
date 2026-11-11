@@ -47,11 +47,13 @@ import Thena.Core.Term (Literal (..))
 -- 'Thena.Core.Term.Bound', a 'Thena.Core.Term.Free' or a
 -- 'Thena.Core.Term.Global'; the tree cannot say which and does not try.
 data Raw
-  = RawName String
+  = RawName [String] String
   | RawUniverse Int
   | RawPrimitive Literal         -- ^ @"ab"@, @'c'@, @3@ (MS6 phase 97a)
   | RawUniverseOpen              -- ^ @Type@ — a universe whose level is inferred
-  | RawAt RawIdent [Int]         -- ^ @foo {0 1}@ — a global at level arguments
+  | RawAt [String] RawIdent [Int]
+    -- ^ @foo {0 1}@, @String.eq {0}@ — a global at level arguments, with the
+    -- steps of its path (MS10 phase 240)
 
   | RawLam [RawBinder] Raw       -- ^ @λ (x : S) (y : T) -> b@
   | RawPi [RawBinder] Raw        -- ^ @∀ (x : S) (y : T) -> B@
@@ -61,7 +63,6 @@ data Raw
   | RawClaim RawIdent Raw Raw    -- ^ @let ? x : S in p@
   | RawGuess RawIdent Raw Raw Raw -- ^ @let ? x : S ≐ (g) in p@
   | RawPending RawConstraint Raw -- ^ @κ ▸ p@
-  | RawQuote Raw                 -- ^ @⌜ t ⌝@
   | RawSplice String
     -- ^ **@${x}@ — a hole in a written term, filled from the binding @x@ when
     -- the instruction runs** (MS5 phase 81, his design).
@@ -90,10 +91,16 @@ data Raw
     --
     -- **The grammars are asked for at resolution**, not here: a module is
     -- parsed whole before its own @language@ block is installed.
-  | RawElim RawIdent [Int] [Raw] Raw [Raw] [Raw] Raw
+  | RawElim [String] RawIdent [Int] [Raw] Raw [Raw] [Raw] Raw
     -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
     -- positional, and in exactly 'Thena.Core.Term.Core''s own field order for
     -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.
+    --
+    -- **The head carries its path's steps, like every other written name**
+    -- (MS10 phase 254, his ruling of 2026-11-02): the datatype is @Nat.Nat@, so
+    -- the printer writes @elim Nat.Nat@ and this is what reads it back. It was
+    -- the one reference position in either language that could not take a path,
+    -- which made the round trip fail on every @elim@ once names were qualified.
   | RawTrusted Raw Raw Raw
     -- ^ @trusted claimed actual body@ (MS8 phase 150) — the development
     -- calculus's spelling of 'Thena.Core.Term.Trusted', with all three fields
@@ -190,18 +197,17 @@ splices t = case t of
   RawClaim n ty p    -> named n ++ splices ty ++ splices p
   RawGuess n ty g p  -> named n ++ splices ty ++ splices g ++ splices p
   RawPending _ p     -> splices p
-  RawQuote q         -> splices q
-  RawElim d _ ps m ms is tg ->
+  RawElim _ d _ ps m ms is tg ->
     named d ++ concatMap splices ps ++ splices m ++ concatMap splices ms
       ++ concatMap splices is ++ splices tg
   RawTrusted c a b   -> splices c ++ splices a ++ splices b
   -- **A region's splices are the terms it holds** (MS6 phase 110), in the
   -- order they were written, which is the order they fill the reading's slots.
   RawObject _ _ ps   -> concat [ splices e | RawSpliced e <- ps ]
-  RawName _          -> []
+  RawName _ _        -> []
   RawUniverse _      -> []
   RawUniverseOpen    -> []
-  RawAt n _          -> named n
+  RawAt _ n _        -> named n
   where
     binder (RawBinder n ty) = named n ++ splices ty
 

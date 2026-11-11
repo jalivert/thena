@@ -137,7 +137,7 @@ data Frame
   | InAnnotTerm Surface                       -- ^ the type ascribed
   | InTrustedType Surface                     -- ^ the trusted term
   | InTrustedTerm Surface                     -- ^ the type claimed
-  | InElimField String [Surface] Surface [Surface] [Surface] Surface Int
+  | InElimField [String] String [Surface] Surface [Surface] [Surface] Surface Int
     -- ^ the focus is one field of an @elim@, at flat position @k@ in the order
     -- the elaborator walks them: parameters, motive, methods, indices, target
   | InSplitTarget Analysis [SurfaceArm]
@@ -226,11 +226,11 @@ rebuild s f = case f of
   -- The flat order is the parameters, the motive, the methods, the indices and
   -- the target, so each group starts where the one before it ended — which is
   -- the arithmetic, and where an off-by-one in this frame would live.
-  InElimField d ps mot ms is tgt k ->
+  InElimField dps d ps mot ms is tgt k ->
     let np = length ps
         nm = length ms
         put i old = if i == k then s else old
-     in SurfaceElim d
+     in SurfaceElim dps d
           (zipWith put [0 ..] ps)
           (put np mot)
           (zipWith put [np + 1 ..] ms)
@@ -356,10 +356,10 @@ intoTrustedTerm ty e = push e (InTrustedTerm ty)
 -- elaborator walks them: the parameters, the motive, the methods, the indices,
 -- the target.
 intoElimField
-  :: String -> [Surface] -> Surface -> [Surface] -> [Surface] -> Surface
-  -> Int -> Surface -> SurfaceZipper -> SurfaceZipper
-intoElimField d ps mot ms is tgt k fld =
-  push fld (InElimField d ps mot ms is tgt k)
+  :: [String] -> String -> [Surface] -> Surface -> [Surface] -> [Surface]
+  -> Surface -> Int -> Surface -> SurfaceZipper -> SurfaceZipper
+intoElimField dps d ps mot ms is tgt k fld =
+  push fld (InElimField dps d ps mot ms is tgt k)
 
 -- | Focus the term a split analyses.
 intoSplitTarget

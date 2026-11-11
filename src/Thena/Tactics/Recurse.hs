@@ -86,14 +86,15 @@ module Thena.Tactics.Recurse
   ( resolveRecursion
   ) where
 
-import Data.List (elemIndex, nub, stripPrefix)
+import Data.List (elemIndex, nub)
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Level (Level (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   ( Core (..)
-  , GlobalName (..)
+  , declarationOf
+  , nameWord
   , Var
   , close
   , fresh
@@ -389,14 +390,18 @@ resolveRecursion env n0 tm = case tm of
     refined w ts =
       nub [ q | t <- ts, u <- freeVars t, Just q <- [through w (Free u)] ]
 
-    -- @caseD@ is the split tactic's other use site: @case … of@ elaborates to an
-    -- application of the generated definition rather than to an 'Eliminate'
+    -- @D.case@ is the split tactic's other use site: @case … of@ elaborates to
+    -- an application of the generated definition rather than to an 'Eliminate'
     -- node, so this is the same report read off the other spelling and not a
     -- second mechanism. The name is generated for every datatype, so it is not
     -- one a user can have bound to something else.
-    analysedBy (GlobalName w) = do
-      rest <- stripPrefix "case" w
-      lookupInductive (GlobalName rest) env
+    --
+    -- **It read the spelling until MS10** — @stripPrefix "case"@ over the whole
+    -- dotted name — and the namespace makes it structural: the word is @case@
+    -- and the datatype is the declaration the name sits in.
+    analysedBy g = do
+      d <- if nameWord g == "case" then declarationOf g else Nothing
+      lookupInductive d env
 
     -- A pair's second half under a partial function.
     traverseSnd f (v, i) = fmap ((,) v) (f i)
@@ -656,8 +661,8 @@ resolveRecursion env n0 tm = case tm of
     -- The same walk, kept as a term: what a copy is defined as, for a message.
     --
     -- __Through the whole term and not only its head__ (MS9 phase 208): an
-    -- argument that is itself built out of copies — @appendString c "'"@ comes
-    -- back as @appendString a2 a3@ — would otherwise be reported in generated
+    -- argument that is itself built out of copies — @String.append c "'"@ comes
+    -- back as @String.append a2 a3@ — would otherwise be reported in generated
     -- names nobody wrote. @close@ then @instantiate@ because those are the only
     -- way in and out of a 'Thena.Core.Term.Scope' (§3.4).
     expand w = look (0 :: Int)

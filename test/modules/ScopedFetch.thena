@@ -1,0 +1,9 @@
+module test.modules.ScopedFetch where
+
+-- **A scoped consult pushes the whole group** (MS11 phase 298): `needed` is a
+-- rule of `Needs` and it calls `helped`, which is a rule of `Helper` and
+-- nowhere else — so this block resolves only if the base the line named arrived
+-- with what it consults, and in that order.
+consult test.modules.Needs where
+  do
+    needed

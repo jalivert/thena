@@ -1,8 +1,8 @@
 -- | Preservation — TAPL Theorem 8.3.3, and with @progress@ beside it, type
 -- safety for the language.
 --
--- **Three modules loaded in sequence.** @canonical.thena@ declares the terms,
--- the typing relation and canonical forms; @progress.thena@ adds the step
+-- **Three modules loaded in sequence.** @Canonical.thena@ declares the terms,
+-- the typing relation and canonical forms; @Progress.thena@ adds the step
 -- relation and 8.3.2; this one takes the typing derivation apart at each term
 -- shape and proves 8.3.3. Thena has no imports, so the chain is the session's
 -- globals — which is what keeps each file to what it actually contributes.
@@ -19,18 +19,19 @@ import Test.Tasty.HUnit (testCase, (@?=))
 
 import Data.List (isInfixOf, isPrefixOf)
 import Data.Maybe (isJust)
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore)
 
 target :: FilePath
-target = "examples/preservation.thena"
+target = "examples/Preservation.thena"
 
 tests :: TestTree
 tests =
@@ -39,14 +40,14 @@ tests =
     [ -- **The theorem.** Evaluation does not change a term's type.
       testCase "a step preserves the type" $ do
         st <- statementOf "preservation"
-        st @?= Just "∀ (t : Term) (t' : Term) -> Step t t' \
-                    \-> ∀ (U : Ty) -> HasType t U -> HasType t' U"
+        st @?= Just "∀ (t : Term.Term) (t' : Term.Term) -> Step.Step t t' \
+                    \-> ∀ (U : Ty.Ty) -> HasType.HasType t U -> HasType.HasType t' U"
 
       -- **Type safety is the pair**, and this asserts the other half is still
       -- the theorem it was two modules ago.
     , testCase "and progress is still there beside it" $ do
         st <- statementOf "progress"
-        st @?= Just "∀ (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)"
+        st @?= Just "∀ (t : Term.Term) (T : Ty.Ty) -> HasType.HasType t T -> Or.Or (Value.Value t) (Steps t)"
 
       -- **The nine lemmas the proof used to need.** Six took the derivation
       -- apart at a term shape; three more — @succAtNat@, @predAtNat@,
@@ -55,7 +56,7 @@ tests =
       -- equation itself, so none of them has anything left to do.
     , testCase "the nine inversion lemmas are gone" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (machineOf s)) . GlobalName)
+        map (isJust . flip lookupDefinition (globals (machineOf s)) . rootName)
             [ "ifGuard", "ifThen", "ifElse"
             , "succArg", "predArg", "isZeroArg"
             , "succAtNat", "predAtNat", "isZeroAtBool"
@@ -74,12 +75,12 @@ tests =
     -- **Three modules, in order** — each reads what the ones before it declared.
     loaded = do
       (s, _)  <- startingSession
-      (s1, _, _) <- loadProofFile s  "examples/canonical.thena"
-      (s2, _, _) <- loadProofFile s1 "examples/progress.thena"
+      (s1, _, _) <- loadProofFile s  "examples/Canonical.thena"
+      (s2, _, _) <- loadProofFile s1 "examples/Progress.thena"
       (s3, _, _) <- loadProofFile s2 target
       pure s3
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore (Rendering [] (names (machineOf s))) [] . definitionType
-               <$> lookupDefinition (GlobalName n) (globals (machineOf s)) )
+      pure ( renderCore (rendering [] (names (machineOf s))) [] . definitionType
+               <$> lookupDefinition (rootName n) (globals (machineOf s)) )

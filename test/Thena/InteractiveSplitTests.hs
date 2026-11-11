@@ -1,7 +1,7 @@
 -- | A split taken interactively, at a hole — @induction-core@ and @case-core@
 -- (MS9 phase 231).
 --
--- @examples\/split-at-a-hole.thena.script@ is the file, and it proves two
+-- @examples\/SplitAtAHole.thena.script@ is the file, and it proves two
 -- theorems: @belowRefl@ over a family with a dependent index telescope, by
 -- induction, and @vhead@ at a pinned index, by cases. **The end-to-end judge is
 -- @qed@**, which runs 'Thena.Kernel.certify' over the finished development, so a
@@ -28,16 +28,16 @@ module Thena.InteractiveSplitTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Driver (Session, command, machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Files (loadFile, startingSession)
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Render (Rendering (..), renderCore, renderResponse)
+import Thena.Render (rendering, renderCore, renderResponse)
 
 -- | Relative to the package root, which is where the suite runs.
 target :: FilePath
-target = "examples/split-at-a-hole.thena.script"
+target = "examples/SplitAtAHole.thena.script"
 
 -- | One command, and what the session said back.
 step :: Session -> String -> (Session, [String])
@@ -54,8 +54,10 @@ atAHole :: Session -> (Session, [String])
 atAHole s =
   run s
     [ "data N : Type\8320 where { z : N ; s : N -> N }"
+    , "open N"
     , "data Vec (A : Type\8320) : forall (n : N) -> Type\8320 where \
       \{ vnil : Vec A z ; vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n) }"
+    , "open Vec"
     , ":theorem vfirst : \8704 (A : Type\8320) (m : N) (xs : Vec A (s m)) -> A"
     , "attack", "intro", "intro", "intro", "into", "along", "along", "along"
     ]
@@ -69,16 +71,16 @@ tests =
         (_, _, stopped) <- loadFile s target
         assertBool (unlines (map show stopped)) (null stopped)
 
-      -- The statement is the one `dependent-index.thena.script` proves by
+      -- The statement is the one `DependentIndex.thena.script` proves by
       -- hand, so the two paths are known to end in the same place.
     , testCase "and the inductive theorem is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadFile s target
-        case lookupDefinition (GlobalName "belowRefl") (globals (machineOf s')) of
+        case lookupDefinition (rootName "belowRefl") (globals (machineOf s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d ->
-            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (n : Nat) (i : Fin n) -> Below n i -> Eq {0} (Fin n) i i"
+            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
+              @?= "\8704 (n : Nat.Nat) (i : Fin.Fin n) -> Below.Below n i -> Eq.Eq {0} (Fin.Fin n) i i"
 
       -- __And the arm really bound the constructor's own argument__: `vhead` of
       -- a one-element vector is that element. An arm handed something ambient

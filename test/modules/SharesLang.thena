@@ -1,0 +1,15 @@
+-- **The control for `~2kc72`'s fix — MS11 phase 303.** The same file as
+-- `WithheldLang.thena` with the language NAMED on the export clause, which is
+-- the one grant: `exporting ( LC )` covers the grammar key `LC` and the
+-- datatype `LC.LC` together, because the test is a prefix.
+module test.modules.SharesLang exporting ( LC keep ) where
+
+x : Token String
+x = /[a-z]+/
+
+language LC, M, N where
+  var : x as occurrence -> x
+  app                   -> ( M N )
+
+keep : Type₁
+keep = Type₀

@@ -1,0 +1,8 @@
+-- **The half that IS withheld — `~2kc72`.** Naming the type is naming a
+-- declared name: refused, *not in scope: LC*.
+module test.modules.NamesLang where
+
+import test.modules.WithheldLang
+
+mine : LC
+mine = keep

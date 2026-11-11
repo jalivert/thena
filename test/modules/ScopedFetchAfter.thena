@@ -1,0 +1,11 @@
+module test.modules.ScopedFetchAfter where
+
+-- **The control** (MS11 phase 298): the same block, and then the same call
+-- outside it, where the whole group is out of the pool again — one pop per
+-- base, which is what a group being pushed by name has to get right.
+consult test.modules.Needs where
+  do
+    needed
+
+do
+  needed

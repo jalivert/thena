@@ -7,6 +7,10 @@ language A, P where
   lit  -> ( a )
   same -> ( a a )
 
+open A
+
 language B, Q where
   other -> ( b )
   same  -> ( b b b )
+
+open B

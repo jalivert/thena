@@ -1,0 +1,8 @@
+module test.modules.ScopedConsult where
+
+-- **The consult states how far it reaches** (MS11 phase 292): `marker` is a
+-- rule of `Tooling.thena.rules` and nowhere else, so the block resolves it and
+-- the file after the block does not.
+consult test.modules.Tooling where
+  do
+    marker

@@ -32,6 +32,17 @@ tests =
             [TTagOpenAt "LC" "var", TRaw "x", TTagClose]
         , lexes "and it opens a region like any other tag" "LC[var]``"
             [TTagOpenAt "LC" "var", TTagClose]
+          -- **A TAG MAY BE QUALIFIED** (MS10 phase 260, `~zjkvd`): a tag
+          -- resolves like any other name, so a path has to be writable. It
+          -- needs its own rules because @.@ is reserved since phase 240 \u2014
+          -- @\@ident@ cannot reach past the first step, and this was
+          -- *unexpected character* before.
+        , lexes "a qualified tag" "A.LC`x`"
+            [TTagOpen "A.LC", TRaw "x", TTagClose]
+        , lexes "a qualified tag with a production" "A.LC[var]`x`"
+            [TTagOpenAt "A.LC" "var", TRaw "x", TTagClose]
+        , lexes "and a deeper path" "A.B.LC`x`"
+            [TTagOpen "A.B.LC", TRaw "x", TTagClose]
         , lexes
             "the tag may be any identifier, including one above ASCII"
             "\120138`x`"
@@ -124,36 +135,25 @@ tests =
             ]
         ]
     , testGroup
-        "the angle-bracket alias for a surface region (MS5 phase 62)"
-        [ lexes
-            "it opens a region tagged surface"
-            "\10216f x\10217"
-            [TTagOpen "surface", TRaw "f x", TTagClose]
-        , lexes
-            "and its contents are raw, like any region's"
-            "\10216let (] ;\10217"
-            [TTagOpen "surface", TRaw "let (] ;", TTagClose]
-        , lexes
-            "a backtick inside it is ordinary text, because it is not the fence"
-            "\10216a`b\10217"
-            [TTagOpen "surface", TRaw "a`b", TTagClose]
-        , lexes
-            "a backslash escapes the closing bracket"
-            "\10216a\\\10217b\10217"
-            [TTagOpen "surface", TRaw "a\10217b", TTagClose]
-        , lexes
-            "it nests through an escape, like any region"
-            "\10216x${ core`t` }\10217"
-            [ TTagOpen "surface"
-            , TRaw "x"
-            , TEscapeOpen
-            , TTagOpen "core"
-            , TRaw "t"
-            , TTagClose
-            , TEscapeClose
-            , TTagClose
-            ]
-        , fails "and one that is never closed" "\10216abc"
+        -- **THE ANGLE-BRACKET ALIAS IS GONE** (MS10 phase 269, `~3t63k`): @⟨ t ⟩@
+        -- opened a @surface@ region that @⟩@ closed, which is a second fence for
+        -- a thing that has one. Six cases stood here — that it opened the region,
+        -- that its contents were raw, that a backtick inside was ordinary text,
+        -- that a backslash escaped the closing bracket, that it nested through an
+        -- escape, and that an unclosed one failed. **Every one of them is a
+        -- property of a region and is tested above, of a region**, which is the
+        -- whole argument for deleting the spelling.
+        "the characters the two deleted notations used"
+        [ -- **A corner is still reserved**, so it is no token and no name
+          -- character either: a user who writes one is told at the lexer.
+          -- 'Thena.Driver.resolving' relies on that, naming its hoisted
+          -- bindings @⌜1⌝@ where nothing a user writes can reach.
+          fails "a corner is reserved and spells nothing" "\8988 x \8989"
+          -- **An angle bracket is an ordinary character again.** It was
+          -- reserved for the alias alone, and reserving one narrows every name
+          -- in every language, so it went back when the alias did.
+        , lexes "an angle bracket is a name character now" "\10216x\10217"
+            [TIdent "\10216x\10217"]
         ]
     , testGroup
         "failures"
@@ -190,10 +190,14 @@ tests =
         [ lexes "a list" "[a, b]"
             [TLBracket, TIdent "a", TComma, TIdent "b", TRBracket]
         , lexes "an empty one" "[]" [TLBracket, TRBracket]
-        , -- Longest match keeps corners working: @[|@ is one token and @[@ is
-          -- another, and the two cannot be confused.
-          lexes "and the corner alias still wins" "[| x |]"
-            [TOpenQuote, TIdent "x", TCloseQuote]
+          -- **@[|@ WAS ONE TOKEN AND IS NO TOKEN NOW** (MS10 phase 269,
+          -- `~3t63k`): it opened the ASCII corners, and corners are gone.
+          -- **The dead spelling is refused rather than reinterpreted**, which
+          -- is luck worth a test: @|@ is an @$idchar@ and not an @$idstart@,
+          -- so @a|b@ is one name and @[| x |]@ cannot lex at all.
+        , fails "the ASCII corner alias does not lex" "[| x |]"
+        , lexes "though a pipe inside a name is still a name" "a|b"
+            [TIdent "a|b"]
         ]
     , testGroup
         "the backtick is reserved now"
@@ -257,7 +261,7 @@ tokensReadBack =
       [ TLambda, TLanguage, TChar 'c'
       , TLBracket, TRBracket, TComma, TForall, TArrow
       , TLParen, TRParen, TColon, TLBrace, TRBrace, TSemi, TEquals, TQuery
-      , TGuessed, TPending, TTurnstile, TEquate, TOpenQuote, TCloseQuote
+      , TGuessed, TPending, TTurnstile, TEquate
       , TLet, TIn, TElim, TWhere, TData, TModule, TDo
       , TRule, TWhen, TNeck
       , TNumber 42, TString "hi", TUniverse 3, TUniverseOpen, TIdent "foo"

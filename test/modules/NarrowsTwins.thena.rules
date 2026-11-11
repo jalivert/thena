@@ -1,0 +1,13 @@
+-- **A rule file's import narrows too** (MS11 phase 306, `~htngj`): the clause
+-- goes on `import` in both grammars, because splitting them would be the
+-- special case. This base asks `Lang` for `A` and matches the language's own
+-- production, so the clause let the grammar keys through.
+-- `MissesLangInBase.thena.rules` is the half that is refused.
+rule base narrows where
+
+import test.modules.Lang ( A )
+
+open A
+
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"

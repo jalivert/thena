@@ -29,7 +29,7 @@ module Thena.View.Instral
 
 import Data.List (intercalate)
 
-import Thena.Core.Term (GlobalName (..), Literal (..))
+import Thena.Core.Term (Spelling, spelledIn, nameDotted, Literal (..))
 import Thena.Global.Env (inductiveName)
 import Thena.Instral.Ops
   ( AnswerKind (..)
@@ -144,6 +144,11 @@ data SkeletonView a
 -- one place 'ValueView' quietly disagreed with what the terminal shows.
 data ValueView
   = ValText String
+  | ValName String
+    -- ^ **a name, dotted** (MS10) — @Nat.elim@, and a bare word for one at the
+    -- root. A case of its own rather than a 'ValText', because a frontend
+    -- showing a name as a quoted string says it is a piece of text, and the two
+    -- are different types in @instral@.
   | ValInt Int
   | ValChar String
     -- ^ escaped as the lexer reads it back, like 'ValText' — not a bare
@@ -172,7 +177,8 @@ data ValueView
 -- same "no finer position yet" choice phase 115c made for a constraint's
 -- fields.
 displayBlock
-  :: [Grammar]
+  :: Spelling
+  -> [Grammar]
   -> Budget
   -> Env
   -> [(Var, Address)]
@@ -181,7 +187,7 @@ displayBlock
   -> Maybe Int
   -> [Instr]
   -> [StatementView]
-displayBlock gs budget env bs n at next instrs =
+displayBlock sp gs budget env bs n at next instrs =
   [ statement k instr | (k, instr) <- zip [0 ..] instrs ]
   where
     statement k instr =
@@ -191,7 +197,7 @@ displayBlock gs budget env bs n at next instrs =
         , statementBind = bindOf instr
         , statementAnnotation = annotationOf instr
         , statementWord = opKeyword (opOf instr)
-        , statementOperands = map (displayOperand gs budget env bs n at) (operandsOf (opOf instr))
+        , statementOperands = map (displayOperand sp gs budget env bs n at) (operandsOf (opOf instr))
         , statementDetail = detailOf (opOf instr)
         }
 
@@ -209,7 +215,7 @@ displayBlock gs budget env bs n at next instrs =
 
     detailOf o = case o of
       Ask _ k'     -> Just (AsksFor (answerKindText k'))
-      DefineData d -> Just (Declares (let GlobalName g = inductiveName d in g))
+      DefineData d -> Just (Declares (spelledIn sp (inductiveName d)))
       Call nm _    -> Just (Calls nm)
       CrossType    -> Just (Crosses "type")
       CrossValue   -> Just (Crosses "val")
@@ -217,25 +223,29 @@ displayBlock gs budget env bs n at next instrs =
 
 -- | An operand, generically — shared with 'Thena.View.Rules', whose head
 -- tests carry operands with no statement around them at all.
-displayOperand :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Operand -> OperandView
-displayOperand gs budget env bs n at o = case o of
+displayOperand :: Spelling -> [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Operand -> OperandView
+displayOperand sp gs budget env bs n at o = case o of
   Ref x -> OpndRef x
-  Lit v -> OpndLiteral (displayValue gs budget env bs n at v)
+  Lit v -> OpndLiteral (displayValue sp gs budget env bs n at v)
   ListOf os -> OpndList (map go os)
   PairOf a b -> OpndPair (go a) (go b)
   ObjectOf sk -> OpndObject (skeleton sk)
   where
-    go = displayOperand gs budget env bs n at
+    go = displayOperand sp gs budget env bs n at
     skeleton sk = case sk of
-      SNode (GlobalName nm) kids -> SkelNode nm (map skeleton kids)
+      SNode sn kids -> SkelNode (nameDotted sn) (map skeleton kids)
       SLit l -> SkelLiteral (literalText l)
       SHole _ o' -> SkelHole (go o')
 
 -- | A runtime value, generically — shared with 'Thena.View.Machine',
 -- whose @env@ pane is values with no operand around them at all.
-displayValue :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Value -> ValueView
-displayValue gs budget env bs n at v = case v of
+displayValue :: Spelling -> [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Value -> ValueView
+displayValue sp gs budget env bs n at v = case v of
   VText s -> ValText (escapeString s)
+  -- **Not escaped, because it is not a literal**: a name's word is
+  -- unrestricted and may hold brackets or spaces, so there is no spelling that
+  -- reads it back and quoting it would promise one.
+  VName g -> ValName (nameDotted g)
   VInt k -> ValInt k
   VChar c -> ValChar (escapeChar c)
   VBool b -> ValBool b
@@ -257,12 +267,12 @@ displayValue gs budget env bs n at v = case v of
   VOption (Just v') -> ValSome (go v')
   VPair a b -> ValPair (go a) (go b)
   VLevel l -> ValLevel (renderLevel l)
-  VTerm t -> ValTerm (displayCore gs budget env bs n at t)
+  VTerm t -> ValTerm (displayCore sp gs budget env bs n at t)
   VClosure {} -> ValOpaque "closure"
   VRaw _ -> ValOpaque "core-region"
-  VSurface z -> ValSurface (displaySurface (focus z))
+  VSurface z -> ValSurface (displaySurface sp (focus z))
   where
-    go = displayValue gs budget env bs n at
+    go = displayValue sp gs budget env bs n at
 
 literalText :: Literal -> String
 literalText l = case l of
@@ -308,8 +318,8 @@ patternText pt = case pt of
 
 skeletonText :: Skeleton Pattern -> String
 skeletonText sk = case sk of
-  SNode (GlobalName nm) [] -> nm
-  SNode (GlobalName nm) kids -> nm ++ "(" ++ commas (map skeletonText kids) ++ ")"
+  SNode n [] -> nameDotted n
+  SNode n kids -> nameDotted n ++ "(" ++ commas (map skeletonText kids) ++ ")"
   SLit l -> case l of
     LString s -> escapeString s
     LChar c   -> escapeChar c

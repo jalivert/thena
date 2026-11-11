@@ -1,6 +1,6 @@
 -- | MS1's target — determinacy of one-step evaluation (§9, phase 18).
 --
--- @examples\/determinacy-tactics.thena.script@ is the deliverable: TAPL chapter 3's language,
+-- @examples\/DeterminacyTactics.thena.script@ is the deliverable: TAPL chapter 3's language,
 -- its numeric-value predicate, its ten-rule evaluation relation, and twenty-one
 -- theorems ending in Theorem 3.5.4. It is a script of command lines, so it is
 -- run the way phase 11 runs any file — through 'loadFile', which is the same
@@ -18,18 +18,18 @@
 --
 -- == Three versions, and they must prove the same theorem
 --
--- **@examples\/determinacy-surface.thena@ is the same proof in the surface
+-- **@examples\/DeterminacySurface.thena@ is the same proof in the surface
 -- language** (MS4 tier 3): a proof module of 278 lines where the script is
 -- 1190, because the script\'s @back@ / @along@ navigation is gone and the
 -- elimination tactic\'s motive is written out instead of derived. Both come
 -- from @examples\/determinacy.py@ — one generator, two targets — so the proof
 -- itself is stated once.
 --
--- **@examples\/determinacy-patterns.thena@ is the same theorem by dependent
+-- **@examples\/DeterminacyPatterns.thena@ is the same theorem by dependent
 -- pattern matching** (MS9), written by hand — and it exists to be read beside
 -- the generated one, which is why it is in the suite rather than in a report.
 -- **Every one of its eight lemmas is a split**: no @elim@ anywhere, and the
--- generated proof's 148 appeals to @noConfusionTerm@ become none.
+-- generated proof's 148 appeals to @Term.lemmata.noConfusion@ become none.
 --
 -- **EVERY ARM OF @determinacy@ IS INLINE, NOTHING TAKES AN INDUCTION HYPOTHESIS
 -- AS A PARAMETER, AND ALL TEN ARMS RECURSE THE SAME WAY.** A split that
@@ -58,26 +58,27 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=), assertBool)
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (rootName)
 import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, loadProofFile, startingSession)
-import Thena.Render ( Rendering (..)
+import Thena.Render
+  ( rendering
   ,renderCore, renderTrouble, renderResponse)
 
 -- | Relative to the package root, which is where the suite runs — the same
 -- assumption @test\/golden@ already makes.
 target :: FilePath
-target = "examples/determinacy-tactics.thena.script"
+target = "examples/DeterminacyTactics.thena.script"
 
 surfaceTarget :: FilePath
-surfaceTarget = "examples/determinacy-surface.thena"
+surfaceTarget = "examples/DeterminacySurface.thena"
 
 patternTarget :: FilePath
-patternTarget = "examples/determinacy-patterns.thena"
+patternTarget = "examples/DeterminacyPatterns.thena"
 
 tests :: TestTree
 tests =
@@ -177,8 +178,9 @@ tests =
       _ : rest -> xs : tails' rest
 
     statementOf s' =
-      renderCore (Rendering [] (names (machineOf s'))) [] . definitionType
-        <$> lookupDefinition (GlobalName "determinacy") (globals (machineOf s'))
+      renderCore (rendering [] (names (machineOf s'))) [] . definitionType
+        <$> lookupDefinition (rootName "determinacy") (globals (machineOf s'))
 
-    theorem = "∀ (t : Term) (t1 : Term) -> Step t t1 \
-              \-> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2"
+    theorem = "∀ (t : Term.Term) (t1 : Term.Term) -> Step.Step t t1 \
+              \-> ∀ (t2 : Term.Term) -> Step.Step t t2 \
+              \-> Eq.Eq {0} Term.Term t1 t2"

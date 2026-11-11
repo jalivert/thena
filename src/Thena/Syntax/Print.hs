@@ -36,6 +36,7 @@ module Thena.Syntax.Print
   , tick
   , escapeString
   , escapeChar
+  , escapeRaw
     -- * Naming and levels, shared by both printers and by the display builder
   , Env
   , nameOf
@@ -50,9 +51,13 @@ import Data.List (intercalate)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level, Normal (..), levelVarName, normalise)
-import Thena.Core.Term (Literal (..), Var)
+import Thena.Core.Term (GlobalName (..), Literal (..), Var, nameDotted)
 import Thena.Instral.Concrete
   ( RawDecl (..)
+  , Reach (..)
+  , Selection (..)
+  , RawOpen (..)
+  , RawOpenSpec (..)
   , RawFunction (..)
   , RawRule (..)
   , RawSignature (..)
@@ -126,7 +131,18 @@ rawRhs r = case r of
 rawFunBody :: RawBody -> String
 rawFunBody b = case b of
   BodyRhs r      -> rawRhs r
-  BodyBlock is   -> "do { " ++ intercalate " ; " (map rawInstruction is) ++ " }"
+  BodyBlock is   -> block is
+
+-- | __A block, braces and all.__
+--
+-- **The empty one is @do { }@ and not @do {  }@** (MS10 phase 270, `~z4trb`):
+-- an empty body has been writable in a rule since MS4 phase 49 and is writable
+-- in a surface term now, so it is printable, and a printer crossed against its
+-- reader may not emit a space the author would not have written.
+block :: [RawInstr] -> String
+block is = case is of
+  [] -> "do { }"
+  _  -> "do { " ++ intercalate " ; " (map rawInstruction is) ++ " }"
 
 -- | A pattern, as written.
 --
@@ -160,6 +176,7 @@ rawOperand :: RawOperand -> String
 rawOperand a = case a of
   RawLambda ps b -> "\\ " ++ unwords (map rawPattern ps) ++ " -> " ++ rawFunBody b
   RawRef x  -> x
+  RawGlobal ps w -> nameDotted (GlobalName ps w)
   RawPos k  -> show k
   RawText t -> escapeString t
   RawChar c -> escapeChar c
@@ -169,17 +186,13 @@ rawOperand a = case a of
   -- the embedded term as the author wrote it.
   RawRegion tag prod src ->
     tag ++ maybe "" (\w -> "[" ++ w ++ "]") prod ++ [tick] ++ src ++ [tick]
-  -- The same gap 'renderValue' has for a 'Thena.Instral.Ops.VRaw': there is no
-  -- printer for written syntax, so this says what it is rather than what it
-  -- contains (§7b's register).
-  RawQuoted _       -> "⌜…⌝"
   -- A nested call, written back as it was written (MS5 phase 63). This is
   -- the one place a rule listing shows the /written/ form rather than the
   -- resolved one — resolution lifts it into a binding of its own.
   RawNested w as    -> "(" ++ unwords (w : map rawOperand as) ++ ")"
 
 surf :: SurfacePrec -> Surface -> String
-surf _ (SurfaceName x)      = x
+surf _ (SurfaceName ps x)     = nameDotted (GlobalName ps x)
 surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
 surf _ (SurfaceLiteral l)   = case l of
   LString s -> escapeString s
@@ -199,8 +212,7 @@ surf _ (SurfaceHole h)      = "?" ++ h
 -- **Printed with explicit braces and semicolons**, never re-laid-out: the
 -- grammar accepts both spellings and this is the one that is unambiguous on
 -- one line, which is what every other case here produces too.
-surf _ (SurfaceDo b)        =
-  "do { " ++ intercalate " ; " (map rawInstruction b) ++ " }" 
+surf _ (SurfaceDo b)        = block b
 surf p (SurfaceApp f as)    =
   paren (p >= Tight) (surf Spine f ++ concatMap arg (NE.toList as))
 -- **The body of each of these four is @Arrowed@ and not @Term@**, which is
@@ -241,9 +253,9 @@ surf p (SurfaceSplit a tgt as) =
     -- what this prints reads back as the same tree (MS9 phase 189).
     arm (SurfaceArm pat Nothing)  = surfacePattern pat ++ " ->"
     arm (SurfaceArm pat (Just b)) = surfacePattern pat ++ " -> " ++ surf Loose b
-surf p (SurfaceElim d ps mot ms is tgt) =
+surf p (SurfaceElim dps d ps mot ms is tgt) =
   paren (p >= Tight)
-    ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
+    ("elim " ++ nameDotted (GlobalName dps d) ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
        ++ " " ++ list is ++ " " ++ surf Tight tgt)
 
 -- | A written pattern, back as it was written.
@@ -263,7 +275,7 @@ surfacePattern = go False
     -- **A dot keeps its parentheses unless the term is a bare name**, which is
     -- the grammar's own two forms: @.n@ round-trips as @.n@ and anything else
     -- needs the brackets back, @.(succ n)@ included.
-    go _ (PatternDot (SurfaceName x)) = "." ++ x
+    go _ (PatternDot (SurfaceName ps x)) = "." ++ nameDotted (GlobalName ps x)
     go _ (PatternDot e)               = ".(" ++ surf Loose e ++ ")"
 
 objectPiece :: ObjectPiece -> String
@@ -274,6 +286,11 @@ objectPiece pc = case pc of
 -- The region scanner reads a backslash before any of these as the
 -- character itself, so writing them this way is what makes the printer's
 -- output readable again.
+--
+-- **The three are 'Thena.Syntax.Lexer.rawEscapes'**, which held a fourth —
+-- @⟩@ — until the @⟨ … ⟩@ alias went (MS10 phase 269). Every printer that
+-- writes a region's text goes through this, including the two in
+-- 'Thena.Render' that write a @core@ region.
 escapeRaw :: Char -> String
 escapeRaw c
   | c `elem` [tick, '\\', '$'] = ['\\', c]
@@ -387,7 +404,48 @@ rawDecl d = case d of
   DeclRule (RawRule n ps ts is) ->
     ("rule " ++ n ++ concatMap ((" " ++) . rawPattern) ps ++ " :-" ++ whens ts ++ " do")
       : map (("  " ++) . rawInstruction) is
+  -- **An @open@ line, as written** (MS10 phase 267). @open X in ‹d›@ is one
+  -- line and then the declaration it reaches, indented under it, so a
+  -- declaration that is several lines keeps its shape.
+  DeclOpen o -> [rawOpen o]
+  DeclOpenIn o inner -> (rawOpen o ++ " in") : map ("  " ++) (rawDecl inner)
+  -- **An @import@ line, as written** (MS11 phase 276). A base printed without
+  -- it would read back and then be refused, because what it depends on would no
+  -- longer be stated. **And a @consult@ line beside it** (MS11 phase 289), for
+  -- that reason doubled: a base printed without one would read back and be
+  -- refused for the base it is written against.
+  DeclImport r ps x sel Nothing  -> [reach r ++ "import " ++ dotted ps x ++ clause sel]
+  -- **AND ITS BLOCK, INDENTED** (MS11 phase 299), which is 'DeclOpenIn''s shape
+  -- one line up: @where@ ends the line and the offside rule opens the block at
+  -- the next token, so what is printed reads back as what was written.
+  -- **An empty block round-trips too** — a layout keyword with nothing after it
+  -- opens an empty block ("Thena.Surface.Layout"), so @Just []@ prints as a
+  -- bare @where@ and parses back to @Just []@.
+  DeclImport r ps x sel (Just ds) ->
+    (reach r ++ "import " ++ dotted ps x ++ clause sel ++ " where")
+      : map ("  " ++) (concatMap rawDecl ds)
+  DeclConsult r ps x Nothing -> [reach r ++ "consult " ++ dotted ps x]
+  -- **AND A CONSULT'S BLOCK, THE SAME WAY** (MS11 phase 300).
+  DeclConsult r ps x (Just ds) ->
+    (reach r ++ "consult " ++ dotted ps x ++ " where")
+      : map ("  " ++) (concatMap rawDecl ds)
   where
+    dotted ps x = intercalate "." (ps ++ [x])
+
+    -- **One word in front of the line, as it is written** (MS11 phase 289), and
+    -- the only thing 'Reach' is for in a printer.
+    reach r = case r of { Own -> "" ; Public -> "public " }
+
+    -- **An import's own clause, printed where it was written** (MS11 phase 306,
+    -- @~htngj@) — between the module's name and the @where@, which is the order
+    -- the grammar reads it in. @SelectOnly []@ prints as @( )@ and round-trips:
+    -- an import that deliberately takes nothing is not the same line as one with
+    -- no clause.
+    clause sel = case sel of
+      SelectWide       -> ""
+      SelectOnly ns    -> " ( " ++ unwords (map (uncurry dotted) ns) ++ " )"
+      SelectHiding ns  -> " hiding ( " ++ unwords (map (uncurry dotted) ns) ++ " )"
+
     header lhs b = case b of
       BodyRhs r    -> [lhs ++ " = " ++ rawRhs r]
       BodyBlock is -> (lhs ++ " = do") : map (("  " ++) . rawInstruction) is
@@ -402,6 +460,23 @@ rawDecl d = case d of
     -- grammar's own distinction (@Test@), not a choice about spacing.
     test (RawTest w []) = w
     test (RawTest w as) = "(" ++ w ++ " " ++ unwords (map rawOperand as) ++ ")"
+
+-- | An @open@ line, less the @in@ that may follow it (MS10 phase 267).
+--
+-- **The written form and not the resolved one**, because this is the printer
+-- the parser inverts: @open X Y Z@ is one line here exactly as the author wrote
+-- it, where resolution has already split it into one 'Thena.Core.Term.Opened'
+-- per namespace and could not put it back.
+rawOpen :: RawOpen -> String
+rawOpen (RawOpen ns spec) = "open " ++ unwords (map dotted ns) ++ said spec
+  where
+    dotted (ps, w) = intercalate "." (ps ++ [w])
+
+    said RawOpenWhole         = ""
+    said (RawOpenOnly ws)     = " ( " ++ unwords ws ++ " )"
+    said (RawOpenHiding ws)   = " hiding ( " ++ unwords ws ++ " )"
+    said (RawOpenRenaming rs) =
+      " renaming ( " ++ unwords [ a ++ " -> " ++ b | (a, b) <- rs ] ++ " )"
 
 -- | A whole rule file: its docstring, its header, and its declarations.
 printRuleFile :: String -> Maybe String -> [RawDecl] -> String
@@ -464,6 +539,7 @@ printBlock b =
 
     item i = case i of
       Word w       -> w
+      Literally w  -> w
       Binding w xs -> w ++ "[" ++ intercalate ", " xs ++ "]"
 
     -- **Two rule headers, and they are the reader's two tiers** (§6.1, §6.4):

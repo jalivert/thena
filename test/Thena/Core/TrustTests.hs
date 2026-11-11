@@ -33,7 +33,7 @@ import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Level (Level (..), LevelVar (..))
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, fresh)
+import Thena.Core.Term (Core (..), Ident (..), Var, fresh, rootName, nameDotted)
 import Thena.Core.Trust
   ( TrustClaim (..)
   , TrustClass (..)
@@ -46,7 +46,8 @@ import Thena.Core.Trust
 import Thena.Driver (parseCore)
 import Thena.Global.Env (Definition (..), GlobalEnv, addDefinition, restingOnTrust)
 
-import Thena.Declared (eqNat, eqNatCounter)
+import Thena.Declared ( opensIn
+  ,eqNat, eqNatCounter)
 
 -- --------------------------------------------------------------------------
 -- Fixtures
@@ -77,7 +78,7 @@ env =
   where
     aliased =
       addDefinition
-        (GlobalName "Alias")
+        (rootName "Alias")
         (MkDefinition [] [] (Universe LZero) (core eqNat "Nat"))
         eqNat
 
@@ -86,14 +87,14 @@ env =
     -- order the dependency graph's acyclicity comes from.
     define nm ty body e =
       addDefinition
-        (GlobalName nm)
+        (rootName nm)
         (MkDefinition [] [] (core e ty) (core e body))
         e
 
 -- | Read a core term. A fixture that will not parse is a bug in the fixture, so
 -- it stops the suite rather than failing a test about something else.
 core :: GlobalEnv -> String -> Core
-core e src = case parseCore [] e [] eqNatCounter src of
+core e src = case parseCore [] e (opensIn e) [] eqNatCounter src of
   Left err     -> error ("fixture does not parse: " ++ show err)
   Right (t, _) -> t
 
@@ -111,7 +112,7 @@ b = fst (fresh (eqNatCounter + 1))
 
 -- | A term read where @a@ and @b@ are in scope.
 open2 :: String -> Core
-open2 src = case parseCore [] env ctx eqNatCounter src of
+open2 src = case parseCore [] env (opensIn env) ctx eqNatCounter src of
   Left err     -> error ("fixture does not parse: " ++ show err)
   Right (t, _) -> t
 
@@ -157,7 +158,7 @@ tests =
 stored :: [TestTree]
 stored =
   [ testCase "a definition holding a trusted node, and one that only calls it" $
-      restingOnTrust env @?= map GlobalName ["through", "cheatNat"]
+      restingOnTrust env @?= map rootName ["through", "cheatNat"]
 
     -- __And the term's own claim is still the term's__: the stored list says
     -- nothing about a 'Trusted' node standing in the term being examined, so
@@ -384,7 +385,7 @@ walk =
   ]
   where
     verdicts cs =
-      [ ([ g | GlobalName g <- claimRoute c ], claimSite c, claimClass c)
+      [ ([ g | g <- map nameDotted (claimRoute c) ], claimSite c, claimClass c)
       | c <- cs
       ]
 

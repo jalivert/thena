@@ -1,0 +1,10 @@
+-- **A clause that keeps the language out keeps it out of the grammar table
+-- too** (MS11 phase 306), which is phase 303's ruling said once: the test is a
+-- prefix, so a key and its datatype are granted or withheld together. This base
+-- asks `Lang` for nothing it has and is refused.
+rule base misses where
+
+import test.modules.Lang ( Nonesuch )
+
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"

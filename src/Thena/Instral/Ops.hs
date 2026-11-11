@@ -49,7 +49,8 @@ import Data.Maybe (isJust)
 
 import Thena.Core.Level (Level)
 import Thena.Core.Term
-  (Core (App, Canonical, Global, Primitive), GlobalName (..), Literal (..))
+  (Core (App, Canonical, Global, Primitive), GlobalName (..), Literal (..), Opened,
+   nameDotted)
 import Thena.Instral.Pattern
   (Pattern (..), Skeleton (..), Slot (..), skeletonHoles, patternBinds, patternIrrefutable)
 import Thena.Instral.Type (Signature (..), Ty (..))
@@ -94,6 +95,30 @@ type Env = [(Name, Value)]
 -- — a body is @[Instr]@, so \"Thena.Rules\" would need this module anyway.
 data Value
   = VText    String    -- ^ what @Ask@ returns and @Say@ consumes
+  | VName    GlobalName
+    -- ^ **a name — a namespace path and a base word** (MS10), and it is the
+    -- introduction form 'Thena.Instral.Type.TName' did not have.
+    --
+    -- **A name was a 'VText' until here, and that is why a qualified name
+    -- written in a surface term could not resolve.** @surface-name@ flattened
+    -- @String.append@ to the nine characters of its dotted form and
+    -- @resolve-name@ built a root name out of whatever string arrived, so the
+    -- environment was asked for a name at the root whose /word/ was
+    -- @\"String.append\"@ — the one shape §3.6 forbids. The type said the two
+    -- were different from MS5 phase 66b; the values did not, so nothing could
+    -- carry a path through a rule.
+    --
+    -- **One name type, shared with the kernel's**
+    -- ('Thena.Core.Term.GlobalName'), rather than a second of @instral@'s own:
+    -- a name is a path and a word wherever it is, and a binder's name is one
+    -- with no path — which is what 'Thena.Core.Term.rootName' makes. A
+    -- position that can only take a binder's identifier refuses a path instead
+    -- of dropping it; see 'Thena.Engine.operandWord'.
+    --
+    -- **A string literal is still accepted where a name is wanted** — his
+    -- ruling of 2026-09-12 — and it reads as a name at the root. Inference
+    -- refuses a /variable/ of 'Thena.Instral.Type.TString' there, so nothing
+    -- but a literal reaches that reading.
   | VTerm    Core      -- ^ a core term; a variable is @Free x@
   | VSurface SurfaceZipper
     -- ^ **a focused surface term — elaboration's input** (MS4 phase 41,
@@ -151,7 +176,7 @@ data Value
   | VBool    Bool
     -- ^ **written @true@ and @false@, and they are reserved in @instral@ only**
     -- — his ruling, 2026-09-12. Not lexer keywords: one lexer serves every
-    -- language, and @examples\/determinacy-tactics.thena.script@ declares
+    -- language, and @examples\/DeterminacyTactics.thena.script@ declares
     -- @data Term … { true : Term ; false : Term ; … }@, so reserving them in
     -- the lexer would take two constructor names away from every object
     -- language. They are read where an operand is read, before a local is
@@ -452,7 +477,7 @@ data Op
     -- that unification there is a /solver/: @fill@ runs @prim-try@ right after,
     -- which is @check@, which subsumes — so the relation is enforced one
     -- instruction later with the right variance, and @unify@ was refusing where
-    -- it merely had nothing to solve. Before it, @try-core ⌜ Nat ⌝@ at a claim
+    -- it merely had nothing to solve. Before it, @try-core core\`Nat\`@ at a claim
     -- of @Type₁@ succeeded and @elaborate Nat@ did not: the elaborator was
     -- strictly weaker than the core it elaborates into.
     --
@@ -1090,6 +1115,102 @@ data Op
     -- the driver checks and installs, as 'DeclarePrimitive' does — so the check
     -- runs at the block's own place in the module, after the token classes
     -- above it.
+  | Open Opened
+    -- ^ @open ‹namespace›@ — **bring a namespace into view for the rest of the
+    -- enclosing one** (MS10 phase 247), in any of the five forms his ruling of
+    -- 2026-10-30 gives — see 'Thena.Core.Term.Opened'.
+    --
+    -- **A field rather than an operand** (MS10 phase 254), for
+    -- 'DeclareGrammar'\'s reason: it is written down and never computed. An
+    -- @open@ is refused in a rule body, so nothing can ever hand it one it
+    -- worked out — and as operands the selective forms would want a list of
+    -- names and a list of pairs, which is three operands nothing writes.
+    --
+    -- **It installs nothing.** A namespace is a prefix over the keys the
+    -- environment already has, so this adds the prefix to the machine's list of
+    -- open namespaces and a written name that does not resolve on its own is
+    -- tried under each of them. @GlobalEnv@ gains no table — his ruling of
+    -- 2026-10-30 — because a table would hold a second copy of what the keys
+    -- say and could disagree with them.
+    --
+    -- **A declaration and not a rule-body operation** (§3.7), exactly as @data@
+    -- is: the word exists so that 'opKeyword' stays total, and
+    -- "Thena.Rules" refuses it in a body one step before @validate@ would.
+  | LeaveOpen
+    -- ^ the end of what @open X in ‹one declaration›@ reaches (MS10 phase 254)
+    -- — takes the newest 'Open' back out of view.
+    --
+    -- **Symmetric with 'LeaveNamespace' and not the same op**, because the two
+    -- lists are not the same kind of thing: the namespaces are ordered rungs
+    -- and the opens are a set.
+  | Reveal [GlobalName]
+    -- ^ @import ‹module› where { … }@, entered — **the module's names may be
+    -- written until the matching 'LeaveReveal'** (MS11 phase 291, his design of
+    -- 2026-11-05).
+    --
+    -- **A field and not an operand**, for 'Open'\'s reason: an import is
+    -- written down and never computed. The names are the module's exports,
+    -- worked out by 'Thena.Driver.exportedByModule' where the program is built,
+    -- because the session knows which module declared what and the machine does
+    -- not.
+    --
+    -- **It reveals rather than brings in**, which is why it is not a second
+    -- @open@: the keys are in the environment either way and what an import
+    -- settles is whether a written name may reach them —
+    -- 'Thena.Core.Term.scopeConcealed' is the subtraction and this pushes a
+    -- frame without these names in it.
+  | LeaveReveal
+    -- ^ the end of what @import ‹module› where { … }@ reaches (MS11 phase 291)
+    -- — puts back the concealment the matching 'Reveal' lifted.
+    --
+    -- **Symmetric with 'LeaveOpen' and not the same op.** An @open@ adds a way
+    -- to resolve a name and this removes a bar to one, so the two compose: a
+    -- scoped import emits both, since the module's own top-level @open@s reach
+    -- its importer and must reach no further than the block does.
+  | PushBase FilePath
+    -- ^ @consult ‹module› where { … }@, entered — **the base is at the top of
+    -- the pool until the matching 'PopBase'** (MS11 phase 292, his design of
+    -- 2026-11-05).
+    --
+    -- **The base's PATH and not the base**, because "Thena.Rules" is below this
+    -- module: the driver reads the file and leaves it in
+    -- 'Thena.Engine.held', and this is the name the two tables meet under —
+    -- which is 'Thena.Driver.moduleFile''s rule, a module name being a path.
+    --
+    -- **At the TOP, which is what makes depth priority.** A file's consults are
+    -- a stack (phase 288), so the innermost block's base is pushed last and is
+    -- searched first, and the shipped base — consulted onto an empty pool at
+    -- startup — stays at the bottom.
+  | PopBase
+    -- ^ the end of what @consult ‹module› where { … }@ reaches (MS11 phase 292)
+    -- — takes the newest 'PushBase' back out of the pool.
+    --
+    -- **'LeaveOpen''s shape for the other thing a file states.** What an
+    -- @import@ settles is which names a block may write and what a @consult@
+    -- settles is which rules answer in it; both are one frame on and one frame
+    -- off.
+  | EnterNamespace Operand
+    -- ^ @namespace ‹name› where { … }@, entered — **everything declared until
+    -- the matching 'LeaveNamespace' goes inside this namespace** (MS10 phase
+    -- 254).
+    --
+    -- **Two ops and not a field on each declaration**, which is what keeps one
+    -- rule for where a name lands: a @data@, a generated definition, a
+    -- @language@ block's datatype and a @define-global@ written in a top-level
+    -- @do@ block all take their place from the machine, so none of them has to
+    -- know what a namespace is.
+    --
+    -- **The push is absolute**: inside @A@, @namespace B@ pushes @A.B@, so a
+    -- rung of the walk is a whole prefix and the walk is a list scan rather
+    -- than an accumulation.
+    --
+    -- **Nothing is checked here.** A namespace is a prefix, so entering one
+    -- that holds nothing yet is exactly the case that declares into it — which
+    -- is where @open@ differs, and @open@ refuses an empty one because it would
+    -- otherwise be a silent no-op.
+  | LeaveNamespace
+    -- ^ the end of a @namespace@ block's declarations (MS10 phase 254) — pops
+    -- what 'EnterNamespace' pushed.
   | DeclarePrimitive Operand Operand
     -- ^ name, type — **install a primitive constant** (MS6 phase 97b), the way
     -- 'DefineGlobal' installs a definition and for the same reason: no
@@ -1497,6 +1618,14 @@ resultOf o = case o of
   Say _        -> Nothing
   DefineData _ -> Nothing
   Certify _    -> Nothing
+  Open {} -> Nothing
+  LeaveOpen -> Nothing
+  Reveal {} -> Nothing
+  LeaveReveal -> Nothing
+  PushBase {} -> Nothing
+  PopBase -> Nothing
+  EnterNamespace {} -> Nothing
+  LeaveNamespace -> Nothing
   DeclarePrimitive {} -> Nothing
   DeclareGrammar {} -> Nothing
   DefineGlobal {} -> Nothing
@@ -1727,6 +1856,14 @@ operandTypes o = case o of
   UnifyInto a b -> [(a, TCore), (b, TCore)]
   Try    a     -> [(a, TCore)]
   Certify a    -> [(a, TCore)]
+  Open _ -> []
+  LeaveOpen -> []
+  Reveal _ -> []
+  LeaveReveal -> []
+  PushBase _ -> []
+  PopBase -> []
+  EnterNamespace a -> [(a, TName)]
+  LeaveNamespace -> []
   DeclarePrimitive a b -> [(a, TName), (b, TCore)]
   DeclareGrammar _ -> []
   DefineGlobal _ a b c -> [(a, TName), (b, TCore), (c, TCore)]
@@ -1876,6 +2013,12 @@ matchPattern env pt v = case (pt, v) of
   (PChar c, VChar d) | c == d -> Just []
   (PBool b, VBool c) | b == c -> Just []
   (PText t, VText u) | t == u -> Just []
+  -- **A written @\"…\"@ matches a name by its dotted form** (MS10), which is
+  -- the pattern side of a literal being accepted where a name is wanted: a
+  -- pattern is the only place a rule can take a name apart, and refusing one
+  -- here would mean a clause could test a name's spelling in a @when@ and not
+  -- in a @case@.
+  (PText t, VName g) | t == nameDotted g -> Just []
   (PPair a b, VPair x y)   -> (++) <$> matchPattern' a x <*> matchPattern' b y
   (PSome a, VOption (Just x)) -> matchPattern' a x
   (PNone,   VOption Nothing)  -> Just []
@@ -2309,6 +2452,14 @@ opKeyword o = case o of
   Typing _     -> "typeof"
   Define _ _   -> "define"
   Certify _    -> "certify"
+  Open {} -> "open"
+  LeaveOpen -> "leave-open"
+  Reveal {} -> "reveal"
+  LeaveReveal -> "leave-reveal"
+  PushBase {} -> "push-base"
+  PopBase -> "pop-base"
+  EnterNamespace {} -> "namespace"
+  LeaveNamespace -> "leave-namespace"
   DeclarePrimitive {} -> "declare-primitive"
   DeclareGrammar {} -> "declare-grammar"
   DefineGlobal {} -> "define-global"

@@ -1,0 +1,11 @@
+module test.modules.BorrowsMetavars where
+
+import test.modules.Metavars
+
+-- **Its own `open`, and not the one `Metavars.thena` wrote.** A metavariable is
+-- read against the languages open where the block is written, so a borrower
+-- says so itself — see `Thena.GrammarTests`.
+open LC
+
+language P, Q where
+  tuple -> ( M , M )

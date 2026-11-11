@@ -1,0 +1,2 @@
+data A0 : Type₀ where { a0 : A0 }
+:load test/modules/Bit.thena

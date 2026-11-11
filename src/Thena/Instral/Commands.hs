@@ -125,14 +125,21 @@ commands =
   , one ":accepts"
   , one ":produces"
   , one ":load"
+  -- A path, like @:load@'s: a proof-script is reached by path and not by module
+  -- name, because its naming is the frontend's (MS11 phase 302).
+  , one ":replay"
+  , one ":consult"
   , one ":theorem"
   , one ":resume"
   -- Optional: the focus, or a term written out.
   , optional ":show"
-  -- **Only the bare, surface form.** @Thena.Driver.cornered@ also accepts
-  -- @:infer ⌜ t ⌝@ as a core term and that still runs — it is simply not
-  -- offered, on his instruction of 2026-10-01: corners are to be replaced by
-  -- @core\`t\`@ throughout (@AGENDA.md@ 98) and nothing new may point at them.
+  -- **Only the bare, surface form.** @Thena.Driver.coreFenced@ also accepts
+  -- @:infer core\`t\`@ as a development-calculus term and that runs; it is
+  -- simply not offered. **The reason has changed and the line has not** (MS10
+  -- phase 269): it used to be that corners were on their way out and nothing
+  -- new could point at them, and now the fence is the only spelling there is,
+  -- so offering both arms of one word here is a question for whoever wants
+  -- two.
   , Command ":infer" [[], [ASurfaceTerm]]
   , Command ":whnf"  [[], [ACoreTerm]]
   -- @:convert ‹t› ≟ ‹u›@ — two opaque terms with a fence between them, which is

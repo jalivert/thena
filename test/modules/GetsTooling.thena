@@ -1,0 +1,6 @@
+module test.modules.GetsTooling where
+
+import test.modules.Publishes
+
+do
+  marker

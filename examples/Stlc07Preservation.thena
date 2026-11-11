@@ -1,0 +1,675 @@
+-- Preservation for the simply typed λ-calculus of 01–03, for closed terms:
+--
+--     · ⊢ M : T   and   M --> M'   give   · ⊢ M' : T
+--
+-- Load it with   :load examples/Stlc07Preservation.thena — it imports 01, 02
+-- and 03 itself. Then try   :infer preservation
+--
+-- == How it is proved
+--
+-- **The β case is the whole difficulty**, and it is the substitution lemma:
+-- the body of a function, typed under x : S, stays typed when a closed argument
+-- of type S is put for x. Everything else is taking a derivation apart.
+--
+-- **Substitution is the language's own, generated in 01**, so the proof is
+-- about the function Thena wrote: LC.subst-*, over a whole map, renaming a
+-- binder when keeping it would capture. The names below — `member`, `look`,
+-- `fvA`, `images` — are its pieces, written out, and the `refl` checks after
+-- them are what shows they are the same terms.
+--
+-- **It never renames here.** The map sends each name either to itself or to a
+-- closed term (`Good`), so what a binder must avoid is only names free in the
+-- node, and the binder is not one of those (`notCaptured`). So `LC.fresh.x`
+-- returns the binder itself (`freshKeeps`), and the binder of the result is
+-- the binder of the term.
+--
+-- **A proof can follow the function's decisions because they are `String.dec`'s**
+-- (MS6 phase 109a): eliminating `String.dec y x` in a proof gives `Eq String y x`
+-- in one branch and its refutation in the other, for names nobody knows.
+--
+-- **For closed terms only**, as Software Foundations states it. For any Γ the
+-- argument can have free names, a binder may be renamed, and proving the new
+-- name fresh needs facts about strings Thena cannot yet state — AGENDA 68.
+--
+-- == What is a split and what is not (MS9)
+--
+-- **Every proof that takes a DERIVATION apart is dependent pattern matching
+-- now.** `preservation` is an induction on the step with the typing derivation
+-- split inside the arm that needs it; `invApp`, `invAbs`, `ctxInvExtend`,
+-- `ctxInvEmpty`, `weaken`, `fvInCtx`, `substAll`, `appendIn` and `listNil` are
+-- splits; `appInj`, `absInj`, `extendInj` and its three projections are
+-- **deleted**, a split doing the injectivity where it stands. 66 `elim`s became
+-- 39, and **every proof here now writes all of its premises across the top**,
+-- the way a student writes one.
+--
+-- **WHAT IS LEFT IS NOT RESIDUE, AND EACH KIND SAYS WHY AT THE LEMMA.** There
+-- are two, and they are the measure of where the feature stops:
+--
+--   * a lemma that decides on a COMPUTED value — `memberSpec`, `freshKeeps`,
+--     `lookHit`, `lookMiss` — eliminates `String.dec` or `member` and must
+--     rewrite the goal's own occurrences of it. That is what `with` is for,
+--     and `with` is not built.
+--   * `arrowInj`, whose equation has a compound term built from AMBIENT
+--     variables on both sides.
+
+module examples.Stlc07Preservation where
+
+import examples.Stlc01Syntax
+import examples.Stlc02Contexts
+import examples.Stlc03TypingAndReduction
+
+-- An `open` does not travel with an `import`, so this file says which
+-- namespaces it is written against. A grammar's metavariables are names
+-- under it too, so a judgment written in them needs the same `open` that a
+-- bare constructor does.
+open Ty
+open LC
+open Ctx
+open extend-in
+open typing
+open step
+
+-- ---------------------------------------------------------------------------
+-- Logic
+
+absurdly : forall (C : Type₀) (e : Empty) -> C
+absurdly = \ C e -> case e of { }
+
+subst : forall (A : Type₀) (P : A -> Type₀) (a : A) (b : A) (e : Eq A a b) (p : P a) -> P b
+subst = \ A P a b e -> case e of { refl c -> \ z -> z }
+
+sym : forall (A : Type₀) (a : A) (b : A) (e : Eq A a b) -> Eq A b a
+sym = \ A a b e -> case e of { refl c -> refl A c }
+
+trans : forall (A : Type₀) (a : A) (b : A) (c : A) (e1 : Eq A a b) (e2 : Eq A b c) -> Eq A a c
+trans = \ A a b c e1 e2 -> case e1 of { refl k -> e2 }
+
+data Or (A : Type₀) (B : Type₀) : Type₀ where
+  orLeft : forall (a : A) -> Or A B
+  orRight : forall (b : B) -> Or A B
+
+open Or
+
+-- ---------------------------------------------------------------------------
+-- Lists of names, and the pieces of generated substitution, named
+
+-- Being in a list is a type computed from the list, so it needs no inversion.
+In : String -> List String -> Type₀
+In = \ c xs -> elim List (String) (\ l -> Type₀) ((Empty) (\ b bs r -> Or (Eq String c b) r)) () xs
+
+member : String -> List String -> Comparison
+member = \ c xs ->
+  elim List (String) (\ l -> Comparison)
+    ((different)
+     (\ b bs rb -> elim Dec ((Eq String c b)) (\ d -> Comparison) ((\ p -> same) (\ n -> rb)) () (String.dec c b)))
+    () xs
+
+look : String -> List (And String LC) -> LC
+look = \ y s ->
+  elim List ((And String LC)) (\ l -> LC)
+    ((var y)
+     (\ p ps rp -> elim And (String LC) (\ q -> LC)
+                     ((\ k w -> elim Dec ((Eq String y k)) (\ d -> LC) ((\ p1 -> w) (\ n -> rp)) () (String.dec y k)))
+                     () p))
+    () s
+
+-- ---------------------------------------------------------------------------
+-- Checks that the names above ARE the generated code
+
+lookIsVar : forall (y : String) (s : List (And String LC)) -> Eq LC (LC.subst-* (var y) s) (look y s)
+lookIsVar = \ y s -> refl LC (look y s)
+
+-- Free variables, with the names bound so far and an accumulator, as LC.fv.x is.
+fvA : LC -> List String -> List String -> List String
+fvA = \ t ->
+  elim LC () (\ u -> List String -> List String -> List String)
+    ((\ x bound acc -> elim Comparison () (\ q -> List String) ((acc) (cons String x acc)) () (member x bound))
+     (\ x T E r bound acc -> r (cons String x bound) acc)
+     (\ M N rM rN bound acc -> rM bound (rN bound acc)))
+    () t
+
+appendL : List String -> List String -> List String
+appendL = \ l r -> elim List (String) (\ k -> List String) ((r) (\ h hs rh -> cons String h rh)) () l
+
+-- What substitution must avoid at a binder: the free variables of the image of
+-- each free variable of the node.
+images : List (And String LC) -> List String -> List String
+images = \ s ys ->
+  elim List (String) (\ l -> List String)
+    ((nil String) (\ y ys1 ry -> appendL (LC.fv.x (look y s)) ry))
+    () ys
+
+fvIs : forall (t : LC) -> Eq (List String) (LC.fv.x t) (fvA t (nil String) (nil String))
+fvIs = \ t -> refl (List String) (LC.fv.x t)
+
+-- Substitution under a binder renames it to LC.fresh.x x ‹what to avoid›, and
+-- sends x to that name on the way into the body.
+absIs : forall (x : String) (T : Ty) (E : LC) (s : List (And String LC))
+          -> Eq LC (LC.subst-* (abs x T E) s)
+                   (abs (LC.fresh.x x (images s (LC.fv.x (abs x T E)))) T
+                        (LC.subst-* E (cons (And String LC)
+                           (both String LC x (var (LC.fresh.x x (images s (LC.fv.x (abs x T E)))))) s)))
+absIs = \ x T E s -> refl LC (LC.subst-* (abs x T E) s)
+
+-- ---------------------------------------------------------------------------
+-- Membership: what `member` answers, and why
+
+MemberSpec : String -> List String -> Type₀
+MemberSpec = \ c l ->
+  Or (And (Eq Comparison (member c l) same) (In c l))
+     (And (Eq Comparison (member c l) different) (In c l -> Empty))
+
+memberSpec : forall (c : String) (xs : List String) -> MemberSpec c xs
+memberSpec = \ c xs ->
+  elim List (String) (\ l -> MemberSpec c l)
+    ((orRight (And (Eq Comparison different same) Empty)
+              (And (Eq Comparison different different) (Empty -> Empty))
+              (both (Eq Comparison different different) (Empty -> Empty) (refl Comparison different) (\ i -> i)))
+     (\ b bs rb ->
+        elim Dec ((Eq String c b))
+          (\ d -> Or (And (Eq Comparison (elim Dec ((Eq String c b)) (\ d1 -> Comparison) ((\ p -> same) (\ n -> member c bs)) () d) same)
+                          (Or (Eq String c b) (In c bs)))
+                     (And (Eq Comparison (elim Dec ((Eq String c b)) (\ d1 -> Comparison) ((\ p -> same) (\ n -> member c bs)) () d) different)
+                          (Or (Eq String c b) (In c bs) -> Empty)))
+          ((\ p -> orLeft (And (Eq Comparison same same) (Or (Eq String c b) (In c bs)))
+                          (And (Eq Comparison same different) (Or (Eq String c b) (In c bs) -> Empty))
+                          (both (Eq Comparison same same) (Or (Eq String c b) (In c bs))
+                                (refl Comparison same) (orLeft (Eq String c b) (In c bs) p)))
+           (\ n -> elim Or ((And (Eq Comparison (member c bs) same) (In c bs))
+                            (And (Eq Comparison (member c bs) different) (In c bs -> Empty)))
+                     (\ o -> Or (And (Eq Comparison (member c bs) same) (Or (Eq String c b) (In c bs)))
+                                (And (Eq Comparison (member c bs) different) (Or (Eq String c b) (In c bs) -> Empty)))
+                     ((\ h -> orLeft (And (Eq Comparison (member c bs) same) (Or (Eq String c b) (In c bs)))
+                                     (And (Eq Comparison (member c bs) different) (Or (Eq String c b) (In c bs) -> Empty))
+                                     (both (Eq Comparison (member c bs) same) (Or (Eq String c b) (In c bs))
+                                           (andLeft (Eq Comparison (member c bs) same) (In c bs) h)
+                                           (orRight (Eq String c b) (In c bs) (andRight (Eq Comparison (member c bs) same) (In c bs) h))))
+                      (\ h -> orRight (And (Eq Comparison (member c bs) same) (Or (Eq String c b) (In c bs)))
+                                      (And (Eq Comparison (member c bs) different) (Or (Eq String c b) (In c bs) -> Empty))
+                                      (both (Eq Comparison (member c bs) different) (Or (Eq String c b) (In c bs) -> Empty)
+                                            (andLeft (Eq Comparison (member c bs) different) (In c bs -> Empty) h)
+                                            (\ o -> elim Or ((Eq String c b) (In c bs)) (\ o1 -> Empty)
+                                                      ((\ e -> n e) (\ i -> andRight (Eq Comparison (member c bs) different) (In c bs -> Empty) h i))
+                                                      () o))))
+                     () rb))
+          () (String.dec c b)))
+    () xs
+
+-- ---------------------------------------------------------------------------
+-- A binder is kept when nothing would be captured
+
+-- The `different` branch of a comparison, whatever the other branch holds.
+pickDifferent : forall (c : String) (X : String) (q : Comparison) (e : Eq Comparison q different)
+                  -> Eq String (elim Comparison () (\ q1 -> String) ((X) (c)) () q) c
+pickDifferent = \ c X q e ->
+  subst Comparison (\ q1 -> Eq String (elim Comparison () (\ q2 -> String) ((X) (c)) () q1) c)
+    different q (sym Comparison q different e) (refl String c)
+
+-- LC.fresh.x x avoid is x itself when x is not to be avoided.
+freshKeeps : forall (c : String) (avoid : List String) (ni : In c avoid -> Empty) -> Eq String (LC.fresh.x c avoid) c
+freshKeeps = \ c avoid ->
+  elim List (String) (\ l -> (In c l -> Empty) -> Eq String (LC.fresh.x c l) c)
+    ((\ ni -> refl String c)
+     (\ a rest r ni ->
+        elim Or ((And (Eq Comparison (member c (cons String a rest)) same) (In c (cons String a rest)))
+                 (And (Eq Comparison (member c (cons String a rest)) different) (In c (cons String a rest) -> Empty)))
+          (\ o -> Eq String (LC.fresh.x c (cons String a rest)) c)
+          ((\ h -> absurdly _ (ni (andRight _ _ h)))
+           (\ h -> pickDifferent c _ (member c (cons String a rest)) (andLeft _ _ h)))
+          () (memberSpec c (cons String a rest))))
+    () avoid
+
+-- ---------------------------------------------------------------------------
+-- Looking a name up in a context, taken apart
+
+ctxInvEmpty : forall (y : String) (U : Ty) (i : extend-in y U empty) -> Empty
+ctxInvEmpty = \ y U i -> case i of { }
+
+-- **Six lemmas no proof in this file needs any more, kept because
+-- `Stlc08PreservationByTactics.thena.script` replays this development by hand
+-- and still calls them.** `extendInj` and `appInj`/`absInj` are no-confusion
+-- for the reason `arrowInj` is: both sides of the equation are compound terms
+-- over AMBIENT variables, so a split cannot solve either.
+extendInj : forall (G0 : Ctx) (x : String) (T : Ty) (G : Ctx) (a : String) (S : Ty)
+              (e : Eq Ctx (extend G0 x T) (extend G a S))
+              -> And (Eq Ctx G0 G) (And (Eq String x a) (Eq Ty T S))
+extendInj = \ G0 x T G a S e -> Ctx.lemmata.noConfusion (extend G0 x T) (extend G a S) e
+
+extendCtx : forall (G0 : Ctx) (x : String) (T : Ty) (G : Ctx) (a : String) (S : Ty)
+              (e : Eq Ctx (extend G0 x T) (extend G a S)) -> Eq Ctx G0 G
+extendCtx = \ G0 x T G a S e ->
+  andLeft (Eq Ctx G0 G) (And (Eq String x a) (Eq Ty T S)) (extendInj G0 x T G a S e)
+
+extendName : forall (G0 : Ctx) (x : String) (T : Ty) (G : Ctx) (a : String) (S : Ty)
+               (e : Eq Ctx (extend G0 x T) (extend G a S)) -> Eq String x a
+extendName = \ G0 x T G a S e ->
+  andLeft (Eq String x a) (Eq Ty T S)
+    (andRight (Eq Ctx G0 G) (And (Eq String x a) (Eq Ty T S)) (extendInj G0 x T G a S e))
+
+extendTy : forall (G0 : Ctx) (x : String) (T : Ty) (G : Ctx) (a : String) (S : Ty)
+             (e : Eq Ctx (extend G0 x T) (extend G a S)) -> Eq Ty T S
+extendTy = \ G0 x T G a S e ->
+  andRight (Eq String x a) (Eq Ty T S)
+    (andRight (Eq Ctx G0 G) (And (Eq String x a) (Eq Ty T S)) (extendInj G0 x T G a S e))
+
+-- A name found in Γ, a : S is a, or it is not a and is found in Γ.
+CtxFound : Ctx -> String -> Ty -> String -> Ty -> Type₀
+CtxFound = \ G a S y U ->
+  Or (And (Eq String y a) (Eq Ty U S)) (And (Eq String y a -> Empty) (extend-in y U G))
+
+-- The split does the injectivity: `extend-here`'s own index is
+-- `Γ , x : T`, and unifying it with `Γ , a : S` IS what `extendInj` and its
+-- three projections were for. They are gone.
+ctxInvExtend : forall (G : Ctx) (a : String) (S : Ty) (y : String) (U : Ty) (i : extend-in y U (extend G a S)) -> CtxFound G a S y U
+ctxInvExtend = \ G a S y U i -> case i of
+  { extend-here G0 x T ->
+      orLeft (And (Eq String y a) (Eq Ty U S)) (And (Eq String y a -> Empty) (extend-in y U G))
+        (both (Eq String y a) (Eq Ty U S) (refl String y) (refl Ty U))
+  ; extend-there-extend G0 x T x1 T1 ne i1 ->
+      orRight (And (Eq String y a) (Eq Ty U S)) (And (Eq String y a -> Empty) (extend-in y U G))
+        (both (Eq String y a -> Empty) (extend-in y U G) ne i1) }
+
+-- ---------------------------------------------------------------------------
+-- Weakening: a derivation survives into any context that finds at least as much
+
+Incl : Ctx -> Ctx -> Type₀
+Incl = \ G G1 -> forall (y : String) (U : Ty) (i : extend-in y U G) -> extend-in y U G1
+
+inclExtend : forall (G : Ctx) (G1 : Ctx) (x : String) (S : Ty) (inc : Incl G G1) -> Incl (extend G x S) (extend G1 x S)
+inclExtend = \ G G1 x S inc y U i -> case (ctxInvExtend G x S y U i) of
+  { orLeft h -> case h of
+      { both ey eU ->
+          subst String (\ z -> extend-in z U (extend G1 x S)) x y (sym String y x ey)
+            (subst Ty (\ V -> extend-in x V (extend G1 x S)) S U (sym Ty U S eU)
+               (extend-here G1 x S)) }
+  ; orRight h -> case h of
+      { both ne i2 -> extend-there-extend G1 y U x S ne (inc y U i2) } }
+
+weaken : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (G1 : Ctx) (inc : Incl G G1) -> typing G1 t T
+-- **`G1` and `inc` are introduced INSIDE the arms, and that is not a
+-- preference.** Writing `\ G t T d G1 inc ->` across the top — what a student
+-- writes, and what every other proof in this file now does — is refused by the
+-- kernel at the `T-abs` arm's recursive call, because the induction hypothesis
+-- there is pinned to the ambient `G` while the recursion is at `G , x : S`.
+-- That it is left this way is his decision, not an oversight.
+weaken = \ G t T d G1 inc -> induction d of
+  { T-var x T0 G0 i -> T-var x T0 G1 (inc x T0 i)
+  ; T-abs G0 x S E T0 d0 ->
+      T-abs G1 x S E T0
+        (weaken (extend G0 x S) E T0 d0 (extend G1 x S) (inclExtend G0 G1 x S inc))
+  ; T-app G0 M S T0 N d1 d2 ->
+      T-app G1 M S T0 N (weaken G0 M (arrow S T0) d1 G1 inc) (weaken G0 N S d2 G1 inc) }
+
+-- A closed derivation holds in every context.
+weakenEmpty : forall (t : LC) (T : Ty) (d : typing empty t T) (D : Ctx) -> typing D t T
+weakenEmpty = \ t T d D -> weaken empty t T d D (\ y U i -> case i of { })
+
+-- ---------------------------------------------------------------------------
+-- The free variables of a typed term are in its context
+
+Dom : Ctx -> String -> Type₀
+Dom = \ G w -> Sigma Ty (\ U -> extend-in w U G)
+
+-- What `fvA t bound acc` can contain: what was accumulated, or a name not bound
+-- on the way down and found in the context.
+FvSpec : Ctx -> List String -> List String -> String -> Type₀
+FvSpec = \ G bound acc w -> Or (In w acc) (And (In w bound -> Empty) (Dom G w))
+
+fvInCtx : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T)
+            (bound : List String) (acc : List String) (w : String) (h : In w (fvA t bound acc))
+            -> FvSpec G bound acc w
+fvInCtx = \ G t T d -> induction d of
+  { T-var x T0 G0 i -> \ bound acc w h -> case (memberSpec x bound) of
+      { orLeft hs -> case hs of
+          { both em ib -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w))
+              (subst Comparison
+                 (\ q -> In w (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                 (member x bound) same em h) }
+      ; orRight hs -> case hs of
+          { both em nb -> case (subst Comparison
+                                  (\ q -> In w (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                                  (member x bound) different em h) of
+              { orLeft q -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w))
+                  (both (In w bound -> Empty) (Dom G0 w)
+                     (\ ib -> nb (subst String (\ z -> In z bound) w x q ib))
+                     (pair Ty (\ U -> extend-in w U G0) T0
+                        (subst String (\ z -> extend-in z T0 G0) x w (sym String w x q) i)))
+              ; orRight ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia } } }
+  -- Under a binder x the body's free names are the node's, and x is bound.
+  ; T-abs G0 x S E T0 d0 -> \ bound acc w h ->
+      case (fvInCtx (extend G0 x S) E T0 d0 (cons String x bound) acc w h) of
+        { orLeft ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia
+        ; orRight hb -> case hb of
+            { both nb dm -> case dm of
+                { pair U i -> case (ctxInvExtend G0 x S w U i) of
+                    -- w is x: but x was bound, so w cannot be free.
+                    { orLeft isX -> case isX of
+                        { both ex eU -> absurdly (FvSpec G0 bound acc w)
+                            (nb (orLeft (Eq String w x) (In w bound) ex)) }
+                    -- w is another name, found further down.
+                    ; orRight other -> case other of
+                        { both nx iw -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w))
+                            (both (In w bound -> Empty) (Dom G0 w)
+                               (\ ib -> nb (orRight (Eq String w x) (In w bound) ib))
+                               (pair Ty (\ U1 -> extend-in w U1 G0) U iw)) } } } } }
+  ; T-app G0 M S T0 N d1 d2 -> \ bound acc w h ->
+      case (fvInCtx G0 M (arrow S T0) d1 bound (fvA N bound acc) w h) of
+        { orLeft h2 -> fvInCtx G0 N S d2 bound acc w h2
+        ; orRight r -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w)) r } }
+
+-- ---------------------------------------------------------------------------
+-- What the avoided names come from, and what a closed term has free
+
+appendIn : forall (l : List String) (r : List String) (w : String) (h : In w (appendL l r)) -> Or (In w l) (In w r)
+-- `h`'s type mentions the target through a FUNCTION — `appendL l r` — and the
+-- split refines it along with the goal, so `h` in each arm is already about
+-- that arm's list.
+appendIn = \ l r w h -> induction l of
+  { nil -> orRight Empty (In w r) h
+  ; cons a as ->
+      case h of
+        { orLeft q -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orLeft (Eq String w a) (In w as) q)
+        ; orRight h1 -> case (appendIn as r w h1) of
+            { orLeft i -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orRight (Eq String w a) (In w as) i)
+            ; orRight i -> orRight (Or (Eq String w a) (In w as)) (In w r) i } } }
+
+-- A name to avoid is free in the image of some name of the node.
+FromImage : List (And String LC) -> List String -> String -> Type₀
+FromImage = \ s ys w -> Sigma String (\ y -> And (In y ys) (In w (LC.fv.x (look y s))))
+
+imagesIn : forall (s : List (And String LC)) (ys : List String) (w : String) (h : In w (images s ys)) -> FromImage s ys w
+imagesIn = \ s ys w ->
+  elim List (String) (\ k -> In w (images s k) -> FromImage s k w)
+    ((\ h -> absurdly (FromImage s (nil String) w) h)
+     (\ y ys1 ry h ->
+        elim Or ((In w (LC.fv.x (look y s))) (In w (images s ys1))) (\ o -> FromImage s (cons String y ys1) w)
+          ((\ h1 -> pair String (\ y1 -> And (In y1 (cons String y ys1)) (In w (LC.fv.x (look y1 s)))) y
+                      (both (In y (cons String y ys1)) (In w (LC.fv.x (look y s)))
+                         (orLeft (Eq String y y) (In y ys1) (refl String y)) h1))
+           (\ h2 -> elim Sigma (String (\ y1 -> And (In y1 ys1) (In w (LC.fv.x (look y1 s)))))
+                      (\ z -> FromImage s (cons String y ys1) w)
+                      ((\ y1 p -> pair String (\ y2 -> And (In y2 (cons String y ys1)) (In w (LC.fv.x (look y2 s)))) y1
+                                    (both (In y1 (cons String y ys1)) (In w (LC.fv.x (look y1 s)))
+                                       (orRight (Eq String y1 y) (In y1 ys1) (andLeft (In y1 ys1) (In w (LC.fv.x (look y1 s))) p))
+                                       (andRight (In y1 ys1) (In w (LC.fv.x (look y1 s))) p))))
+                      () (ry h2)))
+          () (appendIn (LC.fv.x (look y s)) (images s ys1) w h)))
+    () ys
+
+-- A closed term has no free variable.
+closedNoFv : forall (N : LC) (S : Ty) (d : typing empty N S) (w : String) (h : In w (LC.fv.x N)) -> Empty
+closedNoFv = \ N S d w h -> case (fvInCtx empty N S d (nil String) (nil String) w h) of
+  { orLeft e -> e
+  ; orRight r -> case r of { both nb dm -> case dm of { pair U i -> case i of { } } } }
+
+listNil : forall (l : List String) (f : forall (w : String) -> In w l -> Empty) -> Eq (List String) l (nil String)
+-- `f`'s type mentions the target, and the split refines it: in the `cons` arm
+-- `f` already asks for a member of `cons a as`.
+listNil = \ l f -> case l of
+  { nil -> refl (List String) (nil String)
+  ; cons a as -> absurdly (Eq (List String) (cons String a as) (nil String))
+                   (f a (orLeft (Eq String a a) (In a as) (refl String a))) }
+
+-- ---------------------------------------------------------------------------
+-- Looking up in a substitution — following String.dec
+
+lookHit : forall (x : String) (w : LC) (s : List (And String LC))
+            -> Eq LC (look x (cons (And String LC) (both String LC x w) s)) w
+lookHit = \ x w s ->
+  elim Dec ((Eq String x x))
+    (\ d -> Eq LC (elim Dec ((Eq String x x)) (\ d1 -> LC) ((\ p1 -> w) (\ n -> look x s)) () d) w)
+    ((\ p -> refl LC w) (\ n -> absurdly (Eq LC (look x s) w) (n (refl String x))))
+    () (String.dec x x)
+
+lookMiss : forall (y : String) (x : String) (w : LC) (s : List (And String LC)) (ne : Eq String y x -> Empty)
+             -> Eq LC (look y (cons (And String LC) (both String LC x w) s)) (look y s)
+lookMiss = \ y x w s ne ->
+  elim Dec ((Eq String y x))
+    (\ d -> Eq LC (elim Dec ((Eq String y x)) (\ d1 -> LC) ((\ p1 -> w) (\ n -> look y s)) () d) (look y s))
+    ((\ p -> absurdly (Eq LC w (look y s)) (ne p)) (\ n -> refl LC (look y s)))
+    () (String.dec y x)
+
+-- ---------------------------------------------------------------------------
+-- The invariant: every name of Γ is sent to itself, found in Δ at its type, or
+-- to a closed term of its type. Nothing else ever enters the map.
+
+Entry : Ctx -> String -> Ty -> LC -> Type₀
+Entry = \ D y U m ->
+  Or (And (Eq LC m (var y)) (extend-in y U D))
+     (And (typing empty m U) (Eq (List String) (LC.fv.x m) (nil String)))
+
+Good : Ctx -> Ctx -> List (And String LC) -> Type₀
+Good = \ G D s -> forall (y : String) (U : Ty) (i : extend-in y U G) -> Entry D y U (look y s)
+
+-- Under a binder x : S, x is sent to itself and every other name as before.
+goodExtend : forall (G : Ctx) (D : Ctx) (s : List (And String LC)) (x : String) (S : Ty) (g : Good G D s)
+               -> Good (extend G x S) (extend D x S) (cons (And String LC) (both String LC x (var x)) s)
+goodExtend = \ G D s x S g y U i ->
+  elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (extend-in y U G)))
+    (\ o -> Entry (extend D x S) y U (look y (cons (And String LC) (both String LC x (var x)) s)))
+    ((\ h -> subst String (\ z -> Entry (extend D x S) z U (look z (cons (And String LC) (both String LC x (var x)) s))) x y
+               (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h))
+               (subst Ty (\ V -> Entry (extend D x S) x V (look x (cons (And String LC) (both String LC x (var x)) s))) S U
+                  (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h))
+                  (orLeft (And (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S)))
+                          (And (typing empty (look x (cons (And String LC) (both String LC x (var x)) s)) S)
+                               (Eq (List String) (LC.fv.x (look x (cons (And String LC) (both String LC x (var x)) s))) (nil String)))
+                          (both (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S))
+                                (lookHit x (var x) s) (extend-here D x S)))))
+     (\ h -> subst LC (\ m -> Entry (extend D x S) y U m) (look y s) (look y (cons (And String LC) (both String LC x (var x)) s))
+               (sym LC (look y (cons (And String LC) (both String LC x (var x)) s)) (look y s)
+                  (lookMiss y x (var x) s (andLeft (Eq String y x -> Empty) (extend-in y U G) h)))
+               (elim Or ((And (Eq LC (look y s) (var y)) (extend-in y U D))
+                         (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String))))
+                  (\ o1 -> Entry (extend D x S) y U (look y s))
+                  ((\ e -> orLeft (And (Eq LC (look y s) (var y)) (extend-in y U (extend D x S)))
+                                  (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String)))
+                                  (both (Eq LC (look y s) (var y)) (extend-in y U (extend D x S))
+                                        (andLeft (Eq LC (look y s) (var y)) (extend-in y U D) e)
+                                        (extend-there-extend D y U x S (andLeft (Eq String y x -> Empty) (extend-in y U G) h)
+                                           (andRight (Eq LC (look y s) (var y)) (extend-in y U D) e))))
+                   (\ c -> orRight (And (Eq LC (look y s) (var y)) (extend-in y U (extend D x S)))
+                                   (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String)))
+                                   c))
+                  () (g y U (andRight (Eq String y x -> Empty) (extend-in y U G) h)))))
+    () (ctxInvExtend G x S y U i)
+
+-- ---------------------------------------------------------------------------
+-- Under the invariant, a binder is never among the names to avoid — so
+-- substitution never renames one, and the binder of the result is the binder
+-- of the term.
+
+notCaptured : forall (G : Ctx) (D : Ctx) (s : List (And String LC)) (x : String) (S : Ty) (E : LC) (T : Ty)
+                (d : typing (extend G x S) E T) (g : Good G D s)
+                (h : In x (images s (LC.fv.x (abs x S E)))) -> Empty
+notCaptured = \ G D s x S E T d g h ->
+  elim Sigma (String (\ y -> And (In y (LC.fv.x (abs x S E))) (In x (LC.fv.x (look y s))))) (\ z -> Empty)
+    ((\ y p ->
+       elim Or ((In y (nil String)) (And (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y)))
+         (\ o -> Empty)
+         ((\ e -> e)
+          (\ r -> elim Sigma (Ty (\ U -> extend-in y U (extend G x S))) (\ z -> Empty)
+                   ((\ U i ->
+                      elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (extend-in y U G)))
+                        (\ o -> Empty)
+                        -- y is the binder itself: it is not free in the node.
+                        ((\ h1 -> andLeft (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y) r
+                                    (orLeft (Eq String y x) (In y (nil String)) (andLeft (Eq String y x) (Eq Ty U S) h1)))
+                         -- y is another name: its image has no x in it.
+                         (\ h2 ->
+                            elim Or ((And (Eq LC (look y s) (var y)) (extend-in y U D))
+                                     (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String))))
+                              (\ o -> Empty)
+                              ((\ e -> elim Or ((Eq String x y) Empty) (\ o1 -> Empty)
+                                         ((\ q -> andLeft (Eq String y x -> Empty) (extend-in y U G) h2 (sym String x y q))
+                                          (\ e1 -> e1))
+                                         ()
+                                         (subst LC (\ m -> In x (LC.fv.x m)) (look y s) (var y)
+                                            (andLeft (Eq LC (look y s) (var y)) (extend-in y U D) e)
+                                            (andRight (In y (LC.fv.x (abs x S E))) (In x (LC.fv.x (look y s))) p)))
+                               (\ c -> subst (List String) (\ l -> In x l) (LC.fv.x (look y s)) (nil String)
+                                         (andRight (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String)) c)
+                                         (andRight (In y (LC.fv.x (abs x S E))) (In x (LC.fv.x (look y s))) p)))
+                              () (g y U (andRight (Eq String y x -> Empty) (extend-in y U G) h2))))
+                        () (ctxInvExtend G x S y U i)))
+                   () (andRight (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y) r)))
+         () (fvInCtx (extend G x S) E T d (cons String x (nil String)) (nil String) y
+               (andLeft (In y (LC.fv.x (abs x S E))) (In x (LC.fv.x (look y s))) p))))
+    () (imagesIn s (LC.fv.x (abs x S E)) x h)
+
+-- ---------------------------------------------------------------------------
+-- The substitution lemma, over the whole map
+
+substAll : forall (G : Ctx) (E : LC) (T : Ty) (d : typing G E T)
+             (D : Ctx) (s : List (And String LC)) (g : Good G D s) -> typing D (LC.subst-* E s) T
+substAll = \ G E T d -> induction d of
+  -- A variable is sent to itself, found in Δ, or to a closed term of its type.
+  { T-var x T0 G0 i -> \ D s g ->
+      elim Or ((And (Eq LC (look x s) (var x)) (extend-in x T0 D))
+               (And (typing empty (look x s) T0) (Eq (List String) (LC.fv.x (look x s)) (nil String))))
+        (\ o -> typing D (look x s) T0)
+        ((\ e -> subst LC (\ m -> typing D m T0) (var x) (look x s)
+                   (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (extend-in x T0 D) e))
+                   (T-var x T0 D (andRight (Eq LC (look x s) (var x)) (extend-in x T0 D) e)))
+         (\ c -> weakenEmpty (look x s) T0
+                   (andLeft (typing empty (look x s) T0) (Eq (List String) (LC.fv.x (look x s)) (nil String)) c) D))
+        () (g x T0 i)
+  -- Under a binder: the fresh name LC.fresh.x picks is the binder itself.
+  ; T-abs G0 x S E0 T0 d0 -> \ D s g ->
+      subst String
+        (\ z -> typing D (abs z S (LC.subst-* E0 (cons (And String LC) (both String LC x (var z)) s))) (arrow S T0))
+        x (LC.fresh.x x (images s (LC.fv.x (abs x S E0))))
+        (sym String (LC.fresh.x x (images s (LC.fv.x (abs x S E0)))) x
+           (freshKeeps x (images s (LC.fv.x (abs x S E0))) (notCaptured G0 D s x S E0 T0 d0 g)))
+        (T-abs D x S (LC.subst-* E0 (cons (And String LC) (both String LC x (var x)) s)) T0
+           (substAll (extend G0 x S) E0 T0 d0 (extend D x S)
+              (cons (And String LC) (both String LC x (var x)) s) (goodExtend G0 D s x S g)))
+  ; T-app G0 M S T0 N d1 d2 -> \ D s g ->
+      T-app D (LC.subst-* M s) S T0 (LC.subst-* N s)
+        (substAll G0 M (arrow S T0) d1 D s g) (substAll G0 N S d2 D s g) }
+
+-- E[x -> N] for a closed N of x's type.
+substLemma : forall (x : String) (S : Ty) (E : LC) (T : Ty) (N : LC)
+               (d : typing (extend empty x S) E T) (dn : typing empty N S) -> typing empty (LC.subst.x E x N) T
+substLemma = \ x S E T N d dn ->
+  substAll (extend empty x S) E T d empty (cons (And String LC) (both String LC x N) (nil (And String LC)))
+    (\ y U i ->
+       elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (extend-in y U empty)))
+         (\ o -> Entry empty y U (look y (cons (And String LC) (both String LC x N) (nil (And String LC)))))
+         ((\ h -> subst String (\ z -> Entry empty z U (look z (cons (And String LC) (both String LC x N) (nil (And String LC))))) x y
+                    (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h))
+                    (subst Ty (\ V -> Entry empty x V (look x (cons (And String LC) (both String LC x N) (nil (And String LC))))) S U
+                       (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h))
+                       (subst LC (\ m -> Entry empty x S m) N (look x (cons (And String LC) (both String LC x N) (nil (And String LC))))
+                          (sym LC (look x (cons (And String LC) (both String LC x N) (nil (And String LC)))) N (lookHit x N (nil (And String LC))))
+                          (orRight (And (Eq LC N (var x)) (extend-in x S empty))
+                                   (And (typing empty N S) (Eq (List String) (LC.fv.x N) (nil String)))
+                                   (both (typing empty N S) (Eq (List String) (LC.fv.x N) (nil String))
+                                         dn (listNil (LC.fv.x N) (closedNoFv N S dn)))))))
+          (\ h -> absurdly (Entry empty y U (look y (cons (And String LC) (both String LC x N) (nil (And String LC)))))
+                    (ctxInvEmpty y U (andRight (Eq String y x -> Empty) (extend-in y U empty) h))))
+         () (ctxInvExtend empty x S y U i))
+
+-- ---------------------------------------------------------------------------
+-- Taking a typing derivation apart at its term's shape
+
+-- **`arrowInj` CANNOT be a split and stays no-confusion**: both sides of
+-- its equation are compound terms built from AMBIENT variables, and a split can
+-- solve only a binder of the method it is in — `case e of { refl k -> … }` is
+-- refused with *A and C cannot be made equal*. It is the one place in this
+-- file where the style does not reach.
+arrowInj : forall (A : Ty) (B : Ty) (C : Ty) (D : Ty) (e : Eq Ty (arrow A B) (arrow C D)) -> And (Eq Ty A C) (Eq Ty B D)
+arrowInj = \ A B C D e -> Ty.lemmata.noConfusion (arrow A B) (arrow C D) e
+
+appInj : forall (M0 : LC) (N0 : LC) (M : LC) (N : LC) (e : Eq LC (app M0 N0) (app M N)) -> And (Eq LC M0 M) (Eq LC N0 N)
+appInj = \ M0 N0 M N e -> LC.lemmata.noConfusion (app M0 N0) (app M N) e
+
+absInj : forall (x0 : String) (S0 : Ty) (E0 : LC) (x : String) (S : Ty) (E : LC) (e : Eq LC (abs x0 S0 E0) (abs x S E))
+           -> And (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E))
+absInj = \ x0 S0 E0 x S E e -> LC.lemmata.noConfusion (abs x0 S0 E0) (abs x S E) e
+
+AppInv : Ctx -> LC -> LC -> Ty -> Type₀
+AppInv = \ G M N T -> Sigma Ty (\ S -> And (typing G M (arrow S T)) (typing G N S))
+
+-- Two of `typing`'s three rules put a `var` or an `abs` at the term, and both
+-- conflict with `app M N`, so the split closes them and one arm is the whole
+-- lemma. The generated proof writes three methods and two appeals to
+-- no-confusion.
+invApp : forall (G : Ctx) (M : LC) (N : LC) (T : Ty) (d : typing G (app M N) T) -> AppInv G M N T
+invApp = \ G M N T d -> case d of
+  { T-app G0 M0 S T0 N0 d1 d2 ->
+      pair Ty (\ S1 -> And (typing G M (arrow S1 T)) (typing G N S1)) S
+        (both (typing G M (arrow S T)) (typing G N S) d1 d2) }
+
+AbsInv : Ctx -> String -> Ty -> LC -> Ty -> Type₀
+AbsInv = \ G x S E T -> Sigma Ty (\ U -> And (Eq Ty T (arrow S U)) (typing (extend G x S) E U))
+
+-- And here the split refines the TYPE as well: `T-abs` concludes at
+-- `arrow S U`, so the ambient `T` means that inside the arm and `refl Ty T`
+-- is the equation the statement asks for.
+invAbs : forall (G : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty) (d : typing G (abs x S E) T) -> AbsInv G x S E T
+invAbs = \ G x S E T d -> case d of
+  { T-abs G0 x0 S0 E0 U d0 ->
+      pair Ty (\ V -> And (Eq Ty T (arrow S V)) (typing (extend G x S) E V)) U
+        (both (Eq Ty T (arrow S U)) (typing (extend G x S) E U) (refl Ty T) d0) }
+
+-- ---------------------------------------------------------------------------
+-- Preservation: a closed term's type survives a step
+
+-- **Induction on the step, and the typing derivation taken apart inside the
+-- arm that needs it.** Each rule knows the shape of the term it acts on, so
+-- `case d of { T-app … }` is the inversion — `invApp` and `invAbs` are not
+-- called here at all, and in the β arm the inner split of the function's own
+-- derivation is a second `case` one line further in.
+--
+-- **The whole statement is introduced at the top**, `\ M M1 T d s ->`. The
+-- split on `s` refines `M` and `M1`, and `d`, whose type mentions `M`, is
+-- generalised with it — so `d` in the β arm is a derivation about
+-- `( λ x : T1 . E ) N` and not about the `M` outside. The recursive calls in
+-- the two congruence arms ARE the induction hypothesis.
+preservation : forall (M : LC) (M1 : LC) (T : Ty) (d : typing empty M T) (s : step M M1) -> typing empty M1 T
+preservation = \ M M1 T d s -> induction s of
+  -- β: the function's body, typed under x : T1, with the argument put for x.
+  --
+  -- **The β arm is where the style stops, and here is why.** Splitting the
+  -- function's own derivation directly — `case d1 of { T-abs … }` on a
+  -- `typing empty ( λ x : T1 . E ) ( S -> T )` — would have to identify the
+  -- `S` the application arm bound with the `T1` the step rule bound, and both
+  -- are ambient: *S and T1 cannot be made equal*. So this arm goes through
+  -- `invAbs` and `arrowInj` and transports, exactly as it did before; what is
+  -- new is only that taking the `Sigma` and the `And` apart is a `case`.
+  { E-beta N x T1 E v -> case (invApp empty (abs x T1 E) N T d) of
+      { pair S p -> case p of
+          { both d1 d2 -> case (invAbs empty x T1 E (arrow S T) d1) of
+              { pair U q -> case q of
+                  { both eq d0 -> case (arrowInj S T T1 U eq) of
+                      { both e1 e2 ->
+                          substLemma x T1 E T N
+                            (subst Ty (\ V -> typing (extend empty x T1) E V) U T (sym Ty T U e2) d0)
+                            (subst Ty (\ V -> typing empty N V) S T1 e1 d2) } } } } }
+  -- A step in the function position.
+  ; E-app1 A A1 N sr -> case d of
+      { T-app G0 M0 S T0 N0 d1 d2 ->
+          T-app empty A1 S T N (preservation A A1 (arrow S T) d1 sr) d2 }
+  -- A step in the argument, once the function is a value.
+  ; E-app2 A N N1 v sr -> case d of
+      { T-app G0 M0 S T0 N0 d1 d2 ->
+          T-app empty A S T N1 d1 (preservation N N1 S d2 sr) } }
+
+
+-- ---------------------------------------------------------------------------
+-- Using it: the type of a reduct, without typing the reduct
+
+-- ⊢ ( λ x : ι -> ι . x ) ( λ y : ι . y )  :  ι -> ι
+redexTyped : typing`· ⊢ ( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) ) : ( ι -> ι )`
+redexTyped =
+  T-app Ctx`·` LC`( λ x : ( ι -> ι ) . x )` Ty`( ι -> ι )` Ty`( ι -> ι )` LC`( λ y : ι . y )`
+    (T-abs Ctx`·` "x" Ty`( ι -> ι )` LC`x` Ty`( ι -> ι )`
+       (T-var "x" Ty`( ι -> ι )` Ctx`·, x : ( ι -> ι )` (extend-here Ctx`·` "x" Ty`( ι -> ι )`)))
+    (T-abs Ctx`·` "y" base LC`y` base (T-var "y" base Ctx`·, y : ι` (extend-here Ctx`·` "y" base)))
+
+-- 03's betaStep takes it to λ y : ι . y, and preservation types that.
+reductTyped : typing`· ⊢ ( λ y : ι . y ) : ( ι -> ι )`
+reductTyped =
+  preservation LC`( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) )` LC`( λ y : ι . y )` Ty`( ι -> ι )`
+    redexTyped betaStep

@@ -1,0 +1,9 @@
+-- **What a narrowed `public import` did NOT pass on** (MS11 phase 306). The
+-- passer asked `Twins` for `Bit`, so `Tri` is not in what it hands over and
+-- this file is refused for writing it — with no clause of its own anywhere.
+module test.modules.MissesTriTravelled where
+
+import test.modules.PassesBitOnly
+
+mine : Tri.Tri
+mine = Tri.lo

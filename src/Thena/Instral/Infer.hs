@@ -26,6 +26,10 @@
 module Thena.Instral.Infer
   ( InstralTypeError (..)
   , Site (..)
+  , Scoped (..)
+  , Callable
+  , callableOf
+  , reachingAll
   , inferProgram
   , inferBlock
   , boundBy
@@ -37,7 +41,7 @@ import Data.Function (on)
 import Data.List (elemIndex, intercalate, nub, nubBy, sort, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (GlobalName (..), nameDotted, rootName)
 import Thena.Syntax.Concrete (Splice (..), splices)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
 import Thena.Rules (opArities, testTypes, writtenPositions)
@@ -120,13 +124,13 @@ data InstralTypeError
 
 renderSite :: Site -> String
 renderSite si = case si of
-  InHead (GlobalName n) i -> n ++ ", test " ++ show (i + 1)
-  InBody (GlobalName n) i -> n ++ ", instruction " ++ show (i + 1)
-  InSignature (GlobalName n) a -> "signature " ++ n ++ "/" ++ show a
+  InHead g i -> nameDotted g ++ ", test " ++ show (i + 1)
+  InBody g i -> nameDotted g ++ ", instruction " ++ show (i + 1)
+  InSignature g a -> "signature " ++ nameDotted g ++ "/" ++ show a
   -- **Counted from one, like a test and an instruction**, and named /parameter/
   -- rather than given a number alone: a clause's parameters are where the
   -- reader's eye goes last, so the word is worth the four characters.
-  InPattern (GlobalName n) i -> n ++ ", parameter " ++ show (i + 1)
+  InPattern g i -> nameDotted g ++ ", parameter " ++ show (i + 1)
 
 renderInstralTypeError :: InstralTypeError -> String
 renderInstralTypeError e = case e of
@@ -134,14 +138,14 @@ renderInstralTypeError e = case e of
     renderSite si ++ ": wanted " ++ renderTy want ++ ", got " ++ renderTy got
   Occurs si t ->
     renderSite si ++ ": " ++ renderTy t ++ " would have to contain itself"
-  BindsNothing si (GlobalName n) ->
+  BindsNothing si g | let n = nameDotted g ->
     renderSite si ++ ": no clause of " ++ n ++ " returns anything, so there is\
       \ nothing to bind"
   AnnotationTooGeneral si t ->
     renderSite si ++ ": the signature says any type here, but the body needs "
       ++ renderTy t
-  SignatureUnanswered (GlobalName n) a ->
-    "signature " ++ n ++ ": no rule of that name takes " ++ show a
+  SignatureUnanswered g a ->
+    "signature " ++ nameDotted g ++ ": no rule of that name takes " ++ show a
       ++ (if a == 1 then " argument" else " arguments")
   TextNotTextual si t ->
     renderSite si ++ ": a string literal is a String or a Name, not "
@@ -275,6 +279,55 @@ instantiateWith ts st0 =
 -- error"*.
 type Callable = (GlobalName, Int)
 
+-- | __One rule, and the callables its body may call__ (MS11 phase 301).
+--
+-- **Two rules in one push need not reach the same callables**, which is what
+-- MS11 phase 300 changed: a rule written inside @consult B where { … }@ runs
+-- with @B@ in front of the pool and a rule outside that block does not, so
+-- /does anything answer this call/ is a question about the body and not about
+-- the file. Asking it of the file is the defect this type is here to make
+-- unstatable — a rule that calls into a base it does not push used to load and
+-- fail at run time.
+--
+-- **The reach is the pool plus what that body's own pushes put on**, and
+-- 'Thena.Driver.installReadBases' reads it off the @push-base@ instructions
+-- the block compiled into the body — the same list the engine pushes when the
+-- body runs, so the check and the run cannot come to disagree.
+--
+-- **It is the callables and not the bases**, because that is what a call site
+-- looks up, and a name several bases answer is one callable however many of
+-- them there are (the flat pool, @~hf9wh@).
+data Scoped = Scoped
+  { scopedRule  :: Rule
+  , scopedReach :: [Callable]
+  }
+
+-- | Every rule, each reaching every callable the others define — **what a
+-- caller with nothing held asks**, and what every load asked before MS11 phase
+-- 300.
+--
+-- A typed line, a @do@ block and @:accepts@ all read a pool that is already
+-- assembled: there is no body in it whose reach is narrower than the list, so
+-- the narrowing has nothing to do.
+reachingAll :: [Rule] -> [Scoped]
+reachingAll rs = [ Scoped r cs | r <- rs ]
+  where
+    cs = nub (map callableOf rs)
+
+-- | __The environment one body may read__ (MS11 phase 301): the entries its
+-- reach names.
+--
+-- **Its own entry is kept whether the reach names it or not.** 'clause' looks
+-- that one up directly and treats a miss as a bug in 'declareThese', so a
+-- reach computed wrongly would be a crash where it should at worst be a
+-- refusal. A rule is in the file it is written in either way.
+inReach :: Scoped -> SigEnv -> SigEnv
+inReach sc env =
+  [ e
+  | e@(c, _) <- env
+  , c `elem` scopedReach sc || c == callableOf (scopedRule sc)
+  ]
+
 -- | Every clause of one name and arity shares one signature — its parameters'
 -- types and the type it returns. Clauses that disagree are what a 'Clash'
 -- reports, and the site is whichever clause was walked second.
@@ -321,19 +374,20 @@ data Bound
 -- The order the components come back in is the order they must be walked —
 -- callees first — so this is a left fold and the environment grows as it goes.
 inferProgram
-  :: [(String, Signature)] -> [Rule]
+  :: [(String, Signature)] -> [Scoped]
   -> ([(Callable, Signature)], [InstralTypeError])
-inferProgram sigs rs =
-  let (env, st) = foldl (inferGroup sigs rs) ([], St 0 [] [] []) (components rs)
+inferProgram sigs scoped =
+  let rs        = map scopedRule scoped
+      (env, st) = foldl (inferGroup sigs scoped) ([], St 0 [] [] []) (components rs)
       -- **Reported in the order the file declares them, not the order they were
       -- walked.** The call graph decides the walking order and that is an
       -- implementation detail; @:accepts@, @:produces@ and the shipped base\'s
       -- own signature listing should read down the file.
       out       = [ (c, whatItIs st b) | c <- nub (map callableOf rs)
                   , Just b <- [lookup c env] ]
-      unanswered = [ SignatureUnanswered (GlobalName n) (length (sigParams t))
+      unanswered = [ SignatureUnanswered (rootName n) (length (sigParams t))
                    | (n, t) <- sigs
-                   , (GlobalName n, length (sigParams t)) `notElem` map fst env
+                   , (rootName n, length (sigParams t)) `notElem` map fst env
                    ]
    in (out, inFileOrder rs (stErrors st) ++ unanswered)
 
@@ -347,9 +401,22 @@ inferProgram sigs rs =
 -- value by 'valueType'. That is how a block typed while a rule is yielding sees
 -- the rule's own locals: @do { goto h }@ reads the @h@ the rule bound, and is
 -- checked against what @h@ actually is rather than refused as unbound.
+-- **AND WHAT IT ANSWERS IS THIS BLOCK'S MISTAKES AND NOT THE POOL'S** (MS11
+-- phase 300). The callables' groups are walked first, so their errors are in
+-- the state by the time the block is — and reporting them here blames a
+-- typed line for a rule somebody else loaded. **It matters now because a rule
+-- CAN be in the pool and not check against it**: a rule written inside
+-- @consult B where { … }@ calls into @B@, which is in no pool until that rule
+-- runs ('Thena.Engine.held'), so every line typed afterwards was told that
+-- rule's call was undefined. 'blamedOn' is the filter.
+--
+-- **Nothing real is lost**: a base is type-checked as a whole when it is
+-- installed ('Thena.Driver.installReadBases'), which is where a pool rule's
+-- errors are reported and refused.
 inferBlock
   :: [(String, Signature)] -> [Rule] -> [(Name, Value)] -> Rule -> [InstralTypeError]
-inferBlock sigs rs bound r = fst (blockResult sigs rs bound r)
+inferBlock sigs rs bound r =
+  [ e | e <- fst (blockResult sigs rs bound r), blamedOn e == Just (ruleName r) ]
 
 -- | **What a block binds, and the type each name ended up with** (MS7 phase 140).
 --
@@ -375,7 +442,7 @@ blockResult
   :: [(String, Signature)] -> [Rule] -> [(Name, Value)] -> Rule
   -> ([InstralTypeError], [(Name, Ty)])
 blockResult sigs rs bound r =
-  let (env, st0)  = foldl (inferGroup sigs rs) ([], St 0 [] [] []) (components rs)
+  let (env, st0)  = foldl (inferGroup sigs (reachingAll rs)) ([], St 0 [] [] []) (components rs)
       site        = InBody (ruleName r) 0
       (ctx, st1)  = foldr seed ([], st0) bound
       seed (n, v) (acc, st) = let (t, st') = valueType site v st in ((n, Mono t) : acc, st')
@@ -415,17 +482,28 @@ inFileOrder :: [Rule] -> [InstralTypeError] -> [InstralTypeError]
 inFileOrder rs = sortOn position
   where
     order = nub (map ruleName rs)
-    position e = maybe (length order) id (elemIndex (whose e) order)
-    whose e = case e of
-      Clash si _ _          -> nameIn si
-      Occurs si _           -> nameIn si
-      BindsNothing si _     -> nameIn si
-      AnnotationTooGeneral si _ -> nameIn si
-      SignatureUnanswered n _   -> n
-      TextNotTextual si _   -> nameIn si
-      Undefined si _ _ _    -> nameIn si
-      NotCallable si _      -> nameIn si
+    position e = maybe (length order) id
+                   (blamedOn e >>= \n -> elemIndex n order)
 
+-- | __Which callable an error is about__, or 'Nothing' where it is about the
+-- file as a whole (MS11 phase 300 named it; 'inFileOrder' has asked it since
+-- MS5 phase 76).
+--
+-- **Lifted out of 'inFileOrder' so that 'inferBlock' can ask it too**: one
+-- answer to /whose mistake is this/, where a second copy would be two.
+blamedOn :: InstralTypeError -> Maybe GlobalName
+blamedOn e = case e of
+  Clash si _ _              -> Just (nameIn si)
+  Occurs si _               -> Just (nameIn si)
+  BindsNothing si _         -> Just (nameIn si)
+  AnnotationTooGeneral si _ -> Just (nameIn si)
+  -- **A signature no rule answers is the file's and no callable's**, which is
+  -- what makes this a 'Maybe': there is no body to blame.
+  SignatureUnanswered _ _   -> Nothing
+  TextNotTextual si _       -> Just (nameIn si)
+  Undefined si _ _ _        -> Just (nameIn si)
+  NotCallable si _          -> Just (nameIn si)
+  where
     nameIn si = case si of
       InHead n _      -> n
       InBody n _      -> n
@@ -440,10 +518,21 @@ inFileOrder rs = sortOn position
 -- turning /this is a string/ into /this is any type/. See 'settleText', whose
 -- comment says why leaving it free is wrong.
 inferGroup
-  :: [(String, Signature)] -> [Rule] -> (SigEnv, St) -> [Callable] -> (SigEnv, St)
-inferGroup sigs rs (env0, st0) cs =
-  let (env1, st1) = declareThese sigs rs cs (env0, st0)
-      st2         = foldl (clause env1) st1 [ r | r <- rs, callableOf r `elem` cs ]
+  :: [(String, Signature)] -> [Scoped] -> (SigEnv, St) -> [Callable] -> (SigEnv, St)
+inferGroup sigs scoped (env0, st0) cs =
+  let rs          = map scopedRule scoped
+      (env1, st1) = declareThese sigs rs cs (env0, st0)
+      -- **Each body against its own reach** (MS11 phase 301), which
+      -- is the one place the narrowing happens: everything below here is handed
+      -- the environment this body may read, so no call site has to ask the
+      -- question a second time.
+      --
+      -- **What is declared is not narrowed, only what is read.** A group's
+      -- entries are one set of variables shared by every use ('declareThese'),
+      -- and hiding an entry from a body that may not call it leaves that
+      -- sharing exactly as it was.
+      st2         = foldl (\st sc -> clause (inReach sc env1) st (scopedRule sc)) st1
+                      [ sc | sc <- scoped, callableOf (scopedRule sc) `elem` cs ]
       st3         = settleText st2
    in ([ (c, if c `elem` cs then generalise st3 b else b) | (c, b) <- env1 ], st3)
 
@@ -505,9 +594,9 @@ components rs = map flattenSCC (stronglyConnComp nodes)
     calledBy c =
       [ d
       | r <- rs, callableOf r == c
-      , (GlobalName m, _) <- callsIn (ruleBody r)
-      , d@(GlobalName m', _) <- defined
-      , m == m'
+      , (mn, _) <- callsIn (ruleBody r), let m = nameDotted mn
+      , d@(mn', _) <- defined
+      , m == nameDotted mn'
       ]
 
 -- | Every callable a body calls, descending into lambdas and blocks.
@@ -523,7 +612,7 @@ callsIn = concatMap one
       -- @Call@ carries only a word (MS5 phase 83). The boundary is one line and
       -- is the whole cost of the narrow rename; widening 'Thena.Instral.Ops.Rule''s own
       -- @ruleName@ is @ms5\/CLOSEOUT.md@ 38 and is not done here.
-      Call nm as  -> (GlobalName nm, length as) : concatMap inOperand as
+      Call nm as  -> (rootName nm, length as) : concatMap inOperand as
       Lambda _ b  -> callsIn b
       Block b     -> callsIn b
       _           -> concatMap inOperand (operandsOf o)
@@ -538,7 +627,7 @@ declareThese
   :: [(String, Signature)] -> [Rule] -> [Callable] -> (SigEnv, St) -> (SigEnv, St)
 declareThese sigs rs cs st0 = foldl one st0 cs
   where
-    one (env, st) c@(GlobalName n, k) = case declaredFor n k of
+    one (env, st) c@(cn, k) = case declaredFor (nameDotted cn) k of
       -- **A declared signature is taken as given**, and the body is checked
       -- against it rather than the other way round — which is the difference
       -- between an annotation and a comment.
@@ -774,8 +863,8 @@ body env r res ctx ps st (instr : rest) =
       -- ('Thena.Rules.BoundNonProducing'); a call passes that check because
       -- 'Thena.Instral.Ops.produces' cannot answer for one, and this pass can.
       bindsNothing s = case o of
-        Call nm as | notReturning (lookup (GlobalName nm, length as) env) ->
-          oops (BindsNothing si (GlobalName nm)) s
+        Call nm as | notReturning (lookup (rootName nm, length as) env) ->
+          oops (BindsNothing si (rootName nm)) s
         _ -> s
    in body env r res ctx' (drop 1 ps) st2 rest
 
@@ -820,7 +909,7 @@ operation env r res ctx si o st0 = case o of
 
   -- **A call is where the signature environment is read**, and the only place.
   Call nm as ->
-    case lookup (GlobalName nm, length as) env of
+    case lookup (rootName nm, length as) env of
       Nothing ->
         -- **Nothing defines it, and that is an error** — see the module header.
         -- Its arguments are still walked, so a mistake inside one is still
@@ -828,7 +917,7 @@ operation env r res ctx si o st0 = case o of
         -- name is reported once rather than again wherever its value goes.
         let st1 = foldl (\s a -> snd (operandType ctx si a s)) st0 as
             (t, st2) = fresh st1
-            others   = [ k | ((GlobalName m, k), _) <- env, m == nm ] ++ opArities nm
+            others   = [ k | ((mn, k), _) <- env, nameDotted mn == nm ] ++ opArities nm
          in (Just t, oops (Undefined si nm (length as) (nub others)) st2)
       Just (Inferred ps cres) ->
         ( cres
@@ -894,8 +983,8 @@ operandAgainst ctx si want o st = case o of
 slotType :: Slot -> Ty
 slotType slot = case slot of
   AtTerm                        -> TCore
-  AtPrimitive (GlobalName "Char") -> TChar
-  AtPrimitive (GlobalName "Int")  -> TInt
+  AtPrimitive (GlobalName [] "Char") -> TChar
+  AtPrimitive (GlobalName [] "Int")  -> TInt
   -- Every other token class is over @String@; §3 admits three primitive types
   -- and the check at declaration refuses the rest.
   AtPrimitive _                 -> TString
@@ -952,6 +1041,10 @@ operandType ctx si o st = case o of
 valueType :: Site -> Value -> St -> (Ty, St)
 valueType si v st = case v of
   VText _    -> (TString, st)
+  -- **A name is a 'TName' and nothing decides it from the position** (MS10):
+  -- unlike a text literal, a name value has an introduction form of its own, so
+  -- there is nothing deferred about it.
+  VName _    -> (TName, st)
   VInt _     -> (TInt, st)
   VChar _    -> (TChar, st)
   VBool _    -> (TBool, st)

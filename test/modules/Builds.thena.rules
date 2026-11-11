@@ -1,0 +1,9 @@
+-- **A base that publishes the base it builds on** (MS11 phase 289, his ruling
+-- of 2026-10-30): whoever consults this one is searched against `Helper` too,
+-- underneath it.
+rule base builds where
+
+public consult test.modules.Helper
+
+rule built :- do
+  call helped

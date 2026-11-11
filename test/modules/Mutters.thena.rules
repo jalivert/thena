@@ -1,0 +1,8 @@
+-- **The control for `Speaks`** (MS11 phase 289): the same import written
+-- plainly, so the names stay the base's own.
+rule base mutters where
+
+import test.modules.Bit
+
+rule mutter :- do
+  say "bit"

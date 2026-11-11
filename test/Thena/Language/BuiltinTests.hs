@@ -319,15 +319,12 @@ goldenArguments ws = do
       -- is @1:6: unexpected {@. Including it would have asked this grammar to
       -- read something the real parser rejects — the opposite of the invariant.
     , not (syntaxError next)
-      -- **And not a notation that is being removed.** Corners and the @⟨…⟩@
-      -- alias are tagged term literals written another way and are deliberately
-      -- described by neither grammar — his instruction, 2026-10-01,
-      -- @AGENDA.md@ 98. @:dev ⌜ ∀ (A : Type₀) -> A ⌝@ is in @levels.golden@ and
-      -- still runs; it is not something this grammar was not told about, so
-      -- failing on it would make a recorded decision look like an omission.
-      -- **When 98 lands these lines go with it and this filter stops matching.**
-    , not (any (`elem` "⌜⌝⟨⟩") arg)
-    , not ("[|" `isInfixOf` arg)
+      -- **The corner filter that used to stand here is gone with the notation**
+      -- (MS10 phase 269, `~3t63k`): `⌜ t ⌝` and `⟨ t ⟩` were tagged term
+      -- literals written another way, and a line holding one needed naming
+      -- separately because it held no backtick. Now it is written
+      -- @core`t`@ and the tagged-literal clause above drops it — one filter
+      -- where there were three, which is what the item was for.
     ]
 
 -- | A response that is a syntax error: @\‹line\>:\‹column\>: @ and then why.

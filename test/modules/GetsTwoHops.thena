@@ -1,0 +1,7 @@
+-- **Two hops, both public** (MS11 phase 287).
+module test.modules.GetsTwoHops where
+
+import test.modules.PassesOn
+
+mine : Bit.Bit
+mine = Bit.off

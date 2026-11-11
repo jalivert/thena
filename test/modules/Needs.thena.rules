@@ -1,0 +1,9 @@
+-- **The same base with a plain `consult`** (MS11 phase 289): it states what it
+-- is written against and does not push it, so whoever consults this one must
+-- have `Helper` of their own.
+rule base needs where
+
+consult test.modules.Helper
+
+rule needed :- do
+  call helped
