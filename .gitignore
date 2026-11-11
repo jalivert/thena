@@ -1,6 +1,11 @@
 dist-newstyle/
 docs/api/
 
+# The TUI's project database: a per-project cache of the sessions worked on
+# here, written beside whatever project the frontend is run in. Never
+# load-bearing — every transcript in it replays on its own.
+.thena/
+
 .claude/
 .muse/
 .jalivert/

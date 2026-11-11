@@ -70,9 +70,17 @@ import Lens.Micro (Lens', lens)
 import System.CPUTime (getCPUTime)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
-import System.IO (hFlush, hPutStr, stdout)
+import System.IO (hFlush, hPutStr, readFile', stdout)
 
-import Thena.Driver (Response (..), Session, Stop (..), digestOf, filesRead, oneLine)
+import Thena.Driver
+  ( Response (..)
+  , Session
+  , Stop (..)
+  , digestOf
+  , digestText
+  , filesRead
+  , oneLine
+  )
 import Thena.Files (following, preludePath, rulesPath, startingSession)
 import Thena.Render (renderResponse, renderTrouble)
 import Thena.View (developmentView, focusAddress, machineView, statementOfferView)
@@ -94,6 +102,16 @@ import Tui.Render
   , spliceAttr
   )
 import Tui.Config (Config (..), loadConfig, saveConfig)
+import Tui.Database
+  ( Stored (..)
+  , databaseDir
+  , freshStored
+  , loadIndex
+  , readTranscript
+  , saveIndex
+  , storedNamed
+  , writeTranscript
+  )
 import Tui.Theme (Theme (..), neonPinkDark, themeByName, themes)
 
 data Name
@@ -320,6 +338,16 @@ data St = St
     -- deleting it again restores the line's own text, so there is nothing
     -- stale any more. The mark is a comparison against 'slText', not a flag
     -- that any key was pressed.
+  , stStored :: Maybe Stored
+    -- ^ **the index entry the live document is persisted under** — `~22qjj`,
+    -- the project database. 'Nothing' before live-script mode has ever been
+    -- entered, since there is no document to persist and no reason to write a
+    -- file into somebody's project for a session they have not started.
+    --
+    -- **It holds the entry rather than the whole index**: every save re-reads
+    -- the index, replaces this one entry and writes it back, so two TUIs open
+    -- on the same project do not drop each other's sessions, and there is no
+    -- second copy of the index to keep true.
   , stEscRun :: Maybe String
     -- ^ **The only thing standing between a Shift+Enter and a corrupted
     -- proof line.** vty decodes neither of the two standard encodings and
@@ -386,6 +414,7 @@ runTui = do
         , stScriptBar   = Nothing
         , stScriptNote  = Nothing
         , stScriptStale = Nothing
+        , stStored      = Nothing
         , stEscRun      = Nothing
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
@@ -1364,6 +1393,24 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- it is typed, `":script "` being in 'pathCommands'. The bar's
         -- `:script open ‹path›` is the same call for when the mode is
         -- already on.
+        -- | **The database's two commands live in the ordinary REPL and not
+        -- in the bar**, because both of them answer with a list or a refusal
+        -- and the bar has one row to say it in. The REPL has a transcript,
+        -- which is what a listing wants.
+        [":script", "sessions"] -> do
+          index <- liftIO loadIndex
+          appendTurn st0 Nothing (sessionLines index)
+        [":script", "resume", handle] -> do
+          index <- liftIO loadIndex
+          case storedNamed handle index of
+            Left why -> appendTurn st0 Nothing [why]
+            Right stored -> do
+              held <- liftIO (readTranscript (stSlug stored))
+              case held of
+                Nothing ->
+                  appendTurn st0 Nothing
+                    ["the transcript for " <> stSlug stored <> " is gone from " <> databaseDir]
+                Just texts -> resumeStored st0 stored texts
         [":script", path] -> do
           ok <- openScriptFile st0 path 0
           if ok then pure () else appendTurn st0 Nothing ["no such file: " <> path]
@@ -1728,6 +1775,8 @@ tuiHelpLines =
     [ (":theme ‹name›",     intercalate ", " (map themeName themes))
     , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
+    , (":script sessions",  "what the project database holds, and how to resume one")
+    , (":script resume ‹slug›", "take a stored session up where its caret was")
     , (":script [path]",    "live-script mode: the pane becomes an editable document")
     , ("",                  "  with a path, that proof-script is opened into it as text:")
     , ("",                  "  its lines are dim until Down walks into them, one run per")
@@ -1903,8 +1952,16 @@ enterScriptMode st = do
     Nothing -> do
       (s, _) <- liftIO startingSession
       pure (Just s)
+  -- The session the document will be persisted under, minted here and written
+  -- the first time a line is committed ('persist').
+  stored <- case stStored st of
+    Just held -> pure (Just held)
+    Nothing -> do
+      index <- liftIO loadIndex
+      Just <$> liftIO (freshStored index Nothing)
   put st
     { stScriptMode = True
+    , stStored = stored
     , stScriptBase = base
     , stScriptPos = Nothing
     , stScriptStale = Nothing
@@ -1914,6 +1971,52 @@ enterScriptMode st = do
     }
   closeDropdowns
   followInput
+
+-- | **Write the live document to the project database** — `~22qjj`. The lines
+-- go to the session's own proof-script and the index entry is rewritten with
+-- where the caret stands, what the session has read, and what it has proved.
+--
+-- **Every committed line and every caret move, his instruction of 2026-11-06**:
+-- *"it happens automatically line by line. That's never going to be an issue,
+-- that's not too many writes anyway, nowadays editors write even more often."*
+-- So it hangs off 'afterScriptEdit', which is already the one place every
+-- commit and every move in the mode goes through.
+--
+-- **Nothing it does can fail loudly.** 'Tui.Database' swallows its own IO
+-- trouble, and a document with no stored session yet — the ordinary REPL — is
+-- simply not written.
+persist :: EventM Name St ()
+persist = do
+  st <- get
+  case stStored st of
+    Nothing -> pure ()
+    -- Nothing has been committed, so there is nothing to write — and no
+    -- reason to put a `.thena` directory into somebody's project for a
+    -- session they have not started.
+    Just _ | null (stScript st) -> pure ()
+    Just stored -> do
+      let ran = scriptTip st
+          entry =
+            stored
+              { stCaret = maybe (length (stScript st)) id (stScriptPos st)
+              , stLines = length (stScript st)
+              , stRead = maybe [] (\s -> [(p, digestText d) | (p, d) <- filesRead s]) ran
+              -- **Empty, and it is the one part of the index that cannot be
+              -- filled yet** — `~jnfkj` in `.jalivert/REPORT.md`. The slices
+              -- are there to be had: `entryProof` carries the proof that was
+              -- open when each line ran, boundary lines included, so a proof
+              -- is a run of consecutive entries under one name. What is
+              -- missing is a way to write the name down — **nothing on the
+              -- frontend boundary turns a `GlobalName` into text**, and
+              -- `nameDotted` is imported by `Thena.View.Core` without being
+              -- exported. It is `~xq9m2`'s field and he has parked that, so
+              -- nothing waits on it.
+              , stProofs = []
+              }
+      liftIO (writeTranscript (stSlug entry) (map slText (stScript st)))
+      others <- liftIO loadIndex
+      liftIO (saveIndex ([o | o <- others, stSlug o /= stSlug entry] <> [entry]))
+      put st { stStored = Just entry }
 
 -- | What became of a file a session read: unchanged, changed under it, or not
 -- findable from here at all.
@@ -1934,16 +2037,28 @@ data FileCheck = Unchanged | Changed | Missing
 -- now, and `Digest` has `Eq`. The engine does no IO and the frontend owns the
 -- project root, so there is deliberately no @FilePath -> IO Digest@ on the
 -- boundary.
+-- **Two moments, comparing different things, and one code path** — §5 of the
+-- design. A partial reload is the same process and still holds the session's
+-- own `Digest` values; taking a session up again is a new process, where the
+-- `Digest` is gone and the sixteen hex digits in the index are what there is to
+-- compare. So everything goes through 'checkStored' and the digest is text at
+-- the point of comparison.
 checkFilesRead :: Session -> IO [(FilePath, FileCheck)]
-checkFilesRead s = mapM one (filesRead s)
+checkFilesRead s = checkStored [(p, digestText d) | (p, d) <- filesRead s]
+
+-- | The same check against what the index wrote down.
+checkStored :: [(FilePath, String)] -> IO [(FilePath, FileCheck)]
+checkStored = mapM one
   where
     one (path, was) = do
       there <- doesFileExist path
       if not there
         then pure (path, Missing)
         else do
-          now <- readFile path
-          pure (path, if digestOf now == was then Unchanged else Changed)
+          -- Strict, for the reason 'Tui.Database.loadIndex' is: a lazy read
+          -- holds its handle open, and this walks every file a session read.
+          now <- readFile' path
+          pure (path, if digestText (digestOf now) == was then Unchanged else Changed)
 
 -- | The two files every session reads at boot, asked for by name rather than
 -- guessed at from the shape of a path. **It is what lets the report tell
@@ -2009,38 +2124,89 @@ openScriptFile st path upto = do
   if not there
     then pure False
     else do
-      src <- liftIO (readFile path)
-      base <- case stScriptBase st of
-        -- A base is a session nothing has advanced, so the one already in
-        -- hand is the same session a new boot would produce, a second of
-        -- prelude-reading later.
-        Just s -> pure s
-        Nothing -> fst <$> liftIO startingSession
-      let texts = lines src
-          (runNow, rest) = splitAt (max 0 upto) texts
-      ran <- liftIO (foldRun base runNow)
-      let doc = ran ++ [ScriptLine t Nothing [] True | t <- rest]
-      put st
-        { stScriptMode = True
-        , stScriptBase = Just base
-        , stScript = doc
-        , stScriptPos = if null doc then Nothing else Just (max 0 (length ran - 1))
-        , stScriptStale = Nothing
-        , stScriptDraft = ""
-        , stScriptBar = Nothing
-        , stScriptNote =
-            Just
-              ( "opened " <> path <> " — " <> show (length doc) <> " lines, "
-                  <> show (length ran)
-                  <> " run; Down runs the next"
-              )
-        , stInput = case doc of
-            [] -> emptyInput
-            _ -> E.editorText Input (Just 1) (Text.pack (slText (doc !! max 0 (length ran - 1))))
-        }
-      closeDropdowns
-      followInput
+      src <- liftIO (readFile' path)
+      index <- liftIO loadIndex
+      -- **A session of its own, recording where the lines came from.** The
+      -- file the user opened is never the file the document is written to:
+      -- persisting happens on every keystroke, and auto-writing over somebody's
+      -- corpus file is not what was agreed. `:script save` is still the way
+      -- to put a document somewhere by name.
+      stored <- liftIO (freshStored index (Just path))
+      openDocument st stored (lines src) upto ("opened " <> path)
       pure True
+
+-- | **The one way a document is opened**, whatever it came from: a path on
+-- disc, a stored session's transcript, or a reload of either. The lines are
+-- the document; the first @upto@ of them are run before the keyboard comes
+-- back, and the caret is left on the last one that ran.
+--
+-- **Opening a file, resuming a session and reloading are one code path at
+-- three speeds** — the design's own words, and this is where that is true
+-- rather than merely intended.
+openDocument :: St -> Stored -> [String] -> Int -> String -> EventM Name St ()
+openDocument st stored texts upto said = do
+  base <- case stScriptBase st of
+    -- A base is a session nothing has advanced, so the one already in hand is
+    -- the same session a new boot would produce, a second of prelude-reading
+    -- later.
+    Just s -> pure s
+    Nothing -> fst <$> liftIO startingSession
+  let (runNow, rest) = splitAt (max 0 (min upto (length texts))) texts
+  ran <- liftIO (foldRun base runNow)
+  let doc = ran ++ [ScriptLine t Nothing [] True | t <- rest]
+      caret = max 0 (length ran - 1)
+  put st
+    { stScriptMode = True
+    , stScriptBase = Just base
+    , stScript = doc
+    , stScriptPos = if null doc then Nothing else Just caret
+    , stScriptStale = Nothing
+    , stScriptDraft = ""
+    , stScriptBar = Nothing
+    , stStored = Just stored
+    , stScriptNote =
+        Just
+          ( said <> " — " <> show (length doc) <> " lines, " <> show (length ran)
+              <> " run; Down runs the next"
+          )
+    , stInput = case nthOf caret doc of
+        Just sl -> E.editorText Input (Just 1) (Text.pack (slText sl))
+        Nothing -> emptyInput
+    }
+  closeDropdowns
+  followInput
+  persist
+
+-- | **`:script resume ‹slug›` — take up a stored session where it was left** —
+-- `~22qjj`, and the reason the database stores a caret at all: resuming goes
+-- there, which is his ruling, and *top or bottom?* was never the question.
+--
+-- **This is the second moment for the staleness check** and it compares
+-- different things from a reload's: the process that wrote those digests is
+-- gone, so what there is to compare is the sixteen hex digits in the index
+-- against the files as they are now. The three outcomes are the same three.
+resumeStored :: St -> Stored -> [String] -> EventM Name St ()
+resumeStored st stored texts = do
+  checks <- liftIO (checkStored (stRead stored))
+  shipped <- liftIO shippedPaths
+  let moved = maybe "" ("; " <>) (staleNote shipped checks)
+  openDocument st stored texts (stCaret stored + 1) ("resumed " <> stName stored <> moved)
+
+-- | `:script sessions` — what the project database is holding, newest last,
+-- the way a listing of dated things reads.
+sessionLines :: [Stored] -> [String]
+sessionLines [] = ["no stored sessions yet — one is started the first time a line is committed in :script"]
+sessionLines sessions =
+  [ "stored sessions, in " <> databaseDir <> ":" ]
+    <> [ "  " <> pad (stSlug s) <> "  " <> stName s <> "  " <> place s <> from s
+       | s <- sessions
+       ]
+    <> ["  :script resume ‹slug› takes one up where its caret was"]
+  where
+    width = maximum (4 : map (length . stSlug) sessions)
+    pad t = t <> replicate (width - length t) ' '
+    place s = show (stCaret s) <> "/" <> show (stLines s) <> " lines"
+    from s = maybe "" ("  from " <>) (stFrom s)
 
 -- | **`:script reload` — re-run the document from the caret down** —
 -- `~rctjq`, his question of 2026-11-11, and it is 'openScriptFile' at an index
@@ -2296,6 +2462,7 @@ afterScriptEdit = do
   put st { stScriptStale = Nothing }
   closeDropdowns
   followInput
+  persist
 
 -- | **Discard the line under the caret and everything after it**, no
 -- replacement run. Reached by @:script drop@ in the command bar; a no-op
