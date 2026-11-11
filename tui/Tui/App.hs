@@ -72,8 +72,8 @@ import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStr, stdout)
 
-import Thena.Driver (Response (..), Session, oneLine)
-import Thena.Files (following, startingSession)
+import Thena.Driver (Response (..), Session, Stop (..), digestOf, filesRead, oneLine)
+import Thena.Files (following, preludePath, rulesPath, startingSession)
 import Thena.Render (renderResponse, renderTrouble)
 import Thena.View (developmentView, focusAddress, machineView, statementOfferView)
 import Thena.View.Chart
@@ -1738,7 +1738,9 @@ tuiHelpLines =
     , ("",                  "  Enter runs this line and re-runs the lines below it,")
     , ("",                  "  Option+Enter runs this line and discards the lines below it.")
     , ("",                  "  F2 or Ctrl+X opens the command bar — :script leaves,")
-    , ("",                  "  :script cut is Option+Enter with no modifier, :script drop")
+    , ("",                  "  :script cut is Option+Enter with no modifier, :script reload")
+    , ("",                  "  re-runs from the caret down (from the top, if the caret is")
+    , ("",                  "  past the end) and says what changed on disc, :script drop")
     , ("",                  "  discards this line and the lines below it, :script save")
     , ("",                  "  [name] writes the file")
     ]
@@ -1862,7 +1864,34 @@ responseTook resp = case resp of
   RuleFileRefused {} -> False
   EntryMistyped {}   -> False
   BasesIllTyped {}   -> False
+  -- | **A program that ran and stopped badly did not do what its line said**,
+  -- and in this mode that has to show. Found by pty, 2026-11-11: a trailing
+  -- space on `open Nat` makes the name @"Nat "@, the act halts with
+  -- *stuck: nothing is named Nat …*, and because a halt was not in this list
+  -- the document drew the line as though it had worked — with the lines below
+  -- it failing for no visible reason. The ordinary REPL never had the problem,
+  -- since it prints every response either way.
+  Ran _ _ stop       -> stopTook stop
   _                  -> True
+
+-- | Whether an instral program's stop means its line took effect.
+--
+-- **The four that are not failures are the four that are not over**:
+-- a completed program, a question waiting for an answer, a yield handing
+-- control back, and a pause. Everything else is the engine declining to do
+-- what the line asked.
+stopTook :: Stop -> Bool
+stopTook stop = case stop of
+  Completed   -> True
+  Waiting {}  -> True
+  Yielded {}  -> True
+  Paused {}   -> True
+  Halted {}         -> False
+  Refused {}        -> False
+  BlockRefused {}   -> False
+  BlockIllTyped {}  -> False
+  Uncertified {}    -> False
+  Untrusted {}      -> False
 
 -- | `:script` from the ordinary REPL. **A fresh session, his ruling** — the
 -- mode does not inherit what the REPL has been doing, because the REPL
@@ -1885,6 +1914,69 @@ enterScriptMode st = do
     }
   closeDropdowns
   followInput
+
+-- | What became of a file a session read: unchanged, changed under it, or not
+-- findable from here at all.
+--
+-- **Three outcomes and not two, and this is the part that bites if it is got
+-- wrong** — §5 of @.jalivert/discussion/the-session-in-the-tui.md@. The paths
+-- come back mixed: a file the user named is relative to the working directory,
+-- while the prelude and the standard base are absolute, out of the data
+-- directory. So starting the TUI in the wrong folder makes every file of the
+-- user's corpus unreadable, and reporting that as *changed* would be a lie
+-- about a file nobody touched.
+data FileCheck = Unchanged | Changed | Missing
+  deriving (Eq, Show)
+
+-- | **Which of the files a session stands on have moved under it.** The whole
+-- of the mechanism, and nothing is owed by the engine for it: `filesRead`
+-- hands over a path and a `Digest` per file, `digestOf` hashes what is on disc
+-- now, and `Digest` has `Eq`. The engine does no IO and the frontend owns the
+-- project root, so there is deliberately no @FilePath -> IO Digest@ on the
+-- boundary.
+checkFilesRead :: Session -> IO [(FilePath, FileCheck)]
+checkFilesRead s = mapM one (filesRead s)
+  where
+    one (path, was) = do
+      there <- doesFileExist path
+      if not there
+        then pure (path, Missing)
+        else do
+          now <- readFile path
+          pure (path, if digestOf now == was then Unchanged else Changed)
+
+-- | The two files every session reads at boot, asked for by name rather than
+-- guessed at from the shape of a path. **It is what lets the report tell
+-- "Thena itself changed under this session" from "your file changed"** —
+-- different sentences for different facts, which the design asks for and a
+-- heuristic over absolute-vs-relative would only approximate.
+shippedPaths :: IO [FilePath]
+shippedPaths = sequence [preludePath, rulesPath]
+
+-- | One line for the pane's foot, or 'Nothing' when nothing moved.
+staleNote :: [FilePath] -> [(FilePath, FileCheck)] -> Maybe String
+staleNote shipped checks = case clauses of
+  [] -> Nothing
+  cs -> Just (intercalate "; " cs)
+  where
+    yours = [p | (p, Changed) <- checks, p `notElem` shipped]
+    thenas = [p | (p, Changed) <- checks, p `elem` shipped]
+    missing = [p | (p, Missing) <- checks]
+    clauses =
+      [ plural (length yours) "file" <> " changed since these lines read " <> listUp yours
+      | not (null yours)
+      ]
+        <> [ "thena's own " <> listUp (map takeFileName thenas) <> " changed under this session"
+           | not (null thenas)
+           ]
+        <> [ plural (length missing) "file" <> " cannot be found from here — wrong folder? " <> listUp missing
+           | not (null missing)
+           ]
+    plural k noun = show k <> " " <> noun <> (if k == 1 then "" else "s")
+    listUp ps = case ps of
+      [p] -> p
+      (p : q : rest) -> p <> ", " <> q <> (if null rest then "" else ", …")
+      [] -> ""
 
 -- | **Open a proof-script from disc into the mode** — `~22qjj`, and the
 -- design's *one code path at three speeds*
@@ -1949,6 +2041,60 @@ openScriptFile st path upto = do
       closeDropdowns
       followInput
       pure True
+
+-- | **`:script reload` — re-run the document from the caret down** —
+-- `~rctjq`, his question of 2026-11-11, and it is 'openScriptFile' at an index
+-- rather than a second feature. The caret's line and everything below it drop
+-- the session they produced and go back to being text; the lines above keep
+-- theirs, and the walk down re-runs the rest.
+--
+-- **With the caret on line 0 — or composing past the end, where there is no
+-- line to be at — it is the hard reload**, and the base session is booted
+-- again so the prelude and the standard rule base are re-read. That is not a
+-- special case bolted on: the session a reload runs from is the one above its
+-- first line, and above line 0 there is no stored session, so one is made.
+--
+-- **IT RUNS THE STALENESS CHECK, AND THE REASON IS IN THE WORD "RELOAD"** —
+-- §4 of the design. The kept prefix is not re-read, so line 10's session still
+-- holds the modules as they were when line 10 ran; a partial reload above a
+-- changed import would otherwise keep the stale one silently, which is the one
+-- thing a reload is supposed to prevent. **This is a check on an action the
+-- user just asked for and not filesystem watching**, which he refused
+-- (`~qb6gc`).
+scriptReload :: EventM Name St ()
+scriptReload = do
+  st <- get
+  let n = length (stScript st)
+      at = maybe 0 id (stScriptPos st)
+  if n == 0
+    then put st { stScriptBar = Nothing, stScriptNote = Just "nothing to reload" }
+    else do
+      checks <- liftIO (maybe (pure []) checkFilesRead (scriptSessionBefore st at))
+      shipped <- liftIO shippedPaths
+      base <- case at of
+        0 -> Just . fst <$> liftIO startingSession
+        _ -> pure (stScriptBase st)
+      let doc = take at (stScript st) ++ map unran (drop at (stScript st))
+          said =
+            "reload: "
+              <> show (n - at)
+              <> (if n - at == 1 then " line" else " lines")
+              <> " un-run — Down runs the next"
+      put st
+        { stScriptBase = base
+        , stScript = doc
+        , stScriptPos = Just at
+        , stScriptStale = Nothing
+        , stScriptBar = Nothing
+        , stInput = E.editorText Input (Just 1) (Text.pack (maybe "" slText (nthOf at doc)))
+        , stScriptNote = Just (maybe said ((said <> "; ") <>) (staleNote shipped checks))
+        }
+      afterScriptEdit
+
+-- | A line of the document with the state it produced thrown away: the text
+-- stays, and that is the whole of a reload.
+unran :: ScriptLine -> ScriptLine
+unran sl = sl { slSession = Nothing, slOutput = [], slOk = True }
 
 -- | Back to the ordinary REPL, whose 'stSession'/'stTurns' were never touched.
 -- The script itself stays in memory, so toggling out to check something and
@@ -2294,6 +2440,7 @@ scriptBarSubmit st text = case words text of
   -- `rerun` would name the one gesture that re-runs nothing.
   [":script", "cut"] -> closeScriptBar >> scriptCutAndRun
   (":script" : "save" : rest) -> scriptSave st (listToMaybe rest)
+  [":script", "reload"] -> closeScriptBar >> scriptReload
   [":script", "open", path] -> do
     ok <- openScriptFile st path 0
     if ok
