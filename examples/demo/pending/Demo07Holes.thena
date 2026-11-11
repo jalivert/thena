@@ -1,45 +1,34 @@
--- THIS FILE DOES NOT WORK YET, AND THAT IS THE WHOLE OF ITEM `~mgqwb`.
+-- A PROOF THIS FILE LEAVES FOR THE SESSION, AND THE IMPORT THAT STOPS FOR IT.
 --
--- What it is supposed to do: you import it, elaboration runs by itself, reaches
--- the hole below, and hands you the unfinished proof to finish.
+-- Import this with the pausing base consulted and elaboration runs by itself,
+-- reaches the hole below and hands you the unfinished proof to finish:
 --
 --   cabal run thena
 --   :consult examples/demo/Demo08Pausing.thena.rules
 --   import examples.demo.pending.Demo07Holes
---
--- WHAT YOU GET INSTEAD. The rule in `Demo08Pausing` fires — its message
--- prints, so elaboration really did reach the hole and really did yield — and
--- then the suspension is thrown away when the load returns:
---
---   a placeholder: fill it and `yield` to carry on
---   (yield to hand control back)
---   :where   -->  let ? goal : Type₀      (a fresh, empty scratch goal)
---   yield    -->  nothing has yielded
---   :infer zeroIsValue
---            -->  not in scope: zeroIsValue
---
--- A module elaborates in an ISOLATED session, and nothing carries a standing
--- machine back out of it. **Everything else already works**: typed at the
--- prompt, the identical declaration suspends on this very goal and finishes —
---
---   declare zeroIsValue : value`0 value` ; zeroIsValue = _
---   a placeholder: fill it and `yield` to carry on
+--     a placeholder: fill it and `yield` to carry on
+--       elaborating examples.demo.pending.Demo07Holes — yield to carry on, ...
 --   :where   -->  focus  let ? goal : value`0 value`
 --                 path   root ▸ zeroIsValue
---                 type   value`0 value`
 --   try-core core`V-num zero NV-zero`
 --   solve
 --   yield
---   :infer zeroIsValue   -->  zeroIsValue : value`0 value`
+--     module examples.demo.pending.Demo07Holes
+--       declared zeroIsValue
 --
--- WITHOUT `Demo08Pausing` CONSULTED the file gets the plain refusal instead,
+-- Nothing of the module is declared until it finishes, so giving up with
+-- `:abandon` leaves the session exactly as it was — and takes anything you
+-- declared at the prompt in the meantime with it.
+--
+-- WITHOUT THE PAUSING BASE CONSULTED the file gets the plain refusal instead,
 -- because the shipped base's two clauses for a hole have empty bodies and the
 -- declaration is then finished with the hole still open:
 --
 --   stuck: not finished: the hole goal is still open, so there is no term yet
 --
--- The file is kept here, ready, so that `~mgqwb` has something to be tested
--- against the day it lands.
+-- It is still under `pending/` because the demo's running order and the corpus
+-- suite were written while it did not work; the suite's demo case does not
+-- drive a yield.
 
 module examples.demo.pending.Demo07Holes where
 

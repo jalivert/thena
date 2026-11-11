@@ -22,12 +22,18 @@ rule base pausing where
 -- own context in scope. Fill it, type `yield`, and the elaboration carries on
 -- and the declaration lands.
 --
--- **IT DOES NOT SURVIVE A MODULE LOAD, AND THAT IS THE WHOLE OF ITEM
--- `~mgqwb`.** The rule fires when a `.thena` file reaches a placeholder — the
--- message prints — but a module elaborates in an isolated session, and the
--- suspended machine is gone by the time the prompt comes back: `yield`
--- answers `nothing has yielded`. So this works at the prompt and only at the
--- prompt.
+-- AND IT WORKS OUT OF AN IMPORTED FILE TOO. An import is a program the machine
+-- runs, so it can stop in the middle: the placeholder suspends the load, the
+-- prompt gets the wheel with the declaration's own goal in front of it, and
+-- `yield` hands control back so the import finishes.
+--
+--   :consult examples/demo/Demo08Pausing.thena.rules
+--   import examples.demo.pending.Demo07Holes
+--
+-- While it is standing there, `:abandon` gives the whole import up and says what
+-- it took, a second `import` is refused, and `:theorem` is refused — a proof
+-- boundary empties the machine's program, so opening one would throw the
+-- suspended elaboration away.
 --
 -- There is no `Nat` in the prelude; declare one, or consult this alongside a
 -- module that has the datatype you want to use.

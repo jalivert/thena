@@ -252,12 +252,31 @@ system. I added one rule to a text file, and now the elaborator asks me for
 help. The automation and the human are in the same loop, and the loop is in
 user space.*
 
-> **Two things to know before you hit them.** The suspension **does not survive
-> a module load** — put the placeholder in a `.thena` file and the rule still
-> fires, but the development is gone when the prompt returns and `yield` answers
-> `nothing has yielded`. That is item `~mgqwb`, and it is why this beat is typed
-> at the prompt. And while a yield is suspended its message **reprints after
-> every line you type** — harmless, noisy on a projector, item `~28czj`.
+**AND IT SURVIVES A MODULE LOAD, which is the stronger beat if you want it.** An
+import is a program the machine runs, so it can stop in the middle. **Start a
+fresh session for this** — the `Nat` and `two` declared above collide with the
+demo modules' own `two`:
+
+```
+cabal run thena
+:consult examples/demo/Demo08Pausing.thena.rules
+import examples.demo.pending.Demo07Holes
+:where
+try-core core`V-num zero NV-zero`
+solve
+yield
+:infer zeroIsValue
+```
+
+The load suspends on the hole that file leaves; `:where` shows `root ▸
+zeroIsValue` at type ``value`0 value` `` — the declaration's own goal, not a
+scratch one — and `yield` lets the whole import finish and declare it.
+**Nothing of the module is declared until it does**, so `:abandon` instead leaves
+the session exactly as it was and says what it took.
+
+> **One thing to know before you hit it.** While a yield is suspended its
+> message **reprints after every line you type** — harmless, noisy on a
+> projector, and not fixed.
 
 A `do { … ; yield "…" }` block typed at the prompt suspends the same way, but
 the thing yielding is then the block you just typed rather than the elaborator,
@@ -390,9 +409,11 @@ Now the files you did not build live, in a **fresh session**.
   quantifies over `M` will shadow a split binder called `M` and the printed name
   is then one you cannot type back. **Pick binder names that do not collide**
   — `t`, not `M`. This is item `~nmtcq`.
-- **A hole left in a surface file does not hand you an unfinished proof** — the
-  declaration is refused and the module rolled back. See
-  `pending/Demo07Holes.thena`. Item `~mgqwb`.
+- **A hole left in a surface file hands you the unfinished proof only if a
+  consulted rule yields on it.** With nothing consulted, the shipped base's two
+  clauses for a hole have empty bodies, the declaration is refused and the module
+  is rolled back. `Demo08Pausing.thena.rules` is the rule that changes that; see
+  `pending/Demo07Holes.thena`.
 - **`:core`, `:dev`, `:goal`, `:whnf`, `:convert`, `:load` and `:consult` are
   scheduled for deletion.** They work now. Prefer `import ‹module›` and
   `consult ‹module›` typed at the prompt, which are what survive.
