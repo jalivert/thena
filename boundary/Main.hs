@@ -52,6 +52,7 @@ import Thena.View
   , offerView
   , statementOfferView
   , parseView
+  , proofsView
   , rulesView
   , sessionTrust
   , trustView
@@ -59,6 +60,7 @@ import Thena.View
 import Thena.View.Chart (BoundView (..), OfferView (..), Written (..))
 import Thena.View.Development (LinkView (..))
 import Thena.View.Machine (MachineView (..))
+import Thena.View.Proofs (ProofsView (..), QuestClaim (..), QuestView (..))
 import Thena.View.Rules (RuleView (..))
 import Thena.View.Tokens (TokenView (..), tokensView)
 import Thena.View.Trust (TrustLevel (..), TrustView (..))
@@ -132,6 +134,18 @@ checks =
     -- A development that rests on nothing says so, which is the answer a pane
     -- draws for almost every proof.
   , \s -> want "nothing is resting on it yet" (null (trustViewClaims (trustView budget s)))
+    -- **The quest list crosses with its statements drawn** (MS12 phase 310, his
+    -- ruling of 2026-11-11: a pane held open on @:proofs@). Both halves are
+    -- checked, because the pane needs both — what the session is on, which it
+    -- marks, and what it has put down, which it offers @:resume@ on. A parked
+    -- row is made here rather than asserted empty: an empty list would pass
+    -- without 'Thena.View.Proofs.QuestView' ever being built.
+  , \s -> want "proofsView marks the quest the session is on"
+            (fmap questViewWord (proofsViewOn (proofsView budget s)) == Just "t")
+  , \s -> want "and a parked quest crosses with its statement"
+            (case proofsViewParked (proofsView budget (fst (oneLine s ":suspend"))) of
+               [QuestView w (AStatement _)] -> w == "t"
+               _                            -> False)
   , \s -> want "a job runs in slices" (job s)
     -- **Which files the session read, and what they said** (MS11 phase 295).
     -- It is the one part of a session on disc that a frontend cannot work out

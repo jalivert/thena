@@ -927,7 +927,8 @@ Three things are refused while a load is standing still:
 
 - a second `import` — one in flight;
 - `:theorem` — a proof boundary empties the machine's program, so opening a theorem
-  would throw the suspended elaboration away. The refusal names the way out;
+  would throw the suspended elaboration away. The refusal names both ways out: hand
+  the wheel back, or park the import (below);
 - a `yield` out of a file reached by `thena-check` or by a rule base's own imports,
   because there is no prompt there to hand control to.
 
@@ -936,6 +937,61 @@ What a module declared is what its text wrote; a lemma proved to get unstuck is 
 one of those, so a module with no `exporting` clause does not pass it on to whoever
 imports it. Otherwise one file would offer different names depending on how a session
 happened to go.
+
+### A parked import sits in `:proofs` beside your proofs
+
+*Decided 2026-11-11, built MS12 phase 310.*
+
+The reason to be handed a module's goal is usually that it needs a lemma, and a lemma
+is a theorem — which the previous section says you cannot start while the import is
+standing. **So you park the import**, and it goes in the one list you already have.
+Here `Demo07Holes` declares `zeroIsValue` and leaves its proof a placeholder, so
+importing it hands you that declaration's goal:
+
+```
+thena spine> :suspend
+parked the import of examples.demo.pending.Demo07Holes
+  it is in :proofs — :resume examples.demo.pending.Demo07Holes to carry on with it
+thena spine> :proofs
+  examples.demo.pending.Demo07Holes : an import, standing in a yield
+thena spine> :theorem helper : value`0 value`
+proving helper : value`0 value`
+thena spine> try-core core`V-num zero NV-zero`
+thena spine> solve
+thena spine> qed
+helper : value`0 value`   ∐
+thena spine> :resume examples.demo.pending.Demo07Holes
+picked the import of examples.demo.pending.Demo07Holes back up
+  still elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give the import up
+thena spine> try-core core`helper`
+thena spine> solve
+thena spine> yield
+module examples.demo.pending.Demo07Holes
+  declared zeroIsValue
+```
+
+**The lemma you proved at the prompt is what filled the module's hole**, and the
+module landed when you handed the wheel back. Every step of that is a line you type.
+
+**`:suspend`, `:resume`, `:proofs` and `:abandon` do not distinguish the two kinds of
+thing in that list.** A proof has a statement and `qed` certifies it; a parked import
+has the name you imported it by and nothing certifies it. Beyond that they are one
+kind of thing, which is why there is no second word for parking an import and no
+second list to look in.
+
+**Nothing parks or unparks itself.** `qed` does not hand the import back the wheel —
+you pick it up when you want it. A boundary that unstacked implicitly would mean two
+things driving the session and no way to see which was about to move.
+
+**What you prove in the meantime is proved in the module's scope**, because parking
+leaves the module's imports, rule bases and concealment exactly as they were. The same
+fact is why **a second `import` is still refused while one is parked**: there is one
+set of those in force, and the parked import expects to find its own when you pick it
+up. To give a parked import up, `:resume` it and then `:abandon` it.
+
+**A `yield` while the import is parked says *nothing has yielded*.** Yielding is about
+the program in front of you, and parking moved that program into the parked quest. For
+the same reason you cannot `yield` out of the lemma: it is a different program.
 
 ### A file's header must match its path, and it is checked when you import it
 

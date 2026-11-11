@@ -85,7 +85,7 @@ walk s bases (path : more) = case kindOf path of
     step s' bases out trouble True
   where
     -- **A yield out of a file being checked is refused, and said plainly**
-    -- (MS12 phase 309, @~4qgxx@). A module may hand control to a prompt; there
+    -- (MS12 phase 309). A module may hand control to a prompt; there
     -- is no prompt here, so there is nobody to hand it to. **The refusal is the
     -- caller's and not the load's** — @:load@ reaches the same loader and does
     -- hand it over — and 'refuseSuspension' puts the session back so nothing is

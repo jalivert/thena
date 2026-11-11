@@ -1319,10 +1319,10 @@ You can have several proofs open, park them, and come back.
 | | |
 |---|---|
 | `:theorem ‹x› : ‹T›` | start a proof |
-| `:suspend` | park the current proof under its name |
-| `:resume ‹name›` | pick a parked proof back up |
+| `:suspend` | park what you are working on, under its name |
+| `:resume ‹name›` | pick a parked one back up |
 | `:proofs` | list what is open and what is parked |
-| `:abandon` | throw the current proof away |
+| `:abandon` | throw away what you are working on |
 | `:undo` | undo the last command that changed anything |
 | `qed` | certify and admit |
 
@@ -1865,6 +1865,130 @@ A `:load` inside a file is still refused — *a :load inside a loaded file is no
 followed*. It is the construct `import` and `consult` replace, and it is the one with
 no cycle check behind it; an `import` cycle is refused by name.
 
+### An import can stop in the middle and hand you the wheel
+
+A module's declarations are turned into **one program**, and that program is run by
+the same machine, through the same loop, as a line you type. So an import is one line
+whose program happens to be long — and **a program can stop**.
+
+It stops when a rule reaches `yield`. Nothing in the shipped base does; a base you
+consult may, and `examples/demo/Demo08Pausing.thena.rules` is two lines that do:
+
+```
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t)
+  do yield "a placeholder: fill it and `yield` to carry on"
+```
+
+With that consulted, importing a file that leaves a placeholder hands you **that
+declaration's own goal**, in the module's own scope. `Demo07Holes` declares
+`zeroIsValue` and leaves its proof a `_`:
+
+*From a fresh session.*
+
+```
+thena spine> :consult examples/demo/Demo08Pausing.thena.rules
+…
+thena spine> import examples.demo.pending.Demo07Holes
+…
+a placeholder: fill it and `yield` to carry on
+  elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give the import up
+thena spine> :where
+focus
+  let ? goal : value`0 value` in
+path
+  root ▸ zeroIsValue
+context
+  zeroIsValue : value`0 value`
+type
+  value`0 value`
+```
+
+`:where` says `root ▸ zeroIsValue` — the declaration the file is writing, not a
+scratch goal. Fill the hole, type `yield`, and the import carries on and finishes,
+declaring everything the module wrote, and any further modules its closure still had
+to load.
+
+**Nothing of the module is declared until the whole import finishes.** A suspended
+load is one command that has not come back, so `:abandon` puts the session back
+exactly as it stood — and it **takes with it anything you declared at the prompt
+meanwhile, and says so**: what you proved during the suspension may rest on the
+module's own declarations, and leaving it would leave a reference dangling.
+
+**What is in scope while you hold the wheel is what the elaboration has** — the
+module's imports and what it has declared so far, not the rest of your session. You
+are standing inside that file's elaboration.
+
+While a load is standing still, **a second `import` is refused**, and so is
+**`:theorem`** — which brings us to the next part.
+
+### Park the import, prove the lemma, pick it back up
+
+A placeholder usually wants a lemma, and a lemma is a theorem — which you cannot
+start while the import is standing, because entering a proof empties the machine's
+program and would throw the suspended elaboration away. The refusal says what to do:
+
+```
+thena spine> :theorem helper : value`0 value`
+a rule has handed control over — yield to hand it back before starting a proof, or :suspend to park the import of examples.demo.pending.Demo07Holes
+```
+
+So park it. **It goes into `:proofs`, under the name you imported it by**, beside any
+parked proofs you have:
+
+```
+thena spine> :suspend
+parked the import of examples.demo.pending.Demo07Holes
+  it is in :proofs — :resume examples.demo.pending.Demo07Holes to carry on with it
+thena spine> :proofs
+  examples.demo.pending.Demo07Holes : an import, standing in a yield
+```
+
+Now the theorem is allowed, and **it is proved in the module's scope**, because
+parking leaves the module's imports and rule bases in force:
+
+```
+thena spine> :theorem helper : value`0 value`
+proving helper : value`0 value`
+thena spine> try-core core`V-num zero NV-zero`
+thena spine> solve
+thena spine> qed
+helper : value`0 value`   ∎
+thena spine> :resume examples.demo.pending.Demo07Holes
+picked the import of examples.demo.pending.Demo07Holes back up
+  still elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give the import up
+thena spine> try-core core`helper`
+a placeholder: fill it and `yield` to carry on
+(yield to hand control back)
+thena spine> solve
+a placeholder: fill it and `yield` to carry on
+(yield to hand control back)
+thena spine> yield
+module examples.demo.pending.Demo07Holes
+  declared zeroIsValue
+```
+
+**The yield's message reprints after every line that steps the machine**, which is why
+it appears twice above. It is cosmetic, and `:where` and `:show` do not provoke it.
+
+Four things are worth knowing about that sequence.
+
+**`:suspend`, `:resume`, `:proofs` and `:abandon` do not care which kind of thing they
+are acting on.** A proof has a statement and `qed` certifies it; a parked import has
+the name you imported it by and nothing certifies it. There is no second word for
+parking an import, and no second list.
+
+**Nothing parks or unparks itself.** `qed` does not hand the import back the wheel —
+you pick it up when you want it.
+
+**A second `import` is refused while one is parked**, for the same reason the lemma is
+proved in the module's scope: there is one set of rule bases and one scope in force,
+and the parked import expects to find its own when you pick it up. To give a parked
+import up, `:resume` it and then `:abandon` it.
+
+**`yield` while it is parked says *nothing has yielded*.** Yielding is about the
+program in front of you, and parking moved that program into the parked import. For
+the same reason, you cannot `yield` out of the lemma: it is a different program.
+
 ### `:replay` runs a script as though you had typed it
 
 `:replay ‹path›` submits a script's lines one at a time, exactly as if you had
@@ -2110,7 +2234,7 @@ language and elaborated on load.
 | `:choices` | open choice points |
 | `:step on` / `:step` / `:step off` / `:run` | single-step the machine |
 | `:theorem ‹x› : ‹T›` | start a proof |
-| `:suspend` `:resume ‹name›` `:proofs` `:abandon` `:undo` | session management |
+| `:suspend` `:resume ‹name›` `:proofs` `:abandon` `:undo` | session management — a proof, or a parked import |
 | `:goal ‹T›` | discard everything and start a fresh scratch goal |
 | `:extract` `:revalidate` | read off the term / recheck the development |
 | `:trust` | the trust level, and what this proof rests on |

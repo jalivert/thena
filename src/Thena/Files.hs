@@ -478,7 +478,7 @@ loadProofFile s path = do
           Right ms -> case loadProofModules s ms of
             (s', WalkedAll rs)       -> (s', rs, [])
             -- **A yield suspends the load and the session keeps it** (MS12
-            -- phase 309, @~4qgxx@). It is a response and not trouble whichever
+            -- phase 309). It is a response and not trouble whichever
             -- file it came out of: the user is being handed the wheel, which is
             -- a thing that happened rather than a thing that went wrong.
             -- **@thena-check@ is what refuses it**, because a batch checker has
@@ -720,8 +720,8 @@ following s resp = case resp of
   -- is the point of entry: a line typed at the prompt is nested inside nothing,
   -- so no replay it starts can close a loop that was already open.
   ReplayRequested path -> Just (replayFile s path)
-  -- **A line whose run finished a suspended import** (MS12 phase 309,
-  -- @~4qgxx@). The user typed @yield@, the module's own program carried on and
+  -- **A line whose run finished a suspended import** (MS12 phase 309). The
+  -- user typed @yield@, the module's own program carried on and
   -- ran out, and /that line/ has no idea it just finished a load — so the
   -- completion is noticed here, after the line, by the one door that can answer
   -- with several responses. Finishing one module may put the next of the closure

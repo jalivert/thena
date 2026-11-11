@@ -109,6 +109,7 @@ library
         Thena.View.Entry
         Thena.View.Instral
         Thena.View.Machine
+        Thena.View.Proofs
         Thena.View.Rules
         Thena.View.Source
         Thena.View.Statement
@@ -168,6 +169,7 @@ library view
         Thena.View.Development,
         Thena.View.Instral,
         Thena.View.Machine,
+        Thena.View.Proofs,
         Thena.View.Rules,
         Thena.View.Source,
         Thena.View.Statement,
