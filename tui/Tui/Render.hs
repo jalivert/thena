@@ -305,6 +305,16 @@ renderSkeleton skel = case skel of
 renderValue :: ValueView -> String
 renderValue v = case v of
   ValText t -> show t
+  -- A name prints bare where 'ValText' prints quoted, and that contrast is
+  -- the whole of the case: in an @env@ pane @w = "zero"@ is a piece of text
+  -- and @w = Nat.zero@ is a name. 'Thena.Render.renderValue' makes the same
+  -- distinction, and `~g482j` is the entry that asked for it — a name value
+  -- used to fall off the end of this @case@ and draw as an @Int@.
+  --
+  -- **Drawn as it arrives, which is dotted and whole** ('nameDotted'). The
+  -- shortest-ending policy is over terms, and a bare name value has no term
+  -- around it to be standing in, so there is no scope to shorten against.
+  ValName s -> s
   ValInt n -> show n
   ValChar c -> c
   ValBool b -> if b then "true" else "false"

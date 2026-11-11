@@ -26,7 +26,9 @@ import Test.Tasty.HUnit (assertEqual, testCase)
 
 import Thena.View.Address (Address (..))
 import Thena.View.Core (Binding (..), Display (..), Shape (..))
-import Tui.Render (Fold (..), renderDisplay)
+import Thena.View.Instral (ValueView (..))
+import Thena.View.Machine (MachineView (..))
+import Tui.Render (Fold (..), renderDisplay, renderMachineView)
 
 
 -- * Drawing a widget without a terminal
@@ -134,6 +136,7 @@ drawingTests =
     , testGroup "so is a function position, which is `~r3fp9`" functionCases
     , testGroup "and a spine head is not" spineCases
     , testGroup "the engine's own lines, drawn" engineCases
+    , testGroup "a value in an env pane" valueCases
     ]
 
 -- | The argument side is the rung every drawer gets right, so these are the
@@ -253,6 +256,28 @@ idElimination =
       , eliminatorIndices = [var "a", var "b"]
       , eliminatorTarget = var "q"
       }
+
+-- | The one contrast 'Tui.Render.renderValue' exists to draw — `~g482j`, the
+-- entry the engine track left open against this file. A name value used to
+-- fall off the end of that @case@ and be drawn by whatever arm followed.
+--
+-- **The quoting is the whole of it**: @instral@ has a type for text and a type
+-- for names, and a pane that draws both quoted says the name is a string.
+valueCases :: [TestTree]
+valueCases =
+  [ testCase "a name is drawn bare" $
+      assertEqual "" ["env:", "w = Nat.zero"] (envLines [("w", ValName "Nat.zero")])
+  , testCase "and text beside it is drawn quoted" $
+      assertEqual "" ["env:", "w = \"zero\""] (envLines [("w", ValText "zero")])
+  , testCase "a name at the root has no path and is still bare" $
+      assertEqual "" ["env:", "n = refl"] (envLines [("n", ValName "refl")])
+  ]
+
+-- | A machine view that is nothing but an @env@, and the @env@ lines of what it
+-- draws. 'renderMachineView' is the exported door; 'renderValue' is not.
+envLines :: [(String, ValueView)] -> [String]
+envLines env =
+  takeWhile (/= "stack:") (dropWhile (/= "env:") (renderMachineView (MachineView [] env [])))
 
 eq :: String -> String -> Shape -> TestTree
 eq name expected shape =
