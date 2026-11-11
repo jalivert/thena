@@ -89,6 +89,7 @@ import Thena.Driver
   , currentQuest
   , fuelOf
   , machineOf
+  , openableNamespaces
   , parked
   , parsingLanguage
   , pendingQuestion
@@ -386,7 +387,8 @@ proofsView budget s =
     (parked s)
 
 statementOfferView :: Session -> [Written] -> [Written] -> OfferView
-statementOfferView s = statementOffer (sessionGrammars s) (sessionRules s)
+statementOfferView s =
+  statementOffer (sessionGrammars s) (sessionRules s) (openableNamespaces s)
 
 -- ---------------------------------------------------------------------------
 -- The plumbing itself

@@ -5522,6 +5522,27 @@ elimination that stated them is the only thing that knows.
 
 ## The REPL and the session
 
+### The prompt completes the acts a file writes, and not only the colon commands
+
+*Decided 2026-11-12.*
+
+`open`, `declare`, `import`, `consult` and `data` are spelled without a colon because
+they act and because they are the words a file writes. They are the driver's own words
+rather than rules in a base, so the completion had never heard of them: a half-typed
+`cons` offered four ops whose spelling begins the same way and not `consult`.
+
+**A line typed at the prompt may be a statement or one of those acts, and both are
+offered** — until the word is finished nobody knows which it is.
+
+**`open`'s argument is the namespaces that are in scope.** No namespace it offers is
+refused when it is taken: the offer asks the act's own resolution question rather than
+a second one, so a namespace that exists but is ambiguous from where you stand is not
+listed. The spellings offered are the full dotted paths; `open A` in force also makes a
+written `Ty` reach `A.Ty`, and those shortened forms are accepted but not offered.
+
+**`import`'s and `consult`'s arguments are not offered**, because the module names that
+could be imported are a question about the disc rather than about the session.
+
 ### An argument that is a name is read with the spaces off both ends
 
 *Decided 2026-11-11.*

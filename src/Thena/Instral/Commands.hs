@@ -23,7 +23,10 @@ module Thena.Instral.Commands
   ( Command (..)
   , Argument (..)
   , commands
+  , acts
+  , actWords
   , isCommandLine
+  , isWholeLine
   ) where
 
 -- | What may follow a command word.
@@ -156,7 +159,65 @@ commands =
       [[], [OneOf ["none", "no-undischargeable", "any"]]]
   , Command ":parse" [[ALanguage], [ALanguageTerm]]
   ]
-  where
-    nothing w  = Command w [[]]
-    one w      = Command w [[Opaque]]
-    optional w = Command w [[], [Opaque]]
+
+-- | __The bare-word acts, with the shape of their argument__ (MS12 phase 312).
+--
+-- **Why there has to be a second table.** These are the words a /file/ writes, so
+-- §2.4 spells them without a colon — and 'isCommandLine' therefore answers 'False'
+-- for a line beginning with one, which sends it to the statement grammar, where no
+-- production names it. The visible result was that @impo@ was offered nothing at
+-- all, and @cons@ was offered four ops whose spelling happens to start the same
+-- way and not @consult@.
+--
+-- **They are the driver's and not the rule base's, which is the whole reason they
+-- need writing down.** An op — @attack@, @certify@, @constructors-of@ — is a form
+-- in a rule base and the statement grammar offers it already; these five are a
+-- @case@ in @Thena.Driver.dispatch@ and nothing the offer reads knows about them.
+--
+-- **Not another set of productions of the statement head**, which is also a
+-- @do@ block's head: @data@ is not an instruction, and an advising grammar may be
+-- narrower than the running one but never wider. They stand under
+-- 'Thena.Language.Instral.lineHead', which is a prompt line and derives either.
+--
+-- **@open@'s argument is enumerable and the others are not.** The namespaces
+-- that can be opened are a read of the session
+-- (@Thena.Driver.openableNamespaces@), so they are offered by name; a module
+-- name would need the engine's module search, which is not a pure read of a
+-- session, and a declaration or a signature has no finite set at all.
+--
+-- **@open@ keeps an 'Opaque' shape beside the enumerated one**, so that a
+-- namespace the offer does not list — a shortened spelling, or one declared
+-- since — still reads as a line rather than going stuck under the cursor.
+acts :: [String] -> [Command]
+acts namespaces =
+  [ Command "open" [[OneOf namespaces], [Opaque]]
+  , one "declare"
+  , one "import"
+  , one "consult"
+  , one "data"
+  ]
+
+-- | The words 'acts' names, which is a question with no namespaces in it.
+--
+-- **@acts []@ and not a second list**: the namespaces decide what may follow
+-- @open@ and not whether @open@ is a word, so the words can be read off the
+-- table with none supplied rather than written down twice and kept in step.
+actWords :: [String]
+actWords = map commandWord (acts [])
+
+-- | Is this line a whole-line form — a @:@-command, or one of the bare acts?
+--
+-- **The question the offer has to ask about CONTEXT** (MS12 phase 312). A
+-- statement is asked about context-free, because the text before a word in one
+-- may not read on its own — @LC\`x\` atta@ has no reading up to @atta@ — but a
+-- whole-line form always reads up to its argument, so @:step o@ offers @on@ and
+-- @off@, and before this @open E@ offered nothing at all. The two kinds of
+-- whole line differ in their punctuation and in nothing else that matters here.
+isWholeLine :: String -> Bool
+isWholeLine line = isCommandLine line || firstWord line `elem` actWords
+  where firstWord = takeWhile (/= ' ') . dropWhile (== ' ')
+
+nothing, one, optional :: String -> Command
+nothing w  = Command w [[]]
+one w      = Command w [[Opaque]]
+optional w = Command w [[], [Opaque]]

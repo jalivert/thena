@@ -29,6 +29,8 @@ module Thena.Language.Instral
   ( instralRules
   , commandRules
   , commandHead
+  , lineRules
+  , lineHead
   , operandHead
   , standsAt
   , statementHead
@@ -40,12 +42,42 @@ import Thena.Core.Term (nameDotted)
 import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Thena.Language.Earley as E
-import Thena.Instral.Commands (Argument (..), Command (..), commands)
+import Thena.Instral.Commands (Argument (..), Command (..), acts, commands)
 import Thena.Language.Build (languageNames, productionNames, productionRule)
 import qualified Thena.Language.Builtin as Builtin
 import Thena.Language.Grammar (Grammar, earleyRules, productionBody)
 import Thena.Language.Lexemes (charRegex, identRegex, numberRegex, stringRegex)
 import Thena.Rules (RuleBase (..), allCallable, opWords)
+
+-- | __The nonterminal a line typed at the prompt parses at__ (MS12 phase 312).
+--
+-- **A prompt line is a statement or one of the bare-word acts**, and nothing the
+-- offer read knew the second of those until this head existed. It is not
+-- 'statementHead' with five productions added, because that head is also a
+-- surface @do@ block's: @data@ and @open@ are not instructions, and an advising
+-- grammar may be narrower than the running one but never wider.
+lineHead :: String
+lineHead = "instral:Line"
+
+-- | __Every production a line typed at the prompt may take__ (MS12 phase 312):
+-- every statement, under this head as well, and the acts beside them.
+--
+-- **The statement productions are repeated here rather than reached through a
+-- unit production**, and that is not a taste: @lineHead -> statementHead@ was the
+-- first shape and it leaked. 'Thena.Language.Earley.offerOptions' collapses a
+-- predicted item to its /first/ symbol, so at the start of every bare line the
+-- frontend was handed @instral:Statement@ as something to draw — the same mistake
+-- phase 141 made with @At:LC:var@. **It costs nothing to repeat them**: a unit
+-- production predicts the statement head, which predicts every form at the same
+-- column, so the chart does the same work either way, one item fewer.
+--
+-- **The rule names are the forms' own**, so a production list a frontend draws
+-- reads @attack\/0@ at a prompt line exactly as it does inside a block.
+lineRules :: [Grammar] -> [RuleBase] -> [String] -> [E.Rule]
+lineRules gs bs namespaces =
+  instralRules gs bs
+    ++ statementsAt lineHead (forms bs)
+    ++ wholeLineProductions gs lineHead (acts namespaces)
 
 -- | The nonterminal a whole statement parses at.
 statementHead :: String
@@ -215,8 +247,13 @@ ruleForms bs =
 
 -- | Every production whose head is 'statementHead'.
 statements :: [Form] -> [E.Rule]
-statements fs =
-  [ E.Rule (formWord f ++ "/" ++ show (length (formParams f))) statementHead
+statements = statementsAt statementHead
+
+-- | The same, under whichever head is asking — 'statementHead' inside a block,
+-- 'lineHead' for a line typed at the prompt (MS12 phase 312).
+statementsAt :: String -> [Form] -> [E.Rule]
+statementsAt hd fs =
+  [ E.Rule (formWord f ++ "/" ++ show (length (formParams f))) hd
       (E.Literal (formWord f) : concatMap slot (formParams f)) []
   | f <- fs
   ]
@@ -399,24 +436,28 @@ literalProductions gs types =
 -- needless, not that it was slow.
 commandRules :: [Grammar] -> [E.Rule]
 commandRules gs =
-  commandProductions gs
+  wholeLineProductions gs commandHead commands
     -- **The grammars the command productions now point into** (MS7 phase 147).
     -- Before it, every command argument was either a literal or the opaque
     -- nonterminal, so this set needed no productions but its own; @:parse LC @,
     -- @:core @ and @:infer @ reach a real grammar now.
     ++ earleyRules gs ++ Builtin.surfaceRules gs ++ Builtin.coreRules gs
 
--- | One production per shape of every @:@-command, derived from
--- 'Thena.Instral.Commands.commands'.
+-- | One production per shape of every word in a whole-line table, derived from
+-- 'Thena.Instral.Commands.commands' or its @acts@.
 --
--- **Nothing here lists a command**: the words, the arities and the argument shapes
+-- **Nothing here lists a word**: the words, the arities and the argument shapes
 -- are that table's, and a command added to it is completable with nothing edited
 -- here. The one thing this function knows is how each 'Argument' becomes symbols.
-commandProductions :: [Grammar] -> [E.Rule]
-commandProductions gs =
-  [ E.Rule (commandWord c ++ "/" ++ show n ++ "/" ++ show k) commandHead
+--
+-- **Two tables and one builder** (MS12 phase 312): a @:@-command and a bare-word
+-- act are the same shape of thing — a word, then the rest of the line — and
+-- differ only in which head they stand under, so they are not built twice.
+wholeLineProductions :: [Grammar] -> String -> [Command] -> [E.Rule]
+wholeLineProductions gs hd table =
+  [ E.Rule (commandWord c ++ "/" ++ show n ++ "/" ++ show k) hd
       (E.Literal (commandWord c) : body) []
-  | c <- commands
+  | c <- table
   , (n, shape) <- zip [0 :: Int ..] (commandShapes c)
   , (k, body) <- zip [0 :: Int ..] (expand shape)
   ]

@@ -42,6 +42,7 @@ module Thena.Driver
   , Record (..)
   , Entry (..)
   , Outcome (..)
+  , openableNamespaces
   , recordOf
   , standing
   , submittedLines
@@ -166,7 +167,7 @@ import Thena.Language.Regex
   )
 import Data.Bits ((.&.), shiftR, xor)
 import Data.Char (intToDigit, isAlpha, isAlphaNum, isSpace, ord)
-import Data.List ((\\), groupBy, intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, stripPrefix)
+import Data.List ((\\), groupBy, intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, sort, stripPrefix)
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
 import Thena.Development.Partial (Partial (..), extract, termsIn)
@@ -192,6 +193,10 @@ import Thena.Engine
   )
 import qualified Thena.Engine as Engine
 import Thena.Engine (whereImpure)
+-- Qualified, because this module has a 'declaredNames' of its own and it is a
+-- different question: which names a *module* declared, against every name the
+-- environment holds.
+import qualified Thena.Global.Env as GEnv
 import Thena.Errors
   ( ConversionFailure
   , FailReason (..)
@@ -223,6 +228,7 @@ import Thena.Global.Env
   , inductiveName
   , isDeclared
   , knownIn
+  , namespaceUnder
   , lookupConstant
   , lookupDefinition
   , lookupInductive
@@ -914,6 +920,36 @@ provedSlices s =
     numbered k (e : es) = case entrySubmitted e of
       Just _  -> (entryProof e, Just k) : numbered (k + 1) es
       Nothing -> (entryProof e, Nothing) : numbered k es
+
+-- | __Which namespaces an @open@ here would accept, written out in full__
+-- (MS12 phase 312).
+--
+-- **What the completion offers after the word @open@.** Nothing enumerated them
+-- before, so the prompt could only say /a name goes here/; the tui track asked
+-- for the set and this is it.
+--
+-- **Every candidate is put through the act's own walk**
+-- ('Thena.Global.Env.namespaceUnder'), not through a test written here. The
+-- rule a dropdown has to keep is that no row it offers refuses when it is
+-- taken, and the only way to keep it is to ask the question the act asks: a
+-- path can be inhabited and still be ambiguous from where the writer stands,
+-- and that refusal is as real as the other one.
+--
+-- **Written in full, and the shortened forms are not offered.** @open A@ in
+-- force makes a written @Ty@ reach @A.Ty@, so the shortened spellings resolve
+-- too — but which of them do is the inverse of 'Thena.Core.Term.globalUnder'\'s
+-- walk, and nothing computes that. A full path always reads, so the offer is
+-- short of rows rather than wrong about them.
+openableNamespaces :: Session -> [String]
+openableNamespaces s =
+  [ intercalate "." p
+  | p <- nub (sort (concatMap prefixes (map nameSteps (GEnv.declaredNames env))))
+  , Right _ <- [namespaceUnder (scope machine) env p]
+  ]
+  where
+    machine = sessionMachine s
+    env     = globals machine
+    prefixes ws = [ take n ws | n <- [1 .. length ws] ]
 
 -- | __What a file said when it was read__ (MS11 phase 295).
 --

@@ -137,7 +137,7 @@ import Thena.Global.Env
   , InductiveDefinition
   , Scheme (..)
   , declaredNames
-  , namespaceInhabited
+  , namespaceUnder
   , recursiveArgument
   , definitionLevels
   , knownIn
@@ -1251,18 +1251,16 @@ perform instr rest m = case operation instr of
   -- time here**: a path is a name whose last step is its word, @known@ is
   -- /something is declared under this prefix/, and the enclosing rungs, the
   -- @open@s and the two-answers refusal all come with it.
-  Open o -> case globalUnder inhabited (scope m) (asName (openedPath o)) of
-    Right c -> Continue (advance m { scope = (scope m)
-                 { scopeOpens = o { openedPath = asPath c } : scopeOpens (scope m) } })
+  -- **'Thena.Global.Env.namespaceUnder' is the question and this is one of its
+  -- two callers** (MS12 phase 312). It was asked inline here until the offer
+  -- had to ask it as well — /which namespaces could be opened from here/ — and
+  -- a dropdown that answered it its own way would offer rows this refuses.
+  Open o -> case namespaceUnder (scope m) (globals m) (openedPath o) of
+    Right p -> Continue (advance m { scope = (scope m)
+                 { scopeOpens = o { openedPath = p } : scopeOpens (scope m) } })
     Left [] -> failure (NoSuchNamespace (intercalate "." (openedPath o))) m
-    Left gs -> failure (AmbiguousName (intercalate "." (openedPath o))
-                         (map (intercalate "." . asPath) gs)) m
-    where
-      inhabited c = namespaceInhabited (asPath c) (globals m)
-      asName ws = case reverse ws of
-        w : before -> GlobalName (reverse before) w
-        []         -> GlobalName [] ""
-      asPath c = nameSteps c ++ [nameWord c]
+    Left ps -> failure (AmbiguousName (intercalate "." (openedPath o))
+                         (map (intercalate ".") ps)) m
 
   -- **A namespace is entered by pushing a prefix and nothing else** (MS10
   -- phase 254). Nothing is checked: a namespace holds whatever keys sit under
