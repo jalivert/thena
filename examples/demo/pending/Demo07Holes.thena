@@ -1,51 +1,56 @@
--- THIS FILE DOES NOT LOAD YET, AND THAT IS WHAT IT IS FOR.
+-- THIS FILE DOES NOT WORK YET, AND THAT IS THE WHOLE OF ITEM `~mgqwb`.
 --
--- It is the demo's intended shape for "write the statement ahead of time,
--- finish the proof interactively": leave a hole where the proof should be,
--- load the file, and be looking at the unfinished proof.
+-- What it is supposed to do: you import it, elaboration runs by itself, reaches
+-- the hole below, and hands you the unfinished proof to finish.
 --
---   ./tc examples/demo/pending/Demo07Holes.thena
+--   cabal run thena
+--   :consult examples/demo/Demo08Pausing.thena.rules
+--   import examples.demo.pending.Demo07Holes
+--
+-- WHAT YOU GET INSTEAD. The rule in `Demo08Pausing` fires — its message
+-- prints, so elaboration really did reach the hole and really did yield — and
+-- then the suspension is thrown away when the load returns:
+--
+--   a placeholder: fill it and `yield` to carry on
+--   (yield to hand control back)
+--   :where   -->  let ? goal : Type₀      (a fresh, empty scratch goal)
+--   yield    -->  nothing has yielded
+--   :infer zeroIsValue
+--            -->  not in scope: zeroIsValue
+--
+-- A module elaborates in an ISOLATED session, and nothing carries a standing
+-- machine back out of it. **Everything else already works**: typed at the
+-- prompt, the identical declaration suspends on this very goal and finishes —
+--
+--   declare zeroIsValue : value`0 value` ; zeroIsValue = _
+--   a placeholder: fill it and `yield` to carry on
+--   :where   -->  focus  let ? goal : value`0 value`
+--                 path   root ▸ zeroIsValue
+--                 type   value`0 value`
+--   try-core core`V-num zero NV-zero`
+--   solve
+--   yield
+--   :infer zeroIsValue   -->  zeroIsValue : value`0 value`
+--
+-- WITHOUT `Demo08Pausing` CONSULTED the file gets the plain refusal instead,
+-- because the shipped base's two clauses for a hole have empty bodies and the
+-- declaration is then finished with the hole still open:
+--
 --   stuck: not finished: the hole goal is still open, so there is no term yet
 --
--- That refusal is measured, not guessed. `?body` and `_` both elaborate by
--- leaving the hole exactly where it is — that is the rule base's intent, two
--- clauses of `elaborate` whose bodies are empty — and then the DECLARATION is
--- refused, because a definition with an open hole has no term. The module is
--- rolled back and nothing is left to work on.
---
--- AND THE INTERESTING PART: consult `../Demo08Pausing.thena.rules` first, and
--- a clause of `elaborate` hands you the hole instead of leaving it. **That
--- rule fires for this file too** — the message prints — but the suspension is
--- gone by the time the prompt comes back, because a module elaborates in an
--- isolated session; a bare `yield` then answers "nothing has yielded".
---
--- So the feature already exists and works at the prompt. **The whole of item
--- `~mgqwb` is that a suspended machine does not survive a module load**, and
--- it is defined in `.jalivert/agenda/`.
---
--- WHAT WORKS TODAY instead, and what the demo uses:
---
---   * `Demo05ByTactics.thena.script` — the statement is typed at the prompt
---     with `:theorem` and the proof is driven by hand. Nothing is left open in
---     a file.
---   * `Demo06Trust.thena` — the statement goes in the file as a `trusted`
---     claim, the theorem that needs it is built on top, and `:trust` is the
---     list of what is still owed. The debt is discharged later.
---   * A `do { … ; yield "…" }` block typed at the prompt INSIDE a `:theorem`
---     does suspend and hand the proof over. It is the file case that does not.
+-- The file is kept here, ready, so that `~mgqwb` has something to be tested
+-- against the day it lands.
 
 module examples.demo.pending.Demo07Holes where
 
 import examples.demo.Demo01Expressions
 import examples.demo.Demo02Judgments
 
-open Ty
 open Tm
-open typing
 open nvalue
 open value
 
--- The statement is the interesting half, and it is written out in full.
--- The proof is left for the session.
-succOfValueIsValue : forall (M : Tm) (n : nvalue`${M} nv`) -> value`( succ ${M} ) value`
-succOfValueIsValue = ?body
+-- The statement is the half worth keeping in a file. The proof is left for the
+-- session: `V-num` needs a numeric value, and `0` is one.
+zeroIsValue : value`0 value`
+zeroIsValue = _
