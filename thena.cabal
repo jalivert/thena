@@ -262,7 +262,11 @@ library tui
         text-zipper       >=0.13 && <0.14,
         time              >=1.12 && <1.15,
         vty               >=6.0  && <7,
-        vty-unix          >=0.4  && <0.5
+        vty-unix          >=0.4  && <0.5,
+        -- **Named here although brick brings it anyway**: 'Tui.Panes' builds a
+        -- 'Text.Wrap.WrapSettings' of its own, so this package is imported
+        -- directly and a direct import is a direct dependency.
+        word-wrap         >=0.5  && <0.6
 
 executable thena-tui
     import:             warnings

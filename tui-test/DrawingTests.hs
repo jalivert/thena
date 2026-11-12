@@ -15,7 +15,7 @@ import Data.Char (isSpace)
 import qualified Data.Vector as V
 
 import Brick (Widget)
-import Brick.AttrMap (attrMap)
+import Brick.AttrMap (AttrMap, attrMap)
 import Brick.Main (renderWidget)
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.PictureToSpans (displayOpsForPic)
@@ -24,8 +24,8 @@ import Graphics.Vty.Span (SpanOp (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertEqual, testCase)
 
-import Thena.View.Address (Address (..))
-import Thena.View.Core (Binding (..), Display (..), Shape (..))
+import Thena.View.Address (Address (..), Move (GoAlong))
+import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Shape (..))
 import Thena.View.Instral (ValueView (..))
 import Thena.View.Machine (MachineView (..))
 import Tui.Panes
@@ -36,7 +36,7 @@ import Tui.Panes
   , outputRows
   , paneRowWidget
   )
-import Tui.Render (Fold (..), renderDisplay, renderMachineView)
+import Tui.Render (Fold (..), foldAttr, renderDisplay, renderMachineView)
 
 
 -- * Drawing a widget without a terminal
@@ -59,19 +59,31 @@ drawLine w =
 
 -- | Every line of it, trailing blanks trimmed.
 drawToLines :: Widget () -> [String]
-drawToLines w =
-  map rowText (V.toList (displayOpsForPic picture region))
+drawToLines = drawToLinesIn region
+
+-- | The same, into a region of a stated size. **Narrow regions are the point
+-- of it**: a pane is a quarter of the screen and a term is longer than that,
+-- so where the drawing breaks a line is only decidable against a width.
+drawToLinesIn :: (Int, Int) -> Widget () -> [String]
+drawToLinesIn size w = map (trimEnd . concatMap fst) (drawToSpansIn (attrMap Vty.defAttr []) size w)
   where
-    picture = renderWidget (Just (attrMap Vty.defAttr [])) [w] region
-
-    rowText = trimEnd . concatMap opText . V.toList
-
-    opText op = case op of
-      TextSpan _ _ _ t -> TL.unpack t
-      Skip n           -> replicate n ' '
-      RowEnd n         -> replicate n ' '
-
     trimEnd = dropWhileEnd isSpace
+
+-- | Every line as its spans, each with the attribute it would be written in.
+-- **The attribute is the half a string cannot carry**, and it is the reason
+-- 'Tui.Render' builds pieces rather than text: a folded literal is coloured
+-- over exactly its own span, so a break inside one has to leave both halves
+-- still coloured.
+drawToSpansIn :: AttrMap -> (Int, Int) -> Widget () -> [[(String, Vty.Attr)]]
+drawToSpansIn am size w =
+  map (concatMap opSpans . V.toList) (V.toList (displayOpsForPic picture size))
+  where
+    picture = renderWidget (Just am) [w] size
+
+    opSpans op = case op of
+      TextSpan a _ _ t -> [(TL.unpack t, a)]
+      Skip n           -> [(replicate n ' ', Vty.defAttr)]
+      RowEnd n         -> [(replicate n ' ', Vty.defAttr)]
 
 
 -- * Terms, built by hand
@@ -147,7 +159,72 @@ drawingTests =
     , testGroup "a value in an env pane" valueCases
     , testGroup "the second column's rows, decided" paneRowCases
     , testGroup "and drawn" paneDrawCases
+    , testGroup "a term too wide for its pane breaks rather than clipping" wrapCases
     ]
+
+-- | **His report, 2026-11-12**: /"Make sure that each smaller pane correctly
+-- 'line-breaks'. Specifically the 'output' is clipping horizontally. Not
+-- great, I can't read the message."/ The panes are a quarter of the screen,
+-- a core term is longer than that, and what ran past the edge used to be
+-- simply not drawn.
+--
+-- **This is the suite's own remit and not the pty's**: where a line breaks at
+-- a given width is a function of the text, decidable with no terminal. How
+-- wide a pane actually is stays the pty's question.
+wrapCases :: [TestTree]
+wrapCases =
+  [ testCase "it breaks at a space, and the continuation is indented two" $
+      assertEqual ""
+        ["Eq {0} Nat", "  zero zero"]
+        (wrapAt 12 eqNatZeroZero)
+  , -- **The case that replaced the first implementation.** Pieces are emitted
+    -- one per drawer step, so @"(snd A B s)"@ and the @")"@ closing the term
+    -- around it are two of them with no space between — and a layout that
+    -- broke between any two pieces put that @")"@ alone at the head of a
+    -- line. A break may fall at whitespace and nowhere else.
+    testCase "a bracket with no space before it stays with what it closes" $
+      assertEqual ""
+        ["f (cons n a", "  as)"]
+        (wrapAt 12 (at (app (global "f") former)))
+  , -- A name, a path and a level-decorated global are each one word, and are
+    -- routinely longer than a pane. Refusing to cut them would be the clip
+    -- this is here to replace.
+    testCase "a word longer than the pane is cut, not dropped" $
+      assertEqual ""
+        ["Averyver", "  ylongn", "  ame"]
+        (wrapAt 8 (global "Averyverylongname"))
+  , -- The whole reason 'Tui.Render' works in pieces rather than in text.
+    testCase "a folded literal is still coloured on both sides of a break" $
+      assertEqual "" [True, True] (foldedSpanPerLine 14 foldedLiteral)
+  ]
+
+-- | A display's lines at a stated width, the fold off and the blank rows
+-- below it dropped — the region has to be taller than the text to prove
+-- nothing was lost off the bottom, which leaves empty rows to trim.
+wrapAt :: Int -> Display -> [String]
+wrapAt w = dropWhileEnd null . drawToLinesIn (w, 8) . renderDisplay NoFold
+
+-- | For each drawn line that has any text on it, whether some span of it
+-- carries the fold's own background. **Red, because the suite's own attribute
+-- map is otherwise empty** — an unmapped name resolves to the default attr,
+-- so a fold drawn through an empty map would be indistinguishable from
+-- ordinary text and the test would pass without proving anything.
+foldedSpanPerLine :: Int -> Display -> [Bool]
+foldedSpanPerLine w d =
+  [ any ((== Vty.SetTo Vty.red) . Vty.attrBackColor . snd) spans
+  | spans <- drawToSpansIn folded (w, 8) (renderDisplay (Fold (Address [])) d)
+  , any (not . all isSpace . fst) spans
+  ]
+  where
+    folded = attrMap Vty.defAttr [(foldAttr, Vty.withBackColor Vty.defAttr Vty.red)]
+
+-- | A tagged literal whose own address is not a prefix of the focus, so the
+-- fold applies — @surface`one two three four`@, long enough to break at 14.
+foldedLiteral :: Display
+foldedLiteral =
+  Display (Address [GoAlong]) $
+    ARegion
+      (Display (Address [GoAlong]) (AnObjectTerm "surface" "app" [ObjectText "one two three four"]))
 
 -- | **What the three new panes say** — `~z5dmq`'s content, decided by
 -- 'Tui.Panes' and therefore decidable here. The pty stays the authority on

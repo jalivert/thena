@@ -123,6 +123,7 @@ import Tui.Panes
   , moduleRows
   , outputRows
   , paneRowWidget
+  , paneWrap
   )
 import Tui.Database
   ( Stored (..)
@@ -817,7 +818,11 @@ draw st =
           , gapV
           , withAttr (attrName "panel") (pane "goals"     GoalsVP     (padAll 1 (renderGoals fold links)))
           , gapV
-          , withAttr (attrName "panel") (pane "machine"   MachineVP   (padAll 1 (vBox (map str (renderMachineView machine)))))
+          -- | **The machine's lines wrap like a list pane's row**, same
+          -- reason and the same settings ('paneWrap'): the engine elides a
+          -- value against its own 'Budget', which knows nothing about how
+          -- wide a quarter of this screen is.
+          , withAttr (attrName "panel") (pane "machine"   MachineVP   (padAll 1 (vBox (map (strWrapWith paneWrap) (renderMachineView machine)))))
           ]
 
     -- | **The second column, left of the three that were there** — his words,
@@ -904,7 +909,14 @@ renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
         promptLine = case turnPrompt t of
           Nothing -> []
           Just line -> [str "❯ " <+> str line]
-    outputLine accented l = marker <+> str " " <+> str l
+    -- | **The repl pane's output wraps too, and that is slightly past what he
+    -- asked for.** His report named the output pane, but what it named is a
+    -- message he could not read, and the engine's answer to a line is the same
+    -- text in both places — `:show And.elim` is twelve lines of type either
+    -- way. A prompt line and a document line are deliberately NOT wrapped:
+    -- those are lines you put a caret in, and one that occupied two screen
+    -- rows would have the editor's own single-row line jumping under it.
+    outputLine accented l = marker <+> str " " <+> strWrapWith paneWrap l
       where
         marker = if accented then withAttr (attrName "accent.output") (str "▏") else str " "
 
@@ -951,7 +963,7 @@ renderScript st inputLine =
     refusal sl
       | slOk sl = []
       | otherwise =
-          [ withAttr (attrName "script.refused") (str ("  " <> l)) | l <- slOutput sl ]
+          [ withAttr (attrName "script.refused") (strWrapWith paneWrap ("  " <> l)) | l <- slOutput sl ]
     -- | The composing line sits past the end, which is where a document's
     -- cursor is when you have not walked back into it.
     tail' = if isNothing (stScriptPos st) then [str "  " <+> inputLine] else []

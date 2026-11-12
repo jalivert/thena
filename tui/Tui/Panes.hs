@@ -7,6 +7,7 @@
 -- can hold all of it to its text, which it does.
 module Tui.Panes
   ( PaneRow (..)
+  , paneWrap
   , globalRows
   , moduleRows
   , FileKind (..)
@@ -16,8 +17,13 @@ module Tui.Panes
 
 import Data.List (intercalate, nub, sort)
 
-import Brick (Widget, str, withAttr)
+import Brick (Widget, strWrapWith, withAttr)
 import Brick.AttrMap (attrName)
+import Text.Wrap
+  ( FillStrategy (FillIndent)
+  , WrapSettings (..)
+  , defaultWrapSettings
+  )
 
 -- | One row of a list pane.
 --
@@ -131,9 +137,42 @@ outputRows (Just line) out = Heading line Nothing : map Entry out
 -- **Polymorphic in the name on purpose**: it reports no extent and owns no
 -- viewport, so it has no business naming one — and the drawing suite can then
 -- draw it without a 'Name' in scope.
+--
+-- **A row wraps rather than clipping** — `~r4gvd`, his report of 2026-11-12: /"the
+-- 'output' is clipping horizontally. Not great, I can't read the message."/
+-- These panes are a quarter of the screen each and the output pane's heading
+-- is a whole line of someone's proof-script, so a row running past the pane's
+-- edge is the ordinary case rather than the exception, and what was off the
+-- right edge was simply gone — no marker, no scroll that reaches it. See
+-- 'paneWrap' for the indent a continuation takes.
 paneRowWidget :: PaneRow -> Widget n
 paneRowWidget row = case row of
   Heading label count ->
-    withAttr (attrName "pane.heading") (str (label <> maybe "" (\n -> "  " <> show n) count))
-  Entry t -> str ("  " <> t)
-  Detail t -> withAttr (attrName "pane.detail") (str ("    " <> t))
+    withAttr (attrName "pane.heading") (wrapped (label <> maybe "" (\n -> "  " <> show n) count))
+  Entry t -> wrapped ("  " <> t)
+  Detail t -> withAttr (attrName "pane.detail") (wrapped ("    " <> t))
+  where
+    wrapped = strWrapWith paneWrap
+
+-- | How a pane's row wraps.
+--
+-- **A continuation line keeps its row's own indent and takes two columns
+-- more**, so it sits under its row's text and inside it: an entry's text
+-- starts at column 2 and its continuations at column 4, a heading's at 0 and 2.
+-- That is 'preserveIndentation' for the row's own step and 'FillIndent' 2 for
+-- the hang — word-wrap puts the preserved indentation before the fill, so the
+-- two compose rather than fighting. **A continuation of a heading is dim like
+-- the heading it belongs to**, which is what keeps it from reading as an entry
+-- under it: the attribute is the row's, not the line's.
+--
+-- **A word longer than the pane breaks mid-word, deliberately.** Nothing here
+-- is prose: a module path, a global's dotted name and a term are each one
+-- unbreakable word most of the time, and refusing to break them is the clip
+-- this is here to fix.
+paneWrap :: WrapSettings
+paneWrap =
+  defaultWrapSettings
+    { preserveIndentation = True
+    , breakLongWords = True
+    , fillStrategy = FillIndent 2
+    }
