@@ -1017,13 +1017,59 @@ things driving the session and no way to see which was about to move.
 
 **What you prove in the meantime is proved in the module's scope**, because parking
 leaves the module's imports, rule bases and concealment exactly as they were. The same
-fact is why **a second `import` is still refused while one is parked**: there is one
-set of those in force, and the parked import expects to find its own when you pick it
-up. To give a parked import up, `:resume` it and then `:abandon` it.
+fact is why **a second `import` is refused while one is parked**, which is the section
+after next.
 
 **A `yield` while the import is parked says *nothing has yielded*.** Yielding is about
 the program in front of you, and parking moved that program into the parked quest. For
 the same reason you cannot `yield` out of the lemma: it is a different program.
+
+### One import at a time, parked or in flight
+
+*Decided 2026-11-11, built MS12 phase 310; kept as it stands 2026-11-12.*
+
+**While an import is parked you cannot import anything else.** Not a second file, and
+not the module that holds the lemma you parked in order to prove. The refusal names
+the repair:
+
+```
+thena spine> import examples.demo.Demo06Trust
+the import of examples.demo.pending.Demo07Holes is parked
+  — :resume examples.demo.pending.Demo07Holes to carry on with it
+```
+
+**It is forced, not a policy.** A standing import holds the module's rule-base pool,
+its held bases and its scope concealment in the live machine, and there is one set of
+those. Leaving them in force is what makes the lemma provable in the module's own
+scope — the previous section — and a second import would displace all three, so the
+parked import would find someone else's when you picked it up.
+
+**The way out, in the order the refusals ask for it.** Finish the lemma with `qed`, or
+`:suspend` it, or `:abandon` it — a parked import cannot be picked up while a proof is
+on the wheel:
+
+```
+thena spine> :resume examples.demo.pending.Demo07Holes
+t is still being proved — :suspend or :abandon it first
+```
+
+Then `:resume` the import, and then either carry it to its end — fill the hole and
+`yield`, as the previous section shows — or give it up:
+
+```
+thena spine> :abandon
+abandoned the import of examples.demo.pending.Demo07Holes, and took 114 declarations
+```
+
+**Abandoning is not all-or-nothing**: what the file declared before it stopped is
+yours, and only the unfinished tail is lost.
+
+**What this costs you, stated plainly.** You cannot reach *outward* mid-import. If the
+lemma a module stopped for needs something you have not imported yet, you have to give
+the import up, fetch what you need, and import it again. The alternative — handing the
+pool and the scope back at the park and re-installing them at `:resume` — would allow
+the second import and would mean your lemma was proved in the session's scope rather
+than the module's, which is the thing parking exists to preserve.
 
 ### A file's header must match its path, and it is checked when you import it
 
