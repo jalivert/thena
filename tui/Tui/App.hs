@@ -1449,7 +1449,24 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
                   appendTurn st0 Nothing
                     ["the transcript for " <> stSlug stored <> " is gone from " <> databaseDir]
                 Just texts -> resumeStored st0 stored texts
-        [":script", path] -> do
+        -- | **The slug left off, said as that and not as a missing file.**
+        -- The branch below reads anything after `:script` as a path, so
+        -- without this one a forgotten slug answers /no such file: resume/.
+        [":script", "resume"] ->
+          appendTurn st0 Nothing
+            [":script resume ‹slug› takes a stored session up where its caret was"
+            , "  :script sessions lists what the project database holds"]
+        -- | **A path argument is the whole of the rest of the line, spaces
+        -- and all** — `~td887`. `:script` takes exactly one path, so there is
+        -- nothing for a space to separate, and matching @[":script", path]@
+        -- meant a path with a space in it missed every branch and reached the
+        -- engine, which answered /no such command: :script/. His own project
+        -- directory has a space in it, so every absolute path into it was in
+        -- that case. **The engine's own path arguments are split on spaces on
+        -- purpose and that is untouched** — @:consult@ takes a list of them,
+        -- where this takes one.
+        (":script" : rest@(_ : _)) -> do
+          let path = unwords rest
           ok <- openScriptFile st0 path 0
           if ok then pure () else appendTurn st0 Nothing ["no such file: " <> path]
         -- | Two more TUI-local toggles, his `.jalivert/TUI.md` #23 — same
@@ -2682,13 +2699,19 @@ scriptBarSubmit st text = case words text of
   -- rather than reassigned: once plain Enter re-runs the tail (@~bxmsc@),
   -- `rerun` would name the one gesture that re-runs nothing.
   [":script", "cut"] -> closeScriptBar >> scriptCutAndRun
-  (":script" : "save" : rest) -> scriptSave st (listToMaybe rest) False
+  (":script" : "save" : rest) -> scriptSave st (pathArg rest) False
   -- | **`save!` replaces, `save` asks** — his ruling of 2026-11-11
   -- (@~kqfbp@). The bang is only ever needed for a path the document was
   -- not opened from, because save-back never asks.
-  (":script" : "save!" : rest) -> scriptSave st (listToMaybe rest) True
+  (":script" : "save!" : rest) -> scriptSave st (pathArg rest) True
   [":script", "reload"] -> closeScriptBar >> scriptReload
-  [":script", "open", path] -> do
+  -- | **The rest of the line is the path** — `~td887`, the same rule the
+  -- REPL's own `:script ‹path›` takes. Matching one word meant
+  -- @:script open /a path/with a space.thena.script@ fell through to
+  -- 'insertScriptLine' and was written into the document as a line, which
+  -- then failed as an engine line.
+  (":script" : "open" : rest@(_ : _)) -> do
+    let path = unwords rest
     ok <- openScriptFile st path 0
     if ok
       then pure ()
@@ -2708,6 +2731,14 @@ scriptBarSubmit st text = case words text of
     liftIO (saveConfig (configOf st'))
     put st'
   _ -> insertScriptLine st text
+
+-- | **One path argument, spaces and all, or none** — `~td887`. A save took
+-- 'listToMaybe' of the words, so @:script save /a path/with a space@ wrote to
+-- @\/a@ and said so: the wrong file, named in the confirmation, which is the
+-- worst of the three doors this bug had.
+pathArg :: [String] -> Maybe FilePath
+pathArg [] = Nothing
+pathArg ws = Just (unwords ws)
 
 -- | A line typed in the bar goes into the document below the caret, and the
 -- tail re-runs behind it — the same rebuild an edit takes, so the two cannot
