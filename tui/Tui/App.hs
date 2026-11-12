@@ -60,7 +60,7 @@ import Brick.BChan (BChan, newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
-import Data.List (intercalate, isPrefixOf, isSuffixOf, sort, sortOn)
+import Data.List (intercalate, intersperse, isPrefixOf, isSuffixOf, sort, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust, isNothing, listToMaybe)
 import Data.Text (Text)
@@ -285,6 +285,25 @@ data Picker = Picker
     -- the highlight cannot be lost off either edge.
   }
 
+-- | **A pane being pulled wider or narrower by its accent bar** — `~gs8tj`,
+-- his request of 2026-11-12: /"can you make the panes resizeable by
+-- mouse-pulling on the 'accent bar'? Each one independently, but make it
+-- 'snapping' to some 'steps'."/
+--
+-- **Latched on the press and read until the release.** The pane under the
+-- pointer changes as a drag proceeds — and so does the pane's own left edge,
+-- since widening the widest pane of a column moves that column left — so
+-- neither can be used to work out how far the pointer has travelled. What
+-- does not move is the column the press landed on and the width the pane had
+-- then; every frame of the drag is computed from those two numbers.
+data Drag = Drag
+  { dragPane  :: Name
+  , dragFrom  :: Int
+    -- ^ the absolute screen column the press landed on.
+  , dragWidth :: Int
+    -- ^ the pane's width at the moment of the press.
+  }
+
 data St = St
   { stTurns       :: [Turn]  -- ^ forward chronological — oldest first, an
                               -- append-only document, his correction 2026-09-29
@@ -418,6 +437,19 @@ data St = St
     -- the index, replaces this one entry and writes it back, so two TUIs open
     -- on the same project do not drop each other's sessions, and there is no
     -- second copy of the index to keep true.
+  , stPaneWidths :: Map.Map Name Int
+    -- ^ **how wide each of the six small panes is, in columns** — `~gs8tj`.
+    -- Filled at startup from the terminal's own width ('defaultPaneWidth')
+    -- and then only ever by a drag, so a pane he has pulled to a width keeps
+    -- it; a pane he has not is the width it always was.
+    --
+    -- **Absolute columns rather than a percentage, and that is the point of
+    -- the feature**: a percentage is a rule about the screen, and what he
+    -- asked for is a width he chose. 'draw' shrinks them proportionally if
+    -- the terminal is too narrow to honour them, and does not write that back.
+  , stDrag :: Maybe Drag
+    -- ^ a resize in progress — see 'Drag'. 'Nothing' between drags, which is
+    -- almost always.
   , stPicker :: Maybe Picker
     -- ^ **the session picker, and while it is open it owns the keyboard** —
     -- see 'Picker' and 'handlePickerEvent'. It is the one widget in the TUI
@@ -508,6 +540,8 @@ runTui = do
         , stScriptNote  = Nothing
         , stScriptStale = Nothing
         , stStored      = Nothing
+        , stPaneWidths  = Map.empty
+        , stDrag        = Nothing
         , stPicker      = Nothing
         , stEscRun      = Nothing
         , stInputExtent = Nothing
@@ -562,6 +596,53 @@ appStart = do
   vty <- getVtyHandle
   liftIO (V.setMode (V.outputIface vty) V.Mouse True)
   liftIO requestBlinkingCursor
+  -- | **The six pane widths, from the terminal's real width** — `~gs8tj`.
+  -- Here rather than in 'runTui' because this runs with a vty in hand and
+  -- before the first frame is drawn, so nothing ever renders against an
+  -- unfilled map.
+  (w, _) <- liftIO (V.displayBounds (V.outputIface vty))
+  st <- get
+  put st { stPaneWidths = Map.fromList [(n, defaultPaneWidth w) | n <- resizablePanes] }
+
+-- | The six panes a drag can resize, in two columns of three — the layout
+-- `~z5dmq` settled. **Order matters here**: it is the column structure, and
+-- 'draw' and the clamp both read it rather than repeating the grouping.
+paneColumnNames :: ([Name], [Name])
+paneColumnNames = ([GlobalsVP, ModulesVP, OutputVP], [ProofTermVP, GoalsVP, MachineVP])
+
+resizablePanes :: [Name]
+resizablePanes = fst paneColumnNames <> snd paneColumnNames
+
+-- | **What a pane is wide before anybody drags it: a quarter of the screen,
+-- which is what `~z5dmq` chose.** It was two nested percentages before
+-- (52% for the pair of columns, then half of that each); this is the same
+-- arithmetic done once, in columns, so that a dragged width and a default
+-- width are the same kind of number.
+defaultPaneWidth :: Int -> Int
+defaultPaneWidth screen = max minPaneWidth (((screen - 2) * 52 `div` 100 - 1) `div` 2)
+
+-- | **A drag snaps to a multiple of this** — his instruction: /"make it
+-- 'snapping' to some 'steps' not like infinite precision (pixel-perfect)
+-- that doesn't make sense anyway. Let it snap on like 10 pixels or
+-- something."/ The unit here is a terminal cell and not a pixel, so ten of
+-- them would be a fifth of a pane; four is a step you can see happen and
+-- still lands a pane where you meant it.
+--
+-- **The snap is to an absolute multiple, not to a multiple of the distance
+-- dragged**, so two panes pulled to "about the same" width are the same
+-- width rather than four columns apart.
+paneWidthStep :: Int
+paneWidthStep = 4
+
+-- | Narrower than this and a pane holds nothing worth drawing: @modules  1@
+-- is twelve columns with no room for a module under it.
+minPaneWidth :: Int
+minPaneWidth = 12
+
+-- | **What the document keeps, whatever the panes are doing.** A drag cannot
+-- take the screen away from the thing being edited.
+docMinWidth :: Int
+docMinWidth = 24
 
 requestBlinkingCursor :: IO ()
 requestBlinkingCursor = hPutStr stdout "\ESC[1 q" >> hFlush stdout
@@ -734,7 +815,6 @@ draw st =
     -- convention is a thin stage gap both ways. Left at the ambient (base)
     -- attr rather than any pane's "panel" attr, same as the stage itself.
     gapH = hLimit 1 (fill ' ')
-    gapV = vLimit 1 (fill ' ')
 
     -- | An append-only document, not a fixed-position input row — his
     -- correction, 2026-09-29: the prompt used to be pinned to the pane's
@@ -811,35 +891,63 @@ draw st =
     -- came out at 25% of the remaining 75% and the three old panes lost a
     -- third of their width to the three new ones. Limiting the pair to half
     -- the screen and then halving that gives six panes of one width.
-    paneColumns = hLimitPercent 52 (hBox [listColumn, gapH, sideColumn])
-    sideColumn =
-        vBox
-          [ withAttr (attrName "panel") (pane "proofterm" ProofTermVP (padAll 1 (renderDevelopment fold links)))
-          , gapV
-          , withAttr (attrName "panel") (pane "goals"     GoalsVP     (padAll 1 (renderGoals fold links)))
-          , gapV
-          -- | **The machine's lines wrap like a list pane's row**, same
-          -- reason and the same settings ('paneWrap'): the engine elides a
-          -- value against its own 'Budget', which knows nothing about how
-          -- wide a quarter of this screen is.
-          , withAttr (attrName "panel") (pane "machine"   MachineVP   (padAll 1 (vBox (map (strWrapWith paneWrap) (renderMachineView machine)))))
-          ]
+    -- | **Each of the six panes is as wide as it has been pulled** —
+    -- `~gs8tj`, his request of 2026-11-12, and `~z5dmq`'s two nested
+    -- percentages are gone with it. Three consequences, all of them his
+    -- choice of /"each one independently"/ over one width per column:
+    --
+    --   * a column is as wide as its widest pane, and the narrower ones leave
+    --     backdrop to their right — a column is no longer a rectangle;
+    --   * the second column's own position depends only on its own widths, so
+    --     pulling a pane of the first column never moves the second;
+    --   * the document takes whatever is left, which is why it is the one
+    --     thing here with no width of its own.
+    --
+    -- **The clamp reads the terminal's width and does not write it back.** A
+    -- window too narrow to honour six chosen widths shrinks them in
+    -- proportion for as long as it is narrow; widen it again and the widths
+    -- he chose are still the widths he chose.
+    paneColumns = Widget Fixed Greedy $ do
+      ctx <- getContext
+      let spare = max (2 * minPaneWidth) (ctx ^. availWidthL - docMinWidth - 1)
+          (first', second') = paneColumnNames
+          wide ns = maximum (minPaneWidth : map storedWidth ns)
+          (w1, w2) = (wide first', wide second')
+          scale x
+            | w1 + w2 <= spare = x
+            | otherwise = max minPaneWidth (x * spare `div` (w1 + w2))
+          drawn n = hLimit (max minPaneWidth (scale (storedWidth n)))
+      render
+        (hBox
+          [ vBox (intersperse gapRow [drawn n (paneOf n) | n <- first'])
+          , gapH
+          , vBox (intersperse gapRow [drawn n (paneOf n) | n <- second'])
+          ])
 
-    -- | **The second column, left of the three that were there** — his words,
-    -- and the reading taken is the literal one: the new panes sit between the
-    -- document and the existing column rather than at the screen's far left.
-    -- Flipping that is one line here if he meant the other.
-    listColumn =
-      hLimitPercent 50 $
-        vBox
-          [ withAttr (attrName "panel") (pane "globals" GlobalsVP (paneBody (globalRows (globalGroups st))))
-          , gapV
-          , withAttr (attrName "panel") (pane "modules" ModulesVP (paneBody (moduleRows (moduleEntries st) (fileEntries st))))
-          , gapV
-          , withAttr (attrName "panel") (pane "output"  OutputVP  (paneBody (outputRows focusText focusOut)))
-          ]
-      where
-        (focusText, focusOut) = lineInFocus st
+    storedWidth = paneWidthOf st
+
+    -- | **A spacer row of one column, not a greedy fill.** The row this
+    -- replaced was @vLimit 1 (fill ' ')@, as wide as it was allowed to be,
+    -- and a greedy row inside a column of chosen widths makes the column
+    -- greedy too — the second column then has nowhere left to be drawn.
+    gapRow = str " "
+
+    -- | Which pane is which, by its 'Name', so that the layout above is the
+    -- column structure and nothing else.
+    paneOf n = withAttr (attrName "panel") $ case n of
+      GlobalsVP -> pane "globals" GlobalsVP (paneBody (globalRows (globalGroups st)))
+      ModulesVP -> pane "modules" ModulesVP (paneBody (moduleRows (moduleEntries st) (fileEntries st)))
+      OutputVP -> pane "output" OutputVP (paneBody (outputRows focusText focusOut))
+      ProofTermVP -> pane "proofterm" ProofTermVP (padAll 1 (renderDevelopment fold links))
+      GoalsVP -> pane "goals" GoalsVP (padAll 1 (renderGoals fold links))
+      -- | **The machine's lines wrap like a list pane's row**, same
+      -- reason and the same settings ('paneWrap'): the engine elides a
+      -- value against its own 'Budget', which knows nothing about how
+      -- wide a quarter of this screen is.
+      MachineVP -> pane "machine" MachineVP (padAll 1 (vBox (map (strWrapWith paneWrap) (renderMachineView machine))))
+      _ -> emptyWidget
+
+    (focusText, focusOut) = lineInFocus st
 
     -- | A list pane's body. **One blank row when there is nothing**, because a
     -- viewport over an empty 'vBox' has no height to scroll and the pane's
@@ -1493,6 +1601,134 @@ handleEventInner ev = do
 
 handleEventFor :: BrickEvent Name AppEvent -> EventM Name St ()
 handleEventFor ev = do
+  resized <- handleResize ev
+  if resized then pure () else handleEventForKeys ev
+
+-- | **A pane being pulled wider or narrower by its accent bar** — `~gs8tj`.
+-- Returns whether it took the event, so that everything it does not take
+-- reaches the keyboards below exactly as it did before.
+--
+-- **The bar follows the pointer, so pulling left widens.** A column is as
+-- wide as its widest pane and the document takes what is left, so widening
+-- the widest pane of a column moves that column's left edge — and the bar
+-- with it — towards the pointer. Pulling right therefore narrows. The one
+-- case where the bar does not move under the hand is a pane that is not its
+-- column's widest: it still changes width, but the column's edge is somebody
+-- else's.
+--
+-- **Both shapes of mouse event are handled, because brick sends both.**
+-- Measured under a pty, 2026-11-12: a press inside a pane arrives as
+-- 'MouseDown' with the column measured from that pane's own extent (the
+-- panes are 'clickable'), and a press on the one-column stage gap between
+-- panes belongs to no clickable extent and arrives raw, in absolute screen
+-- coordinates. The same measurement is what established that a drag arrives
+-- at all — vty asks for @ESC[?1002h@, button-event tracking, so motion with
+-- the button held comes through as a run of 'MouseDown's at successive
+-- columns.
+handleResize :: BrickEvent Name AppEvent -> EventM Name St Bool
+handleResize ev = case ev of
+  -- | **A press inside a pane, which is the bar when its column is 0.** The
+  -- event's own name says which pane, and that is the whole of the hit test:
+  -- **the three panes of a column all have their bar in the same screen
+  -- column**, so a hit test by column alone resizes whichever of the three
+  -- comes first in the list. Measured, 2026-11-12: pulling the machine
+  -- pane's bar narrowed the proof-term pane.
+  MouseDown n V.BLeft _ (Location (c, _)) -> do
+    left <- paneLeft n
+    st <- get
+    case (stDrag st, left) of
+      (Just d, Just l) -> resizeTo d (l + c) >> pure True
+      (Just _, Nothing) -> pure True
+      (Nothing, Just l) | c == 0, n `elem` resizablePanes -> startDrag n l >> pure True
+      _ -> pure False
+  -- | **A press on the stage gap, which belongs to no clickable widget and so
+  -- arrives in absolute screen coordinates.** Taking it doubles a one-column
+  -- target ('▎' is one column — his correction of 2026-09-29, a full cell read
+  -- as too thick) and costs no other gesture, because nothing else is drawn
+  -- there. Here the row is needed, and here it is reliable: an extent and a
+  -- raw event are both absolute.
+  VtyEvent (V.EvMouseDown c r V.BLeft _) -> do
+    st <- get
+    case stDrag st of
+      Just d -> resizeTo d c >> pure True
+      Nothing -> do
+        hit <- barRightOf c r
+        case hit of
+          Just n -> startDrag n c >> pure True
+          Nothing -> pure False
+  MouseUp _ (Just V.BLeft) _ -> release
+  VtyEvent (V.EvMouseUp _ _ (Just V.BLeft)) -> release
+  _ -> pure False
+  where
+    startDrag n from = do
+      st <- get
+      put st { stDrag = Just (Drag n from (paneWidthOf st n)) }
+    release = do
+      st <- get
+      case stDrag st of
+        Nothing -> pure False
+        Just _ -> put st { stDrag = Nothing } >> pure True
+
+paneLeft :: Name -> EventM Name St (Maybe Int)
+paneLeft n = fmap (locationColumn . extentUpperLeft) <$> lookupExtent n
+
+-- | The pane whose accent bar is in the column just right of @(col, row)@ —
+-- the rectangle test the gap press needs, and the reason a pane's extent is
+-- read whole rather than for its left edge alone.
+barRightOf :: Int -> Int -> EventM Name St (Maybe Name)
+barRightOf col row = do
+  found <- mapM beside resizablePanes
+  pure (listToMaybe [n | Just n <- found])
+  where
+    beside n = do
+      ext <- lookupExtent n
+      pure $ case ext of
+        Just e
+          | locationColumn (extentUpperLeft e) == col + 1
+          , let top = locationRow (extentUpperLeft e)
+          , row >= top
+          , row < top + snd (extentSize e) ->
+              Just n
+        _ -> Nothing
+
+paneWidthOf :: St -> Name -> Int
+paneWidthOf st n = Map.findWithDefault minPaneWidth n (stPaneWidths st)
+
+-- | One frame of a drag: the pane's width is what it was at the press, plus
+-- however far the pointer has travelled back towards the screen's left edge,
+-- snapped and then held between 'minPaneWidth' and whatever leaves the
+-- document 'docMinWidth'.
+resizeTo :: Drag -> Int -> EventM Name St ()
+resizeTo d col = do
+  st <- get
+  vty <- getVtyHandle
+  (screen, _) <- liftIO (V.displayBounds (V.outputIface vty))
+  let pulled = dragWidth d - (col - dragFrom d)
+      capped = min (maxPaneWidth st (dragPane d) screen) (snapWidth pulled)
+  put st { stPaneWidths = Map.insert (dragPane d) capped (stPaneWidths st) }
+
+-- | To the nearest multiple of 'paneWidthStep', never below 'minPaneWidth' —
+-- which is itself a multiple of it, so the floor is on the grid too.
+snapWidth :: Int -> Int
+snapWidth w = max minPaneWidth (((w + paneWidthStep `div` 2) `div` paneWidthStep) * paneWidthStep)
+
+-- | How wide this pane may be pulled: what is left of the screen once the
+-- other column's widest pane, the two stage gaps, the layout's own margins
+-- and the document's minimum have had their share.
+--
+-- **It does not consider this pane's own neighbours**, and does not need to:
+-- a pane narrower than one beside it costs the column nothing, and a column
+-- too wide for the window is what 'draw''s proportional clamp is for.
+maxPaneWidth :: St -> Name -> Int -> Int
+maxPaneWidth st n screen =
+  max minPaneWidth (screen - 2 - 1 - 1 - docMinWidth - otherWide)
+  where
+    (c1, c2) = paneColumnNames
+    other = if n `elem` c1 then c2 else c1
+    otherWide = maximum (minPaneWidth : map (paneWidthOf st) other)
+
+handleEventForKeys :: BrickEvent Name AppEvent -> EventM Name St ()
+handleEventForKeys ev = do
   st <- get
   case (stPicker st, stScriptBar st) of
     -- | **The picker is checked first, and that is what makes it modal** —
