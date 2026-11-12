@@ -99,7 +99,7 @@ stuckCases =
 
 offerOf :: [Grammar] -> String -> String -> IO OfferView
 offerOf gs before after =
-  case displayOffer gs "LC" Nothing [WrittenText before] [WrittenText after] of
+  case displayOffer gs (ch "LC") Nothing [WrittenText before] [WrittenText after] of
     Right o -> pure o
     Left p  -> assertFailure ("displayOffer refused the fixture: " <> show p)
 
@@ -139,6 +139,13 @@ source =
     , "  app                   -> ( M N )"
     ]
 
+-- | __The fixture's own module namespace__ (MS12 phase 313). @source@ is
+-- @module Charting where@, and a module's declarations live under the name its
+-- header gives it — so the languages this file is written against are
+-- @Charting.LC@ and @Charting.Ty@, and a view names a production in full.
+ch :: String -> String
+ch = ("Charting." ++)
+
 loaded :: IO [Grammar]
 loaded = do
   (s0, _) <- startingSession
@@ -163,7 +170,7 @@ parseCases =
   where
     agree name text = testCase name $ do
       gs <- loaded
-      mismatchParse gs "LC" text
+      mismatchParse gs (ch "LC") text
 
 mismatchParse :: [Grammar] -> String -> String -> IO ()
 mismatchParse gs lang text
@@ -242,7 +249,7 @@ offerCases =
   where
     agree name before after = testCase name $ do
       gs <- loaded
-      mismatchOffer gs "LC" before after
+      mismatchOffer gs (ch "LC") before after
 
 mismatchOffer :: [Grammar] -> String -> String -> String -> IO ()
 mismatchOffer gs lang before after
@@ -310,13 +317,14 @@ regionCases =
       displayOffer [] "LC" Nothing [] [] @?= Left (NoSuchLanguage "LC")
   , testCase "so is a production the language does not have" $ do
       gs <- loaded
-      displayOffer gs "LC" (Just "nope") [] [] @?= Left (NoSuchProduction "LC" "nope")
+      displayOffer gs (ch "LC") (Just "nope") [] []
+        @?= Left (NoSuchProduction (ch "LC") "nope")
   , testCase "an explicit production starts there instead of at the language" $ do
       gs <- loaded
       -- At @app@ the region must open with @(@; at the language, @\955@ is
       -- reachable too, because @abs@ is a term as well.
-      opts <- optionsOf gs "LC" (Just "app") [] []
-      whole <- optionsOf gs "LC" Nothing [] []
+      opts <- optionsOf gs (ch "LC") (Just "app") [] []
+      whole <- optionsOf gs (ch "LC") Nothing [] []
       assertBool "app offers no more than LC does" (all (`elem` whole) opts)
       assertBool "and LC offers something app does not" (opts /= whole)
   , testCase "a placeholder as a run and as its character are the same thing" $ do
@@ -325,8 +333,8 @@ regionCases =
       -- 'WrittenPlaceholder'; one holding only text puts 'placeholderChar' in.
       -- If those ever stopped agreeing, a region would read differently
       -- depending on which kind of frontend sent it.
-      asRun <- optionsOf gs "LC" Nothing [WrittenText "( ", WrittenPlaceholder] []
-      asChar <- optionsOf gs "LC" Nothing [WrittenText ("( " <> [placeholderChar])] []
+      asRun <- optionsOf gs (ch "LC") Nothing [WrittenText "( ", WrittenPlaceholder] []
+      asChar <- optionsOf gs (ch "LC") Nothing [WrittenText ("( " <> [placeholderChar])] []
       asRun @?= asChar
   , testCase "and that holds to the right of the cursor, where the flag is read" $ do
       gs <- loaded
@@ -338,8 +346,8 @@ regionCases =
       -- rather than in it, and was then answered about what may stand beside a
       -- box — nothing, wherever the production has no room for it.
       let after = " . " <> [placeholderChar] <> " )"
-      asRun <- optionsOf gs "LC" Nothing [WrittenText "( \955 x : "] (WrittenPlaceholder : [WrittenText after])
-      asChar <- optionsOf gs "LC" Nothing [WrittenText "( \955 x : "] [WrittenText ([placeholderChar] <> after)]
+      asRun <- optionsOf gs (ch "LC") Nothing [WrittenText "( \955 x : "] (WrittenPlaceholder : [WrittenText after])
+      asChar <- optionsOf gs (ch "LC") Nothing [WrittenText "( \955 x : "] [WrittenText ([placeholderChar] <> after)]
       asRun @?= asChar
       asRunFlag <- replacesAt gs [WrittenText "( \955 x : "] (WrittenPlaceholder : [WrittenText after])
       asCharFlag <- replacesAt gs [WrittenText "( \955 x : "] [WrittenText ([placeholderChar] <> after)]
@@ -356,15 +364,15 @@ regionCases =
       gs <- loaded
       -- Computed as though the placeholder were not there, so the box does not
       -- count as text already written.
-      inBox <- optionsOf gs "LC" Nothing [WrittenText "( "] [WrittenPlaceholder, WrittenText " )"]
-      without <- optionsOf gs "LC" Nothing [WrittenText "( "] [WrittenText " )"]
+      inBox <- optionsOf gs (ch "LC") Nothing [WrittenText "( "] [WrittenPlaceholder, WrittenText " )"]
+      without <- optionsOf gs (ch "LC") Nothing [WrittenText "( "] [WrittenText " )"]
       inBox @?= without
   , testCase "and a splice stands where a placeholder does" $ do
       gs <- loaded
       -- A splice fills a slot exactly as a placeholder does, so what may follow
       -- it is what may follow a filled slot.
-      spliced <- optionsOf gs "LC" Nothing [WrittenText "( ", WrittenSplice] []
-      held <- optionsOf gs "LC" Nothing [WrittenText "( ", WrittenPlaceholder] []
+      spliced <- optionsOf gs (ch "LC") Nothing [WrittenText "( ", WrittenSplice] []
+      held <- optionsOf gs (ch "LC") Nothing [WrittenText "( ", WrittenPlaceholder] []
       spliced @?= held
   , testCase "the splices of a region are numbered in order, from zero" $ do
       gs <- loaded
@@ -374,20 +382,21 @@ regionCases =
       -- does. 'displayOffer' splits its region at the cursor and numbers the
       -- two halves as one; nothing about that is checkable there, and here it
       -- is.
-      displayParse gs "LC" Nothing [WrittenText "( ", WrittenSplice, WrittenText " ", WrittenSplice, WrittenText " )"]
-        @?= Right (ANode "LC.app" [ASpliceOf 0, ASpliceOf 1])
+      displayParse gs (ch "LC") Nothing [WrittenText "( ", WrittenSplice, WrittenText " ", WrittenSplice, WrittenText " )"]
+        @?= Right (ANode (ch "LC.app") [ASpliceOf 0, ASpliceOf 1])
   , testCase "and a written term beside a splice does not take a number" $ do
       gs <- loaded
-      displayParse gs "LC" Nothing [WrittenText "( x ", WrittenSplice, WrittenText " )"]
-        @?= Right (ANode "LC.app" [ANode "LC.var" [ATokenView "x"], ASpliceOf 0])
+      displayParse gs (ch "LC") Nothing [WrittenText "( x ", WrittenSplice, WrittenText " )"]
+        @?= Right (ANode (ch "LC.app") [ANode (ch "LC.var") [ATokenView "x"], ASpliceOf 0])
   , testCase "an explicit production reads at that production" $ do
       gs <- loaded
       -- @T@ is @Ty@'s own nonterminal, so @\953@ reads there and not at @LC@.
-      displayParse gs "Ty" (Just "Ty.base") [WrittenText "\953"] @?= Right (ANode "Ty.base" [])
+      displayParse gs (ch "Ty") (Just (ch "Ty.base")) [WrittenText "\953"]
+        @?= Right (ANode (ch "Ty.base") [])
   ]
 
 replacesAt :: [Grammar] -> [Written] -> [Written] -> IO Bool
-replacesAt gs before after = case displayOffer gs "LC" Nothing before after of
+replacesAt gs before after = case displayOffer gs (ch "LC") Nothing before after of
   Left p  -> assertFailure ("displayOffer refused a fixture: " <> show p) >> pure False
   Right o -> pure (offeredReplaces o)
 
@@ -425,16 +434,16 @@ productionCases =
       -- says what the grammar says, so a frontend listing them sees one name
       -- twice and two different shapes; which of the two it offers a reader is
       -- the frontend's to decide.
-      named gs [] [] >>= (@?= ["LC.var", "LC.abs", "LC.app", "LC.subst.w", "LC.subst.w"])
+      named gs [] [] >>= (@?= map ch ["LC.var", "LC.abs", "LC.app", "LC.subst.w", "LC.subst.w"])
   , testCase "with their shapes, which is what a list shows" $ do
       gs <- loaded
-      shapeOf gs [] [] "LC.app" >>= (@?= Just ["(", "LC", "LC", ")"])
+      shapeOf gs [] [] (ch "LC.app") >>= (@?= Just ["(", ch "LC", ch "LC", ")"])
   , -- **His own example, exactly.** @app: ( LC LC )@ in the list, @( █ █ )@ in
     -- the buffer — and the boxes arrive as runs, so the editor knows where they
     -- are without scanning the text it just inserted.
     testCase "and inserting one writes its terminals and leaves boxes" $ do
       gs <- loaded
-      insertOf gs [] [] "LC.app"
+      insertOf gs [] [] (ch "LC.app")
         >>= (@?= Just
               [ WrittenText "( "
               , WrittenPlaceholder
@@ -445,7 +454,7 @@ productionCases =
   , testCase "a binding form's binder is a box too, being a slot" $ do
       gs <- loaded
       -- @abs@ is @( λ x : T . E[x] )@: three slots, one of them a token class.
-      insertOf gs [] [] "LC.abs"
+      insertOf gs [] [] (ch "LC.abs")
         >>= (@?= Just
               [ WrittenText "( λ "
               , WrittenPlaceholder
@@ -462,7 +471,7 @@ productionCases =
     -- own can.
     testCase "a production that could not be finished here is not offered" $ do
       gs <- loaded
-      named gs [WrittenText "( "] [WrittenText " )"] >>= (@?= ["LC.abs", "LC.app"])
+      named gs [WrittenText "( "] [WrittenText " )"] >>= (@?= map ch ["LC.abs", "LC.app"])
   , -- **The crossing, and it is the assertion worth having here.** A production
     -- may begin at the cursor only if its opening symbol may be written there,
     -- so every offered production's first symbol has to be among the options the
@@ -476,7 +485,7 @@ productionCases =
             []    -> ""
           at (before, after) = do
             ps <- offered gs before after
-            os <- optionsOf gs "LC" Nothing before after
+            os <- optionsOf gs (ch "LC") Nothing before after
             pure [ (productionName p, opening p) | p <- ps, opening p `notElem` os ]
       bad <- concat <$> mapM at
         [ ([], [])
@@ -487,10 +496,11 @@ productionCases =
       bad @?= []
   , testCase "and inside a Ty slot it is Ty's productions, not LC's" $ do
       gs <- loaded
-      named gs [WrittenText "( λ x : "] [WrittenText " . x )"] >>= (@?= ["Ty.base", "Ty.arrow"])
+      named gs [WrittenText "( λ x : "] [WrittenText " . x )"]
+        >>= (@?= map ch ["Ty.base", "Ty.arrow"])
   ]
   where
-    offered gs before after = case displayOffer gs "LC" Nothing before after of
+    offered gs before after = case displayOffer gs (ch "LC") Nothing before after of
       Left p  -> assertFailure ("displayOffer refused a fixture: " <> show p) >> pure []
       Right o -> pure (offeredProductions o)
     named gs before after = map productionName <$> offered gs before after

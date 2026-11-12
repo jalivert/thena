@@ -19,15 +19,15 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=))
 
-import Thena.Core.Term (rootName)
 import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadProofFile, startingSession)
+import Thena.Declared (named)
 import Thena.Render
-  ( rendering
+  ( renderingIn
   ,renderCore)
 
 tests :: TestTree
@@ -43,12 +43,12 @@ tests =
       -- stuck.
     , testCase "a well-typed term is a value or it steps" $ do
         st <- statementOf "progress"
-        st @?= Just "∀ (t : Term.Term) (T : Ty.Ty) -> HasType.HasType t T -> Or.Or (Value.Value t) (Steps t)"
+        st @?= Just "∀ (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)"
 
       -- …and what @Steps@ means, so the conclusion cannot be hollowed out.
     , testCase "and stepping really is the existential" $ do
         st <- statementOf "Steps"
-        st @?= Just "Term.Term -> Type₀"
+        st @?= Just "Term -> Type₀"
 
       -- **The three lemmas that produce a step**, asserted as present rather
       -- than by their rendered types. Each concludes with a @Sigma@ whose second
@@ -58,7 +58,9 @@ tests =
       -- the elaborator's output shape, not the theorem.
     , testCase "and the three lemmas that produce a step are there" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (machineOf s)) . rootName)
+        -- **Under the file's own module namespace** (MS12 phase 313).
+        map (isJust . flip lookupDefinition (globals (machineOf s))
+                    . named . ("examples.Progress." ++))
             ["ifSteps", "predSteps", "isZeroSteps"]
           @?= [True, True, True]
 
@@ -86,5 +88,5 @@ tests =
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore (rendering [] (names (machineOf s))) [] . definitionType
-               <$> lookupDefinition (rootName n) (globals (machineOf s)) )
+      pure ( renderCore (renderingIn (machineOf s)) [] . definitionType
+               <$> lookupDefinition (named ("examples.Progress." ++ n)) (globals (machineOf s)) )

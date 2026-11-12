@@ -62,7 +62,7 @@ import Thena.Global.Env (GlobalEnv)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Build (skeletonOf)
 import Thena.Language.Grammar
-  (GProduction (..), Grammar (..), builtInTags, earleyRules, grammarForTag)
+  (GProduction (..), Grammar (..), builtInTags, earleyRules, grammarForTag, grammarKey)
 import qualified Thena.Instral.Ops as Op
 import Thena.Instral.Ops
   ( AnswerKind (..)
@@ -1521,15 +1521,23 @@ objectGrammar rd = grammarForTag (readingScope rd) (readingGrammars rd)
 productionsOf :: Grammar -> [String]
 productionsOf gr = [ nameWord (gproductionName p) | p <- grammarProductions gr ]
 
+--
+-- **THE PARSER IS KEYED BY THE GRAMMAR'S OWN NAME, NOT BY THE WRITTEN TAG —
+-- MS12 PHASE 313.** The two were the same thing while every module declared at
+-- the root; a language lives under its module's namespace now, so a rule file
+-- writing @LC`( f g )`@ started the parse at a nonterminal with no rules and
+-- every region came back stuck at character 0 with nothing expected.
+-- @objectGrammar@ has already resolved the written word to the grammar, and
+-- 'Thena.Language.Grammar.grammarKey' is what the rules are built under.
 startAt :: Grammar -> String -> Maybe String -> Earley.Start
-startAt gr tag = maybe (Earley.StartAt tag) rule
+startAt gr _ = maybe (Earley.StartAt (grammarKey gr)) rule
   where
     rule w = case [ nameDotted (gproductionName p)
                   | p <- grammarProductions gr, nameWord (gproductionName p) == w ] of
       n : _ -> Earley.StartRule n
       -- Cannot arise: the caller has already refused a word this grammar has
       -- no production for.
-      []    -> Earley.StartAt tag
+      []    -> Earley.StartAt (grammarKey gr)
 
 -- | A region's text as parser pieces, and the names its splices bind or read.
 --

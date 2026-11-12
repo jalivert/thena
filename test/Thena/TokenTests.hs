@@ -133,7 +133,7 @@ accepted =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 (snd good)
           env = globals (machineOf s1)
-          value g = whnf env [] . definitionBody <$> lookupDefinition (rootName g) env
+          value g = whnf env [] . definitionBody <$> lookupDefinition (named ("Good." ++ g)) env
       map value ["ident", "digit", "numeral", "again"]
         @?= map Just
           [ App (Primitive (LRegex "[a-z][a-zA-Z0-9']*")) (rooted "String")
@@ -161,7 +161,8 @@ refused =
       , "t : Token Bool"
       , "t = /x/"
       ]
-      (TokenClassRefused (rootName "t") (TokenTypeUnsupported (Canonical (named "Bool.Bool") [] [])))
+      (TokenClassRefused (named "M.t")
+         (TokenTypeUnsupported (Canonical (named "M.Bool.Bool") [] [])))
   , klass "the regex does not parse: a stray metacharacter"
       ["f : Token String", "f = /a{3}/"]
       (refusedRegex "f" "a{3}" (RegexUnexpected 1 '{'))
@@ -176,17 +177,20 @@ refused =
       (refusedRegex "d" "[z-a]" (RegexReversedRange 3 'z' 'a'))
   , klass "it matches the empty string"
       ["b : Token String", "b = /a*/"]
-      (TokenClassRefused (rootName "b") (TokenMatchesEmpty "a*"))
+      (TokenClassRefused (named "M.b") (TokenMatchesEmpty "a*"))
   , klass "it accepts something that is not a Char"
       ["e : Token Char", "e = /ab|c/"]
-      (TokenClassRefused (rootName "e") (TokenNotIncluded "ab|c" (rootName "Char") "ab"))
+      (TokenClassRefused (named "M.e") (TokenNotIncluded "ab|c" (rootName "Char") "ab"))
   , klass "it accepts something that is not an Int, and says the shortest"
       ["n : Token Int", "n = /[a-z]+/"]
-      (TokenClassRefused (rootName "n") (TokenNotIncluded "[a-z]+" (rootName "Int") "a"))
+      (TokenClassRefused (named "M.n") (TokenNotIncluded "[a-z]+" (rootName "Int") "a"))
   ]
   where
     klass title body e = ((title, unlines ("module M where" : "" : body)), e)
-    refusedRegex g src r = TokenClassRefused (rootName g) (TokenRegexRefused src r)
+    -- **Under the fixture module's namespace** (MS12 phase 313): the fixture is
+    -- @module M where@ and a module's declarations live under its own name.
+    refusedRegex g src r =
+      TokenClassRefused (named ("M." ++ g)) (TokenRegexRefused src r)
 
 refusals :: [TestTree]
 refusals =

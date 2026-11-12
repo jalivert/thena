@@ -84,6 +84,7 @@ import Thena.Core.Term
   , freeVars
   , fresh
   , open
+  , nameFromText
   )
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor
@@ -247,12 +248,12 @@ renderResponse :: Session -> Response -> [String]
 renderResponse s resp = let ren = renderingOf s in case resp of
   Blank          -> []
   RenderedSurface t -> [renderSurface t]
-  ParsedObject t -> [renderTree t]
+  ParsedObject t -> [renderTreeIn ren t]
   ParsingEntered lang ->
     [ "each line is an " ++ lang ++ " term: Tab shows what fits at the cursor, "
         ++ [Earley.placeholderChar] ++ " is a part not written yet, :done leaves" ]
   ParsingLeft lang -> ["done parsing " ++ lang]
-  ObjectUnparsed lang text why -> [renderUnparsed lang text why]
+  ObjectUnparsed lang text why -> [renderUnparsedIn ren lang text why]
   Rendered t     -> [renderCore ren (contextOf s) t]
   RenderedDev p  -> [renderPartial ren (contextOf s) p]
   Shown c        -> [renderCursor ren c]
@@ -2724,12 +2725,32 @@ sortPhrase ren s = article word
 -- | A reading, as the production names applied to their slots (MS6 phase
 -- 102): @abs(x, base, var(x))@. A class's match is its text, a hole is @?@.
 renderTree :: Earley.Tree -> String
-renderTree t = case t of
-  Earley.Node n [] -> n
-  Earley.Node n cs -> n ++ "(" ++ intercalate ", " (map renderTree cs) ++ ")"
+renderTree = renderTreeIn (rendering [] 0)
+
+-- | __The same, written where the reader stands__ (MS12 phase 313).
+--
+-- **A production's name is the constructor's name**, so it shortens exactly as
+-- any other name does: a language lives under its module's namespace now, and
+-- @Tm.cond(…)@ is what a reader with that module opened writes, where the whole
+-- path @a.b.C.Tm.cond(…)@ is what they would have to write without it.
+-- 'nameString' is the one spelling, asked here as everywhere.
+--
+-- **The node name comes back as text and goes out as text**: the parser is keyed
+-- by the dotted name, so this reads it with 'nameFromText' and keeps it verbatim
+-- where nothing answers — a hand-built rule in a test has no environment and no
+-- scope, which is what 'renderTree' is.
+renderTreeIn :: Rendering -> Earley.Tree -> String
+renderTreeIn ren t = case t of
+  Earley.Node n [] -> word n
+  Earley.Node n cs ->
+    word n ++ "(" ++ intercalate ", " (map (renderTreeIn ren) cs) ++ ")"
   Earley.Token x -> x
   Earley.PlaceholderAt _ -> [Earley.placeholderChar]
   Earley.SpliceOf k -> "${" ++ show k ++ "}"
+  where
+    word n = case nameString ren (nameFromText n) of
+      "" -> n
+      w  -> w
 
 -- | Why a tagged term literal is not one term of its language. Shared by the
 -- surface's reader and the development calculus's (MS6 phase 110), so a region
@@ -2761,24 +2782,51 @@ renderObjectError e = case e of
 -- | Why an object term did not parse, in @ms6\/SPEC.md@ §7.5's form: the
 -- language and the text first, as a tagged literal would be written.
 renderUnparsed :: String -> String -> Earley.ParseFailure -> String
-renderUnparsed lang text why = "in " ++ lang ++ "`" ++ text ++ "`: " ++ parseFailureReason text why
+renderUnparsed = renderUnparsedIn (rendering [] 0)
+
+-- | __The same, where the reader stands__ (MS12 phase 313).
+--
+-- **A reading names productions, and a production's name is under its module's
+-- namespace now** — so a reader with that module open sees @app(var(f), …)@
+-- where a caller with no scope has to write the whole path. 'renderTreeIn' is
+-- the shortening and this is the one message that has a reader to shorten for:
+-- @:parse@ answers a line somebody typed. **The block and rule-file refusals
+-- keep 'renderUnparsed'**, having no scope to offer — they are about a file,
+-- not about a prompt.
+renderUnparsedIn :: Rendering -> String -> String -> Earley.ParseFailure -> String
+renderUnparsedIn ren lang text why =
+  "in " ++ lang ++ "`" ++ text ++ "`: " ++ parseFailureReasonIn ren text why
 
 -- | Why a text did not parse, without saying which text.
 parseFailureReason :: String -> Earley.ParseFailure -> String
-parseFailureReason text why = case why of
+parseFailureReason = parseFailureReasonIn (rendering [] 0)
+
+parseFailureReasonIn :: Rendering -> String -> Earley.ParseFailure -> String
+parseFailureReasonIn ren text why = case why of
   Earley.Ambiguous a b ->
-    "this term parses two ways, as " ++ renderTree a ++ " and as " ++ renderTree b
+    "this term parses two ways, as " ++ renderTreeIn ren a
+      ++ " and as " ++ renderTreeIn ren b
+  -- **The production is named as the reader writes it too** — it is the
+  -- parser's dotted key, which is the production's own name.
   Earley.Disagrees r x a b ->
-    r ++ "'s " ++ x ++ " is written more than once and must read the same each time, "
-      ++ "but here it is " ++ renderTree a ++ " and " ++ renderTree b
+    spelled r ++ "'s " ++ x
+      ++ " is written more than once and must read the same each time, "
+      ++ "but here it is " ++ renderTreeIn ren a ++ " and " ++ renderTreeIn ren b
   Earley.Unbounded h ->
-    "this term parses without end, because " ++ h ++ " can derive itself from the same text"
+    "this term parses without end, because " ++ spelled h
+      ++ " can derive itself from the same text"
   Earley.Stuck p expected
     | p >= length text -> "the term ends too soon" ++ expecting expected
     | otherwise ->
         "unexpected " ++ escapeChar (text !! p) ++ " at character " ++ show (p + 1)
           ++ expecting expected
   where
+    -- A production's key, as the reader writes it: the shortest ending that
+    -- still means it ('renderTreeIn''s own move, for a name that arrives as
+    -- text rather than in a tree).
+    spelled n = case nameString ren (nameFromText n) of
+      "" -> n
+      w  -> w
     expecting [] = ""
     -- **BY THE TEXT, SO TWO SYMBOLS SPELLED ALIKE ARE SAID ONCE** (2026-11-10).
     -- A class's qualified substitution puts a terminal and a name slot of the

@@ -27,7 +27,8 @@ import Test.Tasty.QuickCheck
 import Thena.Core.Level (Level (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), rootName)
-import Thena.Declared (declaredAs, named)
+import Thena.Declared (declaredAs)
+import qualified Thena.Declared as Declared
 import Thena.Driver
   ( Response (..)
   , machineOf
@@ -303,6 +304,13 @@ source =
     , "open LB"
     ]
 
+-- | __A name of the fixture module's, under the fixture module's namespace__
+-- (MS12 phase 313). @source@ is @module Subst where@, and a module's
+-- declarations live under the name its header gives it, so the generated
+-- families are @Subst.LC.subst.x@ and the rest. The test titles stay short.
+named :: String -> GlobalName
+named = Declared.named . ("Subst." ++)
+
 loaded :: IO GlobalEnv
 loaded = do
   (s0, _) <- startingSession
@@ -332,8 +340,11 @@ base = Canonical (named "Ty.base") [] []
 -- | **The language is threaded, not recovered from the word** (MS10 phase 251):
 -- a production lives in its language's namespace, so @app@ in @LC@ is @LC.app@,
 -- and a 'Tm' keeps the short word because that is what the roles are keyed by.
+--
+-- **AND THE LANGUAGE IS UNDER THE FIXTURE MODULE'S NAMESPACE** (MS12 phase
+-- 313), so @app@ in @LC@ is @Subst.LC.app@ — 'named' is where that is said.
 toCore :: String -> Tm -> Core
-toCore l (Tm c fs) = Canonical (GlobalName [l] c) [] (map field fs)
+toCore l (Tm c fs) = Canonical (named (l ++ "." ++ c)) [] (map field fs)
   where
     field f = case f of
       Name s -> Primitive (LString s)
@@ -501,10 +512,14 @@ declared io =
   -- what the type is, and it is asserted rather than printed away.
   | (f, ty, levels) <-
       [ ("LC.fresh.x", "String -> List.List String -> String", 1)
-      , ("LC.fv.x", "LC.LC -> List.List String", 1)
-      , ("LC.subst-*", "LC.LC -> List.List (And.And String LC.LC) -> LC.LC", 3)
-      , ("LC.subst.x", "LC.LC -> String -> LC.LC -> LC.LC", 0)
-      , ("LB.subst.x", "LB.LB -> String -> LB.LB -> LB.LB", 0)
+      , ("LC.fv.x", "Subst.LC.LC -> List.List String", 1)
+      , ( "LC.subst-*"
+        , "Subst.LC.LC -> List.List (And.And String Subst.LC.LC) -> Subst.LC.LC"
+        , 3 )
+      , ( "LC.subst.x"
+        , "Subst.LC.LC -> String -> Subst.LC.LC -> Subst.LC.LC", 0 )
+      , ( "LB.subst.x"
+        , "Subst.LB.LB -> String -> Subst.LB.LB -> Subst.LB.LB", 0 )
       ]
   ]
     ++ [ testCase "a language that reaches no class gets none" $ do
@@ -662,7 +677,7 @@ refused =
     -- point of the phase, and the install case below is the pair of this one.
   [ refusal "two variable productions at one class"
       ["language L, M where", "  v1 : x as occurrence -> x", "  v2 : x as occurrence -> $ x"]
-      "refused: in the grammar of L: L.v1, L.v2 all declare an occurrence at x, and a language has one variable production per class"
+      "refused: in the grammar of L: Refused.L.v1, Refused.L.v2 all declare an occurrence at Refused.x, and a language has one variable production per class"
     -- **A class a grammar reaches belongs to one of the languages it reaches**
     -- (MS8 phase 155): what a renamed name of the class becomes is that
     -- language's variable production, and the map substituting for it is a map
@@ -672,10 +687,10 @@ refused =
   , refusal "a class reached through two languages that both read it"
       [ "language K, A where", "  kvar : x as occurrence -> x", "open K", ""
       , "language L, M where", "  v : x as occurrence -> x", "  box -> ( box A )" ]
-      "refused: in the grammar of L: L and K both read an occurrence at x, and this grammar reaches both, so a substitution for x has no one language to replace a name with"
+      "refused: in the grammar of L: Refused.L and Refused.K both read an occurrence at Refused.x, and this grammar reaches both, so a substitution for Refused.x has no one language to replace a name with"
   , refusal "an occurrence beside something else"
       ["language L, M where", "  v : x as occurrence -> x ^ M"]
-      "refused: in the grammar of L, production L.v: the occurrence x must be the production's only argument, because substitution replaces the whole of it"
+      "refused: in the grammar of L, production Refused.L.v: the occurrence x must be the production's only argument, because substitution replaces the whole of it"
     -- **Narrowed at MS8 phase 154** (`~5k3mg`): a binder free in another
     -- language's argument is refused only where that language reaches no
     -- occurrence at the binder's class, as @K@ does not here — so there is
@@ -685,10 +700,10 @@ refused =
   , refusal "a binder free in a language that reaches no such class"
       [ "language K, A where", "  k -> k", "open K", ""
       , "language L, M where", "  v : x as occurrence -> x", "  bind : x as binder -> ( \955 x . A[x] )" ]
-      "refused: in the grammar of L, production L.bind: a binder is free in A, which is of K, and nothing K reaches occurs at x, so there is nothing there to rename"
+      "refused: in the grammar of L, production Refused.L.bind: a binder is free in A, which is of Refused.K, and nothing Refused.K reaches occurs at Refused.x, so there is nothing there to rename"
   , refusal "a generated name already declared"
       ["L.fv.x : String", "L.fv.x = \"taken\"", "", "language L, M where", "  v : x as occurrence -> x"]
-      "refused: L's substitution function L.fv.x is already declared"
+      "refused: Refused.L.fv.x is already declared"
   ]
   where
     refusal what body want = testCase what $ do

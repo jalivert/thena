@@ -592,10 +592,24 @@ checkGrammar sc installed env b = do
     -- written spelling, and a generated one is dotted — @L.fv.x@ is already
     -- declared when the environment holds @x@ in @L.fv@, which a root-level
     -- name whose word held the dots would never have matched.
-    taken x =
-      isDeclared (nameFromText x) env
-        || nameFromText x `elem` concat
-             [ grammarName g : map gproductionName (grammarProductions g) | g <- installed ]
+    --
+    -- **AND IT IS ASKED WHERE THE BLOCK IS WRITTEN — MS12 PHASE 313.** It read
+    -- the spelling as an absolute name, which was the same thing while every
+    -- module declared at the root and is not now: a block in module @M@ naming
+    -- a constructor @x@ was compared against a root @x@ that nothing declares,
+    -- so the check stopped firing and a constructor could take a word the module
+    -- had already used. **'Thena.Core.Term.globalUnder' is the walk every other
+    -- reader asks**, so what counts as taken here is what a reader standing in
+    -- this block would reach — and two candidates count as taken too, an
+    -- ambiguity being no more writable than a clash.
+    taken x = reaches (`isDeclared` env) || reaches installedName
+      where
+        reaches p = either (not . null) (const True)
+                           (globalUnder p sc (nameFromText x))
+        installedName c =
+          c `elem` concat
+            [ grammarName g : map gproductionName (grammarProductions g)
+            | g <- installed ]
 
     -- **This block's metavariables first, then every other grammar's**, which
     -- is only an order because @MetavariableTaken@ has already refused a name

@@ -18,6 +18,7 @@ import Data.List (isInfixOf, isPrefixOf, nub, sort)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Engine (scope)
 import Thena.Driver (Session)
 import Thena.Files (following, startingSession)
 import Thena.Driver (commandSummary, oneLine, openableNamespaces)
@@ -30,7 +31,7 @@ import qualified Thena.Language.Earley as E
 import Thena.Core.Term (rootName)
 import Thena.Render (renderResponse)
 import Thena.Rules (RuleBase, baseSignatures, opWords, ruleBase)
-import Thena.View (sessionGrammars, sessionRules, statementOfferView)
+import Thena.View (machineOf, sessionGrammars, sessionRules, statementOfferView)
 import Thena.View.Chart (offerAt)
 import Thena.View.Chart
   ( BoundView (..)
@@ -365,7 +366,7 @@ narrows = do
 derived :: IO ()
 derived = do
   s <- fst <$> startingSession
-  let rs      = instralRules (sessionGrammars s) (sessionRules s)
+  let rs      = instralRules (sessionGrammars s) (scope (machineOf s)) (sessionRules s)
       heads   = [ w | r <- rs, E.ruleHead r == statementHead
                     , E.Literal w : _ <- [E.ruleBody r] ]
       missing = [ w | (w, _) <- opWords, w `notElem` heads ]
@@ -484,7 +485,7 @@ fixture sigs names =
 askIn :: Session -> RuleBase -> String -> [SymbolView]
 askIn s b before =
   offeredOptions
-    (offerAt (instralRules (sessionGrammars s) (sessionRules s ++ [b])) (E.StartAt statementHead)
+    (offerAt (instralRules (sessionGrammars s) (scope (machineOf s)) (sessionRules s ++ [b])) (E.StartAt statementHead)
        [WrittenText before] [])
 
 listSlot :: IO ()

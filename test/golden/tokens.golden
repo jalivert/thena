@@ -13,42 +13,42 @@ solved: ?ℓ4685
 already equal
 solved: ?ℓ4686
 solved: T
-refused: in the token class t: Bool.Bool is not String, Char or Int
+refused: in the token class M.t: M.Bool.Bool is not String, Char or Int
 -- the regex does not parse: a stray metacharacter
 already equal
 solved: ?ℓ4685
 solved: T
-refused: in the token class f: unexpected '{' in the regular expression
+refused: in the token class M.f: unexpected '{' in the regular expression
 -- the regex does not parse: it ends too soon
 already equal
 solved: ?ℓ4685
 solved: T
-refused: in the token class g: the regular expression ends too soon
+refused: in the token class M.g: the regular expression ends too soon
 -- the regex does not parse: an escape other dialects have
 already equal
 solved: ?ℓ4685
 solved: T
-refused: in the token class c: \S is not supported in a regular expression
+refused: in the token class M.c: \S is not supported in a regular expression
 -- the regex does not parse: a reversed range
 already equal
 solved: ?ℓ4685
 solved: T
-refused: in the token class d: the range z-a is empty, because z comes after a
+refused: in the token class M.d: the range z-a is empty, because z comes after a
 -- it matches the empty string
 already equal
 solved: ?ℓ4685
 solved: T
-refused: in the token class b: the regular expression matches the empty string
+refused: in the token class M.b: the regular expression matches the empty string
 -- it accepts something that is not a Char
 already equal
 solved: ?ℓ4685
 solved: T
-refused: in the token class e: /ab|c/ accepts "ab", which is not a Char
+refused: in the token class M.e: /ab|c/ accepts "ab", which is not a Char
 -- it accepts something that is not an Int, and says the shortest
 already equal
 solved: ?ℓ4685
 solved: T
-refused: in the token class n: /[a-z]+/ accepts "a", which is not an Int
+refused: in the token class M.n: /[a-z]+/ accepts "a", which is not an Int
 thena spine> :theorem d : Token Char
 proving d : Token Char
 thena spine> fill core`/[a-z]+/ Char`

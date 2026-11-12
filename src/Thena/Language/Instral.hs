@@ -38,14 +38,14 @@ module Thena.Language.Instral
 
 import Data.List (nub)
 
-import Thena.Core.Term (nameDotted)
+import Thena.Core.Term (nameDotted, InScope, nameFromText)
 import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Thena.Language.Earley as E
 import Thena.Instral.Commands (Argument (..), Command (..), acts, commands)
 import Thena.Language.Build (languageNames, productionNames, productionRule)
 import qualified Thena.Language.Builtin as Builtin
-import Thena.Language.Grammar (Grammar, earleyRules, productionBody)
+import Thena.Language.Grammar (Grammar, earleyRules, productionBody, tagText)
 import Thena.Language.Lexemes (charRegex, identRegex, numberRegex, stringRegex)
 import Thena.Rules (RuleBase (..), allCallable, opWords)
 
@@ -73,11 +73,11 @@ lineHead = "instral:Line"
 --
 -- **The rule names are the forms' own**, so a production list a frontend draws
 -- reads @attack\/0@ at a prompt line exactly as it does inside a block.
-lineRules :: [Grammar] -> [RuleBase] -> [String] -> [E.Rule]
-lineRules gs bs namespaces =
-  instralRules gs bs
+lineRules :: [Grammar] -> InScope -> [RuleBase] -> [String] -> [E.Rule]
+lineRules gs sc bs namespaces =
+  instralRules gs sc bs
     ++ statementsAt lineHead (forms bs)
-    ++ wholeLineProductions gs lineHead (acts namespaces)
+    ++ wholeLineProductions gs sc lineHead (acts namespaces)
 
 -- | The nonterminal a whole statement parses at.
 statementHead :: String
@@ -133,10 +133,10 @@ variableSlots = [ operandHead (TVar i) | i <- [0 .. 25] ]
 -- Session-driven the same way 'Thena.View.sessionGrammars' is: pass the
 -- session's bases and the rules that may be called are the ones that are
 -- actually there.
-instralRules :: [Grammar] -> [RuleBase] -> [E.Rule]
-instralRules gs bs =
+instralRules :: [Grammar] -> InScope -> [RuleBase] -> [E.Rule]
+instralRules gs sc bs =
   statements fs ++ operandProductions fs types ++ earleyRules gs
-    ++ literalProductions gs types
+    ++ literalProductions gs sc types
     -- **Thena's own two languages, on the same footing as an object language**
     -- (MS7 phase 147). They are here rather than beside the chart because this
     -- is the rule set a REPL line is read with, and because the @do@ block below
@@ -355,13 +355,26 @@ operandProductions fs types = concatMap forType types
 --
 -- **@surface\`…\`@ and @core\`…\`@ are not here**, and that is deliberate — see the
 -- module header of "Thena.View.Statement" for what still answers for them.
-literalProductions :: [Grammar] -> [Ty] -> [E.Rule]
-literalProductions gs types =
-  [ rule t l | t <- coreish, l <- languageNames gs ]
-    ++ [ atRule t l p
+--
+-- **A TAG IS OFFERED AS IT IS WRITTEN HERE — MS12 PHASE 313.** A language lives
+-- under its module's namespace now, so @languageNames@ gives
+-- @examples.demo.Demo01Expressions.Tm@ where a reader with that module open
+-- writes @Tm@ — and an offer that said the whole path would be offering what
+-- nobody types. 'Thena.Language.Grammar.tagText' is the one spelling, the
+-- inverse of the walk a written tag is resolved by; **the parser's key stays
+-- dotted** and 'productionNames' is asked by it.
+literalProductions :: [Grammar] -> InScope -> [Ty] -> [E.Rule]
+literalProductions gs sc types =
+  [ rule t l (written l) | t <- coreish, l <- languageNames gs ]
+    ++ [ atRule t l (written l) p
        | t <- coreish, l <- languageNames gs, p <- productionNames gs l ]
     ++ builtIn
   where
+    -- **The TAG shortens and the KEY does not.** A tag is a spelling and the
+    -- parser's nonterminal is the grammar's own name (MS10 phase 258), so the
+    -- literal a reader types is 'tagText''s answer and everything the rule
+    -- points into stays dotted.
+    written l = tagText gs sc (nameFromText l)
     coreish = [ t | t <- types, t == TCore || isVariable t ]
 
     isVariable t = case t of { TVar _ -> True; _ -> False }
@@ -398,9 +411,9 @@ literalProductions gs types =
         (E.Literal open : body ++ [E.Literal close]) []
 
     -- @LC\`…\`@ — a term of the language.
-    rule t l =
+    rule t l tag =
       E.Rule (renderTy t ++ "/`" ++ l) (operandHead t)
-        [E.Literal (l ++ "`"), E.Nonterminal l, E.Literal "`"] []
+        [E.Literal (tag ++ "`"), E.Nonterminal l, E.Literal "`"] []
 
     -- @LC[var]\`…\`@ — a term of one named production of it (MS6 phase 104c).
     --
@@ -417,9 +430,9 @@ literalProductions gs types =
     -- empty set. 'productionRule' resolves it inside the language, which is also
     -- what makes two languages both declaring @var@ harmless — the search used to
     -- have no language filter and rested on a refusal MS10 removed.
-    atRule t l p =
+    atRule t l tag p =
       E.Rule (renderTy t ++ "/`" ++ l ++ "[" ++ p ++ "]") (operandHead t)
-        ( E.Literal (l ++ "[" ++ p ++ "]`")
+        ( E.Literal (tag ++ "[" ++ p ++ "]`")
             : maybe [] (productionBody gs) (productionRule gs l p)
             ++ [E.Literal "`"] ) []
 
@@ -434,9 +447,9 @@ literalProductions gs types =
 -- in. **Measured at about 5% of the offer at a statement slot**, back to back in one
 -- session: worth having and not dramatic. The reason to split is that the union is
 -- needless, not that it was slow.
-commandRules :: [Grammar] -> [E.Rule]
-commandRules gs =
-  wholeLineProductions gs commandHead commands
+commandRules :: [Grammar] -> InScope -> [E.Rule]
+commandRules gs sc =
+  wholeLineProductions gs sc commandHead commands
     -- **The grammars the command productions now point into** (MS7 phase 147).
     -- Before it, every command argument was either a literal or the opaque
     -- nonterminal, so this set needed no productions but its own; @:parse LC @,
@@ -453,8 +466,8 @@ commandRules gs =
 -- **Two tables and one builder** (MS12 phase 312): a @:@-command and a bare-word
 -- act are the same shape of thing — a word, then the rest of the line — and
 -- differ only in which head they stand under, so they are not built twice.
-wholeLineProductions :: [Grammar] -> String -> [Command] -> [E.Rule]
-wholeLineProductions gs hd table =
+wholeLineProductions :: [Grammar] -> InScope -> String -> [Command] -> [E.Rule]
+wholeLineProductions gs sc hd table =
   [ E.Rule (commandWord c ++ "/" ++ show n ++ "/" ++ show k) hd
       (E.Literal (commandWord c) : body) []
   | c <- table
@@ -477,11 +490,12 @@ wholeLineProductions gs hd table =
       ANumeral  -> [ [E.Scan "int" numberRegex] ]
       -- **Whatever is loaded**, so @:parse @ names the languages that are actually
       -- there and nothing has to be kept in step.
-      ALanguage -> [ [E.Literal l] | l <- languageNames gs ]
+      ALanguage -> [ [E.Literal (tagText gs sc (nameFromText l))] | l <- languageNames gs ]
       -- **The name and the term together**, because the second depends on the
       -- first and 'expand' is a product over independent arguments (MS7 phase
       -- 147). @:parse LC @ then offers @LC@'s own productions and nothing else's.
-      ALanguageTerm -> [ [E.Literal l, E.Nonterminal l] | l <- languageNames gs ]
+      ALanguageTerm -> [ [E.Literal (tagText gs sc (nameFromText l)), E.Nonterminal l]
+                       | l <- languageNames gs ]
       -- **Thena's own two languages are describable now** (MS7 phase 147), so a
       -- term argument is a nonterminal with productions rather than the opaque
       -- one below.

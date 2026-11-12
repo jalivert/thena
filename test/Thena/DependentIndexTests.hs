@@ -45,15 +45,16 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=), assertBool)
 
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (Canonical), GlobalName (..), rootName)
+import Thena.Core.Term (Core (Canonical), GlobalName (..))
 import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
+import Thena.Declared (resolvedIn)
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, loadProofFile, startingSession)
 import Thena.Render
-  ( rendering
+  ( renderingIn
   ,renderCore)
 
 -- | Relative to the package root, which is where the suite runs.
@@ -94,11 +95,11 @@ tests =
     , testCase "and the split's definition is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        case lookupDefinition (rootName "tied") (globals (machineOf s')) of
+        case definitionCalled (machineOf s') "tied" of
           Nothing -> assertFailure "tied was not admitted"
           Just d  ->
-            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (m : N.N) -> Q.Q (N.s m) (Fin.fz m) -> N.N"
+            renderCore (renderingIn (machineOf s')) [] (definitionType d)
+              @?= "\8704 (m : N) -> Q (s m) (fz m) -> N"
 
       -- __AND THE SAME CHAIN CROSSED BY INJECTIVITY RATHER THAN BY SOLUTION —
       -- MS9, @~rqs39@.__ @isFz@'s target pins the first index to @s n@, so the
@@ -110,11 +111,11 @@ tests =
     , testCase "and the split injectivity crosses is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        case lookupDefinition (rootName "tiedTwo") (globals (machineOf s')) of
+        case definitionCalled (machineOf s') "tiedTwo" of
           Nothing -> assertFailure "tiedTwo was not admitted"
           Just d  ->
-            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (m : N.N) -> Small.Small (N.s m) (Fin.fz m) -> N.N"
+            renderCore (renderingIn (machineOf s')) [] (definitionType d)
+              @?= "\8704 (m : N) -> Small (s m) (fz m) -> N"
 
       -- __And the arm answers with its own binder.__ The ambient @m@ and the
       -- constructor's @n@ are the same number here, so the type says nothing
@@ -135,11 +136,11 @@ tests =
     , testCase "and a chain deletion matched first is crossed by injectivity" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
-        case lookupDefinition (rootName "pinned") (globals (machineOf s')) of
+        case definitionCalled (machineOf s') "pinned" of
           Nothing -> assertFailure "pinned was not admitted"
           Just d  ->
-            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "T.T (Fin.fs (N.s N.z) (Fin.fz N.z)) -> Fin.Fin (N.s N.z)"
+            renderCore (renderingIn (machineOf s')) [] (definitionType d)
+              @?= "T (fs (s z) (fz z)) -> Fin (s z)"
 
       -- __And that arm binds the constructor's argument too.__ The type says
       -- nothing about it — @Fin (s z)@ has more than one inhabitant here — so
@@ -148,12 +149,17 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s tiedTarget
         let m = machineOf s'
-        case lookupDefinition (rootName "pinnedFromArm") (globals m) of
+        case definitionCalled m "pinnedFromArm" of
           Nothing -> assertFailure "pinnedFromArm was not admitted"
           Just d  -> case whnf (globals m) [] (definitionBody d) of
-            Canonical (GlobalName ["Fin"] "fz") _ [inner] ->
+            -- **Named by its ending**, the datatype's namespace sitting under
+            -- the file's own module since MS12 phase 313.
+            Canonical g _ [inner]
+              | nameWord g == "fz", take 1 (reverse (nameSteps g)) == ["Fin"] ->
               case whnf (globals m) [] inner of
-                Canonical (GlobalName ["N"] "z") _ [] -> pure ()
+                Canonical g' _ []
+                  | nameWord g' == "z"
+                  , take 1 (reverse (nameSteps g')) == ["N"] -> pure ()
                 other -> assertFailure ("fz applied to " ++ show other)
             other -> assertFailure ("not fz: " ++ show other)
 
@@ -175,11 +181,11 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s argumentTarget
         let m = machineOf s'
-        case lookupDefinition (rootName "depth") (globals m) of
+        case definitionCalled m "depth" of
           Nothing -> assertFailure "depth was not admitted"
           Just d  ->
-            renderCore (rendering [] (names m)) [] (definitionType d)
-              @?= "\8704 (m : N.N) (j : Fin.Fin m) -> Holds.Holds (Pack.pack m j) -> N.N"
+            renderCore (renderingIn m) [] (definitionType d)
+              @?= "\8704 (m : N) (j : Fin m) -> Holds (pack m j) -> N"
 
       -- __The @Vec@-style families, which the corpus had never had — MS9 phase
       -- 216.__ @examples\/VectorFamilies.thena@ declares @Vec@ at a level
@@ -227,11 +233,11 @@ tests =
     , testCase "and a projection at a pinned index is admitted" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s vectorTarget
-        case lookupDefinition (rootName "headAll") (globals (machineOf s')) of
+        case definitionCalled (machineOf s') "headAll" of
           Nothing -> assertFailure "headAll was not admitted"
           Just d  ->
-            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (A : Type\8320) (P : A -> Type\8320) (m : N.N) (a : A) (as : Vec.Vec {0} A m) -> All.All A P (N.s m) (Vec.vcons {0} A m a as) -> P a"
+            renderCore (renderingIn (machineOf s')) [] (definitionType d)
+              @?= "\8704 (A : Type\8320) (P : A -> Type\8320) (m : N) (a : A) (as : Vec {0} A m) -> All A P (s m) (vcons {0} A m a as) -> P a"
 
       -- __And the arm answers with the argument it bound__, which the type
       -- cannot say: @headTwo@ is the projection at a one-element @All@, and
@@ -256,11 +262,11 @@ tests =
     , testCase "and the chained split is admitted at its written type" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s chainedTarget
-        case lookupDefinition (rootName "chained") (globals (machineOf s')) of
+        case definitionCalled (machineOf s') "chained" of
           Nothing -> assertFailure "chained was not admitted"
           Just d  ->
-            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "\8704 (m : N.N) -> Chain.Chain (N.s m) (Fin.fz m) (Below.bz m) -> N.N"
+            renderCore (renderingIn (machineOf s')) [] (definitionType d)
+              @?= "\8704 (m : N) -> Chain (s m) (fz m) (bz m) -> N"
 
       -- __And the arm answers with the constructor's own payload__, which the
       -- type cannot say. A split that typechecked and refined nothing would
@@ -295,34 +301,47 @@ tests =
     , testCase "and the theorem is a global with the statement it should have" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadFile s target
-        case lookupDefinition (rootName "belowRefl") (globals (machineOf s')) of
+        case definitionCalled (machineOf s') "belowRefl" of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d  ->
-            renderCore (rendering [] (names (machineOf s'))) [] (definitionType d)
-              @?= "∀ (n : Nat.Nat) (i : Fin.Fin n) -> Below.Below n i -> Eq.Eq {0} (Fin.Fin n) i i"
+            renderCore (renderingIn (machineOf s')) [] (definitionType d)
+              @?= "∀ (n : Nat) (i : Fin n) -> Below n i -> Eq {0} (Fin n) i i"
     ]
 
 -- | A global that must reduce to a specific @N@ numeral.
 --
 -- The payload assertions want /the arm bound this argument and not another/,
--- and a numeral is how a term says so: @N.z@ and @N.s@ are the only two things
+-- and a numeral is how a term says so: @z@ and @s@ are the only two things
 -- it can be built from, so reducing to the right depth cannot happen by
 -- accident.
 --
 -- **Every payload assertion in this file goes through it** (MS10 phase 253):
 -- four wrote the same walk out and each one named the constructors at the root,
 -- so the namespace move broke them one at a time.
+-- | __A definition by the word the file wrote__ (MS12 phase 313).
+--
+-- A module's declarations live under its own namespace now, and the session that
+-- loaded the file has that module open — so this asks the resolver for the word,
+-- which is what a reader standing at that prompt would write. 'resolvedIn' is
+-- the walk.
+definitionCalled :: Machine -> String -> Maybe Definition
+definitionCalled m n = resolvedIn m n >>= \g -> lookupDefinition g (globals m)
+
 numeral :: Machine -> String -> Int -> Assertion
 numeral m name expected =
-  case lookupDefinition (rootName name) (globals m) of
+  case definitionCalled m name of
     Nothing -> assertFailure (name ++ " was not admitted")
     Just d  -> go expected (whnf (globals m) [] (definitionBody d))
   where
+    -- **The constructor is named by its ending** (MS12 phase 313): the
+    -- datatype's namespace is under the file's own module now, so what the walk
+    -- can assert about a key is that it is @N@'s @z@ and @N@'s @s@.
+    inN w g = nameWord g == w && take 1 (reverse (nameSteps g)) == ["N"]
     go 0 t = case t of
-      Canonical (GlobalName ["N"] "z") _ [] -> pure ()
+      Canonical g _ [] | inN "z" g -> pure ()
       other -> assertFailure (name ++ ": expected z, got " ++ show other)
     go k t = case t of
-      Canonical (GlobalName ["N"] "s") _ [inner] ->
+      Canonical g _ [inner] | inN "s" g ->
         go (k - 1) (whnf (globals m) [] inner)
       other ->
         assertFailure (name ++ ": expected a successor, got " ++ show other)

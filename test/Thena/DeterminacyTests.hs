@@ -58,15 +58,15 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=), assertBool)
 
-import Thena.Core.Term (rootName)
 import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, loadProofFile, startingSession)
+import Thena.Declared (named)
 import Thena.Render
-  ( rendering
+  ( renderingIn
   ,renderCore, renderTrouble, renderResponse)
 
 -- | Relative to the package root, which is where the suite runs — the same
@@ -98,7 +98,7 @@ tests =
     , testCase "and TAPL 3.5.4 is a global with the statement it should have" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadFile s target
-        statementOf s' @?= Just theorem
+        statementOf "determinacy" s' @?= Just theorem
 
       -- **The same proof, in the surface language** (MS4 tier 3). A proof
       -- module is one program rather than a sequence of command lines, so it
@@ -113,7 +113,8 @@ tests =
     , testCase "and the surface version proves the same statement" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s surfaceTarget
-        statementOf s' @?= Just theorem
+        statementOf "examples.DeterminacySurface.determinacy" s'
+          @?= Just theorem
 
       -- **The same theorem by pattern matching** (MS9). A proof module like the
       -- one above, so the same path loads it; the golden is what the splitter
@@ -127,7 +128,8 @@ tests =
     , testCase "and the pattern version proves the same statement" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s patternTarget
-        statementOf s' @?= Just theorem
+        statementOf "examples.DeterminacyPatterns.determinacy" s'
+          @?= Just theorem
 
       -- **The style, not the theorem** — and it is here because 'HAZARDS.md'
       -- asked for it after a green suite said nothing while six of this file's
@@ -177,10 +179,13 @@ tests =
       []       -> [[]]
       _ : rest -> xs : tails' rest
 
-    statementOf s' =
-      renderCore (rendering [] (names (machineOf s'))) [] . definitionType
-        <$> lookupDefinition (rootName "determinacy") (globals (machineOf s'))
+    -- **The name depends on which door the proof came in by** (MS12 phase
+    -- 313): a script proves it at the prompt, where a declaration is the root's,
+    -- and a surface file declares it inside the file's own module namespace.
+    statementOf n s' =
+      renderCore (renderingIn (machineOf s')) [] . definitionType
+        <$> lookupDefinition (named n) (globals (machineOf s'))
 
-    theorem = "∀ (t : Term.Term) (t1 : Term.Term) -> Step.Step t t1 \
-              \-> ∀ (t2 : Term.Term) -> Step.Step t t2 \
-              \-> Eq.Eq {0} Term.Term t1 t2"
+    theorem = "∀ (t : Term) (t1 : Term) -> Step t t1 \
+              \-> ∀ (t2 : Term) -> Step t t2 \
+              \-> Eq {0} Term t1 t2"

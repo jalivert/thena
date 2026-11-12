@@ -19,7 +19,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
   (Gen, counterexample, elements, forAll, ioProperty, oneof, property, sized, testProperty, withNumTests, (===))
 
-import Thena.Core.Term (Core (..), InScope, Literal (..), rootName, rootScope)
+import Thena.Core.Term (Core (..), InScope, Literal (..), openingOnly, rootName, rootScope)
 import Thena.Driver
   ( Response (..)
   , machineOf
@@ -110,7 +110,10 @@ con :: String -> [Core] -> Core
 -- | **Named with its language's path** (MS10 phase 251): a production lives in
 -- the namespace its block opens, and a root-level name is one the grammar has
 -- no production for, so the term does not print at all.
-con name = foldl App (Global (named name) [])
+-- **AND UNDER ITS MODULE'S NAMESPACE** (MS12 phase 313): the fixture is
+-- @module Printing where@, and a module's declarations live under the name its
+-- header gives it, so @LC.app@ is @Printing.LC.app@.
+con name = foldl App (Global (named ("Printing." ++ name)) [])
 
 str :: String -> Core
 str = Primitive . LString
@@ -119,8 +122,15 @@ str = Primitive . LString
 host :: Core -> String
 host = renderCore (rendering [] 0) []
 
+-- | **Printed where the fixture's own module is open** (MS12 phase 313). A
+-- module's declarations live under the name its header gives it, so a reader
+-- standing at a prompt that has loaded @Printing@ writes the tag @LC@ and sees
+-- @LC@ printed back — which is the spelling these cases are about. Printing it
+-- at 'rootScope' would say @Printing.LC@ and test nothing a user does.
 printed :: [Grammar] -> Core -> IO String
-printed gs t = maybe (assertFailure "it did not print") pure (printTerm gs rootScope host t)
+printed gs t =
+  maybe (assertFailure "it did not print") pure
+        (printTerm gs (openingOnly [["Printing"]]) host t)
 
 -- ---------------------------------------------------------------------------
 
@@ -155,7 +165,7 @@ notation =
       t @?= "LC`${\"a b\"}`"
   , testCase "a term of no language does not print" $ do
       (_, gs) <- loaded
-      printTerm gs rootScope host (str "x") @?= Nothing
+      printTerm gs (openingOnly [["Printing"]]) host (str "x") @?= Nothing
   ]
 
 fences :: [TestTree]
@@ -275,7 +285,7 @@ inside =
       printTerm gs sc host jux @?= Just "LC`f x`"
   , testCase "and nothing is open, so the tag is the whole path" $ do
       (_, gs, _) <- insideLoaded
-      printTerm gs rootScope host jux @?= Just "A.LC`f x`"
+      printTerm gs rootScope host jux @?= Just "PrintingInside.A.LC`f x`"
     -- **A fence writes a tag too**, and it is the same question one level
     -- down: 'Thena.Language.Build.laid' spells the fence it writes, so a
     -- nested literal cannot come out in the other spelling.
@@ -284,11 +294,15 @@ inside =
       printTerm gs sc host nested @?= Just "LC`${LC`f x`} y`"
   , testCase "and the same fence writes the path with nothing open" $ do
       (_, gs, _) <- insideLoaded
-      printTerm gs rootScope host nested @?= Just "A.LC`${A.LC`f x`} y`"
+      printTerm gs rootScope host nested
+        @?= Just "PrintingInside.A.LC`${PrintingInside.A.LC`f x`} y`"
   ]
   where
-    jux = con "A.LC.jux" [con "A.LC.var" [str "f"], con "A.LC.var" [str "x"]]
-    nested = con "A.LC.jux" [jux, con "A.LC.var" [str "y"]]
+    -- **@insideSource@ is @module PrintingInside where@**, not @Printing@, so
+    -- these two build their names directly (MS12 phase 313).
+    inside' n = foldl App (Global (named ("PrintingInside." ++ n)) [])
+    jux = inside' "A.LC.jux" [inside' "A.LC.var" [str "f"], inside' "A.LC.var" [str "x"]]
+    nested = inside' "A.LC.jux" [jux, inside' "A.LC.var" [str "y"]]
 
 -- | A language inside a namespace, with the namespace opened beside the block
 -- — so one fixture gives both halves of the pair, the scope coming from the

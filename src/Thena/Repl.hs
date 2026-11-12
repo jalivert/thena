@@ -48,10 +48,10 @@ import Thena.Driver
   , parsingLanguage
   , pendingQuestion
   )
-import Thena.Engine (Machine (..), cursor, development)
+import Thena.Engine (Machine (..), cursor, development, scope)
 import Thena.Development.Cursor (Focus (..), focus)
 import Thena.Files (following)
-import Thena.Language.Grammar (earleyRules)
+import Thena.Language.Grammar (earleyRules, grammarForTag, grammarKey)
 import qualified Thena.Language.Earley as Earley
 import Thena.Render (renderResponse, renderTrouble)
 
@@ -203,10 +203,19 @@ transcriptFrom s0 = unlines . replay s0
 -- 'tabComplete' keeps its own signature, because "Thena.EarleyTests" tests it on
 -- hand-built rules with no grammar to wrap them in; what moved is the plumbing,
 -- not the question.
+-- **THE WRITTEN NAME IS RESOLVED TO THE PARSER'S KEY FIRST — MS12 phase 313.**
+-- @parsingLanguage@ holds the word the user typed, so that the prompt says
+-- @parse Tm>@ and not a whole module path; the parser is keyed by the grammar's
+-- real name, which is under its module's namespace. 'grammarForTag' is the walk
+-- 'Thena.Driver.parseObject' asks for the same word on the same line.
 tabOffer :: Session -> (String, String) -> Maybe (String, [(String, String)])
 tabOffer s input = case parsingLanguage s of
   Nothing   -> Nothing
-  Just lang -> Just (tabComplete (earleyRules (grammars (machineOf s))) lang input)
+  Just lang -> Just (tabComplete (earleyRules (grammars m)) (key lang) input)
+  where
+    m = machineOf s
+    key lang = either (const lang) grammarKey
+                      (grammarForTag (scope m) (grammars m) lang)
 
 -- | **Tab in @:parse@'s mode** (MS6 phase 102b, his request of 2026-09-19;
 -- corrected in MS7 phase 120). Haskeline hands over the text left of the

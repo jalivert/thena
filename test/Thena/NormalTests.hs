@@ -17,15 +17,16 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
-import Thena.Core.Term (substLevelsIn, rootName)
+import Thena.Core.Term (substLevelsIn)
 import Thena.Driver
   ( machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadProofFile, startingSession)
+import Thena.Declared (named)
 import Thena.Render
-  ( rendering
+  ( renderingIn
   ,renderCore)
 
 target :: FilePath
@@ -43,18 +44,20 @@ tests =
       -- to assert. @CanonicalTests@ has the same pair for the same reason.
       testCase "a value takes no step" $ do
         st <- statementOf "valueNoStep"
-        st @?= Just (1, "∀ (v : Term.Term) -> Value.Value v -> ∀ (u : Term.Term) -> Step.Step v u -> Empty.Empty {0}")
+        st @?= Just (1, "∀ (v : Term) -> Value v -> ∀ (u : Term) -> Step v u -> Empty {0}")
 
       -- **It holds of any value, not only a well-typed one** — the statement
       -- mentions no typing at all, which is what makes it the exclusivity half
       -- of progress rather than a corollary of it.
     , testCase "and it says nothing about typing" $ do
         st <- statementOf "nvNoStep"
-        st @?= Just (1, "∀ (t : Term.Term) -> NV.NV t -> ∀ (u : Term.Term) -> Step.Step t u -> Empty.Empty {0}")
+        st @?= Just (1, "∀ (t : Term) -> NV t -> ∀ (u : Term) -> Step t u -> Empty {0}")
 
     , testCase "the three inversions underneath are there" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (machineOf s)) . rootName)
+        -- **Under the file's own module namespace** (MS12 phase 313).
+        map (isJust . flip lookupDefinition (globals (machineOf s))
+                    . named . ("examples.Normal." ++))
             ["trueNoStep", "falseNoStep", "zeroNoStep"]
           @?= [True, True, True]
 
@@ -81,12 +84,12 @@ tests =
     statementOf n = do
       s <- loaded
       pure (atZero (machineOf s) <$>
-              lookupDefinition (rootName n) (globals (machineOf s)))
+              lookupDefinition (named ("examples.Normal." ++ n)) (globals (machineOf s)))
 
     -- Every prenex level parameter read at 0, with how many there were.
     atZero m d =
       let ps  = definitionLevels d
           sub = maybe [] id (instantiateLevels ps (map (const LZero) ps))
        in ( length ps
-          , renderCore (rendering [] (names m)) []
+          , renderCore (renderingIn m) []
               (substLevelsIn sub (definitionType d)) )

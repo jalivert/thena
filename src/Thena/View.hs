@@ -388,7 +388,8 @@ proofsView budget s =
 
 statementOfferView :: Session -> [Written] -> [Written] -> OfferView
 statementOfferView s =
-  statementOffer (sessionGrammars s) (sessionRules s) (openableNamespaces s)
+  statementOffer (sessionGrammars s) (scope (machineOf s)) (sessionRules s)
+                 (openableNamespaces s)
 
 -- ---------------------------------------------------------------------------
 -- The plumbing itself

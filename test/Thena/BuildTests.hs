@@ -18,9 +18,9 @@ import Test.Tasty.QuickCheck
   (Gen, counterexample, elements, forAll, ioProperty, oneof, property, sized, testProperty, withNumTests, (===))
 
 import Thena.Core.Context (entryType)
-import Thena.Declared (declaredAs, named)
+import Thena.Declared (declaredUnder, named)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), Literal (..), rootName, rootScope, nameDotted)
+import Thena.Core.Term (Core (..), GlobalName, InScope, Literal (..), openingOnly, nameDotted)
 import Thena.Core.Typing (infer)
 import Thena.Driver
   ( Response (..)
@@ -97,7 +97,10 @@ loaded = do
 datatypeOf :: String -> IO InductiveDefinition
 datatypeOf name = do
   (env, _) <- loaded
-  maybe (assertFailure (name ++ " was not declared")) pure (lookupInductive (declaredAs name) env)
+  -- **Under the fixture's module namespace** (MS12 phase 313): @stlc@ is
+  -- @module STLC where@.
+  maybe (assertFailure (name ++ " was not declared")) pure
+        (lookupInductive (declaredUnder "STLC" name) env)
 
 -- ---------------------------------------------------------------------------
 
@@ -106,23 +109,23 @@ generated =
   [ testCase "LC's constructors are §4.6's, arguments in order of first appearance" $ do
       d <- datatypeOf "LC"
       map shape (inductiveConstructors d)
-        @?= [ ("LC.var", ["String"])
-            , ("LC.abs", ["String", "Ty.Ty", "LC.LC"])
-            , ("LC.app", ["LC.LC", "LC.LC"])
+        @?= [ ("STLC.LC.var", ["String"])
+            , ("STLC.LC.abs", ["String", "STLC.Ty.Ty", "STLC.LC.LC"])
+            , ("STLC.LC.app", ["STLC.LC.LC", "STLC.LC.LC"])
               -- A slot named like its own language: the binder is renamed, the
               -- argument's type is the datatype.
-            , ("LC.paren", ["LC.LC"])
+            , ("STLC.LC.paren", ["STLC.LC.LC"])
               -- §4.3: a name written twice is one argument.
-            , ("LC.twice", ["LC.LC"])
+            , ("STLC.LC.twice", ["STLC.LC.LC"])
             ]
   , testCase "a context's datatype is generated too" $ do
       d <- datatypeOf "Ctx"
       map shape (inductiveConstructors d)
-        @?= [("Ctx.empty", []), ("Ctx.extend", ["Ctx.Ctx", "String", "Ty.Ty"])]
+        @?= [("STLC.Ctx.empty", []), ("STLC.Ctx.extend", ["STLC.Ctx.Ctx", "String", "STLC.Ty.Ty"])]
   , testCase "the language it refers to is generated as well" $ do
       d <- datatypeOf "Ty"
       map shape (inductiveConstructors d)
-        @?= [("Ty.base", []), ("Ty.arrow", ["Ty.Ty", "Ty.Ty"])]
+        @?= [("STLC.Ty.base", []), ("STLC.Ty.arrow", ["STLC.Ty.Ty", "STLC.Ty.Ty"])]
   ]
   where
     shape c =
@@ -151,8 +154,8 @@ roles =
                , let n = nameDotted (constructorName c)
                , r <- constructorRoles c
                , case r of Occurrence _ -> True; Binder _ -> True; _ -> False ]
-        @?= [ ("LC.var", Occurrence (rootName "x"))
-            , ("LC.abs", Binder (rootName "x")) ]
+        @?= [ ("STLC.LC.var", Occurrence (inStlc "x"))
+            , ("STLC.LC.abs", Binder (inStlc "x")) ]
     -- **One role per argument, which nothing checked** (MS8 phase 153).
     -- `~5k3mg` makes 'constructorRoles' the table a class lives on, so anything
     -- reading it by position has to be reading the right positions.
@@ -161,20 +164,20 @@ roles =
       [ (n, length (constructorArguments c), length (constructorRoles c))
         | c <- inductiveConstructors d
         , let n = nameDotted (constructorName c) ]
-        @?= [ ("LC.var", 1, 1), ("LC.abs", 3, 3), ("LC.app", 2, 2)
-            , ("LC.paren", 1, 1), ("LC.twice", 1, 1) ]
+        @?= [ ("STLC.LC.var", 1, 1), ("STLC.LC.abs", 3, 3), ("STLC.LC.app", 2, 2)
+            , ("STLC.LC.paren", 1, 1), ("STLC.LC.twice", 1, 1) ]
   , testCase "a datatype written by hand has none of it" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 "module W where\n\ndata Pair : Type\8320 where\n  mk : String -> String -> Pair\n" of
         (s1, ProofLoaded {}) ->
-          case lookupInductive (declaredAs "Pair") (globals (machineOf s1)) of
+          case lookupInductive (declaredUnder "W" "Pair") (globals (machineOf s1)) of
             Just d -> map constructorRoles (inductiveConstructors d) @?= [[Plain, Plain]]
             Nothing -> assertFailure "Pair was not declared"
         (_, other) -> assertFailure (show other)
   ]
   where
-    occ = Occurrence (rootName "x")
-    bnd = Binder (rootName "x")
+    occ = Occurrence (inStlc "x")
+    bnd = Binder (inStlc "x")
 
 -- ---------------------------------------------------------------------------
 
@@ -184,8 +187,20 @@ identity = con "LC.abs" [Primitive (LString "x"), con "Ty.base" [], con "LC.var"
 
 -- | **Named with its language's path** (MS10 phase 251): a production lives in
 -- the namespace its @language@ block opens, so @abs@ in @LC@ is @LC.abs@.
+-- **Under the fixture's module namespace** (MS12 phase 313): @stlc@ is
+-- @module STLC where@, so @LC.abs@ is @STLC.LC.abs@. One place, so every
+-- expectation in this file reads as the author wrote it.
 con :: String -> [Core] -> Core
-con name = foldl App (Global (named name) [])
+con name = foldl App (Global (inStlc name) [])
+
+-- | A name the @stlc@ fixture declared.
+inStlc :: String -> GlobalName
+inStlc = named . ("STLC." ++)
+
+-- | Printed where the fixture's own module is open, which is where a session
+-- that loaded it stands.
+stlcScope :: InScope
+stlcScope = openingOnly [["STLC"]]
 
 terms :: [TestTree]
 terms =
@@ -195,25 +210,25 @@ terms =
   , testCase "and the term type checks as an LC" $ do
       (env, _) <- loaded
       case infer env [] 0 identity of
-        (Right t, _, _) -> t @?= Global (declaredAs "LC") []
+        (Right t, _, _) -> t @?= Global (declaredUnder "STLC" "LC") []
         (Left e, _, _) -> assertFailure (show e)
   , testCase "the term prints as the text" $ do
       (_, gs) <- loaded
-      printRegion gs rootScope host identity @?= Just "( \955 x : \953 . x )"
+      printRegion gs stlcScope host identity @?= Just "( \955 x : \953 . x )"
   , testCase "a name written twice is one argument, and prints twice" $ do
       (_, gs) <- loaded
       let t = con "LC.twice" [con "LC.var" [Primitive (LString "a")]]
-      (readTerm gs "{ a a }", printRegion gs rootScope host t) @?= (Right t, Just "{ a a }")
+      (readTerm gs "{ a a }", printRegion gs stlcScope host t) @?= (Right t, Just "{ a a }")
   , testCase "a placeholder is not a term" $ do
       (_, gs) <- loaded
       readTerm gs "( \955 \9608 : \953 . x )" @?= Left (Incomplete "x")
   , testCase "a name the class would not read back is spliced instead" $ do
       (_, gs) <- loaded
-      printRegion gs rootScope host (con "LC.var" [Primitive (LString "a b")])
+      printRegion gs stlcScope host (con "LC.var" [Primitive (LString "a b")])
         @?= Just "${\"a b\"}"
   , testCase "nor does a term that is not a constructor of a grammar" $ do
       (_, gs) <- loaded
-      printRegion gs rootScope host (Primitive (LString "x")) @?= Nothing
+      printRegion gs stlcScope host (Primitive (LString "x")) @?= Nothing
   ]
 
 -- ---------------------------------------------------------------------------
@@ -236,7 +251,7 @@ elaborated decls = do
   case loadProofSource s0 (stlc ++ "\n" ++ decls ++ "\n") of
     (s1, ProofLoaded {}) ->
       let env = globals (machineOf s1)
-       in case lookupDefinition (rootName "t") env of
+       in case lookupDefinition (inStlc "t") env of
             Just d  -> pure (Right (whnf env [] (definitionBody d)))
             Nothing -> assertFailure "t was not declared"
     (_, Ran _ _ (Halted why)) -> pure (Left why)
@@ -259,7 +274,7 @@ literals =
   , testCase "and it prints back as the text it was written as" $ do
       (_, gs) <- loaded
       r <- elaboratedTerm ("LC" ++ region "( \955 x : \953 . x )")
-      fmap (printRegion gs rootScope host) r @?= Right (Just "( \955 x : \953 . x )")
+      fmap (printRegion gs stlcScope host) r @?= Right (Just "( \955 x : \953 . x )")
     -- **The reader the phase nearly missed — MS7 phase 127.** A tagged term
     -- literal in a surface module reaches the parser through
     -- 'Thena.Language.Build.objectInput', which built its pieces with
@@ -286,7 +301,7 @@ literals =
       r <- elaborated
              ("u : LC\nu = LC[var]" ++ region "q"
                 ++ "\n\nt : LC\nt = LC" ++ region "( ${u} ${u} )")
-      r @?= Right (canon "LC.app" [Global (rootName "u") [], Global (rootName "u") []])
+      r @?= Right (canon "LC.app" [Global (inStlc "u") [], Global (inStlc "u") []])
     -- **A class slot takes one too**, and what it supplies is the literal: the
     -- constructor's argument there is a @String@, so the splice elaborates at
     -- that type like any other term.
@@ -335,7 +350,7 @@ literals =
 -- **Only the head**, which is why the arguments below are written with 'con':
 -- weak head normal form reduces the wrapper it is given and nothing under it.
 canon :: String -> [Core] -> Core
-canon name = Canonical (named name) []
+canon name = Canonical (inStlc name) []
 
 readTerm :: [Grammar] -> String -> Either BuildError Core
 readTerm gs src = case parse (earleyRules gs) (Earley.StartAt "LC") (pieces src) of
@@ -371,6 +386,6 @@ roundTrip =
     testProperty "printed and read back, a term is itself" $
       withNumTests 200 $ forAll genTerm $ \t -> ioProperty $ do
         (_, gs) <- io
-        pure $ case printRegion gs rootScope host t of
+        pure $ case printRegion gs stlcScope host t of
           Nothing -> counterexample "it did not print" (property False)
           Just src -> counterexample src (readTerm gs src === Right t)

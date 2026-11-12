@@ -24,7 +24,7 @@ import Data.List ((\\), isInfixOf, isPrefixOf, nub)
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (Core (..), GlobalName (..), rootName)
 import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..), Warning (..))
-import Thena.Declared (declaredAs, named)
+import Thena.Declared (declaredAs, declaredUnder, named)
 import Thena.Instral.Concrete (Selection (..))
 import Thena.Driver
   ( CommandError (..)
@@ -103,7 +103,7 @@ import Thena.Files
   , startingSession
   )
 import Thena.Render
-  ( rendering
+  ( rendering, renderingOf
   ,renderTrouble, renderResponse, renderCore, renderEliminator)
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
@@ -991,7 +991,7 @@ isolationTests =
       (s0, _) <- startingSession
       (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
       let hidden = map nameDotted (concealedFrom [] s1)
-      assertBool (show hidden) ("Bit.Bit" `elem` hidden)
+      assertBool (show hidden) ("test.modules.Bit.Bit.Bit" `elem` hidden)
       assertBool (show hidden) ("Eq.Eq" `notElem` hidden)
       assertBool (show hidden) ("String" `notElem` hidden)
 
@@ -1003,8 +1003,8 @@ isolationTests =
       (s0, _) <- startingSession
       (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
       let hidden = map nameDotted (concealedFrom [(named' "test.modules.Bit", SelectWide)] s1)
-      assertBool (show hidden) ("Bit.Bit" `notElem` hidden)
-      assertBool (show hidden) ("Bit.off" `notElem` hidden)
+      assertBool (show hidden) ("test.modules.Bit.Bit.Bit" `notElem` hidden)
+      assertBool (show hidden) ("test.modules.Bit.Bit.off" `notElem` hidden)
   ]
 
 -- --------------------------------------------------------------------------
@@ -1535,7 +1535,7 @@ importTests =
       (s1, _, trouble) <- loadProofFile s0 "test/modules/Lang.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       let mine = map nameDotted (declaredByModule (named' "test.modules.Lang") s1)
-      assertBool (show mine) (all (`elem` mine) ["A.x", "A.LC.LC"])
+      assertBool (show mine) (all (`elem` mine) (map ("test.modules.Lang." ++) ["A.x", "A.LC.LC"]))
 
   , -- **A key is named once however many tables hold it.** A constructor is in
     -- two of the four 'Env.declaredNames' concatenates, so the list would carry
@@ -1557,16 +1557,17 @@ importTests =
       -- The language's productions and its generated substitution, none of
       -- which is written as a declaration anywhere in the file.
       assertBool (show mine)
-        (all (`elem` mine) ["A.LC.var", "A.LC.app", "A.LC.subst.A.x"])
+        (all (`elem` mine)
+             (map ("test.modules.Lang." ++) ["A.LC.var", "A.LC.app", "A.LC.subst.A.x"]))
 
   , testCase "a global says which module declared it" $ do
       (s0, _) <- startingSession
       (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
       case [ g | g <- declaredByModule (named' "test.modules.Lang") s1
-               , nameDotted g == "A.LC.var" ] of
+               , nameDotted g == "test.modules.Lang.A.LC.var" ] of
         g : _ -> fmap moduleText (moduleDeclaring g s1)
                    @?= Just "test.modules.Lang"
-        []    -> assertFailure "A.LC.var is not among the module's names"
+        []    -> assertFailure "the module's A.LC.var is not among its names"
 
   , -- **An absence and not an invented answer.** @0unnameable.thena@ is reached
     -- by no module name, so what it declares belongs to no module — the same
@@ -1576,10 +1577,10 @@ importTests =
       (s0, _) <- startingSession
       (s1, _, _) <- loadProofFile s0 "test/modules/0unnameable.thena"
       let known = [ g | g <- Env.declaredNames (globals (machineOf s1))
-                      , nameDotted g == "Three.Three" ]
+                      , nameDotted g == "Unnameable.Three.Three" ]
       case known of
         g : _ -> moduleDeclaring g s1 @?= Nothing
-        []    -> assertFailure "Three.Three was not declared"
+        []    -> assertFailure "Unnameable.Three.Three was not declared"
 
   , testCase "a cycle is refused, and names the path the walk took" $ do
       (s0, _) <- startingSession
@@ -1679,12 +1680,16 @@ namespaceTests =
       case loadProofSource s0 namespacedModule of
         (s1, ProofLoaded {}) -> do
           let env = globals (machineOf s1)
-          isDeclared (named "A.Nat.Nat") env @?= True
-          isDeclared (named "A.Nat.zero") env @?= True
-          isJust (lookupDefinition (named "A.one") env) @?= True
+          isDeclared (named "NS.A.Nat.Nat") env @?= True
+          isDeclared (named "NS.A.Nat.zero") env @?= True
+          isJust (lookupDefinition (named "NS.A.one") env) @?= True
           -- **Nothing lands at the root**, which is the half a module that
-          -- resolved correctly would still get wrong.
+          -- resolved correctly would still get wrong. **And nothing lands at
+          -- the module's own top level either since MS12 phase 313** — the
+          -- module is a namespace, so @NS.A@ is the nesting and @NS.Nat.Nat@
+          -- would be the escape this asserts against.
           isDeclared (named "Nat.Nat") env @?= False
+          isDeclared (named "NS.Nat.Nat") env @?= False
         (_, other) -> assertFailure (show other)
 
   , -- @one = Nat.succ Nat.zero@ is written inside @A@ with no @open@, so it
@@ -1700,9 +1705,9 @@ namespaceTests =
       case loadProofSource s0 nestedModule of
         (s1, ProofLoaded {}) -> do
           let env = globals (machineOf s1)
-          isDeclared (named "A.B.Leaf.Leaf") env @?= True
-          isJust (lookupDefinition (named "A.B.inner") env) @?= True
-          isJust (lookupDefinition (named "A.outer") env) @?= True
+          isDeclared (named "NS.A.B.Leaf.Leaf") env @?= True
+          isJust (lookupDefinition (named "NS.A.B.inner") env) @?= True
+          isJust (lookupDefinition (named "NS.A.outer") env) @?= True
         (_, other) -> assertFailure (show other)
 
   , -- **The whole point of the walk being ordered**: @Nat.Nat@ is a name at the
@@ -1714,13 +1719,15 @@ namespaceTests =
         (s1, ProofLoaded {}) -> do
           let env = globals (machineOf s1)
           -- @inner@'s type is written @Nat.Nat@ inside @A@, so it is @A@'s.
-          case lookupDefinition (named "A.inner") env of
-            Just d  -> definitionType d @?= Canonical (named "A.Nat.Nat") [] []
-            Nothing -> assertFailure "A.inner was not declared"
-          -- The same text outside the block is the root's, unchanged.
-          case lookupDefinition (named "outer") env of
-            Just d  -> definitionType d @?= Canonical (named "Nat.Nat") [] []
-            Nothing -> assertFailure "outer was not declared"
+          case lookupDefinition (named "NS.A.inner") env of
+            Just d  -> definitionType d @?= Canonical (named "NS.A.Nat.Nat") [] []
+            Nothing -> assertFailure "NS.A.inner was not declared"
+          -- The same text outside the block is the module's own, unchanged —
+          -- which is the module's namespace and no longer the root (MS12 phase
+          -- 313). What the test is about is unmoved: the nearer namespace wins.
+          case lookupDefinition (named "NS.outer") env of
+            Just d  -> definitionType d @?= Canonical (named "NS.Nat.Nat") [] []
+            Nothing -> assertFailure "NS.outer was not declared"
         (_, other) -> assertFailure (show other)
 
   , -- A namespace's effect ends with its block, which is what makes it a
@@ -1807,7 +1814,8 @@ shadowingTests =
       (s0, _) <- startingSession
       case loadProofSource s0 constructorTakesTheWord of
         (_, ProofLoaded _ _ _ ws) ->
-          ws @?= [NameShadows (named "Nat.zero") (named "Nat.zero.zero")]
+          ws @?= [ NameShadows (named "Shadow.Nat.zero")
+                               (named "Shadow.Nat.zero.zero") ]
         (_, other) -> assertFailure (show other)
 
   , -- **Once, not twice**: a constructor is installed as the constant it is and
@@ -1825,7 +1833,7 @@ shadowingTests =
       (s0, _) <- startingSession
       case loadProofSource s0 theoremTakesTheWord of
         (_, ProofLoaded _ _ _ ws) ->
-          ws @?= [NameShadows (named "Nat") (named "Nat.Nat")]
+          ws @?= [NameShadows (named "Shadow.Nat") (named "Shadow.Nat.Nat")]
         (_, other) -> assertFailure (show other)
 
   , -- **A @data@ BLOCK IS REFUSED FOR THE WORD IT TAKES, AS THE @data@ LINE IS**
@@ -1845,7 +1853,7 @@ shadowingTests =
     testCase "a data block is refused when a definition holds the word it takes" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 datatypeUnderATakenWord of
-        (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= rootName "Foo"
+        (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= named "Shadow.Foo"
         (_, other) -> assertFailure (show other)
 
   , -- **What survives of the old test, and it is the half that was right**: the
@@ -1866,10 +1874,10 @@ shadowingTests =
           let env = globals (machineOf s1)
           -- Accepted at all, which 'targetIndices' only permits when the
           -- constructor's target IS the family being declared.
-          isDeclared (named "Foo.Foo") env @?= True
-          isDeclared (named "Foo.ff") env @?= True
-          isJust (lookupDefinition (named "Bar.Foo") env) @?= True
-          ws @?= [NameShadows (rootName "Foo") (named "Bar.Foo")]
+          isDeclared (named "Shadow.Foo.Foo") env @?= True
+          isDeclared (named "Shadow.Foo.ff") env @?= True
+          isJust (lookupDefinition (named "Shadow.Bar.Foo") env) @?= True
+          ws @?= [NameShadows (named "Shadow.Foo") (named "Shadow.Bar.Foo")]
         (_, other) -> assertFailure (show other)
   ]
   where
@@ -2301,7 +2309,7 @@ moduleTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 dependentModule
           g = globals (machineOf s1)
-      map (\n -> isDeclared (named n) g)
+      map (\n -> isDeclared (named ("W." ++ n)) g)
           ["Chain.Chain", "Chain.lemmata.NoConfusion", "Chain.lemmata.noConfusion"]
         @?= [True, True, True]
 
@@ -2315,7 +2323,7 @@ moduleTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 natModule
           g = globals (machineOf s1)
-      map (\n -> isDeclared (named n) g)
+      map (\n -> isDeclared (named ("M." ++ n)) g)
           ["Nat.Nat", "Nat.zero", "Nat.succ", "one"]
         @?= [True, True, True, True]
 
@@ -2334,7 +2342,8 @@ moduleTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 qualifiedModule
           g = globals (machineOf s1)
-      map (\n -> isDeclared (named n) g) ["Nat.one", "one"] @?= [True, False]
+      map (\n -> isDeclared (named ("Q." ++ n)) g) ["Nat.one", "one"]
+        @?= [True, False]
 
   , -- **Quiet on success, loud on failure** — his call, 2026-09-02. The success
     -- case above carries no op messages at all; this one keeps them, because
@@ -2376,7 +2385,7 @@ moduleTests =
   , testCase "and what it declared is really there" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 blockModule
-      isDeclared (rootName "one") (globals (machineOf s1)) @?= True
+      isDeclared (named "M.one") (globals (machineOf s1)) @?= True
 
   , -- **Resolution happens where the block runs** (MS6 phase 104b), so a block
     -- whose op is given the wrong operands stops the run rather than refusing
@@ -2420,16 +2429,23 @@ moduleTests =
       let (s1, _) = loadProofSource s0 mistypedBlockModule
       isDeclared (rootName "Nat") (globals (machineOf s1)) @?= False
 
-  , -- **A module that redeclares a name is refused for the name.**
-    -- It is the first thing a newcomer does — write @data Nat@, or copy an
-    -- @Eq@ out of an example — and until this was fixed what came back was a
-    -- sentence about a constructor's target, because the elaborated target of
-    -- an already-declared datatype is a saturated @Canonical@ former and
-    -- 'Thena.Global.Declare.targetIndices' read only the @Global@ spine.
-    testCase "a module redeclaring a prelude datatype is refused for the name" $ do
+  , -- **A MODULE MAY DECLARE ITS OWN @Unit@ SINCE MS12 PHASE 313, AND THAT IS
+    -- THE POINT OF THE PHASE.** This asserted a refusal, because a module's
+    -- declarations were the root's and @data Unit@ took the prelude's word. They
+    -- live under the module's own name now, so @M.Unit.Unit@ clashes with
+    -- nothing — and inside @M@ a written @Unit@ is @M@'s, the walk trying the
+    -- nearer namespace first, while everywhere else the prelude's is unmoved.
+    --
+    -- **What the old test was really protecting is kept below**: a refusal whose
+    -- message names the word rather than a constructor's target. One module
+    -- declaring the same datatype twice still collides, and still says so.
+    testCase "a module may declare its own Unit, and the prelude's is unmoved" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 redeclaringModule of
-        (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= declaredAs "Unit"
+        (s1, ProofLoaded {}) -> do
+          let env = globals (machineOf s1)
+          isDeclared (declaredUnder "M" "Unit") env @?= True
+          isDeclared (declaredAs "Unit") env @?= True
         (_, other) -> assertFailure (show other)
 
   , -- **And the same holds with no prelude in it**: one module declaring the
@@ -2439,7 +2455,7 @@ moduleTests =
     testCase "and the same datatype twice in one module is refused the same way" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 twiceDeclaredModule of
-        (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= declaredAs "Widget"
+        (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= declaredUnder "M" "Widget"
         (_, other) -> assertFailure (show other)
 
   , -- **Everything goes back except the fresh counter**, which must go forward
@@ -2634,7 +2650,11 @@ tierTests =
   [ goldenVsString "tier0" "test/golden/tier0.golden" $ do
       (s, trouble) <- startingSession
       (s1, out, _) <- loadProofFile s "examples/Tier0.thena"
-      let shown = concatMap (renderResponse' s1) ["one", "two", "plusZeroLeft"]
+      -- **Under the file's own module namespace** (MS12 phase 313):
+      -- @examples/Tier0.thena@ is @module examples.Tier0 where@.
+      let shown = concatMap (renderResponse' s1)
+                            [ "examples.Tier0." ++ g
+                            | g <- ["one", "two", "plusZeroLeft"] ]
       pure (toLazyByteString (stringUtf8 (unlines
         (concatMap (renderTrouble s) trouble
           ++ concatMap (renderResponse s1) out ++ shown))))
@@ -2656,8 +2676,8 @@ tierTests =
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 bothSpellings
           m = machineOf s1
-      case ( lookupDefinition (rootName "oneExplicit") (globals m)
-           , lookupDefinition (rootName "oneImplicit") (globals m)
+      case ( lookupDefinition (named "Both.oneExplicit") (globals m)
+           , lookupDefinition (named "Both.oneImplicit") (globals m)
            ) of
         (Just a, Just b) ->
           case convert (globals m) [] 0 (definitionBody a) (definitionBody b) of
@@ -2666,8 +2686,12 @@ tierTests =
         _ -> assertFailure "one of the two was not admitted"
   ]
   where
-    renderResponse' s g = case lookupDefinition (rootName g) (globals (machineOf s)) of
-      Just d  -> [g ++ " = " ++ renderCore (rendering [] 0) [] (definitionBody d)]
+    -- **Printed as the session that loaded the file would print it** (MS12
+    -- phase 313): the file's declarations are under @examples.Tier0@ now, and
+    -- a whole-path rendering would say that prefix on every name in every
+    -- @let@. The session has the module open, which is what a user has.
+    renderResponse' s g = case lookupDefinition (named g) (globals (machineOf s)) of
+      Just d  -> [g ++ " = " ++ renderCore (renderingOf s) [] (definitionBody d)]
       Nothing -> [g ++ " is missing"]
 
     bothSpellings =
@@ -2770,7 +2794,7 @@ exportTests =
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Guarded"]
       assertBool (show (map nameDotted (declaredByModule (named' "test.modules.Guarded") s1)))
-                 ("flip" `elem` map nameDotted
+                 ("test.modules.Guarded.flip" `elem` map nameDotted
                                (declaredByModule (named' "test.modules.Guarded") s1))
 
   , -- **And the prompt is not narrowed either** (MS11 phase 282's rule, which
@@ -2885,9 +2909,9 @@ privateTests =
       let m = named' "test.modules.Kept"
           itDeclared = map nameDotted (declaredByModule m s1)
           itExported = map nameDotted (exportedByModule m s1)
-      assertBool (show itDeclared) ("helper" `elem` itDeclared)
-      assertBool (show itExported) ("helper" `notElem` itExported)
-      assertBool (show itExported) ("Shown.yes" `elem` itExported)
+      assertBool (show itDeclared) ("test.modules.Kept.helper" `elem` itDeclared)
+      assertBool (show itExported) ("test.modules.Kept.helper" `notElem` itExported)
+      assertBool (show itExported) ("test.modules.Kept.Shown.yes" `elem` itExported)
       assertBool (show out) (not (null out))
 
   , -- **And the prompt reaches it**, as it reaches everything the session holds.

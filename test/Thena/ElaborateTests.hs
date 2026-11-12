@@ -1132,7 +1132,7 @@ splittingTree =
       [ "loop : Nat -> Nat"
       , "loop = \\ n -> induction n of { zero -> zero ; succ m -> loop zero }"
       ]
-      "stuck: no induction hypothesis is about this call, so it is not structurally smaller: loop Nat.zero"
+      "stuck: no induction hypothesis is about this call, so it is not structurally smaller: loop M.Nat.zero"
 
     -- The name used as a value rather than called. There is no hypothesis for
     -- that, and leaving it would make the body open.
@@ -1470,7 +1470,7 @@ splittingTree =
       , "wrongPremise = \\ n x e -> induction x of \
         \{ az -> z ; as k p -> s (wrongPremise k p e) }"
       ]
-      "stuck: N.s k and k cannot be made equal"
+      "stuck: Reach.N.s k and k cannot be made equal"
 
     -- __AND A RECURSION MAY VARY A PREMISE THE SPLIT DID NOT SPLIT ON__ (MS9
     -- phase 199, @~754m3@), which is the last of the four and the one the two
@@ -1840,7 +1840,7 @@ splittingTree =
         \; pr a b rp -> case e of \
         \{ c1 -> s (wrongArm a b (allQ a) rp c2) ; c2 -> z } }"
       ]
-      "stuck: the split fixed e and this call passes C.c2, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: wrongArm a b (allQ a) rp C.c2"
+      "stuck: the split fixed e and this call passes Fixed.C.c2, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: wrongArm a b (Fixed.allQ a) rp Fixed.C.c2"
 
     -- __AND PHASE 208'S OWN CASE IS UNTOUCHED__: with no split on @e@ at all,
     -- the premise is in scope and a call naming anything else for it still
@@ -1850,7 +1850,7 @@ splittingTree =
       , "noSplit = \\ x y hx p e -> induction p of { pz c -> z \
         \; pr a b rp -> s (noSplit a b (allQ a) rp c1) }"
       ]
-      "stuck: the split fixed e and this call passes C.c1, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: noSplit a b (allQ a) rp C.c1"
+      "stuck: the split fixed e and this call passes Fixed.C.c1, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: noSplit a b (Fixed.allQ a) rp Fixed.C.c1"
 
     -- __AND THE RECURSION DEMANDS A COPY THE ARMS DO NOT__ (MS9 phase 205,
     -- @~wk9qh@). Every shape above has its premises introduced where the split
@@ -2112,7 +2112,7 @@ splittingTree =
       , "size2 = \\ t d u -> induction d of"
       , "  { okLeaf -> zero ; okNode a b da db -> succ (size2 a da (node u u)) }"
       ]
-      "stuck: the split fixed u and this call passes Tr.node u u, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: size2 a da (Tr.node u u)"
+      "stuck: the split fixed u and this call passes M.Tr.node u u, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: size2 a da (M.Tr.node u u)"
 
     -- __AND BOUND INSIDE THE ARM IT VARIES FREELY__, which is the whole of the
     -- remedy: the motive then quantifies it and the hypothesis takes it. Same

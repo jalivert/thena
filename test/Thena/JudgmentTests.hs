@@ -157,12 +157,15 @@ said s line = let (s', r) = command s line in renderResponse s' r
 -- @j@ declares @j.j@ with constructors @j.R@, so asking at the root finds no
 -- inductive at all and the answer is the empty list — which reads as a
 -- constructor with no arguments rather than as a lookup that missed.
+-- **Under the fixture's own module namespace** (MS12 phase 313): @header@ is
+-- @module J where@, so the judgment @twice@ is @J.twice.twice@.
 argumentNames :: Session -> String -> String -> [String]
 argumentNames s d c =
-  [ n | Just ind <- [lookupInductive (GlobalName [d] d) (globals (machineOf s))]
+  [ n | Just ind <- [lookupInductive (inJ [d] d) (globals (machineOf s))]
       , con <- inductiveConstructors ind
-      , constructorName con == GlobalName [d] c
+      , constructorName con == inJ [d] c
       , Ident n <- map entryIdent (constructorArguments con) ]
+  where inJ ps w = GlobalName ("J" : ps) w
 
 refusal :: String -> [String] -> String -> TestTree
 refusal what body want = testCase what $ do
@@ -269,7 +272,7 @@ generated =
       said s ":infer typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`"
         @?= ["typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )` : Type₀"]
       said s ":parse typing · ⊢ x : ι"
-        @?= ["typing.typing(Ctx.empty, LC.var(x), Ty.base)"]
+        @?= ["typing(empty, var(x), base)"]
   ]
 
 premises :: [TestTree]
@@ -481,7 +484,7 @@ substitution =
         other -> assertFailure (unlines ("not two constructors:" : other))
   , refusal "the left of -> is not a name"
       ["judgment sub = M ~> N where", "", "  S:  ---", "      M ~> E[M->N]", ""]
-      "refused: in the judgment sub, rule S: its conclusion `M ~> E[M->N]` is not a sub judgment: unexpected 'M' at character 8, expecting x"
+      "refused: in the judgment sub, rule S: its conclusion `M ~> E[M->N]` is not a sub judgment: unexpected 'M' at character 8, expecting x or J.x"
   ]
 
 annotated :: [TestTree]

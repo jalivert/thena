@@ -1316,7 +1316,14 @@ perform instr rest m = case operation instr of
   LeaveNamespace ->
     Continue (advance m { scope = (scope m) { scopeWithin = drop 1 (scopeWithin (scope m)) } })
 
-  DeclarePrimitive nm ty -> case (,) <$> declaredNameOf nm <*> term ty of
+  -- **A PRIMITIVE IS NAMED ABSOLUTELY AND NOT WHERE IT IS WRITTEN** (MS12
+  -- phase 313). @String@ and @String.eq@ are the language's own constants
+  -- rather than any module's — 'Thena.Global.Env.emptyGlobals' seeds the types
+  -- before a file has said anything, and 'Thena.Driver.concealedFrom' already
+  -- exempts them for that reason — so the name is the one written and the
+  -- namespace the writer stands in does not reach it. The prelude declares
+  -- @String.eq@ from inside its own namespace and means the primitive.
+  DeclarePrimitive nm ty -> case (,) <$> nameOf nm <*> term ty of
     Left r -> failure r m
     Right (x, t) -> Primitively x t (advance m)
 

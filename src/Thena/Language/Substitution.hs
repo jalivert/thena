@@ -59,7 +59,7 @@ module Thena.Language.Substitution
 
 import qualified Data.List.NonEmpty as NE
 
-import Data.List (intercalate, nub)
+import Data.List (intercalate, nub, stripPrefix)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Thena.Core.Term (GlobalName (..), declarationNamed, inDeclarationOf, nameDotted, rootName, Literal (..))
 import Thena.Global.Env (ArgRole (..))
@@ -100,6 +100,35 @@ import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), Surf
 -- the encoding is injective and @A.x@ and a root class called @A-x@ do not
 -- collide. **A class whose word holds no dash is unchanged** — @x@ is @x@ —
 -- which is every class in the corpus, so no existing generated body moved.
+-- | __A class, named where the prefix in front of it is named__ (MS12 phase
+-- 313, his ruling of 2026-11-12).
+--
+-- A class is carried as its resolved name, and a module's declarations live
+-- under the module's own namespace since that phase, so that name begins with
+-- the module's steps. 'Thena.Core.Term.inFamilyOf' turns a class's steps into
+-- path steps, so @LC@'s @fv@ for the class @x@ of module @M@ was minted as
+-- @M.LC.fv.M.x@ while @declaredIn@ was asked for @M.LC.fv.x@ — the family went
+-- in under a name nothing would ever write, and nothing said so.
+--
+-- **The prefix a class shares with the prefix written in front of it says
+-- nothing**, and the two classes this encoding exists to keep apart still
+-- differ without it: @A.x@ and @B.x@ of one module stay @A.x@ and @B.x@ (MS10
+-- phase 259).
+--
+-- **@l@ is a language's name and only its steps are read**, which is what lets
+-- one function serve both conventions already in this file: a language of one's
+-- own is written relative ('grammarWritten') and another language is written in
+-- full ('grammarName'), and the class is made relative to whichever is in front
+-- of it.
+classUnder :: GlobalName -> GlobalName -> GlobalName
+classUnder l k = case stripPrefix (nameSteps l) (nameSteps k) of
+  Just rest -> GlobalName rest (nameWord k)
+  Nothing   -> k
+
+-- | 'classUnder' for the grammar the class is being named inside.
+classIn :: Grammar -> GlobalName -> GlobalName
+classIn = classUnder . grammarName
+
 classLocal :: GlobalName -> String
 classLocal k = intercalate "-" (map escape (nameSteps k ++ [nameWord k]))
   where
@@ -115,10 +144,12 @@ classLocal k = intercalate "-" (map escape (nameSteps k ++ [nameWord k]))
 -- the ordinary declaration path now admits and what the environment holds.
 substitutionDefinitions :: [Grammar] -> Grammar -> [(GlobalName, Surface, Surface)]
 substitutionDefinitions gs g =
-  [ (freshOf langName k, arrows [string, listOf string] string, freshBody k) | k <- owned ]
-    ++ [ (fvOf langName k, arrows [self] (listOf string), fvBody k) | k <- reached ]
+  [ (freshOf langName (mine k), arrows [string, listOf string] string, freshBody k)
+  | k <- owned ]
+    ++ [ (fvOf langName (mine k), arrows [self] (listOf string), fvBody k) | k <- reached ]
     ++ [ (allOf langName, arrows (self : map mapType reached) self, allBody) | not (null reached) ]
-    ++ [ (substOf langName k, arrows [self, string, ownerSelf k] self, oneBody k) | k <- reached ]
+    ++ [ ( substOf langName (mine k)
+         , arrows [self, string, ownerSelf k] self, oneBody k ) | k <- reached ]
   where
     -- **MINTED RELATIVE, WRITTEN AS A WORD** (MS10 phase 258). @langName@ is
     -- what the generated names hang off and it must carry no namespace, because
@@ -126,6 +157,10 @@ substitutionDefinitions gs g =
     -- written into the types, so it is the word the author would have written.
     langName = grammarWritten g
     lang = grammarWord g
+
+    -- 'classUnder' says why these two, and which is which.
+    mine = classIn g
+    theirs = classUnder
     -- **A CLASS IS CARRIED AS ITS NAME AND SPELLED AS ITS WORD** (MS10 phase
     -- 259). Resolved in scope, @A.x@ and @B.x@ are two classes, so what is
     -- compared below is the name; what a generated name hangs off, and what a
@@ -285,9 +320,9 @@ substitutionDefinitions gs g =
             -- A slot of another language that can hold a free k-name: ask that
             -- language, then take out the names bound on the way in.
             (Scope bs, Nothing, OfLanguage l) | k `elem` reachedBy l ->
-              without (app (global (fvOf l k)) [v a]) (under bs) acc
+              without (app (global (fvOf l (theirs l k))) [v a]) (under bs) acc
             (Plain, Nothing, OfLanguage l) | k `elem` reachedBy l ->
-              without (app (global (fvOf l k)) [v a]) (v "bound") acc
+              without (app (global (fvOf l (theirs l k))) [v a]) (v "bound") acc
             _ -> acc
        in lamL (as ++ rs ++ ["bound", "acc"]) (foldr step (v "acc") (zip as args))
 
@@ -298,7 +333,7 @@ substitutionDefinitions gs g =
         (elimOn lang [] (lamL ["u"] (arrows (map mapType reached) self))
            (map allMethod prods) (v "t"))
 
-    mapVar k = "s-" ++ classLocal k
+    mapVar k = "s-" ++ classLocal (mine k)
 
     -- What the class-k map sends @y@ to: the first pair that names it, or @y@
     -- itself as a term of the class's owning language.
@@ -323,7 +358,7 @@ substitutionDefinitions gs g =
           binderClasses = nub [ c | i <- binders, Just c <- [binderAt args i] ]
           bindersAt c = [ i | i <- binders, binderAt args i == Just c ]
           renamed i = "z" ++ show i
-          avoidName c = "avoid-" ++ classLocal c
+          avoidName c = "avoid-" ++ classLocal (mine c)
           -- A renaming for each binder of the class, and each avoids the names
           -- already chosen for the ones before it and the names of the ones
           -- after — the ones of its own class only, since no other can capture.
@@ -370,16 +405,21 @@ substitutionDefinitions gs g =
                        , lamL ["y", "ys", "ry"]
                            (elimOn "List" [string] (lamL ["l"] (listOf string))
                               [ v "ry", lamL ["h", "hs", "rh"] (consOf string (v "h") (v "rh")) ]
-                              (app (global (fvOf (grammarName (owner k)) c)) [lookupIn k (v "y") (v (mapVar k))]))
+                              (app (global (fvOf (grammarName (owner k))
+                                                 (theirs (grammarName (owner k)) c)))
+                                   [lookupIn k (v "y") (v (mapVar k))]))
                        ]
-                       (app (global (fvOf langName k)) [app (global (gproductionName p)) (map v as)]))
+                       (app (global (fvOf langName (mine k)))
+                            [app (global (gproductionName p)) (map v as)]))
                   (nilOf string)
                   [ k | k <- reached, c `elem` reachedBy (grammarName (owner k)) ]
           withRenamings =
             foldr (\i body ->
                      let c = fromMaybe (rootName "") (binderAt args i)
                       in SurfaceLet (local (renamed i)) (Just string)
-                           (app (global (freshOf (grammarWritten (owner c)) c)) [v (as !! i), avoidTerm i c]) body)
+                           (app (global (freshOf (grammarWritten (owner c))
+                                                 (theirs (grammarName (owner c)) c)))
+                                [v (as !! i), avoidTerm i c]) body)
                   rebuilt binders
        in lamL (as ++ rs ++ map mapVar reached) $ case (map argumentRole args, as) of
             -- A variable production: the whole node is what its class's map says.
@@ -501,12 +541,20 @@ substitutionNotations gs g
       [ [ Production 0 nm params Nothing
             (map Word [target k, "[", classWord k, "->", replacement k, "]"])
         , Production 0 nm params Nothing
-            ( [ Word (target k), Word "[", Literally (nameDotted k), Literally ":" ]
+            -- **The class is named relative to the language — MS12 phase 313**
+            -- ('classUnder'): the notation a user writes is @e[x: x -> n]@, and
+            -- the key carries the module's namespace, so this printed
+            -- @e[M.x: x -> n]@ and the ascription asked for a name no reader
+            -- would write.
+            ( [ Word (target k), Word "["
+              , Literally (nameDotted (classIn g k)), Literally ":" ]
               ++ map Word [classWord k, "->", replacement k, "]"] )
         ]
       | k <- classesSubstituted gs g
-      , let nm = nameDotted (substOf (grammarWritten g) k)
-            params = [ Param (target k) Nothing, Param (classWord k) (Just (nameDotted k)), Param (replacement k) Nothing ]
+      , let nm = nameDotted (substOf (grammarWritten g) (classIn g k))
+            params = [ Param (target k) Nothing
+                     , Param (classWord k) (Just (nameDotted (classIn g k)))
+                     , Param (replacement k) Nothing ]
       ]
 
     -- **Three parameters: the term, the name replaced, and what replaces it.**
