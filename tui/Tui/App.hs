@@ -916,13 +916,27 @@ draw st =
           scale x
             | w1 + w2 <= spare = x
             | otherwise = max minPaneWidth (x * spare `div` (w1 + w2))
-          drawn n = hLimit (max minPaneWidth (scale (storedWidth n)))
-      render
-        (hBox
-          [ vBox (intersperse gapRow [drawn n (paneOf n) | n <- first'])
-          , gapH
-          , vBox (intersperse gapRow [drawn n (paneOf n) | n <- second'])
-          ])
+          width n = max minPaneWidth (scale (storedWidth n))
+          -- | **A column is flush on the right and ragged on the LEFT, which
+          -- is the whole of `~rr8bx`'s fix.** A 'vBox' left-aligns a child
+          -- narrower than the box, so before this the three panes of a column
+          -- shared one left edge — and therefore one bar column, three bars
+          -- drawn on top of each other — while their right edges were ragged.
+          -- Two things went wrong with that and he found both. **Pulling any
+          -- bar of a column moved all three bars**, because the column's left
+          -- edge is the layout's and not the pane's. And **widening one pane
+          -- took width off the other two**: the column grows, so its left edge
+          -- moves left, and a pane left-aligned against it keeps its own width
+          -- while its right edge travels left with the box — his report of
+          -- 2026-11-12, /"it adds or removes space from the pane on the
+          -- right-hand side, not the one where the bar is"/. Padding each pane
+          -- on the left instead pins every right edge to the column's, so a
+          -- pane's own bar is the only thing its width moves.
+          drawn cw n = hLimit cw . padLeft Max . hLimit (width n)
+          column ns =
+            vBox (intersperse gapRow [drawn (colWidth ns) n (paneOf n) | n <- ns])
+            where colWidth = maximum . map width
+      render (hBox [column first', gapH, column second'])
 
     storedWidth = paneWidthOf st
 
