@@ -141,7 +141,7 @@ instralRules gs sc bs =
     -- (MS7 phase 147). They are here rather than beside the chart because this
     -- is the rule set a REPL line is read with, and because the @do@ block below
     -- needs a statement head to point at — which only this module has.
-    ++ Builtin.surfaceRules gs ++ Builtin.coreRules gs ++ surfaceBlock
+    ++ Builtin.surfaceRules gs sc ++ Builtin.coreRules gs sc ++ surfaceBlock
   where
     -- **The table and the types in play are worked out once.** Three of the four
     -- producers below need them, and each computing its own was a second place
@@ -454,7 +454,7 @@ commandRules gs sc =
     -- Before it, every command argument was either a literal or the opaque
     -- nonterminal, so this set needed no productions but its own; @:parse LC @,
     -- @:core @ and @:infer @ reach a real grammar now.
-    ++ earleyRules gs ++ Builtin.surfaceRules gs ++ Builtin.coreRules gs
+    ++ earleyRules gs ++ Builtin.surfaceRules gs sc ++ Builtin.coreRules gs sc
 
 -- | One production per shape of every word in a whole-line table, derived from
 -- 'Thena.Instral.Commands.commands' or its @acts@.

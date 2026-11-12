@@ -64,6 +64,7 @@ import Thena.View.Chart
   , StuckView (..)
   , displayOffer
   , offerAt
+  , spelling
   )
 import Thena.View.Entry (Split (..), splitEntry)
 import Thena.View.Type (displayType)
@@ -116,9 +117,12 @@ statementOffer gs sc bs namespaces before after = answer { offeredBound = bound 
     rules | asCommand = commandRules gs sc
           | otherwise = lineRules gs sc bs namespaces
 
+    -- A nonterminal is spelled as a reader writes it ('Thena.View.Chart.spelling').
+    spell = spelling gs sc
+
     whole
-      | asCommand = offerAt rules (E.StartAt commandHead) before after
-      | otherwise = offerAt rules (E.StartAt lineHead) before' after
+      | asCommand = offerAt spell rules (E.StartAt commandHead) before after
+      | otherwise = offerAt spell rules (E.StartAt lineHead) before' after
 
     answer
       | Nothing <- offeredStuck whole = shift whole
@@ -201,7 +205,7 @@ recover gs sc _bs rules head' before after = do
           -- the view goes on saying the tag as it was written.
           key = either (const (litLang l)) grammarKey
                        (grammarForTag sc gs (litLang l))
-       in case displayOffer gs key (litProd l)
+       in case displayOffer gs sc key (litProd l)
                  [WrittenText innerLeft] [WrittenText innerRight] of
             Left _  -> Nothing
             Right o -> Just o
@@ -215,7 +219,7 @@ recover gs sc _bs rules head' before after = do
     -- identifier. So the unit is the colon and whatever follows it, together.
     CommandWord start stop ->
       let typed = slice start cursor
-          o = offerAt rules (E.StartAt commandHead) [] []
+          o = offerAt (spelling gs sc) rules (E.StartAt commandHead) [] []
        in Just o
             { offeredOptions     = filter (startsWith typed) (offeredOptions o)
             , offeredWanted      = filter (startsWith typed) (offeredWanted o)
@@ -244,7 +248,7 @@ recover gs sc _bs rules head' before after = do
           -- the start of a line and answered nothing.
           ctx | isWholeLine line = [WrittenText (take start line)]
               | otherwise        = []
-          o = offerAt rules (E.StartAt head') ctx []
+          o = offerAt (spelling gs sc) rules (E.StartAt head') ctx []
        in Just o
             { offeredOptions     = filter (startsWith word) (offeredOptions o)
             , offeredWanted      = filter (startsWith word) (offeredWanted o)

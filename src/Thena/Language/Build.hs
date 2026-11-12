@@ -40,7 +40,7 @@ module Thena.Language.Build
 import Data.List (elemIndex, intercalate)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (Core (..), GlobalName (..), InScope, nameDotted, nameFromText, rootName, rootScope, Literal (..))
+import Thena.Core.Term (Core (..), GlobalName (..), InScope, declarationNamed, nameDotted, nameFromText, rootName, rootScope, Literal (..))
 import Thena.Errors (BuildError (..))
 import Thena.Language.Earley (Piece (..), Tree (..), placeholderChar)
 import qualified Thena.Language.Earley as Earley
@@ -101,7 +101,13 @@ buildCore gs splices = build
       (OfUniverse _, Node n kids) | Just r <- typeReading n kids -> case r of
         -- **A KEY, SO IT IS SPLIT ON ITS DOTS** (MS10 phase 258): the node
         -- carries @A.Ty@ and the term wants the name @Ty@ in @A@.
-        TypeCalled l  -> Right (Global (nameFromText l) [])
+        --
+        -- **AND THE TYPE IS THE DATATYPE THE LANGUAGE DECLARES — MS12 PHASE
+        -- 313.** A language opens a namespace of its own and its datatype sits
+        -- inside it, so @A.Ty@ is the namespace and @A.Ty.Ty@ is the type a
+        -- universe slot is being filled with. There is no walk here — a 'Core'
+        -- global is already resolved — so it is said rather than looked up.
+        TypeCalled l  -> Right (Global (declarationNamed (nameFromText l)) [])
         AtUniverse k  -> Right (Universe (levelOfNat k))
         TypeInside t  -> build t
       (OfUniverse _, _) -> Left (NotForSlot (argumentName a) (shapeOf child))
@@ -143,7 +149,14 @@ buildSurface gs splices = build
       (OfLanguage _, _) -> build child
       (OfUniverse _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfUniverse _, Node n kids) | Just r <- typeReading n kids -> case r of
-        TypeCalled l  -> Right (SurfaceName [] l)
+        -- **A KEY IS SPLIT, AND IT IS WRITTEN AS A NAME — MS12 PHASE 313.**
+        -- @SurfaceName [] l@ put the whole key in the /word/, which is the one
+        -- shape a word may not have (his ruling of 2026-10-30): @U.Ty@ resolved
+        -- to nothing and a universe slot filled with a language inside a module
+        -- was refused with @not in scope: U.Ty@. Written as a name it goes
+        -- through the walk like anything else a user writes, so an @open@ still
+        -- reaches it and two languages of one word stay apart.
+        TypeCalled l  -> Right (surfaceName (nameFromText l))
         AtUniverse k  -> Right (SurfaceUniverse k)
         TypeInside t  -> build t
       (OfUniverse _, _) -> Left (NotForSlot (argumentName a) (shapeOf child))

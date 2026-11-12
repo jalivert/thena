@@ -122,19 +122,24 @@ scoped =
     -- minted relative to the namespace and the declaring op supplies the
     -- prefix, so an absolute mint would have landed at @A.A.LC.subst.A.x@.
     --
-    -- **THE CLASS'S PATH IS ABSOLUTE INSIDE THE FAMILY** (his ruling of
-    -- 2026-11-10), so a class in the same namespace as the language repeats
-    -- that namespace: @A.LC.subst.A.x@ for @A.x@. Relative would need a
-    -- relative-to-what, and the shortest-ending printer is what a reader
-    -- actually sees.
+    -- **THE CLASS IS NAMED AFTER THE LANGUAGE AND NOT BEFORE IT** (MS12 phase
+    -- 313, 'Thena.Language.Grammar.classIn'): the steps the language's own name
+    -- has already said are not said again, so @A.x@ inside @A.LC@ gives
+    -- @A.LC.subst.x@. His ruling of 2026-11-10 spells the family
+    -- @Compiles.subst.Source.x@ — the class's name after the language — and
+    -- from this phase a module's declarations live under the module's name, so
+    -- repeating the shared steps would have made that ruling's own example
+    -- @Two.Compiles.subst.Two.Source.x@ and the printer's promised @subst.x@
+    -- unreachable. A class the language does NOT share a prefix with is
+    -- unchanged, which is the case that distinction exists for.
   , testCase "and a language's substitution is placed under the namespace" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 blocksInANamespace
           env = globals (machineOf s1)
-      ( isDeclared (named "NSAll.A.LC.subst.A.x") env
-        , isDeclared (named "NSAll.A.LC.fv.A.x") env
-        , isDeclared (named "NSAll.A.A.LC.subst.A.x") env
-        , isDeclared (named "NSAll.LC.subst.A.x") env ) @?= (True, True, False, False)
+      ( isDeclared (named "NSAll.A.LC.subst.x") env
+        , isDeclared (named "NSAll.A.LC.fv.x") env
+        , isDeclared (named "NSAll.A.LC.subst.A.x") env
+        , isDeclared (named "NSAll.LC.subst.x") env ) @?= (True, True, False, False)
 
     -- **A COMMA LIST REACHES THE OWNING LANGUAGE BY ITS KEY, NOT ITS WORD**
     -- (2026-11-10). The pair rule a rule's grammar gets per class names the
@@ -177,13 +182,13 @@ scoped =
       (s0, _) <- startingSession
       s <- either assertFailure pure (loadOrSay s0 oneWordTwoClasses)
       said s ":parse Compiles ( a ~> b ) [ Source.x: y -> c ]"
-        @?= [ "Compiles.subst.Source.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Source.LC.var(c))" ]
+        @?= [ "subst.Source.x(step(var(a), ref(b)), y, var(c))" ]
       said s ":parse Compiles ( a ~> b ) [ Target.x: y -> c ]"
-        @?= [ "Compiles.subst.Target.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Target.Mach.ref(c))" ]
+        @?= [ "subst.Target.x(step(var(a), ref(b)), y, ref(c))" ]
       -- **The bare spelling is still two readings here, and that is what the
       -- qualifier is for** — not a defect left behind. It names both.
       said s ":parse Compiles ( a ~> b ) [ y -> c ]"
-        @?= [ "in Compiles`( a ~> b ) [ y -> c ]`: this term parses two ways, as Compiles.subst.Source.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Source.LC.var(c)) and as Compiles.subst.Target.x(Compiles.step(Source.LC.var(a), Target.Mach.ref(b)), y, Target.Mach.ref(c))" ]
+        @?= [ "in Compiles`( a ~> b ) [ y -> c ]`: this term parses two ways, as subst.Source.x(step(var(a), ref(b)), y, var(c)) and as subst.Target.x(step(var(a), ref(b)), y, ref(c))" ]
       -- **And a comma list qualifies each pair**, so the simultaneous
       -- substitution gets one list per class with that class's pair in it —
       -- where before the second class's language could not appear in a pair at
@@ -1073,11 +1078,34 @@ meaning =
                   [("t.thena.rules", "rule base t where\nlanguage Tm where { var : name }\n")]) of
         RuleFileRefused _ (RuleSyntaxError _) -> pure ()
         other -> assertFailure (show other)
-  , testCase "and may not declare a language of the same name" $ do
+    -- **TWO MODULES MAY EACH DECLARE A LANGUAGE CALLED @LC@ — MS12 PHASE
+    -- 313.** A module's declarations live under the name its header gives it,
+    -- so these are @STLC.LC@ and @Again.LC@ and neither is the other. Before
+    -- that phase every module declared at the root, the second block's name was
+    -- the first block's name, and the second module was refused — which is what
+    -- this test used to assert.
+    --
+    -- **The bare word is then an ambiguity, not a refusal of the module**, and
+    -- that is the general rule: a name reachable two ways is refused where it is
+    -- /written/, naming both (his ruling of 2026-10-30).
+  , testCase "a second module may declare a language of the same word" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 stlc
       case loadProofSource s1 "module Again where\n\nlanguage LC, P where\n  f -> P\n" of
-        (_, Ran _ _ (Refused (GrammarRefused e))) -> e @?= GrammarError LanguageBlock "LC" NameTaken
+        (_, ProofLoaded nm ds _ _) -> (nm, ds) @?= ("Again", ["LC"])
+        (_, other) -> assertFailure (show other)
+    -- **And one module may not declare it twice**, which is where the clash
+    -- now lives: the second block's datatype is the first block's datatype.
+  , testCase "but one module may not declare it twice" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (unlines
+             [ "module Twice where", ""
+             , "language LC, P where"
+             , "  f -> P", ""
+             , "language LC, Q where"
+             , "  g -> Q" ]) of
+        (_, Ran _ _ (Refused (GrammarRefused e))) ->
+          e @?= GrammarError LanguageBlock "LC" NameTaken
         (_, other) -> assertFailure (show other)
   ]
   where
@@ -1151,7 +1179,7 @@ notating =
       -- ran. Here the sorts are what the checker recorded.
       let gs = grammars (machineOf s1)
       map argumentSort (concat [ gproductionArguments p
-                               | g <- gs, grammarName g == rootName "Imp"
+                               | g <- gs, grammarName g == named "U.Imp"
                                , p <- grammarProductions g ])
         @?= [OfUniverse 0, OfUniverse 0]
     -- **A universe slot is refused where the argument types are generated FROM
@@ -1187,7 +1215,7 @@ notating =
       -- And @same@ in the fixture is `refl`, so the load itself asserts that
       -- the notation builds exactly the hand-written constructor application.
       map gproductionKind (concat [ grammarProductions g | g <- grammars (machineOf byHand)
-                                                         , grammarName g == rootName "Lam" ])
+                                                         , grammarName g == named "Lam.Lam" ])
         -- Three constructors, and the two 'Function's are the generated
         -- substitution's own notation block (phase 159) — so the equipment
         -- arrived with its spelling, exactly as a @language@ block's does.
@@ -1215,7 +1243,7 @@ notating =
         , "notation Ctx where"
         , "  extend : x as occurrence -> ⟪ Γ , x , T ⟫", "" ])
         @?= Left ("refused: in the notation for Ctx, production extend: a role belongs to the "
-                    ++ "block that installs the grammar, and Ctx's is installed already, with "
+                    ++ "block that installs the grammar, and E.Ctx's is installed already, with "
                     ++ "its substitution generated from the roles it had then")
     -- **The family is generated FROM THE GRAMMAR**, so a constructor with no
     -- production would get no method and the generated @elim@ would be one
@@ -1235,7 +1263,7 @@ notating =
         , "notation D where"
         , "  dOne (v : x) : v as occurrence -> ⟨ v ⟩", "" ])
         @?= Left ("refused: in the notation for D: it declares a role, so it generates D's "
-                    ++ "substitution from these productions — and D.dTwo is a constructor of D "
+                    ++ "substitution from these productions — and D.D.dTwo is a constructor of D "
                     ++ "that no production spells")
   , -- **THE HEADER FORM GIVES A DECLARED NAME ITS OWN SPELLING, AND THE NAME
     -- NEED NOT BE A GRAMMAR** (MS8 phase 160, `~hwxrx`, and it closes `~wkv37`).
@@ -1255,14 +1283,14 @@ notating =
         Left e -> assertFailure e
         Right s1 -> do
           let gs = grammars (machineOf s1)
-          v <- case [ g | g <- gs, grammarName g == rootName "Valid" ] of
+          v <- case [ g | g <- gs, grammarName g == named "V.Valid" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called Valid")
           -- One production, the type former's own spelling, named after it.
           map (\p -> (gproductionName p, gproductionKind p)) (grammarProductions v)
-            @?= [(named "Valid.Valid", TypeFormer)]
+            @?= [(named "V.Valid.Valid", TypeFormer)]
           map argumentSort (concatMap gproductionArguments (grammarProductions v))
-            @?= map (OfLanguage . rootName) ["Ctx", "LC", "Ty", "typing"]
+            @?= map (OfLanguage . named . ("V." ++)) ["Ctx", "LC", "Ty", "typing"]
           -- And the constructor's target prints in it: a judgment over a
           -- judgment, spelled.
           said s1 ":show Valid" !! 1
@@ -1280,14 +1308,14 @@ notating =
       case loadProofSource s0 (joiningWith "notation C where\n  join a b -> ⟦ a , b ⟧") of
         (s1, ProofLoaded {}) -> do
           let gs = grammars (machineOf s1)
-          c <- case [ g | g <- gs, grammarName g == rootName "C" ] of
+          c <- case [ g | g <- gs, grammarName g == named "Joining.C" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called C")
           -- Two parameters, both at @C@ because that is what @join@ takes.
           map gproductionArguments [ p | p <- grammarProductions c
-                                       , gproductionName p == rootName "join" ]
-            @?= [[ Argument "a" (OfLanguage (rootName "C")) Plain
-                 , Argument "b" (OfLanguage (rootName "C")) Plain ]]
+                                       , gproductionName p == named "Joining.join" ]
+            @?= [[ Argument "a" (OfLanguage (named "Joining.C")) Plain
+                 , Argument "b" (OfLanguage (named "Joining.C")) Plain ]]
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , -- **A refusal that quotes a type may not print a nameless argument.** The
     -- stand-in 'functionShape' peels a telescope with used to be a global with
@@ -1311,22 +1339,23 @@ notating =
           -- @join@ is the definition's own name; the block declares nothing.
           names @?= ["x", "Ty", "C", "join"]
           let gs = grammars (machineOf s1)
-          c <- case [ g | g <- gs, grammarName g == rootName "C" ] of
+          c <- case [ g | g <- gs, grammarName g == named "Joining.C" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called C")
           map gproductionName (grammarProductions c)
-            @?= [named "C.e", named "C.ext", rootName "join"]
+            @?= [named "Joining.C.e", named "Joining.C.ext", named "Joining.join"]
           map gproductionKind (grammarProductions c)
             @?= [Constructor, Constructor, Function]
           -- **The datatype is the one it was**, which is the whole reason this
           -- is not the refused joining constructor: @C@ stays a list.
-          map gproductionName (constructorProductions c) @?= map named ["C.e", "C.ext"]
+          map gproductionName (constructorProductions c)
+            @?= map named ["Joining.C.e", "Joining.C.ext"]
           -- Plain arguments, in the parameter list's order, at the types the
           -- declaration gives them (MS8 phase 171).
           map gproductionArguments [ p | p <- grammarProductions c
-                                       , gproductionName p == rootName "join" ]
-            @?= [[ Argument "a" (OfLanguage (rootName "C")) Plain
-                 , Argument "b" (OfLanguage (rootName "C")) Plain ]]
+                                       , gproductionName p == named "Joining.join" ]
+            @?= [[ Argument "a" (OfLanguage (named "Joining.C")) Plain
+                 , Argument "b" (OfLanguage (named "Joining.C")) Plain ]]
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
     -- **The term is written in the same module as the block** (MS11 phase 282,
     -- @~xdt8c@). It was a second module loaded into the session the first one

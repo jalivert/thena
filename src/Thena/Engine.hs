@@ -2646,9 +2646,20 @@ perform instr rest m = case operation instr of
     -- What the machine recorded about this name\'s argument positions, if it
     -- recorded anything. A name with no entry — every DC-declared global, and
     -- every local — takes what was written and nothing more.
-    plicitiesOf g = case lookup g (signatures m) of
+    -- **THE WRITTEN NAME IS RESOLVED FIRST — MS12 PHASE 313.** The table is
+    -- keyed by the name the definition went in under and the caller hands over
+    -- the name as the user wrote it; a module's declarations live under the
+    -- module's own namespace from this phase, so @idI@ was looked up at the
+    -- root while its signature sat at @Both.idI@ — no implicit was ever
+    -- inserted, and @idI (succ zero)@ put the term in the type's position and
+    -- refused with @Nat and Type\8320 cannot be made equal@.
+    -- 'Thena.Core.Term.globalUnder' is the one walk; two answers or none means
+    -- nothing is recorded, which is the same as an unrecorded name.
+    plicitiesOf g = case lookup (resolved g) (signatures m) of
       Just ps -> ps
       Nothing -> []
+
+    resolved g = either (const g) id (globalNamed m g)
 
     -- | Brady\'s @EXPAND@: line the written arguments up against the plicities,
     -- writing a placeholder in at each implicit position the user left out.

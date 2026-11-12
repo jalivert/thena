@@ -2837,7 +2837,11 @@ parseFailureReasonIn ren text why = case why of
     symbolText s = case s of
       Earley.Literal x -> x
       Earley.Scan n _ -> n
-      Earley.Nonterminal n -> n
+      -- **A NONTERMINAL IS A KEY, SO IT IS SPELLED — MS12 phase 313.** The
+      -- parser is keyed by a grammar's own name, which carries the module's
+      -- namespace since that phase, and @expecting Printing.LC@ named a
+      -- language by a path the reader never wrote.
+      Earley.Nonterminal n -> spelled n
     oneOf ws = case reverse ws of
       [w] -> w
       w : rest -> intercalate ", " (reverse rest) ++ " or " ++ w

@@ -143,7 +143,7 @@ module Thena.Driver
   , kindOf
   ) where
 
-import Data.Maybe (fromMaybe, isJust, mapMaybe, maybeToList)
+import Data.Maybe (fromMaybe, isJust, mapMaybe, maybeToList, listToMaybe)
 import Data.Word (Word64)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
@@ -2776,7 +2776,7 @@ loadProofItems s nm items = case (moduleImports items, moduleConsults items) of
     case loadProofItemsConsulting (Pool (rules (sessionMachine s)) [] [] []) s nm items of
       (s', r@(ProofLoaded {})) ->
         (moduleDeclared nm (interfaceOf items) [] s s', r)
-      answer -> answer
+      other -> other
   -- **Refused rather than ignored** (MS11 phases 273 and 274). This door has no
   -- way to read a file (§12 invariant 4), so a module that names anything on
   -- disc cannot be elaborated through it — and silently elaborating it against
@@ -3666,13 +3666,19 @@ grammarsReachedBy ms0 s = concatMap (one []) ms0
     -- datatype are granted together because the test is a prefix, so a clause
     -- that keeps @LC@ out keeps the language out of both tables and a term
     -- written in it is refused at the tag.
+    -- **AND THE CLAUSE IS READ AS THE IMPORTER WRITES IT — MS12 PHASE 313**,
+    -- which 'reachedBy' does for names: a language lives under its module's
+    -- namespace, so @import Lang ( A )@ is a word about @A.LC@ and not about
+    -- the key @test.modules.Lang.A.LC@. 'asWritten' is the one reading.
     one seen (m, sel)
       | m `elem` seen = []
       | otherwise     =
-          selects sel
-            (filter (interfaceAdmits m s)
-                    (concat [ gs | (m', gs) <- sessionGrammarsBy s, m' == m ])
-               ++ concatMap (one (m : seen)) (publicImportsOf m s))
+          [ g
+          | g <- filter (interfaceAdmits m s)
+                        (concat [ gs | (m', gs) <- sessionGrammarsBy s, m' == m ])
+                   ++ concatMap (one (m : seen)) (publicImportsOf m s)
+          , not (null (selects sel [asWritten s g]))
+          ]
 
 -- | __What importing these modules reaches__ (MS11 phase 291).
 --
@@ -3722,9 +3728,9 @@ opensFor ms0 s =
 
     -- The step that follows this prefix, where the name is under it at all.
     firstUnder ps g
-      | ps `isPrefixOf` whole, w : _ <- drop (length ps) whole = Just w
+      | ps `isPrefixOf` steps, w : _ <- drop (length ps) steps = Just w
       | otherwise = Nothing
-      where whole = nameSteps g ++ [nameWord g]
+      where steps = nameSteps g ++ [nameWord g]
 
 reachedBy :: [(ModuleName, Selection)] -> Session -> [GlobalName]
 reachedBy ms0 s = concatMap (one []) ms0
@@ -4447,10 +4453,17 @@ coversName (ps, x) g = steps (GlobalName ps x) `isPrefixOf` steps g
 -- **Unchanged for a name no module declared** — the prompt's, and the prelude's,
 -- which are the root's.
 asWritten :: Session -> GlobalName -> GlobalName
-asWritten s g = case moduleDeclaring g s of
+asWritten s g = case holder of
   Just m | Just rest <- stripPrefix (moduleNamespace m) (nameSteps g) ->
     GlobalName rest (nameWord g)
   _ -> g
+  where
+    -- **A grammar key is in neither table 'moduleDeclaring' reads** — @A.LC@ is
+    -- a key and @A.LC.LC@ is the datatype — so the grammar table answers for
+    -- it, which is 'grammarsReachedBy''s own asymmetry said once more.
+    holder = case moduleDeclaring g s of
+      Just m  -> Just m
+      Nothing -> listToMaybe [ m | (m, gs) <- sessionGrammarsBy s, g `elem` gs ]
 
 -- | A module reached with no clause on it (MS11 phase 306) — the prelude, and
 -- anything that is not an @import@ line.
@@ -6171,9 +6184,9 @@ scopedDecls reveals brought gs env conc = go conc []
     -- base is read before the prelude declares its first name, so a path that
     -- reaches nothing is an @open@ that brings nothing in, and the author sees
     -- the tag it failed to shorten.
-    brings o sc = sc { scopeOpens = map (resolve sc) (openedOf o) ++ scopeOpens sc }
+    brings o sc = sc { scopeOpens = map (resolved sc) (openedOf o) ++ scopeOpens sc }
 
-    resolve sc o = case namespaceUnder sc env (openedPath o) of
+    resolved sc o = case namespaceUnder sc env (openedPath o) of
       Right ps -> o { openedPath = ps }
       Left _   -> o
 

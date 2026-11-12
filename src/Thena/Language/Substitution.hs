@@ -59,7 +59,7 @@ module Thena.Language.Substitution
 
 import qualified Data.List.NonEmpty as NE
 
-import Data.List (intercalate, nub, stripPrefix)
+import Data.List (intercalate, nub)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Thena.Core.Term (GlobalName (..), declarationNamed, inDeclarationOf, nameDotted, rootName, Literal (..))
 import Thena.Global.Env (ArgRole (..))
@@ -72,6 +72,8 @@ import Thena.Language.Grammar
   , allOf
   , classOwner
   , classWord
+  , classIn
+  , classUnder
   , classesSubstituted
   , freshOf
   , fvOf
@@ -100,35 +102,6 @@ import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), Surf
 -- the encoding is injective and @A.x@ and a root class called @A-x@ do not
 -- collide. **A class whose word holds no dash is unchanged** — @x@ is @x@ —
 -- which is every class in the corpus, so no existing generated body moved.
--- | __A class, named where the prefix in front of it is named__ (MS12 phase
--- 313, his ruling of 2026-11-12).
---
--- A class is carried as its resolved name, and a module's declarations live
--- under the module's own namespace since that phase, so that name begins with
--- the module's steps. 'Thena.Core.Term.inFamilyOf' turns a class's steps into
--- path steps, so @LC@'s @fv@ for the class @x@ of module @M@ was minted as
--- @M.LC.fv.M.x@ while @declaredIn@ was asked for @M.LC.fv.x@ — the family went
--- in under a name nothing would ever write, and nothing said so.
---
--- **The prefix a class shares with the prefix written in front of it says
--- nothing**, and the two classes this encoding exists to keep apart still
--- differ without it: @A.x@ and @B.x@ of one module stay @A.x@ and @B.x@ (MS10
--- phase 259).
---
--- **@l@ is a language's name and only its steps are read**, which is what lets
--- one function serve both conventions already in this file: a language of one's
--- own is written relative ('grammarWritten') and another language is written in
--- full ('grammarName'), and the class is made relative to whichever is in front
--- of it.
-classUnder :: GlobalName -> GlobalName -> GlobalName
-classUnder l k = case stripPrefix (nameSteps l) (nameSteps k) of
-  Just rest -> GlobalName rest (nameWord k)
-  Nothing   -> k
-
--- | 'classUnder' for the grammar the class is being named inside.
-classIn :: Grammar -> GlobalName -> GlobalName
-classIn = classUnder . grammarName
-
 classLocal :: GlobalName -> String
 classLocal k = intercalate "-" (map escape (nameSteps k ++ [nameWord k]))
   where
@@ -158,9 +131,12 @@ substitutionDefinitions gs g =
     langName = grammarWritten g
     lang = grammarWord g
 
-    -- 'classUnder' says why these two, and which is which.
+    -- 'Thena.Language.Grammar.classUnder' says why these two, and which is
+    -- which: a class of this language's own is named after @langName@, and a
+    -- class reached in another language is named after that one.
     mine = classIn g
     theirs = classUnder
+
     -- **A CLASS IS CARRIED AS ITS NAME AND SPELLED AS ITS WORD** (MS10 phase
     -- 259). Resolved in scope, @A.x@ and @B.x@ are two classes, so what is
     -- compared below is the name; what a generated name hangs off, and what a
@@ -541,11 +517,19 @@ substitutionNotations gs g
       [ [ Production 0 nm params Nothing
             (map Word [target k, "[", classWord k, "->", replacement k, "]"])
         , Production 0 nm params Nothing
-            -- **The class is named relative to the language — MS12 phase 313**
-            -- ('classUnder'): the notation a user writes is @e[x: x -> n]@, and
-            -- the key carries the module's namespace, so this printed
-            -- @e[M.x: x -> n]@ and the ascription asked for a name no reader
-            -- would write.
+            -- **WHAT IS WRITTEN IS THE CLASS AFTER THE LANGUAGE — MS12 phase
+            -- 313** ('classIn'). His ruling of 2026-11-10 spells this
+            -- qualifier @Source.x@ for the class of @Compiles@, and since
+            -- phase 313 a module's declarations live under the module's own
+            -- namespace, so that class's whole name is @Two.Source.x@ — the
+            -- absolute spelling would have put the module's name into every
+            -- qualified substitution in every file, and his own worked example
+            -- would be unwritable. The language is already in front of the
+            -- bracket, so the steps it has said are not said again.
+            --
+            -- **The generated NAME is unchanged and absolute**, which is what
+            -- that ruling's bullet is about: @nm@ below is the function this
+            -- production spells.
             ( [ Word (target k), Word "["
               , Literally (nameDotted (classIn g k)), Literally ":" ]
               ++ map Word [classWord k, "->", replacement k, "]"] )

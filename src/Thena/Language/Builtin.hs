@@ -76,7 +76,8 @@ module Thena.Language.Builtin
   , coreRules
   ) where
 
-import Thena.Language.Grammar (Grammar, productionBody)
+import Thena.Core.Term (InScope, nameFromText)
+import Thena.Language.Grammar (Grammar, productionBody, tagText)
 import Thena.Language.Build (languageNames, productionNames, productionRule)
 import qualified Thena.Language.Earley as E
 import Thena.Language.Lexemes
@@ -132,8 +133,8 @@ coreHead = "core term"
 -- named in a list — which is the whole of what lets this exist before any object
 -- language does. A @language LC@ loaded mid-session is writable inside a
 -- @surface@ region immediately, with nothing rebuilt.
-surfaceRules :: [Grammar] -> [E.Rule]
-surfaceRules gs = concat
+surfaceRules :: [Grammar] -> InScope -> [E.Rule]
+surfaceRules gs sc = concat
   [ term, atom, arguments, terms, binders, piBinders, name, names, bindings ]
   where
     t = surfaceHead
@@ -204,7 +205,7 @@ surfaceRules gs = concat
           ]
       ] ++
       at atomH "parenthesised" [lit "("] [lit ")"] ++
-      literals atomH gs
+      literals atomH gs sc
 
     -- @Terms@ may be empty in @Surface\/Parser.y@ and the chart has no empty
     -- rules, so the parenthesised group is spelled twice.
@@ -261,8 +262,8 @@ surfaceRules gs = concat
 -- **Flat, like the surface, and with no ascription to spell out**: the
 -- development calculus has none. The one extra head is the atom, for @elim@'s
 -- slots and for the parenthesised runs.
-coreRules :: [Grammar] -> [E.Rule]
-coreRules gs = concat
+coreRules :: [Grammar] -> InScope -> [E.Rule]
+coreRules gs sc = concat
   [ term, atom, atoms, arguments, binders, name, qname, levels, levelArgs
   , constraint ]
   where
@@ -317,7 +318,7 @@ coreRules gs = concat
       , rule "int" atomH [scan "int" numberRegex]
       , rule "regex" atomH [scan "regex" regexRegex]
       , rule "parenthesised" atomH [lit "(", nt c, lit ")"]
-      ] ++ literals atomH gs
+      ] ++ literals atomH gs sc
 
     atoms =
       [ rule "one" atomsH [nt atomH]
@@ -379,17 +380,26 @@ coreRules gs = concat
 --
 -- **The body is looked up by the production's full name** (MS10 phase 253) — see
 -- 'Thena.Language.Instral.literalProductions', which had the same stale lookup.
-literals :: String -> [Grammar] -> [E.Rule]
-literals head' gs = concat
-  [ [ E.Rule (head' ++ " " ++ l) head' [E.Literal (l ++ "`"), E.Nonterminal l, fence] []
-    , E.Rule (head' ++ " empty " ++ l) head' [E.Literal (l ++ "`"), fence] []
+-- **THE TAG SHORTENS AND THE KEY DOES NOT — MS12 PHASE 313.** A module's
+-- declarations live under the module's own name from that phase, so the key of
+-- a language in @examples\/Stlc01Syntax.thena@ is
+-- @examples.Stlc01Syntax.LC@ — and with the key as the opening literal the only
+-- way to write an object literal inside a surface region was to type the whole
+-- path. 'Thena.Language.Grammar.tagText' is the walk a written tag already
+-- resolves by, and everything the rule points into stays dotted.
+-- 'Thena.Language.Instral.literalProductions' is the same pair, for a REPL line.
+literals :: String -> [Grammar] -> InScope -> [E.Rule]
+literals head' gs sc = concat
+  [ [ E.Rule (head' ++ " " ++ l) head' [E.Literal (t ++ "`"), E.Nonterminal l, fence] []
+    , E.Rule (head' ++ " empty " ++ l) head' [E.Literal (t ++ "`"), fence] []
     ] ++
     [ E.Rule (head' ++ " " ++ l ++ " " ++ p) head'
-        ( E.Literal (l ++ "[" ++ p ++ "]`")
+        ( E.Literal (t ++ "[" ++ p ++ "]`")
             : maybe [] (productionBody gs) (productionRule gs l p) ++ [fence] ) []
     | p <- productionNames gs l
     ]
   | l <- languageNames gs
+  , let t = tagText gs sc (nameFromText l)
   ]
   where fence = E.Literal "`"
 

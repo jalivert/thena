@@ -28,6 +28,7 @@ import Thena.Driver
   , loadProofSource
   , machineOf
   )
+import Thena.Core.Term (rootScope)
 import Thena.Engine (Machine (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
@@ -99,7 +100,7 @@ stuckCases =
 
 offerOf :: [Grammar] -> String -> String -> IO OfferView
 offerOf gs before after =
-  case displayOffer gs (ch "LC") Nothing [WrittenText before] [WrittenText after] of
+  case displayOffer gs rootScope (ch "LC") Nothing [WrittenText before] [WrittenText after] of
     Right o -> pure o
     Left p  -> assertFailure ("displayOffer refused the fixture: " <> show p)
 
@@ -180,7 +181,7 @@ mismatchParse gs lang text
     shown = case Earley.parse (earleyRules gs) (Earley.StartAt lang) (Earley.pieces text) of
       Left f  -> parseFailureReason text f
       Right t -> renderTree t
-    drawn = case displayParse gs lang Nothing [WrittenText text] of
+    drawn = case displayParse gs rootScope lang Nothing [WrittenText text] of
       Left f  -> redrawFailure text f
       Right t -> redrawTree t
 
@@ -260,7 +261,7 @@ mismatchOffer gs lang before after
     -- **A region, as of phase 125** — one run of written text on each side, no
     -- splices, which is exactly what a terminal line is. The 'Left' cannot
     -- happen here: every caller names a language the fixture loaded.
-    drawn = case displayOffer gs lang Nothing [WrittenText before] [WrittenText after] of
+    drawn = case displayOffer gs rootScope lang Nothing [WrittenText before] [WrittenText after] of
       Right o -> redrawOffer before o
       Left p  -> error ("displayOffer refused the fixture: " <> show p)
 
@@ -314,10 +315,10 @@ redrawSymbolText' s = case s of
 regionCases :: [TestTree]
 regionCases =
   [ testCase "a language nothing declared is refused, by name" $
-      displayOffer [] "LC" Nothing [] [] @?= Left (NoSuchLanguage "LC")
+      displayOffer [] rootScope "LC" Nothing [] [] @?= Left (NoSuchLanguage "LC")
   , testCase "so is a production the language does not have" $ do
       gs <- loaded
-      displayOffer gs (ch "LC") (Just "nope") [] []
+      displayOffer gs rootScope (ch "LC") (Just "nope") [] []
         @?= Left (NoSuchProduction (ch "LC") "nope")
   , testCase "an explicit production starts there instead of at the language" $ do
       gs <- loaded
@@ -382,26 +383,26 @@ regionCases =
       -- does. 'displayOffer' splits its region at the cursor and numbers the
       -- two halves as one; nothing about that is checkable there, and here it
       -- is.
-      displayParse gs (ch "LC") Nothing [WrittenText "( ", WrittenSplice, WrittenText " ", WrittenSplice, WrittenText " )"]
+      displayParse gs rootScope (ch "LC") Nothing [WrittenText "( ", WrittenSplice, WrittenText " ", WrittenSplice, WrittenText " )"]
         @?= Right (ANode (ch "LC.app") [ASpliceOf 0, ASpliceOf 1])
   , testCase "and a written term beside a splice does not take a number" $ do
       gs <- loaded
-      displayParse gs (ch "LC") Nothing [WrittenText "( x ", WrittenSplice, WrittenText " )"]
+      displayParse gs rootScope (ch "LC") Nothing [WrittenText "( x ", WrittenSplice, WrittenText " )"]
         @?= Right (ANode (ch "LC.app") [ANode (ch "LC.var") [ATokenView "x"], ASpliceOf 0])
   , testCase "an explicit production reads at that production" $ do
       gs <- loaded
       -- @T@ is @Ty@'s own nonterminal, so @\953@ reads there and not at @LC@.
-      displayParse gs (ch "Ty") (Just (ch "Ty.base")) [WrittenText "\953"]
+      displayParse gs rootScope (ch "Ty") (Just (ch "Ty.base")) [WrittenText "\953"]
         @?= Right (ANode (ch "Ty.base") [])
   ]
 
 replacesAt :: [Grammar] -> [Written] -> [Written] -> IO Bool
-replacesAt gs before after = case displayOffer gs (ch "LC") Nothing before after of
+replacesAt gs before after = case displayOffer gs rootScope (ch "LC") Nothing before after of
   Left p  -> assertFailure ("displayOffer refused a fixture: " <> show p) >> pure False
   Right o -> pure (offeredReplaces o)
 
 optionsOf :: [Grammar] -> String -> Maybe String -> [Written] -> [Written] -> IO [String]
-optionsOf gs lang prod before after = case displayOffer gs lang prod before after of
+optionsOf gs lang prod before after = case displayOffer gs rootScope lang prod before after of
   Left p  -> assertFailure ("displayOffer refused a fixture: " <> show p) >> pure []
   Right o -> pure (map redrawSymbolText (offeredOptions o ++ offeredWanted o))
 
@@ -500,7 +501,7 @@ productionCases =
         >>= (@?= map ch ["Ty.base", "Ty.arrow"])
   ]
   where
-    offered gs before after = case displayOffer gs (ch "LC") Nothing before after of
+    offered gs before after = case displayOffer gs rootScope (ch "LC") Nothing before after of
       Left p  -> assertFailure ("displayOffer refused a fixture: " <> show p) >> pure []
       Right o -> pure (offeredProductions o)
     named gs before after = map productionName <$> offered gs before after

@@ -707,6 +707,19 @@ isolation**, and that is what makes a module that type-checks for its author typ
 for whoever imports it. Nineteen files in the shipped `examples/` relied on the old flat
 scope and were fixed rather than accommodated.
 
+**A MODULE'S DECLARATIONS LIVE UNDER THE NAME ITS HEADER GIVES IT.** `module M where`
+is a namespace block: everything the file declares is named inside it — `M.LC`,
+`M.LC.LC`, `M.x` — and the file's own body resolves with `M` innermost, so nothing you
+write changes. **Two files may each declare a language called `LC`**, and the bare word
+is then an ambiguity refused where you *write* it, naming both, exactly as two `open`s
+of one word are. Decided 2026-11-12, built MS12 phase 313.
+
+*Until that phase the isolation above was stated and not true. A module's own
+declarations were worked out by subtracting the session from itself, which cannot see a
+name the session already held — so a file could not see a name it had declared itself,
+its own interface dropped that name, and a second definition silently answered every
+lookup in its place. Three defects, one cause.*
+
 **The prelude needs no import** — it is the one module every other one may reach, so
 `Eq` and `refl` are there whatever you wrote; `import Prelude` is allowed and does
 nothing. **The prompt is not a module**: a line you type reaches everything the session

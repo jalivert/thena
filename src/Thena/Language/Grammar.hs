@@ -34,6 +34,8 @@ module Thena.Language.Grammar
   , grammarWord
   , grammarWritten
   , classWord
+  , classIn
+  , classUnder
   , grammarForTag
   , tagText
   , sortType
@@ -74,7 +76,7 @@ module Thena.Language.Grammar
   , productionBody
   ) where
 
-import Data.List (nub, (\\))
+import Data.List (nub, stripPrefix, (\\))
 import Data.Maybe (isJust, isNothing, listToMaybe)
 
 import Thena.Core.Level (Normal (..), normalise)
@@ -602,10 +604,16 @@ checkGrammar sc installed env b = do
     -- reader asks**, so what counts as taken here is what a reader standing in
     -- this block would reach — and two candidates count as taken too, an
     -- ambiguity being no more writable than a clash.
+    -- **THE WALK AND NOT THE @open@s.** A name the walk reaches — this block's
+    -- own namespace outward to the root — is a name the new one would be unable
+    -- to shadow, so the new one is born unreachable and is refused. A name
+    -- reached only by an @open@ is a different thing: writing the word becomes
+    -- an ambiguity, which 'Thena.Core.Term.globalUnder' already refuses by
+    -- naming both, and two contexts may each have a @nil@.
     taken x = reaches (`isDeclared` env) || reaches installedName
       where
         reaches p = either (not . null) (const True)
-                           (globalUnder p sc (nameFromText x))
+                           (globalUnder p sc { scopeOpens = [] } (nameFromText x))
         installedName c =
           c `elem` concat
             [ grammarName g : map gproductionName (grammarProductions g)
@@ -885,6 +893,38 @@ isGrammar gs c = any ((== c) . grammarName) gs
 -- class as well as the name does.
 classWord :: GlobalName -> String
 classWord = nameWord
+
+-- | __A class, named where the prefix in front of it is named__ (MS12 phase
+-- 313, his ruling of 2026-11-12).
+--
+-- A class is carried as its resolved name, and a module's declarations live
+-- under the module's own namespace since that phase, so that name begins with
+-- the module's steps. The two places a class is named next to a language —
+-- the qualified spelling of a substitution pair, and the generated family a
+-- language hangs off — both write the class after the language, so the steps
+-- the two share are already said and saying them again names something nobody
+-- would write: @J.LC@'s class @J.x@ was spelled @J.x@ in @E[J.x: x -> M]@ and
+-- minted as @J.LC.fv.J.x@.
+--
+-- **The prefix a class shares with the prefix written in front of it says
+-- nothing**, and the two classes this distinction exists to keep apart still
+-- differ without it: @A.x@ and @B.x@ of one module stay @A.x@ and @B.x@ (MS10
+-- phase 259).
+--
+-- **@l@ is a language's name and only its steps are read**, which is what lets
+-- one function serve both conventions in
+-- 'Thena.Language.Substitution.substitutionDefinitions': a language of one's
+-- own is written relative ('grammarWritten') and another language is written
+-- in full ('grammarName'), and the class is made relative to whichever is in
+-- front of it.
+classUnder :: GlobalName -> GlobalName -> GlobalName
+classUnder l k = case stripPrefix (nameSteps l) (nameSteps k) of
+  Just rest -> GlobalName rest (nameWord k)
+  Nothing   -> k
+
+-- | 'classUnder' for the grammar the class is being named inside.
+classIn :: Grammar -> GlobalName -> GlobalName
+classIn = classUnder . grammarName
 
 -- | __The type a slot's sort is, as it is written into a generated type.__
 --
@@ -1433,14 +1473,20 @@ substitutable gs g = do
 -- 'Thena.Core.Term.inFamilyOf' and 'Thena.Core.Term.inDeclarationOf', the
 -- helpers every generated name is minted by, so none of these four decides a
 -- placement of its own.
+--
+-- **THE CLASS GOES IN AS 'classIn' NAMES IT — MS12 PHASE 313 — WHICH IS WHAT
+-- 'Thena.Language.Substitution.substitutionDefinitions' MINTS.** This list is
+-- what a clash is checked against, so a name here that is not minted is a check
+-- that can never fire: with the class's whole name it asked after
+-- @M.LC.fv.M.x@ while the definition went in as @M.LC.fv.x@.
 substitutionFamily :: [Grammar] -> Grammar -> [GlobalName]
 substitutionFamily gs g
   | null reached = []
   | otherwise =
-      [ freshOf n k | k <- owned ]
-        ++ [ fvOf n k | k <- reached ]
+      [ freshOf n (classIn g k) | k <- owned ]
+        ++ [ fvOf n (classIn g k) | k <- reached ]
         ++ [ allOf n ]
-        ++ [ substOf n k | k <- reached ]
+        ++ [ substOf n (classIn g k) | k <- reached ]
   where
     n = grammarName g
     reached = classesSubstituted gs g

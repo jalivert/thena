@@ -32,7 +32,7 @@ import Thena.Core.Term (rootName)
 import Thena.Render (renderResponse)
 import Thena.Rules (RuleBase, baseSignatures, opWords, ruleBase)
 import Thena.View (machineOf, sessionGrammars, sessionRules, statementOfferView)
-import Thena.View.Chart (offerAt)
+import Thena.View.Chart (offerAt, spelling)
 import Thena.View.Chart
   ( BoundView (..)
   , OfferView (..)
@@ -213,7 +213,8 @@ nestedLiteral = do
   s <- withLC
   offeredStuck (offerIn s "elaborate surface`LC`") @?= Nothing
   let o = offeredOptions (offerIn s "elaborate surface`LC`")
-  ANonterminalSymbol "LC" `elem` o @?= True
+  if ANonterminalSymbol "LC" `elem` o then pure ()
+    else assertFailure ("the object language was not offered: " <> show o)
 
 -- | The @:@-commands whose argument is a term now offer one. **Which language is
 -- the dispatch arm's**: @:core@ reads a development-calculus term, @:infer@ a
@@ -485,7 +486,9 @@ fixture sigs names =
 askIn :: Session -> RuleBase -> String -> [SymbolView]
 askIn s b before =
   offeredOptions
-    (offerAt (instralRules (sessionGrammars s) (scope (machineOf s)) (sessionRules s ++ [b])) (E.StartAt statementHead)
+    (offerAt (spelling (sessionGrammars s) (scope (machineOf s)))
+       (instralRules (sessionGrammars s) (scope (machineOf s)) (sessionRules s ++ [b]))
+       (E.StartAt statementHead)
        [WrittenText before] [])
 
 listSlot :: IO ()

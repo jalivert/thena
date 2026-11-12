@@ -353,7 +353,10 @@ canon :: String -> [Core] -> Core
 canon name = Canonical (inStlc name) []
 
 readTerm :: [Grammar] -> String -> Either BuildError Core
-readTerm gs src = case parse (earleyRules gs) (Earley.StartAt "LC") (pieces src) of
+-- **The parser is keyed by the grammar's own name** (MS12 phase 313): the
+-- fixture is @module STLC where@, so @LC@'s nonterminal is @STLC.LC@.
+readTerm gs src =
+  case parse (earleyRules gs) (Earley.StartAt "STLC.LC") (pieces src) of
   Left why -> Left (NoSuchProduction (show why))
   Right tree -> buildTerm gs tree
 

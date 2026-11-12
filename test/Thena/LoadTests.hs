@@ -1558,7 +1558,10 @@ importTests =
       -- which is written as a declaration anywhere in the file.
       assertBool (show mine)
         (all (`elem` mine)
-             (map ("test.modules.Lang." ++) ["A.LC.var", "A.LC.app", "A.LC.subst.A.x"]))
+             -- **The class is named relative to its language** (MS12 phase
+             -- 313, 'Thena.Language.Substitution.classUnder'): the module's
+             -- prefix is common to both, so it is said once.
+             (map ("test.modules.Lang." ++) ["A.LC.var", "A.LC.app", "A.LC.subst.x"]))
 
   , testCase "a global says which module declared it" $ do
       (s0, _) <- startingSession
@@ -3504,7 +3507,8 @@ langInterfaceTests =
     -- session cannot hold two of that name — which is `~ps4c7`'s territory and
     -- no part of this.
     testCase "the key is concealed from an importer of the withholding module" $ do
-      let key = GlobalName [] "LC"
+      -- **The key is under the module's own namespace** (MS12 phase 313).
+      let key m = named (m ++ ".LC")
           loaded path = do
             (s0, _) <- startingSession
             (s1, _, trouble) <- loadProofFile s0 path
@@ -3513,9 +3517,11 @@ langInterfaceTests =
       withheld <- loaded "test/modules/WithheldLang.thena"
       shared   <- loaded "test/modules/SharesLang.thena"
       assertBool "withheld: the key is concealed"
-        (key `elem` concealedFrom [(named' "test.modules.WithheldLang", SelectWide)] withheld)
+        (key "test.modules.WithheldLang"
+           `elem` concealedFrom [(named' "test.modules.WithheldLang", SelectWide)] withheld)
       assertBool "shared: the key is not"
-        (key `notElem` concealedFrom [(named' "test.modules.SharesLang", SelectWide)] shared)
+        (key "test.modules.SharesLang"
+           `notElem` concealedFrom [(named' "test.modules.SharesLang", SelectWide)] shared)
 
   , -- **The rule file is the case that leaked.** Refused at the TAG now, which
     -- is the refusal a base that never imported the language gets.

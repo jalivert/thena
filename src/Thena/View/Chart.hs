@@ -46,13 +46,15 @@ module Thena.View.Chart
   , OfferProblem (..)
   , displayParse
   , displayOffer
+  , spelling
   , offerAt
   ) where
 
 import Data.List (intersperse)
 
 import Thena.Language.Build (languageNames, productionNames)
-import Thena.Language.Grammar (Grammar, earleyRules)
+import Thena.Core.Term (InScope, nameFromText)
+import Thena.Language.Grammar (Grammar, earleyRules, tagText)
 import Thena.View.Type (TypeView)
 import qualified Thena.Language.Earley as Earley
 
@@ -276,12 +278,13 @@ data ProductionView = ProductionView
 -- has to say which.
 displayParse
   :: [Grammar]
+  -> InScope         -- ^ where the reader stands, for spelling a nonterminal
   -> String          -- ^ the language the region is in
   -> Maybe String    -- ^ the production it was written with, if any
   -> [Written]
   -> Either FailureView TreeView
-displayParse gs lang prod region =
-  either (Left . failureView) (Right . treeView)
+displayParse gs sc lang prod region =
+  either (Left . failureView (spelling gs sc)) (Right . treeView)
     (Earley.parse (earleyRules gs) (startOf lang prod) (fst (piecesFrom 0 region)))
 
 -- | One run of a region, as an editor holds it: characters the user typed, or
@@ -323,15 +326,31 @@ data OfferProblem
 -- tagged region with a production written on it.
 displayOffer
   :: [Grammar]
+  -> InScope         -- ^ where the reader stands, for spelling a nonterminal
   -> String          -- ^ the language the region is in
   -> Maybe String    -- ^ the production it was written with, if any
   -> [Written]       -- ^ left of the cursor
   -> [Written]       -- ^ right of the cursor
   -> Either OfferProblem OfferView
-displayOffer gs lang prod before after
+displayOffer gs sc lang prod before after
   | lang `notElem` languageNames gs = Left (NoSuchLanguage lang)
   | Just p <- prod, p `notElem` productionNames gs lang = Left (NoSuchProduction lang p)
-  | otherwise = Right (offerAt (earleyRules gs) (startOf lang prod) before after)
+  | otherwise =
+      Right (offerAt (spelling gs sc) (earleyRules gs) (startOf lang prod) before after)
+
+-- | __How a nonterminal is spelled for a frontend__ (MS12 phase 313).
+--
+-- **The parser is keyed by a grammar's own name and a reader writes a tag.**
+-- Since that phase a module's declarations live under the module's own
+-- namespace, so the key of a language declared in @examples\/Stlc01Syntax@ is
+-- @examples.Stlc01Syntax.Ty@ — and an offer that named it that was telling the
+-- editor to show a path nobody had written. 'Thena.Language.Grammar.tagText' is
+-- the printer's own walk, the same one @:show@ uses, and it leaves a
+-- nonterminal that is not a grammar alone.
+spelling :: [Grammar] -> InScope -> String -> String
+spelling gs sc n = case tagText gs sc (nameFromText n) of
+  "" -> n
+  w  -> w
 
 -- | The offer at a cursor, given the rules and where a parse starts — the half
 -- of 'displayOffer' that is not about an object language's name.
@@ -341,9 +360,9 @@ displayOffer gs lang prod before after
 -- to check and no production to be written at, but everything below this line
 -- is exactly the same question. Splitting it here is what keeps the two from
 -- being two implementations of one answer.
-offerAt :: [Earley.Rule] -> Earley.Start -> [Written] -> [Written] -> OfferView
-offerAt rs start before after =
-  offerView replacing (Earley.offer rs start left right)
+offerAt :: (String -> String) -> [Earley.Rule] -> Earley.Start -> [Written] -> [Written] -> OfferView
+offerAt spell rs start before after =
+  offerView spell replacing (Earley.offer rs start left right)
   where
     -- The cursor is in the box when the box is the first thing to its right.
     (replacing, after') = case runs after of
@@ -401,14 +420,14 @@ piecesFrom k0 = go k0
     go k (WrittenSplice : rest)      = let (ps, k') = go (k + 1) rest in (Earley.Splice k : ps, k')
     go k (WrittenPlaceholder : rest) = let (ps, k') = go k rest in (Earley.Placeholder : ps, k')
 
-offerView :: Bool -> Earley.Offer -> OfferView
-offerView replacing o =
+offerView :: (String -> String) -> Bool -> Earley.Offer -> OfferView
+offerView spell replacing o =
   OfferView
-    (map symbolView (Earley.offerOptions o))
-    (map symbolView (Earley.offerWanted o))
+    (map (symbolView spell) (Earley.offerOptions o))
+    (map (symbolView spell) (Earley.offerWanted o))
     replacing
-    (fmap (map symbolView) (Earley.offerRest o))
-    [ ProductionView n (map symbolView body) (insertion body)
+    (fmap (map (symbolView spell)) (Earley.offerRest o))
+    [ ProductionView n (map (symbolView spell) body) (insertion body)
     | (n, body) <- Earley.offerProductions o
     ]
     -- Recovery is "Thena.View.Statement"'s, and it sets this afterwards: the
@@ -418,10 +437,10 @@ offerView replacing o =
     -- reason: the chart is handed one instruction and does not know there were
     -- others above it.
     []
-    (fmap stuckView (Earley.offerStuck o))
+    (fmap (stuckView spell) (Earley.offerStuck o))
 
-stuckView :: (Int, [Earley.Symbol]) -> StuckView
-stuckView (at, expected) = StuckView at (map symbolView expected)
+stuckView :: (String -> String) -> (Int, [Earley.Symbol]) -> StuckView
+stuckView spell (at, expected) = StuckView at (map (symbolView spell) expected)
 
 -- | A production's body as a region to insert: terminals as text, slots as
 -- placeholders, one space between.
@@ -439,9 +458,9 @@ insertion = merge . intersperse (WrittenText " ") . map one
     merge (w : rest)                             = w : merge rest
     merge []                                     = []
 
-failureView :: Earley.ParseFailure -> FailureView
-failureView f = case f of
-  Earley.Stuck p expected -> AStuck p (map symbolView expected)
+failureView :: (String -> String) -> Earley.ParseFailure -> FailureView
+failureView spell f = case f of
+  Earley.Stuck p expected -> AStuck p (map (symbolView spell) expected)
   Earley.Ambiguous a b -> AnAmbiguity (treeView a) (treeView b)
   Earley.Unbounded h -> AnUnboundedRule h
   Earley.Disagrees r x a b -> ADisagreement r x (treeView a) (treeView b)
@@ -454,11 +473,13 @@ failureView f = case f of
 -- rather than anybody's. The grammars are flat now
 -- ("Thena.Language.Builtin") and every head they have is a phrase a dropdown can
 -- show, so there is nothing to map and nothing to hide.
-symbolView :: Earley.Symbol -> SymbolView
-symbolView s = case s of
+symbolView :: (String -> String) -> Earley.Symbol -> SymbolView
+symbolView spell s = case s of
   Earley.Literal t -> ALiteralSymbol t
   Earley.Scan n _ -> AScanSymbol n
-  Earley.Nonterminal n -> ANonterminalSymbol n
+  -- **A nonterminal is a key, and a frontend shows a tag** (MS12 phase 313) —
+  -- 'spelling'.
+  Earley.Nonterminal n -> ANonterminalSymbol (spell n)
 
 treeView :: Earley.Tree -> TreeView
 treeView t = case t of

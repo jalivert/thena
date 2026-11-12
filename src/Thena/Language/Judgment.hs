@@ -59,6 +59,7 @@ import Thena.Language.Grammar
   , earleyRules
   , classOwner
   , classWord
+  , classIn
   , classesSubstituted
   , substitutionNames
   , variableProductions
@@ -498,7 +499,15 @@ ruleGrammar gs =
     own g =
       let l = grammarKey g
        in Earley.Rule ("metavariable " ++ l) l
-            [Earley.Scan ("a metavariable of " ++ l) (metavariables (grammarMetavars g))] []
+            -- **THE RULE IS KEYED BY THE NAME AND THE SCAN IS LABELLED BY THE
+            -- WORD — MS12 phase 313.** The rule's name is read back by
+            -- 'Special' and must stay the key; the scan's name is only ever
+            -- printed, in @expecting a metavariable of Ctx@, and a module's
+            -- declarations live under the module's own name from this phase, so
+            -- the key there read @a metavariable of J.Ctx@ for a language the
+            -- author of the rule writes @Ctx@.
+            [ Earley.Scan ("a metavariable of " ++ grammarWord g)
+                          (metavariables (grammarMetavars g)) ] []
             : case classesSubstituted gs g of
                 [] -> []
                 cs ->
@@ -541,7 +550,17 @@ ruleGrammar gs =
                     : concat
                         [ [ Earley.Rule nm (pairNT l) body []
                           , Earley.Rule nm (pairNT l)
-                              (Earley.Literal (nameDotted c) : Earley.Literal ":" : body) []
+                              -- **The class is named relative to the language
+                              -- — MS12 phase 313** ('classIn'): the whole name
+                              -- carries the module's namespace, which the
+                              -- language in front of the bracket has already
+                              -- said, so this wanted @E[J.x: x -> M]@ while the
+                              -- generated notation for the one-pair form wanted
+                              -- @E[x: x -> M]@. **The rule's NAME stays whole**
+                              -- — it is what says which map the pair belongs
+                              -- in, and it is read back by 'Special'.
+                              ( Earley.Literal (nameDotted (classIn g c))
+                                  : Earley.Literal ":" : body ) []
                           ]
                         | c <- cs
                         , let nm = "pair " ++ l ++ " " ++ nameDotted c

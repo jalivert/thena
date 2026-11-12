@@ -142,8 +142,8 @@ twoKinds =
       s <- loaded twoContexts
       let env = globals (machineOf s)
       map (\n -> isDeclared (named n) env)
-        [ "Ctx.bind-in.bind-in", "Ctx.bind-in.bind-here"
-        , "Ctx.bind-in.bind-there-bind", "Dtx.bind-in.bind-here"
+        [ "TwoCtx.Ctx.bind-in.bind-in", "TwoCtx.Ctx.bind-in.bind-here"
+        , "TwoCtx.Ctx.bind-in.bind-there-bind", "TwoCtx.Dtx.bind-in.bind-here"
         , "bind-in", "bind-here" ]
         @?= [True, True, True, True, False, False]
 
@@ -333,7 +333,10 @@ notation =
       -- shortest ending that resolves where the reader stands.
       said s ":show D.push-in" !! 0
         @?= "data D.push-in.push-in : String -> Ty -> D -> Type\8320 where"
-      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "D.push-in")
+      -- **THE PARSER IS KEYED BY THE GRAMMAR'S OWN NAME** (MS12 phase 313), so
+      -- the start symbol carries the module's namespace even where the printer
+      -- above writes the short ending a reader sees.
+      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "Last.D.push-in")
                  (pieces "x : \953 \8712 x : \953 ; \949") of
         Left why -> assertFailure (show why)
         Right _ -> pure ()

@@ -421,7 +421,7 @@ premises =
         , "  B-any:  𝕌₀    Γ ⊢ M : T"
         , "          -------------------"
         , "          Γ ⊫ M : T", "" ])
-      "refused: the argument d1 of big.B-any lives in Type₁, which the datatype's own Type₀ does not contain"
+      "refused: the argument d1 of J.big.B-any lives in Type₁, which the datatype's own Type₀ does not contain"
   , refusal "a premise named like a metavariable"
       (typing ++ ["judgment bad = M bad where", "", "  B:  M' : · ⊢ M : ι", "      ---", "      M bad", ""])
       "refused: in the judgment bad, rule B: a premise may not be named M', which is a metavariable"
@@ -484,7 +484,7 @@ substitution =
         other -> assertFailure (unlines ("not two constructors:" : other))
   , refusal "the left of -> is not a name"
       ["judgment sub = M ~> N where", "", "  S:  ---", "      M ~> E[M->N]", ""]
-      "refused: in the judgment sub, rule S: its conclusion `M ~> E[M->N]` is not a sub judgment: unexpected 'M' at character 8, expecting x or J.x"
+      "refused: in the judgment sub, rule S: its conclusion `M ~> E[M->N]` is not a sub judgment: unexpected 'M' at character 8, expecting x"
   ]
 
 annotated :: [TestTree]

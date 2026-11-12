@@ -39,6 +39,7 @@ module Thena.View
     Session
   , sessionGlobals
   , sessionGrammars
+  , sessionScope
   , sessionRules
   , sessionCursor
   , sessionContext
@@ -80,7 +81,7 @@ module Thena.View
 import Data.Foldable (toList)
 
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (GlobalName (..), Spelling (..), nameDotted, Ident (..), Var)
+import Thena.Core.Term (GlobalName (..), InScope, Spelling (..), nameDotted, Ident (..), Var)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefix, rebuild)
 import Thena.Development.Partial (Partial (..))
@@ -133,6 +134,11 @@ sessionGlobals = globals . machineOf
 -- | The object-language grammars installed so far, latest first.
 sessionGrammars :: Session -> [Grammar]
 sessionGrammars = grammars . machineOf
+
+-- | __Where a reader of this session stands__ (MS12 phase 313), for spelling a
+-- name or a parser key the way the session would print it.
+sessionScope :: Session -> InScope
+sessionScope = scope . machineOf
 
 -- | The ordered rule bases.
 sessionRules :: Session -> [RuleBase]
@@ -333,7 +339,7 @@ trustView budget s =
 
 -- | Is this region one term of this language, and if not, why.
 parseView :: Session -> String -> Maybe String -> [Written] -> Either FailureView TreeView
-parseView s = displayParse (sessionGrammars s)
+parseView s = displayParse (sessionGrammars s) (sessionScope s)
 
 -- | What may be written at the cursor inside a region (phase 115e, given the
 -- shape an editor holds a region in at phase 125).
@@ -344,7 +350,7 @@ offerView
   -> [Written]
   -> [Written]
   -> Either OfferProblem OfferView
-offerView s = displayOffer (sessionGrammars s)
+offerView s = displayOffer (sessionGrammars s) (sessionScope s)
 
 -- | **What may be written at the cursor of an @instral@ line** — the prompt
 -- itself, not a region inside one (MS7 phase 137; Tier A of
