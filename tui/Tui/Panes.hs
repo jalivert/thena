@@ -98,6 +98,12 @@ moduleRows modules files =
 -- tell: Thena's own prelude and standard base, a rule base somebody
 -- consulted, or anything else — which is a module's own file, and is named by
 -- its module in the modules group rather than repeated here.
+-- **Not 'Thena.Driver.LoadKind' wearing another name.** That one says what a
+-- path is — a rule base, a proof module, a script — and 'Tui.App' asks it. This
+-- one says which group of this pane the file belongs in, which is a question
+-- about the pane: Thena's own prelude is a proof module and does not belong
+-- beside his, and a module's own file is named under its module rather than
+-- twice.
 data FileKind = AShippedFile | ARuleBase | AModuleFile | AnotherFile
   deriving (Eq, Show)
 

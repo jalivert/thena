@@ -78,8 +78,10 @@ import Thena.Driver
   , Stop (..)
   , digestOf
   , digestText
+  , LoadKind (..)
   , exportedByModule
   , filesRead
+  , kindOf
   , moduleOfFile
   , moduleText
   , modulesLoaded
@@ -985,20 +987,21 @@ moduleEntries st =
 -- | **Every file the session read, sorted into what it is** — the other half
 -- of `~t7wc8`.
 --
--- **The kinds are decided by the extension and by one comparison**, and that
--- is as far as a frontend can honestly go: `moduleImports`/`moduleConsults`
--- take a module's items rather than a session, so /imported versus consulted/
--- is not a session read. A @.thena.rules@ file in here was consulted, which is
--- the half of the distinction that is visible. **Thena's own two files are
--- told apart by 'stShipped'** so that his corpus is never listed under our
--- prelude.
+-- **The engine says what kind a path is, through 'Thena.Driver.kindOf'**, and
+-- that is the point: the extensions are the engine's and a suffix test written
+-- here would be this frontend keeping its own copy of them. What it cannot say
+-- is /imported versus consulted/ — `moduleImports`/`moduleConsults` take a
+-- module's items rather than a session — but a @LoadRules@ file in here was
+-- consulted, which is the half of the distinction that is visible.
+-- **Thena's own two files are told apart by 'stShipped'** so that his corpus is
+-- never listed under our prelude.
 fileEntries :: St -> [(FileKind, FilePath)]
-fileEntries st = [(kindOf p, p) | (p, _) <- filesRead s]
+fileEntries st = [(sortOf p, p) | (p, _) <- filesRead s]
   where
     s = activeSession st
-    kindOf p
+    sortOf p
       | p `elem` stShipped st = AShippedFile
-      | ".thena.rules" `isSuffixOf` p = ARuleBase
+      | kindOf p == LoadRules = ARuleBase
       | Just m <- moduleOfFile p, m `elem` modulesLoaded s = AModuleFile
       | otherwise = AnotherFile
 
