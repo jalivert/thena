@@ -81,9 +81,15 @@ data Stored = Stored
     -- typed. Provenance for the listing, and never a destination.
   , stProofs :: [(String, Int, Int)]
     -- ^ each theorem the session proved and the slice of the transcript that
-    -- proves it — @:theorem@ through @qed@, as line indices. **A stored proof
-    -- is a slice of a transcript and not a second kind of artifact**, which is
-    -- what `~xq9m2` will read when he unparks it.
+    -- proves it, as line indices into the transcript beside it. **A stored
+    -- proof is a slice of a transcript and not a second kind of artifact**,
+    -- which is what `~xq9m2` will read when he unparks it.
+    --
+    -- **A name may appear more than once and the entries are not spans to
+    -- merge** — a proof suspended and picked up again is two runs of
+    -- consecutive lines with other lines between them, and replaying the runs
+    -- in the order given replays the proof. @Tui.App.scriptProofs@ fills it;
+    -- 'Thena.Driver.provedSlices' is where the names and the runs come from.
   } deriving (Eq, Show)
 
 -- * Where it lives

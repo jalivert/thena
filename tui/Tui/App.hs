@@ -80,6 +80,8 @@ import Thena.Driver
   , digestText
   , filesRead
   , oneLine
+  , provedSlices
+  , submittedLines
   )
 import Thena.Files (following, preludePath, rulesPath, startingSession)
 import Thena.Render (renderResponse, renderTrouble)
@@ -2045,22 +2047,52 @@ persist = do
               { stCaret = maybe (length (stScript st)) id (stScriptPos st)
               , stLines = length (stScript st)
               , stRead = maybe [] (\s -> [(p, digestText d) | (p, d) <- filesRead s]) ran
-              -- **Empty, and it is the one part of the index that cannot be
-              -- filled yet** — `~jnfkj` in `.jalivert/REPORT.md`. The slices
-              -- are there to be had: `entryProof` carries the proof that was
-              -- open when each line ran, boundary lines included, so a proof
-              -- is a run of consecutive entries under one name. What is
-              -- missing is a way to write the name down — **nothing on the
-              -- frontend boundary turns a `GlobalName` into text**, and
-              -- `nameDotted` is imported by `Thena.View.Core` without being
-              -- exported. It is `~xq9m2`'s field and he has parked that, so
-              -- nothing waits on it.
-              , stProofs = []
+              -- **Filled since MS12 phase 311** — `provedSlices` answers the
+              -- name and the engine's own indices, which `scriptProofs` puts
+              -- back into the document's numbering. `~jnfkj` asked for this
+              -- and it is answered.
+              , stProofs = scriptProofs st
               }
       liftIO (writeTranscript (stSlug entry) (map slText (stScript st)))
       others <- liftIO loadIndex
       liftIO (saveIndex ([o | o <- others, stSlug o /= stSlug entry] <> [entry]))
       put st { stStored = Just entry }
+
+-- | **Which theorems the document proves, and where each one is in it** —
+-- the @proofs@ field of the index entry, and `~jnfkj`'s consumer.
+--
+-- 'Thena.Driver.provedSlices' (MS12 phase 311) answers the name in full and
+-- the first and last line of each proof, **in the engine's numbering**, which
+-- is not the document's — so the indices are translated here.
+--
+-- **Why a translation rather than the engine's numbers written down.**
+-- 'provedSlices' indexes 'submittedLines', the lines the engine was handed;
+-- the transcript this index sits beside is the document's lines, blanks and
+-- comments included. The two agree line for line until one document line
+-- hands over several, and one does: @:replay ‹path›@ submits the whole of the
+-- file it names ('Thena.Files.script' folds it through 'oneLine'), so a
+-- forty-line replay on line 3 leaves the engine forty lines ahead for
+-- everything below it. **It is measured per line rather than assumed** — how
+-- many lines the engine had been handed by the end of each document line is a
+-- read of the session that line produced, and the line holding engine index
+-- @k@ is the first whose count has passed it.
+--
+-- A slice that starts before the document did is dropped rather than clamped.
+-- It belongs to the base session, so it is not a slice of this transcript —
+-- which cannot happen while entering the mode boots a fresh session, and is
+-- one line here rather than an invariant to remember.
+scriptProofs :: St -> [(String, Int, Int)]
+scriptProofs st = case scriptTip st of
+  Nothing -> []
+  Just tip ->
+    [ (name, lineOf from, lineOf to)
+    | (name, from, to) <- provedSlices tip
+    , from >= base
+    ]
+  where
+    base = maybe 0 (length . submittedLines) (stScriptBase st)
+    ends = [maybe base (length . submittedLines) (slSession sl) | sl <- stScript st]
+    lineOf k = length (takeWhile (<= k) ends)
 
 -- | What became of a file a session read: unchanged, changed under it, or not
 -- findable from here at all.
