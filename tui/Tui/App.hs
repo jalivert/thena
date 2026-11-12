@@ -55,6 +55,7 @@ import Brick.Widgets.Edit
   , renderEditor
   )
 import qualified Brick.Widgets.Edit as E
+import Brick.Widgets.Center (centerLayer)
 import Brick.BChan (BChan, newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad.IO.Class (liftIO)
@@ -67,7 +68,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Zipper as Zip
 import qualified Graphics.Vty as V
 import Graphics.Vty.Platform.Unix (mkVty)
-import Lens.Micro (Lens', lens)
+import Lens.Micro ((^.), Lens', lens)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStr, readFile', stdout)
@@ -149,6 +150,7 @@ data Name
   | OutputVP
   | LoadPopup
   | OfferPopup
+  | PickerVP
   deriving (Eq, Ord, Show)
 
 -- | One committed line of a live script, and **the whole session it
@@ -252,6 +254,34 @@ data OfferDropdown = OfferDropdown
     -- pick can be anything Jev wants."* Zero on a freshly built dropdown
     -- (every keystroke) until an answer actually lands; 'offerRowToPopup'
     -- reads it to colour exactly that many rows and no more.
+  }
+
+-- | **The stored sessions, as a thing you move a highlight through** — `~xf2hv`,
+-- his instruction, 2026-11-12: /"the session selection shouldn't be done by
+-- `:script sessions` printing a static list and the user having to re-type its
+-- identifier. That should be some dialog with a selectable sessions."/
+--
+-- **It is the TUI's first modal, and the reason is selection and not typing.**
+-- 'scriptSave' says in its own haddock that the command bar retired the modal
+-- his spec once wanted — and that still holds, because what the bar gives you
+-- is somewhere to *type*. A list you pick a row out of is the other thing: the
+-- bar has one row to draw and no way to highlight one of nine sessions in it.
+--
+-- **The rows are the index's own order, and 'pkSelected' opens on the last of
+-- them.** That order is not "newest first" — it is least-recently-touched
+-- first: 'persist' writes the index as @[everything else] <> [this session]@,
+-- so every save moves its own entry to the end. The last row is therefore the
+-- session you were in most recently, which is the one a picker should open on,
+-- and the rows above it are a history in the order you left them.
+data Picker = Picker
+  { pkRows     :: [Stored]
+    -- ^ never empty: with nothing stored there is nothing to select, and
+    -- 'openSessionPicker' says so in the transcript instead of opening a
+    -- dialog onto an empty list.
+  , pkSelected :: Int
+    -- ^ an index into 'pkRows', always in range — 'pickerMove' clamps rather
+    -- than wrapping, so Up at the top and Down at the bottom are no-ops and
+    -- the highlight cannot be lost off either edge.
   }
 
 data St = St
@@ -387,6 +417,11 @@ data St = St
     -- the index, replaces this one entry and writes it back, so two TUIs open
     -- on the same project do not drop each other's sessions, and there is no
     -- second copy of the index to keep true.
+  , stPicker :: Maybe Picker
+    -- ^ **the session picker, and while it is open it owns the keyboard** —
+    -- see 'Picker' and 'handlePickerEvent'. It is the one widget in the TUI
+    -- that is modal, and it is modal because Up, Down and Enter already mean
+    -- three other things in each of the keyboards underneath it.
   , stEscRun :: Maybe String
     -- ^ **The only thing standing between a Shift+Enter and a corrupted
     -- proof line.** vty decodes neither of the two standard encodings and
@@ -472,6 +507,7 @@ runTui = do
         , stScriptNote  = Nothing
         , stScriptStale = Nothing
         , stStored      = Nothing
+        , stPicker      = Nothing
         , stEscRun      = Nothing
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
@@ -644,6 +680,13 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- solid bar, panel-dark text on top of it, same "selected" contrast an
   -- ordinary list widget uses.
   , (attrName "dropdown.selected", surface (themeRepl th) (themePanel th))
+  -- | **Small print *on* the popup surface, which is why it is not "dim".**
+  -- The picker's title, its key hints and the highlighted session's handle
+  -- are secondary text inside a floating box, and 'attrName "dim"' is an ink
+  -- with no background of its own — brick resolves that against the map's
+  -- default, the stage, so it would draw a black band across a box filled
+  -- with 'themePopup'. The same mistake 'script.stale' was measured making.
+  , (attrName "dropdown.faint",    surface (themePopup th) (themeDim th))
   -- The input line's own editor: 'renderEditor' wraps its output in
   -- Brick's 'edit'/'editFocused' attributes, which fall back to the
   -- terminal default (black) unless named here. The input is the last line
@@ -666,12 +709,21 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
 -- with a hardcoded marker widget before trusting the fix.
 draw :: St -> [Widget Name]
 draw st =
-  dropdownLayer st
-    <> offerDropdownLayer st
+  pickerLayer st
+    <> popups
     <> [padAll 1 (hBox [replColumn, gapH, paneColumns])]
   where
     budget = Budget 200
     s = activeSession st
+
+    -- | **Neither dropdown is drawn while the picker is open**, and the
+    -- state behind them is untouched: a completion popup hanging over a
+    -- modal is two things claiming the same keys on screen when only one of
+    -- them has them. Esc out of the picker and whatever was open comes back
+    -- exactly as it was, because nothing was dismissed to get it off screen.
+    popups
+      | isJust (stPicker st) = []
+      | otherwise = dropdownLayer st <> offerDropdownLayer st
     links = developmentView budget s
     machine = machineView budget s
     fold = if stFoldOn st then Fold (focusAddress s) else NoFold
@@ -725,7 +777,11 @@ draw st =
     -- rendered focused, the caret stayed in the document while every key
     -- went to the bar. Measured under a pty, his report of 2026-10-20: the
     -- bar opened, the cursor did not move, and the mode read as a dead key.
-    editorWidget = reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) (isNothing (stScriptBar st)) (stInput st))
+    -- | **Unfocused while the picker is open, for the same reason as the
+    -- bar.** 'showFirstCursor' takes the first cursor any widget reports in
+    -- draw order, so an editor still rendered focused under a modal leaves
+    -- the caret blinking in a document that is not taking keys.
+    editorWidget = reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) (isNothing (stScriptBar st) && isNothing (stPicker st)) (stInput st))
       where
         -- | `:whisper off` (his `.jalivert/TUI.md` #23) silences this
         -- outright rather than 'ghostAt' itself carrying the flag — the
@@ -1065,6 +1121,90 @@ offerRowToPopup :: Maybe Int -> Int -> Int -> OfferRow -> PopupRow
 offerRowToPopup selected jevPicked i (OfferRow label ins) =
   PopupRow label (Just i == selected) (isNothing ins) (i < jevPicked)
 
+-- * The session picker
+
+-- | The picker, centred over the whole layout — see 'Picker'.
+--
+-- **Centred rather than anchored to the input line.** Every other floating
+-- thing here hangs off the caret ('popupAt') because it is about the text
+-- under it; this one is about the project, so there is no column it belongs
+-- beside, and the middle of the screen is where a modal is looked for.
+pickerLayer :: St -> [Widget Name]
+pickerLayer st = case stPicker st of
+  Nothing -> []
+  Just pk -> [centerLayer (renderPicker pk)]
+
+-- | **The dropdown's own surface, its own selected-row swap, its own
+-- scrolling** — a session picker that looked like a fifth kind of floating
+-- box would be a new visual language for the same gesture. The box hugs its
+-- widest line, title and foot included, so nothing sticks out one side (his
+-- `.jalivert/TUI.md` #4, #6, #7).
+renderPicker :: Picker -> Widget Name
+renderPicker pk = Widget Fixed Fixed $ do
+  ctx <- getContext
+  render (pickerBox (ctx ^. availWidthL) pk)
+
+-- | The box, against a known width. **The width is the terminal's own**, read
+-- from the render context rather than fixed: a row here ends in a path, which
+-- is both the longest field and the one that identifies a session opened from
+-- a file, and a constant cap ellided it on a 120-column screen with forty
+-- columns going spare. Measured under a pty, 2026-11-12, before and after:
+-- @from examples\/Stlc08PreservationBy…@ against the whole path.
+pickerBox :: Int -> Picker -> Widget Name
+pickerBox avail (Picker rows selected) =
+  withAttr (attrName "dropdown") $
+    hLimit boxWidth $
+      vBox
+        ( [ faint titleText, blank ]
+            <> [ vLimit visibleH (viewport PickerVP Vertical (vBox (zipWith row [0 ..] texts))) ]
+            <> [ blank
+               , faint keysText
+               -- | **The handle, for the one row that is lit.** The rows
+               -- themselves do not carry it: a slug is what you *type* and
+               -- the whole point of this dialog is that you no longer have
+               -- to. It stays on screen anyway, because `:script resume
+               -- ‹slug›` is still there for anyone who would rather type it,
+               -- and nothing else in the TUI shows a slug now.
+               , faint handleText
+               ]
+        )
+  where
+    -- | The box keeps a column of backdrop on either side of itself, the same
+    -- one cell the whole layout keeps against the screen's edge ('draw''s own
+    -- 'padAll' 1) — a modal flush against the terminal's edge reads as part
+    -- of the furniture rather than as something floating over it.
+    cap = max 24 (avail - 2 - 2 * dropdownMarkerWidth)
+    texts = map (capText cap) (pickerTexts rows)
+    titleText = "stored sessions in " <> databaseDir
+    keysText = "↑↓ move · Enter resume · Esc cancel"
+    handleText = maybe "" ((":script resume " <>) . stSlug) (listToMaybe (drop selected rows))
+    boxWidth = maximum (0 : map length (texts <> [titleText, keysText, handleText])) + 2 * dropdownMarkerWidth
+    visibleH = popupVisibleH (length rows)
+    blank = str (replicate boxWidth ' ')
+    faint t = withAttr (attrName "dropdown.faint") (str (padTo boxWidth (dropdownMargin <> t)))
+    row i t = mark (styled (str (padTo boxWidth (dropdownMargin <> t))))
+      where
+        styled = if i == selected then withAttr (attrName "dropdown.selected") else id
+        mark = if i == (selected :: Int) then visible else id
+
+-- | A session as one row of the picker: **what it is called, where its caret
+-- stood, and where its lines came from** — and no slug, see 'renderPicker'.
+--
+-- The three are padded into columns across the whole list rather than run
+-- together, so the dates line up under each other and the eye can scan one
+-- column at a time. @from@ is last because it is the one field that is
+-- usually absent (a typed session came from nowhere) and the only one long
+-- enough to ellide.
+pickerTexts :: [Stored] -> [String]
+pickerTexts rows =
+  [ padTo nameW (stName s) <> "   " <> padTo placeW (place s) <> from s | s <- rows ]
+  where
+    place s = show (stCaret s) <> "/" <> show (stLines s) <> " lines"
+    from s = maybe "" ("   from " <>) (stFrom s)
+    nameW = maximum (0 : map (length . stName) rows)
+    placeW = maximum (0 : map (length . place) rows)
+
+
 -- | One row of any dropdown, before it becomes a 'Widget' — shared by
 -- ':load''s directory listing and the completion dropdown so both scroll
 -- and pad exactly the same way, see 'renderPopup'.
@@ -1145,9 +1285,13 @@ padTo n s = s <> replicate (max 0 (n - length s)) ' '
 -- | A row over the cap shows an ellipsis rather than running past the
 -- pane — display only, the row's value keeps its full text.
 truncateRow :: Int -> PopupRow -> PopupRow
-truncateRow cap r
-  | length (prText r) > cap = r { prText = take (cap - 1) (prText r) <> "…" }
-  | otherwise = r
+truncateRow cap r = r { prText = capText cap (prText r) }
+
+-- | Text past a cap, with an ellipsis standing for the rest.
+capText :: Int -> String -> String
+capText cap s
+  | length s > cap = take (cap - 1) s <> "…"
+  | otherwise = s
 
 popupMinRows, popupMaxRows :: Int
 popupMinRows  = 3
@@ -1338,9 +1482,15 @@ handleEventInner ev = do
 handleEventFor :: BrickEvent Name AppEvent -> EventM Name St ()
 handleEventFor ev = do
   st <- get
-  case stScriptBar st of
-    Just bar -> handleBarEvent st bar ev
-    Nothing
+  case (stPicker st, stScriptBar st) of
+    -- | **The picker is checked first, and that is what makes it modal** —
+    -- the one widget here that takes the keyboard off whichever of the three
+    -- keyboards below it was holding it. Up, Down and Enter mean something in
+    -- each of them, so a picker that merely added bindings would be a fourth
+    -- claim on the same three keys.
+    (Just pk, _) -> handlePickerEvent pk ev
+    (_, Just bar) -> handleBarEvent st bar ev
+    _
       | stScriptMode st -> handleScriptEvent ev
       | otherwise -> handleReplEvent ev
 
@@ -1399,6 +1549,104 @@ handleBarEvent st bar ev = case ev of
   _ -> do
     bar' <- nestEventM' bar (handleEditorEvent ev)
     put st { stScriptBar = Just bar' }
+
+-- | The session picker's keys, and they are the three a list dialog has
+-- everywhere: Up and Down move the highlight, Enter takes the session it is
+-- on, Esc leaves without taking one. Home\/End and PageUp\/PageDown come
+-- along because the list scrolls past ten rows and a long one is tedious to
+-- walk a row at a time.
+--
+-- **The highlight clamps and does not wrap.** Up on the first row and Down on
+-- the last do nothing: this is a list of nine things you are looking at, not
+-- a carousel, and wrapping would move the eye to the far end of the box on a
+-- keystroke that read as "one more".
+--
+-- **A background Jev answer is still let through.** It belongs to the
+-- completion dropdown underneath, which is intact and merely not drawn, and
+-- dropping it would leave that dropdown holding a ranking request it never
+-- gets an answer to.
+handlePickerEvent :: Picker -> BrickEvent Name AppEvent -> EventM Name St ()
+handlePickerEvent pk ev = case ev of
+  VtyEvent (V.EvKey V.KUp [])       -> moveBy (-1)
+  VtyEvent (V.EvKey V.KDown [])     -> moveBy 1
+  VtyEvent (V.EvKey V.KPageUp [])   -> moveBy (-popupMaxRows)
+  VtyEvent (V.EvKey V.KPageDown []) -> moveBy popupMaxRows
+  VtyEvent (V.EvKey V.KHome [])     -> moveTo 0
+  VtyEvent (V.EvKey V.KEnd [])      -> moveTo (length (pkRows pk) - 1)
+  -- The wheel moves the highlight rather than scrolling the box under it:
+  -- there is one thing to choose here, so a scroll that left the selection
+  -- behind would be scrolling away from the only state the dialog has.
+  MouseDown _ V.BScrollUp _ _       -> moveBy (-1)
+  MouseDown _ V.BScrollDown _ _     -> moveBy 1
+  VtyEvent (V.EvKey V.KEnter [])    -> resumePicked pk
+  VtyEvent (V.EvKey V.KEsc [])      -> closePicker
+  AppEvent _                        -> handleReplEvent ev
+  _                                 -> pure ()
+  where
+    moveBy d = moveTo (pkSelected pk + d)
+    moveTo i = do
+      st <- get
+      put st { stPicker = Just pk { pkSelected = max 0 (min (length (pkRows pk) - 1) i) } }
+
+closePicker :: EventM Name St ()
+closePicker = do
+  st <- get
+  put st { stPicker = Nothing }
+
+-- | **`:script sessions` opens the picker** — `~xf2hv`, his instruction of 2026-11-12,
+-- and what it replaces is a printed listing whose slugs you then re-typed
+-- into `:script resume`.
+--
+-- **With nothing stored it says so and opens nothing.** A dialog whose only
+-- content is "there is nothing here" is a dialog you have to dismiss to be
+-- told something a line of text could have told you.
+--
+-- **The index is re-read on every open**, like every other read of it: two
+-- TUIs on one project are expected, and the picker showing a session that was
+-- started after this one booted is the whole reason to go through the file.
+openSessionPicker :: St -> EventM Name St ()
+openSessionPicker st = do
+  index <- liftIO loadIndex
+  case index of
+    [] -> sayEither st noStoredSaid
+    rows -> do
+      sayEither st (storedCountSaid (length rows))
+      st' <- get
+      put st' { stPicker = Just (Picker rows (length rows - 1)) }
+
+-- | Enter on a row: the same path `:script resume ‹slug›` takes, from the
+-- entry in hand rather than from a handle that had to be matched — so the
+-- staleness check, the caret and the note are one piece of code and cannot
+-- come to differ between the two doors.
+resumePicked :: Picker -> EventM Name St ()
+resumePicked pk = case listToMaybe (drop (pkSelected pk) (pkRows pk)) of
+  Nothing -> closePicker
+  Just stored -> do
+    st <- get
+    let st' = st { stPicker = Nothing }
+    held <- liftIO (readTranscript (stSlug stored))
+    case held of
+      Nothing -> sayEither st' (transcriptGoneSaid stored)
+      Just texts -> resumeStored st' stored texts
+
+-- | **Says one line in whichever of the two places is on screen** — the
+-- repl's transcript, or live-script mode's pane foot. The picker is reachable
+-- from both and has nowhere of its own to put a refusal.
+sayEither :: St -> String -> EventM Name St ()
+sayEither st said
+  | stScriptMode st = put st { stScriptNote = Just said }
+  | otherwise = appendTurn st Nothing [said]
+
+noStoredSaid :: String
+noStoredSaid = "no stored sessions yet — one is started the first time a line is committed in :script"
+
+storedCountSaid :: Int -> String
+storedCountSaid 1 = "1 stored session in " <> databaseDir
+storedCountSaid n = show n <> " stored sessions in " <> databaseDir
+
+transcriptGoneSaid :: Stored -> String
+transcriptGoneSaid stored =
+  "the transcript for " <> stSlug stored <> " is gone from " <> databaseDir
 
 -- | Live-script mode's own keys. **Enter, Up, Down and forward-delete mean
 -- something different here**; everything else — ordinary typing, Tab, the
@@ -1595,13 +1843,18 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- it is typed, `":script "` being in 'pathCommands'. The bar's
         -- `:script open ‹path›` is the same call for when the mode is
         -- already on.
-        -- | **The database's two commands live in the ordinary REPL and not
-        -- in the bar**, because both of them answer with a list or a refusal
-        -- and the bar has one row to say it in. The REPL has a transcript,
-        -- which is what a listing wants.
-        [":script", "sessions"] -> do
-          index <- liftIO loadIndex
-          appendTurn st0 Nothing (sessionLines index)
+        -- | **`:script sessions` opens the picker** — his instruction,
+        -- 2026-11-12. It used to print the index and leave you to re-type a
+        -- slug into the command below; it now puts the sessions on screen as
+        -- rows you move a highlight through, 'openSessionPicker'.
+        --
+        -- **Which is also why it is in the bar now.** The old reason both
+        -- database commands lived in the repl and not in live-script mode's
+        -- bar was that each of them answers with a list, and the bar has one
+        -- row to say a list in. A dialog has as many rows as it likes, so
+        -- that reason is gone and script mode can reach its own sessions
+        -- without leaving the mode first.
+        [":script", "sessions"] -> openSessionPicker st0
         [":script", "resume", handle] -> do
           index <- liftIO loadIndex
           case storedNamed handle index of
@@ -1609,9 +1862,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
             Right stored -> do
               held <- liftIO (readTranscript (stSlug stored))
               case held of
-                Nothing ->
-                  appendTurn st0 Nothing
-                    ["the transcript for " <> stSlug stored <> " is gone from " <> databaseDir]
+                Nothing -> appendTurn st0 Nothing [transcriptGoneSaid stored]
                 Just texts -> resumeStored st0 stored texts
         -- | **The slug left off, said as that and not as a missing file.**
         -- The branch below reads anything after `:script` as a path, so
@@ -1619,7 +1870,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         [":script", "resume"] ->
           appendTurn st0 Nothing
             [":script resume ‹slug› takes a stored session up where its caret was"
-            , "  :script sessions lists what the project database holds"]
+            , "  :script sessions picks one from a list instead"]
         -- | **A path argument is the whole of the rest of the line, spaces
         -- and all** — `~td887`. `:script` takes exactly one path, so there is
         -- nothing for a space to separate, and matching @[":script", path]@
@@ -1998,8 +2249,9 @@ tuiHelpLines =
     [ (":theme ‹name›",     intercalate ", " (map themeName themes))
     , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
-    , (":script sessions",  "what the project database holds, and how to resume one")
-    , (":script resume ‹slug›", "take a stored session up where its caret was")
+    , (":script sessions",  "pick a stored session from a list and resume it")
+    , ("",                  "  ↑↓ move, Enter resumes, Esc cancels. In the bar too")
+    , (":script resume ‹slug›", "the same, by handle, with no list to walk")
     , (":script [path]",    "live-script mode: the pane becomes an editable document")
     , ("",                  "  with a path, that proof-script is opened into it as text:")
     , ("",                  "  its lines are dim until Down walks into them, one run per")
@@ -2449,22 +2701,6 @@ resumeStored st stored texts = do
   let moved = maybe "" ("; " <>) (staleNote shipped checks)
   openDocument st stored texts (stCaret stored + 1) ("resumed " <> stName stored <> moved)
 
--- | `:script sessions` — what the project database is holding, newest last,
--- the way a listing of dated things reads.
-sessionLines :: [Stored] -> [String]
-sessionLines [] = ["no stored sessions yet — one is started the first time a line is committed in :script"]
-sessionLines sessions =
-  [ "stored sessions, in " <> databaseDir <> ":" ]
-    <> [ "  " <> pad (stSlug s) <> "  " <> stName s <> "  " <> place s <> from s
-       | s <- sessions
-       ]
-    <> ["  :script resume ‹slug› takes one up where its caret was"]
-  where
-    width = maximum (4 : map (length . stSlug) sessions)
-    pad t = t <> replicate (width - length t) ' '
-    place s = show (stCaret s) <> "/" <> show (stLines s) <> " lines"
-    from s = maybe "" ("  from " <>) (stFrom s)
-
 -- | **`:script reload` — re-run the document from the caret down** —
 -- `~rctjq`, his question of 2026-11-11, and it is 'openScriptFile' at an index
 -- rather than a second feature. The caret's line and everything below it drop
@@ -2869,6 +3105,11 @@ scriptBarSubmit st text = case words text of
   -- not opened from, because save-back never asks.
   (":script" : "save!" : rest) -> scriptSave st (pathArg rest) True
   [":script", "reload"] -> closeScriptBar >> scriptReload
+  -- | **The session picker, reachable from inside the mode** — see the repl's
+  -- own branch for why this did not exist before there was a dialog to open.
+  -- The bar closes first: the picker owns the keyboard, and two things that
+  -- both own it is the bug `~sfs2n` is about.
+  [":script", "sessions"] -> openSessionPicker st { stScriptBar = Nothing }
   -- | **The rest of the line is the path** — `~td887`, the same rule the
   -- REPL's own `:script ‹path›` takes. Matching one word meant
   -- @:script open /a path/with a space.thena.script@ fell through to
