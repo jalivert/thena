@@ -1,0 +1,12 @@
+module test.modules.Pauses where
+
+data Two : Type₀ where
+  this : Two
+  that : Two
+
+open Two
+
+-- Elaborating this reaches the placeholder and, with `Pausing` consulted, hands
+-- control to the prompt. Nothing of this module is declared until it finishes.
+picked : Two
+picked = _

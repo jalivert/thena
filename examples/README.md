@@ -23,6 +23,14 @@ to the file.
 | `Stlc10PreservationAnyContext.thena` | **Preservation for ANY context** — what `07` could not do. An open argument can capture, so the generated substitution renames the binder, and the file **proves** that the minted name is fresh. **Three trusted laws about `String.append` and everything else derived**: associativity, and that a string differs from itself with a `'` appended, with and without more after it. No lengths and no arithmetic — the counting is a `Longer` computed from two lists |
 | `Stlc09Printing.thena` | **Terms shown in their own notation** — the other direction from 01. A judgment's statement printed as it reads on paper; a name kept rather than unfolded into what it stands for, in a splice; the splices the printer writes where a grammar groups by splicing, as 05 writes them by hand; a variable spelled like one of the grammar's own terminals, which is fenced where the same position otherwise is not; reading it all back with `:core` |
 
+## The demo set — `demo/`, its own set
+
+**`examples/demo/` is loaded in a FRESH session** too, and for the same reason: it
+declares its own `Ty`. TAPL's arithmetic and boolean expressions carried from a grammar to
+progress, in files short enough to read off a projector, plus a tactic script.
+`examples/demo/README.md` is the account, and `DEMO.md` beside it is a running order for
+presenting the system in an hour.
+
 ## System F-sub — `poplmark/`, its own set
 
 **`examples/poplmark/` is loaded in a FRESH session**, not with the series above: it

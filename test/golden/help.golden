@@ -49,9 +49,9 @@ a bare word acts, a word with a colon looks.
   :run / :run ‹n›               let it run on / for n instructions
   :theorem ‹x› : ‹T›            start a proof
   :goal ‹T›                     discard everything and start a scratch goal
-  :suspend / :resume ‹name›     put a proof aside / take it up again
-  :proofs                       the current proof and the suspended ones
-  :abandon                      give up the current proof
+  :suspend / :resume ‹name›     put a proof or an import aside / take it up again
+  :proofs                       what is being worked on, and what is parked
+  :abandon                      give up what is being worked on
   :undo                         take back the last line
   :extract                      the term the development stands for
   :revalidate                   recheck the whole development

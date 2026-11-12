@@ -438,7 +438,7 @@ refusals =
 
     , testCase "or while one is suspended" $
         rejected (suspended ":load extra.thena.rules")
-          @?= Just (ProofsSuspended [rootName "t"])
+          @?= Just (ProofsSuspended ["t"])
 
     , testCase "but between theorems it is allowed" $
         case snd (command newSession ":load extra.thena.rules") of

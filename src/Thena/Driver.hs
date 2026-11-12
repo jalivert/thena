@@ -32,16 +32,22 @@ module Thena.Driver
   , CommandError (..)
   , Attempt (..)
   , Parked (..)
+  , Quest (..)
+  , parkedWord
+  , questWord
   , Working (..)
   , currentAttempt
+  , currentQuest
   , Snapshot
   , Record (..)
   , Entry (..)
   , Outcome (..)
+  , openableNamespaces
   , recordOf
   , standing
   , submittedLines
   , provedUnder
+  , provedSlices
   , Digest
   , digestOf
   , digestText
@@ -64,6 +70,14 @@ module Thena.Driver
   , loadProofItems
   , loadProofItemsConsulting
   , loadProofModules
+  , walkProofModules
+  , Walked (..)
+    -- * A suspended import (MS12 phase 309)
+  , Importing (..)
+  , importSuspended
+  , finishImport
+  , abandonImport
+  , refuseSuspension
   , ReadModule (..)
   , moduleConsults
   , moduleImports
@@ -153,7 +167,7 @@ import Thena.Language.Regex
   )
 import Data.Bits ((.&.), shiftR, xor)
 import Data.Char (intToDigit, isAlpha, isAlphaNum, isSpace, ord)
-import Data.List ((\\), intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, stripPrefix)
+import Data.List ((\\), groupBy, intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, sort, stripPrefix)
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
 import Thena.Development.Partial (Partial (..), extract, termsIn)
@@ -179,6 +193,10 @@ import Thena.Engine
   )
 import qualified Thena.Engine as Engine
 import Thena.Engine (whereImpure)
+-- Qualified, because this module has a 'declaredNames' of its own and it is a
+-- different question: which names a *module* declared, against every name the
+-- environment holds.
+import qualified Thena.Global.Env as GEnv
 import Thena.Errors
   ( ConversionFailure
   , FailReason (..)
@@ -210,6 +228,7 @@ import Thena.Global.Env
   , inductiveName
   , isDeclared
   , knownIn
+  , namespaceUnder
   , lookupConstant
   , lookupDefinition
   , lookupInductive
@@ -584,6 +603,82 @@ data Session = Session
     -- **Not in a 'Snapshot', and carried forward by 'rolledBack'** — the one
     -- field that survives a rollback along with the name counter, because a
     -- refusal does not unread a file.
+  , sessionImporting :: Maybe Importing
+    -- ^ __the import standing in a yield, if one is__ (MS12 phase 309).
+    --
+    -- **One at a time, his ruling of 2026-11-11**: a second @import@ while this
+    -- is set is refused, the way @:theorem@ is refused while a proof is open.
+    --
+    -- **Not in a 'Snapshot'**, like 'sessionLoaded' beside it and for the same
+    -- reason: what modules are in is not a thing @:undo@ takes back, and the
+    -- suspended load's own position is in the live machine rather than in here.
+  }
+  deriving (Eq, Show)
+
+-- | __An import that reached a @yield@ and is standing still__ (MS12 phase 309,
+-- his ruling of 2026-11-11).
+--
+-- **The suspended load stays in the LIVE machine**, which is what makes this
+-- small: its pool, its held bases, its scope, its program and its development
+-- are all already where they need to be, because a load runs in the machine like
+-- any other program and nothing here had to copy them out. **What this record
+-- holds is only what the load's own tail would have needed** — what to put back
+-- when it finishes, what to roll back to if it is given up, and how much of the
+-- closure has not run yet.
+--
+-- **So the session's own names stay concealed while it stands, and that is his
+-- ruling, not an accident**: /"what is in scope for the prompt, is what was in
+-- scope for the elaboration… you are now at the wheel for the sub-process that
+-- elaborates this file."/ Nothing in here lifts the concealment.
+data Importing = Importing
+  { importingBefore :: Session
+    -- ^ the session as it stood before any of the closure ran. **What
+    -- @:abandon@ goes back to**, through 'rolledBack', which takes everything
+    -- the user declared during the suspension with it — his ruling of
+    -- 2026-11-11, /"I want the abandoning of the import to take everything. The
+    -- honest way."/
+    --
+    -- **Its own 'sessionImporting' is 'Nothing'**, since one is in flight at a
+    -- time, so this does not nest.
+  , importingAt     :: Session
+    -- ^ the session as the suspended module's own load began — **the pool, the
+    -- held bases and the scope that go back when it completes**, which is what
+    -- @poolBack@ in 'loadProofItemsConsulting' closes over. Not the same as
+    -- 'importingBefore' when the closure had modules before this one.
+  , importingName   :: Maybe ModuleName
+    -- ^ the name the suspended module is reached by, where it has one. **A file
+    -- loaded by a path that is no module name has none**, exactly as
+    -- 'sessionLoaded' does not list one.
+    --
+    -- **Filled in by 'loadProofModules' and not by the load itself**, which is
+    -- handed the header's text and never the name: the two doors know different
+    -- amounts and this says which.
+  , importingText   :: String
+    -- ^ the header's text, for the 'ProofLoaded' the completion answers with
+  , importingItems  :: [Item]
+    -- ^ the suspended module's items — what its interface and its declared
+    -- names are read off when it completes
+  , importingRest   :: [ReadModule]
+    -- ^ the closure past this module, still to run. **An @import@ may be a
+    -- graph**, so a suspension lands in the middle of a fold and the rest of the
+    -- walk has to be carried or it is lost.
+  , importingWarns  :: [Warning]
+    -- ^ what the suspended run had warned about before it stopped
+  , importingTheirs :: [GlobalName]
+    -- ^ __what the MODULE's own program declared__ (@~3c2db@, his ruling of
+    -- 2026-11-11), as against what the user typed at the prompt while it stood
+    -- suspended. **The module's are the ones its text wrote; a lemma proved to
+    -- get unstuck is the user's**, and a module with no @exporting@ clause
+    -- publishes what it declared — so without this one file would offer
+    -- different names depending on how a session went.
+    --
+    -- **ATTRIBUTED BY WHICH RUN DECLARED IT, AND THAT IS THE ONLY SOUND TEST.**
+    -- A line typed during the suspension runs /in front of/ the yield and the
+    -- module's remaining program runs /behind/ it, so the two never declare in
+    -- the same run: this is seeded with what the load's own first run added and
+    -- extended by each @yield@ that hands control back. **Per line it cannot be
+    -- done** — a @declare@ during the suspension and a @yield@ that reaches the
+    -- next yield both leave the machine yielding with new names behind them.
   }
   deriving (Eq, Show)
 
@@ -604,6 +699,15 @@ workingOn = sessionWork
 -- | Attempts left and re-enterable, most recently suspended first (§2.4).
 parked :: Session -> [Parked]
 parked = sessionSuspended
+
+-- | __The import standing in a yield, if one is__ (MS12 phase 309).
+--
+-- **What a frontend reads to know it is holding one**, and what the batch
+-- checker reads to refuse: @thena-check@ goes through the same loader a @:load@
+-- does, so the difference between handing the wheel over and refusing to is made
+-- by the caller and not inside the load.
+importSuspended :: Session -> Maybe Importing
+importSuspended = sessionImporting
 
 -- | How many instructions a run may do before handing control back — @Nothing@
 -- to run on, @Just n@ for at most @n@ (phase 128).
@@ -773,6 +877,80 @@ submittedLines = mapMaybe entrySubmitted . recordOf
 provedUnder :: GlobalName -> Session -> [Entry]
 provedUnder n = filter ((== Just n) . entryProof) . recordOf
 
+-- | __Which theorems the session proved, and where each one is in the
+-- transcript__ (MS12 phase 311): the name in full, and the first and last
+-- index into 'submittedLines'.
+--
+-- **The name is the only part a caller could not work out**, which is why this
+-- is a read here rather than a walk over 'recordOf' on the other side of the
+-- boundary: 'GlobalName' crosses as a type whose fields nothing out there can
+-- reach, and 'Thena.Render.nameString' is the wrong answer anyway — it applies
+-- the printer\'s shortest-ending policy, and a key written down and read back
+-- later has to mean the same thing whatever happens to be open then.
+--
+-- **A proof is a /run/ of consecutive entries under one name** rather than a
+-- single span from @:theorem@ to @qed@, and that is @:suspend@'s doing: a proof
+-- that was parked and picked up again is two runs with other lines between
+-- them, and submitting the runs in the order given replays it — the
+-- @:suspend@ and @:resume@ lines included, since each has the proof open on
+-- one side of it.
+--
+-- **Only names the session sealed appear.** @isDeclared@ is the test, so an
+-- attempt that was abandoned and never closed is absent entirely; a name that
+-- was abandoned and then proved on a second attempt lists both runs, because
+-- nothing in the record says which boundary ended a run — and replaying them
+-- in order is still right, an abandoned run replaying as an abandoned run.
+--
+-- **A line a frontend ran through 'oneProgram' takes no index**, having never
+-- been submitted; a run made only of those is not reported.
+provedSlices :: Session -> [(String, Int, Int)]
+provedSlices s =
+  [ (nameDotted n, minimum ks, maximum ks)
+  | run <- groupBy (\a b -> fst a == fst b) (numbered 0 (recordOf s))
+  , (Just n, _) <- take 1 run
+  , isDeclared n (globals (sessionMachine s))
+  , let ks = [ k | (_, Just k) <- run ]
+  , not (null ks)
+  ]
+  where
+    -- The proof each entry is under, paired with its index among the submitted
+    -- entries — which is what 'submittedLines' numbers.
+    numbered :: Int -> [Entry] -> [(Maybe GlobalName, Maybe Int)]
+    numbered _ []       = []
+    numbered k (e : es) = case entrySubmitted e of
+      Just _  -> (entryProof e, Just k) : numbered (k + 1) es
+      Nothing -> (entryProof e, Nothing) : numbered k es
+
+-- | __Which namespaces an @open@ here would accept, written out in full__
+-- (MS12 phase 312).
+--
+-- **What the completion offers after the word @open@.** Nothing enumerated them
+-- before, so the prompt could only say /a name goes here/; the tui track asked
+-- for the set and this is it.
+--
+-- **Every candidate is put through the act's own walk**
+-- ('Thena.Global.Env.namespaceUnder'), not through a test written here. The
+-- rule a dropdown has to keep is that no row it offers refuses when it is
+-- taken, and the only way to keep it is to ask the question the act asks: a
+-- path can be inhabited and still be ambiguous from where the writer stands,
+-- and that refusal is as real as the other one.
+--
+-- **Written in full, and the shortened forms are not offered.** @open A@ in
+-- force makes a written @Ty@ reach @A.Ty@, so the shortened spellings resolve
+-- too — but which of them do is the inverse of 'Thena.Core.Term.globalUnder'\'s
+-- walk, and nothing computes that. A full path always reads, so the offer is
+-- short of rows rather than wrong about them.
+openableNamespaces :: Session -> [String]
+openableNamespaces s =
+  [ intercalate "." p
+  | p <- nub (sort (concatMap prefixes (map nameSteps (GEnv.declaredNames env))))
+  , Right _ <- [namespaceUnder (scope machine) env p]
+  ]
+  where
+    machine = sessionMachine s
+    env     = globals machine
+    prefixes ws = [ take n ws | n <- [1 .. length ws] ]
+
 -- | __What a file said when it was read__ (MS11 phase 295).
 --
 -- **A number and not a signature.** What it is for is telling a file that has
@@ -863,22 +1041,57 @@ data Attempt = Attempt
   }
   deriving (Eq, Show)
 
--- | An attempt that has been put down, and where it was put down.
+-- | __What the session can be made to put down and pick up again__ (MS12 phase
+-- 310, his ruling of 2026-11-11).
+--
+-- **A proof and a suspended import go in ONE list under ONE word** — his, and
+-- the words are /"one list one word"/: @:proofs@ shows them together and
+-- @:resume ‹word›@ picks either up. **Nothing in the machinery tells them
+-- apart** beyond this one type, which is what stops @:suspend@, @:resume@ and
+-- @:proofs@ growing a second spelling each.
+--
+-- **Why it is a sum and not a record with two optional halves**: exactly one of
+-- them is parked, and a record would make /neither/ and /both/ representable
+-- for nothing. The live session keeps them in two fields instead
+-- ('sessionWork' and 'sessionImporting') because there a proof may be open
+-- /inside/ a standing import, which is how @:abandon@ gives up the innermost
+-- thing first.
+data Quest
+  = AProof Attempt     -- ^ a theorem being proved
+  | AnImport Importing -- ^ a module's load that reached a @yield@
+  deriving (Eq, Show)
+
+-- | What a quest is listed and asked for under — the one word (MS12 phase 310).
+--
+-- A theorem's name, or the header's text the import was reached by
+-- ('importingText'), which is what every message about a suspended import
+-- already names it by. **A theorem is always a root name** (@:theorem@ mints
+-- one with 'rootName'), so this is the word that was typed in both cases.
+questWord :: Quest -> String
+questWord q = case q of
+  AProof att -> nameDotted (attemptName att)
+  AnImport imp -> importingText imp
+
+-- | A quest that has been put down, and where it was put down.
 --
 -- **The snapshot is here and nowhere else** (phase 37). @:suspend@ is the only
 -- thing that builds one of these, @:resume@ the only thing that takes one
--- apart, so an attempt cannot carry a stale parking position while it is the
+-- apart, so a quest cannot carry a stale parking position while it is the
 -- one being worked on.
 --
 -- **The asymmetry with 'Working' is deliberate, not an oversight**: what is
--- live is an attempt beside a 'Machine'; what is parked is an attempt beside a
+-- live is a quest beside a 'Machine'; what is parked is a quest beside a
 -- 'Snapshot'. A parked one may not carry a machine, for the reason 'Snapshot'
 -- gives above.
 data Parked = Parked
-  { parkedAttempt :: Attempt
-  , parkedAt      :: Snapshot
+  { parkedQuest :: Quest
+  , parkedAt    :: Snapshot
   }
   deriving (Eq, Show)
+
+-- | The word a parked quest is listed and asked for under (MS12 phase 310).
+parkedWord :: Parked -> String
+parkedWord = questWord . parkedQuest
 
 -- | Put the machine at rest: no tape, no environment and **no frames**.
 --
@@ -908,6 +1121,18 @@ currentAttempt :: Session -> Maybe Attempt
 currentAttempt s = case sessionWork s of
   Scratch        -> Nothing
   Attempting att -> Just att
+
+-- | __The quest being worked on, if there is one__ (MS12 phase 310).
+--
+-- **Innermost first, which is 'Thena.Driver.command''s @abandonProof@ rule and
+-- not a second one**: a lemma opened inside a standing import is what the
+-- session is on while it is open, and the import is what it is on once there is
+-- no lemma. So @:proofs@ marks the same thing @:abandon@ would give up and
+-- @:suspend@ would park, and the three cannot come to disagree.
+currentQuest :: Session -> Maybe Quest
+currentQuest s = case sessionWork s of
+  Attempting att -> Just (AProof att)
+  Scratch        -> AnImport <$> sessionImporting s
 
 -- ---------------------------------------------------------------------------
 -- Trust accounting, asked of a session (MS8 phase 151)
@@ -1001,6 +1226,7 @@ newSession = Session
   , sessionGrammarsBy = []
   , sessionOpenedBy  = []
   , sessionFilesRead = []
+  , sessionImporting = Nothing
   }
   where
     (ps, n) = newDevelopment 0
@@ -1090,8 +1316,13 @@ data Response
   | Resumed GlobalName        -- ^ @:resume@
   | Abandoned GlobalName      -- ^ @:abandon@
   | Undone                    -- ^ @:undo@ — one line taken back
-  | Proofs (Maybe Attempt) [Parked]
-    -- ^ @:proofs@ — the current one, if any, and the suspended ones
+  | Proofs (Maybe Quest) [Parked]
+    -- ^ @:proofs@ — the quest the session is on, if any, and the parked ones.
+    --
+    -- **A 'Quest' and not an 'Attempt' since MS12 phase 310**: a suspended
+    -- import is parked into this same list under its module name, his ruling of
+    -- 2026-11-11, so what is shown as live has to be able to be one too — in
+    -- limbo the session is on an import and on no proof.
     -- ^ @:extract@ — the closed term the development stands for (§7.5). Its
     -- own look, because @certify@ is an op and an op's answer comes back as a
     -- 'Message', which the driver may not build out of a term: rendering is
@@ -1169,6 +1400,50 @@ data Response
     -- **And the warnings are 'ConsultRequested''s** (MS11 phase 298): a
     -- @public import@ written at the prompt has no importer to pass anything to,
     -- so the word is idle there for the reason it is idle in a rule file.
+  | ImportSuspended String [Message] [Warning] Message
+    -- ^ **a module's elaboration reached a @yield@ and the load is standing
+    -- still** (MS12 phase 309). The header's text, whatever the run
+    -- printed before it stopped, its warnings, and the yield's own message.
+    --
+    -- **Its own response and not a 'Ran' with a 'Yielded' in it**, which is what
+    -- the un-built behaviour answered: a frontend has to be able to tell /a rule
+    -- handed you the wheel/ from /a rule handed you the wheel and an import is
+    -- waiting on you/, because only the second has an @:abandon@ that takes a
+    -- whole module and a @yield@ that finishes a load. The messages are carried
+    -- through so what the run said is still shown.
+  | ImportResumed String [Message] [Warning] Message
+    -- ^ **a suspended import was handed back the wheel and reached ANOTHER
+    -- yield** (MS12 phase 309). 'ImportSuspended''s twin, and a separate
+    -- constructor so that a second stop does not read as a second import
+    -- starting.
+  | ImportAbandoned String Int [GlobalName]
+    -- ^ **@:abandon@ on a suspended import** (MS12 phase 309): the module, how
+    -- many declarations went, and **which of them were the user's own.**
+    --
+    -- **It says what went, because his ruling is that it takes everything** —
+    -- /"I want the abandoning of the import to take everything. The honest
+    -- way."/ — so a lemma proved at the prompt during the suspension goes with
+    -- it, and a message that did not say so would be the silent half of exactly
+    -- the data loss the second principle is about.
+    --
+    -- **The user's are named and the module's are counted, which is not
+    -- laziness.** A closure of three modules generates hundreds of names, and
+    -- the first thing printed was a seventy-line list nobody could read. That a
+    -- module's own declarations go when its import is given up is the obvious
+    -- half; **that your lemma goes is the half worth printing in full.**
+  | ImportParked String
+    -- ^ **@:suspend@ on a standing import** (MS12 phase 310, his ruling of
+    -- 2026-11-11): the module, put down into @:proofs@ under the
+    -- header's text so that a lemma can be proved before it carries on.
+    --
+    -- **Its own constructor rather than 'Suspended'**, which is 309's rule for
+    -- every message about a suspended import: the thing put down has no
+    -- theorem's name and nothing certifies it, so a frontend that showed it as
+    -- a suspended proof would offer @qed@ on a module.
+  | ImportPickedUp String
+    -- ^ **@:resume ‹module›@ on a parked import** (MS12 phase 310): it is back
+    -- on the wheel, standing in its @yield@ exactly where it was left, and a
+    -- @yield@ carries it on. 'ImportParked''s twin.
   | ModuleAlreadyIn ModuleName
     -- ^ **@import ‹module›@ naming a module the session already holds** (MS11
     -- phase 284). A module is loaded once however many files reach it, so this
@@ -1394,6 +1669,52 @@ data CommandError
     -- ^ @yield@ typed when no rule has handed control over (MS4 phase 45b).
     -- 'NotAsking''s twin, and it exists for the same reason: a word that did
     -- nothing would be worse than one that says so.
+  | ImportInFlight String
+    -- ^ **a second @import@ while one is standing in a yield** (MS12 phase 309,
+    -- his ruling of 2026-11-11: one in flight). Named for the module
+    -- that is waiting, not the one refused — that is the one the user has to do
+    -- something about. @:theorem@ refusing while a proof is open is the
+    -- precedent for the wording.
+  | ImportIsParked String
+    -- ^ **a second @import@ while one is parked in @:proofs@** (MS12 phase
+    -- 310). 'ImportInFlight''s sibling, and the same ruling of 2026-11-11:
+    -- one import at a time, in flight or put down.
+    --
+    -- **Parking does not make room for another one, and that is forced rather
+    -- than chosen.** A standing import holds the machine's pool, its held bases
+    -- and its concealment, and parking deliberately leaves all three in force —
+    -- /"what is in scope for the prompt, is what was in scope for the
+    -- elaboration"/ — so a second import would displace what the parked one
+    -- expects to find when it is picked up again. The repair it names is
+    -- @:resume@, because giving a parked import up means picking it up first.
+  | NobodyToYieldTo String
+    -- ^ **a module's elaboration yielded where there is no prompt to hand it
+    -- to** (MS12 phase 309), naming the module. Two callers refuse
+    -- this way: @thena-check@, which is a batch checker, and a module pulled in
+    -- by a /rule base/, where the user asked for a base and never named the
+    -- file that stopped.
+    --
+    -- **It is the caller's refusal and not the load's**, which is the whole
+    -- reason 'Walked' has three cases: the load does the same thing either way
+    -- and whoever asked for it decides whether there is a wheel to hand over.
+  | ProvingWhileYielding (Maybe String)
+    -- ^ **@:theorem@ typed while a rule is standing in a yield** (MS12 phase
+    -- 309, his ruling of 2026-11-11), carrying the import that is standing
+    -- where one is.
+    --
+    -- **It used to be allowed and it silently destroyed the suspended
+    -- elaboration**: the four proof boundaries go through 'atRest', which empties
+    -- the program, so the lemma landed and the thing it was for was gone —
+    -- @yield@ afterwards answered @nothing has yielded@. **Refusing is the
+    -- second principle, not against it**: going wrong is permitted, not being
+    -- able to see it coming is not, and the message names the way out.
+    --
+    -- **The field is what the way out is** (MS12 phase 310): a bare yield at
+    -- the prompt can only be handed back, and an import that is standing can be
+    -- parked instead — which is the whole of the five-step sequence his ruling
+    -- of 2026-11-11 describes, and 309 could not name it because there was
+    -- nothing to park. One constructor rather than two, because it is one
+    -- refusal with one cause; what differs is which repairs exist.
   | NoSuchGlobal String
   | NoSuchLanguage String
   | NotParsing
@@ -1425,9 +1746,14 @@ data CommandError
     -- under a half-built proof** — the user's reproducibility argument,
     -- 2026-08-25 — and *"loading a new rule-base in between theorems is fine
     -- for now"* is why this names the proof rather than refusing outright
-  | ProofsSuspended [GlobalName]
+  | ProofsSuspended [String]
     -- ^ … or while one is suspended, which is the same hazard postponed: a
-    -- suspended proof is resumed and continued, so its replay would change
+    -- suspended proof is resumed and continued, so its replay would change.
+    --
+    -- **Words rather than names since MS12 phase 310**, because a parked import
+    -- is in the same list and has a module's name and not a theorem's. Nothing
+    -- is lost: a parked theorem is a root name, so 'Thena.Render.nameString'
+    -- answered the word it was typed as.
   | LevelExpected String
     -- ^ @:elim Nat Nat@ — @:elim@\'s optional second argument parsed as a term
     -- but is not a @Typeₗ@ (phase 10). Not called @NotAUniverse@ because
@@ -2651,6 +2977,47 @@ loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
                              -- kind of file.
                              (ws ++ unlistedTravelling s' items)
             )
+          -- **A YIELD IS NOT A FAILURE TO COMPLETE — IT IS THE LOAD ASKING FOR
+          -- THE WHEEL** (MS12 phase 309, his ruling of 2026-11-11).
+          -- The arm below rolls back everything that did not finish, and until
+          -- here that took a yielding load with it: the message printed, so the
+          -- user was told control had been handed over, and then the session was
+          -- put back — told a thing that had not happened.
+          --
+          -- **So this arm does the one thing the feature needs, which is to NOT
+          -- put it back.** No @poolBack@ either: the module's pool, held bases
+          -- and scope stay in force, which is his ruling and not an oversight —
+          -- /"what is in scope for the prompt, is what was in scope for the
+          -- elaboration."/ The program, the development and the frames are
+          -- already standing in the live machine, so there is nothing to carry.
+          --
+          -- **ATOMICITY IS UNTOUCHED.** Nothing is declared until the load
+          -- completes, @globals@ is still the same before the command and after
+          -- it, and the arm below is still what a load that genuinely stopped
+          -- gets. A suspended load is one command that has not finished, which
+          -- is what a @yield@ at the prompt already was.
+          --
+          -- **'importingName', 'importingRest' and 'importingDone' are filled in
+          -- by 'loadProofModules'**, which is the caller that walked the graph;
+          -- this knows only its own module. 'loadProofItems' never reaches here
+          -- with a closure, because it refuses a module that names anything on
+          -- disc.
+          (s', Ran msgs ws (Yielded msg)) ->
+            ( s' { sessionImporting = Just Importing
+                     { importingBefore = s
+                     , importingAt     = s
+                     , importingName   = Nothing
+                     , importingText   = nm
+                     , importingItems  = items
+                     , importingRest   = []
+                     , importingWarns  = ws
+                       -- What this run declared before it stopped — the
+                       -- module's own, every one of them.
+                     , importingTheirs = declaredSince s s'
+                     }
+                 }
+            , ImportSuspended nm msgs ws msg
+            )
           -- **A load that does not complete declares nothing** (MS6 closeout 15,
           -- his ruling 2026-09-30: /"Atomic from now on."/). Before this, the
           -- partial run's declarations stayed: a module whose third definition
@@ -2706,9 +3073,8 @@ loadProofItemsConsulting (Pool poolOf published heldBases pushable) s nm items
 -- replay of these lines will open again — 'sessionFilesRead' has why a file
 -- that was read and then refused still counts, and 'rolledBack' is what keeps
 -- these notes when the install does not take.
-loadProofModules
-  :: Session -> [ReadModule] -> (Session, Either (ReadModule, Response) [Response])
-loadProofModules s00 ms0 = go s0 [] ms0
+loadProofModules :: Session -> [ReadModule] -> (Session, Walked)
+loadProofModules s00 ms0 = walkProofModules s0 s0 [] ms0
   where
     s0 = foldl' readsOf s00 ms0
 
@@ -2718,20 +3084,51 @@ loadProofModules s00 ms0 = go s0 [] ms0
              (concat [ spreadPool sp ++ concatMap heldTexts (spreadHeld sp)
                      | sp <- fromMaybe [] (readModulePool m) ])
 
-    go s acc [] = (s, Right (reverse acc))
+-- | __The walk itself, enterable in the middle__ (MS12 phase 309).
+--
+-- 'loadProofModules' with the fold's own state handed in: the session to roll
+-- back to, the session as it stands, the modules already in, and the modules
+-- still to run. **It is one function and not two because a suspension lands in
+-- the middle of the fold** — a @yield@ out of the third module of a closure has
+-- to be picked up with the first two in and the fourth still to go, and a second
+-- walk written for that case would be the one that drifts.
+--
+-- **'finishImport' is the other caller**, with the rest of the closure it was
+-- carrying.
+walkProofModules
+  :: Session -> Session -> [Response] -> [ReadModule] -> (Session, Walked)
+walkProofModules s0 = go
+  where
+    go s acc [] = (s, WalkedAll (reverse acc))
     go s acc (m : rest) = case poolFor s m of
       -- **A base that will not resolve refuses the module it was consulted
       -- by** (MS11 phase 288), which is what names the file: a base reached
       -- through an @import@ fails against the module that published it, and
       -- "Thena.Files" already splits the one the user named from the rest.
-      Left bad   -> (rolledBack s0 s, Left (m, bad))
+      Left bad   -> (rolledBack s0 s, WalkedStopped m bad)
       Right pool -> case loadProofItemsConsulting pool s
                                         (moduleText (readModuleHeader m))
                                         (readModuleItems m) of
         (s', r@(ProofLoaded {})) -> go (marked m s (readModuleName m) s') (r : acc) rest
+        -- **A suspended load keeps the rest of the walk** (MS12 phase 309).
+        -- 'loadProofItemsConsulting' recorded what it knew — its own module's
+        -- text and items, and the session its pool goes back to; this fills in
+        -- the three things only the walk knows. **'importingBefore' is @s0@ and
+        -- not @s@**, because abandoning takes the whole closure: a module that
+        -- went in because this one imported it does not stay behind.
+        (s', r@(ImportSuspended {}))
+          | Just imp <- sessionImporting s' ->
+              ( s' { sessionImporting = Just imp
+                       { importingBefore = s0
+                       , importingName   = readModuleName m
+                       , importingRest   = rest
+                       }
+                   }
+              , WalkedSuspended (reverse acc) r
+              )
         -- 'loadProofItemsConsulting' has already put this module's own
         -- declarations back; this takes the closure's with them.
-        (s', bad)                -> (rolledBack s0 s', Left (m, bad))
+        (s', bad)                -> (rolledBack s0 s', WalkedStopped m bad)
 
     -- | The pool this module is elaborated against, resolved here rather than
     -- when the file was read — 'readModulePool' says why.
@@ -2810,7 +3207,160 @@ loadProofModules s00 ms0 = go s0 [] ms0
 
     marked _ _      Nothing  s = s
     marked m before (Just n) s =
-      moduleDeclared n (interfaceOf (readModuleItems m)) before s
+      moduleDeclared n (interfaceOf (readModuleItems m)) [] before s
+
+-- | __How a walk over a closure came out__ (MS12 phase 309).
+--
+-- **Three ways and not two**, which is the whole of what this phase changed
+-- about the shape: a load used to either go in or not, and a @yield@ had to be
+-- squeezed into /not/. **A caller must now decide what to do about a load that
+-- is standing still**, and the two kinds of caller decide differently — a prompt
+-- hands the user the wheel, and a batch checker has nobody to hand it to and
+-- refuses. Making it a third case is what forces that choice to be made rather
+-- than defaulted.
+data Walked
+  = WalkedAll [Response]
+    -- ^ every module of the closure is in, one response each, in the order they
+    -- went
+  | WalkedStopped ReadModule Response
+    -- ^ **nothing went in**, and this is the module it stopped on. The session
+    -- is already rolled back.
+  | WalkedSuspended [Response] Response
+    -- ^ **the load is standing in a yield** and the session carries the
+    -- 'Importing' that says how to finish it or give it up.
+    --
+    -- **The modules of the closure that are already in come with it**, because
+    -- they really are in: a module the suspended one imported was elaborated
+    -- before it, its declarations are in the environment, and the user is about
+    -- to write code against them. Holding their responses back until the import
+    -- completes would report them minutes after they landed.
+    --
+    -- **The suspended module itself is not among them** — it is what the second
+    -- response is about, and nothing of it is declared until it finishes.
+  deriving (Eq, Show)
+
+-- | __A suspended import whose program has run out, finished off__ (MS12 phase
+-- 309).
+--
+-- **This is the piece with no precedent in the system** — the user's @yield@
+-- resumes the suspended program inside /that line's/ run, and that line has no
+-- idea it is finishing a load. So the completion is noticed after the line, by
+-- whoever sees that the machine's program ran out while an import was standing,
+-- and this is what it calls.
+--
+-- **It answers several responses, which is why it goes out through the same door
+-- a @:load@ does.** Finishing one module may put the next one in, and the next,
+-- and any of them may yield again — so one line can land a whole closure.
+-- "Thena.Files"\'s @following@ is that door and it already carries a list.
+--
+-- **The module's own declarations are what the file wrote, LESS what the user
+-- typed** (@~3c2db@, his ruling of 2026-11-11). 'moduleDeclared' works the
+-- module's declarations out as a set difference of the global environment, which
+-- cannot tell a name the file declared from a lemma proved at the prompt to get
+-- unstuck; 'importingMine' is that subtraction.
+finishImport :: Session -> (Session, Walked)
+finishImport s = case sessionImporting s of
+  Nothing  -> (s, WalkedAll [])
+  Just imp ->
+    let at    = importingAt imp
+        items = importingItems imp
+        -- The pool, the held bases and the concealment the module's load
+        -- replaced, put back now that it really has finished — 'poolBack' in
+        -- 'loadProofItemsConsulting', with the session it closed over handed
+        -- over in 'importingAt' instead.
+        inherited = openedFrom at
+        final     = scopeOpens (scope (sessionMachine s))
+        back = s { sessionMachine = (sessionMachine s)
+                     { pool  = pool (sessionMachine at)
+                     , held  = held (sessionMachine at)
+                     , scope = (scope (sessionMachine s))
+                                 { scopeConcealed =
+                                     scopeConcealed (scope (sessionMachine at))
+                                 , scopeOpens =
+                                     take (length final - length inherited) final
+                                       ++ scopeOpens (scope (sessionMachine at))
+                                 }
+                     }
+                 , sessionImporting = Nothing
+                 }
+        -- **Everything new that the module's own program did not declare**
+        -- (@~3c2db@) — what the user typed at the prompt while it stood.
+        usersOwn = filter (`notElem` importingTheirs imp) (declaredSince at s)
+        landed = ProofLoaded (importingText imp)
+                             (concatMap declaredNames items)
+                             (sum (map blocksIn items))
+                             (importingWarns imp ++ unlistedTravelling back items)
+        s'  = case importingName imp of
+          Nothing -> back
+          Just n  -> moduleDeclared n (interfaceOf items) usersOwn at back
+        -- **The accumulator starts with this module alone.** What the closure
+        -- had already put in was reported at the suspension, by
+        -- 'WalkedSuspended', so repeating it here would say it twice.
+     in walkProofModules (importingBefore imp) s' [landed] (importingRest imp)
+
+-- | __What the environment gained between two sessions__ (MS12 phase 309).
+--
+-- 'moduleDeclared''s @arrived@, said once so that the three places asking the
+-- same question cannot come to disagree about it — what a suspended load had
+-- declared before it stopped, what a @yield@ put in when it carried on, and what
+-- an @:abandon@ took away.
+--
+-- **Deduplicated, for 'moduleDeclared''s reason**: @declaredNames@ is four
+-- tables concatenated and a constructor is in two of them.
+declaredSince :: Session -> Session -> [GlobalName]
+declaredSince before after =
+  nub (filter (`notElem` had) (Env.declaredNames (globals (sessionMachine after))))
+  where
+    had = Env.declaredNames (globals (sessionMachine before))
+
+-- | __Give a suspended import up because there is nobody to hand it to__ (MS12
+-- phase 309).
+--
+-- 'abandonImport' with the refusal in front of it, for a caller with no prompt
+-- behind it. **The session is put back as it stood**, so a batch run that met a
+-- yield leaves nothing half-installed.
+refuseSuspension :: Session -> (Session, Response)
+refuseSuspension s = case sessionImporting s of
+  -- Cannot arise: the callers ask only when a walk answered 'WalkedSuspended',
+  -- which is the one thing that sets it. Written out rather than left to a
+  -- pattern-match failure.
+  Nothing  -> (s, Rejected NotYielding)
+  Just imp ->
+    ( fst (abandonImport s imp)
+    , Rejected (NobodyToYieldTo (importingText imp))
+    )
+
+-- | __Give a suspended import up, and everything that came with it__ (MS12 phase
+-- 309, his ruling of 2026-11-11).
+--
+-- **It takes the user's own work too, and that is the ruling** — /"I want the
+-- abandoning of the import to take everything. The honest way."/ A module's
+-- earlier declarations are in @globals@ while the load runs, so anything
+-- declared at the prompt during the suspension may be built on them; taking only
+-- the module's would leave a reference dangling, which is the problem revoking
+-- was refused over in @~mgqwb@, in miniature.
+--
+-- **'rolledBack' already does the whole of it**: it restores the session as it
+-- stood before the closure and carries only the fresh-name counter and what was
+-- read. So nothing here had to be written except the message, which names what
+-- went.
+abandonImport :: Session -> Importing -> (Session, Response)
+abandonImport s imp =
+  ( (rolledBack (importingBefore imp) s) { sessionImporting = Nothing }
+  , ImportAbandoned (importingText imp) (length took) mine
+  )
+  where
+    took = declaredSince (importingBefore imp) s
+    -- **What the user typed, as against what the files did** (@~3c2db@): the
+    -- module's own program recorded its names in 'importingTheirs', so what is
+    -- left over is the prompt's — and the prompt's is what a user did not
+    -- expect to lose.
+    --
+    -- **It is the whole closure's names less this module's program's**, so a
+    -- declaration from a module that went in earlier is not called the user's.
+    -- 'declaredSince' against 'importingAt' is that earlier part.
+    mine = [ g | g <- declaredSince (importingAt imp) s
+               , g `notElem` importingTheirs imp ]
 
 -- | __Which module these declarations are__ (MS11 phase 280).
 --
@@ -2832,8 +3382,8 @@ loadProofModules s00 ms0 = go s0 [] ms0
 -- thing here that is read off the items rather than off the two environments,
 -- because an export list names declarations rather than making any:
 -- 'moduleExporting' is what the caller passes.
-moduleDeclared :: ModuleName -> Interface -> Session -> Session -> Session
-moduleDeclared n face before after
+moduleDeclared :: ModuleName -> Interface -> [GlobalName] -> Session -> Session -> Session
+moduleDeclared n face notMine before after
   | moduleLoaded n after = after
   | otherwise =
       after { sessionLoaded     = n : sessionLoaded after
@@ -2853,9 +3403,21 @@ moduleDeclared n face before after
     -- **Deduplicated, because 'Env.declaredNames' is four tables concatenated**
     -- and a constructor is in two of them: a key naming its module twice would
     -- make any count taken off this list wrong.
+    -- **AND WHAT THE USER TYPED IS NOT THE MODULE'S** (MS12 phase 309,
+    -- @~3c2db@, his ruling of 2026-11-11). A name declared at the prompt while
+    -- this module's load stood suspended in a yield arrives in the same
+    -- difference and the difference cannot tell them apart: what the file
+    -- /wrote/ is the module's, and a lemma proved to get unstuck is the user's.
+    -- **The caller is what knows which** — 'finishImport' carries them on
+    -- 'importingMine' — and @notMine@ is empty for every load that never
+    -- suspended, which is all of them before this phase.
+    --
+    -- **It matters because a module with no @exporting@ clause exports what it
+    -- declared**, so without this one file would offer different names
+    -- depending on how a session happened to go.
     arrived =
       let had = Env.declaredNames (globals (sessionMachine before))
-       in nub (filter (`notElem` had)
+       in nub (filter (\g -> g `notElem` had && g `notElem` notMine)
                       (Env.declaredNames (globals (sessionMachine after))))
 
     -- **The same difference over the grammar table** (MS11 phase 297), and it
@@ -3806,9 +4368,12 @@ dispatch s name arg = case name of
       | otherwise -> (s, parseObject machine lang (dropWhile (== ' ') rest))
   -- The only command that means two things, and they do not overlap: with no
   -- argument it is the development, with one it is a global (§9, phase 6).
-  ":show"  -> case arg of
-    "" -> (s, Shown (cursor (development machine)))
-    _  -> showGlobal arg
+  -- **Both halves read the argument trimmed** (MS12 phase 311), for
+  -- 'opening''s reason: @:show@ takes a name, and @:show Nat @ asked after a
+  -- global whose word was @Nat @.
+  ":show"  -> case trimmed arg of
+    ""   -> (s, Shown (cursor (development machine)))
+    what -> showGlobal what
   -- The eliminator is not a global, so it is not reachable through @:show@
   -- (§3.7, reversed by the user 2026-08-22). Its own word, and its own second
   -- argument: the level comes from the motive at every use site, so there is
@@ -3816,7 +4381,7 @@ dispatch s name arg = case name of
   -- Only a datatype has rules, so this is not reachable through @:show@ and
   -- takes its own word, as @:elim@ does. **Not @:rules@**: that is the engine's
   -- rule base, and an instral rule is not an inference rule.
-  ":judgment" -> withArgument (showRules arg)
+  ":judgment" -> withArgument (showRules (trimmed arg))
   ":elim"  -> withArgument (eliminator arg)
   ":where" -> noArgument (s, Where (cursor (development machine)))
   -- Autocomplete, and it is a read-only query on the iterator (§7.6): the
@@ -3938,12 +4503,21 @@ dispatch s name arg = case name of
   -- op program and is written as the op is written. That also keeps @:abandon@
   -- (this proof) apart from @abandon@ (this hole), which are two different
   -- operations that thesis §2 gives one name.
-  ":theorem" -> withArgument theorem
+  -- **Refused while a rule is standing in a yield** (MS12 phase 309, his ruling
+  -- of 2026-11-11). It is here and not inside 'theorem' because the refusal is
+  -- about the machine rather than about the argument, so it is answered before
+  -- the name is even parsed.
+  -- **The refusal names the park where there is one to make** (MS12 phase 310):
+  -- a bare yield at the prompt can only be handed back, an import that is
+  -- standing can be put down instead.
+  ":theorem" | Engine.isYielding machine ->
+                 (s, Rejected (ProvingWhileYielding (importingText <$> sessionImporting s)))
+             | otherwise -> withArgument theorem
   "qed"      -> noArgument closeProof
   ":suspend" -> noArgument suspend
   ":resume"  -> withArgument (resume arg)
   ":abandon" -> noArgument abandonProof
-  ":proofs"  -> noArgument (s, Proofs (currentAttempt s) (sessionSuspended s))
+  ":proofs"  -> noArgument (s, Proofs (currentQuest s) (sessionSuspended s))
   ":undo"    -> noArgument undo
   ":convert" -> conversion
   -- **The session's trust level, and what the development rests on** (MS8
@@ -3986,7 +4560,21 @@ dispatch s name arg = case name of
     -- **Nothing is refused for an already-loaded module**: it is the no-op a
     -- diamond in the import graph gets, and "Thena.Files" answers it, because
     -- the walk that knows about deduplication is the one that reads files.
-    Just m  -> (s, ImportRequested m [])
+    Just m
+      -- **One import in flight — his ruling of 2026-11-11** (MS12 phase 309).
+      -- A suspended load holds the machine's program, its pool and its
+      -- concealment; a second one would have to displace all three and there
+      -- would be nothing to go back to.
+      | Just imp <- sessionImporting s ->
+          (s, Rejected (ImportInFlight (importingText imp)))
+      -- **A parked one is still one** (MS12 phase 310). Parking takes the
+      -- import off the wheel but leaves the pool, the held bases and the
+      -- concealment it is standing in, so a second load would displace exactly
+      -- what it expects to find when it is picked up again.
+      | (nm : _) <- [ importingText imp
+                    | Parked (AnImport imp) _ <- sessionSuspended s ] ->
+          (s, Rejected (ImportIsParked nm))
+      | otherwise -> (s, ImportRequested m [])
   -- **Refused while a proof is open, as @:consult@ is** — the base may not
   -- change under a half-built proof (the user, 2026-08-25). An @import@ is not,
   -- for the reason @:load proof@ is not: it declares and does not touch the
@@ -4087,8 +4675,30 @@ dispatch s name arg = case name of
   -- after it. @retry@ is the precedent for a bare driver word that is not an op.
   "yield" -> noArgument $
     if Engine.isYielding machine
-      then progress (sessionFuel s)
-                    s { sessionMachine = Engine.resumeYield machine } [] []
+      then case progress (sessionFuel s)
+                         s { sessionMachine = Engine.resumeYield machine } [] [] of
+             -- **What the resumed program declared is the MODULE's** (MS12 phase
+             -- 309, @~3c2db@). This is the only word that hands a suspended
+             -- program control back, so it is the only line during which a
+             -- module's own program can declare anything — 'importingTheirs'
+             -- says why that is the test rather than something per line.
+             (s', r) | Just imp <- sessionImporting s' ->
+                         ( s' { sessionImporting = Just imp
+                                  { importingTheirs =
+                                      importingTheirs imp ++ declaredSince s s'
+                                  }
+                              }
+                           -- **A second stop says the import is STILL waiting**
+                           -- (MS12 phase 309). A bare yield message here would
+                           -- read as an ordinary rule handing control over, and
+                           -- the user would not know a module was still on the
+                           -- hook. Every other stop is left exactly as it came.
+                         , case r of
+                             Ran msgs ws (Yielded msg) ->
+                               ImportResumed (importingText imp) msgs ws msg
+                             _ -> r
+                         )
+                     | otherwise -> (s', r)
       else (s, Rejected NotYielding)
   "retry"  -> case arg of
     "" -> retryAt Nothing
@@ -4165,7 +4775,7 @@ dispatch s name arg = case name of
     proofUnderway = case (currentAttempt s, sessionSuspended s) of
       (Just att, _)    -> Just (ProofUnderway (attemptName att))
       (Nothing, [])    -> Nothing
-      (Nothing, ps)    -> Just (ProofsSuspended (map (attemptName . parkedAttempt) ps))
+      (Nothing, ps)    -> Just (ProofsSuspended (map parkedWord ps))
 
     -- | One kind, the paths it was given. **Rule bases take several and the
     -- other two take one**, which is not an accident of spelling: a load of
@@ -4401,19 +5011,55 @@ dispatch s name arg = case name of
         , definitionType d
         )
 
-    suspend = case sessionWork s of
-      Scratch -> (s, Rejected NotProving)
-      Attempting att ->
-        ( cleared { sessionSuspended =
-                      Parked att (snapshotOf machine) : sessionSuspended s }
+    -- **Innermost first, exactly as @:abandon@ is** (MS12 phase 310): a lemma
+    -- opened inside a standing import is what @:suspend@ puts down while it is
+    -- open, and the import is what it puts down once there is no lemma. One
+    -- word for /put down what I am on/, and 'currentQuest' is the one place
+    -- that says which that is.
+    --
+    -- **PARKING AN IMPORT IS WHAT MAKES THE LEMMA POSSIBLE — HIS RULING OF
+    -- 2026-11-11**, and the sequence is his: yielded at the prompt → park the
+    -- quest → @:theorem@ the lemma → @qed@, which lands it as a name → pick the
+    -- quest back up → @yield@. /"There is a step to park the current 'quest'
+    -- and that is done manually, so I think the opposite should be manual
+    -- also."/ **So @qed@ does not pop it back**: a boundary that unstacked
+    -- implicitly would be a second driver underneath the first, which is what
+    -- the first principle warns about.
+    --
+    -- **It is the same two lines as a proof's**, which is the point of 'Quest':
+    -- the suspended load is already standing in the live machine's program and
+    -- frames, so 'snapshotOf' carries it and 'restore' hands it back. Nothing
+    -- is copied out of the machine and no second snapshot type was needed.
+    --
+    -- **The pool, the held bases and the concealment are LEFT IN FORCE.** A
+    -- parked import is still an import in the middle of being elaborated — his
+    -- word for the state after the park is /limbo/, /"in the middle of an
+    -- import and proving nothing"/ — and putting them back would mean the
+    -- lemma is proved in a scope the module cannot see. It is also why a second
+    -- @import@ stays refused while one is parked ('ImportIsParked').
+    suspend = case currentQuest s of
+      Nothing -> (s, Rejected NotProving)
+      Just q@(AProof att) ->
+        ( cleared { sessionSuspended = Parked q (snapshotOf machine) : sessionSuspended s }
         , Suspended (attemptName att)
+        )
+      Just q@(AnImport imp) ->
+        ( cleared { sessionSuspended = Parked q (snapshotOf machine) : sessionSuspended s
+                  , sessionImporting = Nothing
+                  }
+        , ImportParked (importingText imp)
         )
 
     -- Abandoning drops the proof; suspending keeps it. Same exit, different
     -- list — which is the whole difference between the two commands.
+    -- **Innermost first** (MS12 phase 309): a lemma opened inside a suspended
+    -- import is what @:abandon@ gives up while it is open, and the import is
+    -- what it gives up once there is no lemma. One word for /give up what I am
+    -- on/, and nothing has to say which kind of thing that is.
     abandonProof = case sessionWork s of
-      Scratch -> (s, Rejected NotProving)
       Attempting att -> (cleared, Abandoned (attemptName att))
+      Scratch | Just imp <- sessionImporting s -> abandonImport s imp
+              | otherwise -> (s, Rejected NotProving)
 
     -- Leave proof mode, putting the machine back on a fresh scratch
     -- development. **The environment and the counter are not touched**, which
@@ -4426,19 +5072,34 @@ dispatch s name arg = case name of
             , sessionWork = Scratch
             }
 
+    -- **One word picks up either kind** (MS12 phase 310, his /"one list one
+    -- word"/): the list is matched on 'parkedWord', which is a theorem's name
+    -- or the header's text an import was reached by. **For a proof this is the
+    -- comparison that was here before** — @:theorem@ mints a root name, so the
+    -- dotted form and the word are the same string.
+    --
+    -- **Refused while the session is on a quest, whichever kind.** Picking one
+    -- up installs a program and a development, so there has to be nowhere for
+    -- the one you are on to go: a proof says so with 'AlreadyProving', and a
+    -- standing import with 'ImportInFlight', whose message already says to park
+    -- it. Nothing is stacked implicitly, which is the ruling parking rests on.
     resume what =
-      case break ((== rootName what) . attemptName . parkedAttempt) (sessionSuspended s) of
+      case break ((== what) . parkedWord) (sessionSuspended s) of
         (_, [])          -> (s, Rejected (NoSuchProof what))
-        (before, Parked att at : after)
-          | Attempting cur <- sessionWork s ->
-              (s, Rejected (AlreadyProving (attemptName cur)))
-          | otherwise ->
-              ( s { sessionMachine = restore at machine
-                  , sessionWork = Attempting att
-                  , sessionSuspended = before ++ after
-                  }
-              , Resumed (attemptName att)
-              )
+        (before, Parked q at : after) -> case currentQuest s of
+          Just (AProof cur)  -> (s, Rejected (AlreadyProving (attemptName cur)))
+          Just (AnImport cur) -> (s, Rejected (ImportInFlight (importingText cur)))
+          Nothing ->
+            let picked = s { sessionMachine = restore at machine
+                           , sessionSuspended = before ++ after
+                           }
+             in case q of
+                  AProof att ->
+                    (picked { sessionWork = Attempting att }, Resumed (attemptName att))
+                  AnImport imp ->
+                    ( picked { sessionImporting = Just imp }
+                    , ImportPickedUp (importingText imp)
+                    )
 
     -- **No proof required** (phase 34). @:undo@ takes back the line you typed,
     -- and nothing about that needs a theorem to be open.
@@ -4470,11 +5131,19 @@ dispatch s name arg = case name of
     -- @:step@ can watch it as it watches @data@. The argument is raw text taken
     -- from a line, which is 'Thena.Core.Term.nameFromText''s one job.
     --
+    -- **Through 'trimmed', because @open@ takes a name** (MS12 phase 311). It
+    -- dropped the leading spaces only, so @open Nat @ asked for a namespace
+    -- whose word was @Nat @ and was refused — and a trailing space is invisible
+    -- in an editor and survives in a saved script, so the line below it failed
+    -- as out of scope with nothing on screen to say why. @import@ and
+    -- @consult@ took their name through 'trimmed' already; this is the same
+    -- convention and not a second one.
+    --
     -- **Its effect runs to the end of the session** (phase 247) — @opened@ is not
     -- backtrackable — so a prompt @open@ behaves as the last @open@ in a loaded
     -- file does, and nothing distinguishes the two.
     opening = withArgument $
-      let g  = nameFromText (dropWhile (== ' ') arg)
+      let g  = nameFromText (trimmed arg)
           -- **It says so, as @data@ does.** A file's @open@ is silent because the
           -- load reports per declaration; a line typed at the prompt that answered
           -- nothing at all would leave the user unable to tell it took, and the
@@ -4754,9 +5423,9 @@ commandSummary =
   , (":run / :run ‹n›",          "let it run on / for n instructions")
   , (":theorem ‹x› : ‹T›",      "start a proof")
   , (":goal ‹T›",                "discard everything and start a scratch goal")
-  , (":suspend / :resume ‹name›", "put a proof aside / take it up again")
-  , (":proofs",                  "the current proof and the suspended ones")
-  , (":abandon",                 "give up the current proof")
+  , (":suspend / :resume ‹name›", "put a proof or an import aside / take it up again")
+  , (":proofs",                  "what is being worked on, and what is parked")
+  , (":abandon",                 "give up what is being worked on")
   , (":undo",                    "take back the last line")
   , (":extract",                 "the term the development stands for")
   , (":revalidate",              "recheck the whole development")
@@ -6337,6 +7006,12 @@ boundary resp = case resp of
   Abandoned {} -> True
   Suspended {} -> True
   Resumed {}   -> True
+  -- **Parking an import crosses one for the same reason @:suspend@ does** (MS12
+  -- phase 310): the development you were standing in is exchanged for another,
+  -- and stepping back across the exchange would put a line's snapshot under the
+  -- wrong one.
+  ImportParked {}   -> True
+  ImportPickedUp {} -> True
   _            -> False
 
 -- | Which responses end a load.

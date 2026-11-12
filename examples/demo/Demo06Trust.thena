@@ -1,0 +1,51 @@
+-- SAYING "TAKE MY WORD FOR IT", AND BEING TOLD WHAT THAT COST.
+--
+--   ./tc examples/demo/Demo06Trust.thena
+--
+-- then, at the prompt:   :trust      :whnf nothingOwed      :whnf owed
+--
+-- `trusted T e` is a term whose type is ASSERTED: `e` is checked as usual, at
+-- whatever type it really has, and the term is then given `T` with nothing
+-- relating the two. What makes it worth having rather than an axiom is that it
+-- REDUCES WHEN THE CLAIM COMES TRUE — so a term still printing as `trusted` is
+-- a term whose claim is still load-bearing.
+--
+-- `:trust` sorts every claim into one of three: DISCHARGED (the two types are
+-- convertible, so the trust carries nothing), PENDING (not met, but some
+-- instance could still meet it), UNDISCHARGEABLE (it can never be met, by any
+-- instance, in any later session).
+--
+-- A session starts at `no-undischargeable`, and that is asked at BOTH ways a
+-- definition reaches the environment — `qed` and `declare` — after the kernel
+-- has already accepted the term, because this is policy and not the kernel's
+-- judgement.
+
+module examples.demo.Demo06Trust where
+
+import examples.demo.Demo01Expressions
+import examples.demo.Demo02Judgments
+
+open Ty
+open Tm
+open typing
+
+-- A claim that is already true. It goes in without comment, and `:whnf` shows
+-- that nothing is left of it: the claim was met, so the term contracted to its
+-- body.
+nothingOwed : typing`⊢ 0 : Nat`
+nothingOwed = trusted typing`⊢ 0 : Nat` T-zero
+
+-- One that is genuinely load-bearing. It claims the `T-succ` rule and offers
+-- its own premise as the body, so nothing relates the two: `:whnf` still
+-- prints `trusted`, and `:trust` lists it as PENDING.
+--
+-- THIS IS THE USEFUL SHAPE: state the lemma, get on with the theorem that
+-- needs it, and come back. `:trust` is the list of what you still owe.
+owed : forall (M : Tm) (d : typing`⊢ ${M} : Nat`) -> typing`⊢ ( succ ${M} ) : Nat`
+owed = \ M d -> trusted typing`⊢ ( succ ${M} ) : Nat` d
+
+-- …and here is the same statement with the debt paid off, for comparison. It
+-- is the rule itself, so `:trust` says the file rests on nothing once the only
+-- user of `owed` is this comment.
+paid : forall (M : Tm) (d : typing`⊢ ${M} : Nat`) -> typing`⊢ ( succ ${M} ) : Nat`
+paid = \ M d -> T-succ M d

@@ -888,6 +888,111 @@ half an import graph.
 see *A header says what the file exports* below. An import reaches what that file
 exports, and nothing it imported unless it said `public import`.
 
+### An import can stop in the middle and hand you the proof it got stuck on
+
+*Decided 2026-11-11, built MS12 phase 309.*
+
+Importing a module is not a special operation. **A module's declarations are turned
+into one program and that program is run by the same machine, through the same loop,
+as a line you type** — so an import is one line whose program happens to be long. The
+consequence is the feature: a program can stop, so an import can stop.
+
+It stops when a rule says `yield`. The shipped rule base never does; a rule base you
+consult may, and four lines are enough:
+
+```
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t)
+  do yield "a placeholder: fill it and `yield` to carry on"
+```
+
+With that consulted, importing a file that leaves a hole hands you **that
+declaration's own goal**, in that module's own scope — not a scratch goal, and not the
+session's scope. Fill it, type `yield`, and the import carries on and finishes,
+including any further modules the closure still had to load.
+
+**Nothing is declared until the whole import finishes.** A module that does not load
+whole declares nothing — the 2026-09-30 rule — and a suspended load is one command
+that has not come back, not a module that half went in. So `:abandon` while it is
+standing puts the session back exactly as it was. **It takes anything you declared at
+the prompt in the meantime with it, and says so**: a lemma you proved during the
+suspension may rest on the module's earlier declarations, and taking only the
+module's would leave a reference dangling.
+
+**What is in scope while you hold the wheel is what the elaboration had**, which is
+the module's imports and what it has declared so far — not the rest of your session.
+You are standing inside that file's elaboration, so the session's other names stay
+concealed exactly as they are concealed from the file itself.
+
+Three things are refused while a load is standing still:
+
+- a second `import` — one in flight;
+- `:theorem` — a proof boundary empties the machine's program, so opening a theorem
+  would throw the suspended elaboration away. The refusal names both ways out: hand
+  the wheel back, or park the import (below);
+- a `yield` out of a file reached by `thena-check` or by a rule base's own imports,
+  because there is no prompt there to hand control to.
+
+**A name you declare at the prompt during a suspension is yours, not the module's.**
+What a module declared is what its text wrote; a lemma proved to get unstuck is not
+one of those, so a module with no `exporting` clause does not pass it on to whoever
+imports it. Otherwise one file would offer different names depending on how a session
+happened to go.
+
+### A parked import sits in `:proofs` beside your proofs
+
+*Decided 2026-11-11, built MS12 phase 310.*
+
+The reason to be handed a module's goal is usually that it needs a lemma, and a lemma
+is a theorem — which the previous section says you cannot start while the import is
+standing. **So you park the import**, and it goes in the one list you already have.
+Here `Demo07Holes` declares `zeroIsValue` and leaves its proof a placeholder, so
+importing it hands you that declaration's goal:
+
+```
+thena spine> :suspend
+parked the import of examples.demo.pending.Demo07Holes
+  it is in :proofs — :resume examples.demo.pending.Demo07Holes to carry on with it
+thena spine> :proofs
+  examples.demo.pending.Demo07Holes : an import, standing in a yield
+thena spine> :theorem helper : value`0 value`
+proving helper : value`0 value`
+thena spine> try-core core`V-num zero NV-zero`
+thena spine> solve
+thena spine> qed
+helper : value`0 value`   ∐
+thena spine> :resume examples.demo.pending.Demo07Holes
+picked the import of examples.demo.pending.Demo07Holes back up
+  still elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give the import up
+thena spine> try-core core`helper`
+thena spine> solve
+thena spine> yield
+module examples.demo.pending.Demo07Holes
+  declared zeroIsValue
+```
+
+**The lemma you proved at the prompt is what filled the module's hole**, and the
+module landed when you handed the wheel back. Every step of that is a line you type.
+
+**`:suspend`, `:resume`, `:proofs` and `:abandon` do not distinguish the two kinds of
+thing in that list.** A proof has a statement and `qed` certifies it; a parked import
+has the name you imported it by and nothing certifies it. Beyond that they are one
+kind of thing, which is why there is no second word for parking an import and no
+second list to look in.
+
+**Nothing parks or unparks itself.** `qed` does not hand the import back the wheel —
+you pick it up when you want it. A boundary that unstacked implicitly would mean two
+things driving the session and no way to see which was about to move.
+
+**What you prove in the meantime is proved in the module's scope**, because parking
+leaves the module's imports, rule bases and concealment exactly as they were. The same
+fact is why **a second `import` is still refused while one is parked**: there is one
+set of those in force, and the parked import expects to find its own when you pick it
+up. To give a parked import up, `:resume` it and then `:abandon` it.
+
+**A `yield` while the import is parked says *nothing has yielded*.** Yielding is about
+the program in front of you, and parking moved that program into the parked quest. For
+the same reason you cannot `yield` out of the lemma: it is a different program.
+
 ### A file's header must match its path, and it is checked when you import it
 
 *Decided 2026-11-05. Built — MS11 phase 278.*
@@ -5417,6 +5522,40 @@ elimination that stated them is the only thing that knows.
 
 ## The REPL and the session
 
+### The prompt completes the acts a file writes, and not only the colon commands
+
+*Decided 2026-11-12.*
+
+`open`, `declare`, `import`, `consult` and `data` are spelled without a colon because
+they act and because they are the words a file writes. They are the driver's own words
+rather than rules in a base, so the completion had never heard of them: a half-typed
+`cons` offered four ops whose spelling begins the same way and not `consult`.
+
+**A line typed at the prompt may be a statement or one of those acts, and both are
+offered** — until the word is finished nobody knows which it is.
+
+**`open`'s argument is the namespaces that are in scope.** No namespace it offers is
+refused when it is taken: the offer asks the act's own resolution question rather than
+a second one, so a namespace that exists but is ambiguous from where you stand is not
+listed. The spellings offered are the full dotted paths; `open A` in force also makes a
+written `Ty` reach `A.Ty`, and those shortened forms are accepted but not offered.
+
+**`import`'s and `consult`'s arguments are not offered**, because the module names that
+could be imported are a question about the disc rather than about the session.
+
+### An argument that is a name is read with the spaces off both ends
+
+*Decided 2026-11-11.*
+
+`open Nat `, `:show Nat ` and `import A.B ` name what the unspaced lines name. A
+trailing space is invisible in an editor and survives in a saved
+`.thena.script`, so without this a line could silently do nothing and take every
+line below it out of scope with nothing on screen to say why.
+
+**An argument that is a path is not reshaped** — it is split on spaces instead —
+and one that is a term or a statement goes to the parser, which has its own
+answer about whitespace.
+
 ### There are three kinds of file, and the extension says which
 
 *Decided 2026-09-02.*
@@ -6435,6 +6574,26 @@ parser's offers in its own vocabulary.
 
 So a frontend never learns what a de Bruijn index is, when a Π is dependent, or
 what distinguishes a guess from a claim. It renders what it is handed.
+
+### A proof's name crosses as text, and so does where its lines are
+
+*Decided 2026-11-11.*
+
+A frontend that stores a session writes down the transcript it already has; what
+it cannot work out is which theorems that transcript proved and where each proof
+is in it. `provedSlices` answers that — the name in full, and the first and last
+index into the submitted lines — and `nameDotted` spells any global name as
+declared.
+
+**The shortest-ending printer is deliberately not that function.** What is drawn
+on screen is the shortest ending that is unambiguous under what is open, which
+is right for a pane and wrong for a key that is written to disc and read back
+when something else is open.
+
+**A proof is a run of consecutive lines and not one span**, because a proof
+suspended and resumed is two runs under one name; submitting the runs in the
+order given replays it. Only names the session sealed are listed, so an
+abandoned attempt does not appear.
 
 **The enforcement is cabal's.** A frontend's `build-depends` names `thena:view`,
 which is a re-export list and has no modules of its own; `thena` is then a

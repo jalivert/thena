@@ -1,0 +1,82 @@
+-- THE SAME PROOFS AGAIN, DRIVEN BY HAND — a script of command lines, each one
+-- exactly what you would type at the prompt.
+--
+-- Run it with   :replay examples/demo/Demo05ByTactics.thena.script
+--
+-- It states what it stands on and loads on its own. **The acts are lines you
+-- typed, so the `import`s and `open`s are still in force when the script
+-- ends** — that is the difference between a script and a module: a module's
+-- pool is the module's for the length of the load, and a script's is yours.
+--
+-- For the demo, step through it a line at a time rather than replaying it, and
+-- ask `:show`, `:where` and `:matches` between the steps.
+
+import examples.demo.Demo01Expressions
+import examples.demo.Demo02Judgments
+import examples.demo.Demo04Progress
+
+open Ty
+open Tm
+open typing
+open nvalue
+open value
+open step
+
+-- ---------------------------------------------------------------------------
+-- The smallest possible proof, to show the two moves: a term is proposed for
+-- the hole, and the guess is accepted. `qed` re-checks the finished term with
+-- the kernel before admitting it — if it does not check, nothing is admitted.
+
+:theorem zeroIsValue : value`0 value`
+try-core core`V-num zero NV-zero`
+solve
+qed
+
+-- ---------------------------------------------------------------------------
+-- A split taken interactively. `case-core` is the tactic spelling of what
+-- `case … of { … }` writes out: it leaves ONE HOLE PER SURVIVING CASE, inside
+-- that case's own binders, with the split's equations already discharged.
+--
+-- Note what the proposed terms look like: a `Tm`( succ 0 )`` literal and the
+-- constructor application `succ zero` are the SAME term, which `Demo01` proves
+-- with `refl`, so inside `core`…`` the constructors are written directly.
+--
+-- So `NV-zeroCase1`'s goal really is about `( pred 0 )` — the `0` has been
+-- substituted in — and `NV-succCase1`'s is about `( pred ( succ M ) )` with
+-- `M` and its derivation already in scope. Nothing has to be transported.
+--
+-- THE SPLIT'S BINDERS ARE THE DECLARATION'S OWN NAMES, so `NV-succ`'s argument
+-- is called `M` here. That is why the theorem quantifies over `t` and not over
+-- `M`: had it used `M`, the split's `M` would be shadowed, and the name the
+-- proof state prints for it is then not a name you can type back.
+
+:theorem predSteps-tactics : forall (t : Tm) (n : nvalue`${t} nv`) -> Steps Tm`( pred ${t} )`
+attack
+intro
+intro
+into
+along
+along
+case-core core`n`
+
+goto-named "NV-zeroCase1"
+try-core core`pair Tm (\ (u : Tm) -> step (pred zero) u) zero E-predZero`
+solve
+goto-named "NV-zeroCase"
+solve
+
+goto-named "NV-succCase1"
+try-core core`pair Tm (\ (u : Tm) -> step (pred (succ M)) u) M (E-predSucc M d1)`
+solve
+goto-named "NV-succCase"
+solve
+
+goto-named "NV-zeroMethod"
+solve
+goto-named "NV-succMethod"
+solve
+goto-named "predSteps-tactics1"
+solve
+goto-root
+solve
+qed

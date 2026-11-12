@@ -44,6 +44,11 @@ module Thena.View
   , sessionContext
   , sessionNames
   , sessionTrust
+    -- | __A global name as text__, in full and with no printer policy on it —
+    -- what an index written to disc is keyed by. @Thena.Render.nameString@
+    -- applies the shortest ending that is unambiguous under what is open,
+    -- which is right on screen and wrong in a file.
+  , nameDotted
     -- ** and the driver's own reads, so that one import serves a frontend
   , workingOn
   , parked
@@ -61,6 +66,7 @@ module Thena.View
   , rulesView
   , matchesView
   , trustView
+  , proofsView
   , parseView
   , offerView
   , statementOfferView
@@ -80,8 +86,10 @@ import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefi
 import Thena.Development.Partial (Partial (..))
 import Thena.Driver
   ( Session
+  , currentQuest
   , fuelOf
   , machineOf
+  , openableNamespaces
   , parked
   , parsingLanguage
   , pendingQuestion
@@ -109,6 +117,7 @@ import Thena.View.Chart
 import Thena.View.Core (Budget (..), Display, displayCore)
 import Thena.View.Development (LinkView, displayDevelopment)
 import Thena.View.Machine (MachineView, displayMachine)
+import Thena.View.Proofs (ProofsView, displayProofs)
 import Thena.View.Statement (statementOffer)
 import Thena.View.Trust (TrustView, displayTrust)
 import Thena.View.Rules (RuleView, displayRule)
@@ -354,8 +363,32 @@ offerView s = displayOffer (sessionGrammars s)
 --
 -- **Total, where 'offerView' can refuse.** There is no language name to get
 -- wrong: @instral@ is always in scope.
+-- | __What the session is holding and has put down__ (MS12 phase 310, his
+-- ruling of 2026-11-11: a pane on @:proofs@, held open at all
+-- times).
+--
+-- **One list and one word, his ruling**: a parked import is in it beside the
+-- proofs, under the name it was imported by, and a row is picked up by
+-- submitting @:resume ‹word›@ — never by anything here, because unparking is a
+-- step.
+--
+-- **It takes neither binders nor an address**, which every other view of a term
+-- does: a quest's statement is closed and belongs to a development the session
+-- is not standing in, so there is nothing of the focus to relate it to.
+-- "Thena.View.Proofs".'displayProofs' says why at length.
+proofsView :: Budget -> Session -> ProofsView
+proofsView budget s =
+  displayProofs
+    (spellingOf s)
+    (sessionGrammars s)
+    budget
+    (sessionNames s)
+    (currentQuest s)
+    (parked s)
+
 statementOfferView :: Session -> [Written] -> [Written] -> OfferView
-statementOfferView s = statementOffer (sessionGrammars s) (sessionRules s)
+statementOfferView s =
+  statementOffer (sessionGrammars s) (sessionRules s) (openableNamespaces s)
 
 -- ---------------------------------------------------------------------------
 -- The plumbing itself

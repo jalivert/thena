@@ -114,6 +114,8 @@ import Thena.Driver
   , SyntaxError (..)
   , Attempt (..)
   , Parked (..)
+  , Quest (..)
+  , Importing (..)
   )
 
 import Thena.Engine
@@ -318,6 +320,50 @@ renderResponse s resp = let ren = renderingOf s in case resp of
       : map ("  declared " ++) ds
       ++ [ "  and " ++ plural blocks "do block" | blocks > 0 ]
       ++ map renderWarning ws
+  -- **A load that is standing still, and both ways out of it** (MS12 phase
+  -- 309). What the run printed before it stopped comes first, as it would
+  -- have on its own; then the yield's own message; then what to type.
+  --
+  -- **It says the module is waiting, which a bare yield message did not.** The
+  -- un-built behaviour answered a plain 'Yielded' here and the session had
+  -- already been rolled back, so the user was told control had been handed over
+  -- and it had not been.
+  ImportSuspended nm msgs ws msg ->
+    msgs
+      ++ map renderWarning ws
+      ++ [ msg
+         , "  elaborating " ++ nm ++ " \8212 yield to carry on, :abandon to give the import up"
+         ]
+  -- Its twin for a second stop in the same load (MS12 phase 309): the wording
+  -- says it carried on, so a user cannot read it as a second import starting.
+  ImportResumed nm msgs ws msg ->
+    msgs
+      ++ map renderWarning ws
+      ++ [ msg
+         , "  still elaborating " ++ nm ++ " \8212 yield to carry on, :abandon to give the import up"
+         ]
+  -- **It names what went** (MS12 phase 309, his ruling of 2026-11-11 that
+  -- abandoning takes everything): a user who declared a lemma at the prompt
+  -- during the suspension loses it with the module, and a message that did not
+  -- say so would be the silent half of that.
+  ImportAbandoned nm n mine ->
+    ("abandoned the import of " ++ nm ++ ", and took " ++ plural n "declaration")
+      : [ "  including yours: " ++ intercalate ", " (map (nameString ren) mine)
+        | not (null mine) ]
+  -- **It says where the import went and how to get it back** (MS12 phase 310,
+  -- his ruling of 2026-11-11 that nothing unparks itself): the list is
+  -- @:proofs@ and the word is the module's, so both halves of picking it up
+  -- again are in the line that put it down.
+  ImportParked nm ->
+    [ "parked the import of " ++ nm
+    , "  it is in :proofs \8212 :resume " ++ nm ++ " to carry on with it"
+    ]
+  -- Its twin. The wording is 'ImportSuspended''s, because what the user is
+  -- holding afterwards is the same thing: a load standing in a yield.
+  ImportPickedUp nm ->
+    [ "picked the import of " ++ nm ++ " back up"
+    , "  still elaborating " ++ nm ++ " \8212 yield to carry on, :abandon to give the import up"
+    ]
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
   -- **Only what the line itself had to say** (MS11 phase 298): the act's own
@@ -1431,6 +1477,28 @@ renderCommandError ren e = case e of
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
   NotYielding          -> "nothing has yielded"
+  -- **It names the import that is waiting and both ways out of it** (MS12 phase
+  -- 309), which is 'AlreadyProving''s shape: a refusal that does not say what to
+  -- do next leaves the user stuck in the state it refused from.
+  ImportInFlight nm    -> "the import of " ++ nm
+                            ++ " is still waiting \8212 yield to carry on with it, :suspend to park it, or :abandon to give it up"
+  -- **Its sibling for an import that is already put down** (MS12 phase 310):
+  -- one import at a time, in flight or parked, and the way out of this one is
+  -- to pick it up rather than to hand it back.
+  ImportIsParked nm    -> "the import of " ++ nm
+                            ++ " is parked \8212 :resume " ++ nm ++ " to carry on with it"
+  -- **The one refusal this phase added that is about saving work** (MS12 phase
+  -- 309, his ruling of 2026-11-11). Until here a proof opened inside a yield
+  -- silently threw the suspended elaboration away.
+  -- **The repair depends on what is standing there** (MS12 phase 310): a bare
+  -- yield at the prompt can only be handed back, and an import can be parked
+  -- instead — which is the first step of the five his ruling of 2026-11-11
+  -- describes, and the reason a lemma can be proved in the middle of a load at
+  -- all.
+  ProvingWhileYielding mi ->
+    "a rule has handed control over \8212 yield to hand it back before starting a proof"
+      ++ maybe "" (\nm -> ", or :suspend to park the import of " ++ nm) mi
+  NobodyToYieldTo nm   -> nm ++ " handed control over, and nothing here can take it \8212 nothing was loaded"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
   NoSuchLanguage x     -> "no language called " ++ x ++ " has been declared"
   NotParsing           -> ":done leaves :parse's mode, and this is not it"
@@ -1451,7 +1519,7 @@ renderCommandError ren e = case e of
     "a rule base may not be loaded while " ++ nameString ren g ++ " is being proved"
   ProofsSuspended names ->
     "a rule base may not be loaded while proofs are suspended: "
-      ++ intercalate ", " (map (nameString ren) names)
+      ++ intercalate ", " names
 
 renderFailReason :: Rendering -> FailReason -> String
 renderFailReason ren r = case r of
@@ -1514,7 +1582,13 @@ renderFailReason ren r = case r of
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
-  NoSuchNamespace n -> "nothing is named " ++ n ++ ".…, so there is no namespace " ++ n ++ " to open"
+  -- **The name is quoted and the dotted form is spelled out** (MS12 phase
+  -- 311). It read @nothing is named Nat .…@, where the @.…@ looks like an
+  -- elision the renderer leaked rather than anything a user wrote, and an
+  -- unquoted name with a space in it says nothing about what went wrong.
+  NoSuchNamespace n ->
+    "no name begins with " ++ show (n ++ ".")
+      ++ ", so there is no namespace " ++ show n ++ " to open"
   AmbiguousName n gs ->
     n ++ " is ambiguous here: it could be " ++ intercalate " or " gs
       ++ "\n  write the one you mean"
@@ -1665,15 +1739,22 @@ renderPosition p = case p of
   Inside _ i inner -> renderPosition inner ++ ", inside the guess for " ++ identString i
 
 -- | @:proofs@ — what the session is holding (§2.4).
-renderProofs :: Rendering -> Maybe Attempt -> [Parked] -> [String]
+--
+-- **A parked import is in the same list under its module name — HIS RULING of
+-- 2026-11-11**, and the words are /\"one list one word\"/. It is printed with
+-- what it is rather than with a statement, because it has none: an import is a
+-- load that stopped, and nothing will certify it.
+renderProofs :: Rendering -> Maybe Quest -> [Parked] -> [String]
 renderProofs ren cur ps
   | null everything = ["no proofs"]
   | otherwise       = everything
   where
     everything = maybe [] (pure . line "▶ ") cur
-                 ++ map (line "  " . parkedAttempt) ps
-    line mark att =
-      mark ++ nameString ren (attemptName att) ++ " : " ++ renderCore ren [] (attemptClaim att)
+                 ++ map (line "  " . parkedQuest) ps
+    line mark q = case q of
+      AProof att ->
+        mark ++ nameString ren (attemptName att) ++ " : " ++ renderCore ren [] (attemptClaim att)
+      AnImport imp -> mark ++ importingText imp ++ " : an import, standing in a yield"
 
 renderMoveError :: MoveError -> String
 renderMoveError m = case m of

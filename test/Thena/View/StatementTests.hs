@@ -20,8 +20,8 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Driver (Session)
 import Thena.Files (following, startingSession)
-import Thena.Driver (commandSummary, oneLine)
-import Thena.Instral.Commands (Command (..), commands)
+import Thena.Driver (commandSummary, oneLine, openableNamespaces)
+import Thena.Instral.Commands (Command (..), actWords, commands)
 import Thena.Instral.Ops (Pattern (..), Rule (..), signatureOf)
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Language.Earley (placeholderChar)
@@ -73,6 +73,15 @@ tests =
         , testCase "every word in the table is a word the driver dispatches" tableDispatches
         , testCase "and the table and :help's list name the same commands" tableMatchesHelp
         , testCase "a statement line is untouched by any of it" statementUntouched
+        ]
+    , testGroup "the bare-word acts (phase 312)"
+        [ testCase "a half-typed act completes, beside the ops it collides with" actPrefix
+        , testCase "and every act word is offered on an empty line" actsOffered
+        , testCase "open's argument is the namespaces that are in scope" namespacesOffered
+        , testCase "and a half-typed one narrows to it" namespacePrefix
+        , testCase "every namespace offered is one open accepts" noRowRefuses
+        , testCase "a namespace the offer does not list is still not stuck" dottedNotStuck
+        , testCase "every act word is a word the driver dispatches" actsDispatch
         ]
     , testGroup "a tagged literal is an operand (phase 141)"
         [ testCase "a slot offers the tag, so a literal may be written there" tagOffered
@@ -821,6 +830,92 @@ statementUntouched = do
   offeredStuck o @?= Nothing
   if ALiteralSymbol "LC`" `elem` offeredOptions o then pure ()
     else assertFailure "a statement line must be unaffected by the command grammar"
+
+-- | **The sharpest form of @~k4s5h@, which the tui track measured under a pty**:
+-- @:cons@ offered @:consult@ and @cons@ offered four ops whose spelling happens
+-- to start the same way, and not @consult@. @impo@ offered nothing at all.
+--
+-- **The ops are still there**, which is the point of a line standing at a head
+-- that derives either: a bare line may be an act or a rule call, and until the
+-- user has finished the word nobody knows which.
+actPrefix :: IO ()
+actPrefix = do
+  (s, _) <- startingSession
+  let offered l = [ w | ALiteralSymbol w <- offeredOptions (offerIn s l) ]
+  offered "impo" @?= ["import"]
+  offered "cons"
+    @?= [ "constructors-of", "constructor-datatype", "constructor-arguments"
+        , "constructor-recursive-arguments", "consult" ]
+  offered "ope"  @?= ["open-case", "open"]
+  offered "decl" @?= ["declare-primitive", "declare"]
+  offered "dat"
+    @?= ["datatype-of", "datatype-parameters", "datatype-indices", "data"]
+
+-- | An empty line offers every act, as it offers every op.
+actsOffered :: IO ()
+actsOffered = do
+  (s, _) <- startingSession
+  let offered = [ w | ALiteralSymbol w <- offeredOptions (offerIn s "") ]
+  filter (`notElem` offered) actWords @?= []
+
+-- | **@open@'s argument is the one an act has that is enumerable** — a read of
+-- the session, so it is right for whatever is loaded, the way @:parse@'s
+-- languages are.
+namespacesOffered :: IO ()
+namespacesOffered = do
+  (s, _) <- startingSession
+  let offered = [ w | ALiteralSymbol w <- offeredOptions (offerIn s "open ") ]
+  offered @?= openableNamespaces s
+  -- The prelude's own, so the set is not empty for an accidental reason.
+  filter (`notElem` offered) ["Eq", "List", "Eq.lemmata"] @?= []
+
+-- | **The half-typed case, which needed the line's own text** (phase 312): a
+-- statement is asked about context-free, and asking @open E@ that way answered
+-- nothing at all, @E@ being no word a line may start with.
+namespacePrefix :: IO ()
+namespacePrefix = do
+  (s, _) <- startingSession
+  [ w | ALiteralSymbol w <- offeredOptions (offerIn s "open E") ]
+    @?= ["Empty", "Empty.lemmata", "Eq", "Eq.lemmata"]
+
+-- | **The property the whole thing exists for: no row refuses when it is
+-- taken.** A namespace can be inhabited and still be ambiguous from where the
+-- writer stands, so the offer asks @open@'s own question
+-- ('Thena.Global.Env.namespaceUnder') rather than a second one written beside
+-- it — the @~hrmkp@ lesson, which is the tui track's too.
+--
+-- Each row is run from the session the offer was made in, not from the one the
+-- row before it left.
+noRowRefuses :: IO ()
+noRowRefuses = do
+  (s, _) <- startingSession
+  let offered = [ w | ALiteralSymbol w <- offeredOptions (offerIn s "open ") ]
+      refused w =
+        let said = unwords (renderResponse s (snd (oneLine s ("open " <> w))))
+         in if ("opened " <> w) `isInfixOf` said then Nothing else Just (w, said)
+  if null offered then assertFailure "no namespace was offered at all" else pure ()
+  [ p | Just p <- map refused offered ] @?= []
+
+-- | **The offer is short of rows rather than wrong about them**, and a line it
+-- cannot enumerate must still read: @open@ keeps an opaque shape beside the
+-- enumerated one, so a spelling the list does not carry is not marked stuck
+-- under the cursor.
+dottedNotStuck :: IO ()
+dottedNotStuck = do
+  (s, _) <- startingSession
+  offeredStuck (offerIn s "open Eq.lemmata") @?= Nothing
+  offeredStuck (offerIn s "import examples.Stlc01Syntax") @?= Nothing
+  offeredStuck (offerIn s "declare q : Nat") @?= Nothing
+
+-- | 'tableDispatches' for the other table: a word offered must be a word the
+-- driver answers to, established by running it.
+actsDispatch :: IO ()
+actsDispatch = do
+  (s, _) <- startingSession
+  let refused w =
+        let said = unwords (renderResponse s (snd (oneLine s w)))
+         in "no such command" `isInfixOf` said
+  filter refused actWords @?= []
 
 -- | **His ask, 2026-09-30**, relayed through @.jalivert\/REPORT.md@: the underline on
 -- a recovered tagged literal should cover the literal — @LC\`@ through the closing

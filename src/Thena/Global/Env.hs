@@ -31,6 +31,7 @@ module Thena.Global.Env
   , knownIn
   , declaredNames
   , namespaceInhabited
+  , namespaceUnder
   , addConstant
   , addPrimitive
   , generalised
@@ -74,6 +75,8 @@ import Thena.Core.Term
   ( Core (..)
   , Var
   , GlobalName (..)
+  , InScope
+  , globalUnder
   , rootName
   , inDeclarationOf
   , Ident (..)
@@ -490,6 +493,29 @@ declaredNames e =
 namespaceInhabited :: [String] -> GlobalEnv -> Bool
 namespaceInhabited ns e = any under (declaredNames e)
   where under g = ns `isPrefixOf` nameSteps g
+
+-- | __Which namespace a written path denotes where the writer stands__, or the
+-- candidates it is ambiguous between (MS12 phase 312).
+--
+-- **@open@'s own question, in one place.** 'Thena.Engine' asked it inline and
+-- the offer now has to ask it too — /which namespaces could be opened from
+-- here/ — and an offer that answered it a second way would differ from the act
+-- it is offering, which is the one failure a dropdown must not have.
+--
+-- **'Thena.Core.Term.globalUnder' is the walk and it is not written again
+-- here**: a path is a name whose last step is its word, @known@ is /something
+-- is declared under this prefix/, and the rungs, the @open@s and the
+-- two-answers refusal all come with it.
+namespaceUnder :: InScope -> GlobalEnv -> [String] -> Either [[String]] [String]
+namespaceUnder sc e ws = case globalUnder inhabited sc (asName ws) of
+  Right c -> Right (asPath c)
+  Left gs -> Left (map asPath gs)
+  where
+    inhabited c = namespaceInhabited (asPath c) e
+    asName vs = case reverse vs of
+      w : before -> GlobalName (reverse before) w
+      []         -> GlobalName [] ""
+    asPath c = nameSteps c ++ [nameWord c]
 
 addConstant :: GlobalName -> [LevelVar] -> Core -> GlobalEnv -> GlobalEnv
 addConstant g ls t e = e { constants = (g, MkConstant ls t) : constants e }

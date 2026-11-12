@@ -49,9 +49,9 @@ import Data.List (find, isPrefixOf)
 import Thena.Language.Grammar (Grammar)
 import Thena.Driver (entryBindings)
 import Thena.Instral.Type (Ty)
-import Thena.Instral.Commands (isCommandLine)
+import Thena.Instral.Commands (isCommandLine, isWholeLine)
 import Thena.Language.Instral
-  (commandHead, commandRules, instralRules, standsAt, statementHead)
+  (commandHead, commandRules, lineHead, lineRules, standsAt)
 import qualified Thena.Language.Earley as E
 import Thena.Rules (RuleBase)
 import Thena.View.Chart
@@ -76,8 +76,9 @@ import Thena.View.Tokens
 -- table and these bases. Recovery is tried **only** when that path reports
 -- 'offeredStuck' — which is phase 134's field, and is exactly the condition
 -- \"the text left of the cursor did not read\".
-statementOffer :: [Grammar] -> [RuleBase] -> [Written] -> [Written] -> OfferView
-statementOffer gs bs before after = answer { offeredBound = bound }
+statementOffer
+  :: [Grammar] -> [RuleBase] -> [String] -> [Written] -> [Written] -> OfferView
+statementOffer gs bs namespaces before after = answer { offeredBound = bound }
   where
     text   = textOf before ++ textOf after
     cursor = length (textOf before)
@@ -102,17 +103,20 @@ statementOffer gs bs before after = answer { offeredBound = bound }
     -- driver's own, shared rather than copied.
     asCommand = isCommandLine (textOf before)
 
+    -- **A bare line stands at 'lineHead' and not at 'statementHead'** (MS12
+    -- phase 312): it may be a statement or one of the bare-word acts, and the
+    -- acts were reachable from neither head before that one existed.
     head' | asCommand = commandHead
-          | otherwise = statementHead
+          | otherwise = lineHead
 
     -- **Each line is asked against the rules that could answer it, and no
     -- others** — see 'commandRules' for the measurement that forced this.
     rules | asCommand = commandRules gs
-          | otherwise = instralRules gs bs
+          | otherwise = lineRules gs bs namespaces
 
     whole
       | asCommand = offerAt rules (E.StartAt commandHead) before after
-      | otherwise = offerAt rules (E.StartAt statementHead) before' after
+      | otherwise = offerAt rules (E.StartAt lineHead) before' after
 
     answer
       | Nothing <- offeredStuck whole = shift whole
@@ -224,8 +228,12 @@ recover gs _bs rules head' before after = do
           -- with it answers nothing. A command line is different — @:step @ reads
           -- perfectly — so there the text before the word is used, and @:step o@
           -- offers @on@ and @off@ instead of nothing.
-          ctx | isCommandLine line = [WrittenText (take start line)]
-              | otherwise          = []
+          -- **A bare act is a whole line too** (MS12 phase 312), so the text
+          -- before its argument is used exactly as a @:@-command's is: it
+          -- reads, and without it @open E@ was asked as though @E@ stood at
+          -- the start of a line and answered nothing.
+          ctx | isWholeLine line = [WrittenText (take start line)]
+              | otherwise        = []
           o = offerAt rules (E.StartAt head') ctx []
        in Just o
             { offeredOptions     = filter (startsWith word) (offeredOptions o)
