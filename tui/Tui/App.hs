@@ -58,6 +58,7 @@ import qualified Brick.Widgets.Edit as E
 import Brick.Widgets.Center (centerLayer)
 import Brick.BChan (BChan, newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
 import Data.List (intercalate, intersperse, isPrefixOf, isSuffixOf, sort, sortOn)
@@ -1204,6 +1205,14 @@ fileEntries st = [(sortOf p, p) | (p, _) <- filesRead s]
 -- exactly the moment the answer arrived. In the ordinary REPL it is the last
 -- turn, whose output the transcript also shows — uncapped here, which is the
 -- point.
+-- | What the output pane is showing, as something comparable across one
+-- event — 'handleEvent' snaps the pane back to the bottom when this changes
+-- (`~3fs3f`). **The turn count rides along with the text** because an answer
+-- can be replaced by an identical one: `:show And.elim` twice in a row is the
+-- same two lines, and only the count says a second answer arrived.
+outputShown :: St -> (Int, (Maybe String, [String]))
+outputShown st = (length (stTurns st), lineInFocus st)
+
 lineInFocus :: St -> (Maybe String, [String])
 lineInFocus st
   | stScriptMode st = case caretLine of
@@ -1594,7 +1603,28 @@ offerGhost col od = do
 -- forget it.
 handleEvent :: BrickEvent Name AppEvent -> EventM Name St ()
 handleEvent ev = do
+  focusBefore <- outputShown <$> get
   handleEventInner ev
+  focusAfter <- outputShown <$> get
+  -- | **The output pane shows the END of an answer, not its beginning** —
+  -- `~3fs3f`, his instruction of 2026-11-12: /"needs to be scrolled to the
+  -- bottom any time its contents are too much to show. It stays at the top of
+  -- the output and that's not helping."/ A `:show` of a long type is a dozen
+  -- lines in a pane a dozen rows tall, and the line that says what the answer
+  -- *is* is the last one.
+  --
+  -- **Here, and only when the answer itself changed.** A viewport keeps its
+  -- offset across redraws, so a pane snapped to the bottom stays there while
+  -- he types; pinning it every frame instead ('visible' on the last row) would
+  -- have taken the wheel away from this one pane, which already scrolls. So
+  -- the rule is tail-the-output: a new answer lands at the bottom, and from
+  -- there the wheel is his.
+  --
+  -- **The turn count is in the comparison because the text alone is not
+  -- enough**: measured under a pty, re-running `:show And.elim` after scrolling
+  -- up produced an answer identical to the one on screen, so a comparison of
+  -- the text saw no change and the pane stayed where it had been dragged.
+  when (focusAfter /= focusBefore) (vScrollToEnd (viewportScroll OutputVP))
   inputExt <- lookupExtent Input
   paneExt <- lookupExtent HistoryVP
   st <- get
