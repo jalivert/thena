@@ -277,8 +277,27 @@ silent. **`*` cannot begin a name**, so no token class can ever be spelled it,
 while `subst-*` itself begins with a letter and is ordinary to type.
 
 **What a reader sees is the shortest ending that still means it**, so `subst.x`
-wherever the language is open. The full name is absolute: a class declared beside
-its language inside `namespace A` is `A.LC.subst.A.x`.
+wherever the language is open.
+
+**The path inside `subst` drops the steps the language's own name has already
+said.** A class declared beside its language inside `namespace A` is `A.x`, and
+the function is `A.LC.subst.x` — not `A.LC.subst.A.x`, which would put the
+module's name into every qualified substitution a reader writes.
+
+**A class from a different module keeps its whole path, and that is what you
+type.** The two names share nothing to drop, so a language `Ex` declared in
+`Stlc05GroupingBySplicing` that substitutes the class `x` declared in
+`Stlc01Syntax` gets
+
+```
+examples.Stlc05GroupingBySplicing.Ex.subst.examples.Stlc01Syntax.x
+```
+
+written in that file as `Ex.subst.examples.Stlc01Syntax.x`. *Decided 2026-11-12,
+after the alternative — teaching a written name to leave steps out of the middle
+and not only off the front — was weighed and deferred to its own design
+question.* It is long, and it is the name the printer shows you, so there is one
+spelling to learn rather than two.
 
 **And a written substitution says which class it is for**, which is the decision
 below.
