@@ -28,6 +28,14 @@ import Thena.View.Address (Address (..))
 import Thena.View.Core (Binding (..), Display (..), Shape (..))
 import Thena.View.Instral (ValueView (..))
 import Thena.View.Machine (MachineView (..))
+import Tui.Panes
+  ( FileKind (..)
+  , PaneRow (..)
+  , globalRows
+  , moduleRows
+  , outputRows
+  , paneRowWidget
+  )
 import Tui.Render (Fold (..), renderDisplay, renderMachineView)
 
 
@@ -137,7 +145,74 @@ drawingTests =
     , testGroup "and a spine head is not" spineCases
     , testGroup "the engine's own lines, drawn" engineCases
     , testGroup "a value in an env pane" valueCases
+    , testGroup "the second column's rows, decided" paneRowCases
+    , testGroup "and drawn" paneDrawCases
     ]
+
+-- | **What the three new panes say** — `~z5dmq`'s content, decided by
+-- 'Tui.Panes' and therefore decidable here. The pty stays the authority on
+-- where the panes are and how wide; this is the text in them.
+paneRowCases :: [TestTree]
+paneRowCases =
+  [ testCase "an empty group is not drawn as a heading with nothing under it" $
+      assertEqual ""
+        [Heading "Prelude" (Just 2), Entry "And.both", Entry "Eq.refl"]
+        (globalRows [("proved in this session", []), ("Prelude", ["Eq.refl", "And.both"])])
+  , testCase "a name listed twice is listed once — a suspended proof is two runs" $
+      assertEqual ""
+        [Heading "proved in this session" (Just 1), Entry "subst"]
+        (globalRows [("proved in this session", ["subst", "subst"])])
+  , testCase "a module carries its file, and the prelude has none" $
+      assertEqual ""
+        [ Heading "modules" (Just 2)
+        , Entry "examples.Stlc01Syntax"
+        , Detail "examples/Stlc01Syntax.thena"
+        , Entry "Prelude"
+        ]
+        (moduleRows
+          [ ("examples.Stlc01Syntax", Just "examples/Stlc01Syntax.thena")
+          , ("Prelude", Nothing)
+          ]
+          [])
+  , testCase "a consulted rule base is its own group, and ours is shown by its tail" $
+      assertEqual ""
+        [ Heading "rule bases" (Just 1)
+        , Entry "examples/demo/Demo08Pausing.thena.rules"
+        , Heading "shipped with thena" (Just 1)
+        , Entry "rules/standard.thena.rules"
+        ]
+        (moduleRows []
+          [ (ARuleBase, "examples/demo/Demo08Pausing.thena.rules")
+          , (AShippedFile, "/Users/x/.cabal/share/aarch64-osx-ghc-9.12.4/thena-0.1.0.0/rules/standard.thena.rules")
+          ])
+  , testCase "a module's own file is not repeated outside its module" $
+      assertEqual ""
+        [Heading "modules" (Just 1), Entry "m", Detail "m.thena"]
+        (moduleRows [("m", Just "m.thena")] [(AModuleFile, "m.thena")])
+  , testCase "no line in focus is no rows at all" $
+      assertEqual "" [] (outputRows Nothing ["something"])
+  , testCase "a line that answered nothing is its heading and nothing else" $
+      assertEqual "" [Heading ":theorem t : Nat" Nothing] (outputRows (Just ":theorem t : Nat") [])
+  , testCase "and nothing is capped, which is the point of the move off the foot" $
+      assertEqual "" 21
+        (length (outputRows (Just ":show subst") [show n | n <- [1 .. 20 :: Int]]))
+  ]
+
+-- | The three row kinds, drawn. **The indents are the structure**, so they
+-- are worth a test: a detail that lined up with an entry would read as a
+-- second entry.
+paneDrawCases :: [TestTree]
+paneDrawCases =
+  [ testCase "a heading carries its count" $
+      assertEqual "" "Prelude  115" (drawLine (paneRowWidget (Heading "Prelude" (Just 115))))
+  , testCase "a heading with nothing to count carries no number" $
+      assertEqual "" ":show o" (drawLine (paneRowWidget (Heading ":show o" Nothing)))
+  , testCase "an entry is one step in" $
+      assertEqual "" "  And.both" (drawLine (paneRowWidget (Entry "And.both")))
+  , testCase "a detail is two" $
+      assertEqual "" "    examples/Stlc01Syntax.thena"
+        (drawLine (paneRowWidget (Detail "examples/Stlc01Syntax.thena")))
+  ]
 
 -- | The argument side is the rung every drawer gets right, so these are the
 -- control: if one of them fails the ladder is upside down.

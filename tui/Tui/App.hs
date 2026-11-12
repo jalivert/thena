@@ -78,14 +78,24 @@ import Thena.Driver
   , Stop (..)
   , digestOf
   , digestText
+  , exportedByModule
   , filesRead
+  , moduleOfFile
+  , moduleText
+  , modulesLoaded
   , oneLine
   , provedSlices
   , submittedLines
   )
 import Thena.Files (following, preludePath, rulesPath, startingSession)
 import Thena.Render (renderResponse, renderTrouble)
-import Thena.View (developmentView, focusAddress, machineView, statementOfferView)
+import Thena.View
+  ( developmentView
+  , focusAddress
+  , machineView
+  , nameDotted
+  , statementOfferView
+  )
 import Thena.View.Chart
   ( OfferView (..)
   , ProductionView (..)
@@ -104,6 +114,13 @@ import Tui.Render
   , spliceAttr
   )
 import Tui.Config (Config (..), loadConfig, saveConfig)
+import Tui.Panes
+  ( FileKind (..)
+  , globalRows
+  , moduleRows
+  , outputRows
+  , paneRowWidget
+  )
 import Tui.Database
   ( Stored (..)
   , clockName
@@ -125,6 +142,9 @@ data Name
   | ProofTermVP
   | GoalsVP
   | MachineVP
+  | GlobalsVP
+  | ModulesVP
+  | OutputVP
   | LoadPopup
   | OfferPopup
   deriving (Eq, Ord, Show)
@@ -307,6 +327,12 @@ data St = St
     -- ^ the committed script, oldest first. Survives toggling the mode off
     -- and back on — discarding someone's script on a stray keypress is a bad
     -- failure mode, so leaving the mode only hides it.
+  , stShipped :: [FilePath]
+    -- ^ Thena's own prelude and standard base, as absolute paths, read once
+    -- at boot. **The modules pane needs them to tell his files from ours**
+    -- (`~t7wc8`) and 'draw' cannot ask: 'preludePath' is IO. The staleness
+    -- check asks the same question at reload time and does its own call,
+    -- which is fine there and would not be in a redraw.
   , stScriptBase :: Maybe Session
     -- ^ **the session live-script mode started from, and it is a fresh one**
     -- — his ruling: entering the mode does not inherit the ordinary REPL's
@@ -409,6 +435,7 @@ runTui = do
   (s0, trouble) <- startingSession
   cfg <- loadConfig
   jevCfg <- loadJevConfig
+  shipped <- shippedPaths
   chan <- newBChan 16
   let theme0 = maybe neonPinkDark id (themeByName (cfgTheme cfg))
       autoSelect0 = cfgAutoSelect cfg
@@ -435,6 +462,7 @@ runTui = do
         , stHistoryDraft = ""
         , stScriptMode  = False
         , stScript      = []
+        , stShipped     = shipped
         , stScriptBase  = Nothing
         , stScriptPos   = Nothing
         , stScriptDraft = ""
@@ -556,6 +584,21 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "title.proofterm", ink (themeProof th))
   , (attrName "title.goals",    ink (themeGoals th))
   , (attrName "title.machine",  ink (themeMachine th))
+  -- | **The second column** — `~z5dmq`. Same scheme, three more accents: the
+  -- edge and the title carry a pane's colour and nothing else does.
+  , (attrName "edge.globals",   surface (themePanel th) (themeGlobals th))
+  , (attrName "edge.modules",   surface (themePanel th) (themeModules th))
+  , (attrName "edge.output",    surface (themePanel th) (themeOutput th))
+  , (attrName "title.globals",  ink (themeGlobals th))
+  , (attrName "title.modules",  ink (themeModules th))
+  , (attrName "title.output",   ink (themeOutput th))
+  -- | A list pane's group heading and its small print. **Both dim, and the
+  -- same dim**: a heading is not a thing in the list and neither is a module's
+  -- file, so what separates them from the entries is weight, not hue — the
+  -- accents are the panes' and a fourth colour inside a pane would compete
+  -- with them.
+  , (attrName "pane.heading",   ink (themeDim th))
+  , (attrName "pane.detail",    ink (themeDim th))
   , (attrName "dim",            ink (themeDim th))
   -- A placeholder box, in the input line, in a dimmer ink than ordinary
   -- text — his `.jalivert/TUI.md`-adjacent report, 2026-09-29: the caret
@@ -620,7 +663,10 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
 -- behind the panes, invisible, no error, just never on screen. Verified
 -- with a hardcoded marker widget before trusting the fix.
 draw :: St -> [Widget Name]
-draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColumn, gapH, sideColumn])]
+draw st =
+  dropdownLayer st
+    <> offerDropdownLayer st
+    <> [padAll 1 (hBox [replColumn, gapH, paneColumns])]
   where
     budget = Budget 200
     s = activeSession st
@@ -687,8 +733,27 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColu
         line = concatMap Text.unpack (getEditContents (stInput st))
         (_, col) = getCursorPosition (stInput st)
 
+    -- | **Six panes in two columns of three, all six the same width** — his
+    -- request of 2026-11-11, `~z5dmq`: /"They should form a new column left to
+    -- the three panes already there. Those get slimmer, they have been wasting
+    -- space anyway. And these new ones are the same width as the old ones after
+    -- you make them slimmer."/
+    --
+    -- **A quarter each, so the document keeps about half the screen.** The
+    -- three panes that existed had 38% between them and the document 62%;
+    -- two columns of 25% leave it 48%. The document is the one thing here
+    -- whose content has no choice about its width — a proof-script line in
+    -- `examples/Products.thena.script` runs past 200 characters — where a list
+    -- of names or of module paths is narrow by nature. **Measured under a pty
+    -- before it was chosen**, which is what `~z5dmq` asked for.
+    -- | **Both columns inside one limit, and that is what makes them equal.**
+    -- 'hLimitPercent' is a percentage of what is left where it stands, so two
+    -- 25%s side by side are not 25% each: measured under a pty, the second
+    -- came out at 25% of the remaining 75% and the three old panes lost a
+    -- third of their width to the three new ones. Limiting the pair to half
+    -- the screen and then halving that gives six panes of one width.
+    paneColumns = hLimitPercent 52 (hBox [listColumn, gapH, sideColumn])
     sideColumn =
-      hLimitPercent 38 $
         vBox
           [ withAttr (attrName "panel") (pane "proofterm" ProofTermVP (padAll 1 (renderDevelopment fold links)))
           , gapV
@@ -696,6 +761,29 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColu
           , gapV
           , withAttr (attrName "panel") (pane "machine"   MachineVP   (padAll 1 (vBox (map str (renderMachineView machine)))))
           ]
+
+    -- | **The second column, left of the three that were there** — his words,
+    -- and the reading taken is the literal one: the new panes sit between the
+    -- document and the existing column rather than at the screen's far left.
+    -- Flipping that is one line here if he meant the other.
+    listColumn =
+      hLimitPercent 50 $
+        vBox
+          [ withAttr (attrName "panel") (pane "globals" GlobalsVP (paneBody (globalRows (globalGroups st))))
+          , gapV
+          , withAttr (attrName "panel") (pane "modules" ModulesVP (paneBody (moduleRows (moduleEntries st) (fileEntries st))))
+          , gapV
+          , withAttr (attrName "panel") (pane "output"  OutputVP  (paneBody (outputRows focusText focusOut)))
+          ]
+      where
+        (focusText, focusOut) = lineInFocus st
+
+    -- | A list pane's body. **One blank row when there is nothing**, because a
+    -- viewport over an empty 'vBox' has no height to scroll and the pane's
+    -- fill would stop at its title — and an empty output pane is the ordinary
+    -- state of the output pane, not an error.
+    paneBody rows =
+      padAll 1 (vBox (if null rows then [str " "] else map paneRowWidget rows))
 
     -- | The accent edge, a title strip, then the content — never a full
     -- fill, per his correction. 'clickable' so a scroll-wheel event over
@@ -842,26 +930,99 @@ scriptFoot st = case stScriptBar st of
     ]
   Nothing -> case stScriptNote st of
     Just note -> [withAttr (attrName "script.refused") (str (" " <> note))]
-    -- | **What the line under the caret said, and this is not decoration.**
-    -- Found by pty: a query is invisible otherwise. `:show belowRefl` worked
-    -- and printed nothing, because the document deliberately shows no output
-    -- for a line that succeeded — right for a tactic, whose effect the three
-    -- panes already draw, and wrong for `:show`/`:where`/`:matches`, whose
-    -- whole result *is* text. Showing it for whichever line you are standing
-    -- on needs no taxonomy of which commands are queries, which would be the
-    -- frontend keeping its own copy of the engine's command table.
-    Nothing -> case stScriptPos st >>= \i -> nthOf i (stScript st) of
-      Just sl | slOk sl, not (null (slOutput sl)) ->
-        [ withAttr (attrName "script.refused") (str (" " <> l))
-        | l <- take scriptFootCap (slOutput sl)
-        ]
-          <> [ withAttr (attrName "script.refused") (str " …") | length (slOutput sl) > scriptFootCap ]
-      _ -> []
+    -- | **A line's own output used to be drawn here, four lines of it, and
+    -- it is the output pane's now** — `~wx6m3`, his request of 2026-11-11:
+    -- /"That stuff that you show me at the bottom of the screen when I do
+    -- `:show o` in a script-mode? That goes into a new pane also."/ The foot
+    -- had room for four lines and cut `:show` on a proved theorem off
+    -- mid-term; a pane has room, so the cap went with the move instead of
+    -- travelling with it. 'lineInFocus' is what the pane reads, and it keeps
+    -- the one thing the foot got right: it follows the caret, so nothing
+    -- anywhere needs a taxonomy of which commands are queries.
+    Nothing -> []
 
--- | How much of a line's output the pane's foot will show. `:show` on a
--- proved theorem is one enormous line; the foot is a glance, not a pane.
-scriptFootCap :: Int
-scriptFootCap = 4
+-- | **What is in scope, grouped by where it came from** — `~5d35q`, and the
+-- session it reads is 'activeSession', which is his ruling of 2026-11-12:
+-- /"what's in scope where the caret is in live mode and what's in scope just
+-- now in normal mode."/ Walking the document up walks this pane back with it,
+-- the same way the proof-term and goals panes already follow the caret.
+--
+-- **Two things it cannot say yet, and both are `~6bckq` in
+-- `.jalivert/REPORT.md` rather than an oversight here.**
+--
+-- 1. **A declaration made at the prompt is not in it.** Nothing on the
+--    boundary enumerates one: `modulesLoaded`/`exportedByModule` only ever
+--    answer for a module and a prompt declaration belongs to none. Measured
+--    2026-11-12 against `lib:thena` — after
+--    @data Nat : Type0 where { zero : Nat ; succ : Nat -> Nat }@ at the
+--    prompt, `modulesLoaded` is still @[Prelude]@ and nothing names
+--    @Nat.zero@. **A theorem is the one prompt-made thing that does cross**,
+--    through `provedSlices`, which is why it is the first group.
+-- 2. **A name is written in full, not as it would be written here.**
+--    @Nat.zero@ reads as @zero@ once @open Nat@ is in force, and the function
+--    that knows that — 'Thena.Core.Term.spelledIn' — is not on the boundary:
+--    'Thena.View.spellingOf' hands out a 'Spelling' and nothing out here can
+--    consume one. So the dotted form is what is drawn, which is right about
+--    what is in scope and silent about how to type it.
+globalGroups :: St -> [(String, [String])]
+globalGroups st =
+  ("proved in this session", [n | (n, _, _) <- provedSlices s])
+    : [ (moduleText m, map nameDotted (exportedByModule m s)) | m <- modulesLoaded s ]
+  where
+    s = activeSession st
+
+-- | **Every module that is in, newest first, and the file it was read from** —
+-- `~t7wc8`. The prelude has no file of its own in this list, arriving with the
+-- session rather than through an @import@, and is shown without one.
+moduleEntries :: St -> [(String, Maybe FilePath)]
+moduleEntries st =
+  [ (moduleText m, listToMaybe [p | (p, _) <- filesRead s, moduleOfFile p == Just m])
+  | m <- modulesLoaded s
+  ]
+  where
+    s = activeSession st
+
+-- | **Every file the session read, sorted into what it is** — the other half
+-- of `~t7wc8`.
+--
+-- **The kinds are decided by the extension and by one comparison**, and that
+-- is as far as a frontend can honestly go: `moduleImports`/`moduleConsults`
+-- take a module's items rather than a session, so /imported versus consulted/
+-- is not a session read. A @.thena.rules@ file in here was consulted, which is
+-- the half of the distinction that is visible. **Thena's own two files are
+-- told apart by 'stShipped'** so that his corpus is never listed under our
+-- prelude.
+fileEntries :: St -> [(FileKind, FilePath)]
+fileEntries st = [(kindOf p, p) | (p, _) <- filesRead s]
+  where
+    s = activeSession st
+    kindOf p
+      | p `elem` stShipped st = AShippedFile
+      | ".thena.rules" `isSuffixOf` p = ARuleBase
+      | Just m <- moduleOfFile p, m `elem` modulesLoaded s = AModuleFile
+      | otherwise = AnotherFile
+
+-- | **The line the output pane is about, and what it answered** — `~wx6m3`.
+--
+-- **In script mode it is the caret's line, and the last committed line when
+-- the caret has moved past the end.** That second case is the one that makes
+-- the pane work: submitting @:show Bit.o@ leaves the caret composing a new
+-- line, so a pane that only ever drew the caret's own line would go empty at
+-- exactly the moment the answer arrived. In the ordinary REPL it is the last
+-- turn, whose output the transcript also shows — uncapped here, which is the
+-- point.
+lineInFocus :: St -> (Maybe String, [String])
+lineInFocus st
+  | stScriptMode st = case caretLine of
+      Just sl -> (Just (slText sl), slOutput sl)
+      Nothing -> case reverse (stScript st) of
+        (sl : _) -> (Just (slText sl), slOutput sl)
+        [] -> (Nothing, [])
+  | otherwise = case reverse (stTurns st) of
+      (t : _) -> (turnPrompt t, turnOutput t)
+      [] -> (Nothing, [])
+  where
+    caretLine = stScriptPos st >>= \i -> nthOf i (stScript st)
 
 -- | The `:load` dropdown, as its own layer positioned by the caret's actual
 -- screen coordinates from the *previous* render — 'Brick.Main.lookupExtent'

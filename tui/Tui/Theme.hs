@@ -29,6 +29,14 @@ data Theme = Theme
   , themeProof   :: V.Color -- ^ the proof-term pane's accent
   , themeGoals   :: V.Color -- ^ the goals pane's accent
   , themeMachine :: V.Color -- ^ the machine pane's accent
+  , themeGlobals :: V.Color -- ^ the globals pane's accent (`~5d35q`)
+  , themeModules :: V.Color -- ^ the modules pane's accent (`~t7wc8`)
+  , themeOutput  :: V.Color -- ^ the output pane's accent (`~wx6m3`). **The
+                             -- second column gets three accents of its own
+                             -- rather than borrowing the first column's** —
+                             -- one accent per pane is this theme's whole
+                             -- idea, and two panes wearing one colour would
+                             -- say they are one thing in two places
   , themeFold    :: V.Color -- ^ a folded literal's background tint
   , themeSplice  :: V.Color -- ^ a folded splice's background tint — distinct
                              -- from a literal's, his ruling, 2026-09-28
@@ -104,6 +112,9 @@ neonPinkDark = Theme
   , themeProof   = rgb 255 140 240
   , themeGoals   = rgb 255 85 195
   , themeMachine = rgb 255 94 196
+  , themeGlobals = rgb 255 170 225
+  , themeModules = rgb 230 60 165
+  , themeOutput  = rgb 255 115 215
   , themeFold    = rgb 40 12 32
   , themeSplice  = rgb 30 20 14
   -- **Deep magenta, 2026-10-21 (@~bmgr7@)**, replacing the `(28, 16, 22)` this was
@@ -137,6 +148,9 @@ gruyere = Theme
   , themeProof   = rgb 237 255 130
   , themeGoals   = rgb 100 58 255
   , themeMachine = rgb 20 249 213
+  , themeGlobals = rgb 255 176 102
+  , themeModules = rgb 130 255 170
+  , themeOutput  = rgb 255 110 150
   , themeFold    = rgb 44 36 74
   , themeSplice  = rgb 34 44 40
   , themePopup   = rgb 86 34 136
@@ -159,6 +173,9 @@ synthwave84 = Theme
   , themeProof   = rgb 54 249 246
   , themeGoals   = rgb 114 241 184
   , themeMachine = rgb 254 222 93
+  , themeGlobals = rgb 184 148 255
+  , themeModules = rgb 54 206 255
+  , themeOutput  = rgb 255 152 102
   , themeFold    = rgb 52 41 79
   , themeSplice  = rgb 40 50 46
   , themePopup   = rgb 112 50 152

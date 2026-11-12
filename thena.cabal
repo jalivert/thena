@@ -237,6 +237,7 @@ library tui
         Tui.Database
         Tui.Jev
         Tui.Json
+        Tui.Panes
         Tui.Render
         Tui.Theme
     -- **`time` is here for one thing**: the project database names a session
