@@ -34,17 +34,13 @@ import Tui.Panes
   , ModuleMark (..)
   , PaneRow (..)
   , globalRows
+  , markColumns
   , markGlyph
   , moduleRows
   , outputRows
   , paneRowWidget
   )
 import Tui.Render (Fold (..), foldAttr, renderDisplay, renderMachineView)
-
--- | vty's own width function, which is what decides how many cells a mark
--- takes on screen — `~nf5tx`. Counting 'Char's would answer 1 for ✅ and 2 for
--- @"\x26A0 "@ and say nothing about whether the names line up.
-import Graphics.Text.Width (safeWcswidth)
 
 
 -- * Drawing a widget without a terminal
@@ -297,7 +293,7 @@ paneRowCases =
       assertEqual ""
         [ Heading "modules" (Just 3)
         , Entry "\x2705 whole"
-        , Tap "some" "\x26A0  some"
+        , Tap "some" "\x26A0\xFE0F some"
         , Tap "none" "\x274C none"
         ]
         (moduleRows
@@ -307,21 +303,26 @@ paneRowCases =
           ]
           [])
   , -- | **The three marks, spelled out, and the spelling is the decision** —
-    -- `~nf5tx`. ⚠ carries a pad because a terminal draws it in one cell and
-    -- the other two in two, so this is what makes the names line up on screen;
-    -- measured under a pty, all three at column 81 of one frame.
-    --
-    -- **⚠ must NOT carry U+FE0F.** With the variation selector the row drew as
-    -- @⚠@ and the module's name never appeared. Nothing computable from vty
-    -- catches that — 'safeWcswidth' answers 1 either way, and 1 for ✅ and ❌
-    -- as well, which is the disagreement with the terminal the pad exists for.
-    -- So the guard is the spelling itself.
-    testCase "the marks are spelled so that the names line up" $
+    -- `~nf5tx`. ⚠ carries U+FE0F, the variation selector, because that is what
+    -- asks for the coloured presentation: his instruction, /"I like the colored
+    -- version. The glyph version is not visible enough."/
+    testCase "the warning mark is the coloured spelling, selector and all" $
       assertEqual ""
-        ["\x2705", "\x26A0 ", "\x274C"]
+        ["\x2705", "\x26A0\xFE0F", "\x274C"]
         (map markGlyph [AllIn, SomeIn, NoneIn])
-  , testCase "and vty reads every one of them as a printable character" $
-      assertEqual "" [1, 2, 1] (map (safeWcswidth . markGlyph) [AllIn, SomeIn, NoneIn])
+  , -- | **The one his report of 2026-11-13 turned into a test**: /"the new
+    -- symbol for ✅ next to the prelude moves the accent bar of the next pane
+    -- to the right."/ vty budgets cells by width, so a mark it reads as one
+    -- column where the terminal spends two shoves the rest of the row along and
+    -- the row runs past its pane into the next one's bar. Every mark measuring
+    -- two is what keeps it inside.
+    --
+    -- **'markColumns' and not 'safeWcwidth' on the glyphs**, because the latter
+    -- answers for a vty with no table installed and would report one — the state
+    -- no running TUI is in, 'Tui.App.declareWideGlyphs' having declared
+    -- 'wideGlyphs' before it made a vty.
+    testCase "every mark is two columns, so no row overruns its pane" $
+      assertEqual "" [2, 2, 2] (map markColumns [AllIn, SomeIn, NoneIn])
   , -- | The engine's ruling of 2026-11-11, /"one failure and forty-seven
     -- pending, not forty-eight warnings"/: the first is the root and carries
     -- its reason, the rest are named and nothing is said about why — because
@@ -329,7 +330,7 @@ paneRowCases =
     testCase "unfolded, the first says why and the rest are only named" $
       assertEqual ""
         [ Heading "modules" (Just 1)
-        , Tap "m" "\x26A0  m"
+        , Tap "m" "\x26A0\xFE0F m"
         , Detail "broken did not go in:"
         , Detail "  stuck: not in scope: nonesuch"
         , Detail "after is pending"
@@ -348,7 +349,7 @@ paneRowCases =
           [])
   , testCase "folded, a module is its row and its file and nothing else" $
       assertEqual ""
-        [Heading "modules" (Just 1), Tap "m" "\x26A0  m", Detail "m.thena"]
+        [Heading "modules" (Just 1), Tap "m" "\x26A0\xFE0F m", Detail "m.thena"]
         (moduleRows
           [ (partial "m")
               { meFile = Just "m.thena"

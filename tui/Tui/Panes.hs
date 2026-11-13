@@ -11,6 +11,8 @@ module Tui.Panes
   , globalRows
   , ModuleMark (..)
   , markGlyph
+  , markColumns
+  , wideGlyphs
   , ModuleEntry (..)
   , moduleRows
   , FileKind (..)
@@ -22,6 +24,7 @@ import Data.List (intercalate, nub, sort)
 
 import Brick (Widget, clickable, strWrapWith, withAttr)
 import Brick.AttrMap (attrName)
+import Graphics.Text.Width (safeWcwidth)
 import Text.Wrap
   ( FillStrategy (FillIndent)
   , WrapSettings (..)
@@ -193,21 +196,64 @@ data ModuleMark = AllIn | SomeIn | NoneIn
 -- disappearance turns on. U+26A0 alone draws fine. **Do not "tidy" the spelling
 -- back to the emoji one.**
 --
--- **THE PADDING IS FOR THE TERMINAL AND NOT FOR vty, WHICH DISAGREES WITH IT.**
--- Measured: @Graphics.Text.Width.safeWcswidth@ answers **1** for ✅, for ⚠ and
--- for ❌ alike, while a terminal draws the two emoji-presentation ones in
--- **two** cells each — pyte and the real thing both. So ⚠ is padded to two
--- cells here, which is what makes the names line up on screen: verified under a
--- pty, all three starting at column 81 of one frame. **In vty's own reckoning
--- they are then 1, 2 and 1**, and a terminal that renders emoji in one cell
--- would show the ✅ and ❌ names one column left of the ⚠ ones. That is the
--- trade, it is cosmetic, and it is in `.claude/CLOSEOUT.md` as `~8btbp`'s
--- neighbour.
+-- **THE COLOURED ⚠️ IS THE EMOJI SPELLING, U+26A0 PLUS U+FE0F** — his
+-- instruction, 2026-11-13: /"I like the colored version. The glyph version is
+-- not visible enough."/ The selector is what asks the terminal for the coloured
+-- presentation rather than the thin outline.
+--
+-- **An earlier note here said the selector lost the module's name. It was
+-- wrong and the cause was `pyte`, the probe's own terminal emulator.** Read
+-- straight off the pty as bytes, the TUI emits @⚠️ test.modules.PartlyGood@ —
+-- selector and name both — and it always did. **Do not re-draw a conclusion
+-- about a glyph from a reconstructed screen**; read what was written.
+--
+-- **WHAT IS REAL IS THE WIDTH, AND IT IS WHY 'wideGlyphs' EXISTS** — his report
+-- the same day, /"the new symbol for ✅ next to the prelude moves the accent bar
+-- of the next pane to the right."/ vty's built-in table calls all three of these
+-- one column; a terminal draws them in two. See 'wideGlyphs'.
 markGlyph :: ModuleMark -> String
 markGlyph m = case m of
   AllIn -> "\x2705"
-  SomeIn -> "\x26A0 "
+  SomeIn -> "\x26A0\xFE0F"
   NoneIn -> "\x274C"
+
+-- | **The code points this pane needs vty to call two columns wide** —
+-- `~8ztt3`. @Tui.App.declareWideGlyphs@ installs exactly these before it makes
+-- a vty, and nothing else in the TUI declares a width.
+--
+-- **Why it is needed.** @Graphics.Text.Width.safeWcswidth@ — the function vty
+-- lays cells out with — answers **1** for U+2705 ✅, U+26A0 ⚠ and U+274C ❌
+-- alike: vty's built-in table predates the Unicode revision that made the
+-- emoji-presentation ones Wide. A terminal spends **two** cells on them, so it
+-- advances its cursor two where vty budgeted one, and **every cell to the right
+-- of the glyph on that row is shoved along by one** — the neighbouring pane's
+-- accent bar included. Measured under a pty: the ✅ and ❌ rows put that bar at
+-- column 113 where every other row had it at 112, and at 112 once declared.
+--
+-- **Padding the glyph does not fix it and was tried.** The terminal advances two
+-- columns for the wide character and writes whatever follows at the next
+-- position, so a trailing space is shoved along with the rest. The shift starts
+-- at the glyph and nothing after it can absorb it.
+--
+-- **U+FE0F is not in the list and must not be**: a variation selector is zero
+-- columns in both reckonings, which is what makes @⚠️@ measure two once U+26A0
+-- does.
+wideGlyphs :: [Int]
+wideGlyphs = [0x2705, 0x26A0, 0x274C]
+
+-- | How many columns a mark takes **once 'wideGlyphs' has been declared**.
+--
+-- **The one invariant worth holding**: every mark is two, so the module names
+-- line up down the pane and no row crosses into the pane beside it. The drawing
+-- suite checks this rather than calling 'safeWcwidth' on the glyphs directly —
+-- that would answer for an undeclared vty and report one, which is the state no
+-- running TUI is ever in.
+markColumns :: ModuleMark -> Int
+markColumns = sum . map column . markGlyph
+  where
+    column c
+      | fromEnum c `elem` wideGlyphs = 2
+      | otherwise = max 0 (safeWcwidth c)
 
 -- | What a module's row is drawn from.
 --

@@ -58,7 +58,8 @@ import qualified Brick.Widgets.Edit as E
 import Brick.Widgets.Center (centerLayer)
 import Brick.BChan (BChan, newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Monad (when)
+import Control.Exception (SomeException, try)
+import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
 import Data.List (intercalate, intersperse, isPrefixOf, isSuffixOf, sort, sortOn)
@@ -70,6 +71,11 @@ import qualified Data.Text as Text
 import qualified Data.Text.Zipper as Zip
 import qualified Graphics.Vty as V
 import Graphics.Vty.Platform.Unix (mkVty)
+import Graphics.Vty.UnicodeWidthTable.Install (installUnicodeWidthTable)
+import Graphics.Vty.UnicodeWidthTable.Types
+  ( UnicodeWidthTable (..)
+  , WidthTableRange (..)
+  )
 import Lens.Micro ((^.), Lens', lens)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
@@ -153,6 +159,7 @@ import Tui.Panes
   , ModuleMark (..)
   , PaneRow (..)
   , globalRows
+  , wideGlyphs
   , moduleRows
   , outputRows
   , paneRowWidget
@@ -631,9 +638,42 @@ runTui = do
   -- first draw somehow hasn't happened yet, the tick is a harmless no-op
   -- and the dropdown arrives on the first keystroke as before.
   _ <- forkIO (threadDelay 200000 >> writeBChan chan Tick)
+  declareWideGlyphs
   vty <- mkVty V.defaultConfig
   _ <- customMain vty (mkVty V.defaultConfig) (Just chan) app st0
   resetCursorStyle
+
+-- | **Tell vty that the mark glyphs are two columns wide, because it thinks
+-- they are one and the terminal does not** — `~8ztt3`, from his report of
+-- 2026-11-13: /"the new symbol for ✅ next to the prelude moves the accent bar
+-- of the next pane to the right."/
+--
+-- **Why, in one line, with the whole of it on 'Tui.Panes.wideGlyphs'**: vty's
+-- built-in table calls those glyphs one column, a terminal spends two on them,
+-- and the difference shoves the rest of the row — the neighbouring pane's
+-- accent bar included.
+--
+-- **So vty is told.** 'V.installUnicodeWidthTable' takes a run-length table and
+-- vty allocates it across the whole code-point space, **falling back to its
+-- built-in table for every code point a range does not cover** — so three
+-- ranges change three characters and nothing else. It must run before
+-- 'mkVty', which installs the user's own table if one is configured and
+-- **skips its own install when a table is already there**, catching everything;
+-- so this cannot stop the TUI from starting.
+--
+-- **It declares what his terminal demonstrably does.** The misalignment he
+-- reported is only possible if his terminal draws ✅ in two cells, so 2 is the
+-- measured value here and not a guess at one. A terminal that drew them in one
+-- cell would be misaligned by this — see `.claude/CLOSEOUT.md`.
+--
+-- **'Tui.Panes.wideGlyphs' is the list, and it lives beside the glyphs it is
+-- about** so that adding a mark and declaring its width cannot come apart.
+declareWideGlyphs :: IO ()
+declareWideGlyphs =
+  void (try @SomeException (installUnicodeWidthTable table))
+  where
+    table = UnicodeWidthTable (map wide wideGlyphs)
+    wide cp = WidthTableRange (fromIntegral cp) 1 2
 
 -- | The custom event channel carries the synthetic post-startup tick
 -- (handled by doing nothing — the outer wrapper around every event still
