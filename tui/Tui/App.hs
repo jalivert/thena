@@ -145,6 +145,7 @@ import Tui.Layout
   , closePane
   , columnsOf
   , openPane
+  , paneBarEntries
   , paneAt
   , paneByName
   , paneName
@@ -161,6 +162,7 @@ import Tui.Panes
   , wideGlyphs
   , moduleRows
   , outputRows
+  , paneBarWidget
   , paneRowWidget
   , paneWrap
   )
@@ -951,6 +953,18 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "pane.heading",   ink (themeDim th))
   , (attrName "pane.detail",    ink (themeDim th))
   , (attrName "dim",            ink (themeDim th))
+  -- | **The pane bar, `~7tfhd`** — an open pane against a closed one. His
+  -- instruction was that the two be /"rendered a bit differently"/, and the
+  -- difference is weight rather than hue, for the same reason a pane's heading
+  -- is: the accents belong to the panes themselves, and a bar in a colour of
+  -- its own would compete with every one of them at once.
+  --
+  -- **An open pane is ordinary text, not an accent.** It is the resting state
+  -- of the screen and should not ask to be read; a closed pane is the one that
+  -- is saying something unusual, and dim is how this TUI says /"present but not
+  -- in play"/ everywhere else — a stale script line, a pane's heading.
+  , (attrName "panebar.open",   ink (themeInk th))
+  , (attrName "panebar.closed", ink (themeDim th))
   -- A placeholder box, in the input line, in a dimmer ink than ordinary
   -- text — his `.jalivert/TUI.md`-adjacent report, 2026-09-29: the caret
   -- itself went dark standing on one. Root cause: the glyph is a solid
@@ -1024,10 +1038,17 @@ draw :: St -> [Widget Name]
 draw st =
   pickerLayer st
     <> popups
-    <> [padAll 1 (hBox [replColumn, gapH, paneColumns])]
+    <> [padAll 1 (vBox [paneBar, hBox [replColumn, gapH, paneColumns]])]
   where
     budget = Budget 200
     s = activeSession st
+
+    -- | **Every pane, which are open, and where** — `~7tfhd`. Above
+    -- everything and the full width of the screen, his ruling of 2026-11-13;
+    -- 'Tui.Layout.paneBarEntries' decides the order and
+    -- 'Tui.Panes.paneBarWidget' how the line reads, so neither is decided here.
+    paneBar =
+      paneBarWidget [(paneName p, pos) | (p, pos) <- paneBarEntries (stLayout st)]
 
     -- | **Neither dropdown is drawn while the picker is open**, and the
     -- state behind them is untouched: a completion popup hanging over a

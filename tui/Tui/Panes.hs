@@ -19,11 +19,12 @@ module Tui.Panes
   , FileKind (..)
   , outputRows
   , paneRowWidget
+  , paneBarWidget
   ) where
 
 import Data.List (intercalate, nub, sort)
 
-import Brick (Widget, clickable, strWrapWith, withAttr)
+import Brick (Widget, clickable, hBox, str, strWrapWith, withAttr)
 import Brick.AttrMap (attrName)
 import Graphics.Text.Width (safeWcwidth)
 import Text.Wrap
@@ -399,3 +400,32 @@ paneWrap =
     , breakLongWords = True
     , fillStrategy = FillIndent 2
     }
+
+-- | **The bar that lists every pane, which are open, and at which position** —
+-- `~7tfhd`, his instruction of 2026-11-13.
+--
+-- **Takes names and positions already paired**, the way everything else here
+-- takes plain data: 'Tui.Layout.paneBarEntries' decides the order and which
+-- pane has a number, 'Tui.App' supplies the names, and this decides only how
+-- the line reads. So the drawing suite can hold it to its text.
+--
+-- **Full screen width, above everything — his ruling of 2026-11-13**, chosen
+-- over a bar only as wide as the pane columns: seven names are about seventy
+-- characters and the pane columns are far narrower than that in a small
+-- terminal, where the narrow bar would wrap to two lines exactly when the
+-- screen is tightest. **It costs the document one row of height**, which he
+-- accepted.
+--
+-- **Two spaces between panes and one before a number**, so a name and its
+-- number read as one thing and the gap between two panes is plainly wider than
+-- the gap inside one. A closed pane is its name alone — there is no position to
+-- draw — and the attribute is the other half of the difference he asked for.
+paneBarWidget :: [(String, Maybe Int)] -> Widget n
+paneBarWidget entries = hBox (concatMap cell entries)
+  where
+    cell (name, pos) =
+      [ withAttr (attrName (attr pos)) (str (name <> number pos))
+      , str "  "
+      ]
+    number = maybe "" (\n -> " " <> show n)
+    attr = maybe "panebar.closed" (const "panebar.open")

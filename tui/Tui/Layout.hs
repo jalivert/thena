@@ -41,6 +41,7 @@ module Tui.Layout
   , closePane
   , layoutPairs
   , layoutFrom
+  , paneBarEntries
   ) where
 
 import qualified Data.Map.Strict as Map
@@ -201,3 +202,28 @@ layoutFrom :: [(Position, Pane)] -> Layout
 layoutFrom = foldl place (Layout Map.empty)
   where
     place layout (n, p) = fst (openPane p n layout)
+
+-- | **Every pane the TUI has, with its position where it has one** — `~7tfhd`,
+-- his instruction of 2026-11-13: /"some smaller UI element that lists all the
+-- available panes, like all that the TUI has, opened ones are rendered a bit
+-- differently to closed ones, and they show the position they are rendered at
+-- (the number)."/
+--
+-- **Placed panes first in position order, then the closed ones.** Decided by
+-- the mockup he picked rather than asked as a question, because it was in the
+-- sketch he chose: @globals 1  proofterm 2  modules 3  goals 4  output 5
+-- machine 6  proofs@. Ascending numbers read as a sequence; 'allPanes' order
+-- would scatter them.
+--
+-- **A closed pane's position is 'Nothing' and is not remembered anywhere.**
+-- 'closePane' drops it from the map and keeps nothing, which is right: a width
+-- is remembered because he pulls one and expects it back (`~vqsd8`), while a
+-- position is what @:pane ‹name› open ‹n›@ states every time it is used.
+--
+-- **The closed ones keep 'allPanes' order among themselves**, which is stable
+-- across opens and closes — so a pane he closes does not make the others jump
+-- about in the bar.
+paneBarEntries :: Layout -> [(Pane, Maybe Position)]
+paneBarEntries layout =
+  [(p, Just n) | (n, p) <- layoutPairs layout]
+    <> [(p, Nothing) | p <- allPanes, positionOf p layout == Nothing]

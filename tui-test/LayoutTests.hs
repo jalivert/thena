@@ -23,6 +23,7 @@ import Tui.Layout
   , defaultLayout
   , layoutFrom
   , layoutPairs
+  , paneBarEntries
   , openPane
   , paneAt
   , paneByName
@@ -122,4 +123,38 @@ layoutTests =
         let twice = layoutFrom [(1, Globals), (4, Globals)]
         placedPanes twice @?= [Globals]
         positionOf Globals twice @?= Just 4
+    , -- | **`~7tfhd`, his instruction of 2026-11-13** — the bar lists every
+      -- pane the TUI has. **Placed ones in position order, then the closed
+      -- ones**, which is the sketch he picked: ascending numbers read as a
+      -- sequence where 'allPanes' order would scatter them.
+      testCase "the bar lists the placed panes in position order, then the closed" $
+        paneBarEntries defaultLayout @?=
+          [ (Globals, Just 1)
+          , (ProofTerm, Just 2)
+          , (Modules, Just 3)
+          , (Goals, Just 4)
+          , (Output, Just 5)
+          , (Machine, Just 6)
+          , (Quests, Nothing)
+          ]
+    , -- | **A closed pane has no position and none is remembered** — unlike a
+      -- width (`~vqsd8`), because a position is what @:pane@ states every time.
+      testCase "closing a pane takes its number away and leaves it in the list" $ do
+        let after = closePane Modules defaultLayout
+        paneBarEntries after @?=
+          [ (Globals, Just 1)
+          , (ProofTerm, Just 2)
+          , (Goals, Just 4)
+          , (Output, Just 5)
+          , (Machine, Just 6)
+          , (Modules, Nothing)
+          , (Quests, Nothing)
+          ]
+    , -- | **Every pane closed still lists every pane** — which is the case his
+      -- ruling of the same day made reachable and the reason this bar exists:
+      -- /"the user closed them, the user wants them closed."/
+      testCase "a screen with no panes still names all seven" $ do
+        let shut = foldr closePane defaultLayout allPanes
+        paneBarEntries shut @?= [(p, Nothing) | p <- allPanes]
+        length (paneBarEntries shut) @?= 7
     ]

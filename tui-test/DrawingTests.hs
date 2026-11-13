@@ -39,6 +39,7 @@ import Tui.Panes
   , markGlyph
   , moduleRows
   , outputRows
+  , paneBarWidget
   , paneRowWidget
   )
 import Tui.Render (Fold (..), foldAttr, renderDisplay, renderMachineView)
@@ -166,7 +167,41 @@ drawingTests =
     , testGroup "and drawn" paneDrawCases
     , testGroup "a term too wide for its pane breaks rather than clipping" wrapCases
     , testGroup "a production's words and slots are spaced, which is `~mxhfj`" spacingCases
+    , testGroup "the bar that names every pane, `~7tfhd`" paneBarCases
     ]
+
+-- | **`~7tfhd`, his instruction of 2026-11-13**: /"lists all the available
+-- panes … opened ones are rendered a bit differently to closed ones, and they
+-- show the position they are rendered at (the number)."/
+--
+-- **The attribute is the other half of the difference and is not asserted
+-- here**, this suite's rule being that nothing in it asserts a colour. What is
+-- decidable as text is the order, the numbers, and the spacing — and the
+-- spacing is what makes a name and its number read as one thing.
+paneBarCases :: [TestTree]
+paneBarCases =
+  [ testCase "an open pane carries its number and a closed one carries none" $
+      assertEqual ""
+        "globals 1  proofterm 2  proofs"
+        (drawLine (paneBarWidget
+                    [("globals", Just 1), ("proofterm", Just 2), ("proofs", Nothing)]))
+  , -- The default screen, which is what he sees before he types anything.
+    testCase "the default screen reads as the sketch he picked" $
+      assertEqual ""
+        "globals 1  proofterm 2  modules 3  goals 4  output 5  machine 6  proofs"
+        (drawLine (paneBarWidget
+                    [ ("globals", Just 1), ("proofterm", Just 2), ("modules", Just 3)
+                    , ("goals", Just 4), ("output", Just 5), ("machine", Just 6)
+                    , ("proofs", Nothing)
+                    ]))
+  , -- | **The case his own ruling made reachable** — every pane closed, so the
+    -- bar is the only thing on screen that says a pane exists at all.
+    testCase "a screen with no panes still names them, with no numbers" $
+      assertEqual ""
+        "globals  modules  output"
+        (drawLine (paneBarWidget
+                    [("globals", Nothing), ("modules", Nothing), ("output", Nothing)]))
+  ]
 
 -- | **HIS REPORT, 2026-11-12, and the suite could not have caught it** —
 -- `~mxhfj`: /"The TUI renders the tagget term literals weird. There are no
