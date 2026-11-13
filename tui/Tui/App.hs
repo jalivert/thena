@@ -329,6 +329,12 @@ data Drag = Drag
     -- ^ the absolute screen column the press landed on.
   , dragWidth :: Int
     -- ^ the pane's width at the moment of the press.
+  , dragWhole :: Bool
+    -- ^ **Option was held at the press, so the whole column moves as one** —
+    -- `~t927j`, his instruction of 2026-11-13. Latched here with the rest of
+    -- the drag rather than read off each motion report: a modifier that
+    -- stopped arriving part-way through a drag would split one gesture into
+    -- two, and the press is the moment he decided which gesture this is.
   }
 
 data St = St
@@ -1864,14 +1870,15 @@ handleResize ev = case ev of
   -- event's own name says which pane, and that is the whole of the hit test —
   -- each pane's bar sits at its own left edge since `~rr8bx`, so the name is
   -- enough and the row never has to be consulted here.
-  MouseDown n V.BLeft _ (Location (c, _)) -> do
+  MouseDown n V.BLeft mods (Location (c, _)) -> do
     left <- paneLeft n
     st <- get
     case (stDrag st, left) of
       (Just d, Just l) -> resizeTo d (l + c) >> pure True
       (Just _, Nothing) -> pure True
       (Nothing, Just l)
-        | c == 0, PaneVP p <- n, n `elem` resizablePanes st -> startDrag p l >> pure True
+        | c == 0, PaneVP p <- n, n `elem` resizablePanes st ->
+            startDrag p l (wholeColumn mods) >> pure True
       _ -> pure False
   -- | **A press on the stage gap, which belongs to no clickable widget and so
   -- arrives in absolute screen coordinates.** Taking it doubles a one-column
@@ -1879,22 +1886,22 @@ handleResize ev = case ev of
   -- as too thick) and costs no other gesture, because nothing else is drawn
   -- there. Here the row is needed, and here it is reliable: an extent and a
   -- raw event are both absolute.
-  VtyEvent (V.EvMouseDown c r V.BLeft _) -> do
+  VtyEvent (V.EvMouseDown c r V.BLeft mods) -> do
     st <- get
     case stDrag st of
       Just d -> resizeTo d c >> pure True
       Nothing -> do
         hit <- barRightOf st c r
         case hit of
-          Just n -> startDrag n c >> pure True
+          Just p -> startDrag p c (wholeColumn mods) >> pure True
           Nothing -> pure False
   MouseUp _ (Just V.BLeft) _ -> release
   VtyEvent (V.EvMouseUp _ _ (Just V.BLeft)) -> release
   _ -> pure False
   where
-    startDrag p from = do
+    startDrag p from whole = do
       st <- get
-      put st { stDrag = Just (Drag p from (paneWidthOf st p)) }
+      put st { stDrag = Just (Drag p from (paneWidthOf st p) whole) }
     release = do
       st <- get
       case stDrag st of
@@ -1926,10 +1933,36 @@ barRightOf st col row = do
 paneWidthOf :: St -> Pane -> Int
 paneWidthOf st p = Map.findWithDefault minPaneWidth p (stPaneWidths st)
 
+-- | **Option held at the press means the whole column moves as one** —
+-- `~t927j`, his instruction of 2026-11-13: /"the whole column of panes snaps
+-- together and moves as one line… this way I can resize the entire column at
+-- the same time."/
+--
+-- **'V.MMeta' is what Option arrives as, and that is vty's own mapping, not a
+-- guess**: @vty-unix@'s 'classifyMouseEvent' reads the SGR modifier field and
+-- turns bit 8 — the meta bit — into 'V.MMeta', on the press and on every
+-- motion report. 'V.MAlt' is taken as well because it costs nothing and
+-- nothing else in the TUI binds either: a terminal that spells Option the
+-- other way then works without a second finding.
+--
+-- **Whether his terminal sets the bit at all is the terminal's business and
+-- not ours.** If Option-drag behaves as a plain drag on his, the bit is not
+-- being sent, and the fix is a terminal setting rather than a line of this.
+wholeColumn :: [V.Modifier] -> Bool
+wholeColumn mods = V.MMeta `elem` mods || V.MAlt `elem` mods
+
 -- | One frame of a drag: the pane's width is what it was at the press, plus
 -- however far the pointer has travelled back towards the screen's left edge,
 -- snapped and then held between 'minPaneWidth' and whatever leaves the
 -- document 'docMinWidth'.
+--
+-- **With Option held, every pane of that column takes the same width** —
+-- `~t927j`. "Snaps together" is his word and it is the literal behaviour: the
+-- panes of a column are ragged on the left since `~rr8bx`, and this is the
+-- gesture that puts them back on one edge, at a width he chooses in one pull.
+-- It is one assignment and not three drags because the column is what he is
+-- sizing — a column of three panes dragged one at a time to the same width is
+-- three chances to land on three different multiples of four.
 resizeTo :: Drag -> Int -> EventM Name St ()
 resizeTo d col = do
   st <- get
@@ -1937,7 +1970,19 @@ resizeTo d col = do
   (screen, _) <- liftIO (V.displayBounds (V.outputIface vty))
   let pulled = dragWidth d - (col - dragFrom d)
       capped = min (maxPaneWidth st (dragPane d) screen) (snapWidth pulled)
-  put st { stPaneWidths = Map.insert (dragPane d) capped (stPaneWidths st) }
+      -- | **The clamp is the dragged pane's and is right for all of them**:
+      -- 'maxPaneWidth' asks what the other column and the document leave,
+      -- which is one answer for the column rather than one per pane.
+      moving
+        | dragWhole d = columnOf st (dragPane d)
+        | otherwise = [dragPane d]
+  put st { stPaneWidths = foldr (\p -> Map.insert p capped) (stPaneWidths st) moving }
+
+-- | The panes sharing a column with this one, itself included — the column
+-- the layout puts it in now, not the one it was built in.
+columnOf :: St -> Pane -> [Pane]
+columnOf st p = if p `elem` c1 then c1 else c2
+  where (c1, c2) = columnsOf (stLayout st)
 
 -- | To the nearest multiple of 'paneWidthStep', never below 'minPaneWidth' —
 -- which is itself a multiple of it, so the floor is on the grid too.
