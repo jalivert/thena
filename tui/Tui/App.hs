@@ -2249,11 +2249,41 @@ handleEventForKeys ev = do
       | stScriptMode st -> handleScriptEvent ev
       | otherwise -> handleReplEvent ev
 
--- | The two encodings of Shift+Enter that vty hands over as literal text.
--- Both measured with a vty event dump under the pty, 2026-11-11: an
--- 'V.KEsc', then one 'V.KChar' per byte of the rest.
-shiftEnterRuns :: [String]
-shiftEnterRuns = ["[13;2u", "[27;2;13~"]
+-- | **The byte runs vty hands over as literal text, and what each one means.**
+-- vty decodes neither the kitty keyboard protocol's @CSI ‹key›;‹mods› u@ nor
+-- xterm's @modifyOtherKeys@ @CSI 27;‹mods›;‹key› ~@, so a key spelled either
+-- way arrives as an 'V.KEsc' followed by one 'V.KChar' per byte of the rest
+-- — measured with a vty event dump under the pty, 2026-11-11. Recognising
+-- them here is the only route such a key has into this frontend.
+--
+-- **Shift+Enter's two are measured; Cmd+L's two are derived and are not.**
+-- `~p6g53`, his correction of 2026-11-13: /"Option + l doesn't work, because I
+-- have it mapped to print λ. Can you try chaning it to ctrl + l and cmd + l
+-- both? I will test which one works and which one doesn't."/ Ctrl+L needs
+-- nothing from this table — vty decodes it. Cmd+L does, because Cmd is
+-- \"super\" and no terminal spells super in a plain escape sequence:
+--
+-- * @[108;9u@ — kitty protocol. @l@ is code point 108; the modifier field is
+--   @1 + bits@ with super at 8, so super alone is 9.
+-- * @[27;9;108~@ — the same key in @modifyOtherKeys@, which is the form his
+--   terminal already sends Shift+Enter in (@[27;2;13~@ above).
+--
+-- **Whether either ever arrives is his terminal's business and probably not
+-- ours at all**: macOS terminals bind Cmd themselves and normally never
+-- forward it to the program. These two are what we recognise *if* it is
+-- forwarded, nothing more — see `~p6g53`.
+--
+-- **`~xmd5b` is still open and this does not close it.** A run that is not in
+-- this table is typed into the line, so Ctrl+Enter still deposits
+-- @[27;5;13~@; what changed is that the fix is now an entry rather than a
+-- second mechanism.
+escRuns :: [(String, EventM Name St ())]
+escRuns =
+  [ ("[13;2u",     shiftEnter)
+  , ("[27;2;13~",  shiftEnter)
+  , ("[108;9u",    clearOneTurn)
+  , ("[27;9;108~", clearOneTurn)
+  ]
 
 -- | Esc has just been handled, so the characters that follow it /may/ be the
 -- tail of a Shift+Enter. Start holding them back ('stEscRun').
@@ -2290,10 +2320,10 @@ continueEscRun :: String -> BrickEvent Name AppEvent -> EventM Name St ()
 continueEscRun p ev = do
   st <- get
   case ev of
-    VtyEvent (V.EvKey (V.KChar c) []) | p' <- p ++ [c], any (p' `isPrefixOf`) shiftEnterRuns ->
-      if p' `elem` shiftEnterRuns
-        then put st { stEscRun = Nothing } >> shiftEnter
-        else put st { stEscRun = Just p' }
+    VtyEvent (V.EvKey (V.KChar c) []) | p' <- p ++ [c], any ((p' `isPrefixOf`) . fst) escRuns ->
+      case lookup p' escRuns of
+        Just act -> put st { stEscRun = Nothing } >> act
+        Nothing  -> put st { stEscRun = Just p' }
     _ -> do
       put st { stEscRun = Nothing }
       mapM_ (\c -> handleEventFor (VtyEvent (V.EvKey (V.KChar c) []))) p
@@ -2636,18 +2666,9 @@ dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptOpenLine
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
 dispatchScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
 dispatchScriptEvent (VtyEvent (V.EvKey (V.KChar 'x') [V.MCtrl])) = openScriptBar
--- | **Option+L in live-script mode clears nothing, and this clause is here to
--- make sure of it** — `~p6g53`. There is no transcript in this mode: the
--- document is the record, so there is nothing on screen for a clear to take
--- off. What it *would* reach without this clause is the repl's turns, which
--- are sitting intact behind the mode waiting for him to leave it
--- ('leaveScriptMode' keeps 'stTurns' untouched on purpose) — deleting those
--- from behind a mode that does not show them is the one outcome worth a
--- clause to prevent.
-dispatchScriptEvent (VtyEvent (V.EvKey (V.KChar 'l') mods))
-  | V.MMeta `elem` mods || V.MAlt `elem` mods = do
-      st <- get
-      put st { stScriptNote = Just clearNotHere }
+-- | **Live-script mode does not need a clause for the clear keys.** It falls
+-- through to the repl's, and 'clearOneTurn' asks 'stScriptMode' itself — see
+-- its haddock for why the guard lives there and not at each binding.
 dispatchScriptEvent ev = handleReplEvent ev
 
 handleReplEvent :: BrickEvent Name AppEvent -> EventM Name St ()
@@ -2864,29 +2885,22 @@ handleReplEvent (VtyEvent (V.EvKey (V.KChar c) [])) = do
 -- nothing to ('C-w' falls through there too), so it is handled here, in the
 -- zipper, before the catch-all: whitespace back, then the word itself,
 -- readline's rubout.
--- | **Option+L clears the last turn** — `~p6g53`, and the key is his:
--- /"Maybe option + l?"/ What he is reaching for is Terminal.app's **Clear to
--- Previous Mark**, which is `Cmd+L` there and clears exactly one prompt and
--- its output; `Cmd` never reaches a terminal program on macOS, so the same
--- letter under Option is the nearest thing this frontend can be given.
+-- | **Ctrl+L clears the last turn** — `~p6g53`. Cmd+L runs the same
+-- 'clearOneTurn' through 'escRuns', which is where the reason for the split
+-- is: vty decodes Ctrl and does not decode super.
 --
--- **Both 'V.MMeta' and 'V.MAlt', the same pair 'wholeColumn' takes** and for
--- the same reason — a terminal that spells Option the other way then works
--- without a second finding.
+-- **Option+L was the first try and is withdrawn, on his correction of
+-- 2026-11-13**: /"Option + l doesn't work, because I have it mapped to print
+-- λ."/ A key that types a character he wants in his proofs is not a key this
+-- frontend may claim, and in a proof assistant λ is about as spoken-for as a
+-- character gets.
 --
--- **It does not touch the input.** The clutter is above the line he is
--- typing, and a shortcut that emptied the line to tidy the screen above it
--- would be the worse trade; 'dropTurns' is the only thing that runs.
---
--- **Whether Option arrives at all is the terminal's setting, not ours.** With
--- macOS's option-as-alt off, Option+L is the character @¬@ and this clause
--- never fires — the same hazard `~xmd5b` and `~kmprv` are about. `:clear` is
--- always there regardless, and moving this to another key is one line.
-handleReplEvent (VtyEvent (V.EvKey (V.KChar 'l') mods))
-  | V.MMeta `elem` mods || V.MAlt `elem` mods = do
-      st <- get
-      put (dropTurns 1 st)
-      followInput
+-- **Ctrl+L means \"clear the screen\" in every terminal and here it means
+-- \"clear one turn\", which is a real difference and is his call, not a
+-- liberty taken**: he asked for this key by name. The one-turn meaning is the
+-- whole feature — Terminal.app's **Clear to Previous Mark** is what he
+-- described, and that is `Cmd+L` there, which is why both are bound.
+handleReplEvent (VtyEvent (V.EvKey (V.KChar 'l') [V.MCtrl])) = clearOneTurn
 handleReplEvent (VtyEvent (V.EvKey V.KBS [V.MMeta])) = do
   st <- get
   put st { stInput = E.applyEdit killWordBack (stInput st) }
@@ -3146,7 +3160,9 @@ tuiHelpLines =
     , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
     , (":clear [n]",        "take the last line and its output off the transcript;")
-    , ("",                  "  with n, the last n of them. Option+L is :clear 1")
+    , ("",                  "  with n, the last n of them. Ctrl+L is :clear 1, and")
+    , ("",                  "  so is Cmd+L if your terminal forwards it rather than")
+    , ("",                  "  binding it itself, which most macOS terminals do")
     , ("",                  "  It clears the view and never the session — the panes")
     , ("",                  "  still say where the proof is. :script cut is the other one")
     , (":script sessions",  "pick a stored session from a list and resume it")
@@ -4264,6 +4280,29 @@ clearTurns n st = do
   put (dropTurns n (submitted st))
   followInput
 
+-- | **`:clear 1` as a keystroke** — what Ctrl+L and Cmd+L both run, so there
+-- is one description of the gesture rather than one per encoding.
+--
+-- **It does not touch the input.** The clutter is above the line he is
+-- typing, and a shortcut that emptied the line to tidy the screen above it
+-- would be the worse trade.
+--
+-- **It guards live-script mode itself** rather than being guarded at each
+-- binding. There is no transcript in that mode — the document is the record —
+-- and what the gesture would otherwise reach is the repl's turns sitting
+-- intact behind the mode ('leaveScriptMode' keeps 'stTurns' on purpose).
+-- Deleting those from behind a mode that does not show them is the one
+-- outcome worth preventing, and preventing it here means a new binding
+-- cannot forget to.
+clearOneTurn :: EventM Name St ()
+clearOneTurn = do
+  st <- get
+  if stScriptMode st
+    then put st { stScriptNote = Just clearNotHere }
+    else do
+      put (dropTurns 1 st)
+      followInput
+
 -- | The usage line, for an argument that is not a count. **This one does
 -- answer**, because it is a mistake and a silent no-op would read as a
 -- `:clear` that did not work.
@@ -4274,7 +4313,7 @@ clearNotHere = "nothing to clear here — the document is the record, and :scrip
 clearUsage :: [String]
 clearUsage =
   [ ":clear ‹n› takes off the last n lines and their output; :clear is :clear 1"
-  , "  Option+L is the same as :clear 1"
+  , "  Ctrl+L is the same as :clear 1, and so is Cmd+L if your terminal sends it"
   ]
 
 -- | Keep the live prompt in view while typing, same reasoning as
