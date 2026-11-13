@@ -63,6 +63,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
 import Data.List (intercalate, intersperse, isPrefixOf, isSuffixOf, sort, sortOn)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Maybe (isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -76,7 +77,9 @@ import System.IO (hFlush, hPutStr, readFile', stdout)
 
 import Thena.Driver
   ( Leniency (..)
+  , Partly (..)
   , Response (..)
+  , Unfinished (..)
   , Session
   , Stop (..)
   , digestOf
@@ -84,8 +87,10 @@ import Thena.Driver
   , LoadKind (..)
   , exportedByModule
   , filesRead
+  , declaredByModule
   , kindOf
   , moduleOfFile
+  , modulePartly
   , moduleText
   , modulesLoaded
   , oneLine
@@ -144,6 +149,8 @@ import Tui.Layout
   )
 import Tui.Panes
   ( FileKind (..)
+  , ModuleEntry (..)
+  , ModuleMark (..)
   , PaneRow (..)
   , globalRows
   , moduleRows
@@ -177,6 +184,13 @@ data Name
   | ScriptBar
   | HistoryVP
   | PaneVP Pane
+  | ModuleRow String
+    -- ^ **one module's row in the modules pane, by the name it is spelled
+    -- with** — `~nf5tx`. A row of its own rather than arithmetic off the pane's
+    -- 'Location': brick dispatches a click to the last extent reported under
+    -- the pointer and a row inside the viewport is reported after the pane, so
+    -- the row wins and the pane's accent-bar drag is untouched — that bar is
+    -- outside the viewport.
   | LoadPopup
   | OfferPopup
   | PickerVP
@@ -471,6 +485,15 @@ data St = St
     -- the index, replaces this one entry and writes it back, so two TUIs open
     -- on the same project do not drop each other's sessions, and there is no
     -- second copy of the index to keep true.
+  , stModulesOpen :: Set.Set String
+    -- ^ **the modules whose unfinished list is unfolded** — `~nf5tx`, his
+    -- instruction of 2026-11-13, and clicking the row toggles one. A set and
+    -- not a single selection: he can have two broken modules open at once, and
+    -- nothing here is a cursor.
+    --
+    -- **A module that stops being partial simply stops being drawn unfolded.**
+    -- Nothing prunes this set — a name left in it after the module loads whole
+    -- costs a string and means the fold is still open if it breaks again.
   , stLayout :: Layout
     -- ^ **which panes are on screen and at which of the six positions** —
     -- `~fxc89`, his instruction of 2026-11-12. 'Tui.Layout.defaultLayout' is
@@ -587,6 +610,7 @@ runTui = do
         , stScriptNote  = Nothing
         , stScriptStale = Nothing
         , stStored      = Nothing
+        , stModulesOpen = Set.empty
         , stLayout      = defaultLayout
         , stPaneWidths  = Map.empty
         , stDrag        = Nothing
@@ -1094,7 +1118,7 @@ draw st =
     -- it too, so a theme keeps its accent per pane wherever the pane is moved.
     paneOf p = withAttr (attrName "panel") $ case p of
       Globals -> pane' (paneBody (globalRows (globalGroups st)))
-      Modules -> pane' (paneBody (moduleRows (moduleEntries st) (fileEntries st)))
+      Modules -> pane' (paneBody (map (fmap ModuleRow) (moduleRows (moduleEntries st) (fileEntries st))))
       Output -> pane' (paneBody (outputRows focusText focusOut))
       ProofTerm -> pane' (padAll 1 (renderDevelopment fold links))
       Goals -> pane' (padAll 1 (renderGoals fold links))
@@ -1363,13 +1387,46 @@ globalGroups st =
 -- | **Every module that is in, newest first, and the file it was read from** —
 -- `~t7wc8`. The prelude has no file of its own in this list, arriving with the
 -- session rather than through an @import@, and is shown without one.
-moduleEntries :: St -> [(String, Maybe FilePath)]
+moduleEntries :: St -> [ModuleEntry]
 moduleEntries st =
-  [ (moduleText m, listToMaybe [p | (p, _) <- filesRead s, moduleOfFile p == Just m])
+  [ ModuleEntry
+      { meName = name
+      , meFile = listToMaybe [p | (p, _) <- filesRead s, moduleOfFile p == Just m]
+      , meMark = mark
+      , meOpen = mark /= AllIn && Set.member name (stModulesOpen st)
+      , meUnfinished = maybe [] (map flatten . partlyUnfinished) partly
+      }
   | m <- modulesLoaded s
+  , let name = moduleText m
+  , let partly = modulePartly m s
+  , let mark = marked partly m
   ]
   where
     s = activeSession st
+    -- | **The three marks, and which one is `~nf5tx`'s ❌.** `moduleWhole` is
+    -- `moduleLoaded` with no `Partly`, and everything in this list is loaded —
+    -- so the question here is only whether there is a `Partly` and, if there
+    -- is, whether *anything* got in under it. Measured under a pty on
+    -- 2026-11-13: a module whose every item fails is still a loaded module,
+    -- with an empty namespace, which is the state ❌ is for.
+    marked partly m = case partly of
+      Nothing -> AllIn
+      Just _ | null (declaredByModule m s) -> NoneIn
+      Just _ -> SomeIn
+    -- | **The engine's own renderer, and that crossing is `~8btbp`.** An
+    -- 'Unfinished' carries its reason as a 'Response', and
+    -- 'Thena.Render.renderResponse' is the only thing that renders one —
+    -- `Thena.Driver`'s own haddock says as much: /"a frontend showing a ⚠️ node
+    -- wants to say what it says at the prompt, and renderResponse is already
+    -- that renderer."/ There is no `Thena.View` for an unfinished item, so the
+    -- pane rule — panes render through the views, `Thena.Render` being
+    -- status-line text — has no other path here. It is in `.claude/CLOSEOUT.md`.
+    flatten u =
+      ( case unfinishedDeclares u of
+          [] -> "an item"
+          xs -> intercalate ", " xs
+      , renderResponse s (unfinishedWhy u)
+      )
 
 -- | **Every file the session read, sorted into what it is** — the other half
 -- of `~t7wc8`.
@@ -1842,7 +1899,36 @@ handleEventInner ev = do
 handleEventFor :: BrickEvent Name AppEvent -> EventM Name St ()
 handleEventFor ev = do
   resized <- handleResize ev
-  if resized then pure () else handleEventForKeys ev
+  if resized
+    then pure ()
+    else do
+      folded <- handlePaneClick ev
+      if folded then pure () else handleEventForKeys ev
+
+-- | **Clicking a module's row unfolds what did not go in, and clicking it
+-- again folds it away** — `~nf5tx`, his instruction of 2026-11-13.
+--
+-- Returns whether it took the event. **After 'handleResize' and before the
+-- keyboards**: a press on a row is not a press on an accent bar — the bar is
+-- outside the viewport the rows are in — so the two cannot both claim one
+-- click, and the order here is only so that a drag in progress keeps the
+-- events it needs.
+--
+-- **Only a row that is drawn as a 'Tui.Panes.Tap' can arrive here at all**,
+-- which is to say only a ⚠️ or ❌ module: 'moduleRows' draws a whole module as
+-- a plain entry with no name to click. So there is no "nothing to unfold" case
+-- to answer.
+handlePaneClick :: BrickEvent Name AppEvent -> EventM Name St Bool
+handlePaneClick ev = case ev of
+  MouseDown (ModuleRow m) V.BLeft _ _ -> do
+    st <- get
+    let open = stModulesOpen st
+        toggled
+          | Set.member m open = Set.delete m open
+          | otherwise = Set.insert m open
+    put st { stModulesOpen = toggled }
+    pure True
+  _ -> pure False
 
 -- | **A pane being pulled wider or narrower by its accent bar** — `~gs8tj`.
 -- Returns whether it took the event, so that everything it does not take

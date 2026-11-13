@@ -30,13 +30,21 @@ import Thena.View.Instral (ValueView (..))
 import Thena.View.Machine (MachineView (..))
 import Tui.Panes
   ( FileKind (..)
+  , ModuleEntry (..)
+  , ModuleMark (..)
   , PaneRow (..)
   , globalRows
+  , markGlyph
   , moduleRows
   , outputRows
   , paneRowWidget
   )
 import Tui.Render (Fold (..), foldAttr, renderDisplay, renderMachineView)
+
+-- | vty's own width function, which is what decides how many cells a mark
+-- takes on screen — `~nf5tx`. Counting 'Char's would answer 1 for ✅ and 2 for
+-- @"\x26A0 "@ and say nothing about whether the names line up.
+import Graphics.Text.Width (safeWcswidth)
 
 
 -- * Drawing a widget without a terminal
@@ -229,26 +237,41 @@ foldedLiteral =
 -- | **What the three new panes say** — `~z5dmq`'s content, decided by
 -- 'Tui.Panes' and therefore decidable here. The pty stays the authority on
 -- where the panes are and how wide; this is the text in them.
+-- | **Pins the row type where a row has no click name to infer one from.**
+-- 'globalRows' and 'outputRows' are polymorphic in what a 'Tui.Panes.Tap'
+-- would be named by, and never build one, so an expected list of theirs has
+-- nothing to fix the variable.
+asRows :: [PaneRow String] -> [PaneRow String]
+asRows = id
+
+-- | A module that came in whole, with the file it was read from — `~nf5tx`.
+whole :: String -> Maybe FilePath -> ModuleEntry
+whole n f = ModuleEntry n f AllIn False []
+
+-- | One that came in partly, folded, with nothing recorded against it yet.
+partial :: String -> ModuleEntry
+partial n = ModuleEntry n Nothing SomeIn False []
+
 paneRowCases :: [TestTree]
 paneRowCases =
   [ testCase "an empty group is not drawn as a heading with nothing under it" $
       assertEqual ""
-        [Heading "Prelude" (Just 2), Entry "And.both", Entry "Eq.refl"]
+        (asRows [Heading "Prelude" (Just 2), Entry "And.both", Entry "Eq.refl"])
         (globalRows [("proved in this session", []), ("Prelude", ["Eq.refl", "And.both"])])
   , testCase "a name listed twice is listed once — a suspended proof is two runs" $
       assertEqual ""
-        [Heading "proved in this session" (Just 1), Entry "subst"]
+        (asRows [Heading "proved in this session" (Just 1), Entry "subst"])
         (globalRows [("proved in this session", ["subst", "subst"])])
   , testCase "a module carries its file, and the prelude has none" $
       assertEqual ""
         [ Heading "modules" (Just 2)
-        , Entry "examples.Stlc01Syntax"
+        , Entry "\x2705 examples.Stlc01Syntax"
         , Detail "examples/Stlc01Syntax.thena"
-        , Entry "Prelude"
+        , Entry "\x2705 Prelude"
         ]
         (moduleRows
-          [ ("examples.Stlc01Syntax", Just "examples/Stlc01Syntax.thena")
-          , ("Prelude", Nothing)
+          [ whole "examples.Stlc01Syntax" (Just "examples/Stlc01Syntax.thena")
+          , whole "Prelude" Nothing
           ]
           [])
   , testCase "a consulted rule base is its own group, and ours is shown by its tail" $
@@ -264,12 +287,79 @@ paneRowCases =
           ])
   , testCase "a module's own file is not repeated outside its module" $
       assertEqual ""
-        [Heading "modules" (Just 1), Entry "m", Detail "m.thena"]
-        (moduleRows [("m", Just "m.thena")] [(AModuleFile, "m.thena")])
+        [Heading "modules" (Just 1), Entry "\x2705 m", Detail "m.thena"]
+        (moduleRows [whole "m" (Just "m.thena")] [(AModuleFile, "m.thena")])
+  , -- | **`~nf5tx`, his instruction of 2026-11-13.** A whole module is a plain
+    -- entry; a module that came in partly is a 'Tap', because only it has
+    -- something to unfold and a row that looks clickable and does nothing is
+    -- worse than one that does not look it.
+    testCase "only a module with something to unfold is clickable" $
+      assertEqual ""
+        [ Heading "modules" (Just 3)
+        , Entry "\x2705 whole"
+        , Tap "some" "\x26A0  some"
+        , Tap "none" "\x274C none"
+        ]
+        (moduleRows
+          [ whole "whole" Nothing
+          , (partial "some") { meUnfinished = [("b", ["why"])] }
+          , (partial "none") { meMark = NoneIn, meUnfinished = [("b", ["why"])] }
+          ]
+          [])
+  , -- | **The three marks, spelled out, and the spelling is the decision** —
+    -- `~nf5tx`. ⚠ carries a pad because a terminal draws it in one cell and
+    -- the other two in two, so this is what makes the names line up on screen;
+    -- measured under a pty, all three at column 81 of one frame.
+    --
+    -- **⚠ must NOT carry U+FE0F.** With the variation selector the row drew as
+    -- @⚠@ and the module's name never appeared. Nothing computable from vty
+    -- catches that — 'safeWcswidth' answers 1 either way, and 1 for ✅ and ❌
+    -- as well, which is the disagreement with the terminal the pad exists for.
+    -- So the guard is the spelling itself.
+    testCase "the marks are spelled so that the names line up" $
+      assertEqual ""
+        ["\x2705", "\x26A0 ", "\x274C"]
+        (map markGlyph [AllIn, SomeIn, NoneIn])
+  , testCase "and vty reads every one of them as a printable character" $
+      assertEqual "" [1, 2, 1] (map (safeWcswidth . markGlyph) [AllIn, SomeIn, NoneIn])
+  , -- | The engine's ruling of 2026-11-11, /"one failure and forty-seven
+    -- pending, not forty-eight warnings"/: the first is the root and carries
+    -- its reason, the rest are named and nothing is said about why — because
+    -- nothing worked out why.
+    testCase "unfolded, the first says why and the rest are only named" $
+      assertEqual ""
+        [ Heading "modules" (Just 1)
+        , Tap "m" "\x26A0  m"
+        , Detail "broken did not go in:"
+        , Detail "  stuck: not in scope: nonesuch"
+        , Detail "after is pending"
+        , Detail "last is pending"
+        ]
+        (moduleRows
+          [ (partial "m")
+              { meOpen = True
+              , meUnfinished =
+                  [ ("broken", ["stuck: not in scope: nonesuch"])
+                  , ("after", ["never asked"])
+                  , ("last", [])
+                  ]
+              }
+          ]
+          [])
+  , testCase "folded, a module is its row and its file and nothing else" $
+      assertEqual ""
+        [Heading "modules" (Just 1), Tap "m" "\x26A0  m", Detail "m.thena"]
+        (moduleRows
+          [ (partial "m")
+              { meFile = Just "m.thena"
+              , meUnfinished = [("broken", ["stuck"])]
+              }
+          ]
+          [])
   , testCase "no line in focus is no rows at all" $
-      assertEqual "" [] (outputRows Nothing ["something"])
+      assertEqual "" (asRows []) (outputRows Nothing ["something"])
   , testCase "a line that answered nothing is its heading and nothing else" $
-      assertEqual "" [Heading ":theorem t : Nat" Nothing] (outputRows (Just ":theorem t : Nat") [])
+      assertEqual "" (asRows [Heading ":theorem t : Nat" Nothing]) (outputRows (Just ":theorem t : Nat") [])
   , testCase "and nothing is capped, which is the point of the move off the foot" $
       assertEqual "" 21
         (length (outputRows (Just ":show subst") [show n | n <- [1 .. 20 :: Int]]))

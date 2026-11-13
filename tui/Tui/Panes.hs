@@ -9,6 +9,9 @@ module Tui.Panes
   ( PaneRow (..)
   , paneWrap
   , globalRows
+  , ModuleMark (..)
+  , markGlyph
+  , ModuleEntry (..)
   , moduleRows
   , FileKind (..)
   , outputRows
@@ -17,7 +20,7 @@ module Tui.Panes
 
 import Data.List (intercalate, nub, sort)
 
-import Brick (Widget, strWrapWith, withAttr)
+import Brick (Widget, clickable, strWrapWith, withAttr)
 import Brick.AttrMap (attrName)
 import Text.Wrap
   ( FillStrategy (FillIndent)
@@ -31,14 +34,31 @@ import Text.Wrap
 -- headings: a 'Heading' names a group and counts it, an 'Entry' is a thing in
 -- that group, and a 'Detail' is the one line of small print an entry is
 -- allowed — a module's file, say. 'Tui.App' gives each its attribute.
-data PaneRow
+data PaneRow n
   = Heading String (Maybe Int)
     -- ^ a group's name, and how many are in it where that is worth saying.
     -- 'Nothing' is the output pane's own heading: the line in focus, which is
     -- one line and does not need counting.
   | Entry String
   | Detail String
-  deriving (Eq, Show)
+  | Tap n String
+    -- ^ **an entry that answers to a click** — `~nf5tx`, the ⚠️ a module's
+    -- unfinished list hangs off. **The whole row is the target, not the glyph**:
+    -- a one-cell target is what `~rr8bx` was reported as, and the row carries
+    -- the symbol anyway.
+    --
+    -- **The name is the row's own, not the pane's.** brick dispatches a click to
+    -- the last extent reported under the pointer, and a 'clickable' inside the
+    -- pane is reported after the pane itself — so a row wins over the pane
+    -- without the pane's own accent-bar drag losing anything, that bar being
+    -- outside the viewport this row is in.
+  deriving (Eq, Show, Functor)
+
+-- The 'Functor' is how a row reaches 'Tui.App''s own 'Name' without this
+-- module ever mentioning one: 'moduleRows' names a row by the module it is
+-- about, and the caller maps that into whatever it calls a clickable thing.
+-- Keeping 'Name' out of here is what lets the drawing suite hold these
+-- functions to their text with no brick resource type in scope.
 
 -- | **The globals pane** — `~5d35q`, his request of 2026-11-11: *"a pane that
 -- shows all the 'globals' in scope. In other words everything that is either
@@ -50,7 +70,7 @@ data PaneRow
 -- two runs under one name ('Thena.Driver.provedSlices'), and a pane listing a
 -- theorem twice would be reporting the engine's bookkeeping rather than what
 -- is in scope.
-globalRows :: [(String, [String])] -> [PaneRow]
+globalRows :: [(String, [String])] -> [PaneRow n]
 globalRows groups =
   concat
     [ Heading label (Just (length names)) : map Entry names
@@ -73,17 +93,46 @@ globalRows groups =
 -- **A module with no file of its own is the prelude**, which arrives with the
 -- session rather than being read as a module, and it is shown without one
 -- rather than left out.
-moduleRows :: [(String, Maybe FilePath)] -> [(FileKind, FilePath)] -> [PaneRow]
+-- | **Each module says whether it came in whole** — `~nf5tx`, his instruction
+-- of 2026-11-13, now that MS12 phase 315 lets a module come in partly:
+-- /"I want the 'modules' pane to use these symbols ✅ ⚠️ ❌ next to each module
+-- to show whether that import was successful."/ See 'ModuleMark' for what each
+-- one means and 'ModuleEntry' for what a row is drawn from.
+moduleRows :: [ModuleEntry] -> [(FileKind, FilePath)] -> [PaneRow String]
 moduleRows modules files =
   concat
-    [ Heading "modules" (Just (length modules))
-        : concat [ Entry m : [Detail f | Just f <- [file]] | (m, file) <- modules ]
+    [ Heading "modules" (Just (length modules)) : concatMap moduleGroup modules
     | not (null modules)
     ]
     <> group "rule bases" ARuleBase
     <> group "shipped with thena" AShippedFile
     <> group "other files read" AnotherFile
   where
+    -- | A module's own row, its file, and — when it is unfolded — what did not
+    -- go in. **Only a ⚠️ or ❌ row is a 'Tap'**: a whole module has nothing to
+    -- unfold, and a row that looks clickable and does nothing is worse than one
+    -- that does not look it.
+    moduleGroup me =
+      row : [Detail f | Just f <- [meFile me]] <> unfolded
+      where
+        row
+          | meMark me == AllIn = Entry labelled
+          | otherwise = Tap (meName me) labelled
+        labelled = markGlyph (meMark me) <> " " <> meName me
+        -- | **The first is the root and the rest are pending** — the engine's
+        -- ruling of 2026-11-11, /"one failure and forty-seven pending, not
+        -- forty-eight warnings"/. The root's own answer is shown; the rest are
+        -- named and nothing is said about why, **because nothing worked out
+        -- why** — the loader tries every later declaration and records what
+        -- does not go through, so a reason for the second would be an invention.
+        unfolded
+          | not (meOpen me) = []
+          | otherwise = case meUnfinished me of
+              [] -> []
+              (name, why) : pending ->
+                Detail (name <> " did not go in:")
+                  : map (Detail . ("  " <>)) why
+                  <> [Detail (nm <> " is pending") | (nm, _) <- pending]
     group label kind =
       let ps = sort [shorten kind p | (k, p) <- files, k == kind]
        in concat [Heading label (Just (length ps)) : map Entry ps | not (null ps)]
@@ -113,6 +162,76 @@ moduleRows modules files =
 data FileKind = AShippedFile | ARuleBase | AModuleFile | AnotherFile
   deriving (Eq, Show)
 
+-- | **How much of a module went in** — `~nf5tx`, and the three states are the
+-- three the engine can actually distinguish, measured under a pty on
+-- 2026-11-13 rather than assumed:
+--
+--   * 'AllIn' — @moduleWhole@: it is in and nothing was left behind.
+--   * 'SomeIn' — it is in, @modulePartly@ answers 'Just', and it did declare
+--     something. The usual partial import.
+--   * 'NoneIn' — it is in the list, @modulePartly@ answers 'Just', and it
+--     declared **nothing at all**. @test\/modules\/AllBad.thena@, whose every
+--     item fails, is still a loaded module with an empty namespace.
+--
+-- **A module whose file does not exist is not one of these**, because it never
+-- reaches the list: the import answers /openFile: does not exist/ and the
+-- session is unchanged. There is nothing on screen to mark.
+--
+-- **An empty module is 'AllIn', not 'NoneIn'.** The 'NoneIn' test is only ever
+-- reached when @modulePartly@ already said something failed, so a module that
+-- legitimately declares nothing cannot fall into it.
+data ModuleMark = AllIn | SomeIn | NoneIn
+  deriving (Eq, Show)
+
+-- | The symbol for a mark — his three, 2026-11-13.
+--
+-- **THE VARIATION SELECTOR IS DELIBERATELY ABSENT. PUTTING IT BACK LOSES THE
+-- MODULE'S NAME.** The emoji spelling of the warning sign is U+26A0 followed by
+-- U+FE0F, and with it the row drew as @⚠@ and nothing else — the name never
+-- appeared at all. Measured under a pty on 2026-11-13; **the cause was not
+-- chased and is not claimed here**, only that the selector is what the row's
+-- disappearance turns on. U+26A0 alone draws fine. **Do not "tidy" the spelling
+-- back to the emoji one.**
+--
+-- **THE PADDING IS FOR THE TERMINAL AND NOT FOR vty, WHICH DISAGREES WITH IT.**
+-- Measured: @Graphics.Text.Width.safeWcswidth@ answers **1** for ✅, for ⚠ and
+-- for ❌ alike, while a terminal draws the two emoji-presentation ones in
+-- **two** cells each — pyte and the real thing both. So ⚠ is padded to two
+-- cells here, which is what makes the names line up on screen: verified under a
+-- pty, all three starting at column 81 of one frame. **In vty's own reckoning
+-- they are then 1, 2 and 1**, and a terminal that renders emoji in one cell
+-- would show the ✅ and ❌ names one column left of the ⚠ ones. That is the
+-- trade, it is cosmetic, and it is in `.claude/CLOSEOUT.md` as `~8btbp`'s
+-- neighbour.
+markGlyph :: ModuleMark -> String
+markGlyph m = case m of
+  AllIn -> "\x2705"
+  SomeIn -> "\x26A0 "
+  NoneIn -> "\x274C"
+
+-- | What a module's row is drawn from.
+--
+-- **Plain data, like everything else here**: 'Tui.App' asks the session which
+-- module is which and flattens the engine's 'Thena.Driver.Unfinished' into
+-- lines, so this module stays a function from data to rows and the drawing
+-- suite can hold all of it to its text.
+data ModuleEntry = ModuleEntry
+  { meName :: String
+    -- ^ the module as 'Thena.Driver.moduleText' spells it. **Also the row's
+    -- click name**, which is why it is a 'String' and not a 'ModuleName'.
+  , meFile :: Maybe FilePath
+    -- ^ 'Nothing' for the prelude, which arrives with the session.
+  , meMark :: ModuleMark
+  , meOpen :: Bool
+    -- ^ whether its unfinished list is unfolded. **Clicking the row toggles
+    -- this** — his instruction: /"when I click again, it hides that list"/.
+  , meUnfinished :: [(String, [String])]
+    -- ^ what did not go in, **in file order**: what the item would have
+    -- declared, and the lines of the answer its own run gave. Only the first
+    -- entry's lines are drawn; see 'moduleRows'.
+  }
+  deriving (Eq, Show)
+
 -- | **The output pane** — `~wx6m3`, his request: *"That stuff that you show me
 -- at the bottom of the screen when I do @:show o@ in a script-mode? That goes
 -- into a new pane also."*
@@ -123,7 +242,7 @@ data FileKind = AShippedFile | ARuleBase | AModuleFile | AnotherFile
 -- answered nothing gets its heading and no rows, rather than a row saying so —
 -- the pane is then visibly empty, which is what "this line said nothing" looks
 -- like.
-outputRows :: Maybe String -> [String] -> [PaneRow]
+outputRows :: Maybe String -> [String] -> [PaneRow n]
 outputRows Nothing _ = []
 outputRows (Just line) out = Heading line Nothing : map Entry out
 
@@ -145,12 +264,13 @@ outputRows (Just line) out = Heading line Nothing : map Entry out
 -- edge is the ordinary case rather than the exception, and what was off the
 -- right edge was simply gone — no marker, no scroll that reaches it. See
 -- 'paneWrap' for the indent a continuation takes.
-paneRowWidget :: PaneRow -> Widget n
+paneRowWidget :: Ord n => PaneRow n -> Widget n
 paneRowWidget row = case row of
   Heading label count ->
     withAttr (attrName "pane.heading") (wrapped (label <> maybe "" (\n -> "  " <> show n) count))
   Entry t -> wrapped ("  " <> t)
   Detail t -> withAttr (attrName "pane.detail") (wrapped ("    " <> t))
+  Tap n t -> clickable n (wrapped ("  " <> t))
   where
     wrapped = strWrapWith paneWrap
 
