@@ -2546,10 +2546,32 @@ dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 -- the same stop-rather-than-wrap the whole mode uses. **Option+Backspace
 -- keeps its word-delete** — that arrives with 'V.MMeta' and never matches
 -- this clause.
+--
+-- **A line he has EMPTIED is removed when he backs out of it** — his report,
+-- 2026-11-13: /"I start deleting with backspace and I go one character after
+-- another, reaching the beginning of the current line. It correctly teleports
+-- me to the end of the line above but the line bellow is still there. I think
+-- that the intuitive way would be to observe that I have literally deleted it
+-- and when I am teleported, it should remove it."/
+--
+-- **It does not contradict his ruling of 2026-11-11 that arrowing off a line
+-- leaves it alone** ('stScriptStale'), and the difference is the key rather
+-- than the state. Up and Down say /go elsewhere/; Backspace says /delete/, and
+-- it is the only key that does both. He pressed a delete key once per character
+-- and then once more — at that last press the line itself is the only thing
+-- left to delete, so taking it is what the keystroke already meant.
+--
+-- **The line still having text keeps today's pure navigation**, which is his
+-- own feature of 2026-10-20: backing into the line above when there is nothing
+-- under the caret to delete.
 dispatchScriptEvent ev@(VtyEvent (V.EvKey V.KBS [])) = do
   st <- get
   let (_, col) = getCursorPosition (stInput st)
-  if col == 0 then scriptUp else handleReplEvent ev
+      line = concatMap Text.unpack (getEditContents (stInput st))
+  case stScriptPos st of
+    Just i | col == 0, all isSpace line -> scriptBackOut i
+    _ | col == 0 -> scriptUp
+    _ -> handleReplEvent ev
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptCutAndRun
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
 dispatchScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
@@ -3731,6 +3753,34 @@ afterScriptEdit = do
   closeDropdowns
   followInput
   persist
+
+-- | **Back out of a line that has been emptied: remove it and seat the caret
+-- at the end of the line above** — `~282h8`, his report of 2026-11-13.
+--
+-- **It is the splice `scriptSubmit` already does for a cleared line, reached by
+-- the other gesture.** Clearing a committed line and pressing Enter has spliced
+-- the tail up and re-run it since 2026-10-20; this makes the backspace that
+-- walks off the front of the same emptied line mean the same thing, so the two
+-- cannot disagree about what emptying a line does. **Nothing new is decided
+-- about truncate-versus-splice** — `~c9rj9` is still his, and this adds no
+-- third behaviour.
+--
+-- **At line 0 it is a no-op, which is what Backspace there already did.** There
+-- is no line above to be seated on, and the mode stops rather than wraps
+-- everywhere else ('scriptUp'). Removing the first line stays reachable by
+-- clearing it and pressing Enter.
+scriptBackOut :: Int -> EventM Name St ()
+scriptBackOut i
+  | i <= 0 = pure ()
+  | otherwise = do
+      st <- get
+      case scriptSessionBefore st i of
+        Nothing -> pure ()
+        Just s -> do
+          let (ran, unrun) = tailFrom st (i + 1)
+          rebuilt <- liftIO (foldRun s ran)
+          let doc = take i (stScript st) ++ rebuilt ++ unrun
+          loadScriptAt st { stScript = doc } (i - 1) (stScriptDraft st)
 
 -- | **Discard the line under the caret and everything after it**, no
 -- replacement run. Reached by @:script drop@ in the command bar; a no-op
