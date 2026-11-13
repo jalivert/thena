@@ -16,15 +16,38 @@ module Tui.Config
   ) where
 
 import Control.Exception (IOException, try)
+import Data.Char (isDigit)
+import Data.List (intercalate)
+import Data.Maybe (mapMaybe)
 import System.Directory (XdgDirectory (XdgConfig), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 import System.FilePath ((</>))
 
+import Tui.Layout
+  ( Layout
+  , Pane
+  , Position
+  , defaultLayout
+  , layoutFrom
+  , layoutPairs
+  , paneByName
+  , paneName
+  )
 import Tui.Theme (neonPinkDark, themeName)
 
 data Config = Config
   { cfgTheme      :: String
   , cfgAutoSelect :: Bool
   , cfgWhisperOn  :: Bool
+  , cfgLayout     :: Layout
+    -- ^ **which panes are on screen and where** — `~fxc89`'s half of
+    -- `~vqsd8`, and the two take one answer because they were put to him as
+    -- one question.
+  , cfgWidths     :: [(Pane, Int)]
+    -- ^ **the width he pulled each pane to, in columns** — `~vqsd8`. A list
+    -- and not a total map: **only a pane he has actually pulled belongs here**,
+    -- so a pane he has never touched keeps taking its width from the terminal's
+    -- own, which is what 'Tui.App.appStart' computes and what makes an unwritten
+    -- dotfile indistinguishable from no feature.
   } deriving (Show, Eq)
 
 -- | The standing defaults as they already are in 'Tui.App.runTui' —
@@ -35,6 +58,8 @@ defaultConfig = Config
   { cfgTheme      = themeName neonPinkDark
   , cfgAutoSelect = True
   , cfgWhisperOn  = True
+  , cfgLayout     = defaultLayout
+  , cfgWidths     = []
   }
 
 -- | @~\/.config\/thena@ — not @thena-tui@: the TUI is the only frontend
@@ -71,12 +96,52 @@ applyLine cfg line = case break (== '=') line of
   ("theme", '=' : v)     -> cfg { cfgTheme = v }
   ("preselect", '=' : v) | Just b <- parseBool v -> cfg { cfgAutoSelect = b }
   ("whisper", '=' : v)   | Just b <- parseBool v -> cfg { cfgWhisperOn = b }
+  ("panes", '=' : v)     -> cfg { cfgLayout = layoutFrom (mapMaybe parsePane (commas v)) }
+  ("widths", '=' : v)    -> cfg { cfgWidths = mapMaybe parseWidth (commas v) }
   _                      -> cfg
 
 parseBool :: String -> Maybe Bool
 parseBool "on"  = Just True
 parseBool "off" = Just False
 parseBool _     = Nothing
+
+-- | **A bad entry is dropped and the rest of the line still counts**, which is
+-- one step more forgiving than 'applyLine''s own rule of dropping the whole
+-- line — deliberately. A @panes=@ line is six entries, and a frontend's
+-- preference file is not worth losing five good ones over a typo in the sixth.
+commas :: String -> [String]
+commas v = case break (== ',') v of
+  (a, [])       -> [a]
+  (a, _ : rest) -> a : commas rest
+
+-- | @1:globals@ — the position, then the name the pane already goes by.
+--
+-- **Position first, because the file is read in position order** and anyone
+-- editing it by hand is reading down a column of 1 to 6.
+-- 'Tui.Layout.layoutFrom' is what rejects a position outside that range, not
+-- this: keeping the range in one place is why it is built out of
+-- 'Tui.Layout.openPane'.
+parsePane :: String -> Maybe (Position, Pane)
+parsePane entry = case break (== ':') entry of
+  (n, ':' : name) -> (,) <$> readInt n <*> paneByName name
+  _               -> Nothing
+
+-- | @globals:60@ — the pane, then its width in columns.
+--
+-- **Name first here and position first above, because these are different
+-- keys**: a width belongs to a pane whatever position it sits at, which is the
+-- whole reason the two are separate lines rather than one list of triples.
+parseWidth :: String -> Maybe (Pane, Int)
+parseWidth entry = case break (== ':') entry of
+  (name, ':' : n) -> (,) <$> paneByName name <*> readInt n
+  _               -> Nothing
+
+-- | **Digits and nothing else.** 'reads' would take @"60 junk"@ and a leading
+-- sign, and neither is a width or a position.
+readInt :: String -> Maybe Int
+readInt t
+  | not (null t), all isDigit t = Just (read t)
+  | otherwise = Nothing
 
 -- | Overwrites the whole file with the current preferences — called after
 -- every `:theme`/`:preselect`/`:whisper` command, not batched, so the
@@ -98,4 +163,8 @@ writeConfig path cfg = do
     [ "theme=" <> cfgTheme cfg
     , "preselect=" <> (if cfgAutoSelect cfg then "on" else "off")
     , "whisper=" <> (if cfgWhisperOn cfg then "on" else "off")
+    , "panes=" <> intercalate ","
+        [show n <> ":" <> paneName p | (n, p) <- layoutPairs (cfgLayout cfg)]
+    , "widths=" <> intercalate ","
+        [paneName p <> ":" <> show w | (p, w) <- cfgWidths cfg]
     ]

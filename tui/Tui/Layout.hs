@@ -39,6 +39,8 @@ module Tui.Layout
   , columnsOf
   , openPane
   , closePane
+  , layoutPairs
+  , layoutFrom
   ) where
 
 import qualified Data.Map.Strict as Map
@@ -174,3 +176,28 @@ closePane p (Layout m) = Layout (without p m)
 
 without :: Pane -> Map.Map Position Pane -> Map.Map Position Pane
 without p = Map.filter (/= p)
+
+-- | **Every placed pane and where it is, in position order** — `~vqsd8`, so
+-- 'Tui.Config' can write a layout down without 'Layout' stopping being opaque.
+--
+-- **The inverse of 'layoutFrom' on anything 'layoutFrom' accepts**, which is
+-- what makes a round trip through the dotfile mean something.
+layoutPairs :: Layout -> [(Position, Pane)]
+layoutPairs (Layout m) = Map.toAscList m
+
+-- | **A layout read back from somewhere outside** — `~vqsd8`, the dotfile.
+--
+-- **Built by replaying 'openPane' over an empty layout rather than by wrapping
+-- the map**, which is the whole point: every invariant 'openPane' keeps is kept
+-- here for free, and a file that has been edited by hand cannot produce a
+-- layout the commands could not. A position outside one to six is dropped, and
+-- a pane named twice ends up at the last position given rather than at both.
+--
+-- **It never fails.** A frontend's own preference file is not worth refusing to
+-- start over — same judgement as 'Tui.Config.loadConfig', which falls back
+-- silently — so the worst a nonsense list can do is place fewer panes than it
+-- meant to.
+layoutFrom :: [(Position, Pane)] -> Layout
+layoutFrom = foldl place (Layout Map.empty)
+  where
+    place layout (n, p) = fst (openPane p n layout)

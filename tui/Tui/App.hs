@@ -144,7 +144,6 @@ import Tui.Layout
   , allPanes
   , closePane
   , columnsOf
-  , defaultLayout
   , openPane
   , paneAt
   , paneByName
@@ -531,6 +530,15 @@ data St = St
     -- and it names three places they could live; a position is the same
     -- question about the same panes and takes the same answer whenever he
     -- gives it.
+  , stDefaultWidths :: Map.Map Pane Int
+    -- ^ **the widths 'appStart' derived from the terminal, kept so that a
+    -- width he CHOSE can be told from one he merely got** — `~vqsd8`.
+    -- 'configOf' writes only the difference, which is what stops an untouched
+    -- pane being frozen at the first terminal's arithmetic.
+    --
+    -- **Not a second source of truth for drawing.** Nothing reads this but
+    -- 'configOf'; 'stPaneWidths' is still the only map the clamp and the
+    -- drawing consult.
   , stPaneWidths :: Map.Map Pane Int
     -- ^ **how wide each pane is, in columns** — `~gs8tj`. Keyed by the pane
     -- and filled over every pane there is, closed ones included, so a pane
@@ -638,8 +646,11 @@ runTui = do
         , stStored      = Nothing
         , stGlobalsClosed = Set.empty
         , stModulesOpen = Set.empty
-        , stLayout      = defaultLayout
-        , stPaneWidths  = Map.empty
+        , stLayout      = cfgLayout cfg
+        , stDefaultWidths = Map.empty
+          -- **The stored widths start here and 'appStart' fills the gaps**,
+          -- because the terminal's width is not known until there is a vty.
+        , stPaneWidths  = Map.fromList (cfgWidths cfg)
         , stDrag        = Nothing
         , stPicker      = Nothing
         , stEscRun      = Nothing
@@ -734,7 +745,16 @@ appStart = do
   -- unfilled map.
   (w, _) <- liftIO (V.displayBounds (V.outputIface vty))
   st <- get
-  put st { stPaneWidths = Map.fromList [(p, defaultPaneWidth w) | p <- allPanes] }
+  -- | **A width restored from the dotfile wins; every other pane takes the
+  -- terminal's** — `~vqsd8`. 'Map.union' is left-biased, and 'stPaneWidths'
+  -- holds exactly what the dotfile had at this point, so this is the whole of
+  -- the layering. **The clamp still applies on every frame**, which is what
+  -- keeps a 60-column pane restored into an 80-column terminal sane.
+  let derived = Map.fromList [(p, defaultPaneWidth w) | p <- allPanes]
+  put st
+    { stPaneWidths = Map.union (stPaneWidths st) derived
+    , stDefaultWidths = derived
+    }
 
 -- | The panes a drag can resize: **the ones on screen, which is now a
 -- question about 'stLayout' rather than a constant** — `~fxc89`. A closed pane
@@ -2060,11 +2080,19 @@ handleResize ev = case ev of
     startDrag p from whole = do
       st <- get
       put st { stDrag = Just (Drag p from (paneWidthOf st p) whole) }
+    -- | **The width is persisted when the drag ENDS, not while it runs** —
+    -- `~vqsd8`. A drag arrives as a run of mouse-downs (vty asks for
+    -- @ESC[?1002h@), so saving in 'resizeTo' would rewrite the dotfile on every
+    -- report of every pull. This is the one place both mouse-up shapes meet.
     release = do
       st <- get
       case stDrag st of
         Nothing -> pure False
-        Just _ -> put st { stDrag = Nothing } >> pure True
+        Just _ -> do
+          let st' = st { stDrag = Nothing }
+          put st'
+          liftIO (saveConfig (configOf st'))
+          pure True
 
 paneLeft :: Name -> EventM Name St (Maybe Int)
 paneLeft n = fmap (locationColumn . extentUpperLeft) <$> lookupExtent n
@@ -2523,8 +2551,10 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- TUI-local like `:theme` and `:fold`: the engine has no panes, so
         -- this never reaches it.
         paneLine@(":pane" : _)
-          | Just (layout', said) <- paneCommand paneLine (stLayout st0) ->
-              appendTurn st0 { stLayout = layout' } Nothing [said]
+          | Just (layout', said) <- paneCommand paneLine (stLayout st0) -> do
+              let st' = st0 { stLayout = layout' }
+              liftIO (saveConfig (configOf st'))
+              appendTurn st' Nothing [said]
         -- | `:script` enters live-script mode (`~5vtt3`). TUI-local like the
         -- rest of this block, and the only way *in* — leaving again is the
         -- command bar's `:script`, because once the mode is on, what you type
@@ -3838,8 +3868,10 @@ scriptBarSubmit st text = case words text of
   -- screen is what live-script mode is mostly made of; leaving it out would
   -- mean leaving the mode to move a pane.
   paneLine@(":pane" : _)
-    | Just (layout', said) <- paneCommand paneLine (stLayout st) ->
-        put st { stLayout = layout', stScriptBar = Nothing, stScriptNote = Just said }
+    | Just (layout', said) <- paneCommand paneLine (stLayout st) -> do
+        let st' = st { stLayout = layout', stScriptBar = Nothing, stScriptNote = Just said }
+        liftIO (saveConfig (configOf st'))
+        put st'
   [":preselect", mode] | mode `elem` ["on", "off"] -> do
     let st' = st { stAutoSelect = mode == "on", stScriptBar = Nothing, stScriptNote = Just ("preselect: " <> mode) }
     liftIO (saveConfig (configOf st'))
@@ -3941,13 +3973,32 @@ freeClockPath = do
         if there then go rest else pure (suffixed t)
   go tries
 
--- | The slice of 'St' that 'Tui.Config' persists, read off whichever state
--- a `:theme`/`:preselect`/`:whisper` command just produced.
+-- | The slice of 'St' that 'Tui.Config' persists, read off whichever state the
+-- command or the gesture just produced.
+--
+-- **The layout and the widths are in it as of `~vqsd8`** — his ruling of
+-- 2026-11-13, the dotfile, with `~fxc89`'s positions taking the same answer
+-- because they were put to him as one question.
+--
+-- **Only a pane whose width differs from the terminal's own default is
+-- written.** 'stPaneWidths' is total over 'allPanes' — 'appStart' fills it from
+-- 'defaultPaneWidth' — so writing it whole would turn "I have never touched a
+-- pane" into six absolute numbers from whatever terminal happened to start the
+-- TUI first, and the next narrower terminal would read them back as choices he
+-- had made. **Filtering here is what keeps an untouched pane reading its width
+-- off the window**, which is the behaviour the second-terminal objection to the
+-- dotfile was about.
 configOf :: St -> Config
 configOf st = Config
   { cfgTheme      = themeName (stTheme st)
   , cfgAutoSelect = stAutoSelect st
   , cfgWhisperOn  = stWhisperOn st
+  , cfgLayout     = stLayout st
+  , cfgWidths     =
+      [ (p, w)
+      | (p, w) <- Map.toAscList (stPaneWidths st)
+      , Just w /= Map.lookup p (stDefaultWidths st)
+      ]
   }
 
 appendTurn :: St -> Maybe String -> [String] -> EventM Name St ()

@@ -21,6 +21,8 @@ import Tui.Layout
   , closePane
   , columnsOf
   , defaultLayout
+  , layoutFrom
+  , layoutPairs
   , openPane
   , paneAt
   , paneByName
@@ -94,4 +96,30 @@ layoutTests =
     , testCase "every pane has a name and every name a pane" $ do
         positions @?= [1 .. 6]
         map (paneByName . paneName) allPanes @?= map Just allPanes
+    , -- | **`~vqsd8`, his ruling of 2026-11-13** — the layout goes in the
+      -- dotfile, so it has to survive being written down and read back.
+      -- 'Tui.Config' writes 'layoutPairs' and parses into 'layoutFrom'; if
+      -- these two stop being inverse, his screen comes back wrong after a
+      -- restart and nothing else would say so.
+      testCase "a layout survives the round trip the dotfile puts it through" $ do
+        layoutFrom (layoutPairs defaultLayout) @?= defaultLayout
+        let moved = fst (openPane Quests 5 (closePane Globals defaultLayout))
+        layoutFrom (layoutPairs moved) @?= moved
+        layoutFrom (layoutPairs (closePane Output moved)) @?= closePane Output moved
+    , -- | **An empty screen round-trips too**, which the @panes=@ line writes
+      -- as nothing at all — close all six and the document has the window, so
+      -- this is a layout he can really be in when he quits.
+      testCase "every pane closed is a layout and not a missing one" $ do
+        let shut = foldr closePane defaultLayout allPanes
+        placedPanes shut @?= []
+        layoutFrom (layoutPairs shut) @?= shut
+    , -- | **A hand-edited dotfile cannot make a layout the commands could
+      -- not** — which is why 'layoutFrom' replays 'openPane' instead of
+      -- wrapping the map. Out-of-range positions are dropped and a pane named
+      -- twice lands once.
+      testCase "a nonsense pane list is read as far as it makes sense" $ do
+        layoutFrom [(7, Globals), (0, Modules), (-1, Output)] @?= layoutFrom []
+        let twice = layoutFrom [(1, Globals), (4, Globals)]
+        placedPanes twice @?= [Globals]
+        positionOf Globals twice @?= Just 4
     ]
