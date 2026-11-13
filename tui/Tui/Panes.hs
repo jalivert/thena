@@ -8,6 +8,7 @@
 module Tui.Panes
   ( PaneRow (..)
   , paneWrap
+  , foldMark
   , globalRows
   , ModuleMark (..)
   , markGlyph
@@ -42,6 +43,19 @@ data PaneRow n
     -- ^ a group's name, and how many are in it where that is worth saying.
     -- 'Nothing' is the output pane's own heading: the line in focus, which is
     -- one line and does not need counting.
+  | TapHeading n String (Maybe Int)
+    -- ^ **a heading that answers to a click** — `~6n5qb`, his instruction of
+    -- 2026-11-12, the globals pane's collapsing namespaces.
+    --
+    -- **A fifth kind rather than a 'Tap' wearing a heading's text**, because a
+    -- 'Tap' is an entry and is drawn like one: indented two columns, in the
+    -- ordinary ink. A namespace's heading sits at column 0 and is dim, and a
+    -- heading that moved two columns right the moment it became clickable
+    -- would be saying something about itself that is not true. **What it draws
+    -- is a 'Heading', exactly; the name is the only difference.**
+    --
+    -- **It keeps the count while collapsed**, which is the whole of how a
+    -- folded group still says how much is behind it.
   | Entry String
   | Detail String
   | Tap n String
@@ -73,14 +87,50 @@ data PaneRow n
 -- two runs under one name ('Thena.Driver.provedSlices'), and a pane listing a
 -- theorem twice would be reporting the engine's bookkeeping rather than what
 -- is in scope.
-globalRows :: [(String, [String])] -> [PaneRow n]
-globalRows groups =
+-- | **Each namespace folds and unfolds, and its heading says which it is** —
+-- `~6n5qb`, his instruction of 2026-11-12: /"so that it is easier to navigate
+-- it"/. The first argument is the labels that are **collapsed**.
+--
+-- **Collapsed is the deviation, so the default is every group open** and the
+-- pane says exactly what it said before anyone clicked. The alternative —
+-- everything folded on launch — would have made a pane he asked for to see what
+-- is in scope open saying nothing is.
+--
+-- **A collapsed group keeps its count.** That is the whole of how it still tells
+-- him how much is behind it; a heading with the names gone and no number would
+-- be strictly less than the fold replaced.
+--
+-- **Every heading is a 'TapHeading', including an open one.** Unlike the modules
+-- pane — where only a ⚠️\/❌ module is clickable because a whole one has nothing
+-- to unfold — every namespace here can be folded, so there is no row that looks
+-- clickable and does nothing.
+globalRows :: [String] -> [(String, [String])] -> [PaneRow String]
+globalRows collapsed groups =
   concat
-    [ Heading label (Just (length names)) : map Entry names
+    [ TapHeading label (foldMark open <> " " <> label) (Just (length names))
+        : [Entry n | open, n <- names]
     | (label, raw) <- groups
     , let names = sort (nub raw)
     , not (null names)
+    , let open = label `notElem` collapsed
     ]
+
+-- | **The pair of symbols a fold's state is said with** — his instruction of
+-- 2026-11-12 asked for a pair, and these are it: @\x25be@ ▾ open, @\x25b8@ ▸
+-- collapsed. 'True' is open.
+--
+-- **The down-pointing one is open because it points at what it revealed**,
+-- which is the convention every file tree uses and the one a reader does not
+-- have to be taught.
+--
+-- **Both are one column wide and deliberately not emoji**, which is why they
+-- need no entry in 'wideGlyphs': the ✅ ⚠️ ❌ of the modules pane are
+-- emoji-presentation code points that vty's built-in table calls one column and
+-- a terminal spends two on, and that mismatch shoves the neighbouring pane's
+-- accent bar sideways (`~8ztt3`). A geometric-shape triangle has no such
+-- disagreement.
+foldMark :: Bool -> String
+foldMark open = if open then "\x25be" else "\x25b8"
 
 -- | **The modules pane** — `~t7wc8`, his request: *"a pane that shows every
 -- file that is imported and consulted (every module)."*
@@ -313,12 +363,19 @@ outputRows (Just line) out = Heading line Nothing : map Entry out
 paneRowWidget :: Ord n => PaneRow n -> Widget n
 paneRowWidget row = case row of
   Heading label count ->
-    withAttr (attrName "pane.heading") (wrapped (label <> maybe "" (\n -> "  " <> show n) count))
+    withAttr (attrName "pane.heading") (wrapped (headingText label count))
   Entry t -> wrapped ("  " <> t)
   Detail t -> withAttr (attrName "pane.detail") (wrapped ("    " <> t))
+  TapHeading n label count ->
+    clickable n (withAttr (attrName "pane.heading") (wrapped (headingText label count)))
   Tap n t -> clickable n (wrapped ("  " <> t))
   where
     wrapped = strWrapWith paneWrap
+
+-- | A heading's text, shared by the two kinds of heading so that a clickable
+-- one cannot drift from a plain one.
+headingText :: String -> Maybe Int -> String
+headingText label count = label <> maybe "" (\n -> "  " <> show n) count
 
 -- | How a pane's row wraps.
 --

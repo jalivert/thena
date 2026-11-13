@@ -191,6 +191,11 @@ data Name
   | ScriptBar
   | HistoryVP
   | PaneVP Pane
+  | GlobalGroup String
+    -- ^ **one namespace's heading in the globals pane, by its label** —
+    -- `~6n5qb`. The label and not an index: the groups are rebuilt from the
+    -- session on every frame and a module loaded mid-session reorders them, so
+    -- a click carrying a position would fold whichever group had moved into it.
   | ModuleRow String
     -- ^ **one module's row in the modules pane, by the name it is spelled
     -- with** — `~nf5tx`. A row of its own rather than arithmetic off the pane's
@@ -492,6 +497,20 @@ data St = St
     -- the index, replaces this one entry and writes it back, so two TUIs open
     -- on the same project do not drop each other's sessions, and there is no
     -- second copy of the index to keep true.
+  , stGlobalsClosed :: Set.Set String
+    -- ^ **the globals pane's namespaces that are folded** — `~6n5qb`, his
+    -- instruction of 2026-11-12, and clicking a heading toggles one.
+    --
+    -- **It holds what is CLOSED, where 'stModulesOpen' holds what is open**,
+    -- and the two are opposite because their defaults are. A module's
+    -- unfinished list starts folded — there is usually nothing in it — while a
+    -- namespace starts unfolded, because the pane exists to show what is in
+    -- scope and must not open saying nothing is. **In both cases the set holds
+    -- the deviation from the default**, so an empty set is the pane as it was
+    -- before this feature.
+    --
+    -- **Nothing prunes it.** A label left here after its module is gone costs a
+    -- string, and means the group is still folded if that module comes back.
   , stModulesOpen :: Set.Set String
     -- ^ **the modules whose unfinished list is unfolded** — `~nf5tx`, his
     -- instruction of 2026-11-13, and clicking the row toggles one. A set and
@@ -617,6 +636,7 @@ runTui = do
         , stScriptNote  = Nothing
         , stScriptStale = Nothing
         , stStored      = Nothing
+        , stGlobalsClosed = Set.empty
         , stModulesOpen = Set.empty
         , stLayout      = defaultLayout
         , stPaneWidths  = Map.empty
@@ -1157,7 +1177,9 @@ draw st =
     -- word — the attribute names ("edge.globals" and the rest) are built from
     -- it too, so a theme keeps its accent per pane wherever the pane is moved.
     paneOf p = withAttr (attrName "panel") $ case p of
-      Globals -> pane' (paneBody (globalRows (globalGroups st)))
+      Globals ->
+        pane' (paneBody (map (fmap GlobalGroup)
+                          (globalRows (Set.toList (stGlobalsClosed st)) (globalGroups st))))
       Modules -> pane' (paneBody (map (fmap ModuleRow) (moduleRows (moduleEntries st) (fileEntries st))))
       Output -> pane' (paneBody (outputRows focusText focusOut))
       ProofTerm -> pane' (padAll 1 (renderDevelopment fold links))
@@ -1954,21 +1976,30 @@ handleEventFor ev = do
 -- click, and the order here is only so that a drag in progress keeps the
 -- events it needs.
 --
--- **Only a row that is drawn as a 'Tui.Panes.Tap' can arrive here at all**,
--- which is to say only a ⚠️ or ❌ module: 'moduleRows' draws a whole module as
--- a plain entry with no name to click. So there is no "nothing to unfold" case
--- to answer.
+-- **Only a row drawn with a name of its own can arrive here at all** — a
+-- 'Tui.Panes.Tap' or a 'Tui.Panes.TapHeading'. In the modules pane that is a
+-- ⚠️ or ❌ module and nothing else ('moduleRows' draws a whole module as a plain
+-- entry with no name to click), so there is no "nothing to unfold" case to
+-- answer; in the globals pane it is every namespace heading, which can always
+-- be folded.
 handlePaneClick :: BrickEvent Name AppEvent -> EventM Name St Bool
 handlePaneClick ev = case ev of
   MouseDown (ModuleRow m) V.BLeft _ _ -> do
     st <- get
-    let open = stModulesOpen st
-        toggled
-          | Set.member m open = Set.delete m open
-          | otherwise = Set.insert m open
-    put st { stModulesOpen = toggled }
+    put st { stModulesOpen = toggle m (stModulesOpen st) }
+    pure True
+  -- **Every namespace heading is clickable, so there is no inert row here** —
+  -- `~6n5qb`, unlike 'ModuleRow' above, where only a module with something to
+  -- unfold is drawn as a target at all.
+  MouseDown (GlobalGroup label) V.BLeft _ _ -> do
+    st <- get
+    put st { stGlobalsClosed = toggle label (stGlobalsClosed st) }
     pure True
   _ -> pure False
+  where
+    toggle x set
+      | Set.member x set = Set.delete x set
+      | otherwise = Set.insert x set
 
 -- | **A pane being pulled wider or narrower by its accent bar** — `~gs8tj`.
 -- Returns whether it took the event, so that everything it does not take
@@ -2915,6 +2946,9 @@ tuiHelpLines =
     , ("",                  "  1 2 / 3 4 / 5 6, so odd is the left column and even the right")
     , ("",                  "  " <> intercalate ", " (map paneName allPanes))
     , (":pane ‹name› close", "take it off the screen — its width is remembered")
+    , ("a click in a list pane", "folds a namespace in globals — ▾ is open, ▸ folded,")
+    , ("",                  "  and the count stays either way; unfolds a ⚠️ or ❌ module's")
+    , ("",                  "  row in modules. Anywhere along the row, not just the symbol")
     , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
     , (":script sessions",  "pick a stored session from a list and resume it")

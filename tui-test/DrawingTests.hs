@@ -33,6 +33,7 @@ import Tui.Panes
   , ModuleEntry (..)
   , ModuleMark (..)
   , PaneRow (..)
+  , foldMark
   , globalRows
   , markColumns
   , markGlyph
@@ -234,11 +235,17 @@ foldedLiteral =
 -- 'Tui.Panes' and therefore decidable here. The pty stays the authority on
 -- where the panes are and how wide; this is the text in them.
 -- | **Pins the row type where a row has no click name to infer one from.**
--- 'globalRows' and 'outputRows' are polymorphic in what a 'Tui.Panes.Tap'
--- would be named by, and never build one, so an expected list of theirs has
--- nothing to fix the variable.
+-- 'outputRows' is polymorphic in what a 'Tui.Panes.Tap' would be named by, and
+-- never builds one, so an expected list of its rows has nothing to fix the
+-- variable. **'globalRows' is no longer one of those** — `~6n5qb` made every
+-- namespace heading a 'Tui.Panes.TapHeading' named by its label.
 asRows :: [PaneRow String] -> [PaneRow String]
 asRows = id
+
+-- | An open namespace heading, as `~6n5qb` draws one — the label is the click
+-- name, the text carries the symbol.
+openGroup :: String -> Int -> PaneRow String
+openGroup label n = TapHeading label (foldMark True <> " " <> label) (Just n)
 
 -- | A module that came in whole, with the file it was read from — `~nf5tx`.
 whole :: String -> Maybe FilePath -> ModuleEntry
@@ -252,12 +259,42 @@ paneRowCases :: [TestTree]
 paneRowCases =
   [ testCase "an empty group is not drawn as a heading with nothing under it" $
       assertEqual ""
-        (asRows [Heading "Prelude" (Just 2), Entry "And.both", Entry "Eq.refl"])
-        (globalRows [("proved in this session", []), ("Prelude", ["Eq.refl", "And.both"])])
+        (asRows [openGroup "Prelude" 2, Entry "And.both", Entry "Eq.refl"])
+        (globalRows [] [("proved in this session", []), ("Prelude", ["Eq.refl", "And.both"])])
   , testCase "a name listed twice is listed once — a suspended proof is two runs" $
       assertEqual ""
-        (asRows [Heading "proved in this session" (Just 1), Entry "subst"])
-        (globalRows [("proved in this session", ["subst", "subst"])])
+        (asRows [openGroup "proved in this session" 1, Entry "subst"])
+        (globalRows [] [("proved in this session", ["subst", "subst"])])
+  , -- | **`~6n5qb`, his instruction of 2026-11-12.** The pane as it was before
+    -- anyone clicked: nothing collapsed, so every group's names are drawn, and
+    -- a heading is a click target whether it is open or shut.
+    testCase "a collapsed namespace keeps its heading and its count, and drops its names" $
+      assertEqual ""
+        [ TapHeading "Prelude" "\x25b8 Prelude" (Just 2)
+        , openGroup "examples.Lambda" 1
+        , Entry "step.E-beta"
+        ]
+        (globalRows ["Prelude"]
+          [ ("Prelude", ["Eq.refl", "And.both"])
+          , ("examples.Lambda", ["step.E-beta"])
+          ])
+  , testCase "the symbol pair says which state a namespace is in, and only that" $
+      assertEqual "" ("\x25be", "\x25b8") (foldMark True, foldMark False)
+  , -- | **A label that is collapsed and no longer on screen changes nothing** —
+    -- nothing prunes 'Tui.App.stGlobalsClosed', so the set outlives the group.
+    testCase "a collapsed label for a group that is gone is ignored" $
+      assertEqual ""
+        (asRows [openGroup "Prelude" 1, Entry "Eq.refl"])
+        (globalRows ["examples.Gone"] [("Prelude", ["Eq.refl"])])
+  , -- | **Collapsing every group leaves the headings and nothing else**, which
+    -- is his reason for asking: eight module groups fit where one module's
+    -- thirty names did not.
+    testCase "every namespace collapsed leaves one row each" $
+      assertEqual ""
+        [ TapHeading "a" "\x25b8 a" (Just 2)
+        , TapHeading "b" "\x25b8 b" (Just 1)
+        ]
+        (globalRows ["a", "b"] [("a", ["a.one", "a.two"]), ("b", ["b.one"])])
   , testCase "a module carries its file, and the prelude has none" $
       assertEqual ""
         [ Heading "modules" (Just 2)
