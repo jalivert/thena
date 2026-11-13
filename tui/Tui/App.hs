@@ -963,8 +963,20 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- of the screen and should not ask to be read; a closed pane is the one that
   -- is saying something unusual, and dim is how this TUI says /"present but not
   -- in play"/ everywhere else — a stale script line, a pane's heading.
-  , (attrName "panebar.open",   ink (themeInk th))
-  , (attrName "panebar.closed", ink (themeDim th))
+  --
+  -- **Both are filled blocks as of his instruction of 2026-11-13** — /"a pink
+  -- accent background around the text (get the contrast right)"/ — so the
+  -- difference between an open pane and a closed one is now the fill itself and
+  -- not only the ink.
+  --
+  -- **The contrast was computed, not eyeballed, and that was the instruction.**
+  -- An open chip is 'themeStage' on 'themePaneBar': in neon-pink-dark that is
+  -- **6.4:1**, where 'themeInk' on the same pink is 2.8:1 and fails for text.
+  -- A closed chip is 'themeDim' on 'themePanel', **3.8:1** — below AA and
+  -- deliberately so: a closed pane is a recessed label and this is the same
+  -- dim-on-panel pairing `pane.heading` and `pane.detail` already ship.
+  , (attrName "panebar.open",   surface (themePaneBar th) (themeStage th))
+  , (attrName "panebar.closed", surface (themePanel th) (themeDim th))
   -- A placeholder box, in the input line, in a dimmer ink than ordinary
   -- text — his `.jalivert/TUI.md`-adjacent report, 2026-09-29: the caret
   -- itself went dark standing on one. Root cause: the glyph is a solid
@@ -1038,13 +1050,18 @@ draw :: St -> [Widget Name]
 draw st =
   pickerLayer st
     <> popups
-    <> [padAll 1 (vBox [paneBar, hBox [replColumn, gapH, paneColumns]])]
+    <> [padAll 1 (vBox [paneBar, str " ", hBox [replColumn, gapH, paneColumns]])]
   where
     budget = Budget 200
     s = activeSession st
 
     -- | **Every pane, which are open, and where** — `~7tfhd`. Above
-    -- everything and the full width of the screen, his ruling of 2026-11-13;
+    -- everything and the full width of the screen, his ruling of 2026-11-13,
+    -- **with a blank row under it** — /"It needs breathing space bellow it to
+    -- separate it from the main pane."/ The row is a 'str' in the 'vBox' rather
+    -- than padding on the bar, so it costs the document exactly one line and
+    -- nothing has to reason about a pad that does not reduce a child's width
+    -- (brick's trap, and the reason `padLeft` is avoided elsewhere here);
     -- 'Tui.Layout.paneBarEntries' decides the order and
     -- 'Tui.Panes.paneBarWidget' how the line reads, so neither is decided here.
     paneBar =

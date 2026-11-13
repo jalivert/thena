@@ -69,6 +69,22 @@ data Theme = Theme
                              -- accent happens to be lightest, so retuning a
                              -- pane never moves the marker with it.
   , themeJevPick :: V.Color -- ^ background for a dropdown row Jev floated
+  , themePaneBar :: V.Color
+    -- ^ **the filled background of one chip in the pane bar** — `~7tfhd`, his
+    -- instruction of 2026-11-13: /"a pink accent background around the text
+    -- (get the contrast right)"/.
+    --
+    -- **A field of its own rather than a pane's accent reused**, because this
+    -- is a decision each theme has to answer: the bar names all six panes at
+    -- once, so borrowing any one pane's accent would make the bar look like it
+    -- belonged to that pane.
+    --
+    -- **The text on it is 'themeStage', the theme's own darkest.** That is what
+    -- /"get the contrast right"/ comes to: a bright accent cannot carry
+    -- 'themeInk' — neon-pink-dark's ink on its pink is 2.8:1, which fails for
+    -- body text — while the stage colour on the same pink is **6.4:1**. The
+    -- other two themes are 7.0:1 and 6.7:1 on the same pairing, all computed
+    -- rather than eyeballed.
                              -- to the top ('floatJevPicks') — paired with
                              -- plain white text, not a theme colour, so
                              -- the row reads as its own surface, "two
@@ -130,6 +146,10 @@ neonPinkDark = Theme
   , themePopupInk = rgb 255 232 248
   , themeSoft    = rgb 255 140 240
   , themeJevPick = rgb 0 150 136
+  -- **The theme's own neon pink.** Same value as 'themeRepl' here and that is
+  -- this theme's answer, not a rule: the repl's accent is one column of `▎`
+  -- at the far left and a chip at the top rhymes with it rather than competing.
+  , themePaneBar = rgb 255 45 190
   }
 
 -- | Ranked second. Accents confirmed from the real source
@@ -157,6 +177,8 @@ gruyere = Theme
   , themePopupInk = rgb 248 238 255
   , themeSoft    = rgb 237 255 130
   , themeJevPick = rgb 0 150 136
+  -- Its one named accent, which is also the pinkest thing it has.
+  , themePaneBar = rgb 238 111 248
   }
 
 -- | Ranked third. `editor.background` confirmed from the shipped theme JSON
@@ -182,6 +204,8 @@ synthwave84 = Theme
   , themePopupInk = rgb 255 244 255
   , themeSoft    = rgb 254 222 93
   , themeJevPick = rgb 0 150 136
+  -- `#ff7edb`, the shipped theme's own pink.
+  , themePaneBar = rgb 255 126 219
   }
 
 themes :: [Theme]

@@ -22,7 +22,7 @@ module Tui.Panes
   , paneBarWidget
   ) where
 
-import Data.List (intercalate, nub, sort)
+import Data.List (intercalate, intersperse, nub, sort)
 
 import Brick (Widget, clickable, hBox, str, strWrapWith, withAttr)
 import Brick.AttrMap (attrName)
@@ -421,11 +421,19 @@ paneWrap =
 -- the gap inside one. A closed pane is its name alone — there is no position to
 -- draw — and the attribute is the other half of the difference he asked for.
 paneBarWidget :: [(String, Maybe Int)] -> Widget n
-paneBarWidget entries = hBox (concatMap cell entries)
+paneBarWidget entries = hBox (intersperse gap (map chip entries))
   where
-    cell (name, pos) =
-      [ withAttr (attrName (attr pos)) (str (name <> number pos))
-      , str "  "
-      ]
+    -- | **One pane is one filled block, padded a column either side** — his
+    -- instruction of 2026-11-13: /"Each 'item' in the bar should be visually
+    -- its own thing."/ The padding is inside the background, so the fill does
+    -- not sit tight against the glyphs.
+    chip (name, pos) =
+      withAttr (attrName (attr pos)) (str (" " <> name <> number pos <> " "))
+    -- | **Two columns of the stage's own black between chips** — /"between the
+    -- items there is the black background space"/. Unstyled on purpose: the
+    -- attribute in force across this row is the stage, so a gap that names no
+    -- attribute of its own is exactly the background he asked for, and it stays
+    -- right when a theme changes the stage.
+    gap = str "  "
     number = maybe "" (\n -> " " <> show n)
     attr = maybe "panebar.closed" (const "panebar.open")

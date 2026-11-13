@@ -174,21 +174,27 @@ drawingTests =
 -- panes … opened ones are rendered a bit differently to closed ones, and they
 -- show the position they are rendered at (the number)."/
 --
--- **The attribute is the other half of the difference and is not asserted
--- here**, this suite's rule being that nothing in it asserts a colour. What is
--- decidable as text is the order, the numbers, and the spacing — and the
--- spacing is what makes a name and its number read as one thing.
+-- **Each item is a filled chip as of his instruction of the same day**: /"Each
+-- 'item' in the bar should be visually its own thing. I am proposing a pink
+-- accent background around the text … and between the items there is the black
+-- background space."/ So a chip is padded one column either side **inside** its
+-- own background, and two unstyled columns separate one from the next — which
+-- is why every expected string here is spaced the way it is.
+--
+-- **The colours are the other half and are not asserted here**, this suite's
+-- rule being that nothing in it asserts one; the contrast figures are in
+-- 'Tui.App''s attribute table and the fills were read off the pty.
 paneBarCases :: [TestTree]
 paneBarCases =
   [ testCase "an open pane carries its number and a closed one carries none" $
       assertEqual ""
-        "globals 1  proofterm 2  proofs"
+        " globals 1    proofterm 2    proofs"
         (drawLine (paneBarWidget
                     [("globals", Just 1), ("proofterm", Just 2), ("proofs", Nothing)]))
   , -- The default screen, which is what he sees before he types anything.
     testCase "the default screen reads as the sketch he picked" $
       assertEqual ""
-        "globals 1  proofterm 2  modules 3  goals 4  output 5  machine 6  proofs"
+        " globals 1    proofterm 2    modules 3    goals 4    output 5    machine 6    proofs"
         (drawLine (paneBarWidget
                     [ ("globals", Just 1), ("proofterm", Just 2), ("modules", Just 3)
                     , ("goals", Just 4), ("output", Just 5), ("machine", Just 6)
@@ -198,7 +204,7 @@ paneBarCases =
     -- bar is the only thing on screen that says a pane exists at all.
     testCase "a screen with no panes still names them, with no numbers" $
       assertEqual ""
-        "globals  modules  output"
+        " globals    modules    output"
         (drawLine (paneBarWidget
                     [("globals", Nothing), ("modules", Nothing), ("output", Nothing)]))
   ]
