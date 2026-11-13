@@ -250,6 +250,59 @@ written `∀ {A : Type₀} -> A -> A`.
 
 ## Modules and namespaces
 
+### An import typed at the prompt loads a module as far as it can
+
+*Decided 2026-11-11, built 2026-11-13.* A surface module that does not elaborate
+whole declares nothing — that has been the rule since 2026-09-30, and it is
+still the rule for `thena-check`, for the prelude, and for a module a rule base
+pulls in. **At a prompt it is not.** `import Foo` tries every declaration in
+turn: what elaborates lands and is usable, and what does not is set aside and
+reported.
+
+```
+thena spine> import test.modules.PartlyGood
+module test.modules.PartlyGood
+  declared Flag
+  declared first
+  declared after
+  broken did not go in:
+    stuck: not in scope: nonesuch
+```
+
+`after` is written *below* `broken` in the file and has nothing to do with it,
+so it lands. **The loader works out nothing about why anything failed** — it
+tries the next declaration. A module whose third definition is broken therefore
+reports one failure and names the rest as pending, rather than forty-seven
+copies of *not in scope*.
+
+**The motive is debugging, and it is the whole of the design.** A module is a
+unit, but a unit you cannot open is a tool that stops helping at the moment the
+work gets hard: you cannot reach the theorem you finished because it shares a
+file with one you have not.
+
+**Leniency belongs to the act you typed, not to the file.** There is no mode and
+no flag on the session. Everything the typed act pulls in is lenient too,
+however deep — if you type `import A` and `A` imports `B`, then `B` loads as far
+as it can as well, because the seam is *where the act was typed* and a seam one
+level down would be the loader asking which situation it is in. A module's own
+`import` line is unaffected: it states a dependency, it does not type an act.
+
+**Atomicity moved down a level rather than away.** A declaration that does not go
+through leaves nothing behind, so fixing the file and loading it again never
+collides with the broken attempt's leavings — which is what the 2026-09-30 rule
+was protecting. And a load is still one command: nothing observes the
+environment partway through it, so the global environment is the same before the
+line and after it.
+
+**What a frontend is given**, all through `Thena.Driver`: `moduleWhole` and
+`modulePartly` make what a module's status is three-valued — in, partly in,
+absent — `modulesPartly` lists the partial ones with their unfinished
+declarations in file order, and `moduleImportsOf` gives the edges of the import
+tree, which nothing kept before.
+
+**Not yet**: a declaration that was left behind is reported, not resumable. It
+cannot be picked up at the prompt and finished.
+
 ### A generated substitution names its class as a path, not as a suffix
 
 *Decided 2026-11-10.* A language's substitution family is **three namespaces and
@@ -277,8 +330,27 @@ silent. **`*` cannot begin a name**, so no token class can ever be spelled it,
 while `subst-*` itself begins with a letter and is ordinary to type.
 
 **What a reader sees is the shortest ending that still means it**, so `subst.x`
-wherever the language is open. The full name is absolute: a class declared beside
-its language inside `namespace A` is `A.LC.subst.A.x`.
+wherever the language is open.
+
+**The path inside `subst` drops the steps the language's own name has already
+said.** A class declared beside its language inside `namespace A` is `A.x`, and
+the function is `A.LC.subst.x` — not `A.LC.subst.A.x`, which would put the
+module's name into every qualified substitution a reader writes.
+
+**A class from a different module keeps its whole path, and that is what you
+type.** The two names share nothing to drop, so a language `Ex` declared in
+`Stlc05GroupingBySplicing` that substitutes the class `x` declared in
+`Stlc01Syntax` gets
+
+```
+examples.Stlc05GroupingBySplicing.Ex.subst.examples.Stlc01Syntax.x
+```
+
+written in that file as `Ex.subst.examples.Stlc01Syntax.x`. *Decided 2026-11-12,
+after the alternative — teaching a written name to leave steps out of the middle
+and not only off the front — was weighed and deferred to its own design
+question.* It is long, and it is the name the printer shows you, so there is one
+spelling to learn rather than two.
 
 **And a written substitution says which class it is for**, which is the decision
 below.
@@ -707,6 +779,19 @@ isolation**, and that is what makes a module that type-checks for its author typ
 for whoever imports it. Nineteen files in the shipped `examples/` relied on the old flat
 scope and were fixed rather than accommodated.
 
+**A MODULE'S DECLARATIONS LIVE UNDER THE NAME ITS HEADER GIVES IT.** `module M where`
+is a namespace block: everything the file declares is named inside it — `M.LC`,
+`M.LC.LC`, `M.x` — and the file's own body resolves with `M` innermost, so nothing you
+write changes. **Two files may each declare a language called `LC`**, and the bare word
+is then an ambiguity refused where you *write* it, naming both, exactly as two `open`s
+of one word are. Decided 2026-11-12, built MS12 phase 313.
+
+*Until that phase the isolation above was stated and not true. A module's own
+declarations were worked out by subtracting the session from itself, which cannot see a
+name the session already held — so a file could not see a name it had declared itself,
+its own interface dropped that name, and a second definition silently answered every
+lookup in its place. Three defects, one cause.*
+
 **The prelude needs no import** — it is the one module every other one may reach, so
 `Eq` and `refl` are there whatever you wrote; `import Prelude` is allowed and does
 nothing. **The prompt is not a module**: a line you type reaches everything the session
@@ -985,13 +1070,59 @@ things driving the session and no way to see which was about to move.
 
 **What you prove in the meantime is proved in the module's scope**, because parking
 leaves the module's imports, rule bases and concealment exactly as they were. The same
-fact is why **a second `import` is still refused while one is parked**: there is one
-set of those in force, and the parked import expects to find its own when you pick it
-up. To give a parked import up, `:resume` it and then `:abandon` it.
+fact is why **a second `import` is refused while one is parked**, which is the section
+after next.
 
 **A `yield` while the import is parked says *nothing has yielded*.** Yielding is about
 the program in front of you, and parking moved that program into the parked quest. For
 the same reason you cannot `yield` out of the lemma: it is a different program.
+
+### One import at a time, parked or in flight
+
+*Decided 2026-11-11, built MS12 phase 310; kept as it stands 2026-11-12.*
+
+**While an import is parked you cannot import anything else.** Not a second file, and
+not the module that holds the lemma you parked in order to prove. The refusal names
+the repair:
+
+```
+thena spine> import examples.demo.Demo06Trust
+the import of examples.demo.pending.Demo07Holes is parked
+  — :resume examples.demo.pending.Demo07Holes to carry on with it
+```
+
+**It is forced, not a policy.** A standing import holds the module's rule-base pool,
+its held bases and its scope concealment in the live machine, and there is one set of
+those. Leaving them in force is what makes the lemma provable in the module's own
+scope — the previous section — and a second import would displace all three, so the
+parked import would find someone else's when you picked it up.
+
+**The way out, in the order the refusals ask for it.** Finish the lemma with `qed`, or
+`:suspend` it, or `:abandon` it — a parked import cannot be picked up while a proof is
+on the wheel:
+
+```
+thena spine> :resume examples.demo.pending.Demo07Holes
+t is still being proved — :suspend or :abandon it first
+```
+
+Then `:resume` the import, and then either carry it to its end — fill the hole and
+`yield`, as the previous section shows — or give it up:
+
+```
+thena spine> :abandon
+abandoned the import of examples.demo.pending.Demo07Holes, and took 114 declarations
+```
+
+**Abandoning is not all-or-nothing**: what the file declared before it stopped is
+yours, and only the unfinished tail is lost.
+
+**What this costs you, stated plainly.** You cannot reach *outward* mid-import. If the
+lemma a module stopped for needs something you have not imported yet, you have to give
+the import up, fetch what you need, and import it again. The alternative — handing the
+pool and the scope back at the park and re-installing them at `:resume` — would allow
+the second import and would mean your lemma was proved in the session's scope rather
+than the module's, which is the thing parking exists to preserve.
 
 ### A file's header must match its path, and it is checked when you import it
 

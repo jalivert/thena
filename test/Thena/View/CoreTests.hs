@@ -24,7 +24,8 @@ import Thena.Global.Env
   , GlobalEnv (..)
   )
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , machineOf
   , loadProofSource
   )
@@ -70,12 +71,12 @@ spelled =
   [ testCase "with nothing open, both write the whole path" $
       bothSay [] "Col.red"
   , testCase "after open Col, both write the short word" $
-      bothSay ["", "open Col"] "red"
+      bothSay ["", "open Col"] "Col.red"
   ]
   where
     bothSay extra want = do
       (s0, _) <- startingSession
-      case loadProofSource s0 (unlines
+      case loadProofSource Strict s0 (unlines
              ([ "module Spelling where", ""
               , "data Col : Type where"
               , "  { red : Col }"
@@ -162,14 +163,17 @@ source =
 loaded :: IO [Grammar]
 loaded = do
   (s0, _) <- startingSession
-  case loadProofSource s0 source of
+  case loadProofSource Strict s0 source of
     (s1, ProofLoaded {}) -> pure (grammars (machineOf s1))
     (_, other) -> assertFailure (show other) >> pure []
 
 con :: String -> [Core] -> Core
 -- | **Named with its language's path** (MS10 phase 251): a production lives in
 -- the namespace its block opens.
-con name = foldl App (Global (named name) [])
+--
+-- **AND UNDER THE FIXTURE'S OWN MODULE NAMESPACE** (MS12 phase 313): @source@
+-- is @module Displaying where@.
+con name = foldl App (Global (named ("Displaying." ++ name)) [])
 
 str :: String -> Core
 str = Primitive . LString
@@ -230,7 +234,7 @@ regionCases =
       sh <- shapeOf (con "Ex.juxt" [con "Ex.ref" [str "f"], con "Ex.ref" [str "a"]])
       case sh of
         ARegion inner -> case displayShape inner of
-          AnObjectTerm lang prod _ -> (lang, prod) @?= ("Ex", "Ex.juxt")
+          AnObjectTerm lang prod _ -> (lang, prod) @?= ("Displaying.Ex", "Displaying.Ex.juxt")
           other -> assertFailure ("ARegion wrapped " <> show other)
         other -> assertFailure ("not a region: " <> show other)
 

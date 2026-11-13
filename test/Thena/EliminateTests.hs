@@ -21,7 +21,8 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Driver
-  ( Loaded (..)
+  ( Leniency (..)
+  , Loaded (..)
   , loadSource
   )
 import Thena.Standard (withRules)
@@ -748,7 +749,7 @@ unfoldedGoal =
   where
     unfolds what levels body = testCase what $ do
       (s0, _) <- startingSession
-      s1 <- case loadProofSource s0 (unlines
+      s1 <- case loadProofSource Strict s0 (unlines
               [ "module Unfolded where", "", "Same : List String -> Type\8320", body ]) of
               (s, ProofLoaded {}) -> pure s
               (s, other) -> assertFailure (unlines (renderResponse s other))

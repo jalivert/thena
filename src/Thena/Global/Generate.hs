@@ -176,6 +176,14 @@ data Generated
 -- so no @open@ stands between them and the environment — the real name is what
 -- they must write, and writing it in one place is what stops twenty sites
 -- having to be found again the next time something moves.
+--
+-- **AND THEY ARE AT THE ROOT, WHICH IS NOT AN OVERSIGHT — MS12 phase 313.**
+-- Every other module's declarations went under its own name in that phase; the
+-- prelude's did not, because these names are the theory's and not a library's.
+-- A kernel tactic builds an @Eq@ application in 'Core', so a namespaced prelude
+-- would have "Thena.Global.Generate" naming a module and the equality the
+-- theory needs would be whatever some file happened to declare.
+-- 'Thena.Driver.moduleNamespace' is where that is said once, beside the reason.
 equalityName, reflexivityName, conjunctionName, bothName :: GlobalName
 dependentPairName, dpairName, truthName, unitName, falsityName :: GlobalName
 equalityName      = declarationNamed (rootName "Eq")

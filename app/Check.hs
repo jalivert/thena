@@ -34,7 +34,7 @@ import System.Environment (getArgs, getProgName)
 import System.Exit (exitFailure)
 import System.IO (hFlush, hPutStrLn, stderr, stdout)
 
-import Thena.Driver (LoadKind (..), Response (..), Session, kindOf)
+import Thena.Driver (Leniency (..), LoadKind (..), Response (..), Session, kindOf)
 import Thena.Files
   ( loadFile
   , loadProofFile
@@ -76,12 +76,18 @@ walk s bases (path : more) = case kindOf path of
     (s', out, trouble) <- loadRuleFiles s bases'
     step s' bases' out trouble (any accepted out)
   LoadProof -> do
-    (s', out, trouble) <- loadProofFile s path
+    -- **A BATCH CHECKER IS STRICT** (MS12 phase 315, @~mgqwb@). Leniency
+    -- belongs to the act that was typed and there is no prompt here: a module
+    -- whose proofs are not all finished is exactly what this is for refusing,
+    -- and a checker that loaded it as far as it could and said so would be
+    -- reporting success. It is the same split that makes this refuse a
+    -- @yield@ — nobody to hand the wheel to, and nobody to fix a proof.
+    (s', out, trouble) <- loadProofFile Strict s path
     step s' bases out trouble (any accepted out)
   LoadScript -> do
     -- A script is a sequence of command lines and says so itself: a line that
     -- stopped it arrives as 'Thena.Files.Stopped', which is trouble.
-    (s', out, trouble) <- loadFile s path
+    (s', out, trouble) <- loadFile Strict s path
     step s' bases out trouble True
   where
     -- **A yield out of a file being checked is refused, and said plainly**

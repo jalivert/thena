@@ -75,7 +75,8 @@ import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, 
 import System.IO (hFlush, hPutStr, readFile', stdout)
 
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , Session
   , Stop (..)
   , digestOf
@@ -2758,7 +2759,10 @@ selectableIxs rows = [i | (i, r) <- zip [0 :: Int ..] rows, isJust (rowInsert r)
 runEngineLine :: St -> String -> [String] -> EventM Name St ()
 runEngineLine st line extra = do
   let (s', resp) = oneLine (stSession st) line
-  case following s' resp of
+  -- **The editor is an interactive prompt, so its acts are lenient** (MS12
+  -- phase 315, @~mgqwb@): a module whose proofs are not all finished loads as
+  -- far as it can and says what did not go in.
+  case following Lenient s' resp of
     Just act | resp /= Quit -> do
       (sLoaded, responses, trouble) <- liftIO act
       let out =
@@ -2902,10 +2906,15 @@ tailFrom st at =
 -- | Run one line and keep everything it produced. The IO is 'following''s,
 -- the same half 'runEngineLine' takes for the ordinary REPL — a `:load` names
 -- a file and somebody has to read it.
+-- **Lenient, the same as the prompt's own line** — MS12 phase 315. Live-script
+-- mode *is* the prompt here: what he types is the document, so an @import@ of a
+-- module whose proofs are not all finished must come in as far as it can on
+-- this path too. The two paths taking different leniencies would mean the same
+-- line behaved one way typed and another way replayed.
 runScriptLine :: Session -> String -> IO ScriptLine
 runScriptLine s line = do
   let (s', resp) = oneLine s line
-  case following s' resp of
+  case following Lenient s' resp of
     Just act | resp /= Quit -> do
       (sLoaded, responses, trouble) <- act
       let out =

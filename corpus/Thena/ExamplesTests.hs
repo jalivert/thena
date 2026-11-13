@@ -38,7 +38,8 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , Session
   , command
   )
@@ -105,7 +106,7 @@ tests =
         -- deduplication is what keeps one session from elaborating anything
         -- twice.
         s <- foldl (\ms p -> ms >>= \s1 -> do
-                      (s2, out, trouble) <- loadProofFile s1 p
+                      (s2, out, trouble) <- loadProofFile Strict s1 p
                       if null trouble then pure s2 else stopped p s2 out trouble)
                (pure s0)
                [ "examples/poplmark/Fsub01Syntax.thena", "examples/poplmark/Fsub02Contexts.thena"
@@ -128,14 +129,14 @@ tests =
     , testCase "the demo set loads, and proves progress both ways" $ do
         (s0, _) <- startingSession
         s <- foldl (\ms p -> ms >>= \s1 -> do
-                      (s2, out, trouble) <- loadProofFile s1 p
+                      (s2, out, trouble) <- loadProofFile Strict s1 p
                       if null trouble then pure s2 else stopped p s2 out trouble)
                (pure s0)
                [ "examples/demo/Demo01Expressions.thena", "examples/demo/Demo02Judgments.thena"
                , "examples/demo/Demo03Derivations.thena", "examples/demo/Demo04Progress.thena"
                , "examples/demo/Demo06Trust.thena" ]
         let script = "examples/demo/Demo05ByTactics.thena.script"
-        (s', out, halted) <- loadFile s script
+        (s', out, halted) <- loadFile Strict s script
         if null halted then pure ()
           else assertFailure
                  (unlines ((script ++ " stopped:") : concatMap (renderResponse s') out))
@@ -164,13 +165,13 @@ tests =
           if null trouble then go s' bases' more else stopped path s' out trouble
         else if ".thena" `isSuffixOf` f
           then do
-            (s', out, trouble) <- loadProofFile s path
+            (s', out, trouble) <- loadProofFile Strict s path
             if null trouble then go s' bases more else stopped path s' out trouble
           -- A script of command lines (phase 109c), run as `:load` runs one:
           -- it fails if any line stops.
           else if ".thena.script" `isSuffixOf` f
             then do
-              (s', out, halted) <- loadFile s path
+              (s', out, halted) <- loadFile Strict s path
               if null halted then go s' bases more
                 else assertFailure
                        (unlines ((path ++ " stopped:")

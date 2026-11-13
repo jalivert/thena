@@ -29,7 +29,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (rootName)
-import Thena.Driver (Session, command, machineOf)
+import Thena.Driver (Leniency (..), Session, command, machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Files (loadFile, startingSession)
 import Thena.Global.Env (Definition (..), lookupDefinition)
@@ -68,14 +68,14 @@ tests =
     "a split taken at a hole"
     [ testCase "the script runs to the end" $ do
         (s, _) <- startingSession
-        (_, _, stopped) <- loadFile s target
+        (_, _, stopped) <- loadFile Strict s target
         assertBool (unlines (map show stopped)) (null stopped)
 
       -- The statement is the one `DependentIndex.thena.script` proves by
       -- hand, so the two paths are known to end in the same place.
     , testCase "and the inductive theorem is admitted at its written type" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadFile s target
+        (s', _, _) <- loadFile Strict s target
         case lookupDefinition (rootName "belowRefl") (globals (machineOf s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d ->
@@ -87,7 +87,7 @@ tests =
       -- would have the same type and would not reduce to `z`.
     , testCase "and the theorem by cases computes from the binder its case bound" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadFile s target
+        (s', _, _) <- loadFile Strict s target
         let (_, out) = step s' ":whnf vhead N z (vcons N z z (vnil N))"
         out @?= ["z"]
 

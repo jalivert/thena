@@ -184,8 +184,8 @@ of it writes that level in braces:
 
 ```
 thena spine> :show Eq
-data Eq {ℓ₈₉} (A : Type (ℓ₈₉)) : A -> A -> Type (ℓ₈₉) where
-  { refl : ∀ (a : A) -> Eq {ℓ₈₉} A a a }
+data Eq {ℓ₆₆} (A : Type (ℓ₆₆)) : A -> A -> Type (ℓ₆₆) where
+  { refl : ∀ (a : A) -> Eq {ℓ₆₆} A a a }
 ```
 
 So `Eq` on its own is not a term — `Eq {0} Nat x y` is. **Written on the
@@ -213,8 +213,8 @@ join:
 
 ```
 thena spine> :show And
-data And {ℓ₅₈₅ ℓ₅₈₆} (A : Type (ℓ₅₈₅)) (B : Type (ℓ₅₈₆)) : Type (ℓ₅₈₅ ⊔ ℓ₅₈₆) where
-  { both : A -> B -> And {ℓ₅₈₅ ℓ₅₈₆} A B }
+data And {ℓ₅₆₆ ℓ₅₆₇} (A : Type (ℓ₅₆₆)) (B : Type (ℓ₅₆₇)) : Type (ℓ₅₆₆ ⊔ ℓ₅₆₇) where
+  { both : A -> B -> And {ℓ₅₆₆ ℓ₅₆₇} A B }
 ```
 
 `⊔` is the one symbol that is printed and never written: the join is computed
@@ -1072,7 +1072,7 @@ env
 stack
   call, 14 instruction(s) to resume
   call, 8 instruction(s) to resume
-  call, 186 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :run 6
 pc
   0  u = universe-at l
@@ -1083,7 +1083,7 @@ stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
   call, 8 instruction(s) to resume
-  call, 186 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :run
 solved: ?ℓ4876
 solved: ?ℓ4878

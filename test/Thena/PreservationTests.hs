@@ -21,13 +21,15 @@ import Data.List (isInfixOf, isPrefixOf)
 import Data.Maybe (isJust)
 import Thena.Core.Term (rootName)
 import Thena.Driver
-  ( machineOf
+  ( Leniency (..)
+  , machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadProofFile, startingSession)
+import Thena.Declared (named)
 import Thena.Render
-  ( rendering
+  ( renderingIn
   ,renderCore)
 
 target :: FilePath
@@ -39,15 +41,15 @@ tests =
     "preservation — TAPL 8.3.3"
     [ -- **The theorem.** Evaluation does not change a term's type.
       testCase "a step preserves the type" $ do
-        st <- statementOf "preservation"
-        st @?= Just "∀ (t : Term.Term) (t' : Term.Term) -> Step.Step t t' \
-                    \-> ∀ (U : Ty.Ty) -> HasType.HasType t U -> HasType.HasType t' U"
+        st <- statementOf "examples.Preservation.preservation"
+        st @?= Just "∀ (t : Term) (t' : Term) -> Step t t' \
+                    \-> ∀ (U : Ty) -> HasType t U -> HasType t' U"
 
       -- **Type safety is the pair**, and this asserts the other half is still
       -- the theorem it was two modules ago.
     , testCase "and progress is still there beside it" $ do
-        st <- statementOf "progress"
-        st @?= Just "∀ (t : Term.Term) (T : Ty.Ty) -> HasType.HasType t T -> Or.Or (Value.Value t) (Steps t)"
+        st <- statementOf "examples.Progress.progress"
+        st @?= Just "∀ (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)"
 
       -- **The nine lemmas the proof used to need.** Six took the derivation
       -- apart at a term shape; three more — @succAtNat@, @predAtNat@,
@@ -75,12 +77,12 @@ tests =
     -- **Three modules, in order** — each reads what the ones before it declared.
     loaded = do
       (s, _)  <- startingSession
-      (s1, _, _) <- loadProofFile s  "examples/Canonical.thena"
-      (s2, _, _) <- loadProofFile s1 "examples/Progress.thena"
-      (s3, _, _) <- loadProofFile s2 target
+      (s1, _, _) <- loadProofFile Strict s  "examples/Canonical.thena"
+      (s2, _, _) <- loadProofFile Strict s1 "examples/Progress.thena"
+      (s3, _, _) <- loadProofFile Strict s2 target
       pure s3
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore (rendering [] (names (machineOf s))) [] . definitionType
-               <$> lookupDefinition (rootName n) (globals (machineOf s)) )
+      pure ( renderCore (renderingIn (machineOf s)) [] . definitionType
+               <$> lookupDefinition (named n) (globals (machineOf s)) )

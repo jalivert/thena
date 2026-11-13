@@ -1,0 +1,16 @@
+module test.modules.PartlyGood where
+
+data Flag : Type₀ where
+  up : Flag
+  down : Flag
+
+open Flag
+
+first : Flag.Flag
+first = Flag.up
+
+broken : Flag.Flag
+broken = nonesuch
+
+after : Flag.Flag
+after = Flag.down

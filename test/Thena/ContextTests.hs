@@ -15,10 +15,11 @@ module Thena.ContextTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), Literal (..), rootScope)
-import Thena.Declared (named)
+import Thena.Core.Term (Core (..), Literal (..))
+import Thena.Declared (named, opensIn)
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , Session
   , machineOf
   , command
@@ -142,8 +143,8 @@ twoKinds =
       s <- loaded twoContexts
       let env = globals (machineOf s)
       map (\n -> isDeclared (named n) env)
-        [ "Ctx.bind-in.bind-in", "Ctx.bind-in.bind-here"
-        , "Ctx.bind-in.bind-there-bind", "Dtx.bind-in.bind-here"
+        [ "TwoCtx.Ctx.bind-in.bind-in", "TwoCtx.Ctx.bind-in.bind-here"
+        , "TwoCtx.Ctx.bind-in.bind-there-bind", "TwoCtx.Dtx.bind-in.bind-here"
         , "bind-in", "bind-here" ]
         @?= [True, True, True, True, False, False]
 
@@ -265,7 +266,7 @@ xNotY =
 load :: [String] -> IO (Either String Session)
 load body = do
   (s0, _) <- startingSession
-  pure $ case loadProofSource s0 (unlines body) of
+  pure $ case loadProofSource Strict s0 (unlines body) of
     (s1, ProofLoaded {}) -> Right s1
     (s1, other) -> Left (last (renderResponse s1 other))
 
@@ -302,7 +303,7 @@ notation =
   [ testCase "the notation is read and built as the relation applied" $ do
       s <- loaded header
       let gs = grammars (machineOf s)
-      case parse (earleyRules gs) (Earley.StartAt "Ctx.extend-in") (pieces "x : \953 \8712 \183 , y : \953") of
+      case parse (earleyRules gs) (Earley.StartAt "Ctx.Ctx.extend-in") (pieces "x : \953 \8712 \183 , y : \953") of
         Left why -> assertFailure (show why)
         Right tree -> buildTerm gs tree @?= Right
           (apps "Ctx.extend-in.extend-in"
@@ -311,7 +312,9 @@ notation =
   , testCase "and prints back as the text it was read from" $ do
       s <- loaded header
       let m = machineOf s
-      printRegion (grammars m) rootScope (renderCore (rendering [] 0) [])
+      -- **With the fixture's own module open** (MS12 phase 313): a module's
+      -- languages live under its namespace, and this is where a reader stands.
+      printRegion (grammars m) (opensIn (globals m)) (renderCore (rendering [] 0) [])
           (apps "Ctx.extend-in.extend-in"
             [ str "x", con "Ty.base"
             , apps "Ctx.extend" [con "Ctx.empty", str "x", con "Ty.base"] ])
@@ -331,14 +334,19 @@ notation =
       -- shortest ending that resolves where the reader stands.
       said s ":show D.push-in" !! 0
         @?= "data D.push-in.push-in : String -> Ty -> D -> Type\8320 where"
-      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "D.push-in")
+      -- **THE PARSER IS KEYED BY THE GRAMMAR'S OWN NAME** (MS12 phase 313), so
+      -- the start symbol carries the module's namespace even where the printer
+      -- above writes the short ending a reader sees.
+      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "Last.D.push-in")
                  (pieces "x : \953 \8712 x : \953 ; \949") of
         Left why -> assertFailure (show why)
         Right _ -> pure ()
   ]
   where
     str = Primitive . LString
-    con n = Global (named n) []
+    -- **Under the fixture's module namespace** (MS12 phase 313): @header@ is
+    -- @module Ctx where@, so @Ctx.extend@ is @Ctx.Ctx.extend@.
+    con n = Global (named ("Ctx." ++ n)) []
     apps f = foldl App (con f)
 
 proofs :: [TestTree]
@@ -382,16 +390,16 @@ refused :: [TestTree]
 refused =
   [ refusal "an extension with no name"
       ["context C, G where", "  e -> \183", "  f -> G , T"]
-      "refused: in the context C: its extension C.f needs exactly one name to look up, and it has none"
+      "refused: in the context C: its extension Ctx.C.f needs exactly one name to look up, and it has none"
   , refusal "an extension with two"
       ["y : Token String", "y = /[a-z]+/", "", "context C, G where", "  e -> \183", "  f -> G , x = y : T"]
-      "refused: in the context C: its extension C.f needs exactly one name to look up, and it has x, y"
+      "refused: in the context C: its extension Ctx.C.f needs exactly one name to look up, and it has x, y"
     -- **The PLACED name, since MS10 phase 263** (`~gkbgs`): the family is in the
     -- context's namespace, so a root-level @f-here@ no longer collides with it
     -- and the name that does is the one the relation would declare.
   , refusal "a lookup name already declared"
       ["C.f-in.f-here : Ty", "C.f-in.f-here = base", "", "context C, G where", "  e -> \183", "  f -> G , x : T"]
-      "refused: C's lookup C.f-in.f-here is already declared"
+      "refused: C's lookup Ctx.C.f-in.f-here is already declared"
     -- **A production with TWO of its own slots is still refused** (MS8 phase
     -- 156): a lookup relation steps over one binding, and there is nothing for
     -- it to read in a form that joins two contexts. More than one *extension* is

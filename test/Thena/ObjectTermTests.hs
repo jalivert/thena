@@ -19,7 +19,8 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Term (Core (..), Literal (..), rootName)
 import Thena.Declared (named)
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , Session
   , machineOf
   , loadRuleTexts
@@ -74,7 +75,7 @@ loadedModule :: IO (Session, String)
 loadedModule = do
   (s0, _) <- startingSession
   shipped <- rulesPath >>= readFile
-  (s1, out, trouble) <- loadProofFile s0 languageModule
+  (s1, out, trouble) <- loadProofFile Strict s0 languageModule
   case (trouble, [ () | ProofLoaded {} <- out ]) of
     ([], _ : _) -> pure (s1, shipped)
     _           -> assertFailure (show out)
@@ -118,20 +119,20 @@ reading io =
     testCase "a pattern resolves to the shape its production denotes" $ do
       r <- oneRule io (base "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"")
       ruleParams r
-        @?= [ PObject (SNode (named "LC.app")
+        @?= [ PObject (SNode (named "test.modules.Rooted.LC.app")
                          [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ]) ]
 
   , testCase "and a token class's text resolves to the literal it denotes" $ do
       r <- oneRule io (base "rule v LC[var]`x` :- do say \"x\"")
       ruleParams r
-        @?= [PObject (SNode (named "LC.var") [SLit (LString "x")])]
+        @?= [PObject (SNode (named "test.modules.Rooted.LC.var") [SLit (LString "x")])]
 
     -- **A hole at a token class binds an @instral@ value, not a term** — the
     -- slot's type, which is what 104b's ordering made knowable at load.
   , testCase "a hole at a token class is typed String" $ do
       r <- oneRule io (base "rule v LC[var]`${s}` :- do say s")
       ruleParams r
-        @?= [PObject (SNode (named "LC.var") [SHole (AtPrimitive (rootName "String")) (PVar "s")])]
+        @?= [PObject (SNode (named "test.modules.Rooted.LC.var") [SHole (AtPrimitive (rootName "String")) (PVar "s")])]
 
   , testCase "and using it as a term is a type error when the base loads" $ do
       r <- refused io (base "rule v LC[var]`${s}` :- do fill s")
@@ -152,7 +153,7 @@ reading io =
              [ "rule swap A.LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
       case r of
         Right (x : _) -> ruleParams x
-          @?= [ PObject (SNode (named "A.LC.app")
+          @?= [ PObject (SNode (named "test.modules.OneNested.A.LC.app")
                            [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ]) ]
         Right []   -> assertFailure "the base declared no rule"
         Left other -> assertFailure (show other)
@@ -193,7 +194,7 @@ opening =
   [ testCase "open A reaches a language declared inside A" $ do
       r <- inNamespaces oneNamespace
              [ "open A", "", "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
-      shapeOf r @?= Right (SNode (named "A.LC.app")
+      shapeOf r @?= Right (SNode (named "test.modules.OneNested.A.LC.app")
                              [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ])
 
     -- **The pair.** Nothing else changes, so what the test above measures is
@@ -207,7 +208,7 @@ opening =
       r <- inNamespaces oneNamespace
              [ "open A renaming ( LC -> L )", ""
              , "rule swap L[app]`( ${f} ${a} )` :- do say \"x\"" ]
-      shapeOf r @?= Right (SNode (named "A.LC.app")
+      shapeOf r @?= Right (SNode (named "test.modules.OneNested.A.LC.app")
                              [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ])
 
   , testCase "and the word it was renamed from no longer reaches it" $ do
@@ -220,7 +221,7 @@ opening =
       r <- inNamespaces oneNamespace
              [ "open A ( LC )", ""
              , "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
-      shapeOf r @?= Right (SNode (named "A.LC.app")
+      shapeOf r @?= Right (SNode (named "test.modules.OneNested.A.LC.app")
                              [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ])
 
   , testCase "and open A hiding ( LC ) keeps it out" $ do
@@ -242,7 +243,7 @@ opening =
       r <- inNamespaces twoNamespaces
              [ "open A", "open B", ""
              , "rule swap B.LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
-      shapeOf r @?= Right (SNode (named "B.LC.app")
+      shapeOf r @?= Right (SNode (named "test.modules.TwoNested.B.LC.app")
                              [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ])
 
     -- **@open X in ‹declaration›@ reaches that declaration and stops**, which
@@ -253,7 +254,7 @@ opening =
       r <- inNamespaces oneNamespace
              [ "open A in"
              , "  rule swap LC[app]`( ${f} ${a} )` :- do say \"x\"" ]
-      shapeOf r @?= Right (SNode (named "A.LC.app")
+      shapeOf r @?= Right (SNode (named "test.modules.OneNested.A.LC.app")
                              [ SHole AtTerm (PVar "f"), SHole AtTerm (PVar "a") ])
 
   , testCase "and not the declaration after it" $ do
@@ -293,7 +294,7 @@ inNamespaces :: (FilePath, String) -> [String] -> IO (Either Response [Rule])
 inNamespaces (path, stated) body = do
   (s0, _) <- startingSession
   shipped <- rulesPath >>= readFile
-  (s1, out, trouble) <- loadProofFile s0 path
+  (s1, out, trouble) <- loadProofFile Strict s0 path
   case (trouble, [ () | ProofLoaded {} <- out ]) of
     ([], _ : _) -> withRules (pure (s1, shipped)) (baseOf stated (unlines body))
     _           -> assertFailure (show out)
@@ -307,7 +308,7 @@ matching io =
     -- tried as written, then reduced and tried again.
     testCase "it matches through a definition and its let-chain" $ do
       (env, p) <- setup "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
-      case matchPattern env p (VTerm (Global (rootName "fg") [])) of
+      case matchPattern env p (VTerm (Global (named "test.modules.Rooted.fg") [])) of
         Just bs -> map fst bs @?= ["f", "a"]
         Nothing -> assertFailure "it did not match"
 
@@ -335,7 +336,7 @@ matching io =
     -- would bind nothing at all rather than refusing it.
   , testCase "a constructor applied to too few arguments does not match" $ do
       (env, p) <- setup "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
-      ( matchPattern env p (VTerm (Global (named "LC.app") []))
+      ( matchPattern env p (VTerm (Global (named "test.modules.Rooted.LC.app") []))
         , matchPattern env p (VTerm (con "LC.app" [con "LC.var" [Primitive (LString "f")]])) )
         @?= (Nothing, Nothing)
 
@@ -387,5 +388,7 @@ building io =
         o : _ -> pure o
         []    -> assertFailure "the rule binds nothing"
 
+-- **Under the fixture module's own namespace** (MS12 phase 313):
+-- @test/modules/Rooted.thena@ is @module test.modules.Rooted where@.
 con :: String -> [Core] -> Core
-con name = foldl App (Global (named name) [])
+con name = foldl App (Global (named ("test.modules.Rooted." ++ name)) [])

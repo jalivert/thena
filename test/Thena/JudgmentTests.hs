@@ -18,7 +18,8 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Context (entryIdent)
 import Thena.Core.Term (GlobalName (..), Ident (..))
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , Session
   , machineOf
   , command
@@ -131,7 +132,7 @@ valueAndStep =
 load :: [String] -> IO (Either String Session)
 load body = do
   (s0, _) <- startingSession
-  pure $ case loadProofSource s0 (unlines body) of
+  pure $ case loadProofSource Strict s0 (unlines body) of
     (s1, ProofLoaded {}) -> Right s1
     (s1, other) -> Left (last (renderResponse s1 other))
 
@@ -157,12 +158,15 @@ said s line = let (s', r) = command s line in renderResponse s' r
 -- @j@ declares @j.j@ with constructors @j.R@, so asking at the root finds no
 -- inductive at all and the answer is the empty list — which reads as a
 -- constructor with no arguments rather than as a lookup that missed.
+-- **Under the fixture's own module namespace** (MS12 phase 313): @header@ is
+-- @module J where@, so the judgment @twice@ is @J.twice.twice@.
 argumentNames :: Session -> String -> String -> [String]
 argumentNames s d c =
-  [ n | Just ind <- [lookupInductive (GlobalName [d] d) (globals (machineOf s))]
+  [ n | Just ind <- [lookupInductive (inJ [d] d) (globals (machineOf s))]
       , con <- inductiveConstructors ind
-      , constructorName con == GlobalName [d] c
+      , constructorName con == inJ [d] c
       , Ident n <- map entryIdent (constructorArguments con) ]
+  where inJ ps w = GlobalName ("J" : ps) w
 
 refusal :: String -> [String] -> String -> TestTree
 refusal what body want = testCase what $ do
@@ -269,7 +273,7 @@ generated =
       said s ":infer typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`"
         @?= ["typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )` : Type₀"]
       said s ":parse typing · ⊢ x : ι"
-        @?= ["typing.typing(Ctx.empty, LC.var(x), Ty.base)"]
+        @?= ["typing(empty, var(x), base)"]
   ]
 
 premises :: [TestTree]
@@ -418,7 +422,7 @@ premises =
         , "  B-any:  𝕌₀    Γ ⊢ M : T"
         , "          -------------------"
         , "          Γ ⊫ M : T", "" ])
-      "refused: the argument d1 of big.B-any lives in Type₁, which the datatype's own Type₀ does not contain"
+      "refused: the argument d1 of J.big.B-any lives in Type₁, which the datatype's own Type₀ does not contain"
   , refusal "a premise named like a metavariable"
       (typing ++ ["judgment bad = M bad where", "", "  B:  M' : · ⊢ M : ι", "      ---", "      M bad", ""])
       "refused: in the judgment bad, rule B: a premise may not be named M', which is a metavariable"

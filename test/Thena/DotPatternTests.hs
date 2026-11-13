@@ -28,7 +28,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Driver (Response (..), loadProofSource, parseSurfaceTerm)
+import Thena.Driver (Leniency (..), Response (..), loadProofSource, parseSurfaceTerm)
 import Thena.Files (loadProofFile, startingSession)
 import Thena.Render (renderResponse)
 import Thena.Surface.Concrete
@@ -141,7 +141,7 @@ acceptedTests =
       loads (vecPreamble ++ vtail "vcons ._ a as")
   , testCase "the example file runs to the end" $ do
       (s, _) <- startingSession
-      (_, _, stopped) <- loadProofFile s "examples/DotPatterns.thena"
+      (_, _, stopped) <- loadProofFile Strict s "examples/DotPatterns.thena"
       assertBool (unlines (map show stopped)) (null stopped)
   ]
 
@@ -178,7 +178,7 @@ refusedTests =
     -- type the position has rather than anywhere: @.A@ where an @N@ was
     -- determined never reaches the unification.
     testCase "a dot at the wrong type" $
-      refusedWith "Type\8320 and N.N cannot be made equal"
+      refusedWith "Type\8320 and Dotted.N.N cannot be made equal"
         (vecPreamble ++ vtail "vcons .A a as")
   , -- __A dot heads no arm.__ The grammar lets one stand anywhere an atom may,
     -- and @arm-for@ wants a constructor's name — an arm is for a case, and
@@ -214,7 +214,7 @@ namingTests =
               , "vq = \\ A p q xs -> case xs of { vnil -> ; vcons .(s q) hd tl -> tl }"
               ])
   , testCase "an ordinary application, with no dot anywhere" $
-      refusedWith "kk and N.s kk cannot be made equal"
+      refusedWith "kk and Dotted.N.s kk cannot be made equal"
         (vecPreamble
            ++ [ "vp : forall (A : Type\8320) (kk : N) (a : A) (xs : Vec A kk) -> Vec A kk"
               , "vp = \\ A kk a xs -> vcons A (s kk) a xs"
@@ -271,14 +271,14 @@ roundTrips src = case parseSurfaceTerm src of
 loads :: [String] -> Assertion
 loads ls = do
   (s0, _) <- startingSession
-  case loadProofSource s0 (unlines ls) of
+  case loadProofSource Strict s0 (unlines ls) of
     (_, ProofLoaded {}) -> pure ()
     (s1, other) -> assertFailure (unwords (renderResponse s1 other))
 
 refusedWith :: String -> [String] -> Assertion
 refusedWith what ls = do
   (s0, _) <- startingSession
-  case loadProofSource s0 (unlines ls) of
+  case loadProofSource Strict s0 (unlines ls) of
     (_, ProofLoaded {}) -> assertFailure "loaded, and it should not have"
     (s1, other)
       | what `isInfixOf` unwords (renderResponse s1 other) -> pure ()

@@ -22,7 +22,8 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (nameDotted, rootName)
 import Thena.Driver
-  ( CommandError (..)
+  ( Leniency (..)
+  , CommandError (..)
   , Parked (..)
   , Quest (..)
   , Response (..)
@@ -61,7 +62,7 @@ suspended :: IO (Session, [Response])
 suspended = do
   s <- pausing
   Just m <- pure (moduleName "test.modules.Pauses")
-  (s', out, trouble) <- importModule s m
+  (s', out, trouble) <- importModule Strict s m
   assertBool ("nothing should be trouble here: " ++ show trouble) (null trouble)
   pure (s', out)
 
@@ -72,7 +73,7 @@ suspended = do
 -- land.
 line :: Session -> String -> IO (Session, [Response])
 line s l = case oneLine s l of
-  (s', resp) -> case following s' resp of
+  (s', resp) -> case following Strict s' resp of
     Nothing  -> pure (s', [resp])
     Just act -> do
       (s'', more, trouble) <- act
@@ -147,7 +148,12 @@ tests = testGroup "a yield out of an imported module"
       -- **It names the user's own, and counts the module's** — a closure
       -- generates hundreds of names and the list was unreadable; that your
       -- lemma goes is the half worth printing in full.
-      [ map nameDotted mine | ImportAbandoned _ _ mine <- out ] @?= [["mine"]]
+      -- **Under the module's own namespace** (MS12 phase 313): the prompt
+      -- stands inside the suspended module's namespace, so a lemma typed to get
+      -- unstuck is declared there — and @~3c2db@'s rule is about who PUBLISHES
+      -- it, which the test below asserts.
+      [ map nameDotted mine | ImportAbandoned _ _ mine <- out ]
+        @?= [["test.modules.Pauses.mine"]]
       assertBool "the module must not be loaded after an abandon"
                  ("test.modules.Pauses" `notElem` map moduleText (modulesLoaded s2))
 
@@ -166,16 +172,16 @@ tests = testGroup "a yield out of an imported module"
       Just m <- pure (moduleName "test.modules.Pauses")
       let theirs = map nameDotted (declaredByModule m s4)
       assertBool ("the module's own declarations should be there: " ++ show theirs)
-                 ("picked" `elem` theirs)
+                 ("test.modules.Pauses.picked" `elem` theirs)
       assertBool ("a name typed at the prompt is not the module's: " ++ show theirs)
-                 ("mine" `notElem` theirs)
+                 ("test.modules.Pauses.mine" `notElem` theirs)
 
   , testCase "a module that imports the suspended one waits for it" $ do
       -- The suspension lands in the middle of a fold over the closure, so the
       -- rest of the walk has to be carried or the importing module is lost.
       s <- pausing
       Just m <- pure (moduleName "test.modules.ImportsPauses")
-      (s1, out, trouble) <- importModule s m
+      (s1, out, trouble) <- importModule Strict s m
       assertBool ("no trouble expected: " ++ show trouble) (null trouble)
       [ nm | ImportSuspended nm _ _ _ <- out ] @?= ["test.modules.Pauses"]
       (s2, _) <- line s1 "try-core core`this`"
@@ -259,9 +265,9 @@ parking = testGroup "parking it, so that a lemma can be proved"
       Just m <- pure (moduleName "test.modules.Pauses")
       let theirs = map nameDotted (declaredByModule m s8)
       assertBool ("the module's own should be there: " ++ show theirs)
-                 ("picked" `elem` theirs)
+                 ("test.modules.Pauses.picked" `elem` theirs)
       assertBool ("the user's lemma is not the module's: " ++ show theirs)
-                 ("helper" `notElem` theirs)
+                 ("test.modules.Pauses.helper" `notElem` theirs)
 
   , testCase "it parks under its module name, in the one list" $ do
       -- **His words are /\"one list one word\"/**: @:proofs@ is the list and
@@ -333,7 +339,7 @@ parking = testGroup "parking it, so that a lemma can be proved"
       (s1, _) <- line s ":theorem spare : Type\8320"
       (s2, _) <- line s1 ":suspend"
       Just m <- pure (moduleName "test.modules.Pauses")
-      (s3, _, trouble) <- importModule s2 m
+      (s3, _, trouble) <- importModule Strict s2 m
       assertBool ("no trouble expected: " ++ show trouble) (null trouble)
       (_, out) <- line s3 ":resume spare"
       rejected out @?= [ImportInFlight "test.modules.Pauses"]

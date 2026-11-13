@@ -46,7 +46,8 @@ module Thena.View.Statement
 
 import Data.List (find, isPrefixOf)
 
-import Thena.Language.Grammar (Grammar)
+import Thena.Language.Grammar (Grammar, grammarForTag, grammarKey)
+import Thena.Core.Term (InScope)
 import Thena.Driver (entryBindings)
 import Thena.Instral.Type (Ty)
 import Thena.Instral.Commands (isCommandLine, isWholeLine)
@@ -63,6 +64,7 @@ import Thena.View.Chart
   , StuckView (..)
   , displayOffer
   , offerAt
+  , spelling
   )
 import Thena.View.Entry (Split (..), splitEntry)
 import Thena.View.Type (displayType)
@@ -77,8 +79,9 @@ import Thena.View.Tokens
 -- 'offeredStuck' — which is phase 134's field, and is exactly the condition
 -- \"the text left of the cursor did not read\".
 statementOffer
-  :: [Grammar] -> [RuleBase] -> [String] -> [Written] -> [Written] -> OfferView
-statementOffer gs bs namespaces before after = answer { offeredBound = bound }
+  :: [Grammar] -> InScope -> [RuleBase] -> [String]
+  -> [Written] -> [Written] -> OfferView
+statementOffer gs sc bs namespaces before after = answer { offeredBound = bound }
   where
     text   = textOf before ++ textOf after
     cursor = length (textOf before)
@@ -111,16 +114,19 @@ statementOffer gs bs namespaces before after = answer { offeredBound = bound }
 
     -- **Each line is asked against the rules that could answer it, and no
     -- others** — see 'commandRules' for the measurement that forced this.
-    rules | asCommand = commandRules gs
-          | otherwise = lineRules gs bs namespaces
+    rules | asCommand = commandRules gs sc
+          | otherwise = lineRules gs sc bs namespaces
+
+    -- A nonterminal is spelled as a reader writes it ('Thena.View.Chart.spelling').
+    spell = spelling gs sc
 
     whole
-      | asCommand = offerAt rules (E.StartAt commandHead) before after
-      | otherwise = offerAt rules (E.StartAt lineHead) before' after
+      | asCommand = offerAt spell rules (E.StartAt commandHead) before after
+      | otherwise = offerAt spell rules (E.StartAt lineHead) before' after
 
     answer
       | Nothing <- offeredStuck whole = shift whole
-      | otherwise = maybe (shift whole) shift (recover gs bs rules head' before' after)
+      | otherwise = maybe (shift whole) shift (recover gs sc bs rules head' before' after)
 
     -- **Positions are reported against the whole entry**, not against the
     -- instruction the question was asked about: the frontend passed the entry and
@@ -150,7 +156,7 @@ statementOffer gs bs namespaces before after = answer { offeredBound = bound }
     -- frontend is handed the answer and never the rule.
     bound =
       [ BoundView n (displayType t)
-      | (n, t) <- if null prefix then [] else entryBindings gs bs prefix
+      | (n, t) <- if null prefix then [] else entryBindings gs sc bs prefix
       , fits t
       ]
 
@@ -182,16 +188,24 @@ dropWritten n ws
 -- unrecovered answer, which still carries 'offeredStuck' and so still says
 -- something.
 recover
-  :: [Grammar] -> [RuleBase] -> [E.Rule] -> String -> [Written] -> [Written]
+  :: [Grammar] -> InScope -> [RuleBase] -> [E.Rule] -> String
+  -> [Written] -> [Written]
   -> Maybe OfferView
-recover gs _bs rules head' before after = do
+recover gs sc _bs rules head' before after = do
   ts <- either (const Nothing) Just (tokensView line)
   unit <- unitAt cursor (atOffsets line ts)
   case unit of
     InsideLiteral l ->
       let innerLeft  = slice (litOpen l) cursor
           innerRight = slice cursor (litClose l)
-       in case displayOffer gs (litLang l) (litProd l)
+          -- **THE WRITTEN TAG IS RESOLVED FIRST — MS12 PHASE 313.** A language
+          -- lives under its module's namespace now, so the reader typed @LC`@
+          -- and 'displayOffer' is keyed by the grammar's own name;
+          -- 'grammarForTag' is the walk every other reader of a tag asks, and
+          -- the view goes on saying the tag as it was written.
+          key = either (const (litLang l)) grammarKey
+                       (grammarForTag sc gs (litLang l))
+       in case displayOffer gs sc key (litProd l)
                  [WrittenText innerLeft] [WrittenText innerRight] of
             Left _  -> Nothing
             Right o -> Just o
@@ -205,7 +219,7 @@ recover gs _bs rules head' before after = do
     -- identifier. So the unit is the colon and whatever follows it, together.
     CommandWord start stop ->
       let typed = slice start cursor
-          o = offerAt rules (E.StartAt commandHead) [] []
+          o = offerAt (spelling gs sc) rules (E.StartAt commandHead) [] []
        in Just o
             { offeredOptions     = filter (startsWith typed) (offeredOptions o)
             , offeredWanted      = filter (startsWith typed) (offeredWanted o)
@@ -234,7 +248,7 @@ recover gs _bs rules head' before after = do
           -- the start of a line and answered nothing.
           ctx | isWholeLine line = [WrittenText (take start line)]
               | otherwise        = []
-          o = offerAt rules (E.StartAt head') ctx []
+          o = offerAt (spelling gs sc) rules (E.StartAt head') ctx []
        in Just o
             { offeredOptions     = filter (startsWith word) (offeredOptions o)
             , offeredWanted      = filter (startsWith word) (offeredWanted o)

@@ -79,7 +79,11 @@ appendOne = refl Ctx Ctx`· , X <: ⊤ , y : X`
 -- Substitution through a whole context, which the type-substitution lemma of
 -- part 1A is written with.
 --
---   Ctx.subst.X : Ctx -> String -> Ty -> Ctx        Γ[X -> T]
+--   Ctx.subst.examples.poplmark.Fsub01Syntax.X
+--     : Ctx -> String -> Ty -> Ctx                 Γ[X -> T]
+--
+-- The class X is declared in 01 and the language Ctx here, so the generated
+-- substitution names its class by the whole path.
 --
 -- It is a plain structural fold: a context's name slot is an ordinary name
 -- and neither an occurrence nor a binder, so nothing in a context is renamed
@@ -87,7 +91,8 @@ appendOne = refl Ctx Ctx`· , X <: ⊤ , y : X`
 -- that is correct — the lemma's substitution is the one that DISCHARGES the
 -- binding X<:Q, exactly as β does, and every occurrence of X in the suffix
 -- must go.
-substThroughCtx : Eq Ctx (Ctx.subst.X Ctx`· , X <: ⊤ , y : X` "X" Ty`⊤`) Ctx`· , X <: ⊤ , y : ⊤`
+substThroughCtx : Eq Ctx (Ctx.subst.examples.poplmark.Fsub01Syntax.X Ctx`· , X <: ⊤ , y : X` "X" Ty`⊤`)
+                         Ctx`· , X <: ⊤ , y : ⊤`
 substThroughCtx = refl Ctx Ctx`· , X <: ⊤ , y : ⊤`
 
 -- A rule may write it, through the substitution notation.

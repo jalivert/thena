@@ -1316,7 +1316,14 @@ perform instr rest m = case operation instr of
   LeaveNamespace ->
     Continue (advance m { scope = (scope m) { scopeWithin = drop 1 (scopeWithin (scope m)) } })
 
-  DeclarePrimitive nm ty -> case (,) <$> declaredNameOf nm <*> term ty of
+  -- **A PRIMITIVE IS NAMED ABSOLUTELY AND NOT WHERE IT IS WRITTEN** (MS12
+  -- phase 313). @String@ and @String.eq@ are the language's own constants
+  -- rather than any module's — 'Thena.Global.Env.emptyGlobals' seeds the types
+  -- before a file has said anything, and 'Thena.Driver.concealedFrom' already
+  -- exempts them for that reason — so the name is the one written and the
+  -- namespace the writer stands in does not reach it. The prelude declares
+  -- @String.eq@ from inside its own namespace and means the primitive.
+  DeclarePrimitive nm ty -> case (,) <$> nameOf nm <*> term ty of
     Left r -> failure r m
     Right (x, t) -> Primitively x t (advance m)
 
@@ -2639,9 +2646,20 @@ perform instr rest m = case operation instr of
     -- What the machine recorded about this name\'s argument positions, if it
     -- recorded anything. A name with no entry — every DC-declared global, and
     -- every local — takes what was written and nothing more.
-    plicitiesOf g = case lookup g (signatures m) of
+    -- **THE WRITTEN NAME IS RESOLVED FIRST — MS12 PHASE 313.** The table is
+    -- keyed by the name the definition went in under and the caller hands over
+    -- the name as the user wrote it; a module's declarations live under the
+    -- module's own namespace from this phase, so @idI@ was looked up at the
+    -- root while its signature sat at @Both.idI@ — no implicit was ever
+    -- inserted, and @idI (succ zero)@ put the term in the type's position and
+    -- refused with @Nat and Type\8320 cannot be made equal@.
+    -- 'Thena.Core.Term.globalUnder' is the one walk; two answers or none means
+    -- nothing is recorded, which is the same as an unrecorded name.
+    plicitiesOf g = case lookup (resolved g) (signatures m) of
       Just ps -> ps
       Nothing -> []
+
+    resolved g = either (const g) id (globalNamed m g)
 
     -- | Brady\'s @EXPAND@: line the written arguments up against the plicities,
     -- writing a placeholder in at each implicit position the user left out.
