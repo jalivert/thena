@@ -2256,33 +2256,27 @@ handleEventForKeys ev = do
 -- — measured with a vty event dump under the pty, 2026-11-11. Recognising
 -- them here is the only route such a key has into this frontend.
 --
--- **Shift+Enter's two are measured; Cmd+L's two are derived and are not.**
--- `~p6g53`, his correction of 2026-11-13: /"Option + l doesn't work, because I
--- have it mapped to print λ. Can you try chaning it to ctrl + l and cmd + l
--- both? I will test which one works and which one doesn't."/ Ctrl+L needs
--- nothing from this table — vty decodes it. Cmd+L does, because Cmd is
--- \"super\" and no terminal spells super in a plain escape sequence:
+-- **One gesture, and it is a table anyway.** Both entries are Shift+Enter's
+-- two encodings, both measured. The @(run, action)@ shape is kept past the
+-- point where one gesture needs it because `~xmd5b` wants exactly it: a run
+-- that is not in this table is typed into the line, so Ctrl+Enter still
+-- deposits @[27;5;13~@ into a proof line, and closing that is an entry here
+-- rather than a second mechanism. **It does not close `~xmd5b`** — that is
+-- still his call.
 --
--- * @[108;9u@ — kitty protocol. @l@ is code point 108; the modifier field is
---   @1 + bits@ with super at 8, so super alone is 9.
--- * @[27;9;108~@ — the same key in @modifyOtherKeys@, which is the form his
---   terminal already sends Shift+Enter in (@[27;2;13~@ above).
---
--- **Whether either ever arrives is his terminal's business and probably not
--- ours at all**: macOS terminals bind Cmd themselves and normally never
--- forward it to the program. These two are what we recognise *if* it is
--- forwarded, nothing more — see `~p6g53`.
---
--- **`~xmd5b` is still open and this does not close it.** A run that is not in
--- this table is typed into the line, so Ctrl+Enter still deposits
--- @[27;5;13~@; what changed is that the fix is now an entry rather than a
--- second mechanism.
+-- **DO NOT PUT CMD+L BACK. IT WAS TRIED AND IT DOES NOT ARRIVE.** `~p6g53`:
+-- @[108;9u@ (kitty protocol — @l@ is 108, modifier @1 + 8@ for super) and
+-- @[27;9;108~@ (@modifyOtherKeys@) were both added and both verified to clear
+-- a turn when fed to a pty. **On his own terminal nothing comes through at
+-- all** — HIS, 2026-11-13: /"ctrl works, cmd doesn't"/ — because macOS
+-- terminals bind Cmd themselves and never forward it to the program. The
+-- entries were removed on his instruction, /"unbind cmd so that it doesn't
+-- confuse us in the future"/: two recognisers for a key that cannot be
+-- pressed are two things a later reader has to disprove.
 escRuns :: [(String, EventM Name St ())]
 escRuns =
-  [ ("[13;2u",     shiftEnter)
-  , ("[27;2;13~",  shiftEnter)
-  , ("[108;9u",    clearOneTurn)
-  , ("[27;9;108~", clearOneTurn)
+  [ ("[13;2u",    shiftEnter)
+  , ("[27;2;13~", shiftEnter)
   ]
 
 -- | Esc has just been handled, so the characters that follow it /may/ be the
@@ -2885,21 +2879,25 @@ handleReplEvent (VtyEvent (V.EvKey (V.KChar c) [])) = do
 -- nothing to ('C-w' falls through there too), so it is handled here, in the
 -- zipper, before the catch-all: whitespace back, then the word itself,
 -- readline's rubout.
--- | **Ctrl+L clears the last turn** — `~p6g53`. Cmd+L runs the same
--- 'clearOneTurn' through 'escRuns', which is where the reason for the split
--- is: vty decodes Ctrl and does not decode super.
+-- | **Ctrl+L clears the last turn, and it is the only key that does** —
+-- `~p6g53`, settled by him on 2026-11-13 after two others were tried and
+-- measured. Neither alternative is coming back; both are recorded so that
+-- nobody spends the round again.
 --
--- **Option+L was the first try and is withdrawn, on his correction of
--- 2026-11-13**: /"Option + l doesn't work, because I have it mapped to print
--- λ."/ A key that types a character he wants in his proofs is not a key this
--- frontend may claim, and in a proof assistant λ is about as spoken-for as a
--- character gets.
+-- **Option+L: withdrawn, his λ.** /"Option + l doesn't work, because I have it
+-- mapped to print λ."/ A key that types a character he wants in his proofs is
+-- not a key this frontend may claim, and in a proof assistant λ is about as
+-- spoken-for as a character gets.
+--
+-- **Cmd+L: withdrawn, it does not arrive.** /"ctrl works, cmd doesn't"/ —
+-- macOS terminals bind Cmd themselves. See 'escRuns' for the two encodings
+-- that were tried and why they are gone.
 --
 -- **Ctrl+L means \"clear the screen\" in every terminal and here it means
--- \"clear one turn\", which is a real difference and is his call, not a
--- liberty taken**: he asked for this key by name. The one-turn meaning is the
--- whole feature — Terminal.app's **Clear to Previous Mark** is what he
--- described, and that is `Cmd+L` there, which is why both are bound.
+-- \"clear one turn\", which is a real difference and is his, not a liberty
+-- taken**: he asked for this key by name. The one-turn meaning is the whole
+-- feature — what he described is Terminal.app's **Clear to Previous Mark**,
+-- which is `Cmd+L` there, and that key cannot be had.
 handleReplEvent (VtyEvent (V.EvKey (V.KChar 'l') [V.MCtrl])) = clearOneTurn
 handleReplEvent (VtyEvent (V.EvKey V.KBS [V.MMeta])) = do
   st <- get
@@ -3160,9 +3158,7 @@ tuiHelpLines =
     , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
     , (":clear [n]",        "take the last line and its output off the transcript;")
-    , ("",                  "  with n, the last n of them. Ctrl+L is :clear 1, and")
-    , ("",                  "  so is Cmd+L if your terminal forwards it rather than")
-    , ("",                  "  binding it itself, which most macOS terminals do")
+    , ("",                  "  with n, the last n of them. Ctrl+L is :clear 1")
     , ("",                  "  It clears the view and never the session — the panes")
     , ("",                  "  still say where the proof is. :script cut is the other one")
     , (":script sessions",  "pick a stored session from a list and resume it")
@@ -4313,7 +4309,7 @@ clearNotHere = "nothing to clear here — the document is the record, and :scrip
 clearUsage :: [String]
 clearUsage =
   [ ":clear ‹n› takes off the last n lines and their output; :clear is :clear 1"
-  , "  Ctrl+L is the same as :clear 1, and so is Cmd+L if your terminal sends it"
+  , "  Ctrl+L is the same as :clear 1"
   ]
 
 -- | Keep the live prompt in view while typing, same reasoning as
