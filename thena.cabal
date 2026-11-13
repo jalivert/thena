@@ -236,6 +236,7 @@ library tui
         Tui.Config
         Tui.Database
         Tui.Jev
+        Tui.Layout
         Tui.Json
         Tui.Panes
         Tui.Render
@@ -413,6 +414,7 @@ test-suite thena-tui-test
     main-is:            Main.hs
     other-modules:
         DrawingTests
+        LayoutTests
     build-depends:
         base         ^>=4.21.2.0,
         thena:tui,

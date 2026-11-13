@@ -21,9 +21,10 @@ module Main (main) where
 import Test.Tasty (TestTree, defaultMain, testGroup)
 
 import DrawingTests (drawingTests)
+import LayoutTests (layoutTests)
 
 main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "tui" [drawingTests]
+tests = testGroup "tui" [drawingTests, layoutTests]

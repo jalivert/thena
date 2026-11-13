@@ -98,7 +98,13 @@ import Thena.View
   , focusAddress
   , machineView
   , nameDotted
+  , proofsView
   , statementOfferView
+  )
+import Thena.View.Proofs
+  ( ProofsView (..)
+  , QuestClaim (..)
+  , QuestView (..)
   )
 import Thena.View.Chart
   ( OfferView (..)
@@ -113,13 +119,31 @@ import Tui.Render
   ( Fold (..)
   , foldAttr
   , renderDevelopment
+  , renderDisplay
   , renderGoals
   , renderMachineView
   , spliceAttr
   )
 import Tui.Config (Config (..), loadConfig, saveConfig)
+import Tui.Layout
+  ( Layout
+  , Pane (..)
+  , Position
+  , allPanes
+  , closePane
+  , columnsOf
+  , defaultLayout
+  , openPane
+  , paneAt
+  , paneByName
+  , paneName
+  , placedPanes
+  , positionOf
+  , positions
+  )
 import Tui.Panes
   ( FileKind (..)
+  , PaneRow (..)
   , globalRows
   , moduleRows
   , outputRows
@@ -140,16 +164,18 @@ import Tui.Database
 import Tui.Jev (JevConfig, jevLog, loadJevConfig, rankCandidates)
 import Tui.Theme (Theme (..), neonPinkDark, themeByName, themes)
 
+-- | **One constructor for all seven panes, carrying which one** — `~fxc89`.
+-- They were seven constructors of their own until the layout became something
+-- he arranges, at which point every function that walks the panes
+-- ('resizablePanes', 'barRightOf', 'maxPaneWidth', 'draw''s own columns) wanted
+-- a 'Tui.Layout.Pane' rather than a 'Name' to key on. Going through
+-- 'Tui.Layout.Pane' keeps the layout in a module with no brick in it, which is
+-- what `thena-tui-test` can reach.
 data Name
   = Input
   | ScriptBar
   | HistoryVP
-  | ProofTermVP
-  | GoalsVP
-  | MachineVP
-  | GlobalsVP
-  | ModulesVP
-  | OutputVP
+  | PaneVP Pane
   | LoadPopup
   | OfferPopup
   | PickerVP
@@ -298,7 +324,7 @@ data Picker = Picker
 -- does not move is the column the press landed on and the width the pane had
 -- then; every frame of the drag is computed from those two numbers.
 data Drag = Drag
-  { dragPane  :: Name
+  { dragPane  :: Pane
   , dragFrom  :: Int
     -- ^ the absolute screen column the press landed on.
   , dragWidth :: Int
@@ -438,8 +464,21 @@ data St = St
     -- the index, replaces this one entry and writes it back, so two TUIs open
     -- on the same project do not drop each other's sessions, and there is no
     -- second copy of the index to keep true.
-  , stPaneWidths :: Map.Map Name Int
-    -- ^ **how wide each of the six small panes is, in columns** — `~gs8tj`.
+  , stLayout :: Layout
+    -- ^ **which panes are on screen and at which of the six positions** —
+    -- `~fxc89`, his instruction of 2026-11-12. 'Tui.Layout.defaultLayout' is
+    -- the screen exactly as it was before the command existed, so nothing
+    -- moves until he types @:pane@.
+    --
+    -- **It is not persisted, and that is `~vqsd8`'s question rather than a
+    -- separate one.** That item is the pane *widths* not surviving a restart
+    -- and it names three places they could live; a position is the same
+    -- question about the same panes and takes the same answer whenever he
+    -- gives it.
+  , stPaneWidths :: Map.Map Pane Int
+    -- ^ **how wide each pane is, in columns** — `~gs8tj`. Keyed by the pane
+    -- and filled over every pane there is, closed ones included, so a pane
+    -- closed and opened again comes back the width he pulled it to.
     -- Filled at startup from the terminal's own width ('defaultPaneWidth')
     -- and then only ever by a drag, so a pane he has pulled to a width keeps
     -- it; a pane he has not is the width it always was.
@@ -541,6 +580,7 @@ runTui = do
         , stScriptNote  = Nothing
         , stScriptStale = Nothing
         , stStored      = Nothing
+        , stLayout      = defaultLayout
         , stPaneWidths  = Map.empty
         , stDrag        = Nothing
         , stPicker      = Nothing
@@ -603,16 +643,95 @@ appStart = do
   -- unfilled map.
   (w, _) <- liftIO (V.displayBounds (V.outputIface vty))
   st <- get
-  put st { stPaneWidths = Map.fromList [(n, defaultPaneWidth w) | n <- resizablePanes] }
+  put st { stPaneWidths = Map.fromList [(p, defaultPaneWidth w) | p <- allPanes] }
 
--- | The six panes a drag can resize, in two columns of three — the layout
--- `~z5dmq` settled. **Order matters here**: it is the column structure, and
--- 'draw' and the clamp both read it rather than repeating the grouping.
-paneColumnNames :: ([Name], [Name])
-paneColumnNames = ([GlobalsVP, ModulesVP, OutputVP], [ProofTermVP, GoalsVP, MachineVP])
+-- | The panes a drag can resize: **the ones on screen, which is now a
+-- question about 'stLayout' rather than a constant** — `~fxc89`. A closed pane
+-- reports no extent, so it could not be hit in any case; reading the layout
+-- is what keeps the clamp and the hit test agreeing with the drawing when he
+-- moves a pane to the other column.
+resizablePanes :: St -> [Name]
+resizablePanes = map PaneVP . placedPanes . stLayout
 
-resizablePanes :: [Name]
-resizablePanes = fst paneColumnNames <> snd paneColumnNames
+-- | **@:pane ‹name› open ‹n›@ and @:pane ‹name› close@** — `~fxc89`, his
+-- instruction of 2026-11-12 and his own two examples.
+--
+-- 'Nothing' for a line that is not a @:pane@ line at all, so the caller falls
+-- through to whatever it did before; 'Just' with the layout unchanged and a
+-- complaint for a @:pane@ line that does not parse, because a line that starts
+-- with the word is his and must not be handed to the engine or written into a
+-- document as a proof step.
+--
+-- **One function for both keyboards.** The REPL and live-script mode's command
+-- bar each dispatch their own commands, and a command built twice is a command
+-- that will eventually behave two ways.
+paneCommand :: [String] -> Layout -> Maybe (Layout, String)
+paneCommand ws layout = case ws of
+  [":pane", name, "close"] ->
+    withPane name (\p -> (closePane p layout, paneName p <> " closed"))
+  [":pane", name, "open", n] -> withPane name $ \p -> case readPosition n of
+    Nothing ->
+      ( layout
+      , n <> " is not a position — they are 1 to 6, two columns of three "
+          <> "numbered across"
+      )
+    Just pos -> placed p pos
+  (":pane" : _) -> Just (layout, paneUsage)
+  _ -> Nothing
+  where
+    withPane name k = Just $ case paneByName name of
+      Just p -> k p
+      Nothing ->
+        ( layout
+        , "no pane called " <> name <> " — "
+            <> intercalate ", " (map paneName allPanes)
+        )
+    -- | **What a move cost is said, not left to be noticed.** A swap moves the
+    -- pane that was there, and opening a closed pane onto a taken position
+    -- closes the occupant; both are read back off the layouts rather than
+    -- reported by 'openPane', which keeps that function about the placement.
+    placed p pos =
+      ( after
+      , intercalate ", "
+          ( (paneName p <> " at " <> show pos)
+              : [ paneName q <> " at " <> show w
+                | Just q <- [paneAt pos layout]
+                , q /= p
+                , Just w <- [positionOf q after]
+                ]
+              <> [paneName q <> " closed" | Just q <- [shut]]
+          )
+      )
+      where (after, shut) = openPane p pos layout
+
+paneUsage :: String
+paneUsage =
+  ":pane ‹name› open ‹1-6›, :pane ‹name› close — "
+    <> intercalate ", " (map paneName allPanes)
+
+readPosition :: String -> Maybe Position
+readPosition w = case reads w of
+  [(n, "")] | n `elem` positions -> Just n
+  _ -> Nothing
+
+-- | The words @:pane@ offers where the caret stands, or 'Nothing' off a
+-- @:pane@ line. **Read by the dropdown and by Tab through 'dropdownRows'**, so
+-- the key and the list cannot offer different things.
+paneVocabulary :: String -> Maybe [String]
+paneVocabulary line
+  | not (paneCommandPrefix `isPrefixOf` line) = Nothing
+  | otherwise = Just (vocab slot)
+  where
+    ws = words line
+    -- | A line ending in a space is one word further on than its words say.
+    slot = if not (null line) && last line /= ' ' then length ws - 1 else length ws
+    vocab 1 = map paneName allPanes
+    vocab 2 = ["open", "close"]
+    vocab 3 | ws !! 2 == "open" = map show positions
+    vocab _ = []
+
+paneCommandPrefix :: String
+paneCommandPrefix = ":pane "
 
 -- | **What a pane is wide before anybody drags it: a quarter of the screen,
 -- which is what `~z5dmq` chose.** It was two nested percentages before
@@ -908,10 +1027,13 @@ draw st =
     -- window too narrow to honour six chosen widths shrinks them in
     -- proportion for as long as it is narrow; widen it again and the widths
     -- he chose are still the widths he chose.
+    -- | **Which panes, and in which column, is 'stLayout''s to say** —
+    -- `~fxc89`. Both columns can be empty now: close all six and the document
+    -- has the window, which is the other thing the command buys.
     paneColumns = Widget Fixed Greedy $ do
       ctx <- getContext
       let spare = max (2 * minPaneWidth) (ctx ^. availWidthL - docMinWidth - 1)
-          (first', second') = paneColumnNames
+          (first', second') = columnsOf (stLayout st)
           wide ns = maximum (minPaneWidth : map storedWidth ns)
           (w1, w2) = (wide first', wide second')
           scale x
@@ -934,10 +1056,21 @@ draw st =
           -- on the left instead pins every right edge to the column's, so a
           -- pane's own bar is the only thing its width moves.
           drawn cw n = hLimit cw . padLeft Max . hLimit (width n)
+          -- | **An empty column draws nothing at all, not an empty box** —
+          -- `~fxc89` made that a state he can reach, @:pane@-ing all three of
+          -- a column away. 'maximum' over no panes has no answer and 'vBox'
+          -- over no widgets has no height, so both are short-circuited here
+          -- rather than guarded further down.
+          column [] = emptyWidget
           column ns =
             vBox (intersperse gapRow [drawn (colWidth ns) n (paneOf n) | n <- ns])
             where colWidth = maximum . map width
-      render (hBox [column first', gapH, column second'])
+          -- | **The stage gap belongs to the second column, not to the pair.**
+          -- With that column closed there is nothing to its right to be
+          -- separated from, and a gap drawn anyway is a column of backdrop the
+          -- document could have had.
+          gapIf ns = if null ns then emptyWidget else gapH
+      render (hBox [column first', gapIf second', column second'])
 
     storedWidth = paneWidthOf st
 
@@ -947,20 +1080,28 @@ draw st =
     -- greedy too — the second column then has nowhere left to be drawn.
     gapRow = str " "
 
-    -- | Which pane is which, by its 'Name', so that the layout above is the
-    -- column structure and nothing else.
-    paneOf n = withAttr (attrName "panel") $ case n of
-      GlobalsVP -> pane "globals" GlobalsVP (paneBody (globalRows (globalGroups st)))
-      ModulesVP -> pane "modules" ModulesVP (paneBody (moduleRows (moduleEntries st) (fileEntries st)))
-      OutputVP -> pane "output" OutputVP (paneBody (outputRows focusText focusOut))
-      ProofTermVP -> pane "proofterm" ProofTermVP (padAll 1 (renderDevelopment fold links))
-      GoalsVP -> pane "goals" GoalsVP (padAll 1 (renderGoals fold links))
+    -- | Which pane is which, so that the layout above is the column structure
+    -- and nothing else. **The title is 'paneName' and not a literal**, which
+    -- is what keeps the word on screen and the word @:pane@ takes the same
+    -- word — the attribute names ("edge.globals" and the rest) are built from
+    -- it too, so a theme keeps its accent per pane wherever the pane is moved.
+    paneOf p = withAttr (attrName "panel") $ case p of
+      Globals -> pane' (paneBody (globalRows (globalGroups st)))
+      Modules -> pane' (paneBody (moduleRows (moduleEntries st) (fileEntries st)))
+      Output -> pane' (paneBody (outputRows focusText focusOut))
+      ProofTerm -> pane' (padAll 1 (renderDevelopment fold links))
+      Goals -> pane' (padAll 1 (renderGoals fold links))
+      -- | **The parked proofs, and the import standing in a `yield`** —
+      -- `~76zrr`, his request of 2026-11-12: /"Right, I need a pane with
+      -- parked proofs!"/
+      Quests -> pane' (paneBody' (proofWidgets (proofsView budget s)))
       -- | **The machine's lines wrap like a list pane's row**, same
       -- reason and the same settings ('paneWrap'): the engine elides a
       -- value against its own 'Budget', which knows nothing about how
       -- wide a quarter of this screen is.
-      MachineVP -> pane "machine" MachineVP (padAll 1 (vBox (map (strWrapWith paneWrap) (renderMachineView machine))))
-      _ -> emptyWidget
+      Machine -> pane' (padAll 1 (vBox (map (strWrapWith paneWrap) (renderMachineView machine))))
+      where
+        pane' = pane (paneName p) (PaneVP p)
 
     (focusText, focusOut) = lineInFocus st
 
@@ -968,8 +1109,56 @@ draw st =
     -- viewport over an empty 'vBox' has no height to scroll and the pane's
     -- fill would stop at its title — and an empty output pane is the ordinary
     -- state of the output pane, not an error.
-    paneBody rows =
-      padAll 1 (vBox (if null rows then [str " "] else map paneRowWidget rows))
+    paneBody rows = paneBody' (map paneRowWidget rows)
+
+    -- | The same, for a pane whose rows are not all text — the proofs pane
+    -- draws a theorem's statement through 'renderDisplay', which is a widget
+    -- and not a 'Tui.Panes.PaneRow'.
+    paneBody' ws = padAll 1 (vBox (if null ws then [str " "] else ws))
+
+    -- | **The proofs pane's rows** — `~76zrr`. The live quest and the parked
+    -- ones, each as its heading, the word @:resume@ takes, and what the quest
+    -- is.
+    --
+    -- **Nothing here is an operation, and that is the engine's design showing
+    -- through**: 'Thena.View.Proofs' carries no action, because a parked proof
+    -- is picked up by submitting @:resume ‹word›@ — the same line a user types
+    -- — and unparking is a step and never automatic, his ruling of 2026-11-11.
+    -- So this pane says what there is and leaves the gesture to the prompt.
+    --
+    -- **'proofsViewOn' is a field and not the head of the list**, so which
+    -- quest is live is the engine's answer rather than this pane's guess; it
+    -- is drawn under its own heading for the same reason.
+    proofWidgets pv =
+      concat
+        [ [paneRowWidget (Heading "on" Nothing)] <> questWidgets q
+        | Just q <- [proofsViewOn pv]
+        ]
+        <> concat
+             [ paneRowWidget (Heading "parked" (Just (length ps))) : concatMap questWidgets ps
+             | let ps = proofsViewParked pv
+             , not (null ps)
+             ]
+
+    -- | One quest: the word, then what it is. **A statement is drawn at the
+    -- root address and with no fold** — a parked quest's claim is not a
+    -- subterm of the development the session is standing in, so there is
+    -- nothing for the reading-flow fold to be relative to.
+    questWidgets q =
+      paneRowWidget (Entry (questViewWord q))
+        : case questViewClaim q of
+            -- | **The indent is an 'hBox' and not a 'padLeft'**, measured
+            -- under a pty: 'padLeft' does not take its four columns off the
+            -- width the term is flowed against, so a statement wider than the
+            -- pane broke at the wrong place and lost the characters past the
+            -- edge — @∀ (a : Nat) (b : Nat) (c : Nat) -> Eq {0} Nat …@ drew as
+            -- @(a : Nat) -> (b : Nat) -> (@ and then @{0} Nat …@, with
+            -- @c : Nat) -> Eq@ simply gone. An 'hBox' hands the flow a box of
+            -- what is left, so every continuation line sits inside the indent
+            -- too.
+            AStatement d -> [str "    " <+> renderDisplay NoFold d]
+            AnImportStanding header ->
+              [paneRowWidget (Detail ("standing in a yield: " <> header))]
 
     -- | The accent edge, a title strip, then the content — never a full
     -- fill, per his correction. 'clickable' so a scroll-wheel event over
@@ -1624,7 +1813,7 @@ handleEvent ev = do
   -- enough**: measured under a pty, re-running `:show And.elim` after scrolling
   -- up produced an answer identical to the one on screen, so a comparison of
   -- the text saw no change and the pane stayed where it had been dragged.
-  when (focusAfter /= focusBefore) (vScrollToEnd (viewportScroll OutputVP))
+  when (focusAfter /= focusBefore) (vScrollToEnd (viewportScroll (PaneVP Output)))
   inputExt <- lookupExtent Input
   paneExt <- lookupExtent HistoryVP
   st <- get
@@ -1672,18 +1861,17 @@ handleEventFor ev = do
 handleResize :: BrickEvent Name AppEvent -> EventM Name St Bool
 handleResize ev = case ev of
   -- | **A press inside a pane, which is the bar when its column is 0.** The
-  -- event's own name says which pane, and that is the whole of the hit test:
-  -- **the three panes of a column all have their bar in the same screen
-  -- column**, so a hit test by column alone resizes whichever of the three
-  -- comes first in the list. Measured, 2026-11-12: pulling the machine
-  -- pane's bar narrowed the proof-term pane.
+  -- event's own name says which pane, and that is the whole of the hit test —
+  -- each pane's bar sits at its own left edge since `~rr8bx`, so the name is
+  -- enough and the row never has to be consulted here.
   MouseDown n V.BLeft _ (Location (c, _)) -> do
     left <- paneLeft n
     st <- get
     case (stDrag st, left) of
       (Just d, Just l) -> resizeTo d (l + c) >> pure True
       (Just _, Nothing) -> pure True
-      (Nothing, Just l) | c == 0, n `elem` resizablePanes -> startDrag n l >> pure True
+      (Nothing, Just l)
+        | c == 0, PaneVP p <- n, n `elem` resizablePanes st -> startDrag p l >> pure True
       _ -> pure False
   -- | **A press on the stage gap, which belongs to no clickable widget and so
   -- arrives in absolute screen coordinates.** Taking it doubles a one-column
@@ -1696,7 +1884,7 @@ handleResize ev = case ev of
     case stDrag st of
       Just d -> resizeTo d c >> pure True
       Nothing -> do
-        hit <- barRightOf c r
+        hit <- barRightOf st c r
         case hit of
           Just n -> startDrag n c >> pure True
           Nothing -> pure False
@@ -1704,9 +1892,9 @@ handleResize ev = case ev of
   VtyEvent (V.EvMouseUp _ _ (Just V.BLeft)) -> release
   _ -> pure False
   where
-    startDrag n from = do
+    startDrag p from = do
       st <- get
-      put st { stDrag = Just (Drag n from (paneWidthOf st n)) }
+      put st { stDrag = Just (Drag p from (paneWidthOf st p)) }
     release = do
       st <- get
       case stDrag st of
@@ -1719,24 +1907,24 @@ paneLeft n = fmap (locationColumn . extentUpperLeft) <$> lookupExtent n
 -- | The pane whose accent bar is in the column just right of @(col, row)@ —
 -- the rectangle test the gap press needs, and the reason a pane's extent is
 -- read whole rather than for its left edge alone.
-barRightOf :: Int -> Int -> EventM Name St (Maybe Name)
-barRightOf col row = do
-  found <- mapM beside resizablePanes
-  pure (listToMaybe [n | Just n <- found])
+barRightOf :: St -> Int -> Int -> EventM Name St (Maybe Pane)
+barRightOf st col row = do
+  found <- mapM beside (placedPanes (stLayout st))
+  pure (listToMaybe [p | Just p <- found])
   where
-    beside n = do
-      ext <- lookupExtent n
+    beside p = do
+      ext <- lookupExtent (PaneVP p)
       pure $ case ext of
         Just e
           | locationColumn (extentUpperLeft e) == col + 1
           , let top = locationRow (extentUpperLeft e)
           , row >= top
           , row < top + snd (extentSize e) ->
-              Just n
+              Just p
         _ -> Nothing
 
-paneWidthOf :: St -> Name -> Int
-paneWidthOf st n = Map.findWithDefault minPaneWidth n (stPaneWidths st)
+paneWidthOf :: St -> Pane -> Int
+paneWidthOf st p = Map.findWithDefault minPaneWidth p (stPaneWidths st)
 
 -- | One frame of a drag: the pane's width is what it was at the press, plus
 -- however far the pointer has travelled back towards the screen's left edge,
@@ -1763,12 +1951,15 @@ snapWidth w = max minPaneWidth (((w + paneWidthStep `div` 2) `div` paneWidthStep
 -- **It does not consider this pane's own neighbours**, and does not need to:
 -- a pane narrower than one beside it costs the column nothing, and a column
 -- too wide for the window is what 'draw''s proportional clamp is for.
-maxPaneWidth :: St -> Name -> Int -> Int
-maxPaneWidth st n screen =
+maxPaneWidth :: St -> Pane -> Int -> Int
+maxPaneWidth st p screen =
   max minPaneWidth (screen - 2 - 1 - 1 - docMinWidth - otherWide)
   where
-    (c1, c2) = paneColumnNames
-    other = if n `elem` c1 then c2 else c1
+    -- | **Which column is "the other one" is 'stLayout''s to say** — `~fxc89`.
+    -- A pane he has moved across is clamped against the column it is in now,
+    -- not the one it was built in.
+    (c1, c2) = columnsOf (stLayout st)
+    other = if p `elem` c1 then c2 else c1
     otherWide = maximum (minPaneWidth : map (paneWidthOf st) other)
 
 handleEventForKeys :: BrickEvent Name AppEvent -> EventM Name St ()
@@ -2125,6 +2316,12 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
           appendTurn st' Nothing ["theme: " <> name]
         [":fold", mode] | mode `elem` ["on", "off"] ->
           appendTurn st0 { stFoldOn = mode == "on" } Nothing ["fold: " <> mode]
+        -- | **@:pane@ — which panes are on screen and where** — `~fxc89`.
+        -- TUI-local like `:theme` and `:fold`: the engine has no panes, so
+        -- this never reaches it.
+        paneLine@(":pane" : _)
+          | Just (layout', said) <- paneCommand paneLine (stLayout st0) ->
+              appendTurn st0 { stLayout = layout' } Nothing [said]
         -- | `:script` enters live-script mode (`~5vtt3`). TUI-local like the
         -- rest of this block, and the only way *in* — leaving again is the
         -- command bar's `:script`, because once the mode is on, what you type
@@ -2539,6 +2736,10 @@ tuiHelpLines =
   , ""
   ] ++ concatMap (uncurry helpRow)
     [ (":theme ‹name›",     intercalate ", " (map themeName themes))
+    , (":pane ‹name› open ‹n›", "put a pane at one of six positions, numbered across:")
+    , ("",                  "  1 2 / 3 4 / 5 6, so odd is the left column and even the right")
+    , ("",                  "  " <> intercalate ", " (map paneName allPanes))
+    , (":pane ‹name› close", "take it off the screen — its width is remembered")
     , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
     , (":script sessions",  "pick a stored session from a list and resume it")
@@ -3419,6 +3620,12 @@ scriptBarSubmit st text = case words text of
     put st'
   [":fold", mode] | mode `elem` ["on", "off"] ->
     put st { stFoldOn = mode == "on", stScriptBar = Nothing, stScriptNote = Just ("fold: " <> mode) }
+  -- | **@:pane@ in the bar too** — `~fxc89`. It arranges the screen, and the
+  -- screen is what live-script mode is mostly made of; leaving it out would
+  -- mean leaving the mode to move a pane.
+  paneLine@(":pane" : _)
+    | Just (layout', said) <- paneCommand paneLine (stLayout st) ->
+        put st { stLayout = layout', stScriptBar = Nothing, stScriptNote = Just said }
   [":preselect", mode] | mode `elem` ["on", "off"] -> do
     let st' = st { stAutoSelect = mode == "on", stScriptBar = Nothing, stScriptNote = Just ("preselect: " <> mode) }
     liftIO (saveConfig (configOf st'))
@@ -4006,6 +4213,7 @@ completeLoadPath = do
 pathArgument :: String -> Bool
 pathArgument line =
   not (resumeArgument `isPrefixOf` line)
+    && not (paneCommandPrefix `isPrefixOf` line)
     && not (scriptCommand `isPrefixOf` line && notElem ' ' (drop (length scriptCommand) line))
 
 -- | What all the offered rows agree on past what is typed, or 'Nothing' when
@@ -4015,9 +4223,14 @@ extended typed rows =
   let common = longestCommonPrefix rows
    in if length common > length typed then Just common else Nothing
 
+-- | **Despite the name, what the dropdown anchors to — not always a path.**
+-- `:script resume` completes a slug and `:pane` completes its own words
+-- (`~fxc89`); both are the line's last word all the same, which is what this
+-- answers and why the two commands needed nothing else to be offered.
 loadPathPrefix :: String -> Maybe String
 loadPathPrefix line
   | any (`isPrefixOf` line) pathCommands = Just (lastWord line)
+  | paneCommandPrefix `isPrefixOf` line = Just (lastWord line)
   | otherwise = Nothing
 
 -- | **What the dropdown offers on this line**, which is not always a
@@ -4041,6 +4254,11 @@ loadPathPrefix line
 -- names are what `:script sessions` is for.
 dropdownRows :: String -> IO [String]
 dropdownRows line
+  -- | **A fourth vocabulary, and it is the pane names** — `~fxc89`. Nothing
+  -- here touches the disc: which panes there are, and which positions, are
+  -- facts about the TUI. 'paneVocabulary' is the whole of it.
+  | Just vocab <- paneVocabulary line =
+      pure (settled [w | w <- vocab, typed `isPrefixOf` w])
   | resumeArgument `isPrefixOf` line = do
       index <- loadIndex
       pure (settled [stSlug st | st <- index, typed `isPrefixOf` stSlug st])
