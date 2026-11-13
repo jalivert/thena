@@ -25,6 +25,9 @@ module Tui.Render
   , renderDevelopment
   , renderGoals
   , renderMachineView
+  , displayText
+  , developmentText
+  , goalTexts
   ) where
 
 import Data.Char (isSpace)
@@ -437,6 +440,49 @@ renderGoals fold links = case goalsOf links of
     goalOf (LinkView _at _focus shape) = case shape of
       AClaimLink {} -> [flow (linkPieces fold shape)]
       AGuessLink {guessBody = body} -> goalsOf body
+      _ -> []
+
+-- | The same words the term drawers above draw, as plain text — for a reader
+-- that is not the screen. `~d4qvm`'s only use is Jev's request state, which is
+-- JSON and has nowhere to put an attribute.
+--
+-- **Always 'NoFold', and that is not a default being left alone.** A fold is a
+-- reading aid for a person — it hides a literal's innards behind the literal —
+-- and the whole point of handing a term to a model is that it reads the
+-- innards. Passing the live 'Fold' here would hide from Jev exactly the part
+-- it is being asked about, and it would make the request depend on whether he
+-- happened to have the fold toggled on.
+displayText :: Display -> String
+displayText = concatMap pieceText . displayPieces NoFold
+
+-- | One link's own line, without its indent or marker.
+linkText :: LinkShape -> String
+linkText = concatMap pieceText . linkPieces NoFold
+
+-- | The development as lines, a guess's body indented beneath it and the
+-- focused link marked — 'renderDevelopment''s shape with the widget taken off,
+-- and deliberately the same two-space step, so that what a model is told and
+-- what he is looking at are the same picture.
+developmentText :: [LinkView] -> [String]
+developmentText = concatMap (go 0)
+  where
+    go depth (LinkView _at focus shape) =
+      (replicate (2 * depth) ' ' <> marker <> linkText shape) : nested
+      where
+        marker = if focus then "> " else "  "
+        nested = case shape of
+          AGuessLink {guessBody = body} -> concatMap (go (depth + 1)) body
+          _ -> []
+
+-- | The open claims, one line each, nested guesses included — 'renderGoals'
+-- over the same links, as text. Flat: a goal is a goal wherever it sits, and
+-- the indentation that locates it is 'developmentText''s job.
+goalTexts :: [LinkView] -> [String]
+goalTexts = concatMap goalOf
+  where
+    goalOf (LinkView _at _focus shape) = case shape of
+      AClaimLink {} -> [linkText shape]
+      AGuessLink {guessBody = body} -> goalTexts body
       _ -> []
 
 renderMachineView :: MachineView -> [String]

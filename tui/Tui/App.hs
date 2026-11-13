@@ -129,7 +129,10 @@ import Thena.View.Core (Budget (..))
 
 import Tui.Render
   ( Fold (..)
+  , developmentText
+  , displayText
   , foldAttr
+  , goalTexts
   , renderDevelopment
   , renderDisplay
   , renderGoals
@@ -177,7 +180,7 @@ import Tui.Database
   , storedNamed
   , writeTranscript
   )
-import Tui.Jev (JevConfig, jevLog, loadJevConfig, rankCandidates)
+import Tui.Jev (JevConfig, JevState (..), jevLog, loadJevConfig, rankCandidates)
 import Tui.Theme (Theme (..), neonPinkDark, themeByName, themes)
 
 -- | **One constructor for all seven panes, carrying which one** — `~fxc89`.
@@ -4268,7 +4271,7 @@ fireJevForCurrentDropdown = do
   case (stOfferDropdown st, stJevConfig st) of
     (Just od, Just jcfg)
       | selectable >= 2 ->
-        fireJevRanking jcfg (Text.pack (take col line)) od
+        fireJevRanking jcfg (activeSession st) (Text.pack (take col line)) od
     (_, Nothing) -> liftIO (jevLog "skip: no key loaded")
     (Nothing, Just _) -> liftIO (jevLog "skip: no dropdown on screen")
     (Just _, Just _) -> liftIO (jevLog ("skip: only " <> show selectable <> " selectable candidate(s)"))
@@ -4278,22 +4281,145 @@ fireJevForCurrentDropdown = do
 -- Bumps 'stJevGen' so a slower, earlier request can't land after a
 -- faster, later one and put a stale order back on screen
 -- ('applyJevRanking' checks the generation it comes back with).
-fireJevRanking :: JevConfig -> Text -> OfferDropdown -> EventM Name St ()
-fireJevRanking jcfg typedSoFar od = do
+--
+-- **The 'Session' is carried in rather than the finished request, so that
+-- 'jevRequest' runs inside the 'forkIO' and not on the keystroke.** It reads
+-- the development and runs @:matches@, neither of which a frontend should pay
+-- for between a key going down and the screen being redrawn. A 'Session' is
+-- immutable and every call 'jevRequest' makes of it is pure, so handing one to
+-- another thread is not sharing mutable state — it is passing a value.
+fireJevRanking :: JevConfig -> Session -> Text -> OfferDropdown -> EventM Name St ()
+fireJevRanking jcfg s typedSoFar od = do
   st <- get
   let gen = stJevGen st + 1
       chan = stJevChan st
-      candidates =
-        [ (Text.pack (rowLabel r), Text.pack (rowLabel r))
-        | r <- odRows od
-        , isJust (rowInsert r)
-        ]
+      offered = [r | r <- odRows od, isJust (rowInsert r)]
   put st { stJevGen = gen }
   liftIO $ do
     _ <- forkIO $ do
-      result <- rankCandidates jcfg typedSoFar candidates
+      -- | **Nothing this thread does may escape it**, which is the module
+      -- contract 'Tui.Jev' states — /"a missing key, a failed call, or a
+      -- timeout all mean exactly the same thing to the caller: no scores"/.
+      -- 'rankCandidates' already wraps its own request, but `~d4qvm` moved
+      -- real work in front of it: 'jevRequest' is forced here rather than on
+      -- the keystroke, so whatever it forces is now this thread's to contain.
+      -- An unhandled exception in a 'forkIO' prints to stderr, and stderr
+      -- under brick is the screen.
+      outcome <-
+        try
+          ( let (situation, candidates) = jevRequest s typedSoFar offered
+             in rankCandidates jcfg situation candidates
+          )
+      result <- case outcome of
+        Left (e :: SomeException) -> do
+          jevLog ("answer: FAILED before the request went out — " <> show e)
+          pure (Left (show e))
+        Right r -> pure r
       writeBChan chan (JevRanked gen result)
     pure ()
+
+-- | **What Jev is told, and it is the whole of `~d4qvm`'s fix.** HIS
+-- instruction, 2026-11-13: /"Jev needs to be given enough information to make
+-- an informed choice."/
+--
+-- What it replaced was one field — the characters typed so far. On an empty
+-- line that is the empty string, so @:theorem@, then @attack@, then @intro@ put
+-- a byte-for-byte identical question to Jev three times, and his report is the
+-- only answer such a request can give: /"it just tells me the same three things
+-- again."/
+--
+-- **The state and the candidates are built together because they share the
+-- expensive part.** @:matches@ is run once; its text goes out as
+-- @applies_here@, and the rule names in it are what marks a candidate as
+-- applying here. Marking the candidate itself matters as much as the list
+-- does: a 'Choice' scores criteria, so a note on the criterion is read where
+-- the decision is made rather than cross-referenced out of a separate field.
+--
+-- **@:matches@ is a look and the driver says so** — /"no body runs, and
+-- nothing is speculatively executed"/ ('Thena.Driver.Matched') — so running it
+-- for context cannot move the session. The returned 'Session' is dropped on
+-- purpose, and is not the same thing as discarding a write.
+jevRequest :: Session -> Text -> [OfferRow] -> (JevState, [(Text, Text)])
+jevRequest s typedSoFar offered = (JevState fields, candidates)
+  where
+    -- The same 'Budget' every pane is drawn with, so that what Jev reads and
+    -- what is on screen are elided at the same place.
+    budget = Budget 200
+    links = developmentView budget s
+
+    fields =
+      (Text.pack "typed_so_far", typedSoFar)
+        : [ (Text.pack k, Text.pack v)
+          | (k, v) <-
+              [ ("proving", proving)
+              , ("open_goals", unlines' (goalTexts links))
+              , ("proof_term", unlines' (developmentText links))
+              , ("applies_here", unlines' (take matchesSent applying))
+              ]
+          , not (null v)
+          ]
+
+    -- | **A field with nothing in it is left out, not sent empty.** "No proof
+    -- is open" and "a proof is open and its goal is the empty string" are
+    -- different situations, and an empty string is how the second one would
+    -- read.
+    unlines' = intercalate "\n"
+
+    proving = case proofsViewOn (proofsView budget s) of
+      Just (QuestView word (AStatement st')) -> word <> " : " <> displayText st'
+      -- An import standing in a @yield@ is not a theorem and has no statement
+      -- to show ('Thena.View.Proofs.AnImportStanding' exists to say exactly
+      -- that), so what is sent is what the session is on, in words.
+      Just (QuestView word (AnImportStanding _)) ->
+        "nothing — the session is on the import " <> word <> ", standing in a yield"
+      Nothing -> ""
+
+    -- | @:matches@, rendered. The driver's own order is kept — nearest first,
+    -- dispatch order — because that is the only ranking in it.
+    applying = case oneLine s ":matches" of
+      (s', resp) -> renderResponse s' resp
+
+    -- | **The rule's own name is the first word of its match line**, the rest
+    -- being its head's pattern (@claim ‹ty›@, @one-case ‹t› ‹c› ‹sub› ‹bs›
+    -- ‹fs›@). Taken from the *whole* list and not from the truncated text, so
+    -- the cap below never un-marks a candidate that does apply.
+    applyingNames = Set.fromList (map (takeWhile (not . isSpace)) applying)
+
+    -- | **A label is a word to type or a production's @name: shape@**
+    -- ('offerRow', 'productionRow'), and the boundary knows nothing further
+    -- about either — so the description a criterion carries is the one thing
+    -- that is ours to add: whether this candidate applies where the cursor
+    -- stands. Before `~d4qvm` it was the label repeated, which is the field
+    -- the API reads prose from, carrying none.
+    candidates =
+      [ ( Text.pack (rowLabel r)
+        , Text.pack
+            ( rowLabel r
+                <> if takeWhile (not . isSpace) (rowLabel r) `Set.member` applyingNames
+                  then " (applies at the current focus)"
+                  else ""
+            )
+        )
+      | r <- offered
+      ]
+
+-- | **How much of @:matches@ goes out.** Measured 2026-11-13 against
+-- @exe:thena@: 110 lines with no proof open, 81 after @:theorem@ + @attack@ +
+-- @intro@. **The length is a signal question and not a cost one** — 50 calls
+-- after those three steps took 0.417s against 0.140s for the same run without
+-- them, so ~5.5ms each, rendering included, and it is paid on the 'forkIO'
+-- rather than on a keystroke anyway. The list is in dispatch order, so its
+-- head is the tactics (@intro@, @solve@, @regret@, @prove@, @claim ‹ty›@,
+-- @assume ‹ty›@, @quantify ‹ty›@) and its tail is helper rules whose heads are
+-- irrefutable and pass everywhere.
+--
+-- **40 is a judgement and is not measured.** What it is weighed against is
+-- answer quality with a key in the environment, which this track cannot test
+-- without one; `~d4qvm` records that. 'applyingNames' is deliberately computed
+-- before the cap, so being past it costs a candidate its text in the state
+-- field and never its mark.
+matchesSent :: Int
+matchesSent = 40
 
 -- | Reads a ranking answer back in — 'Left' (a failed call) and a
 -- generation that no longer matches both mean the same thing: do

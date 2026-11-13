@@ -12,6 +12,7 @@
 -- had.
 module Tui.Jev
   ( JevConfig (..)
+  , JevState (..)
   , loadJevConfig
   , rankCandidates
   , jevLog
@@ -20,6 +21,7 @@ module Tui.Jev
 
 import Control.Exception (SomeException, catch, try)
 import Data.Aeson (FromJSON (..), Value, eitherDecode, encode, object, toJSON, withObject, (.:), (.=))
+import qualified Data.Aeson.Key as Key
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -77,6 +79,23 @@ data JevConfig = JevConfig
   , jevModel  :: Text
   }
 
+-- | **Everything Jev is told about the situation**, as the @state@ object's
+-- fields in the order they go out. `~d4qvm`, HIS instruction of 2026-11-13:
+-- /"Jev needs to be given enough information to make an informed choice."/
+--
+-- Before that this was one hard-coded field, the characters typed so far —
+-- which on an empty line is the empty string, so a question asked before a
+-- tactic and the same question asked after it were byte-for-byte identical and
+-- could not come back with different answers. **The fields are not this
+-- module's to choose.** It is a transport: what counts as the situation is a
+-- question about the proof, and 'Tui.App.jevRequest' is the one place that
+-- answers it.
+--
+-- **A newtype and not a bare list**, because 'rankCandidates' takes a list of
+-- pairs for the candidates too and the two are not interchangeable — swapping
+-- them would type-check and send a well-formed, meaningless request.
+newtype JevState = JevState [(Text, Text)]
+
 -- | 'Nothing' when @TYPESAFE_API_KEY@ isn't set. That is not an error —
 -- the feature is simply off, the same as it is for anyone without a key.
 loadJevConfig :: IO (Maybe JevConfig)
@@ -92,8 +111,8 @@ loadJevConfig = do
     mkConfig modelOverride k =
       JevConfig (Text.pack k) (maybe "jev-latest" Text.pack modelOverride)
 
--- | One 'Choice' question, naming every candidate once as a criterion, the
--- line typed so far as the whole of the state. Returns a probability per
+-- | One 'Choice' question, naming every candidate once as a criterion, with
+-- 'JevState' as the whole of the state. Returns a probability per
 -- candidate name, read out of the one answer's @probabilities@ — never
 -- throws; a connection failure, a timeout, and a malformed response all
 -- come back as 'Left' for the caller to treat identically.
@@ -106,12 +125,19 @@ loadJevConfig = do
 --
 -- **At most 'choiceOptionLimit' candidates go out, and that is the API's
 -- rule, not ours** — see that constant.
-rankCandidates :: JevConfig -> Text -> [(Text, Text)] -> IO (Either String (Map.Map Text Double))
-rankCandidates cfg typedSoFar offered = do
+rankCandidates :: JevConfig -> JevState -> [(Text, Text)] -> IO (Either String (Map.Map Text Double))
+rankCandidates cfg st@(JevState fields) offered = do
   jevLog
     ( "request: " <> show (length candidates) <> " candidates"
         <> (if dropped > 0 then " (" <> show dropped <> " over the 255 limit, not sent)" else "")
-        <> ", model=" <> Text.unpack (jevModel cfg)
+        -- **The state's field names and their sizes, not their contents.**
+        -- Which fields went out is the thing that cannot be reconstructed
+        -- afterwards, and it is what `~d4qvm` turned on; the contents are the
+        -- development and the match list, which would make this log unreadable
+        -- and are on screen anyway.
+        <> ", state=["
+        <> unwords [Text.unpack k <> ":" <> show (Text.length v) | (k, v) <- fields]
+        <> "], model=" <> Text.unpack (jevModel cfg)
     )
   result <- either (Left . show) id <$> (try go :: IO (Either SomeException (Either String (Map.Map Text Double))))
   jevLog $ case result of
@@ -133,7 +159,7 @@ rankCandidates cfg typedSoFar offered = do
                   [ ("Authorization", "Bearer " <> TE.encodeUtf8 (jevApiKey cfg))
                   , ("Content-Type", "application/json")
                   ]
-              , requestBody = RequestBodyLBS (encode (requestPayload cfg typedSoFar candidates))
+              , requestBody = RequestBodyLBS (encode (requestPayload cfg st candidates))
               }
       resp <- httpLbs req manager
       -- **The status is read before the body is decoded.** It was not, and
@@ -149,19 +175,33 @@ rankCandidates cfg typedSoFar offered = do
     -- hung connection can never outlive the dropdown it was scoring for.
     tlsSettings = tlsManagerSettings { managerResponseTimeout = responseTimeoutMicro 1500000 }
 
-requestPayload :: JevConfig -> Text -> [(Text, Text)] -> Value
-requestPayload cfg typedSoFar candidates =
+requestPayload :: JevConfig -> JevState -> [(Text, Text)] -> Value
+requestPayload cfg (JevState fields) candidates =
   object
     [ "model" .= jevModel cfg
-    , "state" .= object ["typed_so_far" .= typedSoFar]
+    , "state" .= object [Key.fromText k .= v | (k, v) <- fields]
     , "questions"
         .= object
           [ "rank"
               .= object
                 [ "type" .= ("choice" :: Text)
+                  -- **The instructions say what the state is, because a field
+                  -- name is not a definition.** @applies_here@ is the one that
+                  -- cannot be guessed from its name: it is not a shortlist Jev
+                  -- must stay inside, and saying so is deliberate — HIS, on
+                  -- `~d4qvm`: /"I am not saying that Jev's recommendations
+                  -- always have to be just a subset of `:matches`, I am saying,
+                  -- Jev should have that info to make the decision."/
                 , "instructions"
-                    .= ( "Given `typed_so_far`, which candidate is the user most \
-                         \likely about to write next?" ::
+                    .= ( "The user is writing one line at the prompt of a proof \
+                         \assistant. `state` holds what they have typed so far, \
+                         \the theorem under proof, the proof term as it stands, \
+                         \the goals still open, and `applies_here` — the tactics \
+                         \and rules that actually apply at the current focus, \
+                         \nearest first. `applies_here` is evidence and not a \
+                         \shortlist: a candidate outside it may still be the \
+                         \right answer. Which candidate is the user most likely \
+                         \about to write next?" ::
                            Text
                        )
                 , "criteria" .= toJSON (Map.fromList candidates)
