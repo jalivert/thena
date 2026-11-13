@@ -337,6 +337,7 @@ test-suite thena-test
         Thena.CallTests
         Thena.ReadTests
         Thena.LoadTests
+        Thena.PartialImportTests
         Thena.SuspendedImportTests
         Thena.ManualTests
         Thena.DriverTests

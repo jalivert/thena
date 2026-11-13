@@ -59,7 +59,8 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=), assertBool)
 
 import Thena.Driver
-  ( machineOf
+  ( Leniency (..)
+  , machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
@@ -86,18 +87,18 @@ tests =
     "MS1's target — determinacy of evaluation (§9, phase 18)"
     [ goldenVsString "determinacy" "test/golden/determinacy.golden" $ do
         (s, trouble) <- startingSession
-        (s', out, _) <- loadFile s target
+        (s', out, _) <- loadFile Strict s target
         pure (toLazyByteString (stringUtf8 (unlines
           (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
 
     , testCase "the file runs to the end" $ do
         (s, _) <- startingSession
-        (_, _, stopped) <- loadFile s target
+        (_, _, stopped) <- loadFile Strict s target
         assertBool (unlines (map show stopped)) (null stopped)
 
     , testCase "and TAPL 3.5.4 is a global with the statement it should have" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadFile s target
+        (s', _, _) <- loadFile Strict s target
         statementOf "determinacy" s' @?= Just theorem
 
       -- **The same proof, in the surface language** (MS4 tier 3). A proof
@@ -106,13 +107,13 @@ tests =
       -- the response rather than in a stopped-line count.
     , goldenVsString "determinacy-surface" "test/golden/determinacy-surface.golden" $ do
         (s, trouble) <- startingSession
-        (s', out, _) <- loadProofFile s surfaceTarget
+        (s', out, _) <- loadProofFile Strict s surfaceTarget
         pure (toLazyByteString (stringUtf8 (unlines
           (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
 
     , testCase "and the surface version proves the same statement" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s surfaceTarget
+        (s', _, _) <- loadProofFile Strict s surfaceTarget
         statementOf "examples.DeterminacySurface.determinacy" s'
           @?= Just theorem
 
@@ -121,13 +122,13 @@ tests =
       -- let the user get away with not writing.
     , goldenVsString "determinacy-patterns" "test/golden/determinacy-patterns.golden" $ do
         (s, trouble) <- startingSession
-        (s', out, _) <- loadProofFile s patternTarget
+        (s', out, _) <- loadProofFile Strict s patternTarget
         pure (toLazyByteString (stringUtf8 (unlines
           (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
 
     , testCase "and the pattern version proves the same statement" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s patternTarget
+        (s', _, _) <- loadProofFile Strict s patternTarget
         statementOf "examples.DeterminacyPatterns.determinacy" s'
           @?= Just theorem
 

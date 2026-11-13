@@ -47,7 +47,8 @@ import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=), assertBool)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (Canonical), GlobalName (..))
 import Thena.Driver
-  ( machineOf
+  ( Leniency (..)
+  , machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Declared (resolvedIn)
@@ -85,7 +86,7 @@ tests =
     "a dependent index telescope, end to end"
     [ testCase "the tied file runs to the end" $ do
         (s, _) <- startingSession
-        (_, _, stopped) <- loadProofFile s tiedTarget
+        (_, _, stopped) <- loadProofFile Strict s tiedTarget
         assertBool (unlines (map show stopped)) (null stopped)
 
       -- The split discharged both equations, so the arm bound the
@@ -94,7 +95,7 @@ tests =
       -- the declaration would not be here at all.
     , testCase "and the split's definition is admitted at its written type" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s tiedTarget
+        (s', _, _) <- loadProofFile Strict s tiedTarget
         case definitionCalled (machineOf s') "tied" of
           Nothing -> assertFailure "tied was not admitted"
           Just d  ->
@@ -110,7 +111,7 @@ tests =
       -- back. Refused by name until the backwards half was generated.
     , testCase "and the split injectivity crosses is admitted at its written type" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s tiedTarget
+        (s', _, _) <- loadProofFile Strict s tiedTarget
         case definitionCalled (machineOf s') "tiedTwo" of
           Nothing -> assertFailure "tiedTwo was not admitted"
           Just d  ->
@@ -122,7 +123,7 @@ tests =
       -- about which one was bound and only reducing does.
     , testCase "and the arm injectivity crossed computes from its own binder" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s tiedTarget
+        (s', _, _) <- loadProofFile Strict s tiedTarget
         numeral (machineOf s') "twoFromArm" 2
 
       -- __AND THE SHAPE DELETION MATCHES FIRST — MS9 phase 234, @~pxgxw@.__
@@ -135,7 +136,7 @@ tests =
       -- with UIP as the reason, until that fallthrough existed.
     , testCase "and a chain deletion matched first is crossed by injectivity" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s tiedTarget
+        (s', _, _) <- loadProofFile Strict s tiedTarget
         case definitionCalled (machineOf s') "pinned" of
           Nothing -> assertFailure "pinned was not admitted"
           Just d  ->
@@ -147,7 +148,7 @@ tests =
       -- reducing at a known argument is what says the arm answered with it.
     , testCase "and the arm it crossed answers with the argument it bound" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s tiedTarget
+        (s', _, _) <- loadProofFile Strict s tiedTarget
         let m = machineOf s'
         case definitionCalled m "pinnedFromArm" of
           Nothing -> assertFailure "pinnedFromArm was not admitted"
@@ -169,7 +170,7 @@ tests =
       -- constructor's arguments alone.
     , testCase "the dependent-argument file runs to the end" $ do
         (s, _) <- startingSession
-        (_, _, stopped) <- loadProofFile s argumentTarget
+        (_, _, stopped) <- loadProofFile Strict s argumentTarget
         assertBool (unlines (map show stopped)) (null stopped)
 
       -- __And the arm really binds them__: @depth@ answers with the
@@ -179,7 +180,7 @@ tests =
       -- would still have this type.
     , testCase "and the split's arm computes from the arguments it bound" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s argumentTarget
+        (s', _, _) <- loadProofFile Strict s argumentTarget
         let m = machineOf s'
         case definitionCalled m "depth" of
           Nothing -> assertFailure "depth was not admitted"
@@ -197,7 +198,7 @@ tests =
       -- left that proof free.
     , testCase "the vector file runs to the end" $ do
         (s, _) <- startingSession
-        (_, _, stopped) <- loadProofFile s vectorTarget
+        (_, _, stopped) <- loadProofFile Strict s vectorTarget
         assertBool (unlines (map show stopped)) (null stopped)
 
       -- __And the recursion really fires.__ @count@ is a recursion over a
@@ -207,7 +208,7 @@ tests =
       -- hypothesis was reached rather than merely bound.
     , testCase "and the recursion over it computes" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s vectorTarget
+        (s', _, _) <- loadProofFile Strict s vectorTarget
         numeral (machineOf s') "one" 1
 
       -- __Two indices reaching back to the same earlier one__ — both of
@@ -219,7 +220,7 @@ tests =
       -- reached its own induction hypothesis.
     , testCase "and so does the recursion over two vectors of one length" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s vectorTarget
+        (s', _, _) <- loadProofFile Strict s vectorTarget
         numeral (machineOf s') "two" 1
 
       -- __A PROJECTION AT A PINNED INDEX — MS9 phase 235, @~5hshj@.__ Not a
@@ -232,7 +233,7 @@ tests =
       -- then.
     , testCase "and a projection at a pinned index is admitted" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s vectorTarget
+        (s', _, _) <- loadProofFile Strict s vectorTarget
         case definitionCalled (machineOf s') "headAll" of
           Nothing -> assertFailure "headAll was not admitted"
           Just d  ->
@@ -245,7 +246,7 @@ tests =
       -- from anywhere else.
     , testCase "and the arm of that projection computes" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s vectorTarget
+        (s', _, _) <- loadProofFile Strict s vectorTarget
         numeral (machineOf s') "headTwo" 2
 
       -- __AND THE CHAINED TELESCOPE — MS9 phase 237, @~fq5gp@.__ @Chain@'s
@@ -256,12 +257,12 @@ tests =
       -- was refused by position and name until the phase.
     , testCase "the chained file runs to the end" $ do
         (s, _) <- startingSession
-        (_, _, stopped) <- loadProofFile s chainedTarget
+        (_, _, stopped) <- loadProofFile Strict s chainedTarget
         assertBool (unlines (map show stopped)) (null stopped)
 
     , testCase "and the chained split is admitted at its written type" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s chainedTarget
+        (s', _, _) <- loadProofFile Strict s chainedTarget
         case definitionCalled (machineOf s') "chained" of
           Nothing -> assertFailure "chained was not admitted"
           Just d  ->
@@ -274,7 +275,7 @@ tests =
       -- arm bound is the @w@ @c0@ was applied to.
     , testCase "and the chained arm computes from the payload it bound" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadProofFile s chainedTarget
+        (s', _, _) <- loadProofFile Strict s chainedTarget
         numeral (machineOf s') "chainedPayload" 3
 
       -- __One rung deeper, which is what says the construction recurses.__
@@ -289,18 +290,18 @@ tests =
       -- or the definition was never admitted.
     , testCase "and a telescope one rung deeper again computes too" $ do
         (s, _) <- startingSession
-        (s', _, stopped) <- loadProofFile s deepTarget
+        (s', _, stopped) <- loadProofFile Strict s deepTarget
         assertBool (unlines (map show stopped)) (null stopped)
         numeral (machineOf s') "deepPayload" 2
 
     , testCase "the file runs to the end" $ do
         (s, _) <- startingSession
-        (_, _, stopped) <- loadFile s target
+        (_, _, stopped) <- loadFile Strict s target
         assertBool (unlines (map show stopped)) (null stopped)
 
     , testCase "and the theorem is a global with the statement it should have" $ do
         (s, _) <- startingSession
-        (s', _, _) <- loadFile s target
+        (s', _, _) <- loadFile Strict s target
         case definitionCalled (machineOf s') "belowRefl" of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d  ->

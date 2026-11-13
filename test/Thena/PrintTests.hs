@@ -21,7 +21,8 @@ import Test.Tasty.QuickCheck
 
 import Thena.Core.Term (Core (..), InScope, Literal (..), openingOnly, rootName, rootScope)
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , machineOf
   , loadProofSource
   , parseCore
@@ -101,7 +102,7 @@ source =
 loaded :: IO (GlobalEnv, [Grammar])
 loaded = do
   (s0, _) <- startingSession
-  case loadProofSource s0 source of
+  case loadProofSource Strict s0 source of
     (s1, ProofLoaded {}) -> pure (globals (machineOf s1), grammars (machineOf s1))
     (_, other) -> assertFailure (show other)
 
@@ -326,7 +327,7 @@ insideSource =
 insideLoaded :: IO (GlobalEnv, [Grammar], InScope)
 insideLoaded = do
   (s0, _) <- startingSession
-  case loadProofSource s0 insideSource of
+  case loadProofSource Strict s0 insideSource of
     (s1, ProofLoaded {}) ->
       let m = machineOf s1 in pure (globals m, grammars m, scope m)
     (_, other) -> assertFailure (show other)

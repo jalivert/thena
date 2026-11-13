@@ -27,7 +27,8 @@ import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..), Warni
 import Thena.Declared (declaredAs, declaredUnder, named)
 import Thena.Instral.Concrete (Selection (..))
 import Thena.Driver
-  ( CommandError (..)
+  ( Leniency (..)
+  , CommandError (..)
   , LoadError (..)
   , Loaded (..)
   , LoadKind (..)
@@ -177,7 +178,7 @@ hashTests =
 
   , testCase "and a module's file is in it, with the ones it imports" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadProofFile s0 "test/modules/Both.thena"
+      (s1, _, trouble) <- loadProofFile Strict s0 "test/modules/Both.thena"
       assertBool (show trouble) (null trouble)
       own (filesRead s1)
         @?= [ "test/modules/Both.thena"
@@ -190,7 +191,7 @@ hashTests =
     -- what a surface @import@ names.
     testCase "a base a module consults is in it, and what the base imports" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadProofFile s0 "test/modules/Keeps.thena"
+      (s1, _, trouble) <- loadProofFile Strict s0 "test/modules/Keeps.thena"
       assertBool (show trouble) (null trouble)
       -- The base comes in front of the file that consults it because the
       -- module's own read is noted before its pool's, which is the engine's
@@ -207,7 +208,7 @@ hashTests =
     -- again, which is why the refusal does not unread them.
     testCase "a file that was read and then refused is still in it" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/ImportsBroken.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/ImportsBroken.thena"
       assertBool "nothing landed" (null (modulesLoaded s1 \\ modulesLoaded s0))
       own (filesRead s1)
         @?= [ "test/modules/ImportsBroken.thena"
@@ -233,7 +234,7 @@ hashTests =
     -- there to be re-read later either.
     testCase "but a file that would not open is not in it" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadProofFile s0 "test/modules/NoSuchFile.thena"
+      (s1, _, trouble) <- loadProofFile Strict s0 "test/modules/NoSuchFile.thena"
       assertBool "it was refused" (not (null trouble))
       own (filesRead s1) @?= []
 
@@ -284,7 +285,7 @@ scriptActTests :: [TestTree]
 scriptActTests =
   [ testCase "a script's import is followed" $ do
       (s0, _) <- startingSession
-      (s1, out, trouble) <- loadFile s0 "test/modules/ImportsBit.thena.script"
+      (s1, out, trouble) <- loadFile Strict s0 "test/modules/ImportsBit.thena.script"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "Bit is in" (moduleLoaded (named' "test.modules.Bit") s1)
       -- The line after the import ran, against what the import brought: a
@@ -298,7 +299,7 @@ scriptActTests =
     -- build does.
     testCase "and what it brought in is still there afterwards" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadFile s0 "test/modules/ImportsBit.thena.script"
+      (s1, _, _) <- loadFile Strict s0 "test/modules/ImportsBit.thena.script"
       assertBool "the declaration is reachable"
         (not (stopped (snd (oneLine s1 ":show Bit.Bit"))))
       -- And the @open@ it wrote, which is an ordinary typed line.
@@ -309,7 +310,7 @@ scriptActTests =
     -- consult is gone by the time the load ends.
     testCase "a script's consult is followed too, and the base stays" $ do
       (s0, _) <- startingSession
-      (s1, out, trouble) <- loadFile s0 "test/modules/ConsultsLouder.thena.script"
+      (s1, out, trouble) <- loadFile Strict s0 "test/modules/ConsultsLouder.thena.script"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ map baseName bs | BasesLoaded bs _ <- out ] @?= [["louder", "standard"]]
       map baseName (rules (machineOf s1)) @?= ["louder", "standard"]
@@ -319,7 +320,7 @@ scriptActTests =
     -- this phase has to keep fixed for the act.
     testCase "a module that is not on disc stops the script" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadFile s0 "test/modules/ImportsNowhere.thena.script"
+      (s1, _, trouble) <- loadFile Strict s0 "test/modules/ImportsNowhere.thena.script"
       assertBool "it stopped" (not (null trouble))
       assertBool "and the line after it did not run"
         (not (isDeclared (declaredAs "A0") (globals (machineOf s1))))
@@ -330,7 +331,7 @@ scriptActTests =
     -- line's own response.
     testCase "and so does a module that will not elaborate" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadFile s0 "test/modules/ImportsBrokenToo.thena.script"
+      (s1, _, trouble) <- loadFile Strict s0 "test/modules/ImportsBrokenToo.thena.script"
       assertBool "it stopped" (not (null trouble))
       assertBool "and the line after it did not run"
         (not (isDeclared (declaredAs "A0") (globals (machineOf s1))))
@@ -340,7 +341,7 @@ scriptActTests =
     -- cycle check behind it — a script that loaded itself would not terminate.
     testCase "but a :load inside a script is still refused" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadFile s0 "test/modules/LoadsAModule.thena.script"
+      (s1, _, trouble) <- loadFile Strict s0 "test/modules/LoadsAModule.thena.script"
       concatMap (renderTrouble s1) trouble
         @?= [ "test/modules/LoadsAModule.thena.script:2: "
                 ++ "a :load inside a loaded file is not followed" ]
@@ -351,7 +352,7 @@ scriptActTests =
     -- script: nothing about it is written twice.
     testCase "and a cycle is refused by name, as it is from a file" $ do
       (s0, _) <- startingSession
-      (_, _, trouble) <- loadFile s0 "test/modules/ImportsLoop.thena.script"
+      (_, _, trouble) <- loadFile Strict s0 "test/modules/ImportsLoop.thena.script"
       concatMap (renderTrouble s0) trouble
         @?= [ "test/modules/LoopA.thena: these modules import each other: "
                 ++ "test.modules.LoopA imports test.modules.LoopB "
@@ -383,7 +384,7 @@ publicConsultTests =
     -- resolves the pool at the module\'s turn in the load.
     testCase "a file may consult a base that imports a surface module" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/Keeps.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/Keeps.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       -- **The base\'s own dependency joined the closure**, and before this
       -- module: nothing in @Keeps.thena@ names @Lang@.
@@ -394,7 +395,7 @@ publicConsultTests =
     -- order below a question at all.
     testCase "two consult lines put both bases in the pool" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/Stacked.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/Stacked.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
@@ -418,13 +419,13 @@ publicConsultTests =
     -- @MissesTooling@ is the same @do@ block behind @Keeps@.
     testCase "a public consult reaches whoever imports the file" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsTooling.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsTooling.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
   , testCase "and a plain consult does not" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/MissesTooling.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/MissesTooling.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "no rule or function is called marker")
@@ -435,7 +436,7 @@ publicConsultTests =
     -- module I imported /got/, so a @public import@ hands a @public consult@ on.
     testCase "a public import passes a public consult on" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsPassedTooling.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsPassedTooling.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
@@ -443,7 +444,7 @@ publicConsultTests =
     -- same thing one level up: @KeepsPublisher@ imports the publisher plainly.
     testCase "and a plain import does not" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/MissesPassedTooling.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/MissesPassedTooling.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "no rule or function is called marker")
@@ -461,7 +462,7 @@ publicConsultTests =
     -- must give the same pool.
     testCase "a published group is the consult lines written out by hand" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadProofFile s0 "test/modules/PublishesTwo.thena"
+      (s1, _, trouble) <- loadProofFile Strict s0 "test/modules/PublishesTwo.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       let viaImport = unlines [ "module M where"
                               , "consult test.modules.First"
@@ -488,13 +489,13 @@ publicConsultTests =
     -- and another thing loaded after it.
     testCase "a publisher already in the session publishes the same base" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadProofFile s0 "test/modules/Publishes.thena"
+      (s1, _, trouble) <- loadProofFile Strict s0 "test/modules/Publishes.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       map moduleText (publishedBy (named' "test.modules.Publishes") s1)
         @?= ["test.modules.Tooling"]
       -- And a module loaded against that session gets it, with nothing left to
       -- gather.
-      (_, out, trouble') <- loadProofFile s1 "test/modules/GetsTooling.thena"
+      (_, out, trouble') <- loadProofFile Strict s1 "test/modules/GetsTooling.thena"
       assertBool (show (map (renderTrouble s1) trouble')) (null trouble')
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
@@ -540,7 +541,7 @@ hidingTests =
   [ -- **What the clause does not name is still exported.**
     testCase "a declaration the clause does not name is reachable" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsWithheld.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsWithheld.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= ["test.modules.Withholds", "test.modules.GetsWithheld"]
@@ -548,7 +549,7 @@ hidingTests =
   , -- **And what it names is not**, with the module declared and in the session.
     testCase "and a declaration it names is not" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/MissesWithheld.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/MissesWithheld.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "not in scope: scratch")
@@ -559,7 +560,7 @@ hidingTests =
     -- constructors and the eliminator stay back with the type.
     testCase "naming a datatype withholds its namespace" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/MissesWithheldData.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/MissesWithheldData.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "not in scope: Inner.Inner")
@@ -571,7 +572,7 @@ hidingTests =
     -- the clause applied to the module.
     testCase "a module's own clause does not narrow the module" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadProofFile s0 "test/modules/Withholds.thena"
+      (s1, _, trouble) <- loadProofFile Strict s0 "test/modules/Withholds.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       let m = named' "test.modules.Withholds"
       assertBool "it declared all three"
@@ -671,7 +672,7 @@ publicBaseTests =
     -- point of the whole act: nothing in @GetsHelper@ names @Helper@.
     testCase "a file that consults the publisher is searched against both" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsHelper.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsHelper.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
@@ -681,13 +682,13 @@ publicBaseTests =
     -- the same file with a different base's name in them.
     testCase "a file consulting a plain consulter gets the base as well" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesHelper.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/MissesHelper.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
   , testCase "and consulting the base itself satisfies it" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/KeepsNeeds.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/KeepsNeeds.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
@@ -696,7 +697,7 @@ publicBaseTests =
     -- @GetsBitViaBase@ writes @Bit.Bit@ and imports nothing.
     testCase "a base's public import hands the names on" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsBitViaBase.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsBitViaBase.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it declared mine"
                  (not (null [ () | ProofLoaded _ ds _ _ <- out
@@ -706,7 +707,7 @@ publicBaseTests =
     -- doing the same thing as on a surface file's import.
     testCase "and a plain import does not" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/MissesBitViaBase.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/MissesBitViaBase.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "not in scope: Bit.Bit")
@@ -933,8 +934,8 @@ isolationTests =
     -- module does not import it, so its names are not this module's to write.
     testCase "a module does not see a module the session loaded" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
-      case loadProofSource s1 "module Borrower where\n\nb : Bit.Bit\nb = Bit.off\n" of
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Bit.thena"
+      case loadProofSource Strict s1 "module Borrower where\n\nb : Bit.Bit\nb = Bit.off\n" of
         (_, ProofLoaded {}) -> assertFailure "the session's Bit was reachable"
         (s2, r) -> assertBool (unwords (renderResponse s2 r))
                               (any (isInfixOf "not in scope: Bit.Bit")
@@ -944,7 +945,7 @@ isolationTests =
     -- one: @Pair@ imports @Bit@ and writes @Bit.Bit@, from a fresh session.
     testCase "and the same names are reachable to a module that imports it" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/Pair.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/Pair.thena"
       assertBool (show (map (renderResponse s0) out)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= ["test.modules.Bit", "test.modules.Pair"]
@@ -956,7 +957,7 @@ isolationTests =
     -- name, not about the file.
     testCase "and not to a module that only imports its importer" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/OnlyPair.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/OnlyPair.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "not in scope: Bit.Bit")
@@ -967,7 +968,7 @@ isolationTests =
     -- @UsesPrelude@ imports nothing and writes @Eq@ and @refl@.
     testCase "the prelude is reachable with nothing imported" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/UsesPrelude.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/UsesPrelude.thena"
       assertBool (show (map (renderResponse s0) out)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.UsesPrelude"]
 
@@ -978,7 +979,7 @@ isolationTests =
     -- load that had it concealed.
     testCase "the prompt still reaches everything the session holds" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Bit.thena"
       let (_, r) = oneLine s1 ":infer Bit.off"
       assertBool (unwords (renderResponse s1 r))
                  (not (any (isInfixOf "not in scope") (renderResponse s1 r)))
@@ -989,7 +990,7 @@ isolationTests =
     -- module's.
     testCase "the concealment is the session's names, less the prelude's" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Bit.thena"
       let hidden = map nameDotted (concealedFrom [] s1)
       assertBool (show hidden) ("test.modules.Bit.Bit.Bit" `elem` hidden)
       assertBool (show hidden) ("Eq.Eq" `notElem` hidden)
@@ -1001,7 +1002,7 @@ isolationTests =
     -- the file that imports it.
     testCase "and an import takes that module's names out of it" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Bit.thena"
       let hidden = map nameDotted (concealedFrom [(named' "test.modules.Bit", SelectWide)] s1)
       assertBool (show hidden) ("test.modules.Bit.Bit.Bit" `notElem` hidden)
       assertBool (show hidden) ("test.modules.Bit.Bit.off" `notElem` hidden)
@@ -1036,8 +1037,8 @@ openIsolationTests =
     -- @BareOpen@'s bare @off@ resolve.
     testCase "a module does not see an open the session is holding" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Pair.thena"
-      (_, out, trouble) <- loadProofFile s1 "test/modules/BareOpen.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Pair.thena"
+      (_, out, trouble) <- loadProofFile Strict s1 "test/modules/BareOpen.thena"
       assertBool (show (map (renderTrouble s1) trouble)) (null trouble)
       assertBool (show (map (renderResponse s1) out))
                  (any (isInfixOf "not in scope: off")
@@ -1047,7 +1048,7 @@ openIsolationTests =
     -- one answer whatever the session is holding.
     testCase "and it is refused the same way with nothing loaded" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/BareOpen.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/BareOpen.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool (show (map (renderResponse s0) out))
                  (any (isInfixOf "not in scope: off")
@@ -1061,10 +1062,10 @@ openIsolationTests =
     -- module that only imported it is refused for the one word.
     testCase "and an open does not travel with an import" $ do
       (s0, _) <- startingSession
-      (_, own, ownTrouble) <- loadProofFile s0 "test/modules/Opener.thena"
+      (_, own, ownTrouble) <- loadProofFile Strict s0 "test/modules/Opener.thena"
       assertBool (show (map (renderTrouble s0) ownTrouble)) (null ownTrouble)
       [ nm | ProofLoaded nm _ _ _ <- own ] @?= ["test.modules.Opener"]
-      (_, out, trouble) <- loadProofFile s0 "test/modules/Inherits.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/Inherits.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool (show (map (renderResponse s0) out))
                  (any (isInfixOf "not in scope: off")
@@ -1076,7 +1077,7 @@ openIsolationTests =
     -- stated once has to hold at both.
     testCase "and not into the block of a scoped import" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/InheritsInBlock.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/InheritsInBlock.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool (show (map (renderResponse s0) out))
                  (any (isInfixOf "not in scope: off")
@@ -1096,7 +1097,7 @@ openIsolationTests =
     -- prelude's and nothing else.
     testCase "and loading a module that opens one adds nothing to it" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Pair.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Pair.thena"
       map openedPath (openedFrom s1) @?= map openedPath (openedFrom s0)
 
   , -- **An @open@ inside a @namespace@ block is not the module's to pass on**,
@@ -1105,7 +1106,7 @@ openIsolationTests =
     -- block.
     testCase "an open inside a namespace block is left behind by nobody" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadProofFile s0 "test/modules/ScopedOpen.thena"
+      (s1, _, trouble) <- loadProofFile Strict s0 "test/modules/ScopedOpen.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       map openedPath (openedByModule (named' "test.modules.ScopedOpen") s1) @?= []
 
@@ -1115,7 +1116,7 @@ openIsolationTests =
     -- module wrote go back on top of the session's own.
     testCase "the prompt keeps the opens a load left it" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Pair.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Pair.thena"
       let (_, r) = oneLine s1 ":infer off"
       assertBool (unwords (renderResponse s1 r))
                  (not (any (isInfixOf "not in scope") (renderResponse s1 r)))
@@ -1169,7 +1170,7 @@ promptActTests =
 
   , testCase "and the same file loaded by its path is accepted" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/Misnamed.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/Misnamed.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Elsewhere"]
 
@@ -1227,7 +1228,7 @@ promptActTests =
     -- driver answers with a request and "Thena.Files" does the reading, so a
     -- test that stopped at the response would not touch the disk at all.
     atPrompt s line = case oneLine s line of
-      (s', resp) -> case following s' resp of
+      (s', resp) -> case following Strict s' resp of
         Just io -> io
         Nothing -> pure (s', [resp], [])
 
@@ -1269,13 +1270,13 @@ openTests =
   where
     loads src = do
       (s0, _) <- startingSession
-      case loadProofSource s0 src of
+      case loadProofSource Strict s0 src of
         (_, ProofLoaded {}) -> pure ()
         (_, other)          -> assertFailure (show other)
 
     notInScope src w = do
       (s0, _) <- startingSession
-      case loadProofSource s0 src of
+      case loadProofSource Strict s0 src of
         (_, Ran _ _ (Halted (CannotRead (ResolveFailed (NotInScope x)))))
           | x == w -> pure ()
         (_, Ran _ _ (Halted r)) -> assertFailure (show r)
@@ -1377,7 +1378,7 @@ baseImportTests =
     -- base is refused.
     testCase "and it is refused even when the module IS in, which is the isolation" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Lang.thena"
       assertBool "the module is in" (moduleLoaded (importNamed "test.modules.Lang") s1)
       (_, _, trouble) <- consultRuleFiles s1 ["test/modules/Unstated.thena.rules"]
       case trouble of
@@ -1390,7 +1391,7 @@ baseImportTests =
     -- the refusal has to come from the grammar table's own subtraction.
     testCase "and what it is refused for is the tag, not a name" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Lang.thena"
       (_, _, trouble) <- consultRuleFiles s1 ["test/modules/Unstated.thena.rules"]
       case trouble of
         [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
@@ -1400,7 +1401,7 @@ baseImportTests =
   , -- A dependency asks that the module BE there, not that this act load it.
     testCase "a module already in the session is not loaded again" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Lang.thena"
       (_, out, trouble) <- consultRuleFiles s1 ["test/modules/Inspecting.thena.rules"]
       assertBool (show (map (renderTrouble s1) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= []
@@ -1460,7 +1461,7 @@ importTests :: [TestTree]
 importTests =
   [ testCase "a module is elaborated after the ones it imports" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/Pair.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/Pair.thena"
       assertBool (show (map (renderResponse s0) out)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Bit", "test.modules.Pair"]
 
@@ -1470,7 +1471,7 @@ importTests =
     -- and the second one would collide with the first one's @Bit.Bit@.
     testCase "a diamond reaches the shared module once" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/Both.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/Both.thena"
       assertBool (show (map (renderResponse s0) out)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= ["test.modules.Bit", "test.modules.Pair", "test.modules.Both"]
@@ -1478,9 +1479,9 @@ importTests =
   , -- The same memory, across two commands rather than inside one walk.
     testCase "and a module the session already loaded is not loaded again" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Bit.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Bit.thena"
       assertBool "Bit is in" (moduleLoaded (named' "test.modules.Bit") s1)
-      (_, out, trouble) <- loadProofFile s1 "test/modules/Pair.thena"
+      (_, out, trouble) <- loadProofFile Strict s1 "test/modules/Pair.thena"
       assertBool (show (map (renderResponse s1) out)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Pair"]
 
@@ -1491,7 +1492,7 @@ importTests =
     -- Such a file loads, and nothing can import it.
     testCase "a file whose path is no module name is remembered by nothing" $ do
       (s0, _) <- startingSession
-      (s1, out, _) <- loadProofFile s0 "test/modules/0unnameable.thena"
+      (s1, out, _) <- loadProofFile Strict s0 "test/modules/0unnameable.thena"
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["Unnameable"]
       moduleOfFile "test/modules/0unnameable.thena" @?= Nothing
       -- **The prelude is the one module a fresh session has remembered** (MS11
@@ -1506,7 +1507,7 @@ importTests =
     -- that answers to another name.
     testCase "a module whose header disagrees with its path is refused" $ do
       (s0, _) <- startingSession
-      (_, _, trouble) <- loadProofFile s0 "test/modules/ImportsMisnamed.thena"
+      (_, _, trouble) <- loadProofFile Strict s0 "test/modules/ImportsMisnamed.thena"
       case trouble of
         [Unloadable p (ModuleMisnamed reached header)] -> do
           p @?= "test/modules/Misnamed.thena"
@@ -1520,7 +1521,7 @@ importTests =
     -- be illegal because of where it sits.
     testCase "and the same file loaded by its path is not asked" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/Misnamed.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/Misnamed.thena"
       assertBool (show (map (renderResponse s0) out)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Elsewhere"]
 
@@ -1532,7 +1533,7 @@ importTests =
     -- own namespace (his design of 2026-10-29).
     testCase "a module's globals are recorded as its own" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadProofFile s0 "test/modules/Lang.thena"
+      (s1, _, trouble) <- loadProofFile Strict s0 "test/modules/Lang.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       let mine = map nameDotted (declaredByModule (named' "test.modules.Lang") s1)
       assertBool (show mine) (all (`elem` mine) (map ("test.modules.Lang." ++) ["A.x", "A.LC.LC"]))
@@ -1542,7 +1543,7 @@ importTests =
     -- it twice without the dedup, and anything counted off it would be wrong.
     testCase "and each of them once" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Lang.thena"
       let mine = map nameDotted (declaredByModule (named' "test.modules.Lang") s1)
       length mine @?= length (nub mine)
 
@@ -1552,7 +1553,7 @@ importTests =
     -- other answer available to it.
     testCase "and the names its declarations generated with them" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Lang.thena"
       let mine = map nameDotted (declaredByModule (named' "test.modules.Lang") s1)
       -- The language's productions and its generated substitution, none of
       -- which is written as a declaration anywhere in the file.
@@ -1565,7 +1566,7 @@ importTests =
 
   , testCase "a global says which module declared it" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Lang.thena"
       case [ g | g <- declaredByModule (named' "test.modules.Lang") s1
                , nameDotted g == "test.modules.Lang.A.LC.var" ] of
         g : _ -> fmap moduleText (moduleDeclaring g s1)
@@ -1578,7 +1579,7 @@ importTests =
     -- can say anything about such a name is `~jmw4k`'s and is not decided here.
     testCase "and a file reached by no name declares for no module" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/0unnameable.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/0unnameable.thena"
       let known = [ g | g <- Env.declaredNames (globals (machineOf s1))
                       , nameDotted g == "Unnameable.Three.Three" ]
       case known of
@@ -1587,7 +1588,7 @@ importTests =
 
   , testCase "a cycle is refused, and names the path the walk took" $ do
       (s0, _) <- startingSession
-      (_, _, trouble) <- loadProofFile s0 "test/modules/LoopA.thena"
+      (_, _, trouble) <- loadProofFile Strict s0 "test/modules/LoopA.thena"
       case trouble of
         [Unloadable _ (ImportCycle ms)] ->
           map moduleText ms
@@ -1596,7 +1597,7 @@ importTests =
 
   , testCase "an import that is not on disc names the file it looked for" $ do
       (s0, _) <- startingSession
-      (_, _, trouble) <- loadProofFile s0 "test/modules/Absent.thena"
+      (_, _, trouble) <- loadProofFile Strict s0 "test/modules/Absent.thena"
       case trouble of
         [Unreadable p _] -> p @?= "test/modules/Nowhere.thena"
         other            -> assertFailure (show (map (renderTrouble s0) other))
@@ -1606,7 +1607,7 @@ importTests =
     -- and then fails, and what must not survive is @Bit@.
     testCase "a closure whose last module fails declares nothing at all" $ do
       (s0, _) <- startingSession
-      (s1, out, _) <- loadProofFile s0 "test/modules/Broken.thena"
+      (s1, out, _) <- loadProofFile Strict s0 "test/modules/Broken.thena"
       assertBool ("it loaded: " ++ show (map (renderResponse s1) out))
                  (null [ () | ProofLoaded {} <- out ])
       assertBool "Bit went back with it"
@@ -1621,7 +1622,7 @@ importTests =
     -- mentioned.
     testCase "a failure inside an imported module names that module's file" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/ImportsBroken.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/ImportsBroken.thena"
       assertBool (show (map (renderResponse s0) out)) (null out)
       case trouble of
         [Unloadable p _] -> p @?= "test/modules/Broken.thena"
@@ -1629,7 +1630,7 @@ importTests =
 
   , testCase "and the file the user named still answers with a response" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/Broken.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/Broken.thena"
       assertBool ("trouble: " ++ show (map (renderTrouble s0) trouble))
                  (null trouble)
       assertBool "it refused" (not (null out))
@@ -1640,7 +1641,7 @@ importTests =
     -- rather than elaborating a module whose dependencies are not in.
     testCase "the door with no IO refuses a module that imports" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (unlines ["module M where", "import test.modules.Bit"]) of
+      case loadProofSource Strict s0 (unlines ["module M where", "import test.modules.Bit"]) of
         (_, ImportsUnread ms) -> map moduleText ms @?= ["test.modules.Bit"]
         (_, other)            -> assertFailure (show other)
 
@@ -1680,7 +1681,7 @@ namespaceTests :: [TestTree]
 namespaceTests =
   [ testCase "it puts what it declares inside itself" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 namespacedModule of
+      case loadProofSource Strict s0 namespacedModule of
         (s1, ProofLoaded {}) -> do
           let env = globals (machineOf s1)
           isDeclared (named "NS.A.Nat.Nat") env @?= True
@@ -1699,13 +1700,13 @@ namespaceTests =
     -- loads only because the walk tried @A.Nat.succ@.
     testCase "and a name written inside it is tried there first" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 namespacedModule of
+      case loadProofSource Strict s0 namespacedModule of
         (_, ProofLoaded _ ds _ _) -> ds @?= ["A.Nat", "A.one", "A.two"]
         (_, other) -> assertFailure (show other)
 
   , testCase "nesting is a longer prefix and needs nothing of its own" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 nestedModule of
+      case loadProofSource Strict s0 nestedModule of
         (s1, ProofLoaded {}) -> do
           let env = globals (machineOf s1)
           isDeclared (named "NS.A.B.Leaf.Leaf") env @?= True
@@ -1718,7 +1719,7 @@ namespaceTests =
     -- of 2026-10-30 — nearer wins outright, where two @open@s would be refused.
     testCase "a nearer namespace wins over the root outright" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 shadowingModule of
+      case loadProofSource Strict s0 shadowingModule of
         (s1, ProofLoaded {}) -> do
           let env = globals (machineOf s1)
           -- @inner@'s type is written @Nat.Nat@ inside @A@, so it is @A@'s.
@@ -1737,7 +1738,7 @@ namespaceTests =
     -- declaration rather than a mode: the word after it is at the root again.
     testCase "and the block is where its effect ends" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 escapingModule of
+      case loadProofSource Strict s0 escapingModule of
         (_, Ran _ _ (Halted (CannotRead _))) -> pure ()
         (_, other) -> assertFailure (show other)
   ]
@@ -1815,7 +1816,7 @@ shadowingTests =
     -- constructor is the only name at this door that can take a word.
     testCase "a constructor that takes a datatype's word says so" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 constructorTakesTheWord of
+      case loadProofSource Strict s0 constructorTakesTheWord of
         (_, ProofLoaded _ _ _ ws) ->
           ws @?= [ NameShadows (named "Shadow.Nat.zero")
                                (named "Shadow.Nat.zero.zero") ]
@@ -1826,7 +1827,7 @@ shadowingTests =
     -- environment gained name it twice and the word it took is one word.
     testCase "and says it once, however many keys the name added" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 constructorTakesTheWord of
+      case loadProofSource Strict s0 constructorTakesTheWord of
         (_, ProofLoaded _ _ _ ws) -> length ws @?= 1
         (_, other) -> assertFailure (show other)
 
@@ -1834,7 +1835,7 @@ shadowingTests =
     -- so this is the half 'Thena.SessionTests' cannot reach.
     testCase "a theorem in a module says so as it lands" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 theoremTakesTheWord of
+      case loadProofSource Strict s0 theoremTakesTheWord of
         (_, ProofLoaded _ _ _ ws) ->
           ws @?= [NameShadows (named "Shadow.Nat") (named "Shadow.Nat.Nat")]
         (_, other) -> assertFailure (show other)
@@ -1855,7 +1856,7 @@ shadowingTests =
     -- two tests are what keeps them doing so.
     testCase "a data block is refused when a definition holds the word it takes" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 datatypeUnderATakenWord of
+      case loadProofSource Strict s0 datatypeUnderATakenWord of
         (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= named "Shadow.Foo"
         (_, other) -> assertFailure (show other)
 
@@ -1872,7 +1873,7 @@ shadowingTests =
     -- reach is allowed and said.
     testCase "a data block answers its own word with the datatype, not an opened name" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 datatypeUnderAnOpenedWord of
+      case loadProofSource Strict s0 datatypeUnderAnOpenedWord of
         (s1, ProofLoaded _ _ _ ws) -> do
           let env = globals (machineOf s1)
           -- Accepted at all, which 'targetIndices' only permits when the
@@ -2290,7 +2291,7 @@ moduleTests :: [TestTree]
 moduleTests =
   [ testCase "a module declares what it says it declares" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 natModule of
+      case loadProofSource Strict s0 natModule of
         (_, ProofLoaded nm ds _ _) -> (nm, ds) @?= ("M", ["Nat", "one"])
         (_, other)             -> assertFailure (show other)
 
@@ -2302,7 +2303,7 @@ moduleTests =
   -- "Thena.GrammarTests", whose module load warns about a vacuous binder.
   , testCase "a dependent argument telescope no longer warns" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 dependentModule of
+      case loadProofSource Strict s0 dependentModule of
         (_, ProofLoaded nm ds _ ws) -> do
           (nm, ds) @?= ("W", ["Chain"])
           ws @?= []
@@ -2310,7 +2311,7 @@ moduleTests =
 
   , testCase "and it gets its no-confusion lemma like any other datatype" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 dependentModule
+      let (s1, _) = loadProofSource Strict s0 dependentModule
           g = globals (machineOf s1)
       map (\n -> isDeclared (named ("W." ++ n)) g)
           ["Chain.Chain", "Chain.lemmata.NoConfusion", "Chain.lemmata.noConfusion"]
@@ -2318,13 +2319,13 @@ moduleTests =
 
   , testCase "a load with nothing to say warns about nothing" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 natModule of
+      case loadProofSource Strict s0 natModule of
         (_, ProofLoaded _ _ _ ws) -> ws @?= []
         (_, other) -> assertFailure (show other)
 
   , testCase "and the globals are really there afterwards" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 natModule
+      let (s1, _) = loadProofSource Strict s0 natModule
           g = globals (machineOf s1)
       map (\n -> isDeclared (named ("M." ++ n)) g)
           ["Nat.Nat", "Nat.zero", "Nat.succ", "one"]
@@ -2335,7 +2336,7 @@ moduleTests =
     -- it is written as surface source and goes through this very path.
     testCase "a declaration written with a path declares into that namespace" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 qualifiedModule of
+      case loadProofSource Strict s0 qualifiedModule of
         (_, ProofLoaded nm ds _ _) -> (nm, ds) @?= ("Q", ["Nat", "Nat.one", "two"])
         (_, other) -> assertFailure (show other)
 
@@ -2343,7 +2344,7 @@ moduleTests =
     -- text and rooted it until this phase, so a path was silently dropped.
     testCase "and only the qualified name is in the environment" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 qualifiedModule
+      let (s1, _) = loadProofSource Strict s0 qualifiedModule
           g = globals (machineOf s1)
       map (\n -> isDeclared (named ("Q." ++ n)) g) ["Nat.one", "one"]
         @?= [True, False]
@@ -2353,7 +2354,7 @@ moduleTests =
     -- that is where the reason is.
     testCase "a module that does not elaborate reports why" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 badModule of
+      case loadProofSource Strict s0 badModule of
         (_, ProofLoaded {}) -> assertFailure "admitted, and it should not have been"
         (_, _)               -> pure ()
 
@@ -2363,7 +2364,7 @@ moduleTests =
     -- rule base reads its header textually.
     testCase "a comment line in a proof module is skipped" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 commentedModule of
+      case loadProofSource Strict s0 commentedModule of
         (_, ProofLoaded nm ds _ _) -> (nm, ds) @?= ("M", ["Nat", "one"])
         (_, other)             -> assertFailure (show other)
 
@@ -2381,13 +2382,13 @@ moduleTests =
     -- unaffected — the module goes on declaring after it.
     testCase "a top-level do block runs and the module goes on" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 blockModule of
+      case loadProofSource Strict s0 blockModule of
         (_, ProofLoaded nm ds n _) -> (nm, ds, n) @?= ("M", ["Nat", "one"], 1)
         (_, other)               -> assertFailure (show other)
 
   , testCase "and what it declared is really there" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 blockModule
+      let (s1, _) = loadProofSource Strict s0 blockModule
       isDeclared (named "M.one") (globals (machineOf s1)) @?= True
 
   , -- **Resolution happens where the block runs** (MS6 phase 104b), so a block
@@ -2398,7 +2399,7 @@ moduleTests =
     -- had run.
     testCase "a block with bad operands stops the run where it stands" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 badBlockModule of
+      case loadProofSource Strict s0 badBlockModule of
         (_, Ran _ _ (Halted (BlockOperands _ "cross"))) -> pure ()
         (_, other) -> assertFailure (show other)
 
@@ -2419,7 +2420,7 @@ moduleTests =
     -- test below shows that shape — so the two cannot be confused.
     testCase "a top-level block that does not type check stops the run" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 mistypedBlockModule of
+      case loadProofSource Strict s0 mistypedBlockModule of
         (_, Ran _ _ (BlockIllTyped (_ : _))) -> pure ()
         (_, other) -> assertFailure (show other)
 
@@ -2429,7 +2430,7 @@ moduleTests =
     -- something: @Nat@ lands, then the block does not type check.
     testCase "and the module it had already declared is rolled back" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      let (s1, _) = loadProofSource Strict s0 mistypedBlockModule
       isDeclared (rootName "Nat") (globals (machineOf s1)) @?= False
 
   , -- **A MODULE MAY DECLARE ITS OWN @Unit@ SINCE MS12 PHASE 313, AND THAT IS
@@ -2444,7 +2445,7 @@ moduleTests =
     -- declaring the same datatype twice still collides, and still says so.
     testCase "a module may declare its own Unit, and the prelude's is unmoved" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 redeclaringModule of
+      case loadProofSource Strict s0 redeclaringModule of
         (s1, ProofLoaded {}) -> do
           let env = globals (machineOf s1)
           isDeclared (declaredUnder "M" "Unit") env @?= True
@@ -2457,7 +2458,7 @@ moduleTests =
     -- the clashing declaration came from.
     testCase "and the same datatype twice in one module is refused the same way" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 twiceDeclaredModule of
+      case loadProofSource Strict s0 twiceDeclaredModule of
         (_, Ran _ _ (Refused (AlreadyDeclared g))) -> g @?= declaredUnder "M" "Widget"
         (_, other) -> assertFailure (show other)
 
@@ -2466,7 +2467,7 @@ moduleTests =
     -- failed load does show them, in its @solved: ?ℓn@ lines.
     testCase "but the fresh counter goes forward across a failed load" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      let (s1, _) = loadProofSource Strict s0 mistypedBlockModule
       assertBool "the counter did not advance"
         (names (machineOf s1) > names (machineOf s0))
 
@@ -2476,8 +2477,8 @@ moduleTests =
     -- re-declaration and blamed the constructor's target (@AGENDA.md@ 81).
     testCase "so the corrected module loads in the same session" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 mistypedBlockModule
-      case loadProofSource s1 blockModule of
+      let (s1, _) = loadProofSource Strict s0 mistypedBlockModule
+      case loadProofSource Strict s1 blockModule of
         (_, ProofLoaded nm ds n _) -> (nm, ds, n) @?= ("M", ["Nat", "one"], 1)
         (_, other) -> assertFailure (show other)
 
@@ -2489,7 +2490,7 @@ moduleTests =
     -- of its own and refused the disagreement.
     testCase "a name bound in one top-level block is not in scope in the next" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 twoBlockModule of
+      case loadProofSource Strict s0 twoBlockModule of
         (_, Ran _ _ (BlockRefused [UnboundInRule _ _ "x"])) -> pure ()
         (_, other) -> assertFailure (show other)
 
@@ -2500,7 +2501,7 @@ moduleTests =
     -- does not play it lets the module through.
     testCase "the shipped run-block plays a block, and a failing one stops the load" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 failingBlockModule of
+      case loadProofSource Strict s0 failingBlockModule of
         (_, Ran _ _ (Halted _)) -> pure ()
         (_, other) -> assertFailure (show other)
 
@@ -2511,14 +2512,14 @@ moduleTests =
                  \run-block : Surface -> ()\n\
                  \rule run-block t :- do say \"intercepted\"\n"
       case loadRuleTexts s0 [("mine", mine), ("shipped", shipped)] of
-        (s1, BasesLoaded _ _) -> case loadProofSource s1 failingBlockModule of
+        (s1, BasesLoaded _ _) -> case loadProofSource Strict s1 failingBlockModule of
           (_, ProofLoaded {}) -> pure ()
           (_, other) -> assertFailure (show other)
         (_, other) -> assertFailure (show other)
 
   , testCase "a file that is not a module at all is a syntax error" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 "data Nat : Type\8320 where { zero : Nat }" of
+      case loadProofSource Strict s0 "data Nat : Type\8320 where { zero : Nat }" of
         (_, Failed _) -> pure ()
         (_, other)    -> assertFailure (show other)
   ]
@@ -2652,7 +2653,7 @@ tierTests :: [TestTree]
 tierTests =
   [ goldenVsString "tier0" "test/golden/tier0.golden" $ do
       (s, trouble) <- startingSession
-      (s1, out, _) <- loadProofFile s "examples/Tier0.thena"
+      (s1, out, _) <- loadProofFile Strict s "examples/Tier0.thena"
       -- **Under the file's own module namespace** (MS12 phase 313):
       -- @examples/Tier0.thena@ is @module examples.Tier0 where@.
       let shown = concatMap (renderResponse' s1)
@@ -2671,13 +2672,13 @@ tierTests =
     -- is the finding, and it is already written down.
     testCase "a written implicit argument and an inserted one agree" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 bothSpellings of
+      case loadProofSource Strict s0 bothSpellings of
         (_, ProofLoaded {}) -> pure ()
         (_, other)           -> assertFailure (show other)
 
   , testCase "and they are convertible, not merely both admitted" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 bothSpellings
+      let (s1, _) = loadProofSource Strict s0 bothSpellings
           m = machineOf s1
       case ( lookupDefinition (named "Both.oneExplicit") (globals m)
            , lookupDefinition (named "Both.oneImplicit") (globals m)
@@ -2738,7 +2739,7 @@ exportTests =
     -- @Bit@ has no clause and @Pair@ writes @Bit.Bit@.
     testCase "no clause at all exports everything declared" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- loadProofFile s0 "test/modules/Bit.thena"
+      (s1, _, trouble) <- loadProofFile Strict s0 "test/modules/Bit.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       let m = named' "test.modules.Bit"
       exportedByModule m s1 @?= declaredByModule m s1
@@ -2748,7 +2749,7 @@ exportTests =
     -- @Bit@ and the importer writes @Bit.off@.
     testCase "naming a namespace exports what is under it" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/SeesExport.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/SeesExport.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= ["test.modules.Guarded", "test.modules.SeesExport"]
@@ -2758,7 +2759,7 @@ exportTests =
     -- exports only @Bit@.
     testCase "and a declaration the list does not name is not reachable" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesExport.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/MissesExport.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "not in scope: flip")
@@ -2771,7 +2772,7 @@ exportTests =
     -- declaration mints is a resolver fact that ends at the type.
     testCase "naming the type alone takes its alias with it" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/SeesType.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/SeesType.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= ["test.modules.GuardedType", "test.modules.SeesType"]
@@ -2780,7 +2781,7 @@ exportTests =
     -- able to name a member.
     testCase "and the constructors do not come with it" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesCtor.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/MissesCtor.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "not in scope: Tri.mid")
@@ -2793,7 +2794,7 @@ exportTests =
     -- at all if the list applied to the module itself.
     testCase "a module's own list does not narrow the module" $ do
       (s0, _) <- startingSession
-      (s1, out, trouble) <- loadProofFile s0 "test/modules/Guarded.thena"
+      (s1, out, trouble) <- loadProofFile Strict s0 "test/modules/Guarded.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ] @?= ["test.modules.Guarded"]
       assertBool (show (map nameDotted (declaredByModule (named' "test.modules.Guarded") s1)))
@@ -2805,7 +2806,7 @@ exportTests =
     -- @flip@ included, however the file that declared it stated its interface.
     testCase "the prompt reaches a name the module did not export" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Guarded.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Guarded.thena"
       let (_, r) = oneLine s1 ":infer flip"
       assertBool (unwords (renderResponse s1 r))
                  (not (any (isInfixOf "not in scope") (renderResponse s1 r)))
@@ -2854,7 +2855,7 @@ privateTests =
     -- states no interface, and @Shown@ comes whole.
     testCase "a file with no clause exports what it did not mark" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/SeesKept.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/SeesKept.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= ["test.modules.Kept", "test.modules.SeesKept"]
@@ -2862,7 +2863,7 @@ privateTests =
   , -- **And not what it did mark.**
     testCase "and a private declaration is not an importer's to name" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesKept.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/MissesKept.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "not in scope: helper")
@@ -2874,7 +2875,7 @@ privateTests =
     -- @Hidden.Hidden@, @Hidden.secret@ and @Hidden.elim@ back together.
     testCase "a private datatype keeps its whole namespace back" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesKeptData.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/MissesKeptData.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "not in scope: Hidden.Hidden")
@@ -2887,7 +2888,7 @@ privateTests =
     -- exist and deny nothing.
     testCase "a private inside a namespace block names the key that landed" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesInside.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/MissesInside.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "not in scope: A.hid")
@@ -2897,7 +2898,7 @@ privateTests =
   , -- **And it says nothing about the block it sits in**: its neighbour came.
     testCase "and its neighbour in the same block still comes" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/SeesInside.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/SeesInside.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= ["test.modules.KeptInside", "test.modules.SeesInside"]
@@ -2907,7 +2908,7 @@ privateTests =
     -- declared: @private@ changes who may name a thing and nothing else.
     testCase "a private declaration is declared, and the module may use it" $ do
       (s0, _) <- startingSession
-      (s1, out, trouble) <- loadProofFile s0 "test/modules/Kept.thena"
+      (s1, out, trouble) <- loadProofFile Strict s0 "test/modules/Kept.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       let m = named' "test.modules.Kept"
           itDeclared = map nameDotted (declaredByModule m s1)
@@ -2920,7 +2921,7 @@ privateTests =
   , -- **And the prompt reaches it**, as it reaches everything the session holds.
     testCase "the prompt reaches a private declaration" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Kept.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Kept.thena"
       let (_, r) = oneLine s1 ":infer helper"
       assertBool (unwords (renderResponse s1 r))
                  (not (any (isInfixOf "not in scope") (renderResponse s1 r)))
@@ -2979,7 +2980,7 @@ unlistedTravellingTests :: [TestTree]
 unlistedTravellingTests =
   [ testCase "a passed-on module the exporting clause omits warns, and still travels" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsThrough.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsThrough.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       let said = concatMap (renderResponse s0) out
       assertBool (unwords said)
@@ -2992,7 +2993,7 @@ unlistedTravellingTests =
 
   , testCase "and listing the namespace silences it" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/ListsWhatTravels.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/ListsWhatTravels.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool (unwords (concatMap (renderResponse s0) out))
         (not (any (isInfixOf "does not list")
@@ -3001,7 +3002,7 @@ unlistedTravellingTests =
   , -- **A deny-list enumerates nothing**, so there is nothing to be missing from.
     testCase "a hiding header does not raise it" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/HidesAndPasses.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/HidesAndPasses.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool (unwords (concatMap (renderResponse s0) out))
         (not (any (isInfixOf "does not list")
@@ -3011,7 +3012,7 @@ unlistedTravellingTests =
     -- written before MS11 phase 285: the corpus must stay silent.
     testCase "and neither does a header with no clause" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsBit.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsBit.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool (unwords (concatMap (renderResponse s0) out))
         (not (any (isInfixOf "does not list")
@@ -3022,14 +3023,14 @@ narrowedImportTests :: [TestTree]
 narrowedImportTests =
   [ testCase "a name list narrows what the importer may write" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/TakesBit.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/TakesBit.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= [ "test.modules.Twins", "test.modules.TakesBit" ]
 
   , testCase "and what it kept out is concealed" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/MissesTri.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/MissesTri.thena"
       assertBool (unwords (concatMap (renderResponse s0) out))
                  (any (isInfixOf "not in scope: Tri.Tri")
                       (concatMap (renderResponse s0) out))
@@ -3038,7 +3039,7 @@ narrowedImportTests =
     -- @open@'s, said again on an import.
     testCase "hiding is the same clause with the other word" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/HidesTri.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/HidesTri.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= [ "test.modules.Twins", "test.modules.HidesTri" ]
@@ -3047,7 +3048,7 @@ narrowedImportTests =
     -- it should be."/
     testCase "a narrowed public import passes the narrowing on" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsBitOnly.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsBitOnly.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= [ "test.modules.Twins", "test.modules.PassesBitOnly"
@@ -3055,7 +3056,7 @@ narrowedImportTests =
 
   , testCase "and what it narrowed away does not travel" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/MissesTriTravelled.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/MissesTriTravelled.thena"
       assertBool (unwords (concatMap (renderResponse s0) out))
                  (any (isInfixOf "not in scope: Tri.Tri")
                       (concatMap (renderResponse s0) out))
@@ -3064,7 +3065,7 @@ narrowedImportTests =
     -- the clause is written one file further away and still holds.
     testCase "a narrowing survives a second hop" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsTwoHopNarrowing.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsTwoHopNarrowing.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= [ "test.modules.Twins", "test.modules.PassesBitOnly"
@@ -3072,7 +3073,7 @@ narrowedImportTests =
 
   , testCase "and the second hop does not widen it" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/MissesTriTwoHops.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/MissesTriTwoHops.thena"
       assertBool (unwords (concatMap (renderResponse s0) out))
                  (any (isInfixOf "not in scope: Tri.Tri")
                       (concatMap (renderResponse s0) out))
@@ -3082,14 +3083,14 @@ narrowedImportTests =
     -- are independent facts and the record may not collapse them.**
     testCase "a plain import beside a narrowed public import of one module" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/BothLines.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/BothLines.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= [ "test.modules.Twins", "test.modules.BothLines" ]
 
   , testCase "and only the narrowed line's names travel" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/GetsOnlyWhatTravelled.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/GetsOnlyWhatTravelled.thena"
       assertBool (unwords (concatMap (renderResponse s0) out))
                  (any (isInfixOf "not in scope: Tri.Tri")
                       (concatMap (renderResponse s0) out))
@@ -3099,7 +3100,7 @@ narrowedImportTests =
     -- everything the clause was about concealed and failed at its first name.
     testCase "a clause naming what the module does not offer is refused" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/TypoClause.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/TypoClause.thena"
       assertBool (unwords (concatMap (renderResponse s0) out))
                  (any (isInfixOf "test.modules.Twins offers no Nonesuch")
                       (concatMap (renderResponse s0) out))
@@ -3108,7 +3109,7 @@ narrowedImportTests =
     -- same way and the grammar keys come through the same prefix test.
     testCase "a rule file's import narrows too" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Lang.thena"
       (_, out, trouble) <-
         consultRuleFiles s1 ["test/modules/NarrowsTwins.thena.rules"]
       assertBool (show (map (renderTrouble s1) trouble)) (null trouble)
@@ -3117,7 +3118,7 @@ narrowedImportTests =
 
   , testCase "and a rule file's clause is refused the same way" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadProofFile s0 "test/modules/Lang.thena"
+      (s1, _, _) <- loadProofFile Strict s0 "test/modules/Lang.thena"
       (_, out, trouble) <-
         consultRuleFiles s1 ["test/modules/MissesLangInBase.thena.rules"]
       let said = concatMap (renderResponse s1) out
@@ -3153,7 +3154,7 @@ publicImportTests =
     -- other half: the same shape with a plain @import@ is refused.
     testCase "a public import passes its module's names on" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsBit.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsBit.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= [ "test.modules.Bit", "test.modules.PassesBit"
@@ -3163,7 +3164,7 @@ publicImportTests =
     -- import /got/, so a module that passed on a passer passes the whole chain.
     testCase "and it travels as far as the public lines go" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsTwoHops.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsTwoHops.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= [ "test.modules.Bit", "test.modules.PassesBit"
@@ -3174,7 +3175,7 @@ publicImportTests =
     -- passed module's exports and not the passer's.
     testCase "a passer's own list does not filter what it passes on" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/GetsThrough.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/GetsThrough.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ nm | ProofLoaded nm _ _ _ <- out ]
         @?= [ "test.modules.Guarded", "test.modules.PassesNothingOwn"
@@ -3183,7 +3184,7 @@ publicImportTests =
   , -- **And its own list is still obeyed for its own declarations.**
     testCase "and its own list still governs its own declarations" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/MissesPasser.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/MissesPasser.thena"
       case out of
         [r] -> assertBool (unwords (renderResponse s0 r))
                           (any (isInfixOf "not in scope: ownThing")
@@ -3234,7 +3235,7 @@ scopedImportTests =
     -- has the refusal).
     testCase "a scoped import's names reach its block" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedImport.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/ScopedImport.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       [ ds | ProofLoaded _ ds _ _ <- out ] @?= [["Bit", "mine"], ["mine"]]
 
@@ -3243,7 +3244,7 @@ scopedImportTests =
     -- file-wide import would have left in scope.
     testCase "and they stop where the block does" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedImportAfter.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/ScopedImportAfter.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool (show (map (renderResponse s0) out))
                  (any (isInfixOf "not in scope: Bit.Bit")
@@ -3286,13 +3287,13 @@ scopedConsultTests :: [TestTree]
 scopedConsultTests =
   [ testCase "a scoped consult's base is in the pool for its block" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedConsult.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/ScopedConsult.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
   , testCase "and out of it afterwards" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedConsultAfter.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/ScopedConsultAfter.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool (show (map (renderResponse s0) out))
                  (any (isInfixOf "no rule or function is called marker")
@@ -3304,7 +3305,7 @@ scopedConsultTests =
     -- arrived with what it consults, beneath it.
     testCase "a scoped consult pushes what its base consults too" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedFetch.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/ScopedFetch.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
@@ -3312,7 +3313,7 @@ scopedConsultTests =
     -- group pushed under one name has to get right (MS11 phase 298).
     testCase "and the whole group leaves the pool after the block" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/ScopedFetchAfter.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/ScopedFetchAfter.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool (show (map (renderResponse s0) out))
                  (any (isInfixOf "no rule or function is called needed")
@@ -3326,7 +3327,7 @@ scopedConsultTests =
     -- out as soon as a scoped base brought anything, which it now always can.
     testCase "a file-wide line and a scoped group are split by group" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/WideAndScoped.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/WideAndScoped.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
@@ -3364,7 +3365,7 @@ scopedConsultTests =
     -- reports, messages being dropped on success.
     testCase "nesting reaches both bases" $ do
       (s0, _) <- startingSession
-      (_, out, trouble) <- loadProofFile s0 "test/modules/NestedConsult.thena"
+      (_, out, trouble) <- loadProofFile Strict s0 "test/modules/NestedConsult.thena"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool "it loaded" (not (null [ () | ProofLoaded {} <- out ]))
 
@@ -3407,7 +3408,7 @@ replayTests =
       resp @?= ReplayRequested "test/modules/Replayed.thena.script"
       -- Nothing was recorded by the asking line itself.
       submittedLines s1 @?= submittedLines s0
-      case following s1 resp of
+      case following Strict s1 resp of
         Nothing  -> assertFailure "a replay was not followed"
         Just act -> do
           (s2, _, trouble) <- act
@@ -3426,7 +3427,7 @@ replayTests =
     -- @import@ line reached is, like any other file a line opens.
     testCase "the script is not in the hash list, and what its lines open is" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- replayFile s0 "test/modules/Replayed.thena.script"
+      (s1, _, trouble) <- replayFile Strict s0 "test/modules/Replayed.thena.script"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       own (filesRead s1) @?= ["test/modules/Bit.thena"]
 
@@ -3435,7 +3436,7 @@ replayTests =
     -- through a replay without replaying anything again.
     testCase "undo steps back into a replay" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- replayFile s0 "test/modules/Replayed.thena.script"
+      (s1, _, _) <- replayFile Strict s0 "test/modules/Replayed.thena.script"
       assertBool "the claim is in" ("h" `isInfixOf` shown s1 ":show")
       let (s2, undone) = oneLine s1 ":undo"
       assertBool (show (renderResponse s1 undone)) (not (stopped undone))
@@ -3447,7 +3448,7 @@ replayTests =
     -- left.
     testCase "where a :load script of the same file leaves none" $ do
       (s0, _) <- startingSession
-      (s1, _, _) <- loadFile s0 "test/modules/Replayed.thena.script"
+      (s1, _, _) <- loadFile Strict s0 "test/modules/Replayed.thena.script"
       let (_, undone) = oneLine s1 ":undo"
       assertBool (show (renderResponse s1 undone)) (stopped undone)
 
@@ -3455,7 +3456,7 @@ replayTests =
     -- against what it brought.
     testCase "a script may replay a script" $ do
       (s0, _) <- startingSession
-      (s1, out, trouble) <- replayFile s0 "test/modules/ReplaysReplayed.thena.script"
+      (s1, out, trouble) <- replayFile Strict s0 "test/modules/ReplaysReplayed.thena.script"
       assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
       assertBool (show (concatMap (renderResponse s1) out))
         (any ("off : Bit" `isInfixOf`) (concatMap (renderResponse s1) out))
@@ -3466,7 +3467,7 @@ replayTests =
     -- said, not what they were called: a path is not canonical.
     testCase "a script that replays itself is refused, and the loop is named" $ do
       (s0, _) <- startingSession
-      (s1, _, trouble) <- replayFile s0 "test/modules/ReplaysItself.thena.script"
+      (s1, _, trouble) <- replayFile Strict s0 "test/modules/ReplaysItself.thena.script"
       submittedLines s1 @?= submittedLines s0
       case trouble of
         [Unloadable _ (ReplayCycle ps)] ->
@@ -3511,7 +3512,7 @@ langInterfaceTests =
       let key m = named (m ++ ".LC")
           loaded path = do
             (s0, _) <- startingSession
-            (s1, _, trouble) <- loadProofFile s0 path
+            (s1, _, trouble) <- loadProofFile Strict s0 path
             assertBool (show (map (renderTrouble s0) trouble)) (null trouble)
             pure s1
       withheld <- loaded "test/modules/WithheldLang.thena"
@@ -3546,7 +3547,7 @@ langInterfaceTests =
     -- against at all now.
     testCase "a surface file may not write a withheld language's notation" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/WritesLang.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/WritesLang.thena"
       let said = concatMap (renderResponse s0) out
       assertBool (show said) (any (isInfixOf "no language called LC") said)
 
@@ -3554,7 +3555,7 @@ langInterfaceTests =
     -- name and the clause withheld it.
     testCase "and still may not name its type" $ do
       (s0, _) <- startingSession
-      (_, out, _) <- loadProofFile s0 "test/modules/NamesLang.thena"
+      (_, out, _) <- loadProofFile Strict s0 "test/modules/NamesLang.thena"
       let said = concatMap (renderResponse s0) out
       assertBool (show said) (any (isInfixOf "not in scope: LC") said)
   ]

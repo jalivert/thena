@@ -48,7 +48,7 @@ import Thena.Declared
   , natDecl
   , preludeDecls
   )
-import Thena.Driver (Response (..), loadProofSource)
+import Thena.Driver (Leniency (..), Response (..), loadProofSource)
 import Thena.Files (startingSession)
 import Thena.Global.Env (GlobalEnv, definitionBody, definitionType, lookupDefinition)
 import Thena.Kernel (certify)
@@ -319,7 +319,7 @@ cycleTests =
 loads :: [String] -> Assertion
 loads ls = do
   (s0, _) <- startingSession
-  case loadProofSource s0 (unlines ls) of
+  case loadProofSource Strict s0 (unlines ls) of
     (_,  ProofLoaded {}) -> pure ()
     (s1, other)          -> assertFailure (unwords (renderResponse s1 other))
 
@@ -535,7 +535,7 @@ guardTests =
 refuses :: String -> [String] -> Assertion
 refuses blamed ls = do
   (s0, _) <- startingSession
-  case loadProofSource s0 (unlines ls) of
+  case loadProofSource Strict s0 (unlines ls) of
     (_, ProofLoaded {}) -> assertFailure "the module loaded, and it should not have"
     (s1, other)
       | any (blamed `isInfixOf`) (renderResponse s1 other) -> pure ()

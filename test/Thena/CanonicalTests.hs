@@ -19,7 +19,7 @@ import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (substLevelsIn)
-import Thena.Driver (machineOf)
+import Thena.Driver (Leniency (..), machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadProofFile, startingSession)
@@ -37,7 +37,7 @@ tests =
     "canonical forms — TAPL 8.3.1"
     [ goldenVsString "canonical" "test/golden/canonical.golden" $ do
         (s, trouble) <- startingSession
-        (s', out, _) <- loadProofFile s target
+        (s', out, _) <- loadProofFile Strict s target
         pure (toLazyByteString (stringUtf8 (unlines
           (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
 
@@ -97,7 +97,7 @@ tests =
     -- as the file wrote it, which is what these cases are about.
     statementOf n = do
       (s, _) <- startingSession
-      (s', _, _) <- loadProofFile s target
+      (s', _, _) <- loadProofFile Strict s target
       pure (atZero (machineOf s') <$>
               lookupDefinition (named ("examples.Canonical." ++ n))
                                (globals (machineOf s')))

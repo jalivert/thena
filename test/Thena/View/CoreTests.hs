@@ -24,7 +24,8 @@ import Thena.Global.Env
   , GlobalEnv (..)
   )
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , machineOf
   , loadProofSource
   )
@@ -75,7 +76,7 @@ spelled =
   where
     bothSay extra want = do
       (s0, _) <- startingSession
-      case loadProofSource s0 (unlines
+      case loadProofSource Strict s0 (unlines
              ([ "module Spelling where", ""
               , "data Col : Type where"
               , "  { red : Col }"
@@ -162,7 +163,7 @@ source =
 loaded :: IO [Grammar]
 loaded = do
   (s0, _) <- startingSession
-  case loadProofSource s0 source of
+  case loadProofSource Strict s0 source of
     (s1, ProofLoaded {}) -> pure (grammars (machineOf s1))
     (_, other) -> assertFailure (show other) >> pure []
 

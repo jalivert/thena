@@ -44,7 +44,8 @@ import Thena.Declared
   , eqNatVecCounter
   )
 import Thena.Driver
-  ( Loaded (..)
+  ( Leniency (..)
+  , Loaded (..)
   , Response (..)
   , Session
   , loadProofSource
@@ -401,7 +402,7 @@ omittedTests =
     -- them.
   , testCase "the example file runs to the end" $ do
       (s, _) <- startingSession
-      (_, _, stopped) <- loadProofFile s "examples/OmittedCases.thena"
+      (_, _, stopped) <- loadProofFile Strict s "examples/OmittedCases.thena"
       assertBool (unlines (map show stopped)) (null stopped)
 
     -- __The refusal names the case and not the rule since MS9 phase 230__, his
@@ -429,7 +430,7 @@ omittedTests =
 accepts :: [String] -> Assertion
 accepts ls = do
   (s0, _) <- startingSession
-  case loadProofSource s0 (unlines ls) of
+  case loadProofSource Strict s0 (unlines ls) of
     (_,  ProofLoaded {}) -> pure ()
     (s1, other)          -> assertFailure (unwords (renderResponse s1 other))
 
@@ -437,7 +438,7 @@ accepts ls = do
 refusedWith :: String -> [String] -> Assertion
 refusedWith what ls = do
   (s0, _) <- startingSession
-  case loadProofSource s0 (unlines ls) of
+  case loadProofSource Strict s0 (unlines ls) of
     (_,  ProofLoaded {}) -> assertFailure ("loaded, and it should not have")
     (s1, other)
       | what `isInfixOf` unwords (renderResponse s1 other) -> pure ()

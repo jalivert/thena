@@ -52,7 +52,8 @@ import Thena.Declared
   , vecDecl
   )
 import Thena.Driver
-  ( parseCore
+  ( Leniency (..)
+  , parseCore
   , parseDeclaration
   )
 import Thena.Global.Declare (DeclareError (..), declare)
@@ -287,7 +288,7 @@ acrossTests =
 loads :: [String] -> Assertion
 loads ls = do
   (s0, _) <- startingSession
-  case loadProofSource s0 (unlines ls) of
+  case loadProofSource Strict s0 (unlines ls) of
     (_,  ProofLoaded {}) -> pure ()
     (s1, other)          -> assertFailure (unwords (renderResponse s1 other))
 

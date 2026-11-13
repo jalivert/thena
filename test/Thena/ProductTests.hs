@@ -19,7 +19,8 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=), assertBool)
 
 import Thena.Declared (named)
 import Thena.Driver
-  ( machineOf
+  ( Leniency (..)
+  , machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
@@ -37,13 +38,13 @@ tests =
     "the prelude's products (phase 20)"
     [ goldenVsString "products" "test/golden/products.golden" $ do
         (s, trouble) <- startingSession
-        (s', out, _) <- loadFile s target
+        (s', out, _) <- loadFile Strict s target
         pure (toLazyByteString (stringUtf8 (unlines
           (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
 
     , testCase "the file runs to the end" $ do
         (s, _) <- startingSession
-        (_, _, stopped) <- loadFile s target
+        (_, _, stopped) <- loadFile Strict s target
         assertBool (unlines (map show stopped)) (null stopped)
 
       -- The whole point of a *dependent* pair, and the one thing that would

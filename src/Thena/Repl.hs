@@ -41,6 +41,7 @@ import Data.List (intercalate)
 
 import Thena.Driver
   ( Response (..)
+  , Leniency (..)
   , Session
   , newSession
   , oneLine
@@ -164,7 +165,11 @@ transcriptIO s0 = fmap unlines . replay s0
     replay s (l : ls) = do
       let t    = turn s l
           echo = prompt s ++ l
-      case following (turnSession t) (turnResponse t) of
+      -- **The prompt is lenient** (MS12 phase 315, @~mgqwb@, his ruling of
+      -- 2026-11-11): a module whose proofs are not all finished loads as far as
+      -- it can, because /"what if I am literally debugging my proofs?"/. The
+      -- batch checker passes 'Strict' at its own door.
+      case following Lenient (turnSession t) (turnResponse t) of
         Just act | not (turnQuit t) -> do
           (s', responses, trouble) <- act
           let out = concatMap (renderResponse s') responses

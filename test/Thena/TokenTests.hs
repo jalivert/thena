@@ -20,7 +20,8 @@ import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), Literal (..), rootName)
 import Thena.Declared (named)
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , machineOf
   , Stop (..)
   , loadProofSource
@@ -44,7 +45,7 @@ tests =
     , goldenVsString "tokens" "test/golden/tokens.golden" $ do
         (s0, trouble) <- startingSession
         let run (title, src) =
-              let (s1, r) = loadProofSource s0 src
+              let (s1, r) = loadProofSource Strict s0 src
                in ("-- " ++ title) : renderResponse s1 r
         pure (toLazyByteString (stringUtf8
           (unlines (concatMap (renderTrouble s0) trouble ++ concatMap run (good : bad)) ++ transcriptFrom s0 prompt)))
@@ -124,14 +125,14 @@ accepted :: [TestTree]
 accepted =
   [ testCase "the module loads" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (snd good) of
+      case loadProofSource Strict s0 (snd good) of
         (_, ProofLoaded {}) -> pure ()
         (_, other) -> assertFailure (show other)
   , -- The point of the ruling: T is not in the literal, it is the argument
     -- unification found — and found from the annotation, not defaulted.
     testCase "T is the argument, and it came from the annotation" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 (snd good)
+      let (s1, _) = loadProofSource Strict s0 (snd good)
           env = globals (machineOf s1)
           value g = whnf env [] . definitionBody <$> lookupDefinition (named ("Good." ++ g)) env
       map value ["ident", "digit", "numeral", "again"]
@@ -196,7 +197,7 @@ refusals :: [TestTree]
 refusals =
   [ testCase title $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 src of
+      case loadProofSource Strict s0 src of
         (_, Ran _ _ (Refused e)) -> e @?= want
         (_, other) -> assertFailure (show other)
   | ((title, src), want) <- refused

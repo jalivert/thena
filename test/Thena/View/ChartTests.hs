@@ -24,7 +24,8 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , loadProofSource
   , machineOf
   )
@@ -150,7 +151,7 @@ ch = ("Charting." ++)
 loaded :: IO [Grammar]
 loaded = do
   (s0, _) <- startingSession
-  case loadProofSource s0 source of
+  case loadProofSource Strict s0 source of
     (s1, ProofLoaded {}) -> pure (grammars (machineOf s1))
     (_, other) -> assertFailure (show other) >> pure []
 

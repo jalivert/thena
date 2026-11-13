@@ -19,7 +19,8 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Term (Core (..), Literal (..), rootName)
 import Thena.Declared (named)
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , Session
   , machineOf
   , loadRuleTexts
@@ -74,7 +75,7 @@ loadedModule :: IO (Session, String)
 loadedModule = do
   (s0, _) <- startingSession
   shipped <- rulesPath >>= readFile
-  (s1, out, trouble) <- loadProofFile s0 languageModule
+  (s1, out, trouble) <- loadProofFile Strict s0 languageModule
   case (trouble, [ () | ProofLoaded {} <- out ]) of
     ([], _ : _) -> pure (s1, shipped)
     _           -> assertFailure (show out)
@@ -293,7 +294,7 @@ inNamespaces :: (FilePath, String) -> [String] -> IO (Either Response [Rule])
 inNamespaces (path, stated) body = do
   (s0, _) <- startingSession
   shipped <- rulesPath >>= readFile
-  (s1, out, trouble) <- loadProofFile s0 path
+  (s1, out, trouble) <- loadProofFile Strict s0 path
   case (trouble, [ () | ProofLoaded {} <- out ]) of
     ([], _ : _) -> withRules (pure (s1, shipped)) (baseOf stated (unlines body))
     _           -> assertFailure (show out)

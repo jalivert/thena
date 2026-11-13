@@ -22,7 +22,8 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (nameDotted, rootName)
 import Thena.Driver
-  ( CommandError (..)
+  ( Leniency (..)
+  , CommandError (..)
   , Parked (..)
   , Quest (..)
   , Response (..)
@@ -61,7 +62,7 @@ suspended :: IO (Session, [Response])
 suspended = do
   s <- pausing
   Just m <- pure (moduleName "test.modules.Pauses")
-  (s', out, trouble) <- importModule s m
+  (s', out, trouble) <- importModule Strict s m
   assertBool ("nothing should be trouble here: " ++ show trouble) (null trouble)
   pure (s', out)
 
@@ -72,7 +73,7 @@ suspended = do
 -- land.
 line :: Session -> String -> IO (Session, [Response])
 line s l = case oneLine s l of
-  (s', resp) -> case following s' resp of
+  (s', resp) -> case following Strict s' resp of
     Nothing  -> pure (s', [resp])
     Just act -> do
       (s'', more, trouble) <- act
@@ -180,7 +181,7 @@ tests = testGroup "a yield out of an imported module"
       -- rest of the walk has to be carried or the importing module is lost.
       s <- pausing
       Just m <- pure (moduleName "test.modules.ImportsPauses")
-      (s1, out, trouble) <- importModule s m
+      (s1, out, trouble) <- importModule Strict s m
       assertBool ("no trouble expected: " ++ show trouble) (null trouble)
       [ nm | ImportSuspended nm _ _ _ <- out ] @?= ["test.modules.Pauses"]
       (s2, _) <- line s1 "try-core core`this`"
@@ -338,7 +339,7 @@ parking = testGroup "parking it, so that a lemma can be proved"
       (s1, _) <- line s ":theorem spare : Type\8320"
       (s2, _) <- line s1 ":suspend"
       Just m <- pure (moduleName "test.modules.Pauses")
-      (s3, _, trouble) <- importModule s2 m
+      (s3, _, trouble) <- importModule Strict s2 m
       assertBool ("no trouble expected: " ++ show trouble) (null trouble)
       (_, out) <- line s3 ":resume spare"
       rejected out @?= [ImportInFlight "test.modules.Pauses"]

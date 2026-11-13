@@ -32,7 +32,7 @@ import System.Console.Haskeline
   , setComplete
   )
 
-import Thena.Driver (Session)
+import Thena.Driver (Leniency (..), Session)
 import Thena.Files (following, startingSession)
 import Thena.Render (renderResponse, renderTrouble)
 import Thena.Repl
@@ -86,7 +86,9 @@ loop current s = do
    run line = do
       let t = turn s line
       mapM_ outputStrLn (turnOutput t)
-      case following (turnSession t) (turnResponse t) of
+      -- **The interactive prompt is lenient** (MS12 phase 315, @~mgqwb@):
+      -- a module whose proofs are not all finished loads as far as it can.
+      case following Lenient (turnSession t) (turnResponse t) of
         Just act | not (turnQuit t) -> do
           (s', responses, trouble) <- liftIO act
           mapM_ outputStrLn (concatMap (renderResponse s') responses)

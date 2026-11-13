@@ -104,6 +104,7 @@ import Thena.Development.Cursor
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Driver
   ( CommandError (..)
+  , Unfinished (..)
   , RuleFileError (..)
   , LoadError (..)
   , Response (..)
@@ -321,6 +322,37 @@ renderResponse s resp = let ren = renderingOf s in case resp of
       : map ("  declared " ++) ds
       ++ [ "  and " ++ plural blocks "do block" | blocks > 0 ]
       ++ map renderWarning ws
+  -- **A MODULE THAT WENT IN AS FAR AS IT COULD** (MS12 phase 315, @~mgqwb@).
+  -- The same shape 'ProofLoaded' has, because the same thing happened to what
+  -- went in, and then what did not.
+  --
+  -- **ONE FAILURE AND N PENDING, NOT N+1 FAILURES** — his ruling of
+  -- 2026-11-11. The first item that did not go through is the root and its own
+  -- answer is printed in full, indented under it; the rest are named on one
+  -- line and nothing is said about why, because nothing worked out why. A
+  -- module whose third declaration broke would otherwise bury its own reason
+  -- under forty-seven copies of /not in scope/.
+  ProofLoadedPartly nm ds blocks ws unfin ->
+    ("module " ++ nm)
+      : map ("  declared " ++) ds
+      ++ [ "  and " ++ plural blocks "do block" | blocks > 0 ]
+      ++ map renderWarning ws
+      ++ case unfin of
+           [] -> []
+           root : pending ->
+             ( "  " ++ named root ++ " did not go in:" )
+               : map ("    " ++) (renderResponse s (unfinishedWhy root))
+               ++ [ "  and " ++ plural (length pending) "more" ++ " pending: "
+                      ++ intercalate ", " (map named pending)
+                  | not (null pending) ]
+    where
+      -- **A declaration that declared nothing still has to be nameable**: an
+      -- item may be a @do@ block or a grammar, which the summary cannot list,
+      -- so the list is said where there is one and the word stands in where
+      -- there is not.
+      named u = case unfinishedDeclares u of
+        [] -> "an item"
+        xs -> intercalate ", " xs
   -- **A load that is standing still, and both ways out of it** (MS12 phase
   -- 309). What the run printed before it stopped comes first, as it would
   -- have on its own; then the yield's own message; then what to type.

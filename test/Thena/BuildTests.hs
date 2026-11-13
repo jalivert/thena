@@ -23,7 +23,8 @@ import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName, InScope, Literal (..), openingOnly, nameDotted)
 import Thena.Core.Typing (infer)
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , Stop (..)
   , loadProofSource
   , machineOf
@@ -90,7 +91,7 @@ stlc =
 loaded :: IO (GlobalEnv, [Grammar])
 loaded = do
   (s0, _) <- startingSession
-  case loadProofSource s0 stlc of
+  case loadProofSource Strict s0 stlc of
     (s1, ProofLoaded {}) -> pure (globals (machineOf s1), grammars (machineOf s1))
     (_, other) -> assertFailure (show other)
 
@@ -168,7 +169,7 @@ roles =
             , ("STLC.LC.paren", 1, 1), ("STLC.LC.twice", 1, 1) ]
   , testCase "a datatype written by hand has none of it" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 "module W where\n\ndata Pair : Type\8320 where\n  mk : String -> String -> Pair\n" of
+      case loadProofSource Strict s0 "module W where\n\ndata Pair : Type\8320 where\n  mk : String -> String -> Pair\n" of
         (s1, ProofLoaded {}) ->
           case lookupInductive (declaredUnder "W" "Pair") (globals (machineOf s1)) of
             Just d -> map constructorRoles (inductiveConstructors d) @?= [[Plain, Plain]]
@@ -248,7 +249,7 @@ host = renderCore (rendering [] 0) []
 elaborated :: String -> IO (Either FailReason Core)
 elaborated decls = do
   (s0, _) <- startingSession
-  case loadProofSource s0 (stlc ++ "\n" ++ decls ++ "\n") of
+  case loadProofSource Strict s0 (stlc ++ "\n" ++ decls ++ "\n") of
     (s1, ProofLoaded {}) ->
       let env = globals (machineOf s1)
        in case lookupDefinition (inStlc "t") env of

@@ -250,6 +250,59 @@ written `∀ {A : Type₀} -> A -> A`.
 
 ## Modules and namespaces
 
+### An import typed at the prompt loads a module as far as it can
+
+*Decided 2026-11-11, built 2026-11-13.* A surface module that does not elaborate
+whole declares nothing — that has been the rule since 2026-09-30, and it is
+still the rule for `thena-check`, for the prelude, and for a module a rule base
+pulls in. **At a prompt it is not.** `import Foo` tries every declaration in
+turn: what elaborates lands and is usable, and what does not is set aside and
+reported.
+
+```
+thena spine> import test.modules.PartlyGood
+module test.modules.PartlyGood
+  declared Flag
+  declared first
+  declared after
+  broken did not go in:
+    stuck: not in scope: nonesuch
+```
+
+`after` is written *below* `broken` in the file and has nothing to do with it,
+so it lands. **The loader works out nothing about why anything failed** — it
+tries the next declaration. A module whose third definition is broken therefore
+reports one failure and names the rest as pending, rather than forty-seven
+copies of *not in scope*.
+
+**The motive is debugging, and it is the whole of the design.** A module is a
+unit, but a unit you cannot open is a tool that stops helping at the moment the
+work gets hard: you cannot reach the theorem you finished because it shares a
+file with one you have not.
+
+**Leniency belongs to the act you typed, not to the file.** There is no mode and
+no flag on the session. Everything the typed act pulls in is lenient too,
+however deep — if you type `import A` and `A` imports `B`, then `B` loads as far
+as it can as well, because the seam is *where the act was typed* and a seam one
+level down would be the loader asking which situation it is in. A module's own
+`import` line is unaffected: it states a dependency, it does not type an act.
+
+**Atomicity moved down a level rather than away.** A declaration that does not go
+through leaves nothing behind, so fixing the file and loading it again never
+collides with the broken attempt's leavings — which is what the 2026-09-30 rule
+was protecting. And a load is still one command: nothing observes the
+environment partway through it, so the global environment is the same before the
+line and after it.
+
+**What a frontend is given**, all through `Thena.Driver`: `moduleWhole` and
+`modulePartly` make what a module's status is three-valued — in, partly in,
+absent — `modulesPartly` lists the partial ones with their unfinished
+declarations in file order, and `moduleImportsOf` gives the edges of the import
+tree, which nothing kept before.
+
+**Not yet**: a declaration that was left behind is reported, not resumable. It
+cannot be picked up at the prompt and finished.
+
 ### A generated substitution names its class as a path, not as a suffix
 
 *Decided 2026-11-10.* A language's substitution family is **three namespaces and

@@ -25,7 +25,8 @@ import Test.Tasty.QuickCheck
   (Gen, counterexample, forAll, oneof, property, testProperty, withNumTests)
 
 import Thena.Driver
-  ( Loaded (..)
+  ( Leniency (..)
+  , Loaded (..)
   , Response (..)
   , Session
   , command
@@ -171,7 +172,7 @@ honestRefusals =
     failureOf ls = do
       (s0, _) <- startingSession
       let src = unlines (["module Wrong where", ""] ++ ls)
-          (s1, resp) = loadProofSource s0 src
+          (s1, resp) = loadProofSource Strict s0 src
       pure $ case filter (not . null) (renderResponse s1 resp) of
         [] -> "it loaded, and should not have"
         rs -> unwords (words (last rs))
@@ -1050,7 +1051,7 @@ emptySplit =
 
     loaded word = do
       (s0, _) <- startingSession
-      pure (loadProofSource s0 (source word))
+      pure (loadProofSource Strict s0 (source word))
 
     declares word = do
       (s1, resp) <- loaded word
@@ -1091,7 +1092,7 @@ splittingTree :: [TestTree]
 splittingTree =
   [ testCase "a function defined by pattern matching declares and computes" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (natModule ++ predDef))
+      let (s1, r) = loadProofSource Strict s0 (unlines (natModule ++ predDef))
       case r of
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
@@ -1110,7 +1111,7 @@ splittingTree =
     -- @Nat@ in scope.
   , testCase "a recursive call becomes the induction hypothesis, and computes" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (natModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (natModule ++
             [ "double : Nat -> Nat"
             , "double = \\ n -> induction n of"
             , "  { zero -> zero ; succ m -> succ (succ (double m)) }"
@@ -1204,7 +1205,7 @@ splittingTree =
 
   , testCase "and the same split declares when the arm takes the equation" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (catModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (catModule ++
             [ "pick : \8704 (x : String) (y : String) -> Cat (String.append x y) -> String"
             , "pick = \\ x y p -> case p of { mk a b -> \\ q -> a }"
             ]))
@@ -1272,7 +1273,7 @@ splittingTree =
     -- β-redex.
   , testCase "a name bound outside a split means what the split refined it to" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (evModule ++
             [ "namesOuter : \8704 (m : N) (e : Ev (s m)) -> IsSucc (s m)"
             , "namesOuter = \\ m e -> case e of { evs n en -> isucc m }"
             ]))
@@ -1290,7 +1291,7 @@ splittingTree =
     -- fails here rather than passing quietly.
   , testCase "a generalising split: refined, used and mentioned all declare" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (evModule ++
             [ "refined : \8704 (m : N) (e : Ev (s m)) -> IsSucc m"
             , "refined = \\ m e -> case e of { evs n en -> isucc n }"
             , "usesHyp : \8704 (m : N) (h : Ev m) (e : Ev (s m)) -> IsSucc m"
@@ -1325,7 +1326,7 @@ splittingTree =
     -- fails here rather than passing quietly.
   , testCase "a friendly index's ambient name means the refined thing too" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (evModule ++
             [ "data D : N -> Type\8320 where"
             , "  mk : \8704 (k : N) -> D k"
             , "open D"
@@ -1362,7 +1363,7 @@ splittingTree =
     -- @refl@ inside the module.
   , testCase "the scrutinee written in its own arm means the refined thing" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (evModule ++
             [ "data D : N -> Type\8320 where"
             , "  mk : \8704 (k : N) -> D k"
             , "open D"
@@ -1408,7 +1409,7 @@ splittingTree =
     -- the wrong copy fails here rather than declaring quietly.
   , testCase "where a premise is introduced does not decide whether it loads" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (reachModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (reachModule ++
             [ "inside : \8704 (n : N) (x : A n) (u : N) (f : F n u) -> N"
             , "inside = \\ n x -> induction x of \
               \{ az -> \\ u f -> z ; as k p -> \\ u f -> case f of { fs j m r -> m } }"
@@ -1449,7 +1450,7 @@ splittingTree =
     -- at @s k@, where a hypothesis about @k@ wants @Eq N k k@.
   , testCase "a recursion supplies the premise a split generalised" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (reachModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (reachModule ++
             [ "takesPremise : \8704 (n : N) (x : A n) (e : Eq N n n) -> N"
             , "takesPremise = \\ n x e -> induction x of \
               \{ az -> z ; as k p -> s (takesPremise k p (refl N k)) }"
@@ -1490,7 +1491,7 @@ splittingTree =
     -- rather than declaring: three @fs@ layers deep, the answer counts them.
   , testCase "a recursion varies a premise the split did not split on" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (reachModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (reachModule ++
             [ "varies : \8704 (n : N) (x : A n) (u : N) (f : F n u) -> N"
             , "varies = \\ n x u f -> induction x of \
               \{ az -> z ; as k p -> case f of { fs j m r -> s (varies k p m r) } }"
@@ -1518,7 +1519,7 @@ splittingTree =
     -- fails here rather than declaring quietly.
   , testCase "a recursion crosses a split that tied two indices" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (tiedModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (tiedModule ++
             [ "twoTied : \8704 (x : N) (y : N) (hx : Q x) (hy : Q y) (p : P x y) -> N"
             , "twoTied = \\ x y hx hy p -> induction p of \
               \{ pz c -> z ; pr a b r -> s (twoTied a b (qq a) (qq b) r) }"
@@ -1562,7 +1563,7 @@ splittingTree =
     -- tied to the wrong copy fails here rather than declaring quietly.
   , testCase "a recursion crosses three nested generalising splits" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (deepModule ++
             [ "threeDeep : \8704 (x : N) (y : N) (w : N) (p : P x y) (q : P y w) \
               \(r : P w x) -> N"
             , "threeDeep = \\ x y w p q r -> induction p of { pz c -> z \
@@ -1585,7 +1586,7 @@ splittingTree =
     -- to take per index.
   , testCase "a recursion crosses a split that tied three indices" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (deepModule ++
             [ "threeTied : \8704 (x : N) (y : N) (w : N) (t : T x y w) -> Q x"
             , "threeTied = \\ x y w t -> induction t of { tz -> qz \
               \; tr a b c r -> qs a (threeTied a b c r) }"
@@ -1606,7 +1607,7 @@ splittingTree =
     -- at the arm's own spine.
   , testCase "a recursion passes an argument bound after the scrutinee" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (deepModule ++
             [ "trailing : \8704 (x : N) (h : Q x) (e : Ev x) (k : N) -> Q k"
             , "trailing = \\ x h e k -> induction e of { evz -> allQ k \
               \; evs n en -> trailing n (allQ n) en k }"
@@ -1629,7 +1630,7 @@ splittingTree =
     -- and the second stated at the first.
   , testCase "a recursion crosses a split generalising two dependent premises" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (deepModule ++
             [ "twoPrem : \8704 (x : N) (h : Q x) (g : Eq (Q x) h h) (e : Ev x) -> Q x"
             , "twoPrem = \\ x h g e -> induction e of { evz -> h \
               \; evs n en -> qs (s n) (qs n (twoPrem n (allQ n) \
@@ -1649,7 +1650,7 @@ splittingTree =
     -- is a term built from two, and the recursion is at each of them in turn.
   , testCase "a recursion where the copy is solved to a built term" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines
+      let (s1, r) = loadProofSource Strict s0 (unlines
             [ "module Built where"
             , ""
             , "data M : Type\8320 where"
@@ -1694,7 +1695,7 @@ splittingTree =
     -- four. **Both compute**, asserted by @refl@ inside the module.
   , testCase "a recursion crosses four nested generalising splits" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (deepModule ++
             [ "fourDeep : \8704 (x : N) (y : N) (w : N) (v : N) (p : P x y) \
               \(q : P y w) (r : P w v) (t : P v x) -> N"
             , "fourDeep = \\ x y w v p q r t -> induction p of { pz c -> z \
@@ -1712,7 +1713,7 @@ splittingTree =
 
   , testCase "a recursion crosses five nested generalising splits" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (deepModule ++
             [ "fiveDeep : \8704 (x : N) (y : N) (w : N) (v : N) (u : N) \
               \(p : P x y) (q : P y w) (r : P w v) (t : P v u) (g : P u x) -> N"
             , "fiveDeep = \\ x y w v u p q r t g -> induction p of { pz c -> z \
@@ -1740,7 +1741,7 @@ splittingTree =
     -- type than the enclosing split's.
   , testCase "a recursion crosses a split whose indices are of two types" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (mixedModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (mixedModule ++
             [ "mixed : \8704 (x : N) (d : B) (hx : Q x) (hd : Qb d) \
               \(m : M x d) -> N"
             , "mixed = \\ x d hx hd m -> induction m of { mz -> z \
@@ -1781,7 +1782,7 @@ splittingTree =
     -- just as far out of reach. **All of them compute.**
   , testCase "a recursion under a split on a premise the split fixed" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (fixedModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (fixedModule ++
             [ "sandwich : \8704 (x : N) (y : N) (hx : Q x) (p : P x y) (e : C) -> N"
             , "sandwich = \\ x y hx p e -> induction p of { pz c -> z \
               \; pr a b rp -> case e of \
@@ -1871,7 +1872,7 @@ splittingTree =
     -- proof loads.
   , testCase "a recursion varies a premise across a tied index no arm needs copied" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (atTopModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (atTopModule ++
             [ "atTop : \8704 (g : N) (d : T g) (g1 : N) (inc : Inc g g1) -> N"
             , "atTop = \\ g d g1 inc -> induction d of \
               \{ tv g0 -> g1 ; tl g0 p -> atTop (s g0) p (s g1) (mkInc (s g0) (s g1)) }"
@@ -1890,7 +1891,7 @@ splittingTree =
     -- the @ln@ arm was asked for @P l@: *ln and l cannot be made equal*.
   , testCase "a goal written in the author's own name for the target is refined" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (listModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (listModule ++
             [ "goalMentions : \8704 (l : L) -> P l"
             , "goalMentions = \\ l -> case l of { ln -> mkP ln ; lc a as -> mkP (lc a as) }"
             ]))
@@ -1908,7 +1909,7 @@ splittingTree =
     -- Answering one arm with the refined term is what pins it.
   , testCase "a premise whose type mentions the target is refined with it" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (listModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (listModule ++
             [ "bothWays : \8704 (l : L) (q : P l) -> P l"
             , "bothWays = \\ l q -> case l of { ln -> mkP ln ; lc a as -> q }"
             ]))
@@ -1925,7 +1926,7 @@ splittingTree =
     -- target's type only, so it must stay fixed.
   , testCase "a split does not generalise what the target's own type mentions" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (atTopModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (atTopModule ++
             [ "data Q : N -> Type\8320 where"
             , "  qq : \8704 (n : N) -> Q n"
             , "open Q"
@@ -1953,7 +1954,7 @@ splittingTree =
     -- elaborate into and nothing for coverage to want.
   , testCase "a split over an indexed family declares, with a forced position" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (vecModule ++ vtailDef))
+      let (s1, r) = loadProofSource Strict s0 (unlines (vecModule ++ vtailDef))
       case r of
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
@@ -1974,7 +1975,7 @@ splittingTree =
             [ "vtail : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
             , "vtail = \\ A n v -> induction v of { vnil -> ; vcons k a as -> as }"
             ]
-          (s1, r) = loadProofSource s0 (unlines src)
+          (s1, r) = loadProofSource Strict s0 (unlines src)
       case r of
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
@@ -2015,7 +2016,7 @@ splittingTree =
             [ "tailLen : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Eq Nat n n"
             , "tailLen = \\ A n v -> induction v of { vcons k a as -> refl Nat k }"
             ]
-          (s1, r) = loadProofSource s0 (unlines src)
+          (s1, r) = loadProofSource Strict s0 (unlines src)
       case r of
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
@@ -2024,7 +2025,7 @@ splittingTree =
     -- binder to take and no name asked for.
   , testCase "a wildcard in a forced position binds nothing" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (vecModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (vecModule ++
             [ "vtailW : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
             , "vtailW = \\ A n v -> induction v of { vcons _ a as -> as }"
             ]))
@@ -2041,7 +2042,7 @@ splittingTree =
     -- went to the right constructors.
   , testCase "an inversion lemma forces two positions and still computes" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (okModule ++
             [ "left : \8704 (p q : Tr) -> Ok (node p q) -> Ok p"
             , "left = \\ p q d -> induction d of { okNode a b da db -> da }"
             ]))
@@ -2058,7 +2059,7 @@ splittingTree =
     -- the case where selection by /type/ would have had two candidates.
   , testCase "a call picks its hypothesis out of two by the argument it names" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (okModule ++
             [ "count : \8704 (t : Tr) -> Ok t -> Nat"
             , "count = \\ t d -> induction d of"
             , "  { okLeaf -> zero ; okNode a b da db -> succ (count a da) }"
@@ -2094,7 +2095,7 @@ splittingTree =
     -- premises across the top**, which is how the examples are written.
   , testCase "a call may pass a premise the split fixed" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (okModule ++
             [ "size : \8704 (t : Tr) -> Ok t -> Tr -> Nat"
             , "size = \\ t d u -> induction d of"
             , "  { okLeaf -> zero ; okNode a b da db -> succ (size a da u) }"
@@ -2119,7 +2120,7 @@ splittingTree =
     -- statement, same proof, and the only difference is where the λ is.
   , testCase "a premise bound inside the arm may vary across the recursion" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (okModule ++
             [ "size3 : \8704 (t : Tr) -> Ok t -> Tr -> Nat"
             , "size3 = \\ t d -> induction d of"
             , "  { okLeaf -> \\ u -> zero"
@@ -2139,7 +2140,7 @@ splittingTree =
     -- from the other side.
   , testCase "a variable inside a tied index is not copied" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (sbModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (sbModule ++
             [ "trv : \8704 (z : String) (g : Nat) (s : Ty2) (t : Ty2)"
             , "        -> Sb g s (tv z) -> Sb g (tv z) t -> Sb g s t"
             , "trv = \\ z g s t d1 d2 -> induction d1 of"
@@ -2162,7 +2163,7 @@ splittingTree =
     -- @~7pn6x@'s failure in a place @~7pn6x@ did not reach.
   , testCase "a split in an argument position refines its goal" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (twoModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (twoModule ++
             [ "f : \8704 (a : String) (c : String) -> Eq String a c -> R a c"
             , "f = \\ a c q -> idT (R a c) (case q of { refl u -> mkR u u })"
             ]))
@@ -2177,7 +2178,7 @@ splittingTree =
     -- has to be looked through.
   , testCase "a split sees an index under a copy of a compound term" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (twoModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (twoModule ++
             [ "pad : String -> String"
             , "pad = \\ s -> String.append s \"!\""
             , ""
@@ -2195,7 +2196,7 @@ splittingTree =
     -- not be written at all.
   , testCase "a premise about an index is refined with the index" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (twoModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (twoModule ++
             [ "h : \8704 (a : String) (c : String) -> R a c -> Eq String a c -> R c a"
             , "h = \\ a c p q -> case q of { refl u -> p }"
             ]))
@@ -2218,7 +2219,7 @@ splittingTree =
     -- to any test that calls the tactic directly — it needs the surface.
   , testCase "a split at a variable index states no equation" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (okModule ++
             [ "idOk : \8704 (t : Tr) -> Ok t -> Ok t"
             , "idOk = \\ t d -> induction d of"
             , "  { okLeaf -> okLeaf ; okNode a b da db -> okNode a b da db }"
@@ -2234,7 +2235,7 @@ splittingTree =
     -- parameter beside them.
   , testCase "and a family with two variable indices" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (okModule ++
             [ "data Ty : Type\8320 where"
             , "  base : Ty"
             , "open Ty"
@@ -2278,7 +2279,7 @@ splittingTree =
     -- it also says @Nat.case@ δ-unfolds to the elimination underneath.
   , testCase "case: a function defined by case analysis declares and computes" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (natModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (natModule ++
             [ "predC : Nat -> Nat"
             , "predC = \\ n -> case n of { zero -> zero ; succ m -> m }"
             ]))
@@ -2292,7 +2293,7 @@ splittingTree =
     -- method per constructor and no hypothesis in either.
   , testCase "and the term applies Nat.case, not an elim node" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 (unlines (natModule ++
+      let (s1, _) = loadProofSource Strict s0 (unlines (natModule ++
             [ "predC : Nat -> Nat"
             , "predC = \\ n -> case n of { zero -> zero ; succ m -> m }"
             ]))
@@ -2318,7 +2319,7 @@ splittingTree =
     -- @k@ is forced to the outer @n@, and the arm binds two of three.
   , testCase "case over an indexed family forces a position the same way" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (vecModule ++
+      let (s1, r) = loadProofSource Strict s0 (unlines (vecModule ++
             [ "vtailC : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
             , "vtailC = \\ A n v -> case v of { vcons k a as -> as }"
             ]))
@@ -2652,7 +2653,7 @@ splittingTree =
 
     refusesIn prefix what ls want = testCase what $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (prefix ++ ls))
+      let (s1, r) = loadProofSource Strict s0 (unlines (prefix ++ ls))
           said = filter (not . null) (renderResponse s1 r)
       case said of
         [] -> assertFailure "it loaded, and should not have"

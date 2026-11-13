@@ -19,7 +19,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Engine (scope)
-import Thena.Driver (Session)
+import Thena.Driver (Leniency (..), Session)
 import Thena.Files (following, startingSession)
 import Thena.Driver (commandSummary, oneLine, openableNamespaces)
 import Thena.Instral.Commands (Command (..), actWords, commands)
@@ -133,7 +133,7 @@ withLC :: IO Session
 withLC = do
   (s0, _) <- startingSession
   let (s1, r) = oneLine s0 ":load examples/Stlc01Syntax.thena"
-  case following s1 r of
+  case following Strict s1 r of
     Just io -> do (s2, _, _) <- io; pure s2
     Nothing -> pure s1
 
@@ -710,7 +710,7 @@ productionsMayShareAWord :: IO ()
 productionsMayShareAWord = do
   (s0, _) <- startingSession
   let (s1, r) = oneLine s0 ":load test/fixtures/two-languages-one-production.thena"
-  s <- case following s1 r of
+  s <- case following Strict s1 r of
     Just io -> do (s2, _, _) <- io; pure s2
     Nothing -> pure s1
   let opened l = [ w | ALiteralSymbol w <- offeredOptions (offerIn s ("fill " <> l)) ]

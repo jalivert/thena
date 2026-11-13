@@ -20,7 +20,8 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Driver
-  ( machineOf
+  ( Leniency (..)
+  , machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
@@ -80,8 +81,8 @@ tests =
     -- **Two modules, in order** — the second reads the first's globals.
     loaded = do
       (s, _)  <- startingSession
-      (s1, _, _) <- loadProofFile s "examples/Canonical.thena"
-      (s2, _, _) <- loadProofFile s1 "examples/Progress.thena"
+      (s1, _, _) <- loadProofFile Strict s "examples/Canonical.thena"
+      (s2, _, _) <- loadProofFile Strict s1 "examples/Progress.thena"
       pure s2
 
     declarationsOf _ = ["loaded Canonical.thena, then Progress.thena"]

@@ -7,11 +7,8 @@ module Good
   declared Name
   declared var
 -- T is not one of the three
-solved: ?ℓ4685
-solved: ?ℓ4685
-solved: ?ℓ4685
 already equal
-solved: ?ℓ4686
+solved: ?ℓ4827
 solved: T
 refused: in the token class M.t: M.Bool.Bool is not String, Char or Int
 -- the regex does not parse: a stray metacharacter

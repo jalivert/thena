@@ -21,7 +21,8 @@ import Data.List (isInfixOf, isPrefixOf)
 import Data.Maybe (isJust)
 import Thena.Core.Term (rootName)
 import Thena.Driver
-  ( machineOf
+  ( Leniency (..)
+  , machineOf
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
@@ -76,9 +77,9 @@ tests =
     -- **Three modules, in order** — each reads what the ones before it declared.
     loaded = do
       (s, _)  <- startingSession
-      (s1, _, _) <- loadProofFile s  "examples/Canonical.thena"
-      (s2, _, _) <- loadProofFile s1 "examples/Progress.thena"
-      (s3, _, _) <- loadProofFile s2 target
+      (s1, _, _) <- loadProofFile Strict s  "examples/Canonical.thena"
+      (s2, _, _) <- loadProofFile Strict s1 "examples/Progress.thena"
+      (s3, _, _) <- loadProofFile Strict s2 target
       pure s3
 
     statementOf n = do

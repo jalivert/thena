@@ -29,7 +29,8 @@ import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), rootName)
 import qualified Thena.Declared as Declared
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , machineOf
   , loadProofSource
   )
@@ -119,14 +120,14 @@ primed :: [TestTree]
 primed =
   [ testCase "the generated fresh mints a name the class accepts, and it reads back" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 primedSource of
+      case loadProofSource Strict s0 primedSource of
         (_, ProofLoaded {}) -> pure ()
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , -- **A warning, not a refusal** — his second principle. The language works and
     -- its substitution is correct; only printing a renamed binder is lost.
     testCase "a class no character extends warns rather than being refused" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 unprimeableSource of
+      case loadProofSource Strict s0 unprimeableSource of
         (_, ProofLoaded _ _ _ ws)
           | any isUnprimeable ws -> pure ()
           | otherwise -> assertFailure ("loaded, but did not warn: " ++ show ws)
@@ -261,7 +262,7 @@ classes =
     -- type-check unless the generated functions compute what they must.
     loadedFrom src = do
       (s0, _) <- startingSession
-      case loadProofSource s0 src of
+      case loadProofSource Strict s0 src of
         (s1, ProofLoaded {}) -> pure (globals (machineOf s1))
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
     -- **'Declared.named' and not this file's 'named'**: these cases have
@@ -317,7 +318,7 @@ named = Declared.named . ("Subst." ++)
 loaded :: IO GlobalEnv
 loaded = do
   (s0, _) <- startingSession
-  case loadProofSource s0 source of
+  case loadProofSource Strict s0 source of
     (s1, ProofLoaded {}) -> pure (globals (machineOf s1))
     (s1, other) -> assertFailure (unlines (renderResponse s1 other))
 
@@ -612,7 +613,7 @@ worked io =
     -- measuring the capture it was written for.
     testCase "a module can state a substitution's answer, and refl proves it" $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (source ++ unlines
+      let (s1, r) = loadProofSource Strict s0 (source ++ unlines
             [ ""
             , "captured : Eq LC (LC.subst.x (abs \"y\" base (var \"x\")) \"x\" (var \"y\")) (abs \"y'\" base (var \"y\"))"
             , "captured = refl LC (abs \"y'\" base (var \"y\"))"
@@ -625,7 +626,7 @@ worked io =
                     `isInfixOf` unwords (renderResponse s1 r))
   , testCase "and a wrong answer is refused" $ do
       (s0, _) <- startingSession
-      let (_, r) = loadProofSource s0 (source ++ unlines
+      let (_, r) = loadProofSource Strict s0 (source ++ unlines
             [ ""
             , "captured : Eq LC (LC.subst.x (abs \"y\" base (var \"x\")) \"x\" (var \"y\")) (abs \"y\" base (var \"y\"))"
             , "captured = refl LC (abs \"y\" base (var \"y\"))"
@@ -737,7 +738,7 @@ refused =
   where
     refusal what body want = testCase what $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines
+      let (s1, r) = loadProofSource Strict s0 (unlines
             (["module Refused where", "", "x : Token String", "x = /[a-z]+/", ""] ++ body))
       last (renderResponse s1 r) @?= want
 
@@ -754,7 +755,7 @@ followed :: [TestTree]
 followed =
   [ testCase "x[x -> N] is N, and y[x -> N] is y when y is not x, for names nobody knows" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (source ++ unlines lemmas) of
+      case loadProofSource Strict s0 (source ++ unlines lemmas) of
         (_, ProofLoaded {}) -> pure ()
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   ]

@@ -18,7 +18,8 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Term (Core (..), Literal (..))
 import Thena.Declared (named, opensIn)
 import Thena.Driver
-  ( Response (..)
+  ( Leniency (..)
+  , Response (..)
   , Session
   , machineOf
   , command
@@ -265,7 +266,7 @@ xNotY =
 load :: [String] -> IO (Either String Session)
 load body = do
   (s0, _) <- startingSession
-  pure $ case loadProofSource s0 (unlines body) of
+  pure $ case loadProofSource Strict s0 (unlines body) of
     (s1, ProofLoaded {}) -> Right s1
     (s1, other) -> Left (last (renderResponse s1 other))
 
