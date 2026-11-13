@@ -2636,6 +2636,18 @@ dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptOpenLine
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
 dispatchScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
 dispatchScriptEvent (VtyEvent (V.EvKey (V.KChar 'x') [V.MCtrl])) = openScriptBar
+-- | **Option+L in live-script mode clears nothing, and this clause is here to
+-- make sure of it** — `~p6g53`. There is no transcript in this mode: the
+-- document is the record, so there is nothing on screen for a clear to take
+-- off. What it *would* reach without this clause is the repl's turns, which
+-- are sitting intact behind the mode waiting for him to leave it
+-- ('leaveScriptMode' keeps 'stTurns' untouched on purpose) — deleting those
+-- from behind a mode that does not show them is the one outcome worth a
+-- clause to prevent.
+dispatchScriptEvent (VtyEvent (V.EvKey (V.KChar 'l') mods))
+  | V.MMeta `elem` mods || V.MAlt `elem` mods = do
+      st <- get
+      put st { stScriptNote = Just clearNotHere }
 dispatchScriptEvent ev = handleReplEvent ev
 
 handleReplEvent :: BrickEvent Name AppEvent -> EventM Name St ()
@@ -2742,6 +2754,15 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
           let st' = st0 { stWhisperOn = mode == "on" }
           liftIO (saveConfig (configOf st'))
           appendTurn st' Nothing ["whisper: " <> mode]
+        -- | **`:clear` and `:clear ‹n›`** — `~p6g53`. TUI-local for the
+        -- plainest possible reason: the engine has no transcript. It holds a
+        -- session and answers lines; what is still on screen from an earlier
+        -- line is this frontend's alone, which is also why `:clear` is not in
+        -- `Thena.Driver`'s table and why no other frontend would want it
+        -- there. 'dropTurns' says what it does and does not touch.
+        [":clear"] -> clearTurns 1 st0
+        [":clear", n] | Just k <- readCount n -> clearTurns k st0
+        (":clear" : _) -> appendTurn st0 Nothing clearUsage
         -- | `:help` runs through the engine as usual (below) — its table is
         -- `Thena.Driver`'s, and stays that way, since it's the one command
         -- the engine and every other frontend share. `:preselect`/`:whisper`
@@ -2843,6 +2864,29 @@ handleReplEvent (VtyEvent (V.EvKey (V.KChar c) [])) = do
 -- nothing to ('C-w' falls through there too), so it is handled here, in the
 -- zipper, before the catch-all: whitespace back, then the word itself,
 -- readline's rubout.
+-- | **Option+L clears the last turn** — `~p6g53`, and the key is his:
+-- /"Maybe option + l?"/ What he is reaching for is Terminal.app's **Clear to
+-- Previous Mark**, which is `Cmd+L` there and clears exactly one prompt and
+-- its output; `Cmd` never reaches a terminal program on macOS, so the same
+-- letter under Option is the nearest thing this frontend can be given.
+--
+-- **Both 'V.MMeta' and 'V.MAlt', the same pair 'wholeColumn' takes** and for
+-- the same reason — a terminal that spells Option the other way then works
+-- without a second finding.
+--
+-- **It does not touch the input.** The clutter is above the line he is
+-- typing, and a shortcut that emptied the line to tidy the screen above it
+-- would be the worse trade; 'dropTurns' is the only thing that runs.
+--
+-- **Whether Option arrives at all is the terminal's setting, not ours.** With
+-- macOS's option-as-alt off, Option+L is the character @¬@ and this clause
+-- never fires — the same hazard `~xmd5b` and `~kmprv` are about. `:clear` is
+-- always there regardless, and moving this to another key is one line.
+handleReplEvent (VtyEvent (V.EvKey (V.KChar 'l') mods))
+  | V.MMeta `elem` mods || V.MAlt `elem` mods = do
+      st <- get
+      put (dropTurns 1 st)
+      followInput
 handleReplEvent (VtyEvent (V.EvKey V.KBS [V.MMeta])) = do
   st <- get
   put st { stInput = E.applyEdit killWordBack (stInput st) }
@@ -3101,6 +3145,10 @@ tuiHelpLines =
     , ("",                  "  row in modules. Anywhere along the row, not just the symbol")
     , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
+    , (":clear [n]",        "take the last line and its output off the transcript;")
+    , ("",                  "  with n, the last n of them. Option+L is :clear 1")
+    , ("",                  "  It clears the view and never the session — the panes")
+    , ("",                  "  still say where the proof is. :script cut is the other one")
     , (":script sessions",  "pick a stored session from a list and resume it")
     , ("",                  "  ↑↓ move, Enter resumes, Esc cancels. In the bar too")
     , (":script resume ‹slug›", "the same, by handle, with no list to walk")
@@ -4028,6 +4076,11 @@ scriptBarSubmit st text = case words text of
     let st' = st { stWhisperOn = mode == "on", stScriptBar = Nothing, stScriptNote = Just ("whisper: " <> mode) }
     liftIO (saveConfig (configOf st'))
     put st'
+  -- | **`:clear` is refused here rather than ignored** — `~p6g53`. Without a
+  -- branch it would fall through to 'insertScriptLine' and be written into
+  -- the document as a line, which then fails as an engine line; see `~td887`
+  -- for the same shape of bug reached by a path with a space in it.
+  (":clear" : _) -> put st { stScriptBar = Nothing, stScriptNote = Just clearNotHere }
   _ -> insertScriptLine st text
 
 -- | **One path argument, spaces and all, or none** — `~td887`. A save took
@@ -4151,13 +4204,78 @@ configOf st = Config
 
 appendTurn :: St -> Maybe String -> [String] -> EventM Name St ()
 appendTurn st prompt output = do
-  put st
-    { stInput = emptyInput
-    , stTurns = stTurns st <> [Turn prompt output]
-    , stDropdown = Nothing
-    , stOfferDropdown = Nothing
-    }
+  put (submitted st) { stTurns = stTurns st <> [Turn prompt output] }
   followInput
+
+-- | **What a submitted line leaves behind, apart from its own turn.**
+-- Factored out of 'appendTurn' for `~p6g53`: `:clear` is the one submission
+-- that answers with nothing at all, so it cannot go through 'appendTurn' and
+-- must still leave the input exactly as every other submitted line does.
+-- Sharing the record update is what keeps the two from drifting.
+submitted :: St -> St
+submitted st = st { stInput = emptyInput, stDropdown = Nothing, stOfferDropdown = Nothing }
+
+-- | **`:clear ‹n›` — the last @n@ turns off the transcript, and nothing else**
+-- (`~p6g53`, his request of 2026-11-13: /"some shortcut removes the latest
+-- output + its input combination as in my normal terminal on mac… I can't
+-- remove stuff like help easily and it always clutters my entire view
+-- forever"/).
+--
+-- **A turn is exactly his "output + input pair"** — 'Turn' is the prompt
+-- line and the output it produced, so the count he gives is a count of turns
+-- and needs no interpretation. Note that a few turns have no prompt at all
+-- ('turnPrompt' is 'Maybe'): the startup trouble dump and `:theme`/`:fold`
+-- never echoed what was typed. Those are still one turn each, which is what
+-- he means by the thing on screen he wants gone.
+--
+-- **It clears the view and never the session** — the terminal's own meaning,
+-- and the only coherent one here: `Cmd+L` in Terminal.app clears back to the
+-- previous mark and does not un-run anything. **The reason it does not lie**
+-- is that this frontend has panes: the proof term, the goals and the globals
+-- say what the session *is*, continuously and regardless of what the
+-- transcript still holds, so a transcript with a line taken out of it is a
+-- shortened log beside a state that is still on screen. `:script cut` is the
+-- other thing — that one does move the session, because there the document
+-- *is* the record.
+--
+-- **Over-clearing is clamped and silent**, same reason: clearing to a mark
+-- that is not there does nothing in a terminal either.
+--
+-- **'stHistory' is deliberately untouched.** He wants the clutter gone, not
+-- his Up-arrow, and the `:clear` line itself is recorded by 'recordHistory'
+-- before dispatch like any other — so `:clear 1` is one Up away from being
+-- repeated.
+dropTurns :: Int -> St -> St
+dropTurns n st = st { stTurns = take (max 0 (length (stTurns st) - n)) (stTurns st) }
+
+-- | A count for `:clear`, or 'Nothing' if the word is not one. Non-negative:
+-- @:clear 0@ is a legitimate "clear nothing" and is silent, where
+-- @:clear -1@ is a typo and should be told so rather than guessed at.
+readCount :: String -> Maybe Int
+readCount w = case reads w of
+  [(n, "")] | n >= 0 -> Just n
+  _ -> Nothing
+
+-- | **No turn is appended, which is the whole point.** A `:clear` that
+-- answered /cleared 1/ would put a line on screen for every line it took
+-- off, and the clutter he is clearing would just change its wording.
+clearTurns :: Int -> St -> EventM Name St ()
+clearTurns n st = do
+  put (dropTurns n (submitted st))
+  followInput
+
+-- | The usage line, for an argument that is not a count. **This one does
+-- answer**, because it is a mistake and a silent no-op would read as a
+-- `:clear` that did not work.
+-- | Said in live-script mode's status line, by both doors into it.
+clearNotHere :: String
+clearNotHere = "nothing to clear here — the document is the record, and :script cut takes a line off"
+
+clearUsage :: [String]
+clearUsage =
+  [ ":clear ‹n› takes off the last n lines and their output; :clear is :clear 1"
+  , "  Option+L is the same as :clear 1"
+  ]
 
 -- | Keep the live prompt in view while typing, same reasoning as
 -- 'appendTurn' — the prompt is just the last line of the same scrollable
