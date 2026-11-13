@@ -303,7 +303,7 @@ renderShape fold prec shape = case shape of
   AnElision -> plain "…"
   ARegion inner -> renderRegion fold inner
   AnObjectTerm lang _prod items ->
-    plain (lang <> "`") <> concatMap (renderObjectItem fold True) items <> plain "`"
+    plain (lang <> "`") <> objectBody fold True items <> plain "`"
   AToken text -> plain text
 
 parensIf :: Bool -> [Piece] -> [Piece]
@@ -329,10 +329,34 @@ renderRegion fold (Display at shape) = case shape of
   AnObjectTerm lang _prod items
     | expanded  -> plain (lang <> "`") <> body <> plain "`"
     | otherwise -> inAttr foldAttr body
-    where body = concatMap (renderObjectItem fold expanded) items
+    where body = objectBody fold expanded items
   other -> renderShape fold AtTop other
   where
     expanded = expandedAt fold at
+
+-- | **A production's items, with ONE SPACE between consecutive ones** —
+-- `~mxhfj`, his report of 2026-11-12: /"There are no spaces between the
+-- identifiers. Instead of @n value@ it's @nvalue@."/
+--
+-- **The separator is the frontend's to supply and the engine has already
+-- chosen it.** 'Thena.View.Core.objectItems' hands over a production's
+-- terminals and slots in written order and deliberately joins them with
+-- nothing — deciding that is a frontend's business. The engine's own printer
+-- decides it in 'Thena.Language.Build.laid', with
+-- @intercalate [Written " "] css@ over exactly the same one-entry-per-grammar-item
+-- list. **So this is not a spacing rule of ours; it is the prompt's rule,
+-- matched.** The test is that @:infer@ and the pane now agree about one term.
+--
+-- **Uniform, with no exceptions, because `laid` has none.** A grammar's
+-- terminals are single tokens and never carry spaces of their own, so there is
+-- no pair this doubles.
+--
+-- **Nesting needs nothing extra.** An inline child ('ObjectChild' 'False') is
+-- one item of its parent and is spaced as one, while its own items are spaced
+-- by this same function one level down — which is exactly how 'laid' recurses
+-- through 'go'.
+objectBody :: Fold -> Bool -> [ObjectItem] -> [Piece]
+objectBody fold expanded = intercalate (plain " ") . map (renderObjectItem fold expanded)
 
 renderObjectItem :: Fold -> Bool -> ObjectItem -> [Piece]
 renderObjectItem fold expanded item = case item of
@@ -348,7 +372,7 @@ renderObjectItem fold expanded item = case item of
 -- through unchanged.
 renderInline :: Fold -> Bool -> Display -> [Piece]
 renderInline fold expanded (Display _ (AnObjectTerm _ _ items)) =
-  concatMap (renderObjectItem fold expanded) items
+  objectBody fold expanded items
 renderInline fold _ d = displayPieces fold d
 
 -- | The development's chain, one line per link, a guess's own body indented
@@ -496,16 +520,21 @@ renderPlain (Display _ shape) = case shape of
   ALiteral text -> text
   AnApplication f a -> renderPlain f <> " " <> renderPlain a
   ARegion (Display _ (AnObjectTerm lang _ items)) ->
-    lang <> "`" <> concatMap plainItem items <> "`"
-  AnObjectTerm lang _ items -> lang <> "`" <> concatMap plainItem items <> "`"
+    lang <> "`" <> plainBody items <> "`"
+  AnObjectTerm lang _ items -> lang <> "`" <> plainBody items <> "`"
   AToken text -> text
   AnElision -> "…"
   ADangling n -> "#" <> show n
   _ -> "…"
   where
+    -- | The same one space 'objectBody' puts between items, for the machine
+    -- pane's plain text — `~mxhfj`. **Both paths or neither**: a term that
+    -- reads correctly in the proof-term pane and runs together in the machine
+    -- pane is the same defect, half fixed.
+    plainBody = intercalate " " . map plainItem
     plainItem it = case it of
       ObjectText t -> t
       ObjectToken d -> renderPlain d
       ObjectChild True d -> "${" <> renderPlain d <> "}"
-      ObjectChild False (Display _ (AnObjectTerm _ _ items)) -> concatMap plainItem items
+      ObjectChild False (Display _ (AnObjectTerm _ _ items)) -> plainBody items
       ObjectChild False d -> renderPlain d

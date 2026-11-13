@@ -165,7 +165,85 @@ drawingTests =
     , testGroup "the second column's rows, decided" paneRowCases
     , testGroup "and drawn" paneDrawCases
     , testGroup "a term too wide for its pane breaks rather than clipping" wrapCases
+    , testGroup "a production's words and slots are spaced, which is `~mxhfj`" spacingCases
     ]
+
+-- | **HIS REPORT, 2026-11-12, and the suite could not have caught it** —
+-- `~mxhfj`: /"The TUI renders the tagget term literals weird. There are no
+-- spaces between the identifiers. Instead of @n value@ it's @nvalue@ and the
+-- same is for lambda expressions like: @((λx.m)n)-->m[x->n]@."/
+--
+-- **Every object-term case in this suite before these had exactly one item**,
+-- so there was no pair for a missing separator to fall between. That is why a
+-- defect this visible survived a passing suite, and it is the reason these
+-- cases are shaped as whole productions rather than as one slot.
+--
+-- **The expected strings are the prompt's, not taste.**
+-- 'Thena.Language.Build.laid' joins a production's items with
+-- @intercalate [Written " "] css@ over the same one-entry-per-grammar-item
+-- list 'Thena.View.Core.objectItems' builds, so one space between consecutive
+-- items is the engine's own rule and these pin the TUI to it.
+spacingCases :: [TestTree]
+spacingCases =
+  [ -- His own first example. The @value@ judgment's production is @M value@ —
+    -- one slot, one terminal — and it used to draw as @value`${n}value`@.
+    testCase "a slot and a terminal are not run together" $
+      assertEqual ""
+        "value`${n} value`"
+        (draw (AnObjectTerm "value" "V-num" [ObjectChild True (var "n"), ObjectText "value"]))
+  , -- His second. Terminals and slots alternating, which is the shape every
+    -- production in his demo's @step@ judgment has: @abs@ is
+    -- @( λ x . E[x] )@, a binder slot in a token class and a nonterminal
+    -- slot between four terminals.
+    testCase "a production of alternating terminals and slots reads as written" $
+      assertEqual ""
+        "LC`( λ x . E )`"
+        (draw (AnObjectTerm "LC" "abs"
+                [ ObjectText "("
+                , ObjectText "λ"
+                , ObjectToken (at (AToken "x"))
+                , ObjectText "."
+                , ObjectChild False (var "E")
+                , ObjectText ")"
+                ]))
+  , -- **An inline child is one item of its parent and spaced as one**, while
+    -- its own items are spaced one level down — which is how 'laid' recurses.
+    -- A child that lost its own spacing, or gained a space against its
+    -- neighbours, would both show here.
+    testCase "a nested production is spaced inside and spaced as one item" $
+      assertEqual ""
+        "LC`( λ x . x ) n`"
+        (draw (AnObjectTerm "LC" "app"
+                [ ObjectChild False
+                    (at (AnObjectTerm "LC" "abs"
+                          [ ObjectText "("
+                          , ObjectText "λ"
+                          , ObjectToken (at (AToken "x"))
+                          , ObjectText "."
+                          , ObjectChild False (var "x")
+                          , ObjectText ")"
+                          ]))
+                , ObjectToken (at (AToken "n"))
+                ]))
+  , -- **A splice keeps its @${...}@ fences and is still one item.** His own
+    -- report's spelling is a spliced variable, so this is the case that says
+    -- the fences and the new space do not fight.
+    testCase "a splice is fenced and spaced as one item" $
+      assertEqual ""
+        "step`${m} --> ${n}`"
+        (draw (AnObjectTerm "step" "E-beta"
+                [ ObjectChild True (var "m")
+                , ObjectText "-->"
+                , ObjectChild True (var "n")
+                ]))
+  , -- A one-item production has no pair to separate, so it must not gain a
+    -- leading or trailing space. This is the shape every case in this suite
+    -- had before `~mxhfj`, which is why it is worth pinning.
+    testCase "a production of one item gains no space" $
+      assertEqual ""
+        "LC`x`"
+        (draw (AnObjectTerm "LC" "var" [ObjectText "x"]))
+  ]
 
 -- | **His report, 2026-11-12**: /"Make sure that each smaller pane correctly
 -- 'line-breaks'. Specifically the 'output' is clipping horizontally. Not
