@@ -2269,8 +2269,12 @@ armEscRun _ = pure ()
 
 -- | A character arriving while a sequence is being held: extend it, and
 --
---   * a complete sequence is swallowed — this is the Shift+Enter, and the
---     line is left exactly as it was;
+--   * a complete sequence **IS the Shift+Enter, and it is now dispatched
+--     rather than only swallowed** — `~bmk98`, his instruction of 2026-11-13.
+--     vty cannot decode these two sequences, but this function already
+--     recognises them exactly, so the gesture was always available here and
+--     was being thrown away. The line is still left as it was: inserting a
+--     line does not touch the caret's own text;
 --   * a still-possible prefix keeps being held, invisibly, for one more key;
 --   * anything else is **typed, in order** — the held characters and then
 --     this one — so a user who presses Esc and then genuinely types @[1@ has
@@ -2284,11 +2288,55 @@ continueEscRun p ev = do
   st <- get
   case ev of
     VtyEvent (V.EvKey (V.KChar c) []) | p' <- p ++ [c], any (p' `isPrefixOf`) shiftEnterRuns ->
-      put st { stEscRun = if p' `elem` shiftEnterRuns then Nothing else Just p' }
+      if p' `elem` shiftEnterRuns
+        then put st { stEscRun = Nothing } >> shiftEnter
+        else put st { stEscRun = Just p' }
     _ -> do
       put st { stEscRun = Nothing }
       mapM_ (\c -> handleEventFor (VtyEvent (V.EvKey (V.KChar c) []))) p
       handleEventFor ev
+
+-- | **What Shift+Enter does** — `~bmk98`, his instruction of 2026-11-13:
+-- /"It should serve as a way to insert a line in between two already existing
+-- lines in script mode. That way I can actually edit something that I might
+-- have done wrong."/
+--
+-- **Script mode only.** In the ordinary REPL there is no document to insert
+-- into, so the sequence is swallowed exactly as it was before.
+shiftEnter :: EventM Name St ()
+shiftEnter = do
+  st <- get
+  if stScriptMode st then scriptOpenLine else pure ()
+
+-- | **An empty line below the caret, with the caret seated on it** — the
+-- other half of `~bmk98`.
+--
+-- **It is 'insertScriptLine''s rebuild with no text and an explicit seat.**
+-- Inserting through the command bar hands over a line already written;
+-- Shift+Enter is for a line he has not written yet, so the one thing it must
+-- not do is 'reseated''s un-park — that would drop him on the composing line
+-- at the end of the document, which is the one place the new line is not.
+--
+-- **An empty line costs nothing while it waits to be written.** `oneLine`
+-- answers @Blank@ for it, so the tail re-runs against a session the blank left
+-- exactly as it found it, and a blank he changes his mind about is removed by
+-- the Backspace that backs out of it (`~282h8`) or by Enter on the empty line.
+--
+-- **On the composing line it appends and seats**, there being no "between" to
+-- insert into there. That is the honest reading rather than a refusal: the
+-- gesture means /give me a line here/, and at the end of the document here is
+-- the end.
+scriptOpenLine :: EventM Name St ()
+scriptOpenLine = do
+  st <- get
+  let at = maybe (length (stScript st)) (+ 1) (stScriptPos st)
+  case scriptSessionBefore st at of
+    Nothing -> pure ()
+    Just s -> do
+      let (ran, unrun) = tailFrom st at
+      rebuilt <- liftIO (foldRun s ("" : ran))
+      let doc = take at (stScript st) ++ rebuilt ++ unrun
+      loadScriptAt st { stScript = doc } at (stScriptDraft st)
 
 -- | The command bar owns every key while it is open. Enter submits it, Esc
 -- closes it unused, everything else edits its one line — no completion, no
@@ -2572,7 +2620,16 @@ dispatchScriptEvent ev@(VtyEvent (V.EvKey V.KBS [])) = do
     Just i | col == 0, all isSpace line -> scriptBackOut i
     _ | col == 0 -> scriptUp
     _ -> handleReplEvent ev
-dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptCutAndRun
+-- **Shift+Enter inserts a line** — `~bmk98`, his instruction of 2026-11-13,
+-- taking this spelling off the cut. **Option+Enter keeps the cut and is the
+-- one that arrives**, so nothing of his 2026-10-20 gesture is lost: the two
+-- were one gesture under two spellings and this is the spare one.
+--
+-- **This clause is still the unreachable one** — vty decodes neither encoding
+-- — and it is kept correct for the day vty gains the kitty protocol. **The
+-- binding that actually fires is 'continueEscRun''s**, which recognises the
+-- bytes itself.
+dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptOpenLine
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
 dispatchScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
 dispatchScriptEvent (VtyEvent (V.EvKey (V.KChar 'x') [V.MCtrl])) = openScriptBar
