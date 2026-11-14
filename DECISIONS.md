@@ -6856,6 +6856,13 @@ straight into the first one.
 Only productions that could still leave the line finishable are listed. Inside a
 parenthesis with one slot left, a production needing two does not appear.
 
+**The name on a row is the word, not a path**, which is what the `app:` above has
+always shown and what `LC[app]` takes between its brackets. A production of a language
+declared in a module is `examples.Stlc01Syntax.LC.app` to the parser, and until
+2026-11-14 that is what a list was handed — a name no bracket accepts, and wide enough
+to push the shape off a dropdown. **Nothing has to be opened for the short form**: the
+fence has already said which language, so the bracket is a lookup inside it.
+
 ### A project is text on disk, and there is no other format
 
 A project is the files, and each file says what it depends on. There is no binary

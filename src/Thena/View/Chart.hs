@@ -44,6 +44,7 @@ module Thena.View.Chart
   , RecoveryView (..)
   , BoundView (..)
   , OfferProblem (..)
+  , Spellings (..)
   , displayParse
   , displayOffer
   , spelling
@@ -51,8 +52,9 @@ module Thena.View.Chart
   ) where
 
 import Data.List (intersperse)
+import Data.Maybe (fromMaybe)
 
-import Thena.Language.Build (languageNames, productionNames)
+import Thena.Language.Build (languageNames, productionNames, productionWord)
 import Thena.Core.Term (InScope, nameFromText)
 import Thena.Language.Grammar (Grammar, earleyRules, tagText)
 import Thena.View.Type (TypeView)
@@ -253,7 +255,8 @@ data StuckView = StuckView
 data ProductionView = ProductionView
   { productionName :: String
     -- ^ the constructor the production declares, which is what to call it in a
-    -- list.
+    -- list — **as a reader writes it, which is the word and not the path**
+    -- (MS12 phase 316, see 'Spellings').
   , productionShape :: [SymbolView]
     -- ^ its body, for the label. Slots are 'ANonterminalSymbol' and
     -- 'AScanSymbol', so a frontend shows what /kind/ of thing goes where.
@@ -284,7 +287,7 @@ displayParse
   -> [Written]
   -> Either FailureView TreeView
 displayParse gs sc lang prod region =
-  either (Left . failureView (spelling gs sc)) (Right . treeView)
+  either (Left . failureView (spellNonterminal (spelling gs sc))) (Right . treeView)
     (Earley.parse (earleyRules gs) (startOf lang prod) (fst (piecesFrom 0 region)))
 
 -- | One run of a region, as an editor holds it: characters the user typed, or
@@ -338,19 +341,40 @@ displayOffer gs sc lang prod before after
   | otherwise =
       Right (offerAt (spelling gs sc) (earleyRules gs) (startOf lang prod) before after)
 
--- | __How a nonterminal is spelled for a frontend__ (MS12 phase 313).
+-- | __The two names in an offer a frontend does not show as the parser holds
+-- them__ (MS12 phases 313 and 316).
 --
 -- **The parser is keyed by a grammar's own name and a reader writes a tag.**
--- Since that phase a module's declarations live under the module's own
+-- Since phase 313 a module's declarations live under the module's own
 -- namespace, so the key of a language declared in @examples\/Stlc01Syntax@ is
 -- @examples.Stlc01Syntax.Ty@ — and an offer that named it that was telling the
 -- editor to show a path nobody had written. 'Thena.Language.Grammar.tagText' is
 -- the printer's own walk, the same one @:show@ uses, and it leaves a
 -- nonterminal that is not a grammar alone.
-spelling :: [Grammar] -> InScope -> String -> String
-spelling gs sc n = case tagText gs sc (nameFromText n) of
-  "" -> n
-  w  -> w
+--
+-- **A production's name is the same mistake one field along** (phase 316, his
+-- report of 2026-11-14: /"the dropdown shows entire full qualified names"/,
+-- and the dropdown is capped, so the shape beside the name was cut off).
+-- 'Thena.Language.Build.productionWord' is that walk, and it is not the same
+-- one: a production is written as its own word inside a fence that has already
+-- said the language, so no scope comes into it and nothing has to be opened for
+-- @Tm[succ]@ to read as @succ@.
+--
+-- They travel together because every caller wants both, and each leaves a name
+-- it does not own exactly as it found it — an @instral@ rule's name is neither
+-- of these things.
+data Spellings = Spellings
+  { spellNonterminal :: String -> String
+  , spellProduction  :: String -> String
+  }
+
+spelling :: [Grammar] -> InScope -> Spellings
+spelling gs sc = Spellings nonterminal production
+  where
+    nonterminal n = case tagText gs sc (nameFromText n) of
+      "" -> n
+      w  -> w
+    production n = fromMaybe n (productionWord gs n)
 
 -- | The offer at a cursor, given the rules and where a parse starts — the half
 -- of 'displayOffer' that is not about an object language's name.
@@ -360,7 +384,7 @@ spelling gs sc n = case tagText gs sc (nameFromText n) of
 -- to check and no production to be written at, but everything below this line
 -- is exactly the same question. Splitting it here is what keeps the two from
 -- being two implementations of one answer.
-offerAt :: (String -> String) -> [Earley.Rule] -> Earley.Start -> [Written] -> [Written] -> OfferView
+offerAt :: Spellings -> [Earley.Rule] -> Earley.Start -> [Written] -> [Written] -> OfferView
 offerAt spell rs start before after =
   offerView spell replacing (Earley.offer rs start left right)
   where
@@ -420,14 +444,14 @@ piecesFrom k0 = go k0
     go k (WrittenSplice : rest)      = let (ps, k') = go (k + 1) rest in (Earley.Splice k : ps, k')
     go k (WrittenPlaceholder : rest) = let (ps, k') = go k rest in (Earley.Placeholder : ps, k')
 
-offerView :: (String -> String) -> Bool -> Earley.Offer -> OfferView
-offerView spell replacing o =
+offerView :: Spellings -> Bool -> Earley.Offer -> OfferView
+offerView sp replacing o =
   OfferView
     (map (symbolView spell) (Earley.offerOptions o))
     (map (symbolView spell) (Earley.offerWanted o))
     replacing
     (fmap (map (symbolView spell)) (Earley.offerRest o))
-    [ ProductionView n (map (symbolView spell) body) (insertion body)
+    [ ProductionView (spellProduction sp n) (map (symbolView spell) body) (insertion body)
     | (n, body) <- Earley.offerProductions o
     ]
     -- Recovery is "Thena.View.Statement"'s, and it sets this afterwards: the
@@ -438,6 +462,8 @@ offerView spell replacing o =
     -- others above it.
     []
     (fmap (stuckView spell) (Earley.offerStuck o))
+  where
+    spell = spellNonterminal sp
 
 stuckView :: (String -> String) -> (Int, [Earley.Symbol]) -> StuckView
 stuckView spell (at, expected) = StuckView at (map (symbolView spell) expected)

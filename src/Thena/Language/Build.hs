@@ -27,6 +27,7 @@ module Thena.Language.Build
   , languageNames
   , productionNames
   , productionRule
+  , productionWord
   , objectInput
   , objectText
   , atCharacters
@@ -551,6 +552,26 @@ productionRule gs lang w =
        | g <- gs, nameFromText lang == grammarName g
        , p <- grammarProductions g, nameWord (gproductionName p) == w ] of
     n : _ -> Just n
+    []    -> Nothing
+
+-- | __'productionRule' backwards: the word a reader writes for the name the
+-- parser knows__ (MS12 phase 316).
+--
+-- **It needs no language, where 'productionRule' does, and that is not an
+-- asymmetry**: a word is only a word inside one language, so turning one into a
+-- name needs the fence to say which; the name already carries its language and
+-- the fence has nothing left to add.
+--
+-- 'Nothing' for a name that is no production of any installed language — an
+-- @instral@ rule's, say — so a caller leaves what it does not own alone,
+-- exactly as 'Thena.Language.Grammar.tagText' leaves a nonterminal that is no
+-- grammar.
+productionWord :: [Grammar] -> String -> Maybe String
+productionWord gs n =
+  case [ nameWord (gproductionName p)
+       | g <- gs, p <- grammarProductions g
+       , nameDotted (gproductionName p) == n ] of
+    w : _ -> Just w
     []    -> Nothing
 
 -- | The pieces the object parser reads. A region is text and splices, and
