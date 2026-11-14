@@ -601,6 +601,11 @@ data St = St
     -- it scored is not the one on screen any more, so it isn't a stale
     -- reordering of the same list, it's an answer to a question nobody is
     -- asking.
+  , stJevPending :: Int
+    -- ^ bumped every time a dropdown change schedules a ranking. A
+    -- 'JevDue' timer whose generation doesn't match was superseded by a
+    -- later keystroke while it slept, so 'handleJevDue' drops it and only
+    -- the trailing edge of a burst ever reaches 'fireJevForCurrentDropdown'.
   }
 
 stInputL :: Lens' St (Editor Text Name)
@@ -665,6 +670,7 @@ runTui = do
         , stJevConfig   = jevCfg
         , stJevChan     = chan
         , stJevGen      = 0
+        , stJevPending  = 0
         }
   -- One synthetic event after startup: extents only exist once something
   -- has rendered, so the launch dropdown cannot position on the very first
@@ -713,9 +719,11 @@ declareWideGlyphs =
 
 -- | The custom event channel carries the synthetic post-startup tick
 -- (handled by doing nothing — the outer wrapper around every event still
--- records the fresh extents) and a Jev ranking answer, tagged with the
+-- records the fresh extents), a Jev debounce timer coming due, tagged with
+-- the pending generation it was scheduled for ('stJevPending',
+-- 'handleJevDue'), and a Jev ranking answer, tagged with the
 -- generation it was asked for ('stJevGen', 'applyJevRanking').
-data AppEvent = Tick | JevRanked Int (Either String (Map.Map Text Double))
+data AppEvent = Tick | JevDue Int | JevRanked Int (Either String (Map.Map Text Double))
 
 app :: App St AppEvent Name
 app = App
@@ -2925,6 +2933,7 @@ handleReplEvent (MouseDown _ _ _ _) = pure ()
 -- 'refreshOfferDropdown' never built and so never would have scored on
 -- its own ('fireJevForCurrentDropdown').
 handleReplEvent (AppEvent Tick) = fireJevForCurrentDropdown
+handleReplEvent (AppEvent (JevDue gen)) = handleJevDue gen
 handleReplEvent (AppEvent (JevRanked gen result)) = applyJevRanking gen result
 handleReplEvent ev =
   Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
@@ -4395,15 +4404,59 @@ refreshOfferDropdown = do
         put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = underlineSpan ov, stArrowsReleased = False }
         -- Same rule as 'refreshDropdown': new rows start at the top, same
         -- rows keep their scroll — above the line, at the bottom instead.
-        let rowsChanged = maybe [] odRows new /= oldRows
+        let newRows = maybe [] odRows new
+            rowsChanged = newRows /= oldRows
         if rowsChanged
           then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll OfferPopup)
           else pure ()
         -- Score the dropdown, not every keystroke: only when the
-        -- candidate set actually changed (same guard as the scroll reset
-        -- above). 'fireJevForCurrentDropdown' re-reads 'stOfferDropdown'
-        -- itself, which is 'new' by now (just 'put').
-        if rowsChanged then fireJevForCurrentDropdown else pure ()
+        -- candidate set actually changed, and then on a trailing-edge
+        -- timer rather than on the keystroke itself ('scheduleJevRanking').
+        -- The set comparison sorts both sides first: 'applyJevRanking'
+        -- floats Jev's picks to the top, so an order-sensitive check would
+        -- see a change after every answer landed and refire on the next
+        -- keystroke even when the set is the same. 'fireJevForCurrentDropdown'
+        -- re-reads 'stOfferDropdown' itself, which is 'new' by now (just 'put').
+        let candidatesChanged = sortOn sortKey newRows /= sortOn sortKey oldRows
+        if candidatesChanged then scheduleJevRanking else pure ()
+  where
+    sortKey r = (rowLabel r, rowInsert r)
+
+-- | **How long a burst of keystrokes may run before Jev is asked** — 250ms
+-- of quiet. Measured against @~/.cache/thena/jev.log@: typing and
+-- backspacing arrive 100–150ms apart, so per-keystroke firing turned a
+-- 20-character delete into 20 concurrent @:matches@ + HTTP rounds. 250ms
+-- coalesces one burst into one request, stays well under the 1.5s ranking
+-- timeout ('Tui.Jev.rankCandidates'), and keeps the green picks feeling
+-- live. His instinct in @.jalivert/discussion/live-offers.md@ was 200ms;
+-- this is that number rounded up to comfortably clear typing speed.
+jevDebounceMicros :: Int
+jevDebounceMicros = 250000
+
+-- | **Schedule a ranking for the dropdown on screen, once it has sat still.**
+-- Bumps 'stJevPending' and hands a timer a generation to report back with;
+-- 'handleJevDue' drops every generation but the latest, so holding
+-- Backspace schedules N timers and fires one request. The timer thread
+-- sleeps and writes — no @:matches@, no HTTP — so a burst costs N sleeps
+-- rather than N ranking rounds. The selectable-count policy stays in
+-- 'fireJevForCurrentDropdown', which runs at fire time against the
+-- dropdown as it then stands, not at schedule time.
+scheduleJevRanking :: EventM Name St ()
+scheduleJevRanking = do
+  st <- get
+  let pending = stJevPending st + 1
+      chan = stJevChan st
+  put st { stJevPending = pending }
+  liftIO (void (forkIO (threadDelay jevDebounceMicros >> writeBChan chan (JevDue pending))))
+
+-- | **A debounce timer coming due.** A generation that no longer matches
+-- 'stJevPending' was superseded by a later keystroke while it slept and is
+-- dropped silently — there is nothing to log, no request went out. The
+-- latest generation fires against whatever is on screen now.
+handleJevDue :: Int -> EventM Name St ()
+handleJevDue gen = do
+  st <- get
+  when (gen == stJevPending st) fireJevForCurrentDropdown
 
 -- | Fires a ranking request for whatever dropdown is on screen right
 -- now, if there's a key and more than one real candidate to order.
