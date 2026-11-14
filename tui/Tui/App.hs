@@ -1023,7 +1023,7 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "placeholder.recovered", V.withStyle (ink (themeRepl th)) V.underline)
   , (attrName "accent.output",  ink (themeSoft th))
   , (attrName "dropdown",          surface (themePopup th) (themePopupInk th))
-  , (attrName "dropdown.jevpick",  surface (themeJevPick th) V.white)
+  , (attrName "dropdown.jevpick",  surface (themeJevPick th) (themeStage th))
   -- A real background swap for the selected row, not a foreground tint
   -- beside an arrow — his `.jalivert/TUI.md` #20: the arrow was the only
   -- thing marking a row selected, which read as weak. The repl accent as a

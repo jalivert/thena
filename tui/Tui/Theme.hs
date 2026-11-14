@@ -69,6 +69,7 @@ data Theme = Theme
                              -- accent happens to be lightest, so retuning a
                              -- pane never moves the marker with it.
   , themeJevPick :: V.Color -- ^ background for a dropdown row Jev floated
+                             -- to the top, read with 'themeStage' — see below.
   , themePaneBar :: V.Color
     -- ^ **the filled background of one chip in the pane bar** — `~7tfhd`, his
     -- instruction of 2026-11-13: /"a pink accent background around the text
@@ -86,17 +87,19 @@ data Theme = Theme
     -- other two themes are 7.0:1 and 6.7:1 on the same pairing, all computed
     -- rather than eyeballed.
                              -- to the top ('floatJevPicks') — paired with
-                             -- plain white text, not a theme colour, so
-                             -- the row reads as its own surface, "two
-                             -- dropdowns merged together," not a tint on
-                             -- the ordinary one. His correction, 2026-10-29:
-                             -- the first cut set this as *text* colour on
-                             -- the popup's own background and he called it
-                             -- "a horrible idea" — green on pink is a
-                             -- legibility problem, not a highlight. A fixed
-                             -- blue-green across all three themes rather
-                             -- than drawn from each theme's own accent
-                             -- family: it means "Jev said so," which should
+                             -- 'themeStage', the theme's own darkest, not white.
+                             -- White on the old teal was 3.7:1, unreadable on a
+                             -- weak projector; the brightened teal on stage is
+                             -- 9.9/8.4/7.2 across the three themes, computed
+                             -- rather than eyeballed — the same bright-accent/
+                             -- darkest-text pairing 'themePaneBar' already uses.
+                             -- His correction, 2026-10-29, still stands: the
+                             -- first cut set this as *text* colour on the popup's
+                             -- own background and he called it "a horrible idea"
+                             -- — green on pink is a legibility problem, not a
+                             -- highlight. A fixed blue-green across all three
+                             -- themes rather than drawn from each theme's own
+                             -- accent family: it means "Jev said so," which should
                              -- read the same regardless of theme.
   }
 
@@ -145,7 +148,7 @@ neonPinkDark = Theme
   , themePopup   = rgb 112 8 64
   , themePopupInk = rgb 255 232 248
   , themeSoft    = rgb 255 140 240
-  , themeJevPick = rgb 0 150 136
+  , themeJevPick = rgb 0 200 180
   -- **The theme's own neon pink.** Same value as 'themeRepl' here and that is
   -- this theme's answer, not a rule: the repl's accent is one column of `▎`
   -- at the far left and a chip at the top rhymes with it rather than competing.
@@ -176,7 +179,7 @@ gruyere = Theme
   , themePopup   = rgb 86 34 136
   , themePopupInk = rgb 248 238 255
   , themeSoft    = rgb 237 255 130
-  , themeJevPick = rgb 0 150 136
+  , themeJevPick = rgb 0 200 180
   -- Its one named accent, which is also the pinkest thing it has.
   , themePaneBar = rgb 238 111 248
   }
@@ -203,7 +206,7 @@ synthwave84 = Theme
   , themePopup   = rgb 112 50 152
   , themePopupInk = rgb 255 244 255
   , themeSoft    = rgb 254 222 93
-  , themeJevPick = rgb 0 150 136
+  , themeJevPick = rgb 0 200 180
   -- `#ff7edb`, the shipped theme's own pink.
   , themePaneBar = rgb 255 126 219
   }
