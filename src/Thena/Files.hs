@@ -57,6 +57,7 @@ import Thena.Driver
   , refuseSuspension
   , importSuspended
   , finishImport
+  , abandonItem
   , readModulePath
   , ruleBaseImports
   , rolledBack
@@ -746,9 +747,16 @@ following leniency s resp = case resp of
   -- **It needs no disc, and comes through this door anyway**: this is the door
   -- that carries a list of responses, and a completion lands a whole closure.
   Ran _ _ Completed | Just _ <- importSuspended s -> Just (pure (finished s))
+  -- **@:abandon@ on a standing import** (MS12 phase 317, his ruling of
+  -- 2026-11-14). It gives up the declaration that was being elaborated and the
+  -- module carries on, so it answers what a finished import answers — which
+  -- is why it comes through this door and not out of the command itself.
+  AbandonRequested _
+    | Just imp <- importSuspended s -> Just (pure (walked (abandonItem s imp)))
   _                    -> Nothing
   where
-    finished sess = case finishImport sess of
+    finished sess = walked (finishImport sess)
+    walked w = case w of
       (s', WalkedAll rs)           -> (s', rs, [])
       (s', WalkedSuspended done r) -> (s', done ++ [r], [])
       -- **The rest of the resumed module refused** (MS12 phase 315). It is a

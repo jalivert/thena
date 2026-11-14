@@ -1,0 +1,27 @@
+module test.modules.PausesThenMore where
+
+-- Three declarations after the data block, for an `:abandon` of a suspended
+-- import to be measured against (MS12 phase 317): the one it gives up, one that
+-- depends on it, and one that does not.
+
+data Two : Type₀ where
+  this : Two
+  that : Two
+
+open Two
+
+-- Elaborating this reaches the placeholder and, with `Pausing` consulted, hands
+-- control to the prompt.
+picked : Two
+picked = _
+
+-- It names the declaration above, so when that one is given up this cannot go
+-- in either. **Nothing works out why** — the loader tries it, and it fails on a
+-- name that is not there.
+leans : Two
+leans = picked
+
+-- It names nothing above the yield, so a lenient load lands it whatever became
+-- of `picked`. This is the declaration his ruling of 2026-11-14 is about.
+stands : Two
+stands = that

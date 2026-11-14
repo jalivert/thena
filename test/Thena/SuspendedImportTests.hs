@@ -28,11 +28,14 @@ import Thena.Driver
   , Quest (..)
   , Response (..)
   , Session
+  , Unfinished (..)
   , currentQuest
   , declaredByModule
   , importSuspended
   , moduleName
   , moduleText
+  , modulePartly
+  , moduleWhole
   , modulesLoaded
   , oneLine
   , parked
@@ -65,6 +68,36 @@ suspended = do
   (s', out, trouble) <- importModule Strict s m
   assertBool ("nothing should be trouble here: " ++ show trouble) (null trouble)
   pure (s', out)
+
+-- | __Import @test.modules.PausesThenMore@ and stop in its placeholder, the way
+-- the PROMPT does__ (MS12 phase 317).
+--
+-- **@Lenient@, which is what the terminal and the TUI pass** — 'suspended'
+-- above passes @Strict@ because it was written before leniency was an argument
+-- of the act (phase 315), and that is now the difference @:abandon@ turns on.
+--
+-- **A different fixture, because @Pauses@ has nothing after its yield.** This
+-- one writes the declaration that yields, one that names it, and one that names
+-- nothing above it — which is the whole of what his ruling of 2026-11-14 is
+-- about.
+suspendedMore :: IO (Session, [Response])
+suspendedMore = do
+  s <- pausing
+  Just m <- pure (moduleName "test.modules.PausesThenMore")
+  (s', out, trouble) <- importModule Lenient s m
+  assertBool ("nothing should be trouble here: " ++ show trouble) (null trouble)
+  pure (s', out)
+
+-- | 'line', lenient — the door 'suspendedMore' opened.
+lenientLine :: Session -> String -> IO (Session, [Response])
+lenientLine s l = case oneLine s l of
+  (s', resp) -> case following Lenient s' resp of
+    Nothing  -> pure (s', [resp])
+    Just act -> do
+      (s'', more, trouble) <- act
+      assertBool ("unexpected trouble on " ++ show l ++ ": " ++ show trouble)
+                 (null trouble)
+      pure (s'', resp : more)
 
 -- | Submit a line the way the REPL does, **following it as the REPL does**.
 --
@@ -137,9 +170,14 @@ tests = testGroup "a yield out of an imported module"
       assertBool "the import must still be standing after the refusal"
                  (isJust (importSuspended s1))
 
-  , testCase ":abandon takes the whole import, and the user's own work with it" $ do
+  , testCase "a STRICT import's :abandon takes the whole module" $ do
       -- His ruling of 2026-11-11: /"I want the abandoning of the import to take
       -- everything. The honest way."/
+      --
+      -- **It is the strict door's answer since phase 317**, and the whole of why
+      -- it still exists: a strict load has no partly-loaded module to leave
+      -- behind, so there is nothing for the abandon to leave. The lenient door
+      -- is the group at the bottom of this file.
       (s, _) <- suspended
       (s1, _) <- line s "declare mine : Type\8320 ; mine = Two"
       (s2, out) <- line s1 ":abandon"
@@ -370,4 +408,76 @@ parking = testGroup "parking it, so that a lemma can be proved"
       (s1, _) <- line s ":suspend"
       (_, out) <- line s1 "yield"
       rejected out @?= [NotYielding]
+
+  -- ---------------------------------------------------------------------
+  -- Giving the DECLARATION up instead of the module — MS12 phase 317
+  --
+  -- **His ruling of 2026-11-14:** /"would it make sense that it is treated as
+  -- failure the same way as when partial import ignores this one and tries to
+  -- bring into scope the rest? … That way I would lose that one theorem and
+  -- every one that depends on it, but I wouldn't lose the entire module."/
+  --
+  -- **It is the lenient door only**, which is why these go through
+  -- 'suspendedMore' and 'lenientLine' rather than the harness above.
+  , testGroup "an abandon is the declaration's own failure (phase 317)"
+      [ testCase "the declaration goes and the module carries on" $ do
+          (s, _) <- suspendedMore
+          (s1, out) <- lenientLine s ":abandon"
+          -- **`stands` names nothing above the yield, so it lands.** That is
+          -- the sentence his ruling is: the module is not lost.
+          [ ds | ProofLoadedPartly _ ds _ _ _ <- out ] @?= [["Two", "stands"]]
+          assertBool "nothing should be suspended after an abandon"
+                     (isNothing (importSuspended s1))
+
+      , testCase "and so does every declaration that named it" $ do
+          (s, _) <- suspendedMore
+          (_, out) <- lenientLine s ":abandon"
+          -- **`picked` was given up and `leans` names it**, so `leans` fails on
+          -- a name that is not there — **nothing works out why anything
+          -- failed, the loader tries it** (phase 315's rule, unchanged).
+          [ map unfinishedDeclares unfin
+            | ProofLoadedPartly _ _ _ _ unfin <- out ]
+            @?= [[["picked"], ["leans"]]]
+
+      , testCase "the given-up one says the user gave it up, not that it failed" $ do
+          (s, _) <- suspendedMore
+          (_, out) <- lenientLine s ":abandon"
+          [ unfinishedWhy u
+            | ProofLoadedPartly _ _ _ _ unfin <- out
+            , u <- unfin, unfinishedDeclares u == ["picked"] ]
+            @?= [Rejected GaveItUp]
+
+      , testCase "the module is recorded partly, not loaded whole" $ do
+          (s, _) <- suspendedMore
+          (s1, _) <- lenientLine s ":abandon"
+          Just m <- pure (moduleName "test.modules.PausesThenMore")
+          -- **A partly-loaded module IS loaded** (phase 315): it is in the
+          -- list, and 'moduleWhole' is the question that tells the two apart.
+          -- The abandon reaches the same record an ordinary lenient failure
+          -- does, which is the whole of what being the item's own failure
+          -- means.
+          assertBool "it must be recorded partly"
+                     (isJust (modulePartly m s1))
+          moduleWhole m s1 @?= False
+
+      , testCase "it still takes what the user declared during the suspension" $ do
+          -- **His ruling of 2026-11-11 is untouched at the new scope**: those
+          -- declarations stand under the elaboration that is going, so they go
+          -- with it. What phase 317 narrowed is the SCOPE, from the closure to
+          -- the item.
+          (s, _) <- suspendedMore
+          (s1, _) <- lenientLine s "declare mine : Two ; mine = this"
+          (s2, out) <- lenientLine s1 ":abandon"
+          [ map nameDotted mine | ImportAbandonedItem _ _ mine <- out ]
+            @?= [["test.modules.PausesThenMore.mine"]]
+          (_, back) <- lenientLine s2 ":show mine"
+          assertBool ("mine should be gone: " ++ show back)
+                     (not (null (rejected back)))
+
+      , testCase "and it names the declaration it gave up" $ do
+          (s, _) <- suspendedMore
+          (_, out) <- lenientLine s ":abandon"
+          [ (nm, ds) | ImportAbandonedItem nm ds _ <- out ]
+            @?= [("test.modules.PausesThenMore", ["picked"])]
+      ]
   ]
