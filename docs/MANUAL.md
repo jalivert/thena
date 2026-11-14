@@ -1891,7 +1891,7 @@ thena spine> :consult examples/demo/Demo08Pausing.thena.rules
 thena spine> import examples.demo.pending.Demo07Holes
 …
 a placeholder: fill it and `yield` to carry on
-  elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give the import up
+  elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give this declaration up
 thena spine> :where
 focus
   let ? goal : value`0 value` in
@@ -1908,11 +1908,19 @@ scratch goal. Fill the hole, type `yield`, and the import carries on and finishe
 declaring everything the module wrote, and any further modules its closure still had
 to load.
 
-**Nothing of the module is declared until the whole import finishes.** A suspended
-load is one command that has not come back, so `:abandon` puts the session back
-exactly as it stood — and it **takes with it anything you declared at the prompt
-meanwhile, and says so**: what you proved during the suspension may rest on the
-module's own declarations, and leaving it would leave a reference dangling.
+**Nothing of the module is declared until the import finishes**, so there is nothing
+half-installed while you hold the wheel.
+
+**`:abandon` gives up the declaration you are standing in, and the module carries on
+without it.** It is the declaration failing, which is what a module imported at the
+prompt does with any declaration that will not go through: that one is lost, every
+declaration that names it is lost with it, and the rest of the file goes in. It answers
+`gave up zeroIsValue — the rest of … carries on`, and the module's own line then names
+it among what did not go in. **There is no word for giving the whole import up.**
+
+**It takes with it anything you declared at the prompt meanwhile, and says so**: what
+you proved during the suspension stands under the elaboration that is going, and
+leaving it would leave a reference dangling.
 
 **What is in scope while you hold the wheel is what the elaboration has** — the
 module's imports and what it has declared so far, not the rest of your session. You
@@ -1955,7 +1963,7 @@ thena spine> qed
 helper : value`0 value`   ∎
 thena spine> :resume examples.demo.pending.Demo07Holes
 picked the import of examples.demo.pending.Demo07Holes back up
-  still elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give the import up
+  still elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give this declaration up
 thena spine> try-core core`helper`
 a placeholder: fill it and `yield` to carry on
 (yield to hand control back)
@@ -1982,8 +1990,9 @@ you pick it up when you want it.
 
 **A second `import` is refused while one is parked**, for the same reason the lemma is
 proved in the module's scope: there is one set of rule bases and one scope in force,
-and the parked import expects to find its own when you pick it up. To give a parked
-import up, `:resume` it and then `:abandon` it.
+and the parked import expects to find its own when you pick it up. To get past a
+parked import, `:resume` it and then either carry it to its end or `:abandon` the
+declaration it stopped in — either way it finishes and the pool is yours again.
 
 **`yield` while it is parked says *nothing has yielded*.** Yielding is about the
 program in front of you, and parking moved that program into the parked import. For

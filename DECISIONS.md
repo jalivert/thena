@@ -1047,7 +1047,7 @@ thena spine> qed
 helper : value`0 value`   ∐
 thena spine> :resume examples.demo.pending.Demo07Holes
 picked the import of examples.demo.pending.Demo07Holes back up
-  still elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give the import up
+  still elaborating examples.demo.pending.Demo07Holes — yield to carry on, :abandon to give this declaration up
 thena spine> try-core core`helper`
 thena spine> solve
 thena spine> yield
@@ -1107,15 +1107,30 @@ t is still being proved — :suspend or :abandon it first
 ```
 
 Then `:resume` the import, and then either carry it to its end — fill the hole and
-`yield`, as the previous section shows — or give it up:
+`yield`, as the previous section shows — or give up the declaration it stopped in:
 
 ```
 thena spine> :abandon
-abandoned the import of examples.demo.pending.Demo07Holes, and took 114 declarations
+gave up zeroIsValue — the rest of examples.demo.pending.Demo07Holes carries on
+module examples.demo.pending.Demo07Holes
+  zeroIsValue did not go in:
+    you gave it up with :abandon
 ```
 
-**Abandoning is not all-or-nothing**: what the file declared before it stopped is
-yours, and only the unfinished tail is lost.
+**`:abandon` gives up the declaration, not the module.** *Decided 2026-11-14.* It is
+that declaration failing, and a module imported at the prompt carries on past a
+declaration that fails: you lose the one you gave up and every declaration that names
+it, and the rest of the file goes in. `Demo07Holes` writes one declaration, so above
+there is no rest.
+
+**It still takes what you declared at the prompt while it stood**, and says which:
+those declarations stand under the elaboration that is going, and leaving them would
+leave a reference dangling — the thing revoking a partial import was refused over, in
+miniature.
+
+**There is no word for giving the whole import up.** Before this decision `:abandon`
+was that word, and it put the session back exactly as it stood — which meant one
+unfinished proof in a file cost you the file.
 
 **What this costs you, stated plainly.** You cannot reach *outward* mid-import. If the
 lemma a module stopped for needs something you have not imported yet, you have to give

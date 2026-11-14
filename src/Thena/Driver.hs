@@ -84,6 +84,7 @@ module Thena.Driver
   , Importing (..)
   , importSuspended
   , finishImport
+  , abandonItem
   , abandonImport
   , refuseSuspension
   , ReadModule (..)
@@ -712,6 +713,24 @@ data Importing = Importing
     -- is what the finished load names as declared. It was every item of the
     -- module until this phase, and a lenient load makes that a claim rather
     -- than a fact.
+    --
+    -- **The yielding item is NOT one of them** (MS12 phase 317). It was, and
+    -- the claim was true only because @:abandon@ took the whole import: now
+    -- that an abandon gives up the item and leaves the module standing, an item
+    -- that never declared anything would have been counted as declared.
+    -- 'importingOn' carries it instead, and it joins this list in
+    -- 'finishingImport' at the moment it really has gone in.
+  , importingOn     :: Item
+    -- ^ __the item the yield is inside__ (MS12 phase 317). It lands when the
+    -- wheel comes back and the program runs out; it is given up when
+    -- @:abandon@ says so, and then it is this that is written down as
+    -- unfinished.
+  , importingOnAt   :: Session
+    -- ^ __the session as 'importingOn' found it__ (MS12 phase 317) — where an
+    -- abandon goes back to, which is exactly what a lenient item's own failure
+    -- goes back to in 'walkItems'. **So abandoning takes what the user did
+    -- during the suspension**, which is his ruling of 2026-11-11 unchanged; what
+    -- phase 317 narrows is the SCOPE, from the closure to the item.
   , importingLeft   :: [Item]
     -- ^ __this module's items the loader had not reached__ (MS12 phase 315).
     -- **They are carried rather than spliced onto the tape**: a yielding rule's
@@ -1506,6 +1525,32 @@ data Response
     -- the first thing printed was a seventy-line list nobody could read. That a
     -- module's own declarations go when its import is given up is the obvious
     -- half; **that your lemma goes is the half worth printing in full.**
+  | AbandonRequested String
+    -- ^ **@:abandon@ typed on a standing import** (MS12 phase 317): the
+    -- module's text, and nothing else, because 'Importing' holds the rest.
+    --
+    -- **It is a request and not the answer**, as every other @…Requested@ is:
+    -- giving the item up lets the rest of the module in, and that lands a
+    -- module, perhaps the closure behind it, perhaps a second suspension —
+    -- several responses, which only "Thena.Files"\'s @following@ can carry.
+    -- A single answer here is what forced the whole-module abandon to be the
+    -- only one that fitted.
+  | ImportAbandonedItem String [String] [GlobalName]
+    -- ^ **@:abandon@ gave up the DECLARATION a lenient import was elaborating,
+    -- and the module carried on** (MS12 phase 317, his ruling of 2026-11-14):
+    -- the module's text, the names that declaration would have made, and the
+    -- user's own that went back with it.
+    --
+    -- **Its own constructor beside 'ImportAbandoned' because the two take
+    -- different amounts.** That one ends the import; this one is the item
+    -- failing, so what follows it is the ordinary answer of a partly-loaded
+    -- module — and the user needs both halves said, since
+    -- 'ProofLoadedPartly' names the item but cannot know that a lemma of theirs
+    -- went with it.
+    --
+    -- **The user's own are named in full, as 'ImportAbandoned' names them**, and
+    -- for its reason: that the declaration goes is what @:abandon@ means, and
+    -- **that your lemma goes with it is the half worth printing.**
   | ImportParked String
     -- ^ **@:suspend@ on a standing import** (MS12 phase 310, his ruling of
     -- 2026-11-11): the module, put down into @:proofs@ under the
@@ -1790,6 +1835,11 @@ data CommandError
     -- of 2026-11-11 describes, and 309 could not name it because there was
     -- nothing to park. One constructor rather than two, because it is one
     -- refusal with one cause; what differs is which repairs exist.
+  | GaveItUp
+    -- ^ **why an item is in a partly-loaded module's unfinished list when
+    -- nothing refused it** (MS12 phase 317): the user typed @:abandon@ while it
+    -- was elaborating. It is the reason carried in 'unfinishedWhy', where every
+    -- other entry carries the run that failed.
   | NoSuchGlobal String
   | NoSuchLanguage String
   | NotParsing
@@ -3031,8 +3081,8 @@ data Held = Held
 -- would be the first thing to drift out of it.
 --
 -- The answer is the session, the warnings, the items that went in, the ones
--- that did not, and — where it stopped early — the run that stopped it
--- beside the items it never reached.
+-- that did not, and — where it stopped early — a 'Stopped' saying what
+-- stopped it, on which item, from which session, and what it never reached.
 -- | __Did that run do what it said?__ (MS12 phase 315).
 --
 -- Said once because four places now ask it: the two one-instruction programs
@@ -3041,6 +3091,27 @@ isCompleted :: Response -> Bool
 isCompleted r = case r of
   Ran _ _ Completed -> True
   _                 -> False
+
+-- | __Where a walk stopped before the last item, and what it needs to be
+-- picked up or given up__ (MS12 phase 317).
+--
+-- **It exists because the item in flight has two futures and the caller decides
+-- which.** A yield's item lands when the wheel comes back and is given up when
+-- @:abandon@ says so, and until this record neither the item nor the session it
+-- started from survived the return — so 'walkItems' had to call the yielding
+-- item @done@ before it was.
+data Stopped = Stopped
+  { stoppedBy     :: Response
+    -- ^ the run that stopped the walk — a @yield@, or a refusal under 'Strict'
+  , stoppedOn     :: Item
+    -- ^ the item it was running
+  , stoppedBefore :: Session
+    -- ^ the session as that item found it, which is what giving the item up
+    -- goes back to
+  , stoppedLeft   :: [Item]
+    -- ^ the items it never reached. **Carried, never spliced onto the tape** —
+    -- 'importingLeft' says why.
+  }
 
 walkItems
   :: Leniency
@@ -3051,7 +3122,7 @@ walkItems
   -> [Item]        -- ^ what has gone in so far, newest first
   -> [Unfinished]  -- ^ what has not, newest first
   -> [Item]        -- ^ still to run
-  -> (Session, [Warning], [Item], [Unfinished], Maybe (Response, [Item]))
+  -> (Session, [Warning], [Item], [Unfinished], Maybe Stopped)
 walkItems leniency brought ns = go
   where
   go st ws done unfin [] = (st, ws, reverse done, reverse unfin, Nothing)
@@ -3078,19 +3149,20 @@ walkItems leniency brought ns = go
           -- **The caller carries them across the suspension instead**,
           -- and 'finishImport' walks them when the wheel comes back.
           --
-          -- **The yielding item is counted as DONE.** It is the one thing here
-          -- that is said before it is true: its program is standing in the
-          -- machine and 'finishImport' is reached only when that program has
-          -- run out, so by the time this list is read the item really has gone
-          -- in. A yield that is given up takes the whole import with it
-          -- (@:abandon@, his ruling of 2026-11-11), so there is no state in
-          -- which the claim survives and is false.
+          -- **THE YIELDING ITEM IS NOT COUNTED AS DONE** (MS12 phase 317). It
+          -- was until then, and the claim was true only because @:abandon@ took
+          -- the whole import: *"its program is standing in the machine and
+          -- 'finishImport' is reached only when that program has run out."*
+          -- **His ruling of 2026-11-14 made an abandon the item's own failure**,
+          -- which is a state in which the item never declares anything and the
+          -- module goes on — so the item travels in 'Stopped' and is put in one
+          -- of the two lists by whoever finishes the import.
           (st', r@(Ran _ ws' (Yielded _))) ->
-            (st', ws ++ ws', reverse (it : done), reverse unfin, Just (r, rest))
+            (st', ws ++ ws', reverse done, reverse unfin, Just (Stopped r it st rest))
           (st', other) -> case leniency of
             -- **Strict is what it always was**: the item's refusal is the
             -- module's, and the caller puts the session back.
-            Strict  -> (st', ws, reverse done, reverse unfin, Just (other, rest))
+            Strict  -> (st', ws, reverse done, reverse unfin, Just (Stopped other it st rest))
             -- **Lenient carries on.** The item is put back and written
             -- down, and the loader goes to the next one.
             Lenient ->
@@ -3243,7 +3315,8 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
             -- graph; this knows only its own module. 'loadProofItems' never
             -- reaches here with a closure, because it refuses a module that
             -- names anything on disc.
-            (s', _, done, unfin, Just (Ran msgs ws (Yielded msg), left)) ->
+            (s', _, done, unfin, Just stop)
+              | Ran msgs ws (Yielded msg) <- stoppedBy stop ->
               ( s' { sessionImporting = Just Importing
                        { importingBefore = s
                        , importingAt     = s
@@ -3253,7 +3326,9 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
                        , importingItems  = items
                        , importingPool   = Pool poolOf published heldBases pushable
                        , importingDone   = done
-                       , importingLeft   = left
+                       , importingOn     = stoppedOn stop
+                       , importingOnAt   = stoppedBefore stop
+                       , importingLeft   = stoppedLeft stop
                        , importingRest   = []
                        , importingWarns  = ws
                          -- What this run declared before it stopped — the
@@ -3289,7 +3364,7 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
             -- this is allowed. A load is one command and nothing observes the
             -- machine partway through it, so @globals@ is the same before the
             -- command and after it.
-            (s', _, _, _, Just (other, _)) -> (rolledBack s s', other)
+            (s', _, _, _, Just stop) -> (rolledBack s s', stoppedBy stop)
             -- **IT REACHED THE END.** Whether every item went through decides
             -- which of the two answers it gets, and nothing else does.
             (s', ws, done, unfin, Nothing) ->
@@ -3562,10 +3637,48 @@ data Walked
 -- cannot tell a name the file declared from a lemma proved at the prompt to get
 -- unstuck; 'importingMine' is that subtraction.
 finishImport :: Session -> (Session, Walked)
-finishImport s = case sessionImporting s of
-  Nothing  -> (s, WalkedAll [])
+finishImport = finishingImport Nothing
+
+-- | __The same, with the item in flight given up instead of landed__ (MS12
+-- phase 317, his ruling of 2026-11-14).
+--
+-- **@Nothing@ is the yield answered and @Just@ is @:abandon@**, and that is the
+-- whole difference between the two: which of the two lists 'importingOn' joins,
+-- and which session the rest of the module is walked from. Everything below is
+-- one path, so the abandoned case cannot drift away from the finished one —
+-- which is what a second copy of this function would have done first.
+finishingImport :: Maybe CommandError -> Session -> (Session, Walked)
+finishingImport gaveUp s0 = case sessionImporting s0 of
+  Nothing  -> (s0, WalkedAll [])
   Just imp ->
-    let at    = importingAt imp
+    let -- **Giving the item up goes back to where the item started**, which is
+        -- what a lenient item's own failure does in 'walkItems'. So the
+        -- suspended elaboration goes, and so does what the user declared while
+        -- it stood — his ruling of 2026-11-11 that an abandon takes your own
+        -- work with it, over the scope phase 317 narrowed it to.
+        s | Just _ <- gaveUp = rolledBack (importingOnAt imp) s0
+          | otherwise        = s0
+        -- **Which list the item in flight joins, and it is the only fork.**
+        -- 'importingOn' landed if the wheel came back and the program ran out;
+        -- it is unfinished if @:abandon@ said so.
+        (done0, unfin0) = case gaveUp of
+          Nothing  -> ( importingOn imp : reverse (importingDone imp)
+                      , reverse (importingUnfinished imp) )
+          Just why -> ( reverse (importingDone imp)
+                      , Unfinished (declaredNames (importingOn imp)) (Rejected why)
+                          : reverse (importingUnfinished imp) )
+        -- What the abandon is told to say, in front of the module's own answer:
+        -- 'ProofLoadedPartly' names the item but cannot know that a lemma of
+        -- the user's went back with it.
+        said = case gaveUp of
+          Nothing -> []
+          Just _  ->
+            [ ImportAbandonedItem (importingText imp)
+                                  (declaredNames (importingOn imp))
+                                  [ g | g <- declaredSince (importingOnAt imp) s0
+                                      , g `notElem` importingTheirs imp ]
+            ]
+        at    = importingAt imp
         items = importingItems imp
         hdr   = importingHeader imp
         Pool _ _ heldBases _ = importingPool imp
@@ -3612,28 +3725,30 @@ finishImport s = case sessionImporting s of
         -- **And it is walked with the act's leniency**, so a declaration below
         -- a @yield@ is treated exactly as one above it would have been.
      in case walkItems (importingLeniency imp) brought (moduleNamespace hdr)
-                       s (importingWarns imp) (reverse (importingDone imp))
-                       (reverse (importingUnfinished imp)) (importingLeft imp) of
+                       s (importingWarns imp) done0 unfin0 (importingLeft imp) of
           -- **A second yield in the same module**, which is what @~4qgxx@
           -- allows: the record is rewritten where it stood and the user is told
           -- the load carried on rather than that a second import began.
-          (s2, ws, done, unfin, Just (Ran msgs ws' (Yielded msg), left)) ->
+          (s2, ws, done, unfin, Just stop)
+            | Ran msgs ws' (Yielded msg) <- stoppedBy stop ->
             ( s2 { sessionImporting = Just imp
                      { importingAt    = at
                      , importingDone  = done
-                     , importingLeft  = left
+                     , importingOn    = stoppedOn stop
+                     , importingOnAt  = stoppedBefore stop
+                     , importingLeft  = stoppedLeft stop
                      , importingWarns = ws'
                      , importingTheirs = importingTheirs imp ++ declaredSince s s2
                      , importingUnfinished = unfin
                      }
                  }
-            , WalkedSuspended [] (ImportResumed (importingText imp) msgs ws msg)
+            , WalkedSuspended said (ImportResumed (importingText imp) msgs ws msg)
             )
           -- **Strict, and an item below the yield refused**: the whole closure
           -- goes back, which is what abandoning an import does and what
           -- atomicity has always done.
-          (s2, _, _, _, Just (other, _)) ->
-            ( rolledBack (importingBefore imp) s2, WalkedHalted other )
+          (s2, _, _, _, Just stop) ->
+            ( rolledBack (importingBefore imp) s2, WalkedHalted (stoppedBy stop) )
           (s2, ws, done, unfin, Nothing) ->
             case progress Nothing
                    s2 { sessionMachine = load leaving (sessionMachine s2) } [] [] of
@@ -3667,8 +3782,11 @@ finishImport s = case sessionImporting s of
                     -- the closure had already put in was reported at the
                     -- suspension, by 'WalkedSuspended', so repeating it here
                     -- would say it twice.
+                    -- **The accumulator is newest-first and reversed at the
+                    -- end**, so the abandon's own line goes under this one here
+                    -- and comes out in front of it.
                  in walkProofModules (importingLeniency imp) (importingBefore imp) s'
-                                     [landed] (importingRest imp)
+                                     (landed : reverse said) (importingRest imp)
 
 -- | __What the environment gained between two sessions__ (MS12 phase 309).
 --
@@ -3716,6 +3834,11 @@ refuseSuspension s = case sessionImporting s of
 -- stood before the closure and carries only the fresh-name counter and what was
 -- read. So nothing here had to be written except the message, which names what
 -- went.
+--
+-- **THIS IS NOW THE STRICT DOOR ALONE** (MS12 phase 317). At the prompt an
+-- abandon is 'abandonItem', because the module can come in partly there; this is
+-- what is left for a door that has no prompt behind it — 'refuseSuspension',
+-- where there is nobody to hand the wheel to and no partial load to be had.
 abandonImport :: Session -> Importing -> (Session, Response)
 abandonImport s imp =
   ( (rolledBack (importingBefore imp) s) { sessionImporting = Nothing }
@@ -3733,6 +3856,35 @@ abandonImport s imp =
     -- 'declaredSince' against 'importingAt' is that earlier part.
     mine = [ g | g <- declaredSince (importingAt imp) s
                , g `notElem` importingTheirs imp ]
+
+-- | __Give up the DECLARATION a suspended import is elaborating, and let the
+-- module carry on__ (MS12 phase 317, his ruling of 2026-11-14).
+--
+-- **His words:** /"would it make sense that it is treated as failure the same
+-- way as when partial import ignores this one and tries to bring into scope the
+-- rest? … That way I would lose that one theorem and every one that depends on
+-- it, but I wouldn't lose the entire module."/
+--
+-- **It is not a reversal of his ruling of 2026-11-11, and the ruling says so
+-- itself**: that one scoped the whole-module abandon to @~4qgxx@, where there
+-- was /"no partial import"/ — the loader had no boundary to carry on from. Phase
+-- 315 built one. What survives of the ruling is the part its reason was about:
+-- an abandon still takes what the user declared during the suspension, because
+-- those declarations are in @globals@ under the elaboration that is going.
+-- **What changes is the scope, from the closure to the item.**
+--
+-- **So an abandon is the item's own failure, and nothing else is written here**:
+-- 'finishingImport' is the one path a picked-up import takes, and it is handed
+-- the reason instead of a landing.
+--
+-- **'Lenient' is the whole of the condition.** A strict load has no partial
+-- module to leave behind, so there the abandon is still 'abandonImport' — which
+-- is not a special case but the same question 'walkItems' asks of every item
+-- that fails.
+abandonItem :: Session -> Importing -> (Session, Walked)
+abandonItem s imp = case importingLeniency imp of
+  Lenient -> finishingImport (Just GaveItUp) s
+  Strict  -> let (s', r) = abandonImport s imp in (s', WalkedHalted r)
 
 -- | __Which module these declarations are__ (MS11 phase 280).
 --
@@ -5705,7 +5857,12 @@ dispatch s name arg = case name of
     -- on/, and nothing has to say which kind of thing that is.
     abandonProof = case sessionWork s of
       Attempting att -> (cleared, Abandoned (attemptName att))
-      Scratch | Just imp <- sessionImporting s -> abandonImport s imp
+      -- **It asks rather than answers** (MS12 phase 317). Giving the item up
+      -- lets the rest of the module in, which is several responses; the session
+      -- is left exactly as it stands and 'Thena.Driver.abandonItem' does the
+      -- whole of it behind @following@.
+      Scratch | Just imp <- sessionImporting s ->
+                  (s, AbandonRequested (importingText imp))
               | otherwise -> (s, Rejected NotProving)
 
     -- Leave proof mode, putting the machine back on a fresh scratch
@@ -7684,7 +7841,7 @@ loadSource s0 = go s0 1 [] . lines
           acc'       = resp : acc
        in case resp of
             -- **The five a caller would have to follow with IO**, which is
-            -- exactly 'Thena.Files.following's list \8212 kept here as a match
+            -- exactly 'Thena.Files.following's list — kept here as a match
             -- rather than by asking that function, because this module is
             -- below it.
             --

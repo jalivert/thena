@@ -287,6 +287,10 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   -- **Nothing of its own, like the other five requests**: what a replay has to
   -- say is the responses of the lines it submitted (MS11 phase 302).
   ReplayRequested _ -> []
+  -- **The same, and for the same reason** (MS12 phase 317): what an abandon has
+  -- to say is 'ImportAbandonedItem' and the module's own answer behind it, both
+  -- of which @following@ produces after this line.
+  AbandonRequested _ -> []
   Revalidated Nothing  -> ["valid"]
   Revalidated (Just e) -> renderKernelError ren e
   Extracted t          -> [renderCore ren [] t]
@@ -365,7 +369,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
     msgs
       ++ map renderWarning ws
       ++ [ msg
-         , "  elaborating " ++ nm ++ " \8212 yield to carry on, :abandon to give the import up"
+         , "  elaborating " ++ nm ++ " — yield to carry on, :abandon to give this declaration up"
          ]
   -- Its twin for a second stop in the same load (MS12 phase 309): the wording
   -- says it carried on, so a user cannot read it as a second import starting.
@@ -373,7 +377,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
     msgs
       ++ map renderWarning ws
       ++ [ msg
-         , "  still elaborating " ++ nm ++ " \8212 yield to carry on, :abandon to give the import up"
+         , "  still elaborating " ++ nm ++ " — yield to carry on, :abandon to give this declaration up"
          ]
   -- **It names what went** (MS12 phase 309, his ruling of 2026-11-11 that
   -- abandoning takes everything): a user who declared a lemma at the prompt
@@ -387,15 +391,27 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   -- his ruling of 2026-11-11 that nothing unparks itself): the list is
   -- @:proofs@ and the word is the module's, so both halves of picking it up
   -- again are in the line that put it down.
+  -- **It says what went and that the module did not** (MS12 phase 317, his
+  -- ruling of 2026-11-14). 'ProofLoadedPartly' follows it and names the item
+  -- among the unfinished, but it cannot know that a lemma of the user's went
+  -- back with the elaboration — which is the half of 'ImportAbandoned''s
+  -- message that is still true at this scope.
+  ImportAbandonedItem nm ds mine ->
+    ( "gave up "
+        ++ (case ds of { [] -> "the declaration being elaborated" ; _ -> intercalate ", " ds })
+        ++ " — the rest of " ++ nm ++ " carries on" )
+      : [ "  and took " ++ plural (length mine) "declaration"
+            ++ " of yours: " ++ intercalate ", " (map (nameString ren) mine)
+        | not (null mine) ]
   ImportParked nm ->
     [ "parked the import of " ++ nm
-    , "  it is in :proofs \8212 :resume " ++ nm ++ " to carry on with it"
+    , "  it is in :proofs — :resume " ++ nm ++ " to carry on with it"
     ]
   -- Its twin. The wording is 'ImportSuspended''s, because what the user is
   -- holding afterwards is the same thing: a load standing in a yield.
   ImportPickedUp nm ->
     [ "picked the import of " ++ nm ++ " back up"
-    , "  still elaborating " ++ nm ++ " \8212 yield to carry on, :abandon to give the import up"
+    , "  still elaborating " ++ nm ++ " — yield to carry on, :abandon to give this declaration up"
     ]
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
@@ -1510,16 +1526,21 @@ renderCommandError ren e = case e of
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
   NotYielding          -> "nothing has yielded"
+  -- **Not a failure, which is why it is worded as a thing the user did** (MS12
+  -- phase 317): it stands where a refusal stands in a partly-loaded module's
+  -- list, and the item is there because @:abandon@ was typed and not because
+  -- anything went wrong.
+  GaveItUp             -> "you gave it up with :abandon"
   -- **It names the import that is waiting and both ways out of it** (MS12 phase
   -- 309), which is 'AlreadyProving''s shape: a refusal that does not say what to
   -- do next leaves the user stuck in the state it refused from.
   ImportInFlight nm    -> "the import of " ++ nm
-                            ++ " is still waiting \8212 yield to carry on with it, :suspend to park it, or :abandon to give it up"
+                            ++ " is still waiting — yield to carry on with it, :suspend to park it, or :abandon to give it up"
   -- **Its sibling for an import that is already put down** (MS12 phase 310):
   -- one import at a time, in flight or parked, and the way out of this one is
   -- to pick it up rather than to hand it back.
   ImportIsParked nm    -> "the import of " ++ nm
-                            ++ " is parked \8212 :resume " ++ nm ++ " to carry on with it"
+                            ++ " is parked — :resume " ++ nm ++ " to carry on with it"
   -- **The one refusal this phase added that is about saving work** (MS12 phase
   -- 309, his ruling of 2026-11-11). Until here a proof opened inside a yield
   -- silently threw the suspended elaboration away.
@@ -1529,9 +1550,9 @@ renderCommandError ren e = case e of
   -- describes, and the reason a lemma can be proved in the middle of a load at
   -- all.
   ProvingWhileYielding mi ->
-    "a rule has handed control over \8212 yield to hand it back before starting a proof"
+    "a rule has handed control over — yield to hand it back before starting a proof"
       ++ maybe "" (\nm -> ", or :suspend to park the import of " ++ nm) mi
-  NobodyToYieldTo nm   -> nm ++ " handed control over, and nothing here can take it \8212 nothing was loaded"
+  NobodyToYieldTo nm   -> nm ++ " handed control over, and nothing here can take it — nothing was loaded"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
   NoSuchLanguage x     -> "no language called " ++ x ++ " has been declared"
   NotParsing           -> ":done leaves :parse's mode, and this is not it"
@@ -2098,7 +2119,7 @@ renderDeclareError ren e = case e of
     NoSuchGrammar -> g ++ " is not a language, a context or a judgment that is declared"
     ConstructorsUnspelled cs ->
       blockAt k g ++ ": it declares a role, so it generates " ++ g
-        ++ "'s substitution from these productions \8212 and "
+        ++ "'s substitution from these productions — and "
         ++ intercalate ", " cs ++ (case cs of { [_] -> " is"; _ -> " are" })
         ++ " a constructor of " ++ g ++ " that no production spells"
     NotationMetavars ms ->
@@ -2132,7 +2153,7 @@ renderDeclareError ren e = case e of
         x ++ " is not written in the notation, so that argument could not be given"
       ParamNotReadable x t ->
         x ++ " names an argument of " ++ renderCore ren [] t
-          ++ ", which no notation reads by itself \8212 if it is a String, say which"
+          ++ ", which no notation reads by itself — if it is a String, say which"
           ++ " token class, as ( " ++ x ++ " : \8249class\8250 )"
       NoSuchTokenClass x -> x ++ " is not a declared token class"
       NotAMetavariable x -> x ++ " is not a metavariable"
@@ -2173,7 +2194,7 @@ renderDeclareError ren e = case e of
       FunctionMetadata -> p ++ " is a function, so there is no constructor for the metadata to be about"
       UniverseSlot x lvl ->
         x ++ " is a slot at " ++ universeSpelling lvl
-          ++ ", and this block generates its arguments' types from its slots \8212 so declare the "
+          ++ ", and this block generates its arguments' types from its slots — so declare the "
           ++ "datatype and give it notation instead"
       RolesAfterTheGrammar gr ->
         "a role belongs to the block that installs the grammar, and " ++ nameString ren gr
@@ -2805,7 +2826,7 @@ renderObjectError e = case e of
   -- way and the writer has reached for the wrong one (MS10 phase 266).
   BuiltInTagNotATerm tag ->
     tag ++ "`\8230` is not a term of the development calculus, so it cannot be"
-        ++ " written here \8212 only core`\8230` can"
+        ++ " written here — only core`\8230` can"
   CoreRegionUnread tag why -> "in " ++ tag ++ "`\8230`: " ++ renderSyntaxError why
   RegionSpliceNotAName tag ->
     "in " ++ tag ++ "`\8230`: an escape here holds a name and nothing else,"
