@@ -33,6 +33,7 @@ import Thena.Core.Term (rootScope)
 import Thena.Engine (Machine (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
+import Thena.Language.Build (productionNames)
 import Thena.Language.Grammar (Grammar, earleyRules)
 import Thena.View.Chart
   ( FailureView (..)
@@ -436,16 +437,21 @@ productionCases =
       -- says what the grammar says, so a frontend listing them sees one name
       -- twice and two different shapes; which of the two it offers a reader is
       -- the frontend's to decide.
-      named gs [] [] >>= (@?= map ch ["LC.var", "LC.abs", "LC.app", "LC.subst.w", "LC.subst.w"])
+      --
+      -- **THE LABEL IS THE WORD AND NOT THE PATH** (MS12 phase 316, his report
+      -- of 2026-11-14): @LC[var]@ is how a reader writes one, and the fence has
+      -- already said the language, so @Charting.LC.var@ was a path nobody could
+      -- type — and in a capped popup it pushed the shape beside it off the row.
+      named gs [] [] >>= (@?= ["var", "abs", "app", "w", "w"])
   , testCase "with their shapes, which is what a list shows" $ do
       gs <- loaded
-      shapeOf gs [] [] (ch "LC.app") >>= (@?= Just ["(", ch "LC", ch "LC", ")"])
+      shapeOf gs [] [] "app" >>= (@?= Just ["(", ch "LC", ch "LC", ")"])
   , -- **His own example, exactly.** @app: ( LC LC )@ in the list, @( █ █ )@ in
     -- the buffer — and the boxes arrive as runs, so the editor knows where they
     -- are without scanning the text it just inserted.
     testCase "and inserting one writes its terminals and leaves boxes" $ do
       gs <- loaded
-      insertOf gs [] [] (ch "LC.app")
+      insertOf gs [] [] "app"
         >>= (@?= Just
               [ WrittenText "( "
               , WrittenPlaceholder
@@ -456,7 +462,7 @@ productionCases =
   , testCase "a binding form's binder is a box too, being a slot" $ do
       gs <- loaded
       -- @abs@ is @( λ x : T . E[x] )@: three slots, one of them a token class.
-      insertOf gs [] [] (ch "LC.abs")
+      insertOf gs [] [] "abs"
         >>= (@?= Just
               [ WrittenText "( λ "
               , WrittenPlaceholder
@@ -473,7 +479,7 @@ productionCases =
     -- own can.
     testCase "a production that could not be finished here is not offered" $ do
       gs <- loaded
-      named gs [WrittenText "( "] [WrittenText " )"] >>= (@?= map ch ["LC.abs", "LC.app"])
+      named gs [WrittenText "( "] [WrittenText " )"] >>= (@?= ["abs", "app"])
   , -- **The crossing, and it is the assertion worth having here.** A production
     -- may begin at the cursor only if its opening symbol may be written there,
     -- so every offered production's first symbol has to be among the options the
@@ -499,7 +505,18 @@ productionCases =
   , testCase "and inside a Ty slot it is Ty's productions, not LC's" $ do
       gs <- loaded
       named gs [WrittenText "( λ x : "] [WrittenText " . x )"]
-        >>= (@?= map ch ["Ty.base", "Ty.arrow"])
+        >>= (@?= ["base", "arrow"])
+  , -- **The crossing that keeps the label honest** (MS12 phase 316). A row in
+    -- the dropdown is a name only if a reader could write it back between the
+    -- brackets, and 'Thena.Language.Build.productionNames' is what @LC[…]@ is
+    -- resolved by — so the two are asked against each other rather than the
+    -- words being listed twice. This is what the dotted name failed: nothing
+    -- answered to @Charting.LC.var@ in a bracket.
+    testCase "and every label is writable between the brackets" $ do
+      gs <- loaded
+      let writable = productionNames gs (ch "LC")
+      ns <- named gs [] []
+      [ n | n <- ns, n `notElem` writable ] @?= []
   ]
   where
     offered gs before after = case displayOffer gs rootScope (ch "LC") Nothing before after of

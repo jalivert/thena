@@ -36,6 +36,7 @@ import Thena.View.Chart (offerAt, spelling)
 import Thena.View.Chart
   ( BoundView (..)
   , OfferView (..)
+  , ProductionView (..)
   , RecoveryView (..)
   , StuckView (..)
   , SymbolView (..)
@@ -90,6 +91,7 @@ tests =
         , testCase "a finished term offers its closing fence, and a substitution" fenceOffered
         , testCase "the production-named form narrows to that production" namedProduction
         , testCase "no nonterminal this module invented reaches the frontend" noSynthetic
+        , testCase "and a production's label says the tag, not the module path" labelIsTheTag
         , testCase "instral's own head cannot collide with a language's" headIsNamespaced
         , testCase "recovery keeps the cases the grammar cannot reach" recoveryRemains
         , testCase "two languages may share a production's word, and the tag says which"
@@ -668,6 +670,26 @@ noSynthetic = do
            ]
     , n <- names l, ours n
     ] @?= []
+
+-- | __A row in the dropdown is as wide as the name on it__ (MS12 phase 316,
+-- his report of 2026-11-14).
+--
+-- 'Thena.View.Chart.productionName' is what a frontend writes on the row, and
+-- the operand productions this module builds put the language in theirs. The
+-- language was the parser's key, so the row read
+-- @Core\/\`examples.Stlc01Syntax.LC[app]@ — and the popup is capped, so the
+-- shape beside it never made it onto the screen.
+--
+-- **Pinned by the dotted path and not by the whole label**, because the label's
+-- shape is this module's business and may change; what may never come back is
+-- the module path in it.
+labelIsTheTag :: IO ()
+labelIsTheTag = do
+  s <- withLC
+  let labels = map productionName (offeredProductions (offerIn s "fill "))
+  [ l | l <- labels, "examples." `isInfixOf` l ] @?= []
+  if "Core/`LC" `elem` labels && "Core/`LC[app]" `elem` labels then pure ()
+    else assertFailure ("expected LC's two operand labels: " <> show labels)
 
 -- | The object grammars are concatenated into one rule set with @instral@'s own
 -- productions, so their nonterminals share a namespace. A language name and a

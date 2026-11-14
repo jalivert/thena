@@ -411,8 +411,17 @@ literalProductions gs sc types =
         (E.Literal open : body ++ [E.Literal close]) []
 
     -- @LC\`…\`@ — a term of the language.
+    --
+    -- **THESE TWO NAMES ARE LABELS, SO THEY CARRY THE TAG AND NOT THE KEY**
+    -- (MS12 phase 316). 'Thena.View.Chart.ProductionView' hands the name to a
+    -- dropdown, and with the key in it the row read
+    -- @Core\/\`examples.demo.Demo01Expressions.Tm[succ]@ — wider than the popup,
+    -- so the shape beside it was cut off. Nothing resolves a synthetic name of
+    -- this module's: it is a /grammar/ production's name that
+    -- @Thena.Language.Build.production@ looks a reading up by, which is why
+    -- that one stays dotted.
     rule t l tag =
-      E.Rule (renderTy t ++ "/`" ++ l) (operandHead t)
+      E.Rule (renderTy t ++ "/`" ++ tag) (operandHead t)
         [E.Literal (tag ++ "`"), E.Nonterminal l, E.Literal "`"] []
 
     -- @LC[var]\`…\`@ — a term of one named production of it (MS6 phase 104c).
@@ -431,7 +440,7 @@ literalProductions gs sc types =
     -- what makes two languages both declaring @var@ harmless — the search used to
     -- have no language filter and rested on a refusal MS10 removed.
     atRule t l tag p =
-      E.Rule (renderTy t ++ "/`" ++ l ++ "[" ++ p ++ "]") (operandHead t)
+      E.Rule (renderTy t ++ "/`" ++ tag ++ "[" ++ p ++ "]") (operandHead t)
         ( E.Literal (tag ++ "[" ++ p ++ "]`")
             : maybe [] (productionBody gs) (productionRule gs l p)
             ++ [E.Literal "`"] ) []
