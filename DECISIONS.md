@@ -6751,10 +6751,11 @@ import Thena.Engine (Machine)
   It is a member of the hidden package 'thena-0.1.0.0'.
 ```
 
-Twelve modules are named: `Thena.Driver`, `Thena.Repl`, `Thena.View` and the
-nine `Thena.View.*`. Nothing else is reachable, and a view that could not be
-used through the list did not survive writing it — `coreView` took a `Core`,
-which a frontend can neither obtain nor name, and became `focusTypeView`.
+The list is `thena.cabal`'s own `reexported-modules` stanza — `Thena.Driver`,
+`Thena.View` and one module per kind of thing it describes, plus the file and
+text doors. Nothing else is reachable, and a view that could not be used through
+the list did not survive writing it — `coreView` took a `Core`, which a frontend
+can neither obtain nor name, and became `focusTypeView`.
 
 **Nothing in the library touches a terminal.** The REPL's line editing lives in
 the `thena` executable, so a frontend that draws its own screen links no line
@@ -6765,6 +6766,31 @@ which are not the terminal's.
 could be the frontend. It was removed: there is no remote client, the same
 boundary is stronger as types than as a schema, and everything the protocol
 carried is now a function call.
+
+### The live choice points are their own view, not a column on the frame stack
+
+*Decided 2026-11-16.*
+
+While a rule is running there may be points the engine can go back to: a call
+where more than one clause's head held, with the untried clauses still waiting.
+`retry` takes one. `choicesView` is the read — the identifier `retry` names each
+point by, the alternative running now, and the ones still to try in dispatch
+order, nearest point first, which is the order a bare `retry` walks.
+
+**The names arrive spelled the way the prompt spells them**, shortest ending
+that still resolves under what is open, so a pane prints a row as it comes.
+**The identifier is not a row number**: it is drawn from the session's name
+counter, so it is stable but not consecutive, and a frontend that numbers its own
+rows would show a number `retry` refuses.
+
+**The machine's frame stack was deliberately left alone.** A frame there says how
+much of it is left to resume and whether control has passed back out, and not
+whether it is a choice — so the same information has exactly one presentation
+instead of two that can disagree.
+
+**The list is empty except while a rule is running or standing in a `yield`**,
+because a proof boundary discards the choice points under it. There is nothing to
+retry at a settled prompt, and that is the answer rather than a missing one.
 
 ### A view is asked for, not handed back
 

@@ -10,8 +10,9 @@
 -- still pass.
 --
 -- **So the crossing is the terminal's own whole command**, driven through
--- 'Thena.Driver.oneLine': @:show@ for the chain, @:matches@ for the match list.
--- Neither goes through any part of this module, and both see the same session.
+-- 'Thena.Driver.oneLine': @:show@ for the chain, @:matches@ for the match list,
+-- @:choices@ for the live choice points. None goes through any part of this
+-- module, and all see the same session.
 --
 -- **'Thena.View.binderAddresses' is the invariant the phase establishes**, so it
 -- is asserted rather than assumed: every pair must be a variable and the address
@@ -19,6 +20,8 @@
 -- 'Thena.View.Address.follow' — the reader the driver itself moves by, not a
 -- second walk of the chain.
 module Thena.ViewTests (tests) where
+
+import Data.List (intercalate)
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
@@ -42,12 +45,14 @@ import Thena.View
   , binderAddresses
   , developmentView
   , focusTypeView
+  , choicesView
   , matchesView
   , sessionCursor
   , sessionGrammars
   , sessionNames
   )
 import Thena.View.Address (follow)
+import Thena.View.Choices (ChoiceView (..))
 import Thena.View.Redraw (markedChainText, redraw, redrawChain)
 import Thena.View.Rules (RuleView (..))
 
@@ -59,6 +64,7 @@ tests =
     , testGroup "every binder address lands on its own link" (map binderCase fixtures)
     , testGroup "the focus's type, against :where" (map typeCase fixtures)
     , testGroup "the match list, against :matches" (map matchCase fixtures)
+    , testGroup "the choice points, against :choices" (map choiceCase choiceFixtures)
     , testGroup "and the fixtures really exercise it" notVacuous
     ]
 
@@ -165,6 +171,47 @@ matchCase (name, s) = testCase name (drawn @?= turnOutput (turn s ":matches"))
     line rv = unwords (ruleViewName rv : ruleViewParams rv)
 
 -- ---------------------------------------------------------------------------
+-- The choice points
+-- ---------------------------------------------------------------------------
+
+-- | __A live choice point needs a machine standing still inside a rule__, and
+-- the fixtures above never have one: a command at the prompt runs to
+-- completion, and choice points are discarded at a proof boundary (his ruling
+-- of 2026-09-03). So this list is its own, and @:step@ is what holds the
+-- machine open.
+--
+-- @prove@ at a bare hole dispatches to @intro@ with @solve@, @regret@ and
+-- @prove@ behind it — four clauses whose heads all hold — so two instructions
+-- of fuel is enough to have built the 'Thena.Engine.Choice' frame and not
+-- enough to have left it.
+choiceFixtures :: [(String, Session)]
+choiceFixtures =
+  [ ("a settled prompt, where there is nothing to retry", after [])
+  , ("paused inside prove, one choice point live", after paused)
+  ]
+  where
+    paused =
+      [":theorem t : \8704 (A : Type\8320) -> A -> A", "attack", ":step 2", "prove"]
+
+-- | 'choicesView' against @:choices@, which is 'Thena.Engine.choicePoints' plus
+-- 'Thena.Render.renderChoices' and no part of this module.
+--
+-- **The spelling is the half that can go wrong silently.** Both sides reach
+-- 'Thena.Core.Term.shortestEnding', but only through a scope each side built
+-- for itself — the view's from 'Thena.View.spellingOf', the terminal's from its
+-- own 'Thena.Render.Rendering' — so a seam that read the scope off the wrong
+-- machine would print a longer name here and nowhere else.
+choiceCase :: (String, Session) -> TestTree
+choiceCase (name, s) = testCase name (drawn @?= turnOutput (turn s ":choices"))
+  where
+    drawn = case map line (choicesView s) of
+      [] -> ["no choice points"]
+      ls -> ls
+    line cv =
+      show (choiceViewId cv) <> "  " <> choiceViewRunning cv
+        <> "   untried: " <> intercalate ", " (choiceViewUntried cv)
+
+-- ---------------------------------------------------------------------------
 -- Non-vacuity
 -- ---------------------------------------------------------------------------
 
@@ -180,6 +227,11 @@ notVacuous =
       assertBool (show matched) (maximum matched >= 1)
   , testCase "some fixture has a marked link that is not the first" $
       assertBool (show marks) (any (\ms -> True `elem` drop 1 ms) marks)
+  , testCase "a choice fixture really has a live choice point" $
+      -- Both sides of 'choiceCase' say "no choice points" at a settled prompt,
+      -- so that case is trivially green; what makes it a test is the paused
+      -- one, and that it has untried alternatives to list.
+      assertBool (show chosen) (chosen == [0, 1] && untried >= 3)
   , testCase "some fixture has a type at the focus, and some has none" $
       -- Both sides of 'typeCase' answer 'Nothing' at a bare root, so the
       -- crossing there is trivially green; what makes it a test is a fixture
@@ -191,3 +243,6 @@ notVacuous =
     matched = [ length (matchesView (Budget 200) s) | (_, s) <- fixtures ]
     marks = [ map fst (redrawChain (developmentView (Budget 200) s)) | (_, s) <- fixtures ]
     types = [ Just (maybe False (const True) (focusTypeView (Budget 200) s)) | (_, s) <- fixtures ]
+    chosen = [ length (choicesView s) | (_, s) <- choiceFixtures ]
+    untried =
+      maximum (0 : [ length (choiceViewUntried c) | (_, s) <- choiceFixtures, c <- choicesView s ])

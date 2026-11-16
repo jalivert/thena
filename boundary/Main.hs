@@ -46,6 +46,7 @@ import Thena.Render (renderResponse)
 import Thena.View
   ( Budget (..)
   , binderAddresses
+  , choicesView
   , developmentView
   , focusAddress
   , focusProgram
@@ -62,6 +63,7 @@ import Thena.View
   , trustView
   )
 import Thena.View.Chart (BoundView (..), OfferView (..), Written (..))
+import Thena.View.Choices (ChoiceView (..))
 import Thena.View.Development (LinkView (..))
 import Thena.View.Machine (MachineView (..))
 import Thena.View.Proofs (ProofsView (..), QuestClaim (..), QuestView (..))
@@ -92,6 +94,12 @@ main = do
   where
     step acc l = fst (oneLine acc l)
 
+-- | Lines through the session, the way a frontend advances one — so a check
+-- that needs a session of its own builds it here rather than moving the one
+-- every other check shares.
+advance :: Session -> [String] -> Session
+advance = foldl (\acc l -> fst (oneLine acc l))
+
 checks :: [Session -> [String]]
 checks =
   [ \s -> want "developmentView" (not (null (developmentView budget s)))
@@ -100,6 +108,19 @@ checks =
   , \s -> want "focusTypeView" (maybe True (const True) (focusTypeView budget s))
   , \s -> want "rulesView" (not (null [ r | (_, rs) <- rulesView budget s, r <- rs ]))
   , \s -> want "matchesView" (not (null (map ruleViewName (matchesView budget s))))
+    -- **A standalone choice-points pane is reachable from the boundary** (his
+    -- ruling, 2026-11-16), and the one thing worth asserting is that it is not
+    -- always empty: at a settled prompt there is nothing to retry, so this
+    -- check drives the session two instructions into @prove@ and stops there,
+    -- where a 'Thena.Engine.Choice' frame is standing.
+  , \s -> want "choicesView reaches a live choice point"
+            (case choicesView (advance s [":step 2", "prove"]) of
+               c : _ -> choiceViewId c > 0
+                          && not (null (choiceViewRunning c))
+                          && not (null (choiceViewUntried c))
+               []    -> False)
+  , \s -> want "choicesView is empty where nothing can be retried"
+            (null (choicesView s))
     -- A rule's declared type arrives structured, not as a rendered line
     -- (MS7 phase 133) — so "Thena.View.Type" really is past the seam.
   , \s -> want "a signature view is structured"
