@@ -78,6 +78,12 @@ data Pane
     -- @Choices@** — 'Thena.Driver' already has a 'Response' constructor of
     -- that name, and the two would collide unqualified everywhere a frontend
     -- imports both wholesale, as this one does.
+  | Matches
+    -- ^ **which rules apply at the focus, the same list @:matches@ already
+    -- prints** — his ask, 2026-11-16, read back at cold-start as uncertain
+    -- whether he had asked it at all. No blocked read this time:
+    -- @Thena.View.matchesView :: Budget -> Session -> [RuleView]@ has been
+    -- on the boundary since MS7 and was simply never drawn anywhere.
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Every pane there is, placed or not. **The width map is built over this and
@@ -98,6 +104,7 @@ paneName p = case p of
   Machine -> "machine"
   Quests -> "proofs"
   ChoicePoints -> "choices"
+  Matches -> "matches"
 
 paneByName :: String -> Maybe Pane
 paneByName w = lookup w [(paneName p, p) | p <- allPanes]
@@ -119,9 +126,11 @@ newtype Layout = Layout (Map.Map Position Pane)
   deriving (Eq, Show)
 
 -- | **Exactly the screen as it was before this command existed**, so nothing
--- moves until he types @:pane@. 'Quests' and 'ChoicePoints' are the seventh
--- and eighth panes and both start closed; `~76zrr`/`:pane proofs open 6`
--- fetches the first, `~396c8`/`:pane choices open ‹n›` the second.
+-- moves until he types @:pane@. 'Quests', 'ChoicePoints' and 'Matches' are
+-- the seventh, eighth and ninth panes and all three start closed;
+-- `~76zrr`/`:pane proofs open 6` fetches the first,
+-- `~396c8`/`:pane choices open ‹n›` the second, and
+-- `:pane matches open ‹n›` the third.
 defaultLayout :: Layout
 defaultLayout =
   Layout

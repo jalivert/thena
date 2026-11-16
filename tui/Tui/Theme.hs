@@ -41,6 +41,8 @@ data Theme = Theme
                              -- A provisional pick, same family as the rest of
                              -- its theme — his to retune, same as any other
                              -- accent here.
+  , themeMatches :: V.Color -- ^ the matches pane's accent. Same provisional
+                             -- status as 'themeChoices'.
   , themeFold    :: V.Color -- ^ a folded literal's background tint
   , themeSplice  :: V.Color -- ^ a folded splice's background tint — distinct
                              -- from a literal's, his ruling, 2026-09-28
@@ -139,6 +141,7 @@ neonPinkDark = Theme
   , themeModules = rgb 230 60 165
   , themeOutput  = rgb 255 115 215
   , themeChoices = rgb 255 70 150
+  , themeMatches = rgb 230 130 200
   , themeFold    = rgb 40 12 32
   , themeSplice  = rgb 30 20 14
   -- **Deep magenta, 2026-10-21 (@~bmgr7@)**, replacing the `(28, 16, 22)` this was
@@ -180,6 +183,7 @@ gruyere = Theme
   , themeModules = rgb 130 255 170
   , themeOutput  = rgb 255 110 150
   , themeChoices = rgb 140 180 255
+  , themeMatches = rgb 255 220 140
   , themeFold    = rgb 44 36 74
   , themeSplice  = rgb 34 44 40
   , themePopup   = rgb 86 34 136
@@ -208,6 +212,7 @@ synthwave84 = Theme
   , themeModules = rgb 54 206 255
   , themeOutput  = rgb 255 152 102
   , themeChoices = rgb 255 90 140
+  , themeMatches = rgb 180 255 210
   , themeFold    = rgb 52 41 79
   , themeSplice  = rgb 40 50 46
   , themePopup   = rgb 112 50 152

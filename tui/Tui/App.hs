@@ -111,11 +111,13 @@ import Thena.View
   , developmentView
   , focusAddress
   , machineView
+  , matchesView
   , nameDotted
   , proofsView
   , statementOfferView
   )
 import Thena.View.Choices (ChoiceView (..))
+import Thena.View.Rules (RuleView (..))
 import Thena.View.Proofs
   ( ProofsView (..)
   , QuestClaim (..)
@@ -957,10 +959,12 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "edge.modules",   surface (themePanel th) (themeModules th))
   , (attrName "edge.output",    surface (themePanel th) (themeOutput th))
   , (attrName "edge.choices",   surface (themePanel th) (themeChoices th))
+  , (attrName "edge.matches",   surface (themePanel th) (themeMatches th))
   , (attrName "title.globals",  ink (themeGlobals th))
   , (attrName "title.modules",  ink (themeModules th))
   , (attrName "title.output",   ink (themeOutput th))
   , (attrName "title.choices",  ink (themeChoices th))
+  , (attrName "title.matches",  ink (themeMatches th))
   -- | A list pane's group heading and its small print. **Both dim, and the
   -- same dim**: a heading is not a thing in the list and neither is a module's
   -- file, so what separates them from the entries is weight, not hue — the
@@ -1272,6 +1276,10 @@ draw st =
       -- 'Thena.View.choicesView' answered it on 2026-11-16. **No 'Budget'**:
       -- a 'ChoiceView' holds no term.
       ChoicePoints -> pane' (paneBody (choiceRows (choicesView s)))
+      -- | **Which rules apply at the focus** — the same list @:matches@
+      -- already prints, through 'matchesView' rather than through
+      -- 'Thena.Render': never blocked, simply never drawn until now.
+      Matches -> pane' (paneBody (matchRows (matchesView budget s)))
       -- | **The machine's lines wrap like a list pane's row**, same
       -- reason and the same settings ('paneWrap'): the engine elides a
       -- value against its own 'Budget', which knows nothing about how
@@ -1332,6 +1340,19 @@ draw st =
         | cv <- cvs
         , let untried = choiceViewUntried cv
         ]
+
+    -- | **The matches pane's rows.** Which rules apply at the focus, in
+    -- dispatch order — 'matchesView' is a look and running it never moves
+    -- the session. **One entry each, the exact line @:matches@ prints**:
+    -- a rule's name then its params, each already spelled and already a
+    -- `:matches`-style placeholder (a bare variable keeps its corners,
+    -- anything else is shown as written) — 'RuleView' hands both over
+    -- pre-formatted, so there is no printer policy left for this pane to
+    -- choose. 'thena-boundary' crosses this exact formula against
+    -- @:matches@ itself.
+    matchRows rvs =
+      [Heading "matches" (Just (length rvs)) | not (null rvs)]
+        <> [Entry (unwords (ruleViewName rv : ruleViewParams rv)) | rv <- rvs]
 
     -- | One quest: the word, then what it is. **A statement is drawn at the
     -- root address and with no fold** — a parked quest's claim is not a
