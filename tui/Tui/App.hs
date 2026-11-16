@@ -107,13 +107,15 @@ import Thena.Driver
 import Thena.Files (following, preludePath, rulesPath, startingSession)
 import Thena.Render (renderResponse, renderTrouble)
 import Thena.View
-  ( developmentView
+  ( choicesView
+  , developmentView
   , focusAddress
   , machineView
   , nameDotted
   , proofsView
   , statementOfferView
   )
+import Thena.View.Choices (ChoiceView (..))
 import Thena.View.Proofs
   ( ProofsView (..)
   , QuestClaim (..)
@@ -954,9 +956,11 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "edge.globals",   surface (themePanel th) (themeGlobals th))
   , (attrName "edge.modules",   surface (themePanel th) (themeModules th))
   , (attrName "edge.output",    surface (themePanel th) (themeOutput th))
+  , (attrName "edge.choices",   surface (themePanel th) (themeChoices th))
   , (attrName "title.globals",  ink (themeGlobals th))
   , (attrName "title.modules",  ink (themeModules th))
   , (attrName "title.output",   ink (themeOutput th))
+  , (attrName "title.choices",  ink (themeChoices th))
   -- | A list pane's group heading and its small print. **Both dim, and the
   -- same dim**: a heading is not a thing in the list and neither is a module's
   -- file, so what separates them from the entries is weight, not hue — the
@@ -1261,6 +1265,13 @@ draw st =
       -- `~76zrr`, his request of 2026-11-12: /"Right, I need a pane with
       -- parked proofs!"/
       Quests -> pane' (paneBody' (proofWidgets (proofsView budget s)))
+      -- | **The live choice points** — `~396c8`, his request of 2026-11-13:
+      -- /"we don't have a pane for backtracking choice-points … something
+      -- that would show me all of the choice-points that could be
+      -- revisited and paths taken from them."/ Blocked on `~sx324` until
+      -- 'Thena.View.choicesView' answered it on 2026-11-16. **No 'Budget'**:
+      -- a 'ChoiceView' holds no term.
+      ChoicePoints -> pane' (paneBody (choiceRows (choicesView s)))
       -- | **The machine's lines wrap like a list pane's row**, same
       -- reason and the same settings ('paneWrap'): the engine elides a
       -- value against its own 'Budget', which knows nothing about how
@@ -1305,6 +1316,22 @@ draw st =
              | let ps = proofsViewParked pv
              , not (null ps)
              ]
+
+    -- | **The choice-points pane's rows** — `~396c8`. One group per live
+    -- choice point, nearest first (the order 'choicesView' already hands
+    -- back and the order @retry@ with no argument walks): a heading naming
+    -- the identifier @retry@ takes and the alternative running now, counted
+    -- by how many are left to try, then one entry per untried alternative,
+    -- in dispatch order. **Never empty where this is drawn**: 'choicesView'
+    -- excludes an exhausted frame, so 'choiceViewUntried' always has at
+    -- least one name.
+    choiceRows cvs =
+      concat
+        [ Heading (show (choiceViewId cv) <> "  " <> choiceViewRunning cv) (Just (length untried))
+            : map Entry untried
+        | cv <- cvs
+        , let untried = choiceViewUntried cv
+        ]
 
     -- | One quest: the word, then what it is. **A statement is drawn at the
     -- root address and with no fold** — a parked quest's claim is not a

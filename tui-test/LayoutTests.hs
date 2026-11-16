@@ -136,6 +136,7 @@ layoutTests =
           , (Output, Just 5)
           , (Machine, Just 6)
           , (Quests, Nothing)
+          , (ChoicePoints, Nothing)
           ]
     , -- | **A closed pane has no position and none is remembered** — unlike a
       -- width (`~vqsd8`), because a position is what @:pane@ states every time.
@@ -149,12 +150,13 @@ layoutTests =
           , (Machine, Just 6)
           , (Modules, Nothing)
           , (Quests, Nothing)
+          , (ChoicePoints, Nothing)
           ]
     , -- | **Every pane closed still lists every pane** — which is the case his
       -- ruling of the same day made reachable and the reason this bar exists:
       -- /"the user closed them, the user wants them closed."/
-      testCase "a screen with no panes still names all seven" $ do
+      testCase "a screen with no panes still names all eight" $ do
         let shut = foldr closePane defaultLayout allPanes
         paneBarEntries shut @?= [(p, Nothing) | p <- allPanes]
-        length (paneBarEntries shut) @?= 7
+        length (paneBarEntries shut) @?= 8
     ]

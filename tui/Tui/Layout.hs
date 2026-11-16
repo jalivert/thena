@@ -68,6 +68,16 @@ data Pane
     -- quest, because a module's load that stopped is not a proof and nothing
     -- will ever certify it, while the words he asked in were /"a pane with
     -- parked proofs"/. 'paneName' is the one place the two meet.
+  | ChoicePoints
+    -- ^ **the live backtracking choice points** — `~396c8`, his request of
+    -- 2026-11-13: /"we don't have a pane for backtracking choice-points…
+    -- something that would show me all of the choice-points that could be
+    -- revisited and paths taken from them."/ Blocked on `~sx324` until the
+    -- engine answered it on 2026-11-16 with @Thena.View.choicesView@; drawn
+    -- as @choices@, the same word @:choices@ already uses. **Not called
+    -- @Choices@** — 'Thena.Driver' already has a 'Response' constructor of
+    -- that name, and the two would collide unqualified everywhere a frontend
+    -- imports both wholesale, as this one does.
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Every pane there is, placed or not. **The width map is built over this and
@@ -87,6 +97,7 @@ paneName p = case p of
   Goals -> "goals"
   Machine -> "machine"
   Quests -> "proofs"
+  ChoicePoints -> "choices"
 
 paneByName :: String -> Maybe Pane
 paneByName w = lookup w [(paneName p, p) | p <- allPanes]
@@ -108,8 +119,9 @@ newtype Layout = Layout (Map.Map Position Pane)
   deriving (Eq, Show)
 
 -- | **Exactly the screen as it was before this command existed**, so nothing
--- moves until he types @:pane@. 'Quests' is the seventh pane and starts closed;
--- `~76zrr` is the item, and @:pane proofs open 6@ is the line that fetches it.
+-- moves until he types @:pane@. 'Quests' and 'ChoicePoints' are the seventh
+-- and eighth panes and both start closed; `~76zrr`/`:pane proofs open 6`
+-- fetches the first, `~396c8`/`:pane choices open ‹n›` the second.
 defaultLayout :: Layout
 defaultLayout =
   Layout
