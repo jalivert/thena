@@ -63,6 +63,7 @@ module Thena.View
   , spellingOf
   , developmentView
   , machineView
+  , choicesView
   , focusTypeView
   , rulesView
   , matchesView
@@ -98,7 +99,7 @@ import Thena.Driver
   , workingOn
   )
 import Thena.Core.Trust (TrustLevel)
-import Thena.Engine (Machine (..), cursor, development, focusContext, knownTo, rules)
+import Thena.Engine (Machine (..), choicePoints, cursor, development, focusContext, knownTo, rules)
 import Thena.Global.Env (GlobalEnv)
 import Thena.Instral.Type (Signature)
 import Thena.Instral.Ops (ruleName, Instr, Rule)
@@ -115,6 +116,7 @@ import Thena.View.Chart
   , displayOffer
   , displayParse
   )
+import Thena.View.Choices (ChoiceView, displayChoice)
 import Thena.View.Core (Budget (..), Display, displayCore)
 import Thena.View.Development (LinkView, displayDevelopment)
 import Thena.View.Machine (MachineView, displayMachine)
@@ -257,6 +259,25 @@ machineView budget s =
     (sessionNames s)
     (focusAddress s)
     (machineOf s)
+
+-- | __The live choice points, nearest first__ — the same list @:choices@ prints,
+-- and the read a standalone choice-points pane is built on (his ruling,
+-- 2026-11-16).
+--
+-- **Nearest first is also the order @retry@ with no argument walks**, so a pane
+-- that draws the rows in the order they arrive is showing what the next bare
+-- @retry@ would take.
+--
+-- **It is empty except while a rule is running or standing in a @yield@**, and
+-- that is correct rather than a gap: choice points are discarded at a proof
+-- boundary (his ruling of 2026-09-03), so there is nothing to retry at a
+-- settled prompt. A pane that is blank until a rule pauses is the honest shape
+-- of the feature.
+--
+-- **No 'Budget'** — a 'ChoiceView' is an identifier and names, with no term in
+-- it to print to a depth. It is the only view here without one.
+choicesView :: Session -> [ChoiceView]
+choicesView s = map (displayChoice (spellingOf s)) (choicePoints (machineOf s))
 
 -- | The type the focus is expected to have, in the context it sits in — @:where@'s
 -- own \"type\" section, and a goal pane's whole content.
