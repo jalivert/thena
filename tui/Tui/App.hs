@@ -9,10 +9,11 @@
 -- for `.jalivert/TUI.md` #8 and withdrawn the same session** — what he
 -- actually wanted was the panes not touching the screen's own edge, the
 -- backdrop visible around the outside, not a drawn box around each pane.
--- That's a one-cell stage-colored margin around the whole layout (see
--- `draw`'s own `padAll 1`), on top of the gap the panes already had
--- between each other — the accent-edge-plus-title scheme itself is
--- unchanged.
+-- That's a one-cell stage-colored margin along the top and the left (see
+-- `draw`: `padTop` and `padLeft` only — his ruling of 2026-11-16, the
+-- bottom row and the right column belong to the panes now), on top of the
+-- gap the panes already had between each other — the
+-- accent-edge-plus-title scheme itself is unchanged.
 --
 -- **Views are pulled, not pushed** — `developmentView`/`machineView` are
 -- recomputed from `stSession` on every draw, never stored.
@@ -1061,7 +1062,10 @@ draw :: St -> [Widget Name]
 draw st =
   pickerLayer st
     <> popups
-    <> [padAll 1 (vBox [paneBar, str " ", hBox [replColumn, gapH, paneColumns]])]
+    -- **The outer margin runs along the top and the left only** — his
+    -- ruling of 2026-11-16: the bottom row and the right column belong to
+    -- the panes, so content reaches the screen's own bottom-right corner.
+    <> [padTop (Pad 1) (padLeft (Pad 1) (vBox [paneBar, str " ", hBox [replColumn, gapH, paneColumns]]))]
   where
     budget = Budget 200
     s = activeSession st
@@ -1331,7 +1335,8 @@ draw st =
     -- wanted was the panes not touching the *screen's* edge, backdrop
     -- visible around the outside, not a drawn box around each one. The
     -- accent-edge-plus-title scheme stays exactly as it was; only 'draw's
-    -- own outer margin (see 'padAll 1' there) is new.
+    -- own outer margin is new, and since his ruling of 2026-11-16 it runs
+    -- along the top and the left only.
     --
     -- **The edge is a glyph, not a solid cell** — his correction,
     -- 2026-09-29: a full-cell fill read as too thick, and a cell can't be
