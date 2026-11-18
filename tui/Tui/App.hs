@@ -4054,11 +4054,55 @@ scriptTruncate = do
         }
       afterScriptEdit
 
+-- | **Walking away from a line you have edited runs it, and everything below
+-- it, exactly as Enter would** — `~htff2`, his ruling of 2026-11-18, which
+-- superseded his own requirement of an hour earlier that the edit be left
+-- standing and dim. His reasoning, and it is about what the two gestures are
+-- for rather than about what they do to the document: /"enter is only the
+-- natural thing to do if I am ok with ending up (my caret) on the next line.
+-- If I want to go above and make changes there, enter is not really something
+-- that makes sense."/ **So Enter and a move are the same commit with two
+-- different destinations**, and an edit is never left behind unrun by walking
+-- off it.
+--
+-- **It runs through 'foldRun' from the session above line @i@, the same rewind
+-- 'scriptSubmit' does**, so a tail line that no longer works keeps its place
+-- and its complaint and the rest carry on from whatever session it handed
+-- back. The caret then goes where the arrow asked, which is the whole
+-- difference from Enter.
+--
+-- **A line edited to nothing is left alone here on purpose.** Emptying a line
+-- and committing it removes it ('scriptSubmit'), and backing out of an emptied
+-- line removes it too (@~282h8@) — a third gesture that removed one would be
+-- answering @~c9rj9@, his open question of whether dropping a line truncates
+-- or splices, by attrition. So a blank edit walked away from stays blank and
+-- unrun, and the two gestures that do mean /delete this line/ still mean it.
+--
+-- **A line that has never run is not edited in this sense and is not run
+-- here**: @slRan@ is 'Nothing' for a line of an opened proof-script, there is
+-- no session under it to re-run from, and @~22qjj@'s Down is what reaches it.
+runTheEdit :: EventM Name St ()
+runTheEdit = do
+  st <- get
+  case stScriptPos st of
+    Just i
+      | Just sl <- nthOf i (stScript st)
+      , staleLine sl
+      , not (all isSpace (slText sl))
+      , Just s <- scriptSessionBefore st i -> do
+          let (ran, unrun) = tailFrom st (i + 1)
+          rebuilt <- liftIO (foldRun s (slText sl : ran))
+          put st { stScript = take i (stScript st) <> rebuilt <> unrun }
+    _ -> pure ()
+
 -- | Up/Down walk the caret through the document. Up from the composing line
 -- saves it into 'stScriptDraft' first; Down past the newest line restores it.
 -- Stops at line 0, no wraparound, same as the history feature.
+--
+-- **An edit under the caret is run before the move** ('runTheEdit').
 scriptUp :: EventM Name St ()
 scriptUp = do
+  runTheEdit
   st <- get
   let n = length (stScript st)
       live = concatMap Text.unpack (getEditContents (stInput st))
@@ -4084,6 +4128,7 @@ scriptUp = do
 -- first clause answers every time.
 scriptDown :: EventM Name St ()
 scriptDown = do
+  runTheEdit
   st <- get
   let n = length (stScript st)
       f = scriptFrontier st
