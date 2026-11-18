@@ -598,7 +598,7 @@ tests =
               s' -> snd (command s' ":run") @?= Ran [] [] Completed
         , testCase ":show ‹datatype› is the declaration" $
             case snd (say [natCommand, ":show Nat"]) of
-              ShownData _ -> pure ()
+              ShownData _ _ -> pure ()
               other       -> assertFailure ("expected ShownData, got " ++ show other)
         , testCase ":show ‹former› is the generated wrapper, type and body" $
             case snd (say [natCommand, "open Nat", ":show succ"]) of

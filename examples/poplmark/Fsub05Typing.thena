@@ -63,18 +63,12 @@ open typing
 -- The polymorphic identity, at the type 01 wrote down for it.
 polyIdTyped : typing`· ⊢ ( Λ X <: ⊤ . ( λ y : X . y ) ) : ( ∀ X <: ⊤ . ( X -> X ) )`
 polyIdTyped =
-  T-TAbs Ctx`·` "X" Ty`⊤` Tm`( λ y : X . y )` Ty`( X -> X )`
-    (T-Abs Ctx`· , X <: ⊤` "y" Ty`X` Tm`y` Ty`X`
-      (T-Var "y" Ty`X` Ctx`· , X <: ⊤ , y : X`
-        (bindTm-here Ctx`· , X <: ⊤` "y" Ty`X`)))
+  T-TAbs (T-Abs (T-Var bindTm-here))
 
 -- Subsumption: y is declared at X, and X is below ⊤, so y is a ⊤.
 subsumed : typing`· , X <: ⊤ , y : X ⊢ y : ⊤`
 subsumed =
-  T-Sub Ctx`· , X <: ⊤ , y : X` Tm`y` Ty`X` Ty`⊤`
-    (T-Var "y" Ty`X` Ctx`· , X <: ⊤ , y : X`
-      (bindTm-here Ctx`· , X <: ⊤` "y" Ty`X`))
-    (SA-Top Ctx`· , X <: ⊤ , y : X` Ty`X`)
+  T-Sub (T-Var bindTm-here) SA-Top
 
 -- Instantiating the identity at ⊤. THE TYPE IS NOT WRITTEN TWICE: the rule's
 -- conclusion is T12[X -> T2], so the kernel computes ( ⊤ -> ⊤ ) from
@@ -82,6 +76,4 @@ subsumed =
 -- what accepts the statement below.
 polyIdAtTopTyped : typing`· ⊢ ( ( Λ X <: ⊤ . ( λ y : X . y ) ) [ ⊤ ] ) : ( ⊤ -> ⊤ )`
 polyIdAtTopTyped =
-  T-TApp Ctx`·` Tm`( Λ X <: ⊤ . ( λ y : X . y ) )` "X" Ty`⊤` Ty`( X -> X )` Ty`⊤`
-    polyIdTyped
-    (SA-Top Ctx`·` Ty`⊤`)
+  T-TApp polyIdTyped SA-Top

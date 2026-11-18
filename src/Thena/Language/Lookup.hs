@@ -161,7 +161,15 @@ relationOf g e = do
       (outer, used1) = names [gamma] (map argumentName others)
 
       ref = SurfaceName []
-      binder x a = SurfaceBinder Explicit x (Just (typeOf a))
+      -- **A metavariable of the relation is an IMPLICIT argument — MS12 phase
+      -- 320 (`~td9j6`), the same ruling as a judgment's.** Every binder this
+      -- makes is a metavariable the author never wrote, determined by the
+      -- conclusion: @extend-here@'s whole type is
+      -- @∀ {Γ : Ctx} {x : String} {T : Ty} -> extend-in x T (extend Γ x T)@, so
+      -- a goal of @x : T ∈ Γ@ fixes all three. The premises below — the
+      -- disequality @ne@ and the lookup @i@ being stepped over — are written
+      -- 'Explicit' where they are built, because a derivation IS its premises.
+      binder x a = SurfaceBinder Implicit x (Just (typeOf a))
       -- An extension applied, with the context and the entry's own names.
       -- **The production's own name, path and all** (MS10 phase 248): a
       -- context's extensions are constructors of its datatype and live in its

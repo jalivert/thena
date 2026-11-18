@@ -50,6 +50,7 @@ module Thena.Development.Cursor
 
     -- * Changing the development
   , insertAbove
+  , insertAt
   , replaceFocus
   , replaceComponent
   , dropFocus
@@ -371,12 +372,24 @@ toRoot = enter . rebuild
 gotoNamed :: Ident -> Cursor -> Either MoveError Cursor
 gotoNamed i = searchFrom (\_ j -> j == i)
 
--- | Depth first from the root, over holes and guesses only.
+-- | Depth first from the root, over holes, guesses and the definitions they
+-- become.
 --
 -- It **descends into guess bodies**, so a hole under an @attack@ is reachable;
 -- @along@ alone never leaves the outer chain. Three lines, because the zipper
 -- is persistent: @inside@ searches a guess\'s subtree and, if it finds nothing,
 -- @next@ carries on from the /unchanged/ cursor.
+--
+-- **A 'Define' is found too, since MS12 phase 320**, and that is what makes a
+-- position unification has already solved reachable: @solve@ promotes @? x : S@
+-- to @x = v : S@ in place and keeps the identifier, so a @goto@ that stopped at
+-- holes said /that names no hole or guess/ about a position still standing in
+-- the development. Elaboration needs to reach one — a written argument whose
+-- hole the goal forced is checked against it ('elaborate-written' in the
+-- shipped base) — and for a person at the prompt it is his ruling of
+-- 2026-09-01 one move down: what is printed is reachable, and being unable to
+-- look at a solved hole is a prevention with nothing behind it. An 'Assume' is
+-- still not found: it binds a hypothesis, not a position elaboration claimed.
 --
 -- It rebuilds from the root first, so the resulting path is the path from the
 -- root and @back@ walks it normally.
@@ -386,9 +399,10 @@ searchFrom p cur = maybe (Left NoSuchHole) Right (search (enter (rebuild cur)))
     search c = here c `orElse` inside c `orElse` next c
 
     here c = case focus c of
-      OnComponent (Claim y i _)   | p y i -> Just c
-      OnComponent (Guess y i _ _) | p y i -> Just c
-      _                                   -> Nothing
+      OnComponent (Claim y i _)    | p y i -> Just c
+      OnComponent (Guess y i _ _)  | p y i -> Just c
+      OnComponent (Define y i _ _) | p y i -> Just c
+      _                                    -> Nothing
 
     inside c = case into c of
       Right c' -> search c'
@@ -664,6 +678,27 @@ insertAbove c cur = case cur of
   InPartial    p f rest    -> InPartial    (p :> Along c) f rest
   AtConstraint p k rest    -> AtConstraint (p :> Along c) k rest
   InCore       p x ts t    -> InCore       (p :> Along c) x ts t
+
+-- | Insert a component at a numbered position, as 'postConstraint' does for a
+-- constraint (MS12 phase 320) — @0@ is the root and the path's own length is
+-- immediately above the focus, which is what 'insertAbove' does.
+--
+-- **What wants it is a scope repair**: "Thena.Core.Unify" strengthens a hole it
+-- cannot otherwise solve by claiming a copy of a later hole /before/ it, which
+-- is §6.4's dependency order being satisfied by adding information rather than
+-- by moving any. The numbering is 'chain'\'s, so the caller passes a position it
+-- read off there.
+insertAt :: Int -> Component -> Cursor -> Cursor
+insertAt n c cur = case cur of
+  InPartial    p f rest -> InPartial    (place p) f rest
+  AtConstraint p k rest -> AtConstraint (place p) k rest
+  InCore       p x ts t -> InCore       (place p) x ts t
+  where
+    place p = foldl (:>) Here (spliceAt (max 0 (min n (length (toList p)))) (toList p))
+
+    spliceAt _ []       = [Along c]
+    spliceAt 0 ss       = Along c : ss
+    spliceAt m (s : ss) = s : spliceAt (m - 1) ss
 
 -- | Replace the focus — the focused form and everything below it — with
 -- another partial construction, and land on its head (§4.0 F6).

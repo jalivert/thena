@@ -63,41 +63,41 @@ open sub
 
 -- ⊤ is above everything, itself included.
 topAboveTop : sub`· ⊢ ⊤ <: ⊤`
-topAboveTop = SA-Top Ctx`·` Ty`⊤`
+topAboveTop = SA-Top
 
 -- A type variable is a subtype of itself with no premise at all.
 tvarRefl : sub`· , X <: ⊤ ⊢ X <: X`
-tvarRefl = SA-Refl-TVar Ctx`· , X <: ⊤` "X"
+tvarRefl = SA-Refl-TVar
 
 -- And of its own bound, by looking it up and going on from there.
 tvarBelowBound : sub`· , X <: ⊤ ⊢ X <: ⊤`
 tvarBelowBound =
-  SA-Trans-TVar "X" Ty`⊤` Ctx`· , X <: ⊤` Ty`⊤`
-    (bindTy-here Ctx`·` "X" Ty`⊤`)
-    (SA-Top Ctx`· , X <: ⊤` Ty`⊤`)
+  SA-Trans-TVar
+    bindTy-here
+    SA-Top
 
 -- A type lookup steps over a TERM binding with nothing to prove: shadowing is
 -- within a namespace, so there is no inequality to discharge here.
 lookupPastTerm : bindTy-in`X <: ⊤ ∈ · , X <: ⊤ , y : X`
 lookupPastTerm =
-  bindTy-there-bindTm Ctx`· , X <: ⊤` "X" Ty`⊤` "y" Ty`X`
-    (bindTy-here Ctx`·` "X" Ty`⊤`)
+  bindTy-there-bindTm
+    bindTy-here
 
 -- The arrow is contravariant on the left and covariant on the right.
 arrowVariance : sub`· , X <: ⊤ ⊢ ( ⊤ -> X ) <: ( X -> ⊤ )`
 arrowVariance =
-  SA-Arrow Ctx`· , X <: ⊤` Ty`X` Ty`⊤` Ty`X` Ty`⊤`
-    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
-    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
+  SA-Arrow
+    SA-Top
+    SA-Top
 
 -- And the quantifier compares bodies under the bound it binds.
 allBody : sub`· ⊢ ( ∀ X <: ⊤ . X ) <: ( ∀ X <: ⊤ . ⊤ )`
 allBody =
-  SA-All Ctx`·` Ty`⊤` Ty`⊤` "X" Ty`X` Ty`⊤`
-    (SA-Top Ctx`·` Ty`⊤`)
+  SA-All
+    SA-Top
     oneTypeVar
-    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
+    SA-Top
 
 -- A derivation whose context is written the paper's way, with a split.
 inSplitContext : sub`· , X <: ⊤ , ${suffix} ⊢ X <: ⊤`
-inSplitContext = SA-Top Ctx`· , X <: ⊤ , ${suffix}` Ty`X`
+inSplitContext = SA-Top

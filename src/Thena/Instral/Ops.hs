@@ -1090,13 +1090,21 @@ data Op
     --
     -- Refused at the outermost development: there is nothing to pop back to,
     -- and a machine with no development is not a state this language has.
-  | MakeData GlobalName Int [GlobalName] (Maybe [[ArgRole]]) [Operand]
+  | MakeData GlobalName Int [(GlobalName, [Plicity])] (Maybe [[ArgRole]]) [Operand]
     -- ^ **assemble a datatype from elaborated types and hand it out through
     -- the channel** (MS4 phase 42b) — the datatype's name, how many parameters
     -- were written, the constructors' names, and the types: the datatype's own
     -- first and then one per constructor, in order. The roles, when there
     -- are any, are a generated datatype's (MS6 phase 103): one list per
     -- constructor, from its grammar.
+    --
+    -- **A constructor's name comes with the plicity of each of its argument
+    -- positions, as they were written** (MS12 phase 320, `~td9j6`), for
+    -- 'DefineGlobal'\'s reason and by the same route: a @Pi@ carries no
+    -- plicity, so the brace a @data@ block writes on a constructor cannot be
+    -- recovered from the elaborated type and has to travel beside it. It used
+    -- to travel nowhere, so a brace on a constructor was accepted and thrown
+    -- away without a word.
     --
     -- The names and the parameter count are fields rather than operands for
     -- 'DefineData'\'s reason — they are written down, never computed — and the
@@ -1258,6 +1266,14 @@ data Op
     -- claim goes directly above the focus, so claiming from one fixed place is
     -- what puts the domains in telescope order and lets a later domain mention
     -- an earlier hole. 'Apply' keeps the focus still for the same reason.
+    --
+    -- **Two ops rather than a flag on one**, which is @eliminate-core@ and
+    -- @eliminate-generalising-core@'s reason: a rule says only what it is
+    -- about, and these two are about two different arguments — one the author
+    -- wrote and one EXPAND inserted. The hole for a written argument is filled
+    -- by that argument a moment later, so where it sits changes nothing; an
+    -- inserted hole is filled by unification from wherever the information
+    -- turns up, so it wants to be as far out as it can get.
   | Apply Operand
     -- ^ the head to apply — thesis §2.7's @naive-refine@ with the search
     -- taken out (phase 25). Walks the head's Π telescope, claims a hole for
@@ -2162,6 +2178,11 @@ data Test
     -- ^ the focus is a component of the chain rather than a core term (MS4
     -- phase 49c). What @along@ and the other component moves need, and the one
     -- thing that is true throughout a walk over a binder group.
+  | FocusIsDefinition
+    -- ^ the focus is an @x = v : S@ component (MS12 phase 320) — a hole that
+    -- has been solved, which is what elaboration finds at an argument position
+    -- the goal forced. 'FocusIsHole'\'s and 'FocusIsGuess'\'s sibling: the
+    -- three are the states a position elaboration claimed can be in.
   | GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
   | GoalTypeIsLet   -- ^ … or to a @let@, which is table 2.8's other intro
   | SurfaceIsName Operand

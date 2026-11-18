@@ -347,6 +347,9 @@ holds env cur args t = case t of
   FocusIsComponent -> case focus cur of
     OnComponent _ -> True
     _             -> False
+  FocusIsDefinition -> case focus cur of
+    OnComponent (Component.Define {}) -> True
+    _                                 -> False
   GoalTypeIsPi  -> case reduced of
     Just (Pi {}) -> True
     _            -> False
@@ -1867,6 +1870,7 @@ data TestError = NoSuchTestWord | WrongTestArity Int Int
 withOperands :: Test -> [Operand] -> Maybe Test
 withOperands t os = case (t, os) of
   (FocusIsHole,      []) -> Just FocusIsHole
+  (FocusIsDefinition, []) -> Just FocusIsDefinition
   (FocusIsGuess,     []) -> Just FocusIsGuess
   (FocusIsComponent, []) -> Just FocusIsComponent
   (GoalTypeIsPi,     []) -> Just GoalTypeIsPi
@@ -1930,6 +1934,7 @@ withOperands t os = case (t, os) of
 testTypes :: Test -> [(Operand, Ty.Ty)]
 testTypes t = case t of
   FocusIsHole     -> []
+  FocusIsDefinition -> []
   FocusIsGuess    -> []
   FocusIsComponent -> []
   GoalTypeIsPi    -> []
@@ -1989,6 +1994,7 @@ testOperands = map fst . testTypes
 testWord :: Test -> String
 testWord t = case t of
   FocusIsHole     -> "focus-is-hole"
+  FocusIsDefinition -> "focus-is-definition"
   FocusIsGuess    -> "focus-is-guess"
   FocusIsComponent -> "focus-is-component"
   GoalTypeIsPi    -> "goal-type-is-pi"
@@ -2041,7 +2047,8 @@ testWord t = case t of
 -- not what any written one says.
 everyTest :: [Test]
 everyTest =
-  [ FocusIsHole, FocusIsGuess, FocusIsComponent, GoalTypeIsPi, GoalTypeIsLet
+  [ FocusIsHole, FocusIsGuess, FocusIsComponent, FocusIsDefinition
+  , GoalTypeIsPi, GoalTypeIsLet
   , SurfaceIsName (Lit (VText ""))
   , SurfaceIsLiteral (Lit (VText ""))
   , SurfaceIsObject (Lit (VText ""))

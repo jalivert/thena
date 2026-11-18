@@ -76,19 +76,19 @@ Progresses = \ M -> Or value`${M} value` (Steps M)
 ifSteps : forall (M : Tm) (N : Tm) (P : Tm) (p : value`${M} value`) (d : typing`⊢ ${M} : Bool`)
           -> Steps Tm`( if ${M} then ${N} else ${P} )`
 ifSteps = \ M N P p -> case p of
-  { V-true  -> \ dd -> pair Tm (\ u -> step`( if true then ${N} else ${P} ) --> ${u}`) N (E-ifTrue N P)
-  ; V-false -> \ dd -> pair Tm (\ u -> step`( if false then ${N} else ${P} ) --> ${u}`) P (E-ifFalse N P)
+  { V-true  -> \ dd -> pair Tm (\ u -> step`( if true then ${N} else ${P} ) --> ${u}`) N (E-ifTrue)
+  ; V-false -> \ dd -> pair Tm (\ u -> step`( if false then ${N} else ${P} ) --> ${u}`) P (E-ifFalse)
   ; V-num c1 nn -> \ dd -> absurd (Steps Tm`( if ${c1} then ${N} else ${P} )`) (nvNotBool c1 nn dd) }
 
 predSteps : forall (M : Tm) (n : nvalue`${M} nv`) -> Steps Tm`( pred ${M} )`
 predSteps = \ M n -> case n of
   { NV-zero -> pair Tm (\ u -> step`( pred 0 ) --> ${u}`) Tm`0` E-predZero
-  ; NV-succ c1 nn -> pair Tm (\ u -> step`( pred ( succ ${c1} ) ) --> ${u}`) c1 (E-predSucc c1 nn) }
+  ; NV-succ c1 nn -> pair Tm (\ u -> step`( pred ( succ ${c1} ) ) --> ${u}`) c1 (E-predSucc nn) }
 
 isZeroSteps : forall (M : Tm) (n : nvalue`${M} nv`) -> Steps Tm`( iszero ${M} )`
 isZeroSteps = \ M n -> case n of
   { NV-zero -> pair Tm (\ u -> step`( iszero 0 ) --> ${u}`) Tm`true` E-isZeroZero
-  ; NV-succ c1 nn -> pair Tm (\ u -> step`( iszero ( succ ${c1} ) ) --> ${u}`) Tm`false` (E-isZeroSucc c1 nn) }
+  ; NV-succ c1 nn -> pair Tm (\ u -> step`( iszero ( succ ${c1} ) ) --> ${u}`) Tm`false` (E-isZeroSucc nn) }
 
 
 -- ---------------------------------------------------------------------------
@@ -115,19 +115,19 @@ progress = \ M T d -> induction d of
               { pair a b -> inr value`( if ${c1} then ${c2} else ${c3} ) value`
                                 (Steps Tm`( if ${c1} then ${c2} else ${c3} )`)
                                 (pair Tm (\ u -> step`( if ${c1} then ${c2} else ${c3} ) --> ${u}`)
-                                   Tm`( if ${a} then ${c2} else ${c3} )` (E-if c1 a c2 c3 b)) } }
+                                   Tm`( if ${a} then ${c2} else ${c3} )` (E-if b)) } }
 
-  ; T-zero -> inl value`0 value` (Steps Tm`0`) (V-num Tm`0` NV-zero)
+  ; T-zero -> inl value`0 value` (Steps Tm`0`) (V-num NV-zero)
 
   ; T-succ c1 dd ->
       case (progress c1 nat dd) of
         { inl v1 -> inl value`( succ ${c1} ) value` (Steps Tm`( succ ${c1} )`)
-                        (V-num Tm`( succ ${c1} )` (NV-succ c1 (canonicalNat c1 v1 dd)))
+                        (V-num (NV-succ (canonicalNat c1 v1 dd)))
         ; inr s1 ->
             case s1 of
               { pair a b -> inr value`( succ ${c1} ) value` (Steps Tm`( succ ${c1} )`)
                                 (pair Tm (\ u -> step`( succ ${c1} ) --> ${u}`)
-                                   Tm`( succ ${a} )` (E-succ c1 a b)) } }
+                                   Tm`( succ ${a} )` (E-succ b)) } }
 
   ; T-pred c1 dd ->
       case (progress c1 nat dd) of
@@ -137,7 +137,7 @@ progress = \ M T d -> induction d of
             case s1 of
               { pair a b -> inr value`( pred ${c1} ) value` (Steps Tm`( pred ${c1} )`)
                                 (pair Tm (\ u -> step`( pred ${c1} ) --> ${u}`)
-                                   Tm`( pred ${a} )` (E-pred c1 a b)) } }
+                                   Tm`( pred ${a} )` (E-pred b)) } }
 
   ; T-isZero c1 dd ->
       case (progress c1 nat dd) of
@@ -147,5 +147,5 @@ progress = \ M T d -> induction d of
             case s1 of
               { pair a b -> inr value`( iszero ${c1} ) value` (Steps Tm`( iszero ${c1} )`)
                                 (pair Tm (\ u -> step`( iszero ${c1} ) --> ${u}`)
-                                   Tm`( iszero ${a} )` (E-isZero c1 a b)) } }
+                                   Tm`( iszero ${a} )` (E-isZero b)) } }
   }

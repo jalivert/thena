@@ -48,4 +48,4 @@ owed = \ M d -> trusted typing`⊢ ( succ ${M} ) : Nat` d
 -- is the rule itself, so `:trust` says the file rests on nothing once the only
 -- user of `owed` is this comment.
 paid : forall (M : Tm) (d : typing`⊢ ${M} : Nat`) -> typing`⊢ ( succ ${M} ) : Nat`
-paid = \ M d -> T-succ M d
+paid = \ M d -> T-succ d

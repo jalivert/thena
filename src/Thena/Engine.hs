@@ -657,8 +657,17 @@ data Outcome
     -- yielding machine yields again; unlike 'Asking' the driver does not owe it
     -- a value, only the word that lets it carry on.
   | Saying    Message    Machine  -- ^ the driver renders, then steps again
-  | Declaring InductiveDefinition Machine
+  | Declaring InductiveDefinition [(GlobalName, [Plicity])] Machine
                                   -- ^ the driver checks, installs, then steps again
+                                  --
+                                  -- **The plicities ride beside it** (MS12
+                                  -- phase 320, `~td9j6`), one entry per
+                                  -- constructor that wrote a brace, exactly as
+                                  -- 'Defining' carries a definition's: 'Core'
+                                  -- has no plicity, so what a @data@ block
+                                  -- wrote cannot be read back off the
+                                  -- declaration, and the driver is what owns
+                                  -- the table it goes in.
   | Defining GlobalName [Plicity] Core Core Machine
   | Primitively GlobalName Core Machine
   | DeclaringGrammar Block Machine
@@ -1146,7 +1155,9 @@ perform instr rest m = case operation instr of
   -- Nothing to check here: the checks are "Thena.Global.Declare"'s and the
   -- driver runs them (§7.5). The op's whole job is to make the declaration a
   -- step you can watch rather than something that happens between commands.
-  DefineData d -> Declaring d (advance m)
+  -- **No plicities**: a prebuilt declaration was never written down, so there
+  -- are no braces to carry (MS12 phase 320).
+  DefineData d -> Declaring d [] (advance m)
 
   -- Purity and extraction are one traversal (§5.3); the kernel itself is the
   -- driver's to run, exactly as a declaration's checks are.
@@ -1240,9 +1251,10 @@ perform instr rest m = case operation instr of
         | length ctys /= length cns -> failure (NotTypeable (UnknownDatatype d)) m
         | otherwise ->
             case buildInductive (globals m) d nps
-                   (zip3 cns ctys (maybe (map (const Nothing) cns) (map Just) roles)) dty (names m) of
+                   (zip3 (map fst cns) ctys
+                         (maybe (map (const Nothing) cns) (map Just) roles)) dty (names m) of
               Left e            -> failure (CannotBuildDatatype e) m
-              Right (def, n1)   -> Declaring def (advance m { names = n1 })
+              Right (def, n1)   -> Declaring def cns (advance m { names = n1 })
 
   -- Out through the channel, exactly as 'DefineGlobal' goes: the driver checks
   -- the name is one with a reduction rule and installs the constant.
@@ -2250,6 +2262,25 @@ perform instr rest m = case operation instr of
   Op.ExpandImplicits x -> case operandSurface (env (exec m)) x of
     Left r  -> failure r m
     Right z -> case Zipper.focus z of
+      -- **A BARE NAME IS A SPINE WITH NO ARGUMENTS WRITTEN** (MS12 phase 320,
+      -- `~td9j6`), and until this phase @EXPAND@ fired only at an application
+      -- — so a declaration whose arguments are all implicit could not be used
+      -- at all: @vz : ∀ {n : Nat} -> V n@ written as @vz@ was elaborated as
+      -- the whole Π and refused against @V zero@ with /they differ by one
+      -- argument/. A judgment's premise-less rule is exactly that shape, which
+      -- is why the gap had to close here and not only at an application.
+      --
+      -- **Unchanged when there is nothing to insert**, which is every name
+      -- with no entry in the table: the answer is the zipper it was handed, so
+      -- the clause that called it goes on to the bare-name case with the
+      -- path it started from.
+      Concrete.SurfaceName ns w ->
+        case expand (plicitiesOf (GlobalName ns w)) [] of
+          Just (a : bs) ->
+            produce (VSurface (Zipper.rootedAt
+                                 (Concrete.SurfaceApp (Concrete.SurfaceName ns w)
+                                                      (a NE.:| bs)))) m
+          _ -> produce (VSurface z) m
       Concrete.SurfaceApp h as
         | Concrete.SurfaceName ps w <- h
         , Just as' <- expand (plicitiesOf (GlobalName ps w)) (NE.toList as) ->
@@ -2712,7 +2743,17 @@ perform instr rest m = case operation instr of
           <$> expand more rest'
       (Explicit : more, a@(Concrete.SurfaceArg Explicit _) : rest') ->
         (a :) <$> expand more rest'
-      -- An explicit position written in braces, or one not written at all.
+      -- **An explicit position the user stopped before** (MS12 phase 320): a
+      -- partial application is ordinary, as it is in the @([], rest')@ case
+      -- above, and this used to refuse one whenever the head had an entry in
+      -- the table at all — @mid String@, for
+      -- @mid : ∀ (A : Type₀) -> ∀ {B : Type₀} -> A -> A@, failed EXPAND and
+      -- was reported as /an application whose head's plicities do not fit/.
+      -- **It is also what stops the clause above from running away with a bare
+      -- name**: inserting the leading implicit run and stopping is what makes
+      -- @vz@ a spine of one inserted argument rather than a refusal.
+      (Explicit : _, [])                  -> Just []
+      -- An explicit position written in braces.
       (Explicit : _, _)                   -> Nothing
 
     written (Concrete.SurfaceArg Explicit _) = True

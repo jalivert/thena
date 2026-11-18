@@ -1324,7 +1324,7 @@ data Response
   | Rendered Core             -- ^ @:core@ (§2.6)
   | RenderedDev Partial       -- ^ @:dev@ (§2.7)
   | Shown Cursor              -- ^ @:show@, and the new state after @:goal@
-  | ShownData InductiveDefinition
+  | ShownData InductiveDefinition [(GlobalName, [Plicity])]
   | ShownRules InductiveDefinition
     -- ^ @:rules ‹judgment›@ — its constructors in the paper's form (MS8 phase
     -- 174). **A second command rather than a change to @:show@**: @:show@ gives
@@ -2653,17 +2653,6 @@ surfaceProgramIn ns0 brought n0 items = foldl (item ns0) ([], n0) items
               ++ [ Do LeaveOpen | _ <- [1 .. pushed] ] ++ [Do LeaveNamespace]
         , n1 )
 
-  -- | The plicity of each argument position a signature writes.
-  --
-  -- Only a leading run of @∀@ groups is read: once the type stops being a
-  -- quantifier there are no more named positions to speak of, and an arrow
-  -- contributes an 'Explicit' one.
-  plicitiesIn t = case t of
-    SurfacePi bs body ->
-      [ p | SurfaceBinder p _ _ <- NE.toList bs ] ++ plicitiesIn body
-    SurfaceArrow _ body -> Explicit : plicitiesIn body
-    _ -> []
-
   -- A constructor's type is written in the scope of the parameters, so they
   -- are put back in front of it and peeled off again by
   -- 'Thena.Global.Declare.buildInductive'.
@@ -2801,7 +2790,14 @@ datatypeProgram ns n d roles =
                      -- that: @data Nat where { Pos.one : Nat }@ is @Nat.Pos.one@.
                      -- Nothing in the corpus writes one, and nesting is what a
                      -- namespace already does, so no refusal had to be invented.
-                     [ GlobalName (nameSteps dn ++ cps) cn | SurfaceConstructor cps cn _ <- cs ] roles
+                     -- **With the plicity of each argument position as it was
+                     -- written** (MS12 phase 320, `~td9j6`): the parameters
+                     -- 'paramsAround' puts back are explicit positions of the
+                     -- constructor, so the list is read off the same type that
+                     -- is elaborated above.
+                     [ ( GlobalName (nameSteps dn ++ cps) cn
+                       , plicitiesIn (paramsAround ps cty) )
+                     | SurfaceConstructor cps cn cty <- cs ] roles
                      (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
              ]
       , n1 )
@@ -2858,6 +2854,21 @@ grammarDatatype g =
                 | y `elem` taken || y `elem` used = unshadowed (y ++ "'")
                 | otherwise = y
            in (x, argumentSort a) : go (x : used) rest
+
+-- | The plicity of each argument position a signature writes.
+--
+-- Only a leading run of @∀@ groups is read: once the type stops being a
+-- quantifier there are no more named positions to speak of, and an arrow
+-- contributes an 'Explicit' one.
+--
+-- **Top-level since MS12 phase 320**, because a @data@ block's constructors
+-- need it too (`~td9j6`) and it was a local of 'surfaceProgram'.
+plicitiesIn :: Surface -> [Plicity]
+plicitiesIn t = case t of
+  SurfacePi bs body ->
+    [ p | SurfaceBinder p _ _ <- NE.toList bs ] ++ plicitiesIn body
+  SurfaceArrow _ body -> Explicit : plicitiesIn body
+  _ -> []
 
 -- | A constructor's type is written in the scope of the parameters, so they go
 -- back in front of it and are peeled off again by
@@ -5643,7 +5654,13 @@ dispatch s name arg = case name of
     showGlobal what = case argumentNamed anywhere what of
       Left amb -> noGlobal what amb
       Right g  -> case lookupInductive g (globals machine) of
-        Just d  -> (s, ShownData d)
+        -- **With each constructor's plicities** (MS12 phase 320, `~td9j6`), so
+        -- that a brace a @data@ block wrote, or a @judgment@ block's
+        -- metavariable, prints back as one. 'Core' has no plicity, so without
+        -- this the answer contradicted what the elaborator does with the name.
+        Just d  -> (s, ShownData d
+                        [ (constructorName c, fromMaybe [] (lookup (constructorName c) (signatures machine)))
+                        | c <- inductiveConstructors d ])
         Nothing -> case lookupDefinition g (globals machine) of
           Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
                            (fromMaybe [] (lookup g (signatures machine)))
@@ -8070,13 +8087,21 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- global environment is not part of 'Development' and no instruction writes it
   -- (§7.4, §7.5). On refusal the rest of the program is dropped — the command
   -- is abandoned, and there is nothing to retry the way there is at 'Halted'.
-  Engine.Declaring d m -> case declare (globals m) (names m) d of
+  Engine.Declaring d cps m -> case declare (globals m) (names m) d of
     Left e -> stop (load [] m) msgs warns (Refused e)
     Right (g, n1)
       | exhausted -> stop installed msgs took (Paused spent)
       | otherwise -> spending fuel spent s { sessionMachine = installed } msgs took
       where
-        installed = m { globals = g, names = n1 }
+        -- **A constructor's braces are recorded here** (MS12 phase 320,
+        -- `~td9j6`), at the same point in the same door that installs the
+        -- declaration, and only for a constructor that wrote one: a block
+        -- whose every position is explicit adds nothing, which keeps a
+        -- generated grammar's dozens of constructors out of the table.
+        installed = m { globals = g, names = n1
+                      , signatures =
+                          [ e | e@(_, ps) <- cps, Implicit `elem` ps ]
+                            ++ signatures m }
         -- **Every name the declaration added is asked, and the word it takes
         -- besides** (MS10 phase 264; the word at MS11 phase 305). A @data@
         -- block's names all land inside its own namespace, so no name it

@@ -770,7 +770,7 @@ runOut :: Machine -> Either FailReason Machine
 runOut m = case step m of
   Continue m'       -> runOut m'
   Saying _ m'       -> runOut m'
-  Declaring _ m'    -> runOut m'
+  Declaring _ _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
   Primitively _ _ m' -> runOut m'
   DeclaringGrammar _ m' -> runOut m'

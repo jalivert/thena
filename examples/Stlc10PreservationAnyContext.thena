@@ -590,8 +590,7 @@ inclSwap = \ D x S y U ne z V i -> case (ctxInvExtend (extend D x S) y U z V i) 
                   (sym String z y (andLeft (Eq String z y) (Eq Ty V U) h))
                   (subst Ty (\ W -> extend-in y W (extend (extend D y U) x S)) U V
                      (sym Ty V U (andRight (Eq String z y) (Eq Ty V U) h))
-                     (extend-there-extend (extend D y U) y U x S
-                       (\ q -> ne (sym String y x q)) (extend-here D y U)))
+                     (extend-there-extend (\ q -> ne (sym String y x q)) extend-here))
   ; orRight h ->
       case (ctxInvExtend D x S z V
               (andRight (Eq String z y -> Empty) (extend-in z V (extend D x S)) h)) of
@@ -599,10 +598,10 @@ inclSwap = \ D x S y U ne z V i -> case (ctxInvExtend (extend D x S) y U z V i) 
                          (sym String z x (andLeft (Eq String z x) (Eq Ty V S) h1))
                          (subst Ty (\ W -> extend-in x W (extend (extend D y U) x S)) S V
                             (sym Ty V S (andRight (Eq String z x) (Eq Ty V S) h1))
-                            (extend-here (extend D y U) x S))
-        ; orRight h1 -> extend-there-extend (extend D y U) z V x S
+                            extend-here)
+        ; orRight h1 -> extend-there-extend
                           (andLeft (Eq String z x -> Empty) (extend-in z V D) h1)
-                          (extend-there-extend D z V y U
+                          (extend-there-extend
                             (andLeft (Eq String z y -> Empty) (extend-in z V (extend D x S)) h)
                             (andRight (Eq String z x -> Empty) (extend-in z V D) h1)) } }
 
@@ -615,10 +614,10 @@ inclShadow = \ D y U S z V i -> case (ctxInvExtend D y S z V i) of
                   (sym String z y (andLeft (Eq String z y) (Eq Ty V S) h))
                   (subst Ty (\ W -> extend-in y W (extend (extend D y U) y S)) S V
                      (sym Ty V S (andRight (Eq String z y) (Eq Ty V S) h))
-                     (extend-here (extend D y U) y S))
-  ; orRight h -> extend-there-extend (extend D y U) z V y S
+                     extend-here)
+  ; orRight h -> extend-there-extend
                    (andLeft (Eq String z y -> Empty) (extend-in z V D) h)
-                   (extend-there-extend D z V y U
+                   (extend-there-extend
                      (andLeft (Eq String z y -> Empty) (extend-in z V D) h)
                      (andRight (Eq String z y -> Empty) (extend-in z V D) h)) }
 
@@ -644,11 +643,11 @@ weakenFv : forall (D : Ctx) (e : LC) (V : Ty) (d : typing D e V) (y1 : String) (
              -> typing (extend D y1 U) e V
 weakenFv = \ D e V d y1 U nf -> induction d of
   { T-var x V0 D0 i ->
-      T-var x V0 (extend D0 y1 U)
-        (extend-there-extend D0 x V0 y1 U
+      T-var
+        (extend-there-extend
           (\ q -> nf (orLeft (Eq String y1 x) (In y1 (nil String)) (sym String x y1 q))) i)
   ; T-abs D0 x S E T0 d1 ->
-      T-abs (extend D0 y1 U) x S E T0
+      T-abs
         (case (String.dec x y1) of
            { yes q -> subst String (\ w -> typing (extend (extend D0 w U) x S) E T0) x y1 q
                         (weaken (extend D0 x S) E T0 d1 (extend (extend D0 x U) x S)
@@ -658,7 +657,7 @@ weakenFv = \ D e V d y1 U nf -> induction d of
                           (\ hz -> nf (fvAAdd E (nil String) x (nil String) y1
                                          (\ q -> n (sym String y1 x q)) hz))) })
   ; T-app D0 M S T0 N d1 d2 ->
-      T-app (extend D0 y1 U) M S T0 N
+      T-app
         (weakenFv D0 M (arrow S T0) d1 y1 U
            (\ hz -> nf (fvAMono M (nil String) (nil String) (fvA N (nil String) (nil String))
                           (\ w hw -> absurdly (In w (fvA N (nil String) (nil String))) hw) y1 hz)))
@@ -765,8 +764,7 @@ substAll = \ G t T d -> induction d of
                      (LC.subst-* E (cons (And String LC)
                         (both String LC x (var (chosen x S E s))) s)))
                 (absIsC x S E s))
-        (T-abs D (chosen x S E s) S
-           (LC.subst-* E (cons (And String LC) (both String LC x (var (chosen x S E s))) s)) T0
+        (T-abs
            (substAll (extend G0 x S) E T0 d1 (extend D (chosen x S E s) S)
               (cons (And String LC) (both String LC x (var (chosen x S E s))) s)
               (\ y U i hf -> case (ctxInvExtend G0 x S y U i) of
@@ -791,8 +789,7 @@ substAll = \ G t T d -> induction d of
                                    (both String LC x (var (chosen x S E s))) s))
                                 (var (chosen x S E s))
                                 (lookHit x (var (chosen x S E s)) s))
-                             (T-var (chosen x S E s) S (extend D (chosen x S E s) S)
-                                (extend-here D (chosen x S E s) S))))
+                             (T-var extend-here)))
                  ; orRight h ->
                      subst LC
                        (\ m -> typing (extend D (chosen x S E s) S) m U)
@@ -823,7 +820,7 @@ substAll = \ G t T d -> induction d of
         (app (LC.subst-* M s) (LC.subst-* N s)) (LC.subst-* (app M N) s)
         (sym LC (LC.subst-* (app M N) s)
                 (app (LC.subst-* M s) (LC.subst-* N s)) (appIsC M N s))
-        (T-app D (LC.subst-* M s) S T0 (LC.subst-* N s)
+        (T-app
            (substAll G0 M (arrow S T0) d1 D s (\ y U i hf ->
               g y U i (fvAMono M (nil String) (nil String) (fvA N (nil String) (nil String))
                          (\ w hw -> absurdly (In w (fvA N (nil String) (nil String))) hw) y hf)))
@@ -881,7 +878,7 @@ substOne = \ G x S E T N d dn ->
                                  (andLeft (Eq String y x -> Empty) (extend-in y U G) h)))
                        (subst LC (\ m -> typing G m U) (var y) (look y (nil (And String LC)))
                           (sym LC (look y (nil (And String LC))) (var y) (lookNil y))
-                          (T-var y U G
+                          (T-var
                             (andRight (Eq String y x -> Empty) (extend-in y U G) h))) }))
 
 
@@ -909,12 +906,12 @@ preservationAny = \ G M M1 T d s -> induction s of
                          (typing (extend G x T1) E U) q)))
                    (andRight (typing G (abs x T1 E) (arrow S T)) (typing G N S) p)) } }
   ; E-app1 A A1 N s0 -> case (invApp G A N T d) of
-      { pair S p -> T-app G A1 S T N
+      { pair S p -> T-app
                       (preservationAny G A A1 (arrow S T)
                         (andLeft (typing G A (arrow S T)) (typing G N S) p) s0)
                       (andRight (typing G A (arrow S T)) (typing G N S) p) }
   ; E-app2 A N N1 v s0 -> case (invApp G A N T d) of
-      { pair S p -> T-app G A S T N1
+      { pair S p -> T-app
                       (andLeft (typing G A (arrow S T)) (typing G N S) p)
                       (preservationAny G N N1 S
                         (andRight (typing G A (arrow S T)) (typing G N S) p) s0) } }
@@ -943,22 +940,11 @@ renamesTheBinder = refl LC LC`( λ y' : ι . ( λ w : ι . y ) )`
 
 openRedexTyped : typing`· , y : ι ⊢ ( ( λ x : ( ι -> ι ) . ( λ y : ι . x ) ) ( λ w : ι . y ) ) : ( ι -> ( ι -> ι ) )`
 openRedexTyped =
-  T-app Ctx`· , y : ι` LC`( λ x : ( ι -> ι ) . ( λ y : ι . x ) )` Ty`( ι -> ι )`
-        Ty`( ι -> ( ι -> ι ) )` LC`( λ w : ι . y )`
-    (T-abs Ctx`· , y : ι` "x" Ty`( ι -> ι )` LC`( λ y : ι . x )` Ty`( ι -> ( ι -> ι ) )`
-       (T-abs Ctx`· , y : ι , x : ( ι -> ι )` "y" base LC`x` Ty`( ι -> ι )`
-          (T-var "x" Ty`( ι -> ι )` Ctx`· , y : ι , x : ( ι -> ι ) , y : ι`
-             (extend-there-extend Ctx`· , y : ι , x : ( ι -> ι )` "x" Ty`( ι -> ι )` "y" base
-                xNotY (extend-here Ctx`· , y : ι` "x" Ty`( ι -> ι )`)))))
-    (T-abs Ctx`· , y : ι` "w" base LC`y` base
-       (T-var "y" base Ctx`· , y : ι , w : ι`
-          (extend-there-extend Ctx`· , y : ι` "y" base "w" base
-             yNotW (extend-here Ctx`·` "y" base))))
+  T-app (T-abs (T-abs (T-var (extend-there-extend xNotY extend-here))))
+        (T-abs (T-var (extend-there-extend yNotW extend-here)))
 
 openStep : step`( ( λ x : ( ι -> ι ) . ( λ y : ι . x ) ) ( λ w : ι . y ) ) --> ( λ y' : ι . ( λ w : ι . y ) )`
-openStep =
-  E-beta LC`( λ w : ι . y )` "x" Ty`( ι -> ι )` LC`( λ y : ι . x )`
-    (V-abs "w" base LC`y`)
+openStep = E-beta V-abs
 
 -- And the reduct's type, without typing the reduct.
 openReductTyped : typing`· , y : ι ⊢ ( λ y' : ι . ( λ w : ι . y ) ) : ( ι -> ( ι -> ι ) )`

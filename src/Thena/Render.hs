@@ -258,7 +258,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   Rendered t     -> [renderCore ren (contextOf s) t]
   RenderedDev p  -> [renderPartial ren (contextOf s) p]
   Shown c        -> [renderCursor ren c]
-  ShownData d    -> renderInductive ren d
+  ShownData d cps -> renderInductive ren d cps
   ShownRules d   -> renderRules ren d
   ShownEliminator g ty  -> renderEliminator ren g ty
   ShownGlobal g lvs cs ps ty body -> renderGlobal ren g lvs cs ps ty body
@@ -1838,8 +1838,8 @@ renderMoveError m = case m of
 -- (§3.7), while the indices are printed as the type they bind, so that
 -- 'renderCore' decides between @Nat -> Type\8320@ and @\8704 (n : Nat) -> \8230@ by
 -- its own rule (§2.6).
-renderInductive :: Rendering -> InductiveDefinition -> [String]
-renderInductive ren d = case inductiveConstructors d of
+renderInductive :: Rendering -> InductiveDefinition -> [(GlobalName, [Plicity])] -> [String]
+renderInductive ren d cps = case inductiveConstructors d of
   -- @header@ already ends in @where@ — a datatype with no constructors gets
   -- the empty brace group and nothing else. It said @where where { }@ until
   -- phase 33c, which is when a bare @Type@ made @data Box : Type where { }@
@@ -1871,10 +1871,18 @@ renderInductive ren d = case inductiveConstructors d of
     -- own arguments. Its stored type abstracts the parameters as well — that is
     -- what makes it a function (§3.7) — and printing /that/ here would rebind
     -- them and freshen the second copy to @A1@.
+    -- **A brace it was written with is printed back** (MS12 phase 320,
+    -- `~td9j6`), by the same table and the same leading-run rule a
+    -- definition's signature is printed by — see 'signature'. The parameters
+    -- are dropped off the front of the list because they are already in scope
+    -- here: the record covers every argument position of the constructor as a
+    -- function, parameters first ('Thena.Driver.datatypeProgram').
     line c =
       nameString ren (constructorName c)
         ++ " : "
-        ++ renderCore ren ps (piOver (constructorArguments c) (constructorTarget d c))
+        ++ signatureIn ren ps
+             (drop (length ps) (fromMaybe [] (lookup (constructorName c) cps)))
+             (piOver (constructorArguments c) (constructorTarget d c))
 
     closed ls = init ls ++ [last ls ++ " }"]
 
@@ -2023,20 +2031,34 @@ scheme ren lvs cs ps ty =
 -- application with its inserted arguments dropped would not be the term that
 -- is there.
 signature :: Rendering -> [Plicity] -> Core -> String
-signature ren@(Rendering _ n0 _ _) ps0 ty0 = braced n0 [] ps0 ty0
+signature ren ps0 ty0 = signatureIn ren [] ps0 ty0
+
+-- | 'signature' with the binders already in scope — a @data@ block's
+-- parameters (MS12 phase 320), which the constructor lines are printed under.
+signatureIn :: Rendering -> Context -> [Plicity] -> Core -> String
+signatureIn ren@(Rendering _ n0 _ _) ctx0 ps0 ty0 = braced n0 ctx0 [] ps0 ty0
   where
     -- Only the **leading** implicit binders are peeled. The moment a position
-    -- is explicit the rest is an ordinary core type and 'renderCore' prints it
-    -- — grouping the binders the way it always has, which peeling them one at a
-    -- time here would lose.
+    -- is explicit the rest is an ordinary core type and 'renderCore' prints it.
+    --
+    -- **The whole run is ONE @∀@** (MS12 phase 320): it is how 'renderCore'
+    -- prints a run of explicit binders and it is what an author writes, and
+    -- until this phase the peel printed a @∀@ apiece — which nothing noticed
+    -- while the only implicit signatures in the tree had one binder, and which
+    -- made a judgment's rule unreadable the moment its metavariables became
+    -- implicit: @∀ {Γ : Ctx} -> ∀ {x : String} -> ∀ {T : Ty} -> …@ for what a
+    -- paper writes as three names.
     --
     -- The opened binder goes into the context, so the codomain prints it by
     -- name rather than as a bare variable.
-    braced n ctx (Implicit : more) (Pi i dom sc) =
+    braced n ctx bs (Implicit : more) (Pi i dom sc) =
       let (v, n1) = fresh n
-       in "∀ {" ++ identString i ++ " : " ++ renderCore (at n) ctx dom ++ "} -> "
-            ++ braced n1 (ctx ++ [Hypothesis v i dom]) more (open v sc)
-    braced n ctx _ ty = renderCore (at n) ctx ty
+       in braced n1 (ctx ++ [Hypothesis v i dom])
+                 (bs ++ ["{" ++ identString i ++ " : " ++ renderCore (at n) ctx dom ++ "}"])
+                 more (open v sc)
+    braced n ctx bs _ ty
+      | null bs   = renderCore (at n) ctx ty
+      | otherwise = "∀ " ++ unwords bs ++ " -> " ++ renderCore (at n) ctx ty
 
     -- The counter moves as the binders are peeled, so each nested render gets
     -- the one that is current rather than the one this call started with.

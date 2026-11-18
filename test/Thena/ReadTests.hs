@@ -73,7 +73,7 @@ go :: Machine -> Either FailReason Machine
 go m = case step m of
   Continue m'       -> go m'
   Saying _ m'       -> go m'
-  Declaring _ m'    -> go m'
+  Declaring _ _ m'    -> go m'
   Defining _ _ _ _ m' -> go m'
   Primitively _ _ m' -> go m'
   DeclaringGrammar _ m' -> go m'
