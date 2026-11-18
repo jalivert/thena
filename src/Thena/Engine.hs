@@ -444,6 +444,31 @@ data Frame
         -- same field a 'Call' carries and the same sentence one line over: a
         -- body that pushes a base and then fails must leave the pool it found,
         -- not the one it made.
+      , savedBelow :: [Frame]
+        -- ^ **and the frames it was standing on** (MS12) — the stack
+        -- under this choice point exactly as the fork found it, which is what
+        -- both 'failure''s unwind and 'retryFrom' put back under an
+        -- alternative. It is the fourth row of the same table as 'saved',
+        -- 'savedEnclosing' and 'savedPushes', and it is here for the same
+        -- reason they are: an alternative must begin from the state the fork
+        -- began from, and @returned@ on a lower frame is part of that state.
+        --
+        -- **What was wrong before it existed.** The unwind marked /every/
+        -- frame below the choice point unreturned. That is right for a frame
+        -- whose return happened inside the branch being abandoned — in the
+        -- branch about to run, it has not returned — and wrong for one that
+        -- had already served its return /before the fork was made/: its
+        -- caller's leftovers are run a second time, and a @Bind@ destination
+        -- down there fails with 'Thena.Errors.NothingReturned' after the body
+        -- above it has run to its last instruction. @x = call f ; call g@,
+        -- where @g@ has two matching clauses, completed the work and then lost
+        -- it. Restoring the saved stack draws that line without the unwind
+        -- having to know which side of it a frame is on: a frame that returned
+        -- after the fork is not in this list in its returned shape, and one
+        -- that returned before the fork is.
+        --
+        -- Cheap: this is the tail of the list the frame is consed onto, so
+        -- building one copies nothing.
       , choiceId  :: Int         -- ^ what @retry ‹n›@ names it by
       , chosen    :: GlobalName  -- ^ the rule this frame is currently running
       , returned  :: Bool
@@ -894,19 +919,23 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
             -- failing command is otherwise invisible: the user typed
             -- @retry 77@, @solve@ failed, @regret@ ran, and only the
             -- development moved.
-            -- **Every frame below comes back to life** (MS4 phase 57). Their
-            -- continuations belong to the branch being abandoned; in the
-            -- branch about to be taken they have not run, so a frame that was
-            -- stepped over must be entered again. Without this the alternative
-            -- would run and the caller\'s remaining program would not — which
-            -- is the same hole from the other side.
+            -- **The frames below go back to the shape the fork found them in**
+            -- (MS4 phase 57 for the revival, MS12 for the shape).
+            -- A frame that returned /inside the branch being abandoned/ comes
+            -- back to life, because in the branch about to be taken it has not
+            -- run and its continuation must be entered again; a frame that had
+            -- already served its return /before the fork existed/ stays
+            -- returned, because its continuation is nobody's to run twice.
+            -- 'savedBelow' is both of those at once and the unwind does not
+            -- have to tell them apart — which is why this is a snapshot and
+            -- not a @map@ over the live stack.
             -- **And the pool goes back with it** (MS11 phase 300): the
             -- branch being abandoned may have pushed a base, and the
             -- alternative about to run is one on which that body never ran.
             Just (r, it') -> Saying (took "backtracking to" fr r) m
               { development = saved fr
               , exec  = Exec (ruleBody r) (seedFor (globals m) fr r)
-                             (demote fr r it' : map unreturned stk)
+                             (demote fr r it' : savedBelow fr)
                              (savedPushes fr)
               }
 
@@ -933,8 +962,6 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
 
     took verb fr r = verb ++ " " ++ show (choiceId fr) ++ ": " ++ nameOfRule r
 
-    unreturned fr = fr { returned = False }
-
 -- | Taking the /last/ alternative demotes the frame to a 'Call', by the same
 -- peek that created it, so an exhausted 'Choice' never exists (§7.3). Three
 -- things follow, and the third is the one that matters: @retry@ can only name a
@@ -957,6 +984,7 @@ choicePoint m dest rest it' r vs seed =
     , saved          = development m
     , savedEnclosing = enclosing m
     , savedPushes    = pushes (exec m)
+    , savedBelow     = stack (exec m)
     , choiceId       = names m
     , chosen         = ruleName r
     , returned       = False
@@ -977,6 +1005,7 @@ demote fr r it'
         , saved          = saved fr
         , savedEnclosing = savedEnclosing fr
         , savedPushes    = savedPushes fr
+        , savedBelow     = savedBelow fr
         , choiceId       = choiceId fr
         , chosen         = ruleName r
         , returned       = False
@@ -3243,8 +3272,18 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
         Nothing       -> Left missing      -- cannot arise; see 'demote'
         Just (r, it') -> Right
           ( m { development = saved fr
-              , exec  = Exec (ruleBody r) (seedFor (globals m) fr r) (demote fr r it' : stk)
+              , exec  = Exec (ruleBody r) (seedFor (globals m) fr r)
+                             (demote fr r it' : savedBelow fr)
                              (savedPushes fr)
+                -- **'savedBelow' and not @stk@** (MS12), so that
+                -- this really is 'failure''s unwind with a target instead of
+                -- a reason. @stk@ is the lower stack as it stands /now/, which
+                -- carries whatever the work being abandoned did to it; a frame
+                -- down there that returned after the fork would keep its
+                -- @returned@ flag and its caller's leftovers would never run.
+                -- The two lists have the same length — a frame below a live
+                -- choice point is never dropped, only stepped over — so the
+                -- floor below is unchanged by this.
                 -- **@retry@ lowers the floor to the frame it entered** (MS5
                 -- phase 95). 'lineFloor' records where /this line's/ work
                 -- begins, and this is a line that deliberately begins its work

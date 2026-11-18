@@ -4874,6 +4874,40 @@ Both readings are lemmas you can use, and `trueNotNat {0}` is the old one. **Wri
 a shorter proof of the same signature can therefore give you a more general global**
 — worth knowing, and not a thing to work around.
 
+### Backtracking puts the whole machine back, so a value bound before a fork is still bound after one
+
+A rule may ask another rule for a value and keep it, and then go on to do
+something that searches:
+
+```
+rule strategy :-
+  do subject = call the-one-to-induct-on
+     ; call try-each-way
+     ; say (concat "done with: " subject)
+```
+
+`try-each-way` is written in several clauses, so the call to it is a real fork:
+the engine takes the first clause that matches, and if the body fails it comes
+back and takes the next. **When it comes back, `subject` is still bound to what
+the first call answered.** Taking an alternative restores the machine the fork
+found — the development, the developments it was nested inside, the rule bases in
+the pool, and the calls that were outstanding — so the branch that failed leaves
+nothing of itself behind, and the branch that runs is not told anything extra
+either.
+
+**It follows that each instruction in a body runs once**, however much searching
+happens in the middle of it. A fork is not a loop: `call try-each-way` above is
+taken again, and `subject = call the-one-to-induct-on` above it is not.
+
+**Until MS12 the last of those was not restored**, and the shape above was the
+one that broke: the body closed every goal, printed everything it was asked to,
+reached its last instruction, and then the line failed saying nothing had been
+bound to `subject` — and the whole development was rolled back with it. The
+practical consequence was that a rule base could replay a proof it already knew
+but could not *look* for one, because looking means forking and forking happened
+under something. A `do { }` block had the same thing in a quieter form: an
+instruction after a call that had returned could be run a second time.
+
 ### The same lesson, one level on: a search must not be a choice point over the work
 
 `induction t of { … }` elaborates by walking a datatype's constructors against
