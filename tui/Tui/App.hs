@@ -1587,18 +1587,19 @@ globalGroups st =
 -- pane was to see the dependency structure. That means only (a) is
 -- acceptable."/ See 'Tui.Panes.meDepth' for the two renderings he turned down.
 --
--- **Two things keep it finite and total.** A module already on the path from
--- the root is drawn and not descended into, so an import cycle is one row and
--- not a hang — this frontend never assumes the engine's graph is acyclic. And
--- a loaded module no root reaches — which is what every module of a cycle
--- would be — is appended at depth 0 rather than silently left off, so the
--- pane's own count cannot disagree with 'modulesLoaded'.
+-- **The walk needs no cycle guard, because a cycle never reaches a loaded
+-- session.** The engine refuses one by name before anything loads — @trouble@
+-- answers `ImportCycle` with the chain in it (MS11 phase 274), the same walk
+-- for a file's import and for the prompt's, and @thena-test@ holds both. So
+-- the edges among 'modulesLoaded' are a DAG: the walk terminates, and every
+-- loaded module is reachable from some module with nothing importing it, which
+-- is why the roots cannot miss one. **Measured rather than assumed, under a
+-- pty on 2026-11-18**: @import test.modules.LoopA@, whose pair import each
+-- other, leaves the pane with the prelude in it and nothing else.
 moduleEntries :: St -> [ModuleEntry]
-moduleEntries st = walked <> [entryFor 0 m | m <- modulesLoaded s, m `notElem` reached]
+moduleEntries st = concat [walk 0 m | m <- modulesLoaded s, m `notElem` imported]
   where
     s = activeSession st
-    walked = concat [walk [] 0 m | m <- modulesLoaded s, m `notElem` imported]
-    reached = [m | m <- modulesLoaded s, moduleText m `elem` map meName walked]
     -- | **A root is a module nobody imports**, which is one he named at the
     -- prompt or in a script: the engine does not say which act pulled a module
     -- in, and /nothing imports it/ is the same answer for everything except a
@@ -1606,13 +1607,8 @@ moduleEntries st = walked <> [entryFor 0 m | m <- modulesLoaded s, m `notElem` r
     -- which the engine no-ops anyway and which is in under its parent either
     -- way.
     imported = concat [moduleImportsOf m s | m <- modulesLoaded s]
-    walk ancestors depth m =
-      entryFor depth m
-        : concat
-          [ walk (m : ancestors) (depth + 1) i
-          | m `notElem` ancestors
-          , i <- moduleImportsOf m s
-          ]
+    walk depth m =
+      entryFor depth m : concat [walk (depth + 1) i | i <- moduleImportsOf m s]
     entryFor depth m =
       ModuleEntry
         { meName = moduleText m
