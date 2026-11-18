@@ -5797,6 +5797,15 @@ answer about whitespace.
 | `.thena.script` | a script of REPL command lines, run in order |
 | `.thena.rules` | a rule base |
 
+**Why the second word rather than a plain `.rules` and `.script`.** Reconsidered
+2026-11-18 and kept. The shared `.thena` is not a composition, the way a literate
+`.agda.md` is markdown that contains Agda; it is a family marker, and that is
+what it buys: `*.thena*` matches every file of this project's and nothing else,
+so one glob configures an editor, a `.gitattributes` or a search. `.rules` and
+`.script` are words general enough that a rule written for them would claim other
+tools' files too. A Core term written to disk, if that ever exists, takes
+`.thena.core` by the same rule.
+
 `:load ‹path›` reads the extension. `:load proof ‹path›`, `:load script ‹path›`
 and `:load rules ‹path›…` say it out loud instead, and the keyword wins over the
 extension. **One `:load` may not mix kinds** — several rule bases at once is
