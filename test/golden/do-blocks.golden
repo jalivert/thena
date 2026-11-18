@@ -11,12 +11,8 @@ proving t : Nat
 thena spine> elaborate surface`do { attack ; prove }`
 chose 18: solve
 backtracking to 18: regret
-chose 19: attack
 thena spine> :show
-▶ let ? t : Nat ≐ (
-    let ? t1 : Nat in
-    t1
-  ) in
+▶ let ? t : Nat in
   t
 thena spine> :abandon
 abandoned t

@@ -4874,6 +4874,40 @@ Both readings are lemmas you can use, and `trueNotNat {0}` is the old one. **Wri
 a shorter proof of the same signature can therefore give you a more general global**
 — worth knowing, and not a thing to work around.
 
+### Backtracking puts the whole machine back, so a value bound before a fork is still bound after one
+
+A rule may ask another rule for a value and keep it, and then go on to do
+something that searches:
+
+```
+rule strategy :-
+  do subject = call the-one-to-induct-on
+     ; call try-each-way
+     ; say (concat "done with: " subject)
+```
+
+`try-each-way` is written in several clauses, so the call to it is a real fork:
+the engine takes the first clause that matches, and if the body fails it comes
+back and takes the next. **When it comes back, `subject` is still bound to what
+the first call answered.** Taking an alternative restores the machine the fork
+found — the development, the developments it was nested inside, the rule bases in
+the pool, and the calls that were outstanding — so the branch that failed leaves
+nothing of itself behind, and the branch that runs is not told anything extra
+either.
+
+**It follows that each instruction in a body runs once**, however much searching
+happens in the middle of it. A fork is not a loop: `call try-each-way` above is
+taken again, and `subject = call the-one-to-induct-on` above it is not.
+
+**Until MS12 the last of those was not restored**, and the shape above was the
+one that broke: the body closed every goal, printed everything it was asked to,
+reached its last instruction, and then the line failed saying nothing had been
+bound to `subject` — and the whole development was rolled back with it. The
+practical consequence was that a rule base could replay a proof it already knew
+but could not *look* for one, because looking means forking and forking happened
+under something. A `do { }` block had the same thing in a quieter form: an
+instruction after a call that had returned could be run a second time.
+
 ### The same lesson, one level on: a search must not be a choice point over the work
 
 `induction t of { … }` elaborates by walking a datatype's constructors against
@@ -4966,6 +5000,57 @@ rule elaborate t :- when focus-is-hole (surface-is-arrow t)
 They do not reuse the cursor's words — `dom` and `cod` already move the
 development's ambient cursor, and one word for two different things is what the
 project rules out.
+
+### A choice point is made by writing rules, and no instruction mints one
+
+Every choice point in Thena comes from the rule base. A call looks for clauses
+whose head matches, takes one, and keeps the rest; a failure in the body comes
+back and takes the next. `:choices` lists the live ones, nearest first, and
+`retry ‹n›` names one of them.
+
+So there is no instruction meaning *make a choice point here*. The wish for one
+is understandable — you are partway through a rule body, or partway through a
+block typed at the prompt, and you would like to mark the spot so that a later
+failure can come back to it. Two things are worth knowing before reaching for a
+construct that does not exist.
+
+**A choice point with nothing different to offer cannot help you.** Taking an
+alternative restores the machine the fork found, so running the same continuation
+again from the same state fails in the same way. An instruction that minted *n*
+indistinguishable alternatives would be a loop whose every iteration is the first
+one.
+
+**A choice point that does offer something different is a rule base you can
+write**, and nothing has to be added to the language for it. Three clauses with
+one head and no distinguishing test are a generator:
+
+```
+pick : Name
+rule pick :- do return "a"
+rule pick :- do return "b"
+rule pick :- do return "c"
+```
+
+Called from a rule that insists on `"c"`, the engine walks them:
+
+```
+thena spine> want-c
+chose 4686: pick
+backtracking to 4686: pick
+backtracking to 4686: pick
+got c
+```
+
+This is the same reason there is no built-in tactic language: the machinery was
+designed so that control flow goes through rules, and a built-in choice point
+would be a second mechanism for the one thing the rule base already is.
+
+**What is left over is not a choice point at all — it is a place a *person* can
+return to.** A choice point is spent by failure, with nobody asked. An anchor is
+spent by someone deciding to go back and answer differently. Those are two
+mechanisms, and the second one belongs to the session rather than to the engine:
+in the editor's live script mode every line is such a point, so stepping back and
+giving a different answer is already how a proof gets revised.
 
 ### Two ops a rule needs that it cannot write down
 
@@ -5711,6 +5796,15 @@ answer about whitespace.
 | `.thena` | a **proof module** — the surface language: a header, then declarations |
 | `.thena.script` | a script of REPL command lines, run in order |
 | `.thena.rules` | a rule base |
+
+**Why the second word rather than a plain `.rules` and `.script`.** Reconsidered
+2026-11-18 and kept. The shared `.thena` is not a composition, the way a literate
+`.agda.md` is markdown that contains Agda; it is a family marker, and that is
+what it buys: `*.thena*` matches every file of this project's and nothing else,
+so one glob configures an editor, a `.gitattributes` or a search. `.rules` and
+`.script` are words general enough that a rule written for them would claim other
+tools' files too. A Core term written to disk, if that ever exists, takes
+`.thena.core` by the same rule.
 
 `:load ‹path›` reads the extension. `:load proof ‹path›`, `:load script ‹path›`
 and `:load rules ‹path›…` say it out loud instead, and the keyword wins over the

@@ -48,6 +48,7 @@ tests =
     "dispatch"
     [ peekTests
     , backtrackTests
+    , answeredBeforeTheForkTests
     , retryTests
     , dispatchableTests
     ]
@@ -212,6 +213,118 @@ backtrackTests =
         case snd (runOut (machine (bases [fails, fails]) hole [Do Ops.Prove])) of
           Left NotAGuessHere -> pure ()
           other              -> assertFailure ("expected NotAGuessHere, got " ++ show other)
+    ]
+
+-- --------------------------------------------------------------------------
+-- An answer given before the fork survives the backtracking (MS12)
+-- --------------------------------------------------------------------------
+
+-- | Hands back a word, so a caller has something to keep.
+gives :: Rule
+gives = rule "gives" [Do (Ops.Return (Ops.Lit (Ops.VText "hello")))]
+
+-- | Two clauses under one name, the first of which fails: this is what builds
+-- a choice point in the middle of a body rather than at the top of it.
+forkedFails, forkedWorks :: Rule
+forkedFails = rule "forked" [Do Ops.Solve]
+forkedWorks = rule "forked" [Do (Ops.Say (Ops.Lit (Ops.VText "second clause")))]
+
+-- | A body that gets a value, keeps it, /then/ forks, and uses the value at
+-- its last instruction.
+keepsThenForks :: Rule
+keepsThenForks =
+  rule "keeps-then-forks"
+    [ Bind (Ops.PVar "x") Nothing (Ops.Call "gives" [])
+    , Do (Ops.Call "forked" [])
+    , Do (Ops.Say (Ops.Ref "x"))
+    ]
+
+-- | The same two calls the other way round, which always worked.
+forksThenKeeps :: Rule
+forksThenKeeps =
+  rule "forks-then-keeps"
+    [ Do (Ops.Call "forked" [])
+    , Bind (Ops.PVar "x") Nothing (Ops.Call "gives" [])
+    , Do (Ops.Say (Ops.Ref "x"))
+    ]
+
+-- | A call that keeps nothing, and then a fork — the same ordering as
+-- 'keepsThenForks' with the binding taken out.
+--
+-- It is the second half of the defect and it shows up as duplicated work
+-- rather than as a failure: a frame with no destination cannot report
+-- 'NothingReturned', so reviving it simply ran the rest of the body again.
+saysNothing :: Rule
+saysNothing = rule "says-nothing" [Do (Ops.Say (Ops.Lit (Ops.VText "first call")))]
+
+quietThenForks :: Rule
+quietThenForks =
+  rule "quiet-then-forks"
+    [ Do (Ops.Call "says-nothing" [])
+    , Do (Ops.Call "forked" [])
+    ]
+
+-- | **A call that has already returned is not un-returned by a later
+-- backtracking** (MS12).
+--
+-- A 'Choice' frame restores the stack it was built on ('savedBelow') rather
+-- than clearing @returned@ on everything below it. The difference is exactly
+-- this body: @gives@ returns, and then @forked@ forks. Clearing the flags
+-- revived @gives@\'s frame, so after the second clause of @forked@ ran, the
+-- @Bind@ that had already been satisfied was entered a second time and the
+-- body — which had printed its answer and reached its last instruction — failed
+-- with 'NothingReturned'. Every visible sign said it had worked.
+--
+-- The same omission the other way is what MS4 phase 57 fixed, so both
+-- directions are pinned here: a frame that returned /inside/ the branch being
+-- abandoned must still come back to life, which is the nested-choice test at
+-- the end of 'retryTests'.
+answeredBeforeTheForkTests :: TestTree
+answeredBeforeTheForkTests =
+  testGroup
+    "an answer given before a fork"
+    [ testCase "survives the fork backtracking, and the body finishes" $ do
+        let base = bases [gives, forkedFails, forkedWorks, keepsThenForks]
+            (msgs, out) = runOut (machine base hole [Do (Ops.Call "keeps-then-forks" [])])
+        case out of
+          Left r  -> assertFailure ("the body did not finish: " ++ show r)
+          Right _ -> pure ()
+        -- The last message is the kept value, printed once.
+        filter (== "hello") msgs @?= ["hello"]
+
+    , testCase "and the alternative really did run" $ do
+        let base = bases [gives, forkedFails, forkedWorks, keepsThenForks]
+            (msgs, _) = runOut (machine base hole [Do (Ops.Call "keeps-then-forks" [])])
+        ("second clause" `elem` msgs) @?= True
+
+      -- The control, and it is the whole argument that this is about ordering:
+      -- the same two calls with the fork first were never affected.
+    , testCase "the other order was always fine, and still is" $ do
+        let base = bases [gives, forkedFails, forkedWorks, forksThenKeeps]
+            (msgs, out) = runOut (machine base hole [Do (Ops.Call "forks-then-keeps" [])])
+        case out of
+          Left r  -> assertFailure ("the body did not finish: " ++ show r)
+          Right _ -> pure ()
+        filter (== "hello") msgs @?= ["hello"]
+
+      -- A body's instruction is run once. Reviving a frame that had returned
+      -- before the fork re-ran everything the body had left after that call,
+      -- and with no binding to fail on that is silent: the fork was taken
+      -- again, and again, and the line did not come back at all.
+      --
+      -- **Bounded on purpose.** 'runOut' builds its messages lazily, so a
+      -- prefix of them is answerable even by a machine that never finishes —
+      -- which is what this one did. Forcing the outcome here would hang the
+      -- suite instead of failing it.
+    , testCase "nothing after the returning call is run twice" $ do
+        let base = bases [saysNothing, forkedFails, forkedWorks, quietThenForks]
+            msgs = fst (runOut (machine base hole [Do (Ops.Call "quiet-then-forks" [])]))
+        take 8 msgs
+          @?= [ "first call"
+              , "chose 1000: forked"
+              , "backtracking to 1000: forked"
+              , "second clause"
+              ]
     ]
 
 -- --------------------------------------------------------------------------
