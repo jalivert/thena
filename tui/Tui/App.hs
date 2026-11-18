@@ -256,6 +256,18 @@ data ScriptLine = ScriptLine
     -- have not, for the frontier @F@ 'scriptFrontier' reads off. Every
     -- rebuild in this module is written to keep that true — it is what makes
     -- "the session above this line" a lookup rather than a search.
+  , slRan     :: Maybe String
+    -- ^ **the text that produced 'slSession'**, so that a line which has been
+    -- edited since it ran can be told from one that has not — `~htff2`, his
+    -- requirement of 2026-11-18: an edit he walks away from stays as he left
+    -- it, the line goes dim because it is no longer evaluated, and the
+    -- cascading re-run takes the new text.
+    --
+    -- **It is the text and not a flag**, so the question /is this line stale/
+    -- is a comparison and cannot drift: typing a character and deleting it
+    -- again leaves the line equal to what ran, and it is not stale, with
+    -- nothing to reset. 'Nothing' for a line that has never run, which is
+    -- never stale either — there is no session under it to disagree with.
   , slOutput  :: [String]
   , slOk      :: Bool
   }
@@ -479,24 +491,6 @@ data St = St
   , stScriptNote :: Maybe String
     -- ^ what the bar last had to say — a refusal, or a saved path. Shown at
     -- the pane's foot until the next thing happens.
-  , stScriptStale :: Maybe Int
-    -- ^ @'Just' i@ means line @i@ has been edited in place and **every line
-    -- below it is stale**: it was run against the session line @i@ used to
-    -- leave behind, and line @i@ no longer says what it said. The lines are
-    -- still there and still run — they are drawn dim ('renderScript') and
-    -- nothing has been destroyed.
-    --
-    -- **His ruling, 2026-11-11, overruling @~sv5v8@'s timing**: the tail is
-    -- invalid the instant the line is edited, which is the half that
-    -- survives, but invalid and deleted are no longer the same event. The
-    -- tail lives until the Enter that decides it — plain Enter re-runs it
-    -- (@~bxmsc@), Option+Enter cuts it. Arrowing off the line or pressing
-    -- Esc leaves it alone.
-    --
-    -- 'Nothing' also means "the edit was taken back": typing a character and
-    -- deleting it again restores the line's own text, so there is nothing
-    -- stale any more. The mark is a comparison against 'slText', not a flag
-    -- that any key was pressed.
   , stStored :: Maybe Stored
     -- ^ **the index entry the live document is persisted under** — `~22qjj`,
     -- the project database. 'Nothing' before live-script mode has ever been
@@ -658,7 +652,6 @@ runTui = do
         , stScriptDraft = ""
         , stScriptBar   = Nothing
         , stScriptNote  = Nothing
-        , stScriptStale = Nothing
         , stStored      = Nothing
         , stGlobalsClosed = Set.empty
         , stModulesOpen = Set.empty
@@ -1460,7 +1453,7 @@ renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
 -- and it is yours to fix.
 --
 -- **A line below an in-place edit is drawn dim and is still drawn** — his
--- ruling of 2026-11-11 ('stScriptStale'). It was run against a session the
+-- ruling of 2026-11-11 ('scriptStaleFrom'). It was run against a session the
 -- line above no longer produces, so it is telling you about a state nothing
 -- holds; the dim says exactly that, and the Enter that follows decides
 -- whether it is re-run or cut. Before that ruling the lines were gone from
@@ -1479,14 +1472,16 @@ renderScript st inputLine =
           | otherwise = str "  "
     -- | **One dim, two causes** — the design's own words. A line is drawn
     -- dim when it has not run in this session (below the frontier, which is
-    -- every line of a freshly opened proof-script) or when it ran against a
-    -- session the line being edited no longer produces.
+    -- every line of a freshly opened proof-script) or when it stands at or
+    -- below an edited line, whose session nothing is going to produce again.
     --
-    -- Stale is /below/ the edited line and not the line itself: that one is
-    -- the caret's, drawn by the editor, and is being typed rather than
-    -- waiting for a verdict.
-    dim i = i >= scriptFrontier st || case stScriptStale st of
-      Just j -> i > j
+    -- **The edited line is itself dim, and that is `~htff2`** — his
+    -- requirement of 2026-11-18, /"it will turn dim too, so that the user can
+    -- see that this line is actually not evaluated"/. While the caret is on it
+    -- the editor draws it and this is not asked; the moment the caret leaves,
+    -- it is a line of the document holding text that never ran.
+    dim i = i >= scriptFrontier st || case scriptStaleFrom st of
+      Just j -> i >= j
       Nothing -> False
     refusal sl
       | slOk sl = []
@@ -2594,7 +2589,7 @@ transcriptGoneSaid stored =
 -- overruled the timing** and this is it: the half that survives is that the tail
 -- is invalid at once, which is what the paragraph below argues. What is gone is
 -- that invalid and deleted were the same event. The tail now lives — dim, and
--- marked by 'stScriptStale' — until the Enter that decides it: plain Enter
+-- marked stale by 'scriptStaleFrom' — until the Enter that decides it: plain Enter
 -- re-runs it (@~bxmsc@), Option+Enter cuts it. See
 -- @.jalivert/DESIGN-PRINCIPLES.md@, /A reload re-runs the transcript/.
 --
@@ -2616,51 +2611,63 @@ transcriptGoneSaid stored =
 -- rewrites the line like any other keystroke.
 handleScriptEvent :: BrickEvent Name AppEvent -> EventM Name St ()
 handleScriptEvent ev = do
-  before <- get
   dispatchScriptEvent ev
-  after <- get
-  case (stScriptPos before, stScriptPos after) of
-    (Just i, Just j)
-      | i == j, textOf before /= textOf after -> markTailStale i
-    _ -> pure ()
-  where
-    textOf st = concatMap Text.unpack (getEditContents (stInput st))
+  keepTheEdit
 
--- | Marks the lines below line @i@ stale, or takes the mark off again when
--- the editor holds line @i@'s own text once more — deleting the character you
--- just typed is not an edit, and the tail it was about to invalidate is fine.
+-- | **Whatever the caret's line says now is what the document says** —
+-- `~htff2`, his requirement of 2026-11-18. The editor holds the line being
+-- typed; this writes it straight back into 'stScript', so the document and the
+-- editor cannot disagree and there is no copy of the line anywhere to be
+-- restored from.
 --
--- **Nothing is removed and nothing is moved.** 'stScriptPos' stays on @i@, so
--- the caret does not jump to the foot of the document the way it did while
--- this severed, and the panes keep drawing the session at the caret.
+-- **This is what fixed the edit that undid itself.** His report: /"when I go
+-- edit a line and then I do not hit enter to submit it and go a line above or
+-- below, it actually reverts my edit back to the original line. Not good."/ It
+-- did, and it was by design — 'loadScriptAt' seats the stored 'slText' under
+-- the caret, so a move used to read the old text back over the new one.
+-- **His ruling: the edit stays as he left it**, the line goes dim because it
+-- is no longer evaluated, and the cascading re-run takes the new text. Writing
+-- through on every keystroke is what makes that true of every way out of the
+-- line — an arrow, a click, the bar, leaving the mode — rather than of the
+-- ones somebody remembered to list.
 --
--- **The dropdown is deliberately left alone.** 'afterScriptEdit' closes it
--- because its callers are commits and navigation, where nobody is typing into
--- the line any more; here somebody is, mid-keystroke, and closing it would
--- make the completion box flicker shut on every edit of an older line.
-markTailStale :: Int -> EventM Name St ()
-markTailStale i = do
+-- **Nothing is removed and nothing is moved.** 'stScriptPos' stays where it
+-- is, and 'slSession' is untouched: the line still carries the state it
+-- produced, which is what lets 'scriptStaleFrom' say the two disagree and what
+-- lets a re-run start from the session above. **The dropdown is left alone**
+-- too — somebody is typing mid-keystroke, and closing it here would make the
+-- completion box flicker shut on every edit of an older line.
+keepTheEdit :: EventM Name St ()
+keepTheEdit = do
   st <- get
-  -- | **Only the lines that have run can go stale**, so the count stops at
-  -- the frontier: in a proof-script opened from disc the lines below it are
-  -- text that has not run against anything and an Enter does not reach them.
-  let below = scriptFrontier st - (i + 1)
-      edited = case nthOf i (stScript st) of
-        Just sl -> slText sl /= concatMap Text.unpack (getEditContents (stInput st))
-        Nothing -> False
-  put st
-    { stScriptStale = if edited then Just i else Nothing
-    -- Editing the newest line has nothing below it, so it says nothing.
-    , stScriptNote =
-        if not edited || below <= 0
-          then Nothing
-          else
-            Just
-              ( show below
-                  <> (if below == 1 then " line" else " lines")
-                  <> " below went stale — Enter re-runs them, Option+Enter cuts them"
-              )
-    }
+  case stScriptPos st of
+    Nothing -> pure ()
+    Just i -> case nthOf i (stScript st) of
+      Nothing -> pure ()
+      Just sl
+        | slText sl == typed -> pure ()
+        | otherwise ->
+            put st
+              { stScript = take i (stScript st) <> [sl { slText = typed }] <> drop (i + 1) (stScript st)
+              -- | **Only the lines that have run can go stale**, so the count
+              -- stops at the frontier: in a proof-script opened from disc the
+              -- lines below it are text that has not run against anything and
+              -- an Enter does not reach them.
+              , stScriptNote =
+                  let below = scriptFrontier st - (i + 1)
+                   in if below <= 0 || slRan sl == Just typed
+                        -- Editing the newest line has nothing below it, so it
+                        -- says nothing.
+                        then Nothing
+                        else
+                          Just
+                            ( show below
+                                <> (if below == 1 then " line" else " lines")
+                                <> " below went stale — Enter re-runs them, Option+Enter cuts them"
+                            )
+              }
+        where
+          typed = concatMap Text.unpack (getEditContents (stInput st))
 
 dispatchScriptEvent :: BrickEvent Name AppEvent -> EventM Name St ()
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
@@ -2725,7 +2732,7 @@ dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 -- and when I am teleported, it should remove it."/
 --
 -- **It does not contradict his ruling of 2026-11-11 that arrowing off a line
--- leaves it alone** ('stScriptStale'), and the difference is the key rather
+-- leaves it alone** ('scriptStaleFrom'), and the difference is the key rather
 -- than the state. Up and Down say /go elsewhere/; Backspace says /delete/, and
 -- it is the only key that does both. He pressed a delete key once per character
 -- and then once more — at that last press the line itself is the only thing
@@ -3340,6 +3347,30 @@ nthOf i xs
 scriptFrontier :: St -> Int
 scriptFrontier st = length (takeWhile (isJust . slSession) (stScript st))
 
+-- | **The first line of the document that no longer says what it ran with**,
+-- and therefore the first that is stale — `~htff2`. 'Nothing' when every line
+-- holds the text that produced its session.
+--
+-- **Read off the document rather than stored**, the same reasoning as
+-- 'scriptFrontier': a copy in 'St' would be one more thing every rebuild has
+-- to remember, and this one would have to be reset by hand the moment an edit
+-- was typed back to what it was. It replaced a 'Maybe Int' field that was
+-- exactly that.
+--
+-- **Everything at or below it is drawn dim.** The line itself was edited, so
+-- its own session is from text that is gone; the lines under it ran against
+-- that session.
+scriptStaleFrom :: St -> Maybe Int
+scriptStaleFrom st = listToMaybe [i | (i, sl) <- zip [0 ..] (stScript st), staleLine sl]
+
+-- | **Whether a line's text has changed since it ran.** A line that never ran
+-- is not stale: there is no session under it to disagree with, and it is dim
+-- already for being past the frontier.
+staleLine :: ScriptLine -> Bool
+staleLine sl = case slRan sl of
+  Just ran -> ran /= slText sl
+  Nothing -> False
+
 -- | The session a new line past the end of the script runs against: the last
 -- line that has run, or the base.
 scriptTip :: St -> Maybe Session
@@ -3387,8 +3418,8 @@ runScriptLine s line = do
             renderResponse s' resp
               ++ concatMap (renderResponse sLoaded) responses
               ++ concatMap (renderTrouble sLoaded) trouble
-      pure (ScriptLine line (Just sLoaded) out (responseTook resp))
-    _ -> pure (ScriptLine line (Just s') (renderResponse s' resp) (responseTook resp))
+      pure (ScriptLine line (Just sLoaded) (Just line) out (responseTook resp))
+    _ -> pure (ScriptLine line (Just s') (Just line) (renderResponse s' resp) (responseTook resp))
 
 -- | Whether a response means the line actually advanced the session.
 --
@@ -3456,7 +3487,6 @@ enterScriptMode st = do
     , stStored = stored
     , stScriptBase = base
     , stScriptPos = Nothing
-    , stScriptStale = Nothing
     , stScriptBar = Nothing
     , stScriptNote = Nothing
     , stInput = emptyInput
@@ -3675,14 +3705,13 @@ openDocument st stored texts upto said = do
     Nothing -> fst <$> liftIO startingSession
   let (runNow, rest) = splitAt (max 0 (min upto (length texts))) texts
   ran <- liftIO (foldRun base runNow)
-  let doc = ran ++ [ScriptLine t Nothing [] True | t <- rest]
+  let doc = ran ++ [ScriptLine t Nothing Nothing [] True | t <- rest]
       caret = max 0 (length ran - 1)
   put st
     { stScriptMode = True
     , stScriptBase = Just base
     , stScript = doc
     , stScriptPos = if null doc then Nothing else Just caret
-    , stScriptStale = Nothing
     , stScriptDraft = ""
     , stScriptBar = Nothing
     , stStored = Just stored
@@ -3756,7 +3785,6 @@ scriptReload = do
         { stScriptBase = base
         , stScript = doc
         , stScriptPos = Just at
-        , stScriptStale = Nothing
         , stScriptBar = Nothing
         , stInput = E.editorText Input (Just 1) (Text.pack (maybe "" slText (nthOf at doc)))
         , stScriptNote = Just (maybe said ((said <> "; ") <>) (staleNote shipped checks))
@@ -3766,7 +3794,7 @@ scriptReload = do
 -- | A line of the document with the state it produced thrown away: the text
 -- stays, and that is the whole of a reload.
 unran :: ScriptLine -> ScriptLine
-unran sl = sl { slSession = Nothing, slOutput = [], slOk = True }
+unran sl = sl { slSession = Nothing, slRan = Nothing, slOutput = [], slOk = True }
 
 -- | Back to the ordinary REPL, whose 'stSession'/'stTurns' were never touched.
 -- The script itself stays in memory, so toggling out to check something and
@@ -3778,7 +3806,6 @@ leaveScriptMode = do
     { stScriptMode = False
     , stScriptBar = Nothing
     , stScriptPos = Nothing
-    , stScriptStale = Nothing
     , stInput = emptyInput
     }
   closeDropdowns
@@ -3954,18 +3981,15 @@ foldRun s (l : ls) = do
 --   * And the dropdown standing open over a line nobody is writing to, which
 --     is what he said about the command bar and is the same principle.
 --
--- **And it is where a stale tail stops being stale** ('stScriptStale'), for
--- the same reason and in one place rather than at eight puts: every caller is
--- a commit or a move, and both settle the question the mark was holding open.
--- A commit has just re-run or cut the tail, so there is nothing stale left; a
--- move takes the edit back, because 'loadScriptAt' puts the stored 'slText'
--- under the caret and the line the mark was about never changed. **Typing
--- does not come through here**, which is exactly what lets the mark survive
--- from the keystroke to the Enter.
+-- **It no longer has a staleness slot to clear, and that is `~htff2`.** There
+-- was one, cleared here on every commit and every move, on the reasoning that
+-- a move took the edit back — which is precisely the behaviour he rejected on
+-- 2026-11-18. Staleness is now read off the document ('scriptStaleFrom'), so a
+-- commit stops it by re-running the lines and a move stops nothing, because
+-- there is nothing to stop: the edit is in the document and the line is dim
+-- until something runs it.
 afterScriptEdit :: EventM Name St ()
 afterScriptEdit = do
-  st <- get
-  put st { stScriptStale = Nothing }
   closeDropdowns
   followInput
   persist
