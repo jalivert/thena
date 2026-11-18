@@ -5001,6 +5001,57 @@ They do not reuse the cursor's words — `dom` and `cod` already move the
 development's ambient cursor, and one word for two different things is what the
 project rules out.
 
+### A choice point is made by writing rules, and no instruction mints one
+
+Every choice point in Thena comes from the rule base. A call looks for clauses
+whose head matches, takes one, and keeps the rest; a failure in the body comes
+back and takes the next. `:choices` lists the live ones, nearest first, and
+`retry ‹n›` names one of them.
+
+So there is no instruction meaning *make a choice point here*. The wish for one
+is understandable — you are partway through a rule body, or partway through a
+block typed at the prompt, and you would like to mark the spot so that a later
+failure can come back to it. Two things are worth knowing before reaching for a
+construct that does not exist.
+
+**A choice point with nothing different to offer cannot help you.** Taking an
+alternative restores the machine the fork found, so running the same continuation
+again from the same state fails in the same way. An instruction that minted *n*
+indistinguishable alternatives would be a loop whose every iteration is the first
+one.
+
+**A choice point that does offer something different is a rule base you can
+write**, and nothing has to be added to the language for it. Three clauses with
+one head and no distinguishing test are a generator:
+
+```
+pick : Name
+rule pick :- do return "a"
+rule pick :- do return "b"
+rule pick :- do return "c"
+```
+
+Called from a rule that insists on `"c"`, the engine walks them:
+
+```
+thena spine> want-c
+chose 4686: pick
+backtracking to 4686: pick
+backtracking to 4686: pick
+got c
+```
+
+This is the same reason there is no built-in tactic language: the machinery was
+designed so that control flow goes through rules, and a built-in choice point
+would be a second mechanism for the one thing the rule base already is.
+
+**What is left over is not a choice point at all — it is a place a *person* can
+return to.** A choice point is spent by failure, with nobody asked. An anchor is
+spent by someone deciding to go back and answer differently. Those are two
+mechanisms, and the second one belongs to the session rather than to the engine:
+in the editor's live script mode every line is such a point, so stepping back and
+giving a different answer is already how a proof gets revised.
+
 ### Two ops a rule needs that it cannot write down
 
 *Decided 2026-09-03.*
