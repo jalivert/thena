@@ -3267,10 +3267,39 @@ prints it:
 
 ```
 data typing : Ctx -> LC -> Ty -> Type₀ where
-  T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in x T Γ -> typing Γ (var x) T
-  T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC)
+  T-var : ∀ {x : String} {T : Ty} {Γ : Ctx} -> extend-in x T Γ -> typing Γ (var x) T
+  T-app : ∀ {Γ : Ctx} {M : LC} {S : Ty} {T : Ty} {N : LC}
             -> typing Γ M (arrow S T) -> typing Γ N S -> typing Γ (app M N) T
 ```
+
+**The metavariables are IMPLICIT and the premises are not, so a derivation does
+not repeat what its own statement says.** *Decided 2026-11-18.* A rule's
+metavariables are determined by the judgment you are proving, and writing them
+again is noise:
+
+```
+idTyped : typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`
+idTyped = T-abs (T-var extend-here)
+```
+
+Before this they were explicit, and the same proof read
+`T-abs empty "x" base (var "x") base (T-var "x" base (extend empty "x" base)
+(extend-here empty "x" base))` — thirteen arguments, every one of them forced by
+the type on the line above. A generated lookup relation is the same: `extend-here`
+takes none, and `extend-there-extend ne i` takes the inequality and the smaller
+lookup.
+
+**Three things stay explicit, and each for its own reason.** A **premise** is an
+argument you supply, named or not. A **named premise** stays explicit even though
+the quantifier that binds it is written by you — `p1 : Γ ⊢ M : T` is a premise. And
+**a pattern binds every argument**: plicity is a permission not to write something
+at a call, so `case d of { T-abs Γ x S E T d1 -> … }` still names all six. The same
+goes for a term inside `` core`…` ``, which is the kernel's language and has no
+implicit positions at all.
+
+**Writing one anyway is allowed**: `T-var {Γ} …` puts the brace back where you need
+it, and `:show` prints a constructor with its braces so the signature a proof is
+written against is visible.
 
 **Every metavariable is quantified, in the order it first appears**, reading
 the premises and then the conclusion. A metavariable is one a `language` or
@@ -3308,7 +3337,9 @@ order and may range over a derivation:
 ```
 
 There, a metavariable the `∀` does not bind is refused, and so is a name it
-binds twice: the `∀` lists the rule's metavariables, it does not nest. **The notation is
+binds twice: the `∀` lists the rule's metavariables, it does not nest. **The parens
+are how you write it and not what you get**: the generated constructor makes a
+metavariable implicit, and a binder standing at a premise — `d` above — explicit. **The notation is
 installed**, as a context's lookup is: `` typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )` ``
 is a type, and `:parse typing …` reads one.
 

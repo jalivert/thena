@@ -269,8 +269,8 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   -- phase 43). The core term it built is deliberately not shown: it was rewound
   -- with the rest of the line, and naming a hole the session no longer has
   -- would invite a @goto@ into nothing.
-  InferredSurface t ty ->
-    [renderSurface t ++ " : " ++ renderCore ren (contextOf s) ty]
+  InferredSurface t ps ty ->
+    [renderSurface t ++ " : " ++ signatureIn ren (contextOf s) ps ty]
   IllTyped e     -> renderTypeError ren e
   -- The two terms are restated, because with η a yes is printed about terms
   -- that still look different (§5.2).
@@ -2051,11 +2051,24 @@ signatureIn ren@(Rendering _ n0 _ _) ctx0 ps0 ty0 = braced n0 ctx0 [] ps0 ty0
     --
     -- The opened binder goes into the context, so the codomain prints it by
     -- name rather than as a bare variable.
-    braced n ctx bs (Implicit : more) (Pi i dom sc) =
-      let (v, n1) = fresh n
-       in braced n1 (ctx ++ [Hypothesis v i dom])
-                 (bs ++ ["{" ++ identString i ++ " : " ++ renderCore (at n) ctx dom ++ "}"])
-                 more (open v sc)
+    braced n ctx bs (p : more) (Pi i dom sc)
+      -- **An explicit position is peeled too, when something names it** — a
+      -- judgment's named premise, `p1 : Γ ⊢ M : T`, which is a premise and
+      -- stays explicit while the metavariables around it do not. Peeling it
+      -- keeps the run in one @∀@; stopping here would print
+      -- @∀ {Γ : Ctx} -> ∀ (p1 : …) -> …@, two quantifiers for one telescope.
+      --
+      -- **An explicit position nothing names is left to 'renderCore'**, which
+      -- prints it as an arrow — @Premise -> …@ — and that is the right spelling
+      -- for all but one of a rule's premises. So the run ends there, with the
+      -- @->@ the fall-through writes.
+      | Implicit <- p = peel ("{" ++ shown ++ "}")
+      | named         = peel ("(" ++ shown ++ ")")
+      where
+        (v, n1)  = fresh n
+        shown    = identString i ++ " : " ++ renderCore (at n) ctx dom
+        named    = v `elem` freeVars (open v sc)
+        peel one = braced n1 (ctx ++ [Hypothesis v i dom]) (bs ++ [one]) more (open v sc)
     braced n ctx bs _ ty
       | null bs   = renderCore (at n) ctx ty
       | otherwise = "∀ " ++ unwords bs ++ " -> " ++ renderCore (at n) ctx ty

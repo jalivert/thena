@@ -157,7 +157,7 @@ import Data.Word (Word64)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, declarationWord, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), close, freeVars, innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, declarationWord, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -252,6 +252,7 @@ import Thena.Core.Trust
   , unmet
   )
 import Thena.Core.Typing (infer, sortOf)
+import qualified Thena.Development.Component as Component
 import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Ops
   ( partOf
@@ -1418,7 +1419,7 @@ data Response
   | ParsingEntered String   -- ^ @:parse ‹L›@: the interactive mode began (phase 102b)
   | ParsingLeft String      -- ^ @:done@: it ended
     -- ^ @:parse@: the language, the text, and why it is not one term
-  | InferredSurface Surface Core
+  | InferredSurface Surface [Plicity] Core
     -- ^ @:infer ‹surface›@ (MS4 phase 43): the term as written and the type
     -- elaborating it produced. The **surface** term, not the core one it built,
     -- because the development it built was rewound and printing a term the
@@ -6014,6 +6015,33 @@ dispatch s name arg = case name of
     -- succeed while owing one; reporting a type for a development that does not
     -- check would be the gap @ms3\/CLOSEOUT.md@ item 25 describes, one command
     -- further on.
+    -- | **An undetermined implicit becomes a quantifier** (MS12 phase 320,
+    -- `~td9j6`). @:infer@ rewinds the development, so a hole the elaboration
+    -- claimed and did not solve is gone by the time the answer is printed —
+    -- and the answer mentions it. Before a name EXPANDed there were no such
+    -- holes and the question never came up; now @:infer S-refl@ is exactly
+    -- this case, and left alone it printed the hole as a bare variable.
+    --
+    -- **Quantifying is the truthful reading of the answer**: the type is
+    -- @sub ?a ?a1 S@ /for some/ @?a@ and @?a1@, which is what a @∀@ over them
+    -- says. They are implicit because the positions they came from are, so
+    -- 'Thena.Render.signature' prints them in braces.
+    --
+    -- **The names are the holes'**, @a@, @a1@, not the declaration's @Γ@, @T@:
+    -- a signature records which positions are implicit and not what their
+    -- binders were called, so the better names are not reachable from here.
+    quantifyUnknowns dev ty =
+      let claims = [ (v, i, dom) | Component.Claim v i dom <- chainOf (flatten dev) ]
+          loose  = [ c | c@(v, _, _) <- claims, v `elem` freeVars ty ]
+       in ( map (const Implicit) loose
+          , foldr (\(v, i, dom) acc -> Pi i dom (close v acc)) ty loose
+          )
+
+    chainOf p = case p of
+      Under c rest   -> c : chainOf rest
+      Pending _ rest -> chainOf rest
+      Trailing _     -> []
+
     inferSurface t =
       let (l, n1) = freshLevelMeta (names machine)
           before  = snapshotOf machine
@@ -6043,8 +6071,10 @@ dispatch s name arg = case name of
                     -- **The two agree up to conversion, not syntactically**, and
                     -- they print the same.
                     (Right _, _) -> case expectedType (cursor dev) of
-                      Just ty -> (back, InferredSurface t
-                                          (whnf (globals m') (focusContext dev) ty))
+                      Just ty ->
+                        let (ps, gen) = quantifyUnknowns dev
+                                          (whnf (globals m') (focusContext dev) ty)
+                         in (back, InferredSurface t ps gen)
                       -- Unreachable as the program is written — the focus is the
                       -- component @Elaborate@ was pointed at — but the cursor
                       -- type admits it and inventing an answer would be worse.

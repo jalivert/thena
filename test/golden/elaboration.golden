@@ -174,10 +174,11 @@ thena spine> along
 thena spine> :step on
 thena spine> elaborate surface`a`
 pc
-  0  w = surface-name t
-  1  x = resolve-name w
-  2  call fill x
-  3  call solve
+  0  h = here
+  1  e = expand-implicits t
+  2  w = surface-name t
+  3  f = resolve-name w
+  4  call spine-arguments h f e
 env
   t = ‹a›
 stack
@@ -187,74 +188,71 @@ stack
   call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
-  0  x = resolve-name w
-  1  call fill x
+  0  e = expand-implicits t
+  1  w = surface-name t
+  2  f = resolve-name w
+  3  call spine-arguments h f e
+env
+  h = core`‹Var 33›`
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+thena spine> :step
+pc
+  0  w = surface-name t
+  1  f = resolve-name w
+  2  call spine-arguments h f e
+env
+  e = ‹a›
+  h = core`‹Var 33›`
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+thena spine> :step
+pc
+  0  f = resolve-name w
+  1  call spine-arguments h f e
+env
+  w = a
+  e = ‹a›
+  h = core`‹Var 33›`
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+thena spine> :step
+pc
+  0  call spine-arguments h f e
+env
+  f = core`a`
+  w = a
+  e = ‹a›
+  h = core`‹Var 33›`
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+thena spine> :step
+pc
+  0  goto h
+  1  call fill f
   2  call solve
 env
-  w = a
+  h = core`‹Var 33›`
+  f = core`a`
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-thena spine> :step
-pc
-  0  call fill x
-  1  call solve
-env
-  x = core`a`
-  w = a
-  t = ‹a›
-stack
-  call, 0 instruction(s) to resume
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-thena spine> :step
-pc
-  0  n = fresh-name "refined"
-  1  x = define n t
-  2  s = typeof x
-  3  g = goal
-  4  unify-into s g
-  5  prim-try x
-env
-  t = core`a`
-stack
-  call, 1 instruction(s) to resume
-  call, 0 instruction(s) to resume
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-thena spine> :step
-pc
-  0  x = define n t
-  1  s = typeof x
-  2  g = goal
-  3  unify-into s g
-  4  prim-try x
-env
-  n = refined
-  t = core`a`
-stack
-  call, 1 instruction(s) to resume
-  call, 0 instruction(s) to resume
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-  call, 0 instruction(s) to resume (returned)
-thena spine> :step
-pc
-  0  s = typeof x
-  1  g = goal
-  2  unify-into s g
-  3  prim-try x
-env
-  x = core`a`
-  n = refined
-  t = core`a`
-stack
-  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
   call, 0 instruction(s) to resume (returned)
   call, 0 instruction(s) to resume (returned)

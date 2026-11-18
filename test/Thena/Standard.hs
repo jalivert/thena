@@ -289,10 +289,20 @@ proveGuess = Rule (rootName "prove") [] [FocusIsGuess] [Do Prove]
 -- move.
 elaborateClauses :: [Rule]
 elaborateClauses =
+  -- **A bare name EXPANDs too** (MS12 phase 320, `~td9j6`): a name whose
+  -- declaration has implicit positions and no written arguments — @V-abs@, a
+  -- rule with no premises — is @E⟦x ⃗a⟧@ with an empty @⃗a@, so it goes through
+  -- the same walk as an application rather than filling the hole with the name
+  -- itself. **Asking whether a name has implicit positions is not a head
+  -- test**: a head test sees the focus and the operand, not the machine's
+  -- signatures, so @expand-implicits@ answers it and gives back the name
+  -- unchanged when there is nothing to insert.
   [ clause SurfaceIsName
-      [ Bind (Op.PVar "w") Nothing (Op.SurfaceNameOf (Ref "t"))
-      , Bind (Op.PVar "x") Nothing (Op.ResolveName (Ref "w"))
-      , call "fill" [Ref "x"], call "solve" []
+      [ Bind (Op.PVar "h") Nothing Here
+      , Bind (Op.PVar "e") Nothing (Op.ExpandImplicits (Ref "t"))
+      , Bind (Op.PVar "w") Nothing (Op.SurfaceNameOf (Ref "t"))
+      , Bind (Op.PVar "f") Nothing (Op.ResolveName (Ref "w"))
+      , Do (Call "spine-arguments" [Ref "h", Ref "f", Ref "e"])
       ]
   , clause SurfaceIsLiteral
       [ Bind (Op.PVar "l") Nothing (Op.SurfaceLiteralOf (Ref "t"))

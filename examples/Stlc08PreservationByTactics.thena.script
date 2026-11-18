@@ -151,9 +151,9 @@ along
 along
 eliminate-core core`ctxInvExtend-tactics G x S y U i`
 goto-named "orLeftMethod"
-elaborate surface`\ h -> subst String (\ z -> extend-in z U (extend G1 x S)) x y (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h)) (subst Ty (\ V -> extend-in x V (extend G1 x S)) S U (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h)) (extend-here G1 x S))`
+elaborate surface`\ h -> subst String (\ z -> extend-in z U (extend G1 x S)) x y (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h)) (subst Ty (\ V -> extend-in x V (extend G1 x S)) S U (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h)) extend-here)`
 goto-named "orRightMethod"
-elaborate surface`\ h -> extend-there-extend G1 y U x S (andLeft (Eq String y x -> Empty) (extend-in y U G) h) (inc y U (andRight (Eq String y x -> Empty) (extend-in y U G) h))`
+elaborate surface`\ h -> extend-there-extend (andLeft (Eq String y x -> Empty) (extend-in y U G) h) (inc y U (andRight (Eq String y x -> Empty) (extend-in y U G) h))`
 goto-named "inclExtend-tactics1"
 solve
 goto-named "inclExtend-tactics"
@@ -173,11 +173,11 @@ along
 along
 eliminate-core core`d`
 goto-named "T-varMethod"
-elaborate surface`\ x T1 G0 i G1 inc -> T-var x T1 G1 (inc x T1 i)`
+elaborate surface`\ x T1 G0 i G1 inc -> T-var (inc x T1 i)`
 goto-named "T-absMethod"
-elaborate surface`\ G0 x S E T1 d0 ih G1 inc -> T-abs G1 x S E T1 (ih (extend G1 x S) (inclExtend-tactics G0 G1 x S inc))`
+elaborate surface`\ G0 x S E T1 d0 ih G1 inc -> T-abs (ih (extend G1 x S) (inclExtend-tactics G0 G1 x S inc))`
 goto-named "T-appMethod"
-elaborate surface`\ G0 M S T1 N d1 d2 ih1 ih2 G1 inc -> T-app G1 M S T1 N (ih1 G1 inc) (ih2 G1 inc)`
+elaborate surface`\ G0 M S T1 N d1 d2 ih1 ih2 G1 inc -> T-app (ih1 G1 inc) (ih2 G1 inc)`
 goto-named "weaken-tactics1"
 solve
 goto-named "weaken-tactics"
@@ -341,9 +341,9 @@ along
 along
 eliminate-core core`ctxInvExtend-tactics G x S y U i`
 goto-named "orLeftMethod"
-elaborate surface`\ h -> subst String (\ z -> Entry (extend D x S) z U (look z (cons (And String LC) (both String LC x (var x)) s))) x y (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h)) (subst Ty (\ V -> Entry (extend D x S) x V (look x (cons (And String LC) (both String LC x (var x)) s))) S U (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h)) (orLeft (And (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S))) (And (typing empty (look x (cons (And String LC) (both String LC x (var x)) s)) S) (Eq (List String) (LC.fv.x (look x (cons (And String LC) (both String LC x (var x)) s))) (nil String))) (both (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S)) (lookHit-tactics x (var x) s) (extend-here D x S))))`
+elaborate surface`\ h -> subst String (\ z -> Entry (extend D x S) z U (look z (cons (And String LC) (both String LC x (var x)) s))) x y (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h)) (subst Ty (\ V -> Entry (extend D x S) x V (look x (cons (And String LC) (both String LC x (var x)) s))) S U (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h)) (orLeft (And (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S))) (And (typing empty (look x (cons (And String LC) (both String LC x (var x)) s)) S) (Eq (List String) (LC.fv.x (look x (cons (And String LC) (both String LC x (var x)) s))) (nil String))) (both (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S)) (lookHit-tactics x (var x) s) extend-here)))`
 goto-named "orRightMethod"
-elaborate surface`\ h -> subst LC (\ m -> Entry (extend D x S) y U m) (look y s) (look y (cons (And String LC) (both String LC x (var x)) s)) (sym LC (look y (cons (And String LC) (both String LC x (var x)) s)) (look y s) (lookMiss-tactics y x (var x) s (andLeft (Eq String y x -> Empty) (extend-in y U G) h))) (elim Or ((And (Eq LC (look y s) (var y)) (extend-in y U D)) (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String)))) (\ o1 -> Entry (extend D x S) y U (look y s)) ((\ e -> orLeft (And (Eq LC (look y s) (var y)) (extend-in y U (extend D x S))) (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String))) (both (Eq LC (look y s) (var y)) (extend-in y U (extend D x S)) (andLeft (Eq LC (look y s) (var y)) (extend-in y U D) e) (extend-there-extend D y U x S (andLeft (Eq String y x -> Empty) (extend-in y U G) h) (andRight (Eq LC (look y s) (var y)) (extend-in y U D) e)))) (\ c -> orRight (And (Eq LC (look y s) (var y)) (extend-in y U (extend D x S))) (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String))) c)) () (g y U (andRight (Eq String y x -> Empty) (extend-in y U G) h)))`
+elaborate surface`\ h -> subst LC (\ m -> Entry (extend D x S) y U m) (look y s) (look y (cons (And String LC) (both String LC x (var x)) s)) (sym LC (look y (cons (And String LC) (both String LC x (var x)) s)) (look y s) (lookMiss-tactics y x (var x) s (andLeft (Eq String y x -> Empty) (extend-in y U G) h))) (elim Or ((And (Eq LC (look y s) (var y)) (extend-in y U D)) (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String)))) (\ o1 -> Entry (extend D x S) y U (look y s)) ((\ e -> orLeft (And (Eq LC (look y s) (var y)) (extend-in y U (extend D x S))) (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String))) (both (Eq LC (look y s) (var y)) (extend-in y U (extend D x S)) (andLeft (Eq LC (look y s) (var y)) (extend-in y U D) e) (extend-there-extend (andLeft (Eq String y x -> Empty) (extend-in y U G) h) (andRight (Eq LC (look y s) (var y)) (extend-in y U D) e)))) (\ c -> orRight (And (Eq LC (look y s) (var y)) (extend-in y U (extend D x S))) (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String))) c)) () (g y U (andRight (Eq String y x -> Empty) (extend-in y U G) h)))`
 goto-named "goodExtend-tactics1"
 solve
 goto-named "goodExtend-tactics"
@@ -401,11 +401,11 @@ along
 along
 eliminate-core core`d`
 goto-named "T-varMethod"
-elaborate surface`\ x T0 G0 i D s g -> elim Or ((And (Eq LC (look x s) (var x)) (extend-in x T0 D)) (And (typing empty (look x s) T0) (Eq (List String) (LC.fv.x (look x s)) (nil String)))) (\ o -> typing D (look x s) T0) ((\ e -> subst LC (\ m -> typing D m T0) (var x) (look x s) (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (extend-in x T0 D) e)) (T-var x T0 D (andRight (Eq LC (look x s) (var x)) (extend-in x T0 D) e))) (\ c -> weakenEmpty-tactics (look x s) T0 (andLeft (typing empty (look x s) T0) (Eq (List String) (LC.fv.x (look x s)) (nil String)) c) D)) () (g x T0 i)`
+elaborate surface`\ x T0 G0 i D s g -> elim Or ((And (Eq LC (look x s) (var x)) (extend-in x T0 D)) (And (typing empty (look x s) T0) (Eq (List String) (LC.fv.x (look x s)) (nil String)))) (\ o -> typing D (look x s) T0) ((\ e -> subst LC (\ m -> typing D m T0) (var x) (look x s) (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (extend-in x T0 D) e)) (T-var (andRight (Eq LC (look x s) (var x)) (extend-in x T0 D) e))) (\ c -> weakenEmpty-tactics (look x s) T0 (andLeft (typing empty (look x s) T0) (Eq (List String) (LC.fv.x (look x s)) (nil String)) c) D)) () (g x T0 i)`
 goto-named "T-absMethod"
-elaborate surface`\ G0 x S E0 T0 d0 ih D s g -> subst String (\ z -> typing D (abs z S (LC.subst-* E0 (cons (And String LC) (both String LC x (var z)) s))) (arrow S T0)) x (LC.fresh.x x (images s (LC.fv.x (abs x S E0)))) (sym String (LC.fresh.x x (images s (LC.fv.x (abs x S E0)))) x (freshKeeps-tactics x (images s (LC.fv.x (abs x S E0))) (notCaptured-tactics G0 D s x S E0 T0 d0 g))) (T-abs D x S (LC.subst-* E0 (cons (And String LC) (both String LC x (var x)) s)) T0 (ih (extend D x S) (cons (And String LC) (both String LC x (var x)) s) (goodExtend-tactics G0 D s x S g)))`
+elaborate surface`\ G0 x S E0 T0 d0 ih D s g -> subst String (\ z -> typing D (abs z S (LC.subst-* E0 (cons (And String LC) (both String LC x (var z)) s))) (arrow S T0)) x (LC.fresh.x x (images s (LC.fv.x (abs x S E0)))) (sym String (LC.fresh.x x (images s (LC.fv.x (abs x S E0)))) x (freshKeeps-tactics x (images s (LC.fv.x (abs x S E0))) (notCaptured-tactics G0 D s x S E0 T0 d0 g))) (T-abs (ih (extend D x S) (cons (And String LC) (both String LC x (var x)) s) (goodExtend-tactics G0 D s x S g)))`
 goto-named "T-appMethod"
-elaborate surface`\ G0 M S T0 N d1 d2 ih1 ih2 D s g -> T-app D (LC.subst-* M s) S T0 (LC.subst-* N s) (ih1 D s g) (ih2 D s g)`
+elaborate surface`\ G0 M S T0 N d1 d2 ih1 ih2 D s g -> T-app (ih1 D s g) (ih2 D s g)`
 goto-named "substAll-tactics1"
 solve
 goto-named "substAll-tactics"
@@ -531,7 +531,7 @@ intro
 goto-named "E-app1Method1"
 eliminate-core core`invApp-tactics empty M N U d`
 goto-named "pairMethod"
-elaborate surface`\ S p -> T-app empty M' S U N (ih (arrow S U) (andLeft (typing empty M (arrow S U)) (typing empty N S) p)) (andRight (typing empty M (arrow S U)) (typing empty N S) p)`
+elaborate surface`\ S p -> T-app (ih (arrow S U) (andLeft (typing empty M (arrow S U)) (typing empty N S) p)) (andRight (typing empty M (arrow S U)) (typing empty N S) p)`
 goto-named "E-app1Method1"
 solve
 goto-named "E-app1Method"
@@ -549,7 +549,7 @@ intro
 goto-named "E-app2Method1"
 eliminate-core core`invApp-tactics empty M N U d`
 goto-named "pairMethod"
-elaborate surface`\ S p -> T-app empty M S U N' (andLeft (typing empty M (arrow S U)) (typing empty N S) p) (ih S (andRight (typing empty M (arrow S U)) (typing empty N S) p))`
+elaborate surface`\ S p -> T-app (andLeft (typing empty M (arrow S U)) (typing empty N S) p) (ih S (andRight (typing empty M (arrow S U)) (typing empty N S) p))`
 goto-named "E-app2Method1"
 solve
 goto-named "E-app2Method"

@@ -561,7 +561,7 @@ tests =
             case ( snd (say [natCommand, "open Nat", ":infer succ zero"])
                  , snd (say [natCommand, "open Nat", ":infer core`succ zero`"])
                  ) of
-              (InferredSurface _ a, Inferred _ b) ->
+              (InferredSurface _ _ a, Inferred _ b) ->
                 case convert (globals (machineOf (fst (say [natCommand])))) [] 0 a b of
                   (Nothing, _, _)  -> pure ()
                   (Just why, _, _) -> assertFailure (show why)

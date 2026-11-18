@@ -28,7 +28,7 @@ open step
 -- the kernel before admitting it — if it does not check, nothing is admitted.
 
 :theorem zeroIsValue : value`0 value`
-try-core core`V-num NV-zero`
+try-core core`V-num zero NV-zero`
 solve
 qed
 
@@ -66,7 +66,7 @@ goto-named "NV-zeroCase"
 solve
 
 goto-named "NV-succCase1"
-try-core core`pair Tm (\ (u : Tm) -> step (pred (succ M)) u) M (E-predSucc d1)`
+try-core core`pair Tm (\ (u : Tm) -> step (pred (succ M)) u) M (E-predSucc M d1)`
 solve
 goto-named "NV-succCase"
 solve

@@ -994,13 +994,13 @@ postConstraint n k cur = case cur of
 
     depth = length . toList
 
-    splice p d = foldl (:>) Here (insertAt (clamp d) (toList p))
+    splice p d = foldl (:>) Here (pastAt (clamp d) (toList p))
 
     clamp d = max 0 (min n d)
 
-    insertAt _ []       = [Past k]
-    insertAt 0 ss       = Past k : ss
-    insertAt m (s : ss) = s : insertAt (m - 1) ss
+    pastAt _ []       = [Past k]
+    pastAt 0 ss       = Past k : ss
+    pastAt m (s : ss) = s : pastAt (m - 1) ss
 
     spliceUnder m q
       | m <= 0 = Pending k q
