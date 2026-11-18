@@ -70,6 +70,7 @@ import Data.Maybe (isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Zipper as Zip
+import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime)
 import qualified Graphics.Vty as V
 import Graphics.Vty.Platform.Unix (mkVty)
 import Graphics.Vty.UnicodeWidthTable.Install (installUnicodeWidthTable)
@@ -272,6 +273,45 @@ data ScriptLine = ScriptLine
   , slOk      :: Bool
   }
 
+-- | **A tail re-run in flight, off the keypress** — `~twdbp`, his ruling of
+-- 2026-11-18: report progress on a background thread rather than freeze the
+-- terminal for the run, which measured 9.6s–25.2s on his own machine with
+-- nothing on screen to say so. 'Nothing' in 'stRerun' is the ordinary state;
+-- a document-editing key is refused while this is 'Just' ('handleEventForKeys'),
+-- so only one re-run is ever in flight and nothing races it.
+data RerunState = RerunState
+  { rrGen     :: Int
+    -- ^ bumped every time a re-run starts. A posted 'RerunStep' whose
+    -- generation disagrees is a straggler nothing is waiting on any more —
+    -- the same role 'stJevGen' plays for a ranking answer.
+  , rrAt      :: Int
+    -- ^ the document index the batch starts at. Everything before it in
+    -- 'stScript' is untouched for as long as this is 'Just'.
+  , rrPending :: [ScriptLine]
+    -- ^ the batch's lines exactly as they stood the instant the re-run
+    -- started — already dim, a 'Nothing' session, their own text. A posted
+    -- step's completed prefix replaces a prefix of this; the rest keeps
+    -- showing as it did, which is what makes a line nothing has reached yet
+    -- indistinguishable from one that was always going to wait.
+  , rrUnrun   :: [ScriptLine]
+    -- ^ whatever came after the batch — never touched by this re-run,
+    -- appended back unchanged at every step.
+  , rrFinish  :: [ScriptLine] -> EventM Name St ()
+    -- ^ what the call site already did with 'foldRun''s result before this
+    -- existed — 'reseated', 'loadScriptAt', or a plain splice. Runs once,
+    -- when the whole batch has an answer.
+  , rrShow    :: Bool
+    -- ^ **the half-second threshold has passed and it is worth saying so**
+    -- — his requirement of 2026-11-18. 'False' throughout a re-run that
+    -- finishes quickly, which never draws the foot note or the '>' marker
+    -- at all.
+  }
+
+-- | A fresh line nothing has run yet, for text with no existing 'ScriptLine'
+-- to start from — the same shape 'unran' leaves one in.
+freshPending :: String -> ScriptLine
+freshPending t = ScriptLine t Nothing Nothing [] True
+
 -- | One completed round: the line that was run (absent for the startup
 -- trouble dump and the `:theme`/`:fold` pseudo-commands, which never echoed
 -- what was typed even before this) and the output lines it produced.
@@ -461,6 +501,12 @@ data St = St
     -- ^ the committed script, oldest first. Survives toggling the mode off
     -- and back on — discarding someone's script on a stray keypress is a bad
     -- failure mode, so leaving the mode only hides it.
+  , stRerun :: Maybe RerunState
+    -- ^ **a tail re-run in flight off the keypress** — `~twdbp`, see
+    -- 'RerunState'. 'Nothing' almost always; see 'rerunTail'.
+  , stRerunGen :: Int
+    -- ^ the last generation handed to a re-run, bumped by 'rerunTail' every
+    -- time one starts — same role 'stJevGen' plays for a ranking request.
   , stShipped :: [FilePath]
     -- ^ Thena's own prelude and standard base, as absolute paths, read once
     -- at boot. **The modules pane needs them to tell his files from ours**
@@ -646,6 +692,8 @@ runTui = do
         , stHistoryDraft = ""
         , stScriptMode  = False
         , stScript      = []
+        , stRerun       = Nothing
+        , stRerunGen    = 0
         , stShipped     = shipped
         , stScriptBase  = Nothing
         , stScriptPos   = Nothing
@@ -720,9 +768,16 @@ declareWideGlyphs =
 -- (handled by doing nothing — the outer wrapper around every event still
 -- records the fresh extents), a Jev debounce timer coming due, tagged with
 -- the pending generation it was scheduled for ('stJevPending',
--- 'handleJevDue'), and a Jev ranking answer, tagged with the
--- generation it was asked for ('stJevGen', 'applyJevRanking').
-data AppEvent = Tick | JevDue Int | JevRanked Int (Either String (Map.Map Text Double))
+-- 'handleJevDue'), a Jev ranking answer, tagged with the
+-- generation it was asked for ('stJevGen', 'applyJevRanking'), and a step
+-- of a tail re-run coming due off 'rerunTail''s background thread: the
+-- generation it was started under, the batch's result so far, whether the
+-- half-second threshold has passed, and whether this is the final step.
+data AppEvent
+  = Tick
+  | JevDue Int
+  | JevRanked Int (Either String (Map.Map Text Double))
+  | RerunStep Int [ScriptLine] Bool Bool
 
 app :: App St AppEvent Name
 app = App
@@ -1462,12 +1517,30 @@ renderScript :: St -> Widget Name -> [Widget Name]
 renderScript st inputLine =
   concat (zipWith row [0 ..] (stScript st)) <> tail'
   where
+    -- | **The line a re-run is on right now, once it is worth saying** —
+    -- `~twdbp`, his requirement of 2026-11-18 that a '>' stand beside it so
+    -- position is not only available when a line happens to flip dim.
+    -- 'Nothing' until the half-second threshold passes ('rrShow'), same as
+    -- 'rerunNote' at the pane's foot — the two always appear together.
+    rerunRow = case stRerun st of
+      Just rs
+        | rrShow rs
+        , let done = scriptFrontier st - rrAt rs
+        , done < length (rrPending rs) ->
+            Just (rrAt rs + done)
+      _ -> Nothing
+    -- | **The caret's own row stops rendering as a live editor while a
+    -- re-run is in flight** — `~twdbp`. Editing is suspended for the run's
+    -- length ('handleEventForKeys' refuses the keys that would reach it
+    -- anyway), so there is nothing here to edit; it falls through to 'dim',
+    -- which is what a batch's lines already are the instant the run starts.
     row i sl
-      | stScriptPos st == Just i = [marker <+> inputLine] <> refusal sl
+      | stScriptPos st == Just i, isNothing (stRerun st) = [marker <+> inputLine] <> refusal sl
       | dim i = [marker <+> withAttr (attrName "script.stale") (str (slText sl))] <> refusal sl
       | otherwise = [marker <+> str (slText sl)] <> refusal sl
       where
         marker
+          | rerunRow == Just i = withAttr (attrName "script.marker") (str "> ")
           | stScriptPos st == Just i = withAttr (attrName "script.marker") (str "⟩ ")
           | otherwise = str "  "
     -- | **One dim, two causes** — the design's own words. A line is drawn
@@ -1521,18 +1594,33 @@ scriptFoot st = case stScriptBar st of
             , fill ' '
             ]
     ]
-  Nothing -> case stScriptNote st of
-    Just note -> [withAttr (attrName "script.refused") (str (" " <> note))]
-    -- | **A line's own output used to be drawn here, four lines of it, and
-    -- it is the output pane's now** — `~wx6m3`, his request of 2026-11-11:
-    -- /"That stuff that you show me at the bottom of the screen when I do
-    -- `:show o` in a script-mode? That goes into a new pane also."/ The foot
-    -- had room for four lines and cut `:show` on a proved theorem off
-    -- mid-term; a pane has room, so the cap went with the move instead of
-    -- travelling with it. 'lineInFocus' is what the pane reads, and it keeps
-    -- the one thing the foot got right: it follows the caret, so nothing
-    -- anywhere needs a taxonomy of which commands are queries.
-    Nothing -> []
+  Nothing -> case rerunNote st of
+    Just note -> [withAttr (attrName "script.marker") (str (" " <> note))]
+    Nothing -> case stScriptNote st of
+      Just note -> [withAttr (attrName "script.refused") (str (" " <> note))]
+      -- | **A line's own output used to be drawn here, four lines of it, and
+      -- it is the output pane's now** — `~wx6m3`, his request of 2026-11-11:
+      -- /"That stuff that you show me at the bottom of the screen when I do
+      -- `:show o` in a script-mode? That goes into a new pane also."/ The foot
+      -- had room for four lines and cut `:show` on a proved theorem off
+      -- mid-term; a pane has room, so the cap went with the move instead of
+      -- travelling with it. 'lineInFocus' is what the pane reads, and it keeps
+      -- the one thing the foot got right: it follows the caret, so nothing
+      -- anywhere needs a taxonomy of which commands are queries.
+      Nothing -> []
+
+-- | **"re-running line N of X", and only once the run has gone on long
+-- enough to say so** — `~twdbp`, his requirement of 2026-11-18: /"the entire
+-- re-run takes longer than half a second... some visual signal that stuff is
+-- happening."/ 'Nothing' throughout a re-run that finishes inside that
+-- window, which draws nothing at all — the same silence a fast re-run has
+-- always drawn.
+rerunNote :: St -> Maybe String
+rerunNote st = case stRerun st of
+  Just rs | rrShow rs ->
+    let done = scriptFrontier st - rrAt rs
+     in Just ("re-running line " <> show (done + 1) <> " of " <> show (length (rrPending rs)))
+  _ -> Nothing
 
 -- | **What is in scope, grouped by where it came from** — `~5d35q`, and the
 -- session it reads is 'activeSession', which is his ruling of 2026-11-12:
@@ -2324,20 +2412,30 @@ maxPaneWidth st p screen =
     other = if p `elem` c1 then c2 else c1
     otherWide = maximum (minPaneWidth : map (paneWidthOf st) other)
 
+-- | **A re-run in flight owns the document, so a key that would edit it is
+-- refused until the run posts its finished step** — `~twdbp`. Only a
+-- 'VtyEvent' is refused: 'AppEvent's still have to reach 'handleRerunStep',
+-- and a mouse click still has to reach a pane fold or a drag, neither of
+-- which touches 'stScript'. This is what keeps only one re-run ever in
+-- flight — 'rerunTail' would otherwise have no way to stop a second one
+-- starting on top of the first, each racing the other to splice the same
+-- document.
 handleEventForKeys :: BrickEvent Name AppEvent -> EventM Name St ()
 handleEventForKeys ev = do
   st <- get
-  case (stPicker st, stScriptBar st) of
-    -- | **The picker is checked first, and that is what makes it modal** —
-    -- the one widget here that takes the keyboard off whichever of the three
-    -- keyboards below it was holding it. Up, Down and Enter mean something in
-    -- each of them, so a picker that merely added bindings would be a fourth
-    -- claim on the same three keys.
-    (Just pk, _) -> handlePickerEvent pk ev
-    (_, Just bar) -> handleBarEvent st bar ev
-    _
-      | stScriptMode st -> handleScriptEvent ev
-      | otherwise -> handleReplEvent ev
+  case (stRerun st, ev) of
+    (Just _, VtyEvent _) -> pure ()
+    _ -> case (stPicker st, stScriptBar st) of
+      -- | **The picker is checked first, and that is what makes it modal** —
+      -- the one widget here that takes the keyboard off whichever of the three
+      -- keyboards below it was holding it. Up, Down and Enter mean something in
+      -- each of them, so a picker that merely added bindings would be a fourth
+      -- claim on the same three keys.
+      (Just pk, _) -> handlePickerEvent pk ev
+      (_, Just bar) -> handleBarEvent st bar ev
+      _
+        | stScriptMode st -> handleScriptEvent ev
+        | otherwise -> handleReplEvent ev
 
 -- | **The byte runs vty hands over as literal text, and what each one means.**
 -- vty decodes neither the kitty keyboard protocol's @CSI ‹key›;‹mods› u@ nor
@@ -2451,9 +2549,10 @@ scriptOpenLine = do
     Nothing -> pure ()
     Just s -> do
       let (ran, unrun) = tailFrom st at
-      rebuilt <- liftIO (foldRun s ("" : ran))
-      let doc = take at (stScript st) ++ rebuilt ++ unrun
-      loadScriptAt st { stScript = doc } at (stScriptDraft st)
+      rerunTail at s ("" : ran) unrun $ \rebuilt -> do
+        st' <- get
+        let doc = take at (stScript st') ++ rebuilt ++ unrun
+        loadScriptAt st' { stScript = doc } at (stScriptDraft st')
 
 -- | The command bar owns every key while it is open. Enter submits it, Esc
 -- closes it unused, everything else edits its one line — no completion, no
@@ -3029,6 +3128,8 @@ handleReplEvent (MouseDown _ _ _ _) = pure ()
 handleReplEvent (AppEvent Tick) = fireJevForCurrentDropdown
 handleReplEvent (AppEvent (JevDue gen)) = handleJevDue gen
 handleReplEvent (AppEvent (JevRanked gen result)) = applyJevRanking gen result
+handleReplEvent (AppEvent (RerunStep gen soFar shown finished)) =
+  handleRerunStep gen soFar shown finished
 handleReplEvent ev =
   Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
 
@@ -3877,16 +3978,18 @@ scriptSubmit = do
       Nothing -> pure ()
       Just s -> do
         let (ran, unrun) = tailFrom st (i + 1)
-        rebuilt <- liftIO (foldRun s ran)
-        put (reseated st i (take i (stScript st) ++ rebuilt ++ unrun))
-        afterScriptEdit
+        rerunTail i s ran unrun $ \rebuilt -> do
+          st' <- get
+          put (reseated st' i (take i (stScript st') ++ rebuilt ++ unrun))
+          afterScriptEdit
     Just i -> case scriptSessionBefore st i of
       Nothing -> pure ()
       Just s -> do
         let (ran, unrun) = tailFrom st (i + 1)
-        rebuilt <- liftIO (foldRun s (line : ran))
-        put (reseated st i (take i (stScript st) ++ rebuilt ++ unrun))
-        afterScriptEdit
+        rerunTail i s (line : ran) unrun $ \rebuilt -> do
+          st' <- get
+          put (reseated st' i (take i (stScript st') ++ rebuilt ++ unrun))
+          afterScriptEdit
 
 -- | The document after a commit on line @i@, and where the caret goes with
 -- it.
@@ -3954,6 +4057,115 @@ foldRun s (l : ls) = do
   rest <- foldRun (maybe s id (slSession sl)) ls
   pure (sl : rest)
 
+-- | **'foldRun', off the keypress** — `~twdbp`, his ruling of 2026-11-18 on
+-- his own report that a 500-line re-run froze the terminal for 9.6 to 25.2
+-- seconds with no sign anything was happening. Every call site that used to
+-- do @rebuilt <- liftIO (foldRun s texts)@ and then splice the three pieces
+-- together now does that splicing inside @finish@ instead, and hands it to
+-- this.
+--
+-- @at@ is the document index the batch starts at — everything before it in
+-- 'stScript' is never touched. @unrun@ is whatever was already sitting below
+-- the batch, carried through to every step unchanged. @finish@ runs once,
+-- when 'runRerunBatch' posts the whole batch's result — exactly what the
+-- call site did with 'foldRun''s result before this existed.
+--
+-- **The whole batch goes dim here, synchronously, the instant this is
+-- called** — not new: a line below an edit has always gone dim the moment
+-- the edit landed (`~htff2`), not when something later gets around to
+-- re-running it. What is new is everything after that moment, which is
+-- 'runRerunBatch''s to report.
+rerunTail
+  :: Int
+  -> Session
+  -> [String]
+  -> [ScriptLine]
+  -> ([ScriptLine] -> EventM Name St ())
+  -> EventM Name St ()
+rerunTail at session texts unrun finish = do
+  closeDropdowns
+  st <- get
+  let gen = stRerunGen st + 1
+      pending = map freshPending texts
+      chan = stJevChan st
+  put st
+    { stRerunGen = gen
+    , stRerun = Just RerunState
+        { rrGen = gen, rrAt = at, rrPending = pending, rrUnrun = unrun
+        , rrFinish = finish, rrShow = False
+        }
+    , stScript = take at (stScript st) ++ pending ++ unrun
+    }
+  liftIO (void (forkIO (runRerunBatch chan gen session texts)))
+
+-- | The background half of 'rerunTail'. **Two numbers, both his, both
+-- 2026-11-18** — a step is posted no more than once every 50ms of wall
+-- clock, so a batch that finishes faster than that posts nothing until its
+-- one, final step (his reasoning: /"there is no reason to cause visual
+-- flashing when reloading 50 lines would just take 20ms"/), and
+-- 'postRerunStep' marks a step 'visible' only once the whole run has taken
+-- half a second — his words, /"the entire re-run takes longer than half a
+-- second... some visual signal that stuff is happening"/.
+runRerunBatch :: BChan AppEvent -> Int -> Session -> [String] -> IO ()
+runRerunBatch chan gen session texts = do
+  start <- getCurrentTime
+  go start start session texts []
+  where
+    go start lastPost s pending acc = case pending of
+      [] -> pure ()
+        -- unreachable: every recursive call below passes a non-empty list,
+        -- guarded by the 'null ts' checks that fire before it would be.
+      (t : ts) -> do
+        sl <- runScriptLine s t
+        let acc' = sl : acc
+            s'   = maybe s id (slSession sl)
+        if null ts
+          then postRerunStep chan gen start True (reverse acc')
+          else do
+            now <- getCurrentTime
+            if diffUTCTime now lastPost >= 0.05
+              then do
+                postRerunStep chan gen start False (reverse acc')
+                go start now s' ts acc'
+              else go start lastPost s' ts acc'
+
+postRerunStep :: BChan AppEvent -> Int -> UTCTime -> Bool -> [ScriptLine] -> IO ()
+postRerunStep chan gen start finished soFar = do
+  now <- getCurrentTime
+  writeBChan chan (RerunStep gen soFar (diffUTCTime now start >= 0.5) finished)
+
+-- | A posted step from 'rerunTail''s background thread. **A generation that
+-- does not match 'stRerun' is a straggler nothing is waiting on any more**
+-- and is dropped — the same rule 'handleJevDue' applies to a superseded
+-- timer.
+--
+-- A step that is not yet 'finished' only ever touches 'stScript' and
+-- 'rrShow' — the splice is exactly 'rrPending''s own shape with a longer
+-- completed prefix, which is what lets 'scriptFrontier' draw the
+-- progression with no other state to keep true. The final step clears
+-- 'stRerun' and hands the whole batch to 'rrFinish', which does the rest —
+-- the caret, the note, 'afterScriptEdit' — exactly as the call site did
+-- before any of this existed.
+handleRerunStep :: Int -> [ScriptLine] -> Bool -> Bool -> EventM Name St ()
+handleRerunStep gen soFar shown finished = do
+  st <- get
+  case stRerun st of
+    Just rs | rrGen rs == gen ->
+      if finished
+        then do
+          put st { stRerun = Nothing }
+          rrFinish rs soFar
+        else
+          put st
+            { stScript =
+                take (rrAt rs) (stScript st)
+                  ++ soFar
+                  ++ drop (length soFar) (rrPending rs)
+                  ++ rrUnrun rs
+            , stRerun = Just rs { rrShow = shown }
+            }
+    _ -> pure ()
+
 -- | **How every script-mode event that is not typing ends: the dropdown
 -- closes.** Committing a line, walking the caret, dropping a line, inserting
 -- one from the bar — none of them is someone writing a line, so none of them
@@ -4018,9 +4230,10 @@ scriptBackOut i
         Nothing -> pure ()
         Just s -> do
           let (ran, unrun) = tailFrom st (i + 1)
-          rebuilt <- liftIO (foldRun s ran)
-          let doc = take i (stScript st) ++ rebuilt ++ unrun
-          loadScriptAt st { stScript = doc } (i - 1) (stScriptDraft st)
+          rerunTail i s ran unrun $ \rebuilt -> do
+            st' <- get
+            let doc = take i (stScript st') ++ rebuilt ++ unrun
+            loadScriptAt st' { stScript = doc } (i - 1) (stScriptDraft st')
 
 -- | **Discard the line under the caret and everything after it**, no
 -- replacement run. Reached by @:script drop@ in the command bar; a no-op
@@ -4081,8 +4294,15 @@ scriptTruncate = do
 -- **A line that has never run is not edited in this sense and is not run
 -- here**: @slRan@ is 'Nothing' for a line of an opened proof-script, there is
 -- no session under it to re-run from, and @~22qjj@'s Down is what reaches it.
-runTheEdit :: EventM Name St ()
-runTheEdit = do
+-- | **@after@ is what the caller wants once the document is settled** —
+-- `~twdbp`. There was nothing to re-run: it happens at once, inline, exactly
+-- as every caller always assumed. There was: it is chained onto the re-run's
+-- own 'rrFinish' instead, because 'scriptDown' in particular reads
+-- 'scriptFrontier' to decide its own next move, and that number is wrong
+-- until the batch 'rerunTail' just started has an answer. Running @after@
+-- early here is what used to race the background thread to the same splice.
+runTheEdit :: EventM Name St () -> EventM Name St ()
+runTheEdit after = do
   st <- get
   case stScriptPos st of
     Just i
@@ -4091,9 +4311,11 @@ runTheEdit = do
       , not (all isSpace (slText sl))
       , Just s <- scriptSessionBefore st i -> do
           let (ran, unrun) = tailFrom st (i + 1)
-          rebuilt <- liftIO (foldRun s (slText sl : ran))
-          put st { stScript = take i (stScript st) <> rebuilt <> unrun }
-    _ -> pure ()
+          rerunTail i s (slText sl : ran) unrun $ \rebuilt -> do
+            st' <- get
+            put st' { stScript = take i (stScript st') <> rebuilt <> unrun }
+            after
+    _ -> after
 
 -- | Up/Down walk the caret through the document. Up from the composing line
 -- saves it into 'stScriptDraft' first; Down past the newest line restores it.
@@ -4101,8 +4323,7 @@ runTheEdit = do
 --
 -- **An edit under the caret is run before the move** ('runTheEdit').
 scriptUp :: EventM Name St ()
-scriptUp = do
-  runTheEdit
+scriptUp = runTheEdit $ do
   st <- get
   let n = length (stScript st)
       live = concatMap Text.unpack (getEditContents (stInput st))
@@ -4127,8 +4348,7 @@ scriptUp = do
 -- typed are the same keypress — in the second, every line has run, so the
 -- first clause answers every time.
 scriptDown :: EventM Name St ()
-scriptDown = do
-  runTheEdit
+scriptDown = runTheEdit $ do
   st <- get
   let n = length (stScript st)
       f = scriptFrontier st
@@ -4278,9 +4498,11 @@ insertScriptLine st text = do
     Nothing -> put st { stScriptBar = Nothing }
     Just s -> do
       let (ran, unrun) = tailFrom st at
-      rebuilt <- liftIO (foldRun s (text : ran))
-      put (reseated st at (take at (stScript st) ++ rebuilt ++ unrun)) { stScriptBar = Nothing }
-      afterScriptEdit
+      put st { stScriptBar = Nothing }
+      rerunTail at s (text : ran) unrun $ \rebuilt -> do
+        st' <- get
+        put (reseated st' at (take at (stScript st') ++ rebuilt ++ unrun)) { stScriptBar = Nothing }
+        afterScriptEdit
 
 -- | `:script save [name]` — writes the document's lines and nothing else.
 -- **No modal.** His spec wanted one because there was nowhere to type a
