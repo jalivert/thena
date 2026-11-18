@@ -1176,6 +1176,13 @@ rule elaborate t :- when focus-is-hole (surface-is-arrow t)
 --
 -- Two clauses, because the annotation is optional and the head language has no
 -- negation. With one, X is left for the value's own FILL to unify against.
+-- **The annotated clause records the braces its annotation wrote** (MS12 phase
+-- 321): record-implicits is expand-implicits' other half, and without it the
+-- brace on a let's type was accepted and meant nothing, so
+-- `let { f : ∀ {A : Type₀} -> A -> A = \ A a -> a } in f "z"` put the string in
+-- A's position. It goes after the define, because what it records is the local
+-- that define bound; the bare clause below has no annotation and so has nothing
+-- to record.
 rule elaborate t :- when focus-is-hole (let-is-annotated t)
   do h  = here
      ; xn = fresh-name "X"
@@ -1192,6 +1199,7 @@ rule elaborate t :- when focus-is-hole (let-is-annotated t)
      ; goto h
      ; w  = let-name t
      ; define w v
+     ; record-implicits t
      ; b  = let-body t
      ; call elaborate b
 

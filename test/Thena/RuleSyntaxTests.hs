@@ -241,6 +241,7 @@ everyOp =
   , ("prim-abandon", Abandon)
   , ("prim-prove",   Prove)
   , ("expand-implicits t", Op.ExpandImplicits (Ref "t"))
+  , ("record-implicits t", Op.RecordImplicits (Ref "t"))
   , ("app-head t", Op.AppHead (Ref "t"))
   , ("app-first-argument t", Op.AppFirstArgument (Ref "t"))
   , ("app-tail t", Op.AppTail (Ref "t"))

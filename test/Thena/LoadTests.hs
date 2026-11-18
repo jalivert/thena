@@ -147,6 +147,8 @@ tests =
     , testGroup "a script states what it stands on (MS11 phase 296)" scriptActTests
     , testGroup "a replay is the lines, not the asking (MS11 phase 302)" replayTests
     , testGroup "a withheld language is withheld (MS11 phase 303)" langInterfaceTests
+    , testGroup "a let-bound local takes implicit arguments (MS12 phase 321)"
+        localImplicitTests
     ]
 
 
@@ -2716,6 +2718,114 @@ tierTests =
       \\n\
       \oneImplicit : Nat\n\
       \oneImplicit = idI (succ zero)\n"
+
+-- --------------------------------------------------------------------------
+-- A let-bound local takes implicit arguments (MS12 phase 321, `~rskkv`)
+-- --------------------------------------------------------------------------
+
+-- | __The brace on a @let@ annotation now means what it means on a signature__
+-- — his ruling of 2026-11-18 that the prenex-only restriction is not to be
+-- enforced: /"local definitions by name (let-bound) \u2026 I feel like they
+-- could."/
+--
+-- **The table is keyed by the binding and not by the word**, which is what the
+-- last two tests here are about. They are the half that cannot be measured by
+-- writing a @let@ on its own: a local whose word is also a global\'s read the
+-- global\'s braces before this phase, and @let { idI : \u2200 (A : Type\u2080) -> A -> A
+-- \u2026 } in idI String "z"@ was refused with /that head does not take that many
+-- arguments/ — an inserted argument for a position the local does not have.
+--
+-- **Each case is a whole module through 'loadProofSource'**, for the reason
+-- @tierTests@ gives: insertion is only observable by whether the declaration
+-- finishes, and a declaration finishes at the load.
+localImplicitTests :: [TestTree]
+localImplicitTests =
+  [ loads "a leading implicit is inserted at a call to a local"
+      "letLeading"
+      "letLeading : String\n\
+      \letLeading = let { f : forall {A : Type\8320} -> A -> A = \\ A a -> a }\n\
+      \             in f \"z\"\n"
+
+  , -- **The written spelling and the inserted one agree here too**, which is
+    -- the global side\'s standing property one scope down.
+    loads "and a written implicit argument is accepted in the same place"
+      "letWritten"
+      "letWritten : String\n\
+      \letWritten = let { f : forall {A : Type\8320} -> A -> A = \\ A a -> a }\n\
+      \             in f {String} \"z\"\n"
+
+  , -- **Not only a leading run.** The insertion walks the whole list of
+    -- positions, so a brace in the middle of a local\'s type is reached — and
+    -- @B@ is the type of an argument that /is/ written, because an implicit
+    -- nothing determines leaves a hole open and the declaration does not
+    -- finish whatever the insertion did.
+    loads "an implicit after an explicit one is inserted too"
+      "letMiddle"
+      "letMiddle : String\n\
+      \letMiddle = let { p : forall (A : Type\8320) -> forall {B : Type\8320} -> B -> B\n\
+      \                      = \\ A B b -> b }\n\
+      \            in p String \"z\"\n"
+
+  , -- **A bare name is a spine with no arguments written** (phase 320\'s case,
+    -- for a local): the leading implicit is inserted and the goal determines
+    -- it.
+    loads "a bare use of a local inserts its leading implicits"
+      "letBare"
+      "letBare : String -> String\n\
+      \letBare = let { f : forall {A : Type\8320} -> A -> A = \\ A a -> a } in f\n"
+
+  , -- **An unannotated @let@ records nothing and still elaborates**, which is
+    -- the clause the op is not called from.
+    loads "a let with no annotation is untouched"
+      "letBareBinding"
+      "letBareBinding : String\n\
+      \letBareBinding = let { h = \"z\" } in h\n"
+
+  , -- **The two shadowing directions.** Keying by the variable is what makes
+    -- both come out right, and either one is wrong under a by-word table.
+    loads "a local shadowing a global does not take the global's braces"
+      "letShadowsImplicit"
+      "idI : forall {A : Type\8320} -> A -> A\n\
+      \idI = \\ A a -> a\n\
+      \\n\
+      \letShadowsImplicit : String\n\
+      \letShadowsImplicit =\n\
+      \  let { idI : forall (A : Type\8320) -> A -> A = \\ A a -> a } in idI String \"z\"\n"
+
+  , loads "and a local's own braces are not lost to a global of that word"
+      "letShadowsExplicit"
+      "idE : forall (A : Type\8320) -> A -> A\n\
+      \idE = \\ A a -> a\n\
+      \\n\
+      \letShadowsExplicit : String\n\
+      \letShadowsExplicit =\n\
+      \  let { idE : forall {A : Type\8320} -> A -> A = \\ A a -> a } in idE \"z\"\n"
+
+  , -- **One word, two bindings, one brace** — the case a word could not tell
+    -- apart at all: the inner @k@ is the implicit one and the outer is not.
+    loads "the inner of two lets of one word is the one recorded for"
+      "letTwice"
+      "letTwice : String\n\
+      \letTwice =\n\
+      \  let { k : forall (A : Type\8320) -> A -> A = \\ A a -> a }\n\
+      \  in let { k : forall {A : Type\8320} -> A -> A = \\ A a -> a } in k \"z\"\n"
+
+  , loads "and so is the outer, when it is the explicit one"
+      "letTwiceOther"
+      "letTwiceOther : String\n\
+      \letTwiceOther =\n\
+      \  let { j : forall {A : Type\8320} -> A -> A = \\ A a -> a }\n\
+      \  in let { j : forall (A : Type\8320) -> A -> A = \\ A a -> a } in j String \"z\"\n"
+  ]
+  where
+    -- A module of one name, loaded strictly: what is asserted is that the
+    -- declaration finished, because an implicit that was not inserted leaves
+    -- the hole it would have filled open and the load says so.
+    loads label nm src = testCase label $ do
+      (s0, _) <- startingSession
+      case loadProofSource Strict s0 ("module Local" ++ nm ++ " where\n\n" ++ src) of
+        (_, ProofLoaded {}) -> pure ()
+        (_, other)          -> assertFailure (show other)
 
 -- --------------------------------------------------------------------------
 -- A header states the file's interface (MS11 phase 285, @~jmw4k@)

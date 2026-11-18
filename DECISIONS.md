@@ -5248,6 +5248,43 @@ above are not.
 The same limit applies to an application whose head is not a name — a β-redex
 like `(\ p -> e) v` — where there is no annotation to write. Use a `let`.
 
+### A `let`-bound name may have implicit arguments
+
+*Decided 2026-11-18, built 2026-11-19.* A brace on a `let` binding's type means what
+it means on a top-level signature: callers may leave that argument out, and
+elaboration writes it in.
+
+```
+shortest : String
+shortest = let { f : ∀ {A : Type₀} -> A -> A = \ A a -> a } in f "z"
+```
+
+Before this the brace parsed and meant nothing, so `"z"` went into `A`'s position
+and the line was refused with *String and Type₀ cannot be made equal*.
+
+**Idris 1 does not allow this** — Brady restricts implicit binders to the prenex of
+a top-level declaration — and we do not adopt the restriction. A `let` binds a
+name, and everything the mechanism needs is a name to hang the permission on.
+Writing the argument anyway, `f {String} "z"`, still works, and so does a bare
+`f` whose implicit the goal determines.
+
+**A local's braces are its own.** The permission is recorded against the
+*binding*, not against the word, so a `let`-bound `f` neither inherits the braces
+of a global `f` nor loses its own to one, and of two nested `let`s of one word only
+the one you wrote the brace on has it.
+
+**A brace still reaches nothing where no name is bound** — on a λ's binder, or
+inside the type of a higher-order argument:
+
+```
+hof : (∀ {A : Type₀} -> A -> A) -> String
+hof = \ f -> f String "z"       -- accepted: the brace on f's type means nothing
+```
+
+That is not a local-versus-global matter. Plicity is not part of a type in Thena
+— `∀ {A : Type₀} -> A -> A` and `∀ (A : Type₀) -> A -> A` are the same type — so
+a brace can only ever be a fact about something that has a name.
+
 ### `instral` has types, and a name is not a string
 
 *Decided 2026-09-12.*

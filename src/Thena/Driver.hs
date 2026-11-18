@@ -298,6 +298,7 @@ import Thena.Rules
   )
 import Thena.Surface.Concrete
   ( Plicity (..)
+  , plicitiesIn
   , Surface (..)
   , SurfaceBinder (..)
   , SurfaceConstructor (..)
@@ -2855,21 +2856,6 @@ grammarDatatype g =
                 | y `elem` taken || y `elem` used = unshadowed (y ++ "'")
                 | otherwise = y
            in (x, argumentSort a) : go (x : used) rest
-
--- | The plicity of each argument position a signature writes.
---
--- Only a leading run of @∀@ groups is read: once the type stops being a
--- quantifier there are no more named positions to speak of, and an arrow
--- contributes an 'Explicit' one.
---
--- **Top-level since MS12 phase 320**, because a @data@ block's constructors
--- need it too (`~td9j6`) and it was a local of 'surfaceProgram'.
-plicitiesIn :: Surface -> [Plicity]
-plicitiesIn t = case t of
-  SurfacePi bs body ->
-    [ p | SurfaceBinder p _ _ <- NE.toList bs ] ++ plicitiesIn body
-  SurfaceArrow _ body -> Explicit : plicitiesIn body
-  _ -> []
 
 -- | A constructor's type is written in the scope of the parameters, so they go
 -- back in front of it and are peeled off again by
@@ -5660,11 +5646,11 @@ dispatch s name arg = case name of
         -- metavariable, prints back as one. 'Core' has no plicity, so without
         -- this the answer contradicted what the elaborator does with the name.
         Just d  -> (s, ShownData d
-                        [ (constructorName c, fromMaybe [] (lookup (constructorName c) (signatures machine)))
+                        [ (constructorName c, fromMaybe [] (lookup (Engine.AsGlobal (constructorName c)) (signatures machine)))
                         | c <- inductiveConstructors d ])
         Nothing -> case lookupDefinition g (globals machine) of
           Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
-                           (fromMaybe [] (lookup g (signatures machine)))
+                           (fromMaybe [] (lookup (Engine.AsGlobal g) (signatures machine)))
                                       (definitionType d) (Just (definitionBody d)))
           Nothing -> case lookupConstant g (globals machine) of
             Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
@@ -8130,7 +8116,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
         -- generated grammar's dozens of constructors out of the table.
         installed = m { globals = g, names = n1
                       , signatures =
-                          [ e | e@(_, ps) <- cps, Implicit `elem` ps ]
+                          [ (Engine.AsGlobal nm', ps) | (nm', ps) <- cps, Implicit `elem` ps ]
                             ++ signatures m }
         -- **Every name the declaration added is asked, and the word it takes
         -- besides** (MS10 phase 264; the word at MS11 phase 305). A @data@
@@ -8250,7 +8236,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
                  , names      = n1
                  , signatures = if Explicit `elem` ps && Implicit `notElem` ps
                                   then signatures m
-                                  else (nm, ps) : signatures m
+                                  else (Engine.AsGlobal nm, ps) : signatures m
                  }
           -- **The word this definition takes, if it takes one** (MS10 phase
           -- 264): this is the door a theorem in a file comes in by, and the

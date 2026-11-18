@@ -1633,6 +1633,8 @@ unaryOps =
   , ("app-first-argument", Op.AppFirstArgument)
   , ("app-tail", Op.AppTail)
   , ("expand-implicits", Op.ExpandImplicits)
+    -- Its other half, for a @let@-bound local (MS12 phase 321).
+  , ("record-implicits", Op.RecordImplicits)
   , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
   , ("lambda-body", Op.LambdaBody), ("lambda-annot-type", Op.LambdaAnnotType)
   , ("let-name", Op.LetName), ("let-type", Op.LetType)

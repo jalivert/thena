@@ -879,7 +879,23 @@ data Op
     -- clause below, exactly as the Haskell @case@ fell through.
     --
     -- A head with nothing recorded — every DC-declared global, and every local
-    -- — takes its arguments as written, so the term comes back unchanged.
+    -- written with no brace — takes its arguments as written, so the term comes
+    -- back unchanged.
+  | RecordImplicits Operand
+    -- ^ **@EXPAND@\'s other half, written for a @let@** (MS12 phase 321,
+    -- `~rskkv`): the braces on the annotation of the @let@ it is given are
+    -- recorded against the local that @define@ has just bound, so a use of that
+    -- name inside the body gets the same insertion a global\'s does.
+    --
+    -- **A @let@ is the only binding form whose annotation a user writes inside
+    -- a term**, which is why one op covers the whole of what is not a global. A
+    -- brace written anywhere else in a term — on a λ\'s binder, or inside a
+    -- higher-order argument\'s type — reaches nothing, and cannot until plicity
+    -- is part of the type.
+    --
+    -- **It takes the @let@ node, not the variable**: the clause that calls it
+    -- has asked @let-is-annotated@ already, and the node carries both the type
+    -- the braces are in and the name they were written for.
   | LambdaName Operand
     -- ^ the first binder's name in a surface λ, as text (MS4 phase 49c).
     -- **It refuses an implicit binder and nothing else.** An annotated binder is
@@ -1794,6 +1810,7 @@ resultOf o = case o of
   ConstructorRecursiveArguments _ -> Just (TList TName)
   ApplyNext _ _ -> Just TCore  -- the spine, one argument longer
   ExpandImplicits _ -> Just TSurface
+  RecordImplicits _ -> Nothing
   AppHead _ -> Just TSurface
   AppFirstArgument _ -> Just TSurface
   AppTail _ -> Just TSurface
@@ -1952,6 +1969,7 @@ operandTypes o = case o of
   -- The spine, and the name to claim the next domain hole under.
   ApplyNext f x -> [(f, TCore), (x, TName)]
   ExpandImplicits a -> [(a, TSurface)]
+  RecordImplicits a -> [(a, TSurface)]
   AppHead a    -> [(a, TSurface)]
   AppFirstArgument a -> [(a, TSurface)]
   AppTail a    -> [(a, TSurface)]
@@ -2503,6 +2521,7 @@ opKeyword o = case o of
   ConstructorRecursiveArguments _ -> "constructor-recursive-arguments"
   ApplyNext _ _ -> "apply-next"
   ExpandImplicits _ -> "expand-implicits"
+  RecordImplicits _ -> "record-implicits"
   AppHead _ -> "app-head"
   AppFirstArgument _ -> "app-first-argument"
   AppTail _ -> "app-tail"

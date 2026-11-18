@@ -625,9 +625,9 @@ elaborateClauses =
         [ Do (Goto (Ref "x"))
         , Bind (Op.PVar "ty") Nothing (Op.LetType (Ref "t"))
         , call "elaborate" [Ref "ty"]
-        ] ++ letBody)
+        ] ++ letBody [Do (Op.RecordImplicits (Ref "t"))])
   , Rule (rootName "elaborate") [PVar "t"] [FocusIsHole, LetIsBare (Ref "t")]
-      (letPrelude ++ letBody)
+      (letPrelude ++ letBody [])
   , clause SurfaceIsAscription
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "xn") Nothing (FreshName (Lit (VText "X")))
@@ -691,14 +691,20 @@ elaborateClauses =
       , Bind (Op.PVar "vn") Nothing (FreshName (Lit (VText "V")))
       , Bind (Op.PVar "v") Nothing (Claim (Ref "vn") (Ref "x"))
       ]
-    letBody =
+    -- **Only the annotated clause records plicities** (MS12 phase 321), so the
+    -- shared tail takes what goes after the @define@ — the one instruction the
+    -- two clauses differ by below the annotation, and a brace is the only thing
+    -- an annotation can say that a bare binding cannot.
+    letBody recording =
       [ Do (Goto (Ref "v"))
       , Bind (Op.PVar "val") Nothing (Op.LetValue (Ref "t"))
       , Do (Call "elaborate" [Ref "val"])
       , Do (Goto (Ref "h"))
       , Bind (Op.PVar "w") Nothing (Op.LetName (Ref "t"))
       , Do (Define (Ref "w") (Ref "v"))
-      , Bind (Op.PVar "b") Nothing (Op.LetBody (Ref "t"))
+      ]
+      ++ recording ++
+      [ Bind (Op.PVar "b") Nothing (Op.LetBody (Ref "t"))
       , Do (Call "elaborate" [Ref "b"])
       ]
 

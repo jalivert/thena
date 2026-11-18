@@ -14,6 +14,7 @@
 module Thena.Engine
   ( -- * The machine
     Machine (..)
+  , Resolved (..)
   , Exec (..)
   , Frame (..)
   , rules
@@ -243,10 +244,28 @@ data Machine = Machine
     --
     -- **Emptied with the pool when the load ends**, since a base read for one
     -- module's blocks is not the session's.
-  , signatures  :: [(GlobalName, [Plicity])]
-    -- ^ **which of a global's argument positions were written implicit** (MS4
+  , signatures  :: [(Resolved, [Plicity])]
+    -- ^ **which of a binding's argument positions were written implicit** (MS4
     -- phase 44b) — Brady's system state @(C, A, I)@, the @I@ of it. NOT
     -- backtrackable, like 'globals' beside it.
+    --
+    -- **A @let@-bound local has entries here too since MS12 phase 321**
+    -- (`~rskkv`), which is why the key is a 'Resolved' and not a 'GlobalName':
+    -- the brace on a @let@ annotation was parsed and thrown away, so
+    -- @let { f : ∀ {A : Type₀} -> A -> A = \\ A a -> a } in f "z"@ put the
+    -- string in @A@\'s position and refused with /String and Type₀ cannot be
+    -- made equal/. Brady restricts implicit binders to the prenex of a
+    -- top-level declaration; **his ruling of 2026-11-18 is that we do not
+    -- enforce that restriction** — /"local definitions by name (let-bound)
+    -- … I feel like they could"/ — and a local is the same by-name case one
+    -- scope down.
+    --
+    -- **A local's entry outlives the development that bound it, and that is
+    -- harmless rather than overlooked.** The table is not backtrackable, so a
+    -- rule that fails past the @define@ leaves the pair standing — but a
+    -- 'Thena.Core.Term.Var' is minted from 'names', which is not backtrackable
+    -- either, so the key can never be handed to a second binding and nothing
+    -- in scope can ever reach it again.
     --
     -- **It is here and not in 'Thena.Global.Env.GlobalEnv' because the core has
     -- no plicity at all** — his decision: /"the DC does not need implicits. I
@@ -537,6 +556,40 @@ goalAtNamed i v ty = Under (Component.Claim v i ty) (Trailing (Free v))
 -- focus to take a prefix of.
 focusContext :: Development -> Context
 focusContext = Cursor.context . cursor
+
+-- | **Whose argument positions an entry in 'Machine'\'s @signatures@ is about**
+-- (MS12 phase 321): a declared global, keyed by the name it went in under, or a
+-- @let@-bound local, keyed by the variable its 'Component.Define' bound.
+--
+-- **A local is keyed by its variable and not by its word**, because a word is
+-- not an identity: @let f = … in let f = … in …@ writes two bindings and only
+-- one of them may have written a brace, and a local shadowing a global of the
+-- same word must not inherit the global\'s positions. A 'Var' is unique within
+-- a session (§3.5), which is exactly the identity wanted.
+data Resolved = AsGlobal GlobalName | AsLocal Var
+  deriving (Eq, Show)
+
+-- | **The innermost local binding of a written name**, or 'Nothing' if the name
+-- cannot be one.
+--
+-- Shadowing is what "innermost" means and Γ runs outermost-first, so this
+-- folds rather than taking the head. **A qualified name skips Γ entirely**
+-- (MS10): the context\'s entries are 'Ident's in the development\'s own scope,
+-- which has no namespaces, so @Nat.zero@ cannot be a local — and a path is how
+-- the writer says they did not mean one.
+--
+-- **One walk, read by two places since MS12 phase 321**: @resolve-name@, which
+-- turns a written name into a term, and 'Machine'\'s @signatures@, which has to
+-- ask the same question to know whether a name\'s implicit positions are a
+-- local\'s or a global\'s. They answered it separately for one phase and the
+-- answers have to agree — a name that resolves locally whose plicities are read
+-- off a global of the same word inserts arguments into the wrong call.
+localNamed :: GlobalName -> Context -> Maybe Var
+localNamed g ctx = case nameSteps g of
+  _ : _ -> Nothing
+  []    -> foldl (\acc e -> if entryIdent e == Ident (nameWord g)
+                              then Just (entryVar e) else acc)
+                 Nothing ctx
 
 -- | The development, rebuilt. O(depth), with most structure shared (§4.2).
 flatten :: Development -> Partial
@@ -2026,25 +2079,17 @@ perform instr rest m = case operation instr of
       globally = globalNamed m
 
       -- **The INNERMOST binding of that name**, which is what shadowing means
-      -- and what "Thena.Syntax.Resolve" gives. Γ runs outermost-first, so this
-      -- folds rather than taking the head.
+      -- and what "Thena.Syntax.Resolve" gives. 'localNamed' is the walk, shared
+      -- with the plicity lookup since MS12 phase 321 and documented there.
       --
       -- **It took the head until MS4 phase 49**, so a shadowed name resolved to
       -- the binding it was shadowing. Nothing had asked: phase 48 shipped the
       -- op with a test that had only one binding of the name in scope, and no
       -- rule used it until the leaf clauses did.
       --
-      -- **A QUALIFIED NAME SKIPS Γ ENTIRELY** (MS10). The context's entries are
-      -- 'Ident's in the development's own scope, which has no namespaces, so
-      -- @Nat.zero@ cannot be a local — and a path is how the writer says they
-      -- did not mean one. Only a root name can be shadowed, which is what makes
-      -- a path a way out of a shadowing.
-      inScopeAt g = case nameSteps g of
-        _ : _ -> Nothing
-        []    ->
-          foldl (\acc e -> if entryIdent e == Ident (nameWord g)
-                             then Just (entryVar e) else acc)
-                Nothing contextAt
+      -- **Only a root name can be shadowed**, which is what makes a path a way
+      -- out of a shadowing.
+      inScopeAt g = localNamed g contextAt
 
   -- **The two surface readers** (MS4 phase 49). Each is paired with the test
   -- that makes it total in the clause that uses it, and fails rather than
@@ -2300,6 +2345,38 @@ perform instr rest m = case operation instr of
             failure (NoElaborationRule
                        "an application whose head's plicities do not fit") m
       _ -> failure (ExpectedSurfaceShape "an application") m
+
+  -- **@EXPAND@\'s other half, for a binding that is not a global** (MS12 phase
+  -- 321, `~rskkv`). @expand-implicits@ reads the table; this writes it, for the
+  -- one binding form whose annotation a user writes inside a term.
+  --
+  -- **It takes the @let@ node and not the variable @define@ produced**, for the
+  -- reason every other reader here does: the clause that calls it has already
+  -- asked @let-is-annotated@, so the shape is known, and the node carries both
+  -- halves of what has to be recorded — the written type the braces are in, and
+  -- the name they were written for. The alternative, an operand holding the
+  -- variable, is the same fact arriving twice.
+  --
+  -- **The name is resolved, not trusted**: @define@ has just inserted the
+  -- component above the focus, so the innermost binding of that word is the one
+  -- being recorded for, and a word that is bound nowhere means the clause ran
+  -- this before its @define@ — which is a rule-author error and is reported as
+  -- one rather than silently recording nothing.
+  --
+  -- **Nothing is recorded when nothing was written in braces**, which is the
+  -- condition the global side applies too: an entry of all-explicit positions
+  -- says exactly what no entry says.
+  Op.RecordImplicits x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right s -> case s of
+      Concrete.SurfaceLet w (Just ty) _ _
+        | ps <- Concrete.plicitiesIn ty
+        , Implicit `elem` ps ->
+            case localNamed (rootName w) contextAt of
+              Nothing -> failure (CannotRead (ResolveFailed (NotInScope w))) m
+              Just v  -> Continue (advance m { signatures = (AsLocal v, ps) : signatures m })
+      Concrete.SurfaceLet {} -> Continue (advance m)
+      _ -> failure (ExpectedSurfaceShape "an annotated let") m
 
   Op.AppHead x -> surfaceMove x "an application" $ \s -> case s of
     Concrete.SurfaceApp h as -> Just (Zipper.intoHead as h)
@@ -2705,7 +2782,18 @@ perform instr rest m = case operation instr of
 
     -- What the machine recorded about this name\'s argument positions, if it
     -- recorded anything. A name with no entry — every DC-declared global, and
-    -- every local — takes what was written and nothing more.
+    -- every local that was written with no brace — takes what was written and
+    -- nothing more.
+    -- **A LOCAL IS ASKED ABOUT FIRST, AND IT IS THE SAME WALK @resolve-name@
+    -- TAKES — MS12 PHASE 321** (`~rskkv`). A @let@-bound name with a braced
+    -- annotation has its positions under 'AsLocal', so the clause that elaborates
+    -- a use of it inserts the arguments the writer left out; before this phase
+    -- the table held globals only and @f "z"@ for
+    -- @f : ∀ {A : Type₀} -> A -> A@ put the string in @A@\'s position.
+    -- **Resolving first is what makes shadowing come out right**: a local @f@
+    -- must not take an unrelated global @f@\'s braces, and asking the context
+    -- before the globals is how @resolve-name@ already decides which @f@ the
+    -- call even means.
     -- **THE WRITTEN NAME IS RESOLVED FIRST — MS12 PHASE 313.** The table is
     -- keyed by the name the definition went in under and the caller hands over
     -- the name as the user wrote it; a module's declarations live under the
@@ -2715,9 +2803,13 @@ perform instr rest m = case operation instr of
     -- refused with @Nat and Type\8320 cannot be made equal@.
     -- 'Thena.Core.Term.globalUnder' is the one walk; two answers or none means
     -- nothing is recorded, which is the same as an unrecorded name.
-    plicitiesOf g = case lookup (resolved g) (signatures m) of
+    plicitiesOf g = case lookup (keyFor g) (signatures m) of
       Just ps -> ps
       Nothing -> []
+
+    keyFor g = case localNamed g contextAt of
+      Just v  -> AsLocal v
+      Nothing -> AsGlobal (resolved g)
 
     resolved g = either (const g) id (globalNamed m g)
 
