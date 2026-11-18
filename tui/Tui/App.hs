@@ -3376,18 +3376,25 @@ runEngineLine st line extra = do
 -- edit, so a quit attempt long after, against different unsaved content,
 -- asks again rather than riding on a stale confirmation.
 maybeQuit :: St -> EventM Name St ()
-maybeQuit st
-  | not (stConfirmQuit st) = halt
-  | stQuitArmed st = halt
-  | otherwise = do
-      dirty <- liftIO (scriptUnsaved st)
-      if not dirty
-        then halt
-        else if stScriptMode st
-          then put st { stQuitArmed = True, stScriptNote = Just quitNote }
-          else appendTurn st { stQuitArmed = True } Nothing [quitNote]
-  where
-    quitNote = "unsaved script changes — quit again to discard, or :script save first"
+maybeQuit st = do
+  go <- liftIO (shouldQuitNow st)
+  if go
+    then halt
+    else if stScriptMode st
+      then put st { stQuitArmed = True, stScriptNote = Just quitNote }
+      else appendTurn st { stQuitArmed = True } Nothing [quitNote]
+
+-- | **The quit decision, pulled out so 'maybeQuit' and `:quit` typed
+-- straight into the document (`scriptLocal`) answer it the same way** — one
+-- rule, not two readings of it. See 'maybeQuit' for what each answer means.
+shouldQuitNow :: St -> IO Bool
+shouldQuitNow st
+  | not (stConfirmQuit st) = pure True
+  | stQuitArmed st = pure True
+  | otherwise = not <$> scriptUnsaved st
+
+quitNote :: String
+quitNote = "unsaved script changes — quit again to discard, or :script save first"
 
 -- | **Compares the document against disc, not a flag** — so this can never
 -- drift from what ':script save' itself would do. 'Nothing' (never saved
@@ -3403,6 +3410,94 @@ scriptUnsaved st
         pure $ case onDisk of
           Left _ -> True
           Right contents -> contents /= unlines (map slText (stScript st))
+
+-- | **The TUI's own words, recognized directly in the document now — a
+-- fresh line exactly the same as an edit to an old one.** His ruling,
+-- 2026-11-18, on a proposal that treated the two differently: *"the real
+-- split is what I am saying and not what you are saying at all."* One rule:
+-- whatever a line's text is when it commits, this is checked first, and the
+-- line's text in the document is exactly what was typed either way — a
+-- recognized word is not kept out of a saved `.thena.script`, it just also
+-- does something.
+--
+-- 'Nothing' for ordinary proof content, unchanged. A recognized word
+-- answers the status text to show as this line's own output (what a
+-- refused line's complaint already does) and, as a side effect, applies
+-- itself to 'St' — the same handful of commands `scriptBarSubmit` already
+-- knows, read off the same functions so the two can't drift apart.
+--
+-- **Deliberately not here**: the `:script save/sessions/cut/drop/reload/
+-- open` family. Those manage the session itself, have their own argument
+-- shapes, and are a separate question from "a standing TUI preference, run
+-- from inside my own proof" — not folded in without being asked.
+scriptLocal :: St -> String -> Maybe (EventM Name St String)
+scriptLocal st text = case words text of
+  [":theme", name] | Just th <- themeByName name -> Just $ do
+    let st' = st { stTheme = th }
+    liftIO (saveConfig (configOf st'))
+    put st'
+    pure ("theme: " <> name)
+  [":fold", mode] | mode `elem` ["on", "off"] -> Just $ do
+    put st { stFoldOn = mode == "on" }
+    pure ("fold: " <> mode)
+  paneLine@(":pane" : _)
+    | Just (layout', said) <- paneCommand paneLine (stLayout st) -> Just $ do
+        let st' = st { stLayout = layout' }
+        liftIO (saveConfig (configOf st'))
+        put st'
+        pure said
+  [":preselect", mode] | mode `elem` ["on", "off"] -> Just $ do
+    let st' = st { stAutoSelect = mode == "on" }
+    liftIO (saveConfig (configOf st'))
+    put st'
+    pure ("preselect: " <> mode)
+  [":whisper", mode] | mode `elem` ["on", "off"] -> Just $ do
+    let st' = st { stWhisperOn = mode == "on" }
+    liftIO (saveConfig (configOf st'))
+    put st'
+    pure ("whisper: " <> mode)
+  [":confirm-quit", mode] | mode `elem` ["on", "off"] -> Just $ do
+    let st' = st { stConfirmQuit = mode == "on" }
+    liftIO (saveConfig (configOf st'))
+    put st'
+    pure ("confirm-quit: " <> mode)
+  (":clear" : _) -> Just (pure clearNotHere)
+  [":quit"] -> Just $ do
+    go <- liftIO (shouldQuitNow st)
+    if go
+      then halt >> pure "quit"
+      else put st { stQuitArmed = True } >> pure quitNote
+  _ -> Nothing
+
+-- | **Where a committed line actually goes through** — the composing line
+-- at the end, or an edit to an existing one with a tail below it
+-- ('scriptSubmit', 'runTheEdit'). Both reduce to the same shape: one line
+-- just typed, then 'ran' and 'unrun' carried through unchanged — so this is
+-- the one place 'scriptLocal' needs wiring in, not two.
+--
+-- **Why the typed line is pulled out of the batch rather than left in it.**
+-- 'rerunTail''s own fold runs on a forked thread (`~twdbp`) that cannot
+-- touch 'St' at all — that is what lets a 500-line re-run not freeze the
+-- terminal. A TUI-local action needs 'St', so it has to run here, on the
+-- thread that already has it, before anything is handed to the fork. The
+-- rest of the tail never depended on what the edited line did to the
+-- session anyway — a TUI-local line is a no-op on it — so handing the fork
+-- the same @s@ it would have gotten either way is exactly as correct as
+-- running the line through the engine would have been.
+commitTailFrom
+  :: Int -> Session -> String -> [String] -> [ScriptLine]
+  -> ([ScriptLine] -> EventM Name St ()) -> EventM Name St ()
+commitTailFrom at s text ran unrun finish = do
+  st <- get
+  case scriptLocal st text of
+    Nothing -> rerunTail at s (text : ran) unrun finish
+    Just action -> do
+      said <- action
+      let sl = ScriptLine
+            { slText = text, slSession = Just s, slRan = Just text
+            , slOutput = [said], slOk = True
+            }
+      rerunTail at s ran unrun (\rest -> finish (sl : rest))
 
 -- | `:preselect` and `:whisper`, in the same column layout
 -- 'Thena.Render.renderHelp' uses for its own rows (two-space indent, a
@@ -4018,10 +4113,20 @@ scriptSubmit = do
     _ | all isSpace line, isNothing (stScriptPos st) -> pure ()
     Nothing -> case scriptTip st of
       Nothing -> pure ()
-      Just s -> do
-        sl <- liftIO (runScriptLine s line)
-        put st { stScript = stScript st ++ [sl], stInput = emptyInput, stScriptNote = Nothing }
-        afterScriptEdit
+      Just s -> case scriptLocal st line of
+        Nothing -> do
+          sl <- liftIO (runScriptLine s line)
+          put st { stScript = stScript st ++ [sl], stInput = emptyInput, stScriptNote = Nothing }
+          afterScriptEdit
+        Just action -> do
+          said <- action
+          let sl = ScriptLine
+                { slText = line, slSession = Just s, slRan = Just line
+                , slOutput = [said], slOk = True
+                }
+          st' <- get
+          put st' { stScript = stScript st' ++ [sl], stInput = emptyInput, stScriptNote = Nothing }
+          afterScriptEdit
     -- | **Clearing a committed line and pressing Enter deletes it** — his
     -- report, 2026-10-20: *"it literally leaves an empty line there."* It
     -- did: the blank went through 'foldRun' as a line of its own, so the
@@ -4049,7 +4154,7 @@ scriptSubmit = do
       Nothing -> pure ()
       Just s -> do
         let (ran, unrun) = tailFrom st (i + 1)
-        rerunTail i s (line : ran) unrun $ \rebuilt -> do
+        commitTailFrom i s line ran unrun $ \rebuilt -> do
           st' <- get
           put (reseated st' i (take i (stScript st') ++ rebuilt ++ unrun))
           afterScriptEdit
@@ -4380,7 +4485,7 @@ runTheEdit after = do
       , not (all isSpace (slText sl))
       , Just s <- scriptSessionBefore st i -> do
           let (ran, unrun) = tailFrom st (i + 1)
-          rerunTail i s (slText sl : ran) unrun $ \rebuilt -> do
+          commitTailFrom i s (slText sl) ran unrun $ \rebuilt -> do
             st' <- get
             put st' { stScript = take i (stScript st') <> rebuilt <> unrun }
             after
@@ -4493,11 +4598,6 @@ scriptBarSubmit :: St -> String -> EventM Name St ()
 scriptBarSubmit st text = case words text of
   [] -> closeScriptBar
   [":script"] -> leaveScriptMode
-  -- | **`:quit` from inside the mode** — it fell through to 'insertScriptLine'
-  -- before this, so typing it just wrote the word into the document as a
-  -- script line instead of quitting anything. Ctrl+D already reached
-  -- 'maybeQuit' from in here; this is the bar's own door to the same place.
-  [":quit"] -> closeScriptBar >> get >>= maybeQuit
   [":script", "drop"] -> closeScriptBar >> scriptTruncate
   -- | **`cut`, not `rerun` — his rename, 2026-11-11.** The word is retired
   -- rather than reassigned: once plain Enter re-runs the tail (@~bxmsc@),
@@ -4525,33 +4625,14 @@ scriptBarSubmit st text = case words text of
     if ok
       then pure ()
       else put st { stScriptBar = Nothing, stScriptNote = Just ("no such file: " <> path) }
-  [":theme", name] | Just th <- themeByName name -> do
-    let st' = st { stTheme = th, stScriptBar = Nothing, stScriptNote = Just ("theme: " <> name) }
-    liftIO (saveConfig (configOf st'))
-    put st'
-  [":fold", mode] | mode `elem` ["on", "off"] ->
-    put st { stFoldOn = mode == "on", stScriptBar = Nothing, stScriptNote = Just ("fold: " <> mode) }
-  -- | **@:pane@ in the bar too** — `~fxc89`. It arranges the screen, and the
-  -- screen is what live-script mode is mostly made of; leaving it out would
-  -- mean leaving the mode to move a pane.
-  paneLine@(":pane" : _)
-    | Just (layout', said) <- paneCommand paneLine (stLayout st) -> do
-        let st' = st { stLayout = layout', stScriptBar = Nothing, stScriptNote = Just said }
-        liftIO (saveConfig (configOf st'))
-        put st'
-  [":preselect", mode] | mode `elem` ["on", "off"] -> do
-    let st' = st { stAutoSelect = mode == "on", stScriptBar = Nothing, stScriptNote = Just ("preselect: " <> mode) }
-    liftIO (saveConfig (configOf st'))
-    put st'
-  [":whisper", mode] | mode `elem` ["on", "off"] -> do
-    let st' = st { stWhisperOn = mode == "on", stScriptBar = Nothing, stScriptNote = Just ("whisper: " <> mode) }
-    liftIO (saveConfig (configOf st'))
-    put st'
-  -- | **`:clear` is refused here rather than ignored** — `~p6g53`. Without a
-  -- branch it would fall through to 'insertScriptLine' and be written into
-  -- the document as a line, which then fails as an engine line; see `~td887`
-  -- for the same shape of bug reached by a path with a space in it.
-  (":clear" : _) -> put st { stScriptBar = Nothing, stScriptNote = Just clearNotHere }
+  -- | **Every other TUI-local word, `:quit` and `:clear` included, now
+  -- reads off 'scriptLocal' — the same function the document itself checks**
+  -- (`~fxc89`, `~p6g53`, `~kmprv`'s and 2026-11-18's quit work), so the bar
+  -- and a typed line cannot answer one of these words two different ways.
+  _ | Just action <- scriptLocal st text -> do
+        said <- action
+        st' <- get
+        put st' { stScriptBar = Nothing, stScriptNote = Just said }
   _ -> insertScriptLine st text
 
 -- | **One path argument, spaces and all, or none** — `~td887`. A save took
