@@ -481,6 +481,16 @@ data St = St
     -- 'ghostAt' ever shows anything. 'True' is the standing behaviour
     -- (`.jalivert/TUI.md` #17/#21); same as 'stAutoSelect', a toggle on top
     -- of the default, not a new one.
+  , stConfirmQuit :: Bool
+    -- ^ `:confirm-quit on|off`, his instruction of 2026-11-18 — whether
+    -- quitting with a script session that was never saved, or saved and
+    -- then changed, is caught and asked about first. 'True' is the default;
+    -- same shape as 'stAutoSelect' and 'stWhisperOn', a toggle on top of it.
+  , stQuitArmed :: Bool
+    -- ^ **the one warning has already fired, so the next quit attempt goes
+    -- through.** Set when 'maybeQuit' holds a quit back; cleared by
+    -- 'afterScriptEdit', so any further edit re-arms the check rather than
+    -- leaving a stale "quit again" live over new, different unsaved work.
   , stHistory :: [String]
     -- ^ every line actually submitted, oldest first — 'recordHistory'
     -- appends, blank lines and an immediate repeat of the last entry
@@ -687,6 +697,8 @@ runTui = do
         , stRecoveredSpan = Nothing
         , stAutoSelect  = autoSelect0
         , stWhisperOn   = cfgWhisperOn cfg
+        , stConfirmQuit = cfgConfirmQuit cfg
+        , stQuitArmed   = False
         , stHistory     = []
         , stHistoryPos  = Nothing
         , stHistoryDraft = ""
@@ -2970,6 +2982,12 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
           let st' = st0 { stWhisperOn = mode == "on" }
           liftIO (saveConfig (configOf st'))
           appendTurn st' Nothing ["whisper: " <> mode]
+        -- | **`:confirm-quit on|off`**, his instruction of 2026-11-18 — same
+        -- standing as the two above. See 'maybeQuit'.
+        [":confirm-quit", mode] | mode `elem` ["on", "off"] -> do
+          let st' = st0 { stConfirmQuit = mode == "on" }
+          liftIO (saveConfig (configOf st'))
+          appendTurn st' Nothing ["confirm-quit: " <> mode]
         -- | **`:clear` and `:clear ‹n›`** — `~p6g53`. TUI-local for the
         -- plainest possible reason: the engine has no transcript. It holds a
         -- session and answers lines; what is still on screen from an earlier
@@ -3017,7 +3035,7 @@ handleReplEvent ev@(VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])) = do
   st <- get
   let line = concatMap Text.unpack (getEditContents (stInput st))
   if null line
-    then halt
+    then maybeQuit st
     else Brick.zoom stInputL (handleEditorEvent ev)
       >> followInput >> refreshDropdown >> refreshOfferDropdown
 -- | Down travels visually down in both placements — toward the input below
@@ -3339,7 +3357,52 @@ runEngineLine st line extra = do
       appendTurn st { stSession = sLoaded } (Just line) (out ++ extra)
     _ -> do
       appendTurn st { stSession = s' } (Just line) (renderResponse s' resp ++ extra)
-      if resp == Quit then halt else pure ()
+      if resp == Quit then get >>= maybeQuit else pure ()
+
+-- | **Every door a quit can be requested through** — Ctrl+D on an empty
+-- line and `:quit` from either the REPL or the script bar — comes here
+-- rather than calling 'halt' itself, his instruction of 2026-11-18.
+--
+-- **"Unsaved" is never about losing the session.** The project database
+-- already holds every committed line continuously ('persist'), restart or
+-- no restart — see `~j3hx8`/`~73f2k`. What this catches is narrower: a
+-- script document whose content a `.thena.script` file on disc does not
+-- (yet, or any more) match, so a `:script save` would still write
+-- something new. A REPL-only session, 'stScript' empty throughout, never
+-- trips this at all.
+--
+-- **One warning, then it goes through** — 'stQuitArmed' is what remembers
+-- that the warning already fired; 'afterScriptEdit' clears it on the next
+-- edit, so a quit attempt long after, against different unsaved content,
+-- asks again rather than riding on a stale confirmation.
+maybeQuit :: St -> EventM Name St ()
+maybeQuit st
+  | not (stConfirmQuit st) = halt
+  | stQuitArmed st = halt
+  | otherwise = do
+      dirty <- liftIO (scriptUnsaved st)
+      if not dirty
+        then halt
+        else if stScriptMode st
+          then put st { stQuitArmed = True, stScriptNote = Just quitNote }
+          else appendTurn st { stQuitArmed = True } Nothing [quitNote]
+  where
+    quitNote = "unsaved script changes — quit again to discard, or :script save first"
+
+-- | **Compares the document against disc, not a flag** — so this can never
+-- drift from what ':script save' itself would do. 'Nothing' (never saved
+-- anywhere) or any difference from what is on disc now counts as unsaved;
+-- an empty document is never unsaved, there being nothing to lose.
+scriptUnsaved :: St -> IO Bool
+scriptUnsaved st
+  | null (stScript st) = pure False
+  | otherwise = case stStored st >>= stFrom of
+      Nothing -> pure True
+      Just path -> do
+        onDisk <- try @SomeException (readFile path)
+        pure $ case onDisk of
+          Left _ -> True
+          Right contents -> contents /= unlines (map slText (stScript st))
 
 -- | `:preselect` and `:whisper`, in the same column layout
 -- 'Thena.Render.renderHelp' uses for its own rows (two-space indent, a
@@ -4205,6 +4268,12 @@ afterScriptEdit = do
   closeDropdowns
   followInput
   persist
+  -- | **Any edit re-arms 'maybeQuit''s one-warning gate** — his 2026-11-18
+  -- instruction's check is against the document as it now stands, so a
+  -- quit held back once must ask again rather than letting a later,
+  -- different bit of unsaved work ride through on an old confirmation.
+  st <- get
+  put st { stQuitArmed = False }
 
 -- | **Back out of a line that has been emptied: remove it and seat the caret
 -- at the end of the line above** — `~282h8`, his report of 2026-11-13.
@@ -4424,6 +4493,11 @@ scriptBarSubmit :: St -> String -> EventM Name St ()
 scriptBarSubmit st text = case words text of
   [] -> closeScriptBar
   [":script"] -> leaveScriptMode
+  -- | **`:quit` from inside the mode** — it fell through to 'insertScriptLine'
+  -- before this, so typing it just wrote the word into the document as a
+  -- script line instead of quitting anything. Ctrl+D already reached
+  -- 'maybeQuit' from in here; this is the bar's own door to the same place.
+  [":quit"] -> closeScriptBar >> get >>= maybeQuit
   [":script", "drop"] -> closeScriptBar >> scriptTruncate
   -- | **`cut`, not `rerun` — his rename, 2026-11-11.** The word is retired
   -- rather than reassigned: once plain Enter re-runs the tail (@~bxmsc@),
@@ -4547,7 +4621,19 @@ scriptSave st given force
         then say (path <> " exists — :script save! " <> path <> " to replace")
         else do
           liftIO (writeFile path (unlines (map slText (stScript st))))
-          say ("saved " <> path)
+          -- **A save tags the session with the name it was saved under —
+          -- his ruling of 2026-11-18 (`~73f2k`).** Before this, a
+          -- typed-then-saved session showed only a bare clock-date in
+          -- `:script sessions`, because nothing connected the file now on
+          -- disc back to the index entry `persist` already writes on every
+          -- committed line. 'persist' re-reads the state itself, so the
+          -- stale @st@ captured above is abandoned the moment it has run.
+          case stStored st of
+            Just stored | stFrom stored /= Just path ->
+              put st { stStored = Just stored { stFrom = Just path } } >> persist
+            _ -> pure ()
+          after <- get
+          put after { stScriptBar = Nothing, stScriptNote = Just ("saved " <> path) }
   where
     openedFrom = stStored st >>= stFrom
     say note = put st { stScriptBar = Nothing, stScriptNote = Just note }
@@ -4593,6 +4679,7 @@ configOf st = Config
   { cfgTheme      = themeName (stTheme st)
   , cfgAutoSelect = stAutoSelect st
   , cfgWhisperOn  = stWhisperOn st
+  , cfgConfirmQuit = stConfirmQuit st
   , cfgLayout     = stLayout st
   , cfgWidths     =
       [ (p, w)

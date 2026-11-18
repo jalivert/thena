@@ -38,6 +38,11 @@ data Config = Config
   { cfgTheme      :: String
   , cfgAutoSelect :: Bool
   , cfgWhisperOn  :: Bool
+  , cfgConfirmQuit :: Bool
+    -- ^ `:confirm-quit on|off`, his instruction of 2026-11-18 — whether
+    -- quitting with an unsaved (or changed-since-save) script session is
+    -- caught and asked about first, same shape as 'cfgAutoSelect' and
+    -- 'cfgWhisperOn'.
   , cfgLayout     :: Layout
     -- ^ **which panes are on screen and where** — `~fxc89`'s half of
     -- `~vqsd8`, and the two take one answer because they were put to him as
@@ -58,6 +63,7 @@ defaultConfig = Config
   { cfgTheme      = themeName neonPinkDark
   , cfgAutoSelect = True
   , cfgWhisperOn  = True
+  , cfgConfirmQuit = True
   , cfgLayout     = defaultLayout
   , cfgWidths     = []
   }
@@ -96,6 +102,7 @@ applyLine cfg line = case break (== '=') line of
   ("theme", '=' : v)     -> cfg { cfgTheme = v }
   ("preselect", '=' : v) | Just b <- parseBool v -> cfg { cfgAutoSelect = b }
   ("whisper", '=' : v)   | Just b <- parseBool v -> cfg { cfgWhisperOn = b }
+  ("confirm-quit", '=' : v) | Just b <- parseBool v -> cfg { cfgConfirmQuit = b }
   ("panes", '=' : v)     -> cfg { cfgLayout = layoutFrom (mapMaybe parsePane (commas v)) }
   ("widths", '=' : v)    -> cfg { cfgWidths = mapMaybe parseWidth (commas v) }
   _                      -> cfg
@@ -163,6 +170,7 @@ writeConfig path cfg = do
     [ "theme=" <> cfgTheme cfg
     , "preselect=" <> (if cfgAutoSelect cfg then "on" else "off")
     , "whisper=" <> (if cfgWhisperOn cfg then "on" else "off")
+    , "confirm-quit=" <> (if cfgConfirmQuit cfg then "on" else "off")
     , "panes=" <> intercalate ","
         [show n <> ":" <> paneName p | (n, p) <- layoutPairs (cfgLayout cfg)]
     , "widths=" <> intercalate ","
