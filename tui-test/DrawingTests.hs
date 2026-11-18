@@ -367,12 +367,18 @@ openGroup :: String -> Int -> PaneRow String
 openGroup label n = TapHeading label (foldMark True <> " " <> label) (Just n)
 
 -- | A module that came in whole, with the file it was read from — `~nf5tx`.
+--
+-- **At the root of the import tree**, depth 0; 'nested' is the one below.
 whole :: String -> Maybe FilePath -> ModuleEntry
-whole n f = ModuleEntry n f AllIn False []
+whole n f = ModuleEntry n f AllIn False [] 0
 
 -- | One that came in partly, folded, with nothing recorded against it yet.
 partial :: String -> ModuleEntry
-partial n = ModuleEntry n Nothing SomeIn False []
+partial n = ModuleEntry n Nothing SomeIn False [] 0
+
+-- | The same module one step further down the import tree — `~84j24`.
+nested :: Int -> ModuleEntry -> ModuleEntry
+nested d me = me { meDepth = d }
 
 paneRowCases :: [TestTree]
 paneRowCases =
@@ -499,6 +505,96 @@ paneRowCases =
                   [ ("broken", ["stuck: not in scope: nonesuch"])
                   , ("after", ["never asked"])
                   , ("last", [])
+                  ]
+              }
+          ]
+          [])
+  , -- | **`~84j24`, his request of 2026-11-11** — the pane is the import tree,
+    -- /"rendered as the dependency tree and not a flat list"/, because
+    -- leniency reaches all the way down and /"the module you typed may be ✅
+    -- while something three levels beneath it is ⚠️"/. A child is indented two
+    -- columns per step, **and the indent is in the row's own text** so that
+    -- 'Tui.Panes.paneWrap' keeps a wrapped module path under its own step.
+    testCase "a module's imports are indented two columns per step" $
+      assertEqual ""
+        [ Heading "modules" (Just 3)
+        , Entry "\x2705 top"
+        , Detail "top.thena"
+        , Entry "  \x2705 middle"
+        , Detail "  middle.thena"
+        , Entry "    \x2705 bottom"
+        ]
+        (moduleRows
+          [ whole "top" (Just "top.thena")
+          , nested 1 (whole "middle" (Just "middle.thena"))
+          , nested 2 (whole "bottom" Nothing)
+          ]
+          [])
+  , -- | **HIS RULING OF 2026-11-18, and the two cheaper renderings it turned
+    -- down.** A module two others import is a row under each of them, drawn
+    -- the same both times: /"my reason for the pane was to see the dependency
+    -- structure. That means only (a) is acceptable."/ The alternatives were a
+    -- repeat reduced to a back-reference and each module drawn once, and the
+    -- measurement put to him was that importing
+    -- @examples.poplmark.Fsub06Transitivity@ is 6 distinct modules and 32 rows
+    -- when every path is drawn, against 16 and 6. **So no row of this pane is
+    -- a first-occurrence special case** — a repeat carries its mark, its file
+    -- and its unfold like any other row.
+    testCase "a module two others import is drawn under each, identically" $
+      assertEqual ""
+        [ Heading "modules" (Just 4)
+        , Entry "\x2705 root"
+        , Entry "  \x2705 left"
+        , Entry "    \x2705 shared"
+        , Detail "    shared.thena"
+        , Entry "  \x2705 right"
+        , Entry "    \x2705 shared"
+        , Detail "    shared.thena"
+        ]
+        (moduleRows
+          [ whole "root" Nothing
+          , nested 1 (whole "left" Nothing)
+          , nested 2 (whole "shared" (Just "shared.thena"))
+          , nested 1 (whole "right" Nothing)
+          , nested 2 (whole "shared" (Just "shared.thena"))
+          ]
+          [])
+  , -- | **The count is what is loaded, not how many rows it took** — `~84j24`.
+    -- A module imported by three others is three rows and one module, and the
+    -- heading answers /what is in/.
+    testCase "the heading counts distinct modules and not rows" $
+      assertEqual ""
+        [ Heading "modules" (Just 2)
+        , Entry "\x2705 root"
+        , Entry "  \x2705 shared"
+        , Entry "  \x2705 shared"
+        ]
+        (moduleRows
+          [ whole "root" Nothing
+          , nested 1 (whole "shared" Nothing)
+          , nested 1 (whole "shared" Nothing)
+          ]
+          [])
+  , -- | **A deep ⚠️ is the whole motive for the tree** — `~84j24`, his own
+    -- case: the module he typed is ✅ and something three levels beneath it is
+    -- not. What it unfolds keeps the row's indent, so the small print stays
+    -- under the module it is about rather than reading as the root's.
+    testCase "a nested module's unfolded reasons keep its indent" $
+      assertEqual ""
+        [ Heading "modules" (Just 2)
+        , Entry "\x2705 top"
+        , Tap "deep" "    \x26A0\xFE0F deep"
+        , Detail "    broken did not go in:"
+        , Detail "      stuck: not in scope: nonesuch"
+        , Detail "    after is pending"
+        ]
+        (moduleRows
+          [ whole "top" Nothing
+          , nested 2 (partial "deep")
+              { meOpen = True
+              , meUnfinished =
+                  [ ("broken", ["stuck: not in scope: nonesuch"])
+                  , ("after", ["never asked"])
                   ]
               }
           ]

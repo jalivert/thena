@@ -152,27 +152,48 @@ foldMark open = if open then "\x25be" else "\x25b8"
 -- /"I want the 'modules' pane to use these symbols ✅ ⚠️ ❌ next to each module
 -- to show whether that import was successful."/ See 'ModuleMark' for what each
 -- one means and 'ModuleEntry' for what a row is drawn from.
+-- | **The modules are the import tree and the nesting is its edges** —
+-- `~84j24`, his request of 2026-11-11: /"a pane listing the files that have
+-- been imported and consulted, rendered as the dependency tree and not a flat
+-- list"/, because /"the module you typed may be ✅ while something three levels
+-- beneath it is ⚠️"/. 'Tui.App.moduleEntries' walks
+-- 'Thena.Driver.moduleImportsOf' and hands the rows over already in tree
+-- order, each carrying its 'meDepth'; this indents them.
+--
+-- **The count beside the heading is how many distinct modules are in, not how
+-- many rows.** A module imported by three others is three rows and one module,
+-- and the heading answers /what is loaded/.
+--
+-- **Rule bases are not in the tree and that is not an omission.** A consulted
+-- @.thena.rules@ file is not a module, so no module's import list names it and
+-- there is no edge to draw; it keeps its own group below.
 moduleRows :: [ModuleEntry] -> [(FileKind, FilePath)] -> [PaneRow String]
 moduleRows modules files =
   concat
-    [ Heading "modules" (Just (length modules)) : concatMap moduleGroup modules
+    [ Heading "modules" (Just distinct) : concatMap moduleGroup modules
     | not (null modules)
     ]
     <> group "rule bases" ARuleBase
     <> group "shipped with thena" AShippedFile
     <> group "other files read" AnotherFile
   where
+    distinct = length (nub (map meName modules))
     -- | A module's own row, its file, and — when it is unfolded — what did not
     -- go in. **Only a ⚠️ or ❌ row is a 'Tap'**: a whole module has nothing to
     -- unfold, and a row that looks clickable and does nothing is worse than one
     -- that does not look it.
+    --
+    -- **The indent is the row's depth and it goes in the text**, not into a
+    -- padded widget, so 'paneWrap''s @preserveIndentation@ keeps a wrapped
+    -- module path under its own step rather than back at the pane's margin.
     moduleGroup me =
-      row : [Detail f | Just f <- [meFile me]] <> unfolded
+      row : [Detail (indent <> f) | Just f <- [meFile me]] <> unfolded
       where
         row
           | meMark me == AllIn = Entry labelled
           | otherwise = Tap (meName me) labelled
-        labelled = markGlyph (meMark me) <> " " <> meName me
+        labelled = indent <> markGlyph (meMark me) <> " " <> meName me
+        indent = replicate (2 * meDepth me) ' '
         -- | **The first is the root and the rest are pending** — the engine's
         -- ruling of 2026-11-11, /"one failure and forty-seven pending, not
         -- forty-eight warnings"/. The root's own answer is shown; the rest are
@@ -184,9 +205,9 @@ moduleRows modules files =
           | otherwise = case meUnfinished me of
               [] -> []
               (name, why) : pending ->
-                Detail (name <> " did not go in:")
-                  : map (Detail . ("  " <>)) why
-                  <> [Detail (nm <> " is pending") | (nm, _) <- pending]
+                Detail (indent <> name <> " did not go in:")
+                  : map (Detail . ((indent <> "  ") <>)) why
+                  <> [Detail (indent <> nm <> " is pending") | (nm, _) <- pending]
     group label kind =
       let ps = sort [shorten kind p | (k, p) <- files, k == kind]
        in concat [Heading label (Just (length ps)) : map Entry ps | not (null ps)]
@@ -326,6 +347,22 @@ data ModuleEntry = ModuleEntry
     -- ^ what did not go in, **in file order**: what the item would have
     -- declared, and the lines of the answer its own run gave. Only the first
     -- entry's lines are drawn; see 'moduleRows'.
+  , meDepth :: Int
+    -- ^ **how deep in the import tree this row sits** — `~84j24`, his ruling
+    -- of 2026-11-18. 0 is a module nothing else imported, which is one he
+    -- named himself; a child is its parent's depth plus one, and the row is
+    -- indented two columns per step.
+    --
+    -- **A module imported by two others is a row under each of them, drawn
+    -- the same both times** — his ruling, /"my reason for the pane was to see
+    -- the dependency structure. That means only (a) is acceptable."/ The two
+    -- cheaper renderings were put to him with the measurement that argues for
+    -- them — importing @examples.poplmark.Fsub06Transitivity@ is 6 distinct
+    -- modules and 32 rows when every path is drawn, against 16 with a repeat
+    -- reduced to a back-reference and 6 with each module drawn once — and he
+    -- took the structure over the brevity. **So there is no first-occurrence
+    -- special case anywhere in this pane**: a repeat carries its mark, its
+    -- file and its unfold like any other row.
   }
   deriving (Eq, Show)
 

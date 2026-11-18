@@ -96,6 +96,7 @@ import Thena.Driver
   , filesRead
   , declaredByModule
   , kindOf
+  , moduleImportsOf
   , moduleOfFile
   , modulePartly
   , moduleText
@@ -1571,22 +1572,59 @@ globalGroups st =
 -- | **Every module that is in, newest first, and the file it was read from** —
 -- `~t7wc8`. The prelude has no file of its own in this list, arriving with the
 -- session rather than through an @import@, and is shown without one.
+--
+-- **It is the import tree and not a list** — `~84j24`, his request of
+-- 2026-11-11, because leniency reaches all the way down and /"the module you
+-- typed may be ✅ while something three levels beneath it is ⚠️"/. A module
+-- nothing else imported is a root at depth 0; its own imports follow it, in
+-- the order they were written, at depth 1, and so on down.
+-- 'Thena.Driver.moduleImportsOf' is the only place the shape he wrote
+-- survives — the closure is flattened into dependency order before it is
+-- walked, which is what 'modulesLoaded' answers with.
+--
+-- **Every path is drawn, so a module two modules import is two rows** — his
+-- ruling of 2026-11-18, taken against the measurement: /"my reason for the
+-- pane was to see the dependency structure. That means only (a) is
+-- acceptable."/ See 'Tui.Panes.meDepth' for the two renderings he turned down.
+--
+-- **Two things keep it finite and total.** A module already on the path from
+-- the root is drawn and not descended into, so an import cycle is one row and
+-- not a hang — this frontend never assumes the engine's graph is acyclic. And
+-- a loaded module no root reaches — which is what every module of a cycle
+-- would be — is appended at depth 0 rather than silently left off, so the
+-- pane's own count cannot disagree with 'modulesLoaded'.
 moduleEntries :: St -> [ModuleEntry]
-moduleEntries st =
-  [ ModuleEntry
-      { meName = name
-      , meFile = listToMaybe [p | (p, _) <- filesRead s, moduleOfFile p == Just m]
-      , meMark = mark
-      , meOpen = mark /= AllIn && Set.member name (stModulesOpen st)
-      , meUnfinished = maybe [] (map flatten . partlyUnfinished) partly
-      }
-  | m <- modulesLoaded s
-  , let name = moduleText m
-  , let partly = modulePartly m s
-  , let mark = marked partly m
-  ]
+moduleEntries st = walked <> [entryFor 0 m | m <- modulesLoaded s, m `notElem` reached]
   where
     s = activeSession st
+    walked = concat [walk [] 0 m | m <- modulesLoaded s, m `notElem` imported]
+    reached = [m | m <- modulesLoaded s, moduleText m `elem` map meName walked]
+    -- | **A root is a module nobody imports**, which is one he named at the
+    -- prompt or in a script: the engine does not say which act pulled a module
+    -- in, and /nothing imports it/ is the same answer for everything except a
+    -- module he asked for twice — once directly and once through a parent —
+    -- which the engine no-ops anyway and which is in under its parent either
+    -- way.
+    imported = concat [moduleImportsOf m s | m <- modulesLoaded s]
+    walk ancestors depth m =
+      entryFor depth m
+        : concat
+          [ walk (m : ancestors) (depth + 1) i
+          | m `notElem` ancestors
+          , i <- moduleImportsOf m s
+          ]
+    entryFor depth m =
+      ModuleEntry
+        { meName = moduleText m
+        , meFile = listToMaybe [p | (p, _) <- filesRead s, moduleOfFile p == Just m]
+        , meMark = mark
+        , meOpen = mark /= AllIn && Set.member (moduleText m) (stModulesOpen st)
+        , meUnfinished = maybe [] (map flatten . partlyUnfinished) partly
+        , meDepth = depth
+        }
+      where
+        partly = modulePartly m s
+        mark = marked partly m
     -- | **The three marks, and which one is `~nf5tx`'s ❌.** `moduleWhole` is
     -- `moduleLoaded` with no `Partly`, and everything in this list is loaded —
     -- so the question here is only whether there is a `Partly` and, if there
