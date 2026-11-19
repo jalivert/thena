@@ -1857,9 +1857,11 @@ draw st =
         -- Jev reorders moves the whisper by construction and there is no
         -- highlight to travel under him.
         (ghost, skip) = if stWhisperOn st then whisper else ("", 0)
+        -- **The strip's own whisper reads 'whisperInsert', which Tab reads
+        -- too** — `~w2tk2` slice 3a's rule, that a key may only take what
+        -- the frame drew, applied to the whisper as well as to the cells.
         whisper
-          | stripOpen (stStrip st)
-          , Just ins <- rowInsert =<< listToMaybe (stripSlateOf st)
+          | Just ins <- whisperInsert st
           = maybe ("", 0) id (ghostOfInsert col (slateStart (stSlate st)) (slateReplaceLen (stSlate st)) ins)
           | otherwise = ghostAt line col (stDropdown st) (liveOffers st)
         line = concatMap Text.unpack (getEditContents (stInput st))
@@ -4239,6 +4241,25 @@ handleReplEvent (VtyEvent (V.EvKey (V.KChar '\t') [])) = do
       acceptLoadRow st entries i
     (_, Just od) | Just i <- odSelected od, Just ins <- rowInsert (odRows od !! i) ->
       acceptOfferRow st od ins
+    -- | **TAB TAKES THE WHISPER — HIS REPORT, 2026-11-19**: /"why doesn't
+    -- tab in the repl prompt turn the \"whisper\" into a real input?"/
+    --
+    -- **It could not, and the dropdown going off by default is what exposed
+    -- it.** This handler knew the two dropdowns and nothing else, so while
+    -- the whisper came from a dropdown's selected row (`ghostAt`) the first
+    -- two cases happened to cover it. `~w2tk2` slice 2 moved the whisper to
+    -- **the strip's slot 1** and `~492hq` then turned the dropdown off, so
+    -- what is whispered is now something no case here reached: dimmed text
+    -- on screen that no key could take.
+    --
+    -- **It sits after the dropdown cases, so nothing about them changes**,
+    -- and it reads 'whisperInsert' — the same function the drawing reads —
+    -- rather than recomputing slot 1, which is slice 3a's rule.
+    --
+    -- **It cannot shadow path completion**: a `:load` line's slate is
+    -- 'emptySlate' by construction ('slateFor'), so there is no whisper
+    -- there and Tab still falls through to 'completeLoadPath'.
+    _ | Just ins <- whisperInsert st -> acceptSlateRow st ins
     _ -> completeLoadPath
 -- | "Walk into" a placeholder box and type to fill it — his own ask,
 -- `.jalivert/LIVE-OFFERS.md`/`.jalivert/TUI.md`: the caret standing right
@@ -4355,6 +4376,23 @@ acceptOfferRow st od ins = do
   put st { stInput = E.applyEdit (acceptOfferEdit (odWordStart od) (odReplaceLen od) ins) (stInput st) }
   refreshOfferDropdown
   followInput
+
+-- | **What the whisper is showing, if it is showing anything** — the one
+-- function the drawing and Tab both read, so a key can only ever take what
+-- the frame drew (`~w2tk2` slice 3a's rule, extended from the cells to the
+-- whisper).
+--
+-- **Slot 1 of the strip's slate and nothing else.** His ruling, slice 2:
+-- /"perhaps the concept of the whisper would be tied to the option number
+-- 1"/. 'Nothing' with the whisper switched off, with the strip closed — the
+-- dropdown's own ghost is 'ghostAt''s and Tab reaches that through
+-- 'liveOffers' — and on a `:load` path line, whose slate is 'emptySlate' so
+-- that path completion keeps Tab.
+whisperInsert :: St -> Maybe String
+whisperInsert st
+  | not (stWhisperOn st) = Nothing
+  | not (stripOpen (stStrip st)) = Nothing
+  | otherwise = rowInsert =<< listToMaybe (stripSlateOf st)
 
 -- | **The same landing for a slot taken off the strip** — `~3gn2r`. The
 -- geometry is the slate's ('slateStart', 'slateReplaceLen'), which is the
