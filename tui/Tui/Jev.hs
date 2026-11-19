@@ -15,11 +15,15 @@ module Tui.Jev
   , JevState (..)
   , loadJevConfig
   , rankCandidates
+  , jevNucleus
+  , jevNucleusMass
+  , jevPickLimit
   , jevLog
   , jevLogPath
   ) where
 
 import Control.Exception (SomeException, catch, try)
+import Data.List (sortOn)
 import Data.Aeson (FromJSON (..), Value, eitherDecode, encode, object, toJSON, withObject, (.:), (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.ByteString.Lazy as BL
@@ -45,6 +49,7 @@ import Network.HTTP.Client.TLS (tlsManagerSettings)
 import System.Directory (XdgDirectory (XdgCache), createDirectoryIfMissing, getXdgDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
+import Numeric (showFFloat)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 
 -- | Where 'jevLog' writes — exported so a cold session (or him, by hand)
@@ -142,7 +147,16 @@ rankCandidates cfg st@(JevState fields) offered = do
   result <- either (Left . show) id <$> (try go :: IO (Either SomeException (Either String (Map.Map Text Double))))
   jevLog $ case result of
     Left e  -> "answer: FAILED — " <> e
-    Right m -> "answer: ok, " <> show (Map.size m) <> " scored"
+    -- **The kept count and the top masses, because the cut is now a
+    -- judgement and a log that omits it cannot be used to check it** —
+    -- `~swxcf`. @255 scored, Jev's own 3@ is the whole finding in one line.
+    Right m ->
+      "answer: ok, " <> show (Map.size m) <> " scored, Jev's own "
+        <> show (jevNucleus (Map.elems m))
+        <> " at " <> showFFloat (Just 2) jevNucleusMass ""
+        <> " (top: "
+        <> unwords [showFFloat (Just 4) p "" | p <- take 6 (sortOn negate (Map.elems m))]
+        <> ")"
   pure result
   where
     candidates = take choiceOptionLimit offered
@@ -208,6 +222,64 @@ requestPayload cfg (JevState fields) candidates =
                 ]
           ]
     ]
+
+-- | **How many of the candidates Jev scored did Jev actually suggest** —
+-- `~swxcf`, and it is the difference between ordering his list and
+-- excluding from it.
+--
+-- **A 'Choice' answers a probability for EVERY option it was given, and
+-- that is measured and not assumed.** His own @jev.log@, 1767 answers:
+-- @request: 191 candidates@ comes back @answer: ok, 191 scored@, and 255
+-- comes back 255, every single time. So /"Jev scored it"/ is true of the
+-- whole list, and a suggestion pane that shows every row Jev scored is
+-- showing the engine's list in Jev's order — which is the thing he
+-- rejected, said five times and last of all on 2026-11-19: /"only when the
+-- Jev is disabled in the settings, do I ever want to see any suggestion
+-- that didn't come from Jev"/.
+--
+-- **So a pick is a candidate Jev put real mass on, and the cut is the
+-- nucleus**: the shortest run of its ranking whose probability adds up to
+-- 'jevNucleusMass' of the answer. In words he can rule on in one breath —
+-- /the cells are the smallest set of candidates Jev is 90% sure the answer
+-- is among/. A confident answer fills one cell, which is his own stated
+-- ideal for this pane; a hedged one fills several; an answer spread thin
+-- across 255 rows fills them all and is then held by 'jevPickLimit'.
+--
+-- **Masses are sorted here rather than required sorted.** The caller does
+-- sort the rows, but a count that silently depends on its argument's order
+-- is a precondition nothing checks, and this way the function is total.
+--
+-- **Nothing at all when the mass is nothing at all.** An answer whose
+-- probabilities are all zero has named no candidate, so no cell is Jev's —
+-- the honest screen is the empty one, not the top of an arbitrary order.
+jevNucleus :: [Double] -> Int
+jevNucleus masses
+  | total <= 0 = 0
+  | otherwise = min jevPickLimit (count 0 0 (sortOn negate masses))
+  where
+    total = sum masses
+    target = jevNucleusMass * total
+    count :: Int -> Double -> [Double] -> Int
+    count k acc (m : ms) | acc < target = count (k + 1) (acc + m) ms
+    count k _ _ = k
+
+-- | How much of Jev's answer the cells have to cover — see 'jevNucleus'.
+-- **His to retune in one word**; it is the one number in the rule.
+jevNucleusMass :: Double
+jevNucleusMass = 0.9
+
+-- | **The most cells Jev's answer may claim, and the number is HIS** —
+-- 2026-11-19: /"ALL of the top 12 suggestions are to be the ones that Jev
+-- suggested"/, and /"the suggestion pane's 12 suggestions (or 11 because I
+-- don't know if we can capture F11)"/.
+--
+-- It bites only on an answer so evenly spread that 'jevNucleusMass' keeps
+-- most of the list; the grid draws fewer than this anyway (ten F-keys,
+-- nine cells at his geometry). It is here so that /how many did Jev
+-- suggest/ has a bound of his choosing rather than a bound that falls out
+-- of whatever the terminal is wide enough to draw.
+jevPickLimit :: Int
+jevPickLimit = 12
 
 -- | **A 'Choice' question takes at most 255 options, and the dropdown can
 -- offer more.** Measured against the live API, 2026-11-11: 287 candidates

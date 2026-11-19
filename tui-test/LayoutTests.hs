@@ -49,6 +49,7 @@ import Tui.Layout
   , stripReplyRows
   , stripSlotKeys
   )
+import Tui.Jev (jevNucleus, jevPickLimit)
 
 layoutTests :: TestTree
 layoutTests =
@@ -325,4 +326,35 @@ layoutTests =
         gridRows g + stripHintRows + stripReplyRows @?= body
     , testCase "a cell is wide enough for the key field and a typical label" $
         assertBool "" (stripCellWidth >= 3 + 2 + 18)
+    , -- | **THE ONE THAT IS THE DEFECT** — `~swxcf`. A 'Choice' answers a
+      -- probability for every option it was sent, so a flat answer over 255
+      -- candidates used to count as 255 picks and the pane drew the whole
+      -- engine list in Jev's order. **An answer that singles out nothing
+      -- may not claim more cells than he allowed.**
+      testCase "a flat answer over 255 candidates is held to his twelve" $ do
+        jevNucleus (replicate 255 (1 / 255)) @?= jevPickLimit
+        jevNucleus (replicate 191 (1 / 191)) @?= jevPickLimit
+    , -- | **A confident answer is one cell, which is his own stated ideal
+      -- for this pane** — one suggestion, and the whisper already on the
+      -- line.
+      testCase "a confident answer suggests exactly one candidate" $
+        jevNucleus [0.95, 0.02, 0.01, 0.01, 0.01] @?= 1
+    , -- | A hedged answer fills as many cells as it hedges across: 0.5 and
+      -- 0.3 do not reach the cut, 0.12 carries it past.
+      testCase "a hedged answer suggests as many as the hedge covers" $
+        jevNucleus [0.5, 0.3, 0.12, 0.05, 0.03] @?= 3
+    , -- | **An answer with no mass in it has named nobody.** Neither an
+      -- empty map nor an all-zero one may put a row on a cell — the
+      -- alternative is the top of an arbitrary order wearing Jev's colour.
+      testCase "no mass means no suggestion at all" $ do
+        jevNucleus [] @?= 0
+        jevNucleus [0, 0, 0] @?= 0
+    , -- | **The cut is on the shape of the answer, not on its scale or its
+      -- order.** A 'Choice' normalises within its own option set, so the
+      -- count must not change if the probabilities arrive unnormalised, and
+      -- it must not depend on the caller having sorted them.
+      testCase "the cut reads the shape and not the scale or the order" $ do
+        jevNucleus [0.02, 0.95, 0.01, 0.01, 0.01] @?= 1
+        jevNucleus [9.5, 0.2, 0.1, 0.1, 0.1] @?= 1
+        jevNucleus [3.0, 1.2, 0.3, 0.1] @?= 2
     ]

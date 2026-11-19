@@ -205,7 +205,7 @@ import Tui.Database
   , storedNamed
   , writeTranscript
   )
-import Tui.Jev (JevConfig, JevState (..), jevLog, loadJevConfig, rankCandidates)
+import Tui.Jev (JevConfig, JevState (..), jevLog, jevNucleus, loadJevConfig, rankCandidates)
 import Tui.Theme (Theme (..), neonPinkDark, themeByName, themes)
 
 -- | **One constructor for all seven panes, carrying which one** — `~fxc89`.
@@ -6287,16 +6287,15 @@ floatJevPicks scores od = od { odRows = newRows, odSelected = newSelected, odJev
 -- deleted, and a slice that rewrote its behaviour on the way past is outside
 -- what he authorised.
 --
--- **What is still true in the cold start, and it is the one choice made here
--- rather than by him**: for the ~300ms before an answer lands the slate is
--- the engine's order, so the cells are the engine's. The alternative is an
--- empty strip (§15 q1, which he has not ruled). Keeping the engine's list
--- visible was chosen because his property 1 is that a late arrival must not
--- be penalised, not that nothing may precede it. **`slateJevPicked` is zero
--- in that window, so the cells carry no Jev mark until Jev has spoken** —
--- which makes `~zt4jk`'s colour read as /Jev has answered/ rather than
--- /these three are Jev's/, and that is the right reading once every cell is
--- Jev's.
+-- **The cold start shows nothing, and §15 q1 is ruled.** For the ~300ms
+-- before an answer lands 'slateJevPicked' is zero, so the strip is empty
+-- rather than showing the engine's order meanwhile — his instruction of
+-- 2026-11-19, /"only when the Jev is disabled in the settings, do I ever
+-- want to see any suggestion that didn't come from Jev"/. His property 1,
+-- that a late arrival must not be penalised, is kept by the answer landing
+-- in full whenever it lands; it never asked for a stand-in to be shown in
+-- the meantime. The Jev mark (`~zt4jk`) therefore reads as /Jev has
+-- answered/, which is the right reading once every cell is Jev's.
 --
 -- **`~63n23` bites harder here and he is holding it.** Jev is asked about at
 -- most 255 candidates, so on a 318-row launch list the rest are unscored and
@@ -6307,13 +6306,37 @@ floatJevSlate scores sl = sl { slateRows = newRows, slateJevPicked = picked }
   where (newRows, picked) = jevOrderRows scores (slateRows sl)
 
 -- | Jev's order for every row Jev scored, then the engine's order for the
--- rest; and how many the first group has. See 'floatJevSlate'.
+-- rest; and **how many of them Jev actually suggested**, which is
+-- 'Tui.Jev.jevNucleus' and not the length of the first group. See
+-- 'floatJevSlate'.
+--
+-- **The two were the same number until `~swxcf` and that was the defect.**
+-- A 'Choice' scores every option it is sent — 191 of 191, 255 of 255, in
+-- his own log — so @length scored@ was the whole candidate list, and
+-- 'stripSlateOf''s @take picked@ therefore took all of it. The pane was
+-- doing the ordering he rejected while its haddock claimed the exclusion he
+-- asked for.
+--
+-- **The ordering of 'slateRows' is untouched**: every scored row still
+-- sorts to the front in Jev's own order, because the rows below the cut are
+-- still the pool the next request is built from and still the list
+-- @:jev off@ sorts alphabetically. What narrowed is only how many of them
+-- count as Jev's.
+-- **The cut is counted over the distinct labels and that is not a
+-- nicety.** A 'Choice' is sent @Map.fromList@ of the candidates, so two
+-- rows sharing a label are one option to Jev and come back as one
+-- probability; counting the nucleus over the rows instead would count that
+-- mass twice and claim one cell more than the answer paid for. Measured
+-- 2026-11-19: on the line @a@ the rows gave six and the answer's own
+-- distribution gave five, and five is the true one.
 jevOrderRows :: Map.Map Text Double -> [OfferRow] -> ([OfferRow], Int)
-jevOrderRows scores rows = (scored <> rest, length scored)
+jevOrderRows scores rows = (scored <> rest, jevNucleus (Map.elems present))
   where
     label = Text.pack . rowLabel
-    scored =
-      map fst (sortOn (negate . snd) [(r, sc) | r <- rows, Just sc <- [Map.lookup (label r) scores]])
+    present = Map.fromList [(label r, sc) | r <- rows, Just sc <- [Map.lookup (label r) scores]]
+    scoredPairs =
+      sortOn (negate . snd) [(r, sc) | r <- rows, Just sc <- [Map.lookup (label r) scores]]
+    scored = map fst scoredPairs
     scoredLabels = map rowLabel scored
     rest = filter (\r -> rowLabel r `notElem` scoredLabels) rows
 
