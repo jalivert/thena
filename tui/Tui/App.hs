@@ -6094,11 +6094,60 @@ floatJevPicks scores od = od { odRows = newRows, odSelected = newSelected, odJev
     selectedLabel = rowLabel . (odRows od !!) <$> odSelected od
     newSelected = selectedLabel >>= \lbl -> listToMaybe [i | (i, r) <- zip [0 ..] newRows, rowLabel r == lbl]
 
--- | The same floating, for the strip's slate — `~3gn2r`. There is no
--- selection to carry across, which is the whole difference.
+-- | **THE STRIP'S SLATE IS JEV'S ORDER, NOT THE ENGINE'S WITH THREE OF JEV'S
+-- ON TOP** — `~w2tk2` slice 3b, and **his instruction, 2026-11-19**: /"ALL of
+-- the top 12 suggestions are to be the ones that Jev suggested."/ The thought
+-- is older and he flagged it as building — §11 of
+-- @discussion/the-dropdown-is-the-wrong-element.md@, /"maybe the Jev
+-- integration needs to be done **more** instead of solving the late arrival
+-- problem… we use Jev to suggest top 12 picks"/.
+--
+-- **A full sort and not a truncation to twelve.** Every row Jev scored comes
+-- first in Jev's own order; everything Jev did not score keeps the engine's
+-- order below. **The property he asked for then holds at every grid size** —
+-- seven cells or ten, the cells are Jev's best that many — where a slate cut
+-- to twelve would have been a second number to keep in step with the grid.
+-- Nothing is destroyed either: the tail is still the slate, simply past the
+-- keys, exactly as the rows past the grid already were.
+--
+-- **'sortOn' is stable, so candidates Jev scores equally keep the engine's
+-- relative order** — tokens before productions, which is a relevance order
+-- and a better tiebreak than whatever a hash would give.
+--
+-- **The dropdown is NOT changed and that is `~492hq`.** 'floatJevPicks' still
+-- floats three, because the dropdown is disabled and awaiting his word to be
+-- deleted, and a slice that rewrote its behaviour on the way past is outside
+-- what he authorised.
+--
+-- **What is still true in the cold start, and it is the one choice made here
+-- rather than by him**: for the ~300ms before an answer lands the slate is
+-- the engine's order, so the cells are the engine's. The alternative is an
+-- empty strip (§15 q1, which he has not ruled). Keeping the engine's list
+-- visible was chosen because his property 1 is that a late arrival must not
+-- be penalised, not that nothing may precede it. **`slateJevPicked` is zero
+-- in that window, so the cells carry no Jev mark until Jev has spoken** —
+-- which makes `~zt4jk`'s colour read as /Jev has answered/ rather than
+-- /these three are Jev's/, and that is the right reading once every cell is
+-- Jev's.
+--
+-- **`~63n23` bites harder here and he is holding it.** Jev is asked about at
+-- most 255 candidates, so on a 318-row launch list the rest are unscored and
+-- sort below every scored row — under the old design that cost them a
+-- promotion, under this one they cannot reach a cell at all.
 floatJevSlate :: Map.Map Text Double -> Slate -> Slate
 floatJevSlate scores sl = sl { slateRows = newRows, slateJevPicked = picked }
-  where (newRows, picked) = floatJevRows scores (slateRows sl)
+  where (newRows, picked) = jevOrderRows scores (slateRows sl)
+
+-- | Jev's order for every row Jev scored, then the engine's order for the
+-- rest; and how many the first group has. See 'floatJevSlate'.
+jevOrderRows :: Map.Map Text Double -> [OfferRow] -> ([OfferRow], Int)
+jevOrderRows scores rows = (scored <> rest, length scored)
+  where
+    label = Text.pack . rowLabel
+    scored =
+      map fst (sortOn (negate . snd) [(r, sc) | r <- rows, Just sc <- [Map.lookup (label r) scores]])
+    scoredLabels = map rowLabel scored
+    rest = filter (\r -> rowLabel r `notElem` scoredLabels) rows
 
 -- | **The ordering rule itself, and the one copy of it** — the picks and how
 -- many of them, given the scores and a list of candidates.
