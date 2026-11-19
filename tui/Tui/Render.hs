@@ -53,6 +53,7 @@ import Lens.Micro ((^.))
 import Thena.View.Address (Address (..))
 import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Shape (..))
 import Thena.View.Development (ConstraintView (..), LinkShape (..), LinkView (..))
+import Thena.View.Goals (GoalKind (..), GoalView (..))
 import Thena.View.Instral
   ( OperandView (..)
   , SkeletonView (..)
@@ -428,19 +429,59 @@ constraintPieces fold (ConstraintView _xi lhs rhs ty) =
     <> plain " : "
     <> displayPieces fold ty
 
--- | "Goal" means an open claim in the development, nothing more — no kernel
--- metas view exists to ask instead. Guesses branch, so this recurses into
--- their own bodies the same way 'renderDevelopment' does.
-renderGoals :: Fold -> [LinkView] -> Widget n
-renderGoals fold links = case goalsOf links of
-  [] -> str " "
-  gs -> vBox gs
+-- | **A goal is a hole or a guess, and both are drawn here** — his instruction
+-- of 2026-11-19, and the engine's 'Thena.View.Goals.goalsView' is what makes it
+-- possible to obey: the flattening, the order and the hole\/guess distinction
+-- are its answers and are not worked out again here.
+--
+-- **Why this used to show one goal and then none.** It walked 'LinkView' and
+-- recursed /through/ a guess into its body without listing the guess — so
+-- @attack@ on @∀ (T : Type) -> T -> T@, which turns the root into a guess, hid
+-- the thing it had just made. That was his question 10 and the engine answered
+-- it by giving a goal list a view of its own.
+--
+-- **The word after the marker is a word he can type** — phase 324 binds every
+-- goal at the prompt under the identifier the development prints it by, so a
+-- row reading @? id1 : T@ is reached by @goto id1@. Showing it is the whole of
+-- his first ask; it was already the string the development printed, and what
+-- changed underneath is that it now denotes something.
+--
+-- **Three things are said beside the type, each the same way the development
+-- pane says it**: @>@ marks the goal the cursor stands on ('developmentText''s
+-- own marker), @(guess)@ distinguishes a guess from a hole, and @(blocked)@ is
+-- 'linkPieces'\' suffix unchanged — something later still mentions it, which is
+-- why @abandon@ would refuse.
+renderGoals :: Fold -> [GoalView] -> Widget n
+renderGoals _ [] = str " "
+renderGoals fold gs = vBox (map row gs)
   where
-    goalsOf = concatMap goalOf
-    goalOf (LinkView _at _focus shape) = case shape of
-      AClaimLink {} -> [flow (linkPieces fold shape)]
-      AGuessLink {guessBody = body} -> goalsOf body
-      _ -> []
+    -- **The marker is a fixed column beside the flow**, for the reason
+    -- 'renderLink' records and measured: inside the flow an unfocused marker
+    -- is two spaces, and a break at a space drops it.
+    row g = str (goalMarker g) <+> flow (goalPieces fold g)
+
+-- | One goal's row without its marker, shared by the widget and 'goalTexts' so
+-- the screen and what Jev is told cannot drift — the same pairing
+-- 'linkPieces' and 'developmentText' already have.
+--
+-- **@(guess)@ goes beside the word and not after the type**, because a type
+-- wraps and a pane is thirty-odd columns wide: measured at his geometry, a
+-- guess at @∀ (T : Type) -> T -> T@ pushed its own tag onto a third line, so
+-- the one thing the row exists to say was the one thing off the first line.
+-- @(blocked)@ stays at the end, where 'linkPieces' puts it.
+goalPieces :: Fold -> GoalView -> [Piece]
+goalPieces fold g =
+  plain ("? " <> goalViewVar g <> kind <> " : ")
+    <> displayPieces fold (goalViewType g)
+    <> plain blocked
+  where
+    kind = case goalViewKind g of
+      AHole -> ""
+      AGuess -> " (guess)"
+    blocked = if goalViewBlocked g then " (blocked)" else ""
+
+goalMarker :: GoalView -> String
+goalMarker g = if goalViewFocus g then "> " else "  "
 
 -- | The same words the term drawers above draw, as plain text — for a reader
 -- that is not the screen. `~d4qvm`'s only use is Jev's request state, which is
@@ -474,16 +515,16 @@ developmentText = concatMap (go 0)
           AGuessLink {guessBody = body} -> concatMap (go (depth + 1)) body
           _ -> []
 
--- | The open claims, one line each, nested guesses included — 'renderGoals'
--- over the same links, as text. Flat: a goal is a goal wherever it sits, and
--- the indentation that locates it is 'developmentText''s job.
-goalTexts :: [LinkView] -> [String]
-goalTexts = concatMap goalOf
-  where
-    goalOf (LinkView _at _focus shape) = case shape of
-      AClaimLink {} -> [linkText shape]
-      AGuessLink {guessBody = body} -> goalTexts body
-      _ -> []
+-- | The goals one line each, guesses included — 'renderGoals' over the same
+-- list, as text. Flat: a goal is a goal wherever it sits, and the indentation
+-- that locates it is 'developmentText''s job.
+--
+-- **This is `~d4qvm`, Jev's request state, so the word matters more here than
+-- on screen**: it is what lets a hint say /goto id1/ rather than only name the
+-- goal it means. Guesses were missing from it for the same reason they were
+-- missing from the pane.
+goalTexts :: [GoalView] -> [String]
+goalTexts = map (\g -> goalMarker g <> concatMap pieceText (goalPieces NoFold g))
 
 renderMachineView :: MachineView -> [String]
 renderMachineView (MachineView pc env stack) =

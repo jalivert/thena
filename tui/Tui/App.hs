@@ -120,6 +120,7 @@ import Thena.View
   , statementOfferView
   )
 import Thena.View.Choices (ChoiceView (..))
+import Thena.View.Goals (goalsOf)
 import Thena.View.Matches (MatchView (..))
 import Thena.View.Type (SignatureView (..), TypeView (..))
 import Thena.View.Proofs
@@ -1968,7 +1969,7 @@ draw st =
       Modules -> pane' (paneBody (map (fmap ModuleRow) (moduleRows (moduleEntries st) (fileEntries st))))
       Output -> pane' (paneBody (outputRows focusText focusOut))
       ProofTerm -> pane' (padAll 1 (renderDevelopment fold links))
-      Goals -> pane' (padAll 1 (renderGoals fold links))
+      Goals -> pane' (padAll 1 (renderGoals fold (goalsOf links)))
       -- | **The parked proofs, and the import standing in a `yield`** —
       -- `~76zrr`, his request of 2026-11-12: /"Right, I need a pane with
       -- parked proofs!"/
@@ -6561,7 +6562,7 @@ jevRequest s typedSoFar offered = (JevState fields, candidates)
         : [ (Text.pack k, Text.pack v)
           | (k, v) <-
               [ ("proving", proving)
-              , ("open_goals", unlines' (goalTexts links))
+              , ("open_goals", unlines' (goalTexts (goalsOf links)))
               , ("proof_term", unlines' (developmentText links))
               , ("applies_here", unlines' (take matchesSent applying))
               ]
@@ -6655,7 +6656,7 @@ hintFields :: St -> [(Text, Text)]
 hintFields st =
   [ (Text.pack k, Text.pack v)
   | (k, v) <-
-      [ ("goals", unlines' (goalTexts links))
+      [ ("goals", unlines' (goalTexts (goalsOf links)))
       , ("proof_term", unlines' (developmentText links))
       , ("applies_here", unlines' (take matchesSent applying))
       , ("in_scope", unlines' scopeLines)

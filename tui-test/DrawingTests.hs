@@ -26,6 +26,7 @@ import Test.Tasty.HUnit (assertEqual, testCase)
 
 import Thena.View.Address (Address (..), Move (GoAlong))
 import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Shape (..))
+import Thena.View.Goals (GoalKind (..), GoalView (..))
 import Thena.View.Instral (ValueView (..))
 import Thena.View.Machine (MachineView (..))
 import Tui.Panes
@@ -47,7 +48,7 @@ import Tui.Panes
   , paneRowWidget
   , stripKeyLabel
   )
-import Tui.Render (Fold (..), foldAttr, renderDisplay, renderMachineView)
+import Tui.Render (Fold (..), foldAttr, renderDisplay, renderGoals, renderMachineView)
 
 
 -- * Drawing a widget without a terminal
@@ -175,7 +176,59 @@ drawingTests =
     , testGroup "the bar that names every pane, `~7tfhd`" paneBarCases
     , testGroup "the suggestion strip's grid, `~w2tk2`" stripGridCases
     , testGroup "the suggestion strip's hint region, `~w2tk2` slice 4" hintRegionCases
+    , testGroup "the goals pane lists a guess as a goal, phase 324" goalRowCases
     ]
+
+-- | **HIS INSTRUCTION, 2026-11-19**: /"change the goals pane such that each goal
+-- shows the variable under which it is bound. And also … report there guesses
+-- too."/
+--
+-- **The case that used to be wrong is the second line of the first test.** The
+-- pane walked the development's links and recursed /through/ a guess into its
+-- body without listing the guess, so a proof whose root had been @attack@ed
+-- showed its inner hole and not the guess holding it. 'Thena.View.Goals' lists
+-- both and this asserts that both are drawn.
+--
+-- **@(guess)@ is beside the word rather than after the type** — a pane is
+-- thirty-odd columns and a type wraps, so a tag at the end of the row is the
+-- part that falls off the first line. Asserted here at a width where nothing
+-- wraps; where it breaks is the pty's question.
+goalRowCases :: [TestTree]
+goalRowCases =
+  [ testCase "a guess and the hole inside it are both goals, the focused one marked" $
+      assertEqual ""
+        [ "> ? id (guess) : A"
+        , "  ? id1 : A"
+        ]
+        (take 2 (drawToLines (renderGoals NoFold
+                              [ goal "id" AGuess True False
+                              , goal "id1" AHole False False
+                              ])))
+  , -- | **@(blocked)@ is 'Tui.Render.linkPieces'\' own suffix, unchanged** —
+    -- something later in the development still mentions the goal, which is what
+    -- a pane needs in order to say why @abandon@ would refuse.
+    testCase "a blocked goal says so, after its type" $
+      assertEqual ""
+        ["  ? h : A (blocked)"]
+        (take 1 (drawToLines (renderGoals NoFold [goal "h" AHole False True])))
+  , -- | **Nothing left to prove is a space and not an empty pane body** — the
+    -- row keeps the pane's height so the panes beside it do not move when the
+    -- last goal closes.
+    testCase "no goals draws one blank row" $
+      assertEqual "" [""] (take 1 (drawToLines (renderGoals NoFold [])))
+  ]
+
+-- | One goal at type @A@, since nothing in these cases is about the type.
+goal :: String -> GoalKind -> Bool -> Bool -> GoalView
+goal name kind focus blocked =
+  GoalView
+    { goalViewVar = name
+    , goalViewKind = kind
+    , goalViewType = global "A"
+    , goalViewAt = Address []
+    , goalViewFocus = focus
+    , goalViewBlocked = blocked
+    }
 
 -- | **`~7tfhd`, his instruction of 2026-11-13**: /"lists all the available
 -- panes … opened ones are rendered a bit differently to closed ones, and they
