@@ -394,6 +394,54 @@ data OfferDropdown = OfferDropdown
     -- reads it to colour exactly that many rows and no more.
   }
 
+-- | **What the engine is offering for the line as it stands, and nothing at
+-- all about whether a popup is on screen** — `~3gn2r`, his correction of
+-- 2026-11-19: /"the suggestion pane is not supposed to hide and appear the
+-- suggestions together with the dropdown, they are always supposed to be
+-- there when available."/
+--
+-- **It exists because the strip read 'stOfferDropdown', and that field means
+-- two things at once**: what the engine offers, and whether the completion
+-- popup is up. The second is what 'submitted' clears on every Enter and what
+-- Esc's second press clears — so the strip went blank for reasons that were
+-- about an element that is switched off. **Concretely**: submit @:show Nat@
+-- and the strip is empty with every op in the language available; type one
+-- character and nine options appear, with nothing about the session changed
+-- between the two frames.
+--
+-- **The dropdown is a slate plus a highlight; the strip is the slate with no
+-- highlight at all.** So this carries the rows and the accept geometry and no
+-- selection — there is nothing in the strip to select, which is his design
+-- and not an omission ('draw''s grid lights no cell).
+--
+-- **Filtered to rows with something to insert**, which is the filter
+-- 'stripSlateOf' used to apply itself: a row that cannot be accepted has no
+-- business occupying a numbered slot. Since `~bkzw9` the engine's offers are
+-- all insertable, so it is a guard and not a policy.
+data Slate = Slate
+  { slateRows :: [OfferRow]
+    -- ^ every insertable candidate, in the order 'buildOfferDropdown' puts
+    -- them in (tokens before productions), Jev's picks floated to the top
+    -- once an answer has landed ('applyJevRanking').
+  , slateStart :: Int
+    -- ^ the column an accepted row replaces from — 'odWordStart's own
+    -- arithmetic, since it is literally that value.
+  , slateReplaceLen :: Int
+    -- ^ how many characters after 'slateStart' an accept removes —
+    -- 'odReplaceLen'.
+  , slateJevPicked :: Int
+    -- ^ how many leading 'slateRows' are Jev's own picks. **Nothing draws it
+    -- yet** — the strip lights no cell — and it is carried so that the
+    -- strip's order and the dropdown's can never explain themselves
+    -- differently.
+  }
+
+-- | **Nothing is offered here**: a `:load` path line, whose offers are a
+-- directory listing and 'stDropdown''s own business, or a line the statement
+-- grammar answers nothing for.
+emptySlate :: Slate
+emptySlate = Slate [] 0 0 0
+
 -- | **The stored sessions, as a thing you move a highlight through** — `~xf2hv`,
 -- his instruction, 2026-11-12: /"the session selection shouldn't be done by
 -- `:script sessions` printing a static list and the user having to re-type its
@@ -483,6 +531,14 @@ data St = St
                                               -- non-colon line never reaches
                                               -- ':load''s), never enforced
                                               -- as an invariant beyond that
+  , stSlate :: Slate
+    -- ^ **the suggestion strip's own source, and never the dropdown's
+    -- state** — `~3gn2r`. Recomputed from the session and the line wherever
+    -- 'stOfferDropdown' is ('refreshOfferDropdown'), and also at every place
+    -- the dropdown is deliberately closed while the offers themselves have
+    -- not gone anywhere: 'submitted' on every Enter, 'closeDropdowns' on a
+    -- mode switch. **It is never cleared by a dismissal**, which is the whole
+    -- of what the item asked for.
   , stInputExtent :: Maybe (Extent Name)  -- ^ looked up post-render, one
                                              -- frame behind — 'Brick.Main'
                                              -- has no way to ask for an
@@ -756,6 +812,10 @@ runTui = do
         -- list, first row lit — the same state deleting back to empty
         -- reaches.
         , stOfferDropdown = buildOfferDropdown autoSelect0 0 (statementOfferView s0 [] [])
+        -- The strip's own source, from the same view — `~3gn2r`. Built here
+        -- rather than left empty for the first keystroke to fill, because
+        -- the strip is open on launch for anyone whose dotfile had it open.
+        , stSlate       = slateFromView 0 (statementOfferView s0 [] [])
         , stDismissed   = Nothing
         , stRecoveredSpan = Nothing
         , stAutoSelect  = autoSelect0
@@ -1469,9 +1529,8 @@ draw st =
         (ghost, skip) = if stWhisperOn st then whisper else ("", 0)
         whisper
           | stripOpen (stStrip st)
-          , Just od <- stOfferDropdown st
           , Just ins <- rowInsert =<< listToMaybe (stripSlateOf st)
-          = maybe ("", 0) id (offerGhostFor col od ins)
+          = maybe ("", 0) id (ghostOfInsert col (slateStart (stSlate st)) (slateReplaceLen (stSlate st)) ins)
           | otherwise = ghostAt line col (stDropdown st) (liveOffers st)
         line = concatMap Text.unpack (getEditContents (stInput st))
         (_, col) = getCursorPosition (stInput st)
@@ -2120,16 +2179,63 @@ liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 -- a guard and not a policy; if hint rows ever come back (`~5f3k6` is open),
 -- they will need somewhere that is not a slot.
 --
--- **Empty with the strip closed**, so nothing computes a slate for a pane
--- that is not on screen and no F-key does anything.
+-- **Empty with the strip closed**, so no F-key does anything for a pane that
+-- is not on screen.
 --
--- **'stOfferDropdown' and NOT 'liveOffers'.** The strip is not the dropdown:
--- it keeps working with @:dropdown off@, which is the whole of what
--- `~492hq`'s /disabled, not deleted/ buys.
+-- **'stSlate' and not 'stOfferDropdown', which is `~3gn2r`.** The strip is
+-- not the dropdown and is not a second view of its visibility: it keeps
+-- working with @:dropdown off@ (`~492hq`'s /disabled, not deleted/) and it
+-- keeps working after an Enter and after Esc, which reading the dropdown's
+-- own field is exactly what it could not do.
 stripSlateOf :: St -> [OfferRow]
 stripSlateOf st
   | not (stripOpen (stStrip st)) = []
-  | otherwise = filter (isJust . rowInsert) (maybe [] odRows (stOfferDropdown st))
+  | otherwise = slateRows (stSlate st)
+
+-- | **The slate for the line as it stands, from the session and the line and
+-- nothing else** — `~3gn2r`. Pure, so every place that changes either of
+-- those two can put a fresh one in state without an 'EventM'.
+--
+-- **Built through 'buildOfferDropdown' rather than beside it.** The strip's
+-- order is then the dropdown's order by construction, instead of two lists
+-- that have to be kept agreeing; the selection it builds is thrown away, so
+-- 'False' goes in for @:preselect@ whatever 'stAutoSelect' says — the strip
+-- has no highlight to preselect.
+--
+-- **A `:load` path line is 'emptySlate'**, the one case 'refreshOfferDropdown'
+-- also declines: the path's own candidates are a directory listing and
+-- 'stDropdown' owns them, so asking the statement grammar would be asking
+-- the wrong question a second time.
+slateFor :: St -> Slate
+slateFor st
+  | isJust (loadPathPrefix line) = emptySlate
+  | otherwise = slateFromView col (statementOfferView (activeSession st) before after)
+  where
+    line = concatMap Text.unpack (getEditContents (stInput st))
+    (_, col) = getCursorPosition (stInput st)
+    (before, after) = splitWritten line col
+
+-- | 'slateFor' once the view is in hand — also the launch slate's own path,
+-- where 'runTui' has a 'Session' and no 'St' to ask yet.
+slateFromView :: Int -> OfferView -> Slate
+slateFromView col ov = slateOfDropdown (buildOfferDropdown False col ov)
+
+-- | **The slate a built dropdown carries inside it** — the rows it can
+-- accept and the span an accept replaces, with the highlight dropped.
+--
+-- **'refreshOfferDropdown' goes through this rather than through
+-- 'slateFromView'**, so one keystroke runs one 'statementOfferView' and one
+-- 'buildOfferDropdown' exactly as it did before `~3gn2r`: the strip's list
+-- and the popup's list are not two computations that could disagree, they
+-- are one value read two ways.
+slateOfDropdown :: Maybe OfferDropdown -> Slate
+slateOfDropdown Nothing = emptySlate
+slateOfDropdown (Just od) = Slate
+  { slateRows = filter (isJust . rowInsert) (odRows od)
+  , slateStart = odWordStart od
+  , slateReplaceLen = odReplaceLen od
+  , slateJevPicked = odJevPicked od
+  }
 
 offerRowToPopup :: Maybe Int -> Int -> Int -> OfferRow -> PopupRow
 offerRowToPopup selected jevPicked i (OfferRow label ins) =
@@ -2444,7 +2550,7 @@ offerGhost :: Int -> OfferDropdown -> Maybe (String, Int)
 offerGhost col od = do
   i <- odSelected od
   ins <- rowInsert (odRows od !! i)
-  offerGhostFor col od ins
+  ghostOfInsert col (odWordStart od) (odReplaceLen od) ins
 
 -- | The same arithmetic, for an insertion the caller has already chosen —
 -- `~w2tk2` slice 2, where the whisper's row is **slot 1 of the strip** and
@@ -2454,12 +2560,16 @@ offerGhost col od = do
 -- slate is a filtered list and an index into it is not an index into
 -- 'odRows'. What both callers genuinely share is this: given the text an
 -- accept would write, how much of it has the caret already walked past.
-offerGhostFor :: Int -> OfferDropdown -> String -> Maybe (String, Int)
-offerGhostFor col od ins =
-  let typedLen = col - odWordStart od
+--
+-- **It takes the two numbers and not a dropdown** — `~3gn2r`. The strip's
+-- caller has a 'Slate' and may have no dropdown at all (after an Enter,
+-- after Esc), and the arithmetic never wanted anything else from one.
+ghostOfInsert :: Int -> Int -> Int -> String -> Maybe (String, Int)
+ghostOfInsert col wordStart replaceLen ins =
+  let typedLen = col - wordStart
    in if typedLen < 0 || typedLen > length ins
         then Nothing
-        else Just (drop typedLen ins, max 0 (odReplaceLen od - typedLen))
+        else Just (drop typedLen ins, max 0 (replaceLen - typedLen))
 
 -- | A line, run against the session, and its 'Response' rendered as lines
 -- via 'Thena.Render.renderResponse' — a status-line-shaped placeholder for
@@ -3425,11 +3535,16 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 -- **This clause is in the repl's handler and live-script mode falls through
 -- to it**, so the gesture is one gesture in both keyboards — which is the
 -- whole reason F2 had to leave the command bar.
+--
+-- **It asks the slate and not the dropdown** — `~3gn2r`. Requiring a
+-- 'stOfferDropdown' here meant every F-key was dead after an Enter and after
+-- Esc's second press, in exactly the frames where the strip was blank for the
+-- same reason.
 handleReplEvent (VtyEvent (V.EvKey (V.KFun k) []))
   | k `elem` stripSlotKeys = do
       st <- get
-      case (stOfferDropdown st, nthOf (k - 1) (stripSlateOf st)) of
-        (Just od, Just row) | Just ins <- rowInsert row -> acceptOfferRow st od ins
+      case nthOf (k - 1) (stripSlateOf st) of
+        Just row | Just ins <- rowInsert row -> acceptSlateRow st ins
         _ -> pure ()
 handleReplEvent (VtyEvent (V.EvKey V.KEsc [])) = do
   st <- get
@@ -3568,7 +3683,7 @@ handleReplEvent (MouseDown _ _ _ _) = pure ()
 -- the first and only chance to score the launch dropdown, which
 -- 'refreshOfferDropdown' never built and so never would have scored on
 -- its own ('fireJevForCurrentDropdown').
-handleReplEvent (AppEvent Tick) = fireJevForCurrentDropdown
+handleReplEvent (AppEvent Tick) = fireJevForCurrentOffers
 handleReplEvent (AppEvent (JevDue gen)) = handleJevDue gen
 handleReplEvent (AppEvent (JevRanked gen result)) = applyJevRanking gen result
 handleReplEvent (AppEvent (RerunStep gen soFar shown finished)) =
@@ -3596,6 +3711,16 @@ acceptLoadRow st entries i = do
 acceptOfferRow :: St -> OfferDropdown -> String -> EventM Name St ()
 acceptOfferRow st od ins = do
   put st { stInput = E.applyEdit (acceptOfferEdit (odWordStart od) (odReplaceLen od) ins) (stInput st) }
+  refreshOfferDropdown
+  followInput
+
+-- | **The same landing for a slot taken off the strip** — `~3gn2r`. The
+-- geometry is the slate's ('slateStart', 'slateReplaceLen'), which is the
+-- same arithmetic 'buildOfferDropdown' computed for the same line; what it
+-- does not need is a dropdown to exist.
+acceptSlateRow :: St -> String -> EventM Name St ()
+acceptSlateRow st ins = do
+  put st { stInput = E.applyEdit (acceptOfferEdit (slateStart (stSlate st)) (slateReplaceLen (stSlate st)) ins) (stInput st) }
   refreshOfferDropdown
   followInput
 
@@ -4525,12 +4650,18 @@ leaveScriptMode = do
 -- just stopped drawing. Nothing redraws until the next keypress, so it sits
 -- there, detached, until you touch something. Refreshing it here could only
 -- ever re-open it at the stale coordinates; closing it is the fix.
+--
+-- **The slate is recomputed rather than cleared** — `~3gn2r`. The box is
+-- closed because it would be drawn at stale coordinates; the offers have not
+-- gone anywhere, and on a mode switch the active session has changed, so the
+-- strip wants a fresh answer and not a blank one.
 closeDropdowns :: EventM Name St ()
 closeDropdowns = do
   st <- get
   put st
     { stDropdown = Nothing
     , stOfferDropdown = Nothing
+    , stSlate = slateFor st
     , stRecoveredSpan = Nothing
     , stDismissed = Nothing
     , stArrowsReleased = False
@@ -5216,14 +5347,26 @@ appendTurn :: St -> Maybe String -> [String] -> EventM Name St ()
 appendTurn st prompt output = do
   put (submitted st) { stTurns = stTurns st <> [Turn prompt output] }
   followInput
+  -- The slate 'submitted' just computed is the new session's, and nothing has
+  -- asked Jev about it — `~3gn2r`. Scheduling rather than firing, so a run of
+  -- lines (a `:script reload`'s replay) coalesces into one request.
+  scheduleJevRanking
 
 -- | **What a submitted line leaves behind, apart from its own turn.**
 -- Factored out of 'appendTurn' for `~p6g53`: `:clear` is the one submission
 -- that answers with nothing at all, so it cannot go through 'appendTurn' and
 -- must still leave the input exactly as every other submitted line does.
 -- Sharing the record update is what keeps the two from drifting.
+--
+-- **The dropdown closes and the slate does not** — `~3gn2r`. Closing the
+-- popup on Enter is the popup's own rule; the offers for the empty line in
+-- the session the submission just produced are a different fact, and they
+-- exist. The slate is recomputed from the state /after/ the input is
+-- emptied, so it is the launch slate of the new session and not the slate of
+-- the line that was just run.
 submitted :: St -> St
-submitted st = st { stInput = emptyInput, stDropdown = Nothing, stOfferDropdown = Nothing }
+submitted st = after { stSlate = slateFor after }
+  where after = st { stInput = emptyInput, stDropdown = Nothing, stOfferDropdown = Nothing }
 
 -- | **`:clear ‹n›` — the last @n@ turns off the transcript, and nothing else**
 -- (`~p6g53`, his request of 2026-11-13: /"some shortcut removes the latest
@@ -5374,40 +5517,55 @@ refreshDropdown = do
 -- `.jalivert/NOTES.md` 2026-09-30) answers it now, through the same
 -- 'statementOfferView' call, no new one — the guard here just never
 -- caught up to ask.
+--
+-- **The strip's slate is recomputed on every branch, including the two that
+-- blank the dropdown** — `~3gn2r`. A dismissal and a `:load` line are about
+-- the popup and about this grammar's relevance respectively; neither is the
+-- engine withdrawing an offer, and only the second of the two leaves the
+-- strip with nothing ('slateFor' answers 'emptySlate' there for the same
+-- reason the dropdown declines).
 refreshOfferDropdown :: EventM Name St ()
 refreshOfferDropdown = do
-  st <- get
-  let line = concatMap Text.unpack (getEditContents (stInput st))
+  st0 <- get
+  let line = concatMap Text.unpack (getEditContents (stInput st0))
+      (_, col) = getCursorPosition (stInput st0)
+      (before, after) = splitWritten line col
+      -- **One view, read two ways** — `~3gn2r`. A `:load` path line asks
+      -- nothing of the statement grammar (see 'slateFor'), so 'Nothing' here
+      -- is both /no dropdown/ and /an empty slate/.
+      offered
+        | isJust (loadPathPrefix line) = Nothing
+        | otherwise = Just (statementOfferView (activeSession st0) before after)
+      new = offered >>= buildOfferDropdown (stAutoSelect st0) col
+      slate = slateOfDropdown new
+      oldSlateRows = slateRows (stSlate st0)
+      st = st0 { stSlate = slate }
   -- Same dismissal as 'refreshDropdown': hidden while the line is as Esc
-  -- left it, back on any edit.
+  -- left it, back on any edit. **The slate is already in 'st' and survives
+  -- it** — `~3gn2r`: Esc is about the popup, not about what is offered.
   if stDismissed st == Just line
     then put st { stOfferDropdown = Nothing }
-    else if isJust (loadPathPrefix line)
-      then put st { stOfferDropdown = Nothing, stDismissed = Nothing, stRecoveredSpan = Nothing, stArrowsReleased = False }
-      else do
-        let (_, col) = getCursorPosition (stInput st)
-            (before, after) = splitWritten line col
-            ov = statementOfferView (activeSession st) before after
-            new = buildOfferDropdown (stAutoSelect st) col ov
-            oldRows = maybe [] odRows (stOfferDropdown st)
+    else case offered of
+      Nothing -> put st { stOfferDropdown = Nothing, stDismissed = Nothing, stRecoveredSpan = Nothing, stArrowsReleased = False }
+      Just ov -> do
+        let oldRows = maybe [] odRows (stOfferDropdown st)
         put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = underlineSpan ov, stArrowsReleased = False }
         -- Same rule as 'refreshDropdown': new rows start at the top, same
         -- rows keep their scroll — above the line, at the bottom instead.
-        let newRows = maybe [] odRows new
-            rowsChanged = newRows /= oldRows
-        if rowsChanged
+        if maybe [] odRows new /= oldRows
           then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll OfferPopup)
           else pure ()
-        -- Score the dropdown, not every keystroke: only when the
-        -- candidate set actually changed, and then on a trailing-edge
-        -- timer rather than on the keystroke itself ('scheduleJevRanking').
-        -- The set comparison sorts both sides first: 'applyJevRanking'
-        -- floats Jev's picks to the top, so an order-sensitive check would
-        -- see a change after every answer landed and refire on the next
-        -- keystroke even when the set is the same. 'fireJevForCurrentDropdown'
-        -- re-reads 'stOfferDropdown' itself, which is 'new' by now (just 'put').
-        let candidatesChanged = sortOn sortKey newRows /= sortOn sortKey oldRows
-        if candidatesChanged then scheduleJevRanking else pure ()
+  -- Score the slate, not every keystroke: only when the candidate set
+  -- actually changed, and then on a trailing-edge timer rather than on the
+  -- keystroke itself ('scheduleJevRanking'). The set comparison sorts both
+  -- sides first: 'applyJevRanking' floats Jev's picks to the top, so an
+  -- order-sensitive check would see a change after every answer landed and
+  -- refire on the next keystroke even when the set is the same.
+  --
+  -- **Off the slate and outside the branches** — `~3gn2r`. It was inside the
+  -- else, so a dismissed dropdown was never re-ranked; the strip is on screen
+  -- in that frame now, and what is on screen is what Jev is asked about.
+  when (sortOn sortKey (slateRows slate) /= sortOn sortKey oldSlateRows) scheduleJevRanking
   where
     sortKey r = (rowLabel r, rowInsert r)
 
@@ -5445,10 +5603,10 @@ scheduleJevRanking = do
 handleJevDue :: Int -> EventM Name St ()
 handleJevDue gen = do
   st <- get
-  when (gen == stJevPending st) fireJevForCurrentDropdown
+  when (gen == stJevPending st) fireJevForCurrentOffers
 
--- | Fires a ranking request for whatever dropdown is on screen right
--- now, if there's a key and more than one real candidate to order.
+-- | Fires a ranking request for the offers on screen right now, if there's
+-- a key and more than one candidate to order.
 --
 -- **Also called once, unconditionally, straight after startup** (the
 -- post-launch 'Tick') — the launch dropdown (his `.jalivert/TUI.md` #14:
@@ -5457,19 +5615,28 @@ handleJevDue gen = do
 -- this call Jev never saw it at all. That gap is exactly his report,
 -- 2026-10-29: *"I just opened it, dropdown is shown... not a single one
 -- is green"* — not a scoring bug, a dropdown Jev was never asked about.
-fireJevForCurrentDropdown :: EventM Name St ()
-fireJevForCurrentDropdown = do
+--
+-- **It asks 'stSlate' and not 'stOfferDropdown'** — `~3gn2r`. The slate is
+-- what the strip draws and is still there after an Enter and after Esc, both
+-- of which used to log /no dropdown on screen/ and leave the ranking stale.
+--
+-- **Nothing is sent when neither element is up**: the strip closed and the
+-- dropdown off or dismissed means the answer would reorder a list nobody is
+-- looking at, and a request costs a @:matches@ and a round trip.
+fireJevForCurrentOffers :: EventM Name St ()
+fireJevForCurrentOffers = do
   st <- get
   let line = concatMap Text.unpack (getEditContents (stInput st))
       (_, col) = getCursorPosition (stInput st)
-      selectable = maybe 0 (length . filter (isJust . rowInsert) . odRows) (stOfferDropdown st)
-  case (stOfferDropdown st, stJevConfig st) of
-    (Just od, Just jcfg)
-      | selectable >= 2 ->
-        fireJevRanking jcfg (activeSession st) (Text.pack (take col line)) od
-    (_, Nothing) -> liftIO (jevLog "skip: no key loaded")
-    (Nothing, Just _) -> liftIO (jevLog "skip: no dropdown on screen")
-    (Just _, Just _) -> liftIO (jevLog ("skip: only " <> show selectable <> " selectable candidate(s)"))
+      offered = slateRows (stSlate st)
+      onScreen = stripOpen (stStrip st) || isJust (liveOffers st)
+  case stJevConfig st of
+    Nothing -> liftIO (jevLog "skip: no key loaded")
+    Just jcfg
+      | not onScreen -> liftIO (jevLog "skip: neither the strip nor the dropdown is on screen")
+      | length offered >= 2 ->
+        fireJevRanking jcfg (activeSession st) (Text.pack (take col line)) offered
+      | otherwise -> liftIO (jevLog ("skip: only " <> show (length offered) <> " candidate(s) offered"))
 
 -- | Sends one ranking request to Jev in the background and returns
 -- immediately — nothing here ever blocks a keystroke on the network.
@@ -5483,12 +5650,11 @@ fireJevForCurrentDropdown = do
 -- for between a key going down and the screen being redrawn. A 'Session' is
 -- immutable and every call 'jevRequest' makes of it is pure, so handing one to
 -- another thread is not sharing mutable state — it is passing a value.
-fireJevRanking :: JevConfig -> Session -> Text -> OfferDropdown -> EventM Name St ()
-fireJevRanking jcfg s typedSoFar od = do
+fireJevRanking :: JevConfig -> Session -> Text -> [OfferRow] -> EventM Name St ()
+fireJevRanking jcfg s typedSoFar offered = do
   st <- get
   let gen = stJevGen st + 1
       chan = stJevChan st
-      offered = [r | r <- odRows od, isJust (rowInsert r)]
   put st { stJevGen = gen }
   liftIO $ do
     _ <- forkIO $ do
@@ -5619,11 +5785,19 @@ matchesSent = 40
 -- | Reads a ranking answer back in — 'Left' (a failed call) and a
 -- generation that no longer matches both mean the same thing: do
 -- nothing, the dropdown 'refreshOfferDropdown' already built stands.
+-- **It lands on the slate as well as on the dropdown** — `~3gn2r`, and the
+-- slate is the half that is always there to land on. The two take the same
+-- scores through the same 'floatJevRows', so the strip's order and the
+-- popup's order are the same order and not two orders that happen to match.
 applyJevRanking :: Int -> Either String (Map.Map Text Double) -> EventM Name St ()
 applyJevRanking gen result = do
   st <- get
-  case (gen == stJevGen st, result, stOfferDropdown st) of
-    (True, Right scores, Just od) -> put st { stOfferDropdown = Just (floatJevPicks scores od) }
+  case (gen == stJevGen st, result) of
+    (True, Right scores) ->
+      put st
+        { stOfferDropdown = floatJevPicks scores <$> stOfferDropdown st
+        , stSlate = floatJevSlate scores (stSlate st)
+        }
     _ -> pure ()
 
 -- | Jev's top three, whatever they are, float to the very top of the
@@ -5642,16 +5816,28 @@ applyJevRanking gen result = do
 -- highlight set with Up/Down follows its candidate rather than landing
 -- on whatever the reorder put in that slot.
 floatJevPicks :: Map.Map Text Double -> OfferDropdown -> OfferDropdown
-floatJevPicks scores od = od { odRows = newRows, odSelected = newSelected, odJevPicked = length picked }
+floatJevPicks scores od = od { odRows = newRows, odSelected = newSelected, odJevPicked = picked }
   where
-    label = Text.pack . rowLabel
-    scored = [ (r, s) | r <- odRows od, Just s <- [Map.lookup (label r) scores] ]
-    picked = map fst (take 3 (sortOn (negate . snd) scored))
-    pickedLabels = map rowLabel picked
-    rest = filter (\r -> rowLabel r `notElem` pickedLabels) (odRows od)
-    newRows = picked <> rest
+    (newRows, picked) = floatJevRows scores (odRows od)
     selectedLabel = rowLabel . (odRows od !!) <$> odSelected od
     newSelected = selectedLabel >>= \lbl -> listToMaybe [i | (i, r) <- zip [0 ..] newRows, rowLabel r == lbl]
+
+-- | The same floating, for the strip's slate — `~3gn2r`. There is no
+-- selection to carry across, which is the whole difference.
+floatJevSlate :: Map.Map Text Double -> Slate -> Slate
+floatJevSlate scores sl = sl { slateRows = newRows, slateJevPicked = picked }
+  where (newRows, picked) = floatJevRows scores (slateRows sl)
+
+-- | **The ordering rule itself, and the one copy of it** — the picks and how
+-- many of them, given the scores and a list of candidates.
+floatJevRows :: Map.Map Text Double -> [OfferRow] -> ([OfferRow], Int)
+floatJevRows scores rows = (picked <> rest, length picked)
+  where
+    label = Text.pack . rowLabel
+    scored = [ (r, sc) | r <- rows, Just sc <- [Map.lookup (label r) scores] ]
+    picked = map fst (take 3 (sortOn (negate . snd) scored))
+    pickedLabels = map rowLabel picked
+    rest = filter (\r -> rowLabel r `notElem` pickedLabels) rows
 
 -- | The offset range 'renderInputContent' underlines — his `.jalivert/
 -- TUI.md` #7, a visible cue that the line (or the literal under the
