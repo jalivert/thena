@@ -59,6 +59,7 @@ module Tui.Layout
   , stripHintBudget
   , stripHintUsed
   , stripReplyRows
+  , stripSeparatorRows
   ) where
 
 import qualified Data.Map.Strict as Map
@@ -462,7 +463,7 @@ stripHintRows = 3
 -- remedy is the drag slice 1 built: pull the strip taller and both regions
 -- grow.
 stripHintBudget :: Int -> Int
-stripHintBudget rows = max stripHintRows (rows - 1 - stripReplyRows)
+stripHintBudget rows = max stripHintRows (rows - 1 - stripReplyRows - stripSeparatorRows)
 
 -- | **The rows the hint region actually occupies**, given how tall the strip
 -- is and how many lines the hint wrapped to — `~w2tk2` slice 4.
@@ -485,6 +486,18 @@ stripHintUsed rows needed = min (stripHintBudget rows) (max stripHintRows needed
 -- user"/. Built at slice 5; reserved here for the reason 'stripHintRows' is.
 stripReplyRows :: Int
 stripReplyRows = 1
+
+-- | **One blank row between the grid and the LLM's half of the pane** — HIS
+-- instruction, 2026-11-19: /"Leave one line's space between the Jev's
+-- suggestions and the space for LLM."/
+--
+-- **Reserved rather than left to chance.** The space appears on its own
+-- whenever the grid has fewer cells than it has room for — the slack falls
+-- between them — but a grid that filled every row it was given would have
+-- run straight into the hint, which is the case this row exists for. So the
+-- grid is sized one row shorter and the gap is there at every height.
+stripSeparatorRows :: Int
+stripSeparatorRows = 1
 
 -- | **The grid the strip's size implies** — `~w2tk2` slice 2.
 --

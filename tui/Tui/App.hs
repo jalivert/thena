@@ -173,6 +173,7 @@ import Tui.Layout
   , stripMinRows
   , stripName
   , stripReplyRows
+  , stripSeparatorRows
   , stripSized
   , stripSlotKeys
   , stripBodyRows
@@ -209,10 +210,8 @@ import Tui.Hint
   ( HintConfig (..)
   , HintModel (..)
   , askHint
-  , defaultModelId
   , fetchModels
   , hintPlaceholder
-  , hintPromptPath
   , loadHintConfig
   , loadHintPrompt
   , matchingModels
@@ -1393,14 +1392,13 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- unpaired one would have punched a three-row hole in the panel whenever
   -- the hint was short.
   , (attrName "strip.hint",     surface (themePanel th) (themeInk th))
-  -- | **A cell Jev picked, in the same surface the dropdown's row wore** —
-  -- `~zt4jk`, his report of 2026-11-19: /"Why doesn't Jev's suggestion have
-  -- the Jev's colored background?"/ Literally the same two colours as
-  -- @dropdown.jevpick@, so his eye does not have to learn a second mark for
-  -- one fact. **A separate attr all the same**: the dropdown's fills a whole
-  -- row and this one fills a word, and a theme that retunes one may want to
-  -- retune the other.
-  , (attrName "strip.jev",      surface (themeJevPick th) (themeStage th))
+  -- | **`strip.jev` IS GONE WITH THE MARK IT PAINTED — HIS WORD,
+  -- 2026-11-19**: /"turn off the green color under Jev's suggestions."/ See
+  -- 'Tui.Panes.offerGridWidget' for why his two instructions about it do not
+  -- conflict — `~zt4jk` asked for the colour while the grid still mixed
+  -- Jev's rows with the engine's, and exclusion made every cell Jev's the
+  -- same day. **The entry is removed rather than left unused**: an attr
+  -- nothing draws is a theme key he can retune to no effect.
   -- | **The reply row's unanswered state** — `~w2tk2` slice 6: the label
   -- that names the region and the dim sentence that fires it. HIS, on the
   -- sentence: /"it by default has a dim line with text like \"give me a
@@ -1679,8 +1677,7 @@ draw st =
           shown = take (gridSlots grid) (map rowLabel stripSlate)
           offers
             | null stripSlate = []
-            | otherwise =
-                [offerGridWidget cellW (gridCols grid) (slateJevPicked (stSlate st)) shown]
+            | otherwise = [offerGridWidget cellW (gridCols grid) shown]
           -- **The reply row is drawn whenever the strip is open, and the
           -- hint's own rows only when there is a hint** — `~w2tk2` slice 6
           -- moved the first of those. Slice 4 drew the row only beside a
@@ -1690,10 +1687,36 @@ draw st =
           -- be clicked, and his design has no other door. `~8cr56`'s rule
           -- is kept where it still applies: the hint's three rows cost
           -- nothing until something is in them.
-          reserve =
+          llm =
             [hintRegionWidget width hintRows (stHint st) | isJust (stHint st)]
               <> [stripReplyWidget]
-      render (vBox (offers <> reserve))
+          -- | **THE ROW HE TYPES IN IS THE PANE'S LAST LINE, AND THE GAP
+          -- ABOVE IT IS HIS** — HIS, 2026-11-19: /"I told you that the
+          -- prompt for the AI is supposed to be on the bottom line at the
+          -- bottom of the pane"/ and /"Leave one line's space between the
+          -- Jev's suggestions and the space for LLM."/
+          --
+          -- **It is counted, not filled.** A greedy 'fill' would be the
+          -- obvious way to push the bottom group down and it is the wrong
+          -- one here: this body renders inside a *vertical* viewport, which
+          -- offers its content unbounded height, so a greedy row claims all
+          -- of it — the trap 'stripReplyWidget' already names for its own
+          -- blank row. So the slack is worked out against
+          -- 'Tui.Layout.stripBodyRows' and emitted as that many bounded
+          -- rows.
+          --
+          -- **Never fewer than 'stripSeparatorRows'.** The grid is sized a
+          -- row shorter than it could be ('stripReserveOf'), so a grid
+          -- drawing every row it was given still leaves his one line; the
+          -- 'max' is there so the gap survives a geometry too short to pay
+          -- for it, the same way 'stripHintBudget' keeps the hint's floor.
+          drawnRows = length offers * ((length shown + gridCols grid - 1) `div` max 1 (gridCols grid))
+          slack =
+            max stripSeparatorRows
+              (stripBodyRows (stripRows (stStrip st)) - drawnRows - hintUsed - stripReplyRows)
+          hintUsed = if isJust (stHint st) then hintRows else 0
+          gap = [vLimit slack (fill ' ')]
+      render (vBox (offers <> gap <> llm))
 
     -- | **The reply row — `~w2tk2` slice 5.** Blank and clickable while
     -- 'stStripReply' is 'Nothing'; the click that opens it is
@@ -1727,9 +1750,27 @@ draw st =
                 Nothing -> [withAttr (attrName "strip.dim") (str (Text.unpack hintPlaceholder))]
                 Just ed ->
                   [ withAttr (attrName "strip.key") (str "❯ ")
-                  , overrideAttr editFocusedAttr (attrName "strip.hint")
-                      (renderEditor (vBox . map (str . Text.unpack)) True ed)
+                  -- | **THE SENTENCE SURVIVES THE CLICK — HIS, 2026-11-19**:
+                  -- /"when I click on \"give me a hint\" the sentence
+                  -- disappears. That's not what we agreed on."/ It is a
+                  -- placeholder and not a prompt-and-clear: it says what
+                  -- Enter will send, and Enter on an untouched row does send
+                  -- it, so a row that blanked itself on a click was showing
+                  -- him the opposite of what it would do.
+                  --
+                  -- **The editor is held to the width of its own text** so
+                  -- the sentence can sit after it. 'renderEditor' is greedy
+                  -- across the row otherwise and would cover the whole
+                  -- line, leaving nowhere for the placeholder to be drawn;
+                  -- one column past the text is where the cursor goes.
+                  , hLimit (Text.length (typedReply ed) + 1)
+                      ( overrideAttr editFocusedAttr (attrName "strip.hint")
+                          (renderEditor (vBox . map (str . Text.unpack)) True ed)
+                      )
                   ]
+                    <> [ withAttr (attrName "strip.dim") (str (Text.unpack hintPlaceholder))
+                       | Text.null (typedReply ed)
+                       ]
               <> [fill ' ']
           )
 
@@ -2514,7 +2555,7 @@ stripGridFor st =
 -- answer; reserving it unconditionally was reserving a row for a
 -- conversation that had not started.
 stripReserveOf :: St -> Int -> Int
-stripReserveOf st w = hint + stripReplyRows
+stripReserveOf st w = stripSeparatorRows + hint + stripReplyRows
   where
     hint = if isJust (stHint st) then stripHintRowsFor st w else 0
 
@@ -3499,9 +3540,31 @@ handleStripReplyEvent st reply ev = case ev of
   -- slice 5 only because there was no model on the other end yet.
   VtyEvent (V.EvKey V.KEnter []) -> askHintNow
   VtyEvent (V.EvKey V.KEsc [])   -> closeStripReply
+  -- | **A CLICK ANYWHERE ELSE GIVES THE KEYBOARD BACK — HIS, 2026-11-19**:
+  -- /"when I click the AI pane, I can't click back to the repl. That's
+  -- wrong too."/ He was right and it was a trap: this row claims every
+  -- event while it is open, so a click on the prompt went into the row's
+  -- own editor and Esc was the only way out, which nothing on screen said.
+  --
+  -- **Any mouse press reaching here is already outside the row.**
+  -- 'handlePaneClick' runs ahead of this dispatch and takes the row's own
+  -- click, the accent-bar drags and the pane folds, returning 'True' for
+  -- each; so there is no gesture to tell apart here, and none to protect.
+  --
+  -- **The click is then handled, not just swallowed.** Releasing the
+  -- keyboard and dropping the press would cost him a second click to do
+  -- what he meant by the first — so the event is re-dispatched down the
+  -- path it would have taken had the row never been open.
+  MouseDown _ V.BLeft _ _ -> releaseAndPass
+  VtyEvent (V.EvMouseDown _ _ V.BLeft _) -> releaseAndPass
   _ -> do
     reply' <- nestEventM' reply (handleEditorEvent ev)
     put st { stStripReply = Just reply' }
+  where
+    releaseAndPass = do
+      closeStripReply
+      st' <- get
+      if stScriptMode st' then handleScriptEvent ev else handleReplEvent ev
 
 closeStripReply :: EventM Name St ()
 closeStripReply = do
@@ -6576,6 +6639,13 @@ hintLabel st
   | stHintAsking st = "AI hint · asking…"
   | stHintAsked st == 0 = "AI hint"
   | otherwise = "AI hint · " <> show (stHintAsked st)
+
+-- | What is actually typed in the reply row — one function, because three
+-- places ask the same question: the drawing (whether to keep the
+-- placeholder), 'askHintNow' (what to send) and the width the editor is
+-- held to.
+typedReply :: Editor Text Name -> Text
+typedReply = Text.concat . getEditContents
 
 hintNoKeySaid :: String
 hintNoKeySaid =

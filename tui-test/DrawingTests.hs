@@ -248,7 +248,7 @@ stripGridCases =
   , testCase "one row of three cells, every label starting at its cell's column 5" $
       assertEqual ""
         "F1   intro                F2   along                F3   abandon"
-        (drawLine (offerGridWidget 26 3 0 ["intro", "along", "abandon"]))
+        (drawLine (offerGridWidget 26 3 ["intro", "along", "abandon"]))
   , -- | **Row-major, the way @:pane@'s own six positions are numbered.** 1 2 3
     -- across and then 4 5 6, which is the order a reader does not have to be
     -- taught.
@@ -257,7 +257,7 @@ stripGridCases =
         [ "F1   a                    F2   b                    F3   c"
         , "F4   d                    F5   e"
         ]
-        (take 2 (drawToLines (offerGridWidget 26 3 0 ["a", "b", "c", "d", "e"])))
+        (take 2 (drawToLines (offerGridWidget 26 3 ["a", "b", "c", "d", "e"])))
   , -- | **A label too long for its cell is cut, not wrapped.** A cell is one
     -- line by construction, and a label that flowed would put its tail in the
     -- cell beside it — which is the defect `~r4gvd` was in a list pane and
@@ -265,24 +265,16 @@ stripGridCases =
     testCase "a label too long for its cell ends in an ellipsis" $
       assertEqual ""
         "F1   constructor-recursi… F2   intro"
-        (drawLine (offerGridWidget 26 2 0 ["constructor-recursive-arguments", "intro"]))
+        (drawLine (offerGridWidget 26 2 ["constructor-recursive-arguments", "intro"]))
   , -- | **One column is the narrow case and it still works** — the strip is
     -- as wide as the document column, and closing the panes is not the only
     -- way that gets small.
     testCase "one column is a column" $
       assertEqual ""
         ["F1   intro", "F2   along"]
-        (take 2 (drawToLines (offerGridWidget 26 1 0 ["intro", "along"])))
+        (take 2 (drawToLines (offerGridWidget 26 1 ["intro", "along"])))
   , testCase "nothing to offer draws nothing at all" $
-      assertEqual "" "" (drawLine (offerGridWidget 26 3 0 []))
-  , -- | **A Jev pick wears Jev's own surface, and only over its label** —
-    -- `~zt4jk`, his report of 2026-11-19. The text is unchanged, so what
-    -- this case holds is that marking a cell does not move a column: the
-    -- attribute is the half asserted in 'Tui.App''s table.
-    testCase "marking Jev's picks leaves every column where it was" $
-      assertEqual ""
-        (drawLine (offerGridWidget 26 3 0 ["intro", "along", "abandon"]))
-        (drawLine (offerGridWidget 26 3 2 ["intro", "along", "abandon"]))
+      assertEqual "" "" (drawLine (offerGridWidget 26 3 []))
   ]
 
 -- | **The hint region** — `~w2tk2` slice 4, the rows his /"three

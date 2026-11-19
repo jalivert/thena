@@ -429,8 +429,8 @@ stripKeyLabel k = padRight 3 ("F" <> show k)
 -- not one attributed string: 'withAttr' replaces the attribute in force
 -- rather than composing with it (the lesson @placeholder.recovered@ is
 -- named for), so a cell is the key, then the text, side by side.
-offerGridWidget :: Ord n => Int -> Int -> Int -> [String] -> Widget n
-offerGridWidget cellW cols jevPicked labels
+offerGridWidget :: Ord n => Int -> Int -> [String] -> Widget n
+offerGridWidget cellW cols labels
   | cols <= 0 || null labels = emptyWidget
   | otherwise = vBox (map line (chunk (zip [1 :: Int ..] labels)))
   where
@@ -443,23 +443,22 @@ offerGridWidget cellW cols jevPicked labels
     line cells = hBox (zipWith cell [0 :: Int ..] cells)
       where
         lastIx = length cells - 1
+        -- | **NO JEV MARK ON A CELL, AND `~zt4jk` IS WITHDRAWN BY HIS OWN
+        -- WORD** — 2026-11-19: /"turn off the green color under Jev's
+        -- suggestions."/
+        --
+        -- **Both instructions were his and the second follows from the
+        -- first.** `~zt4jk` asked for the mark back when the grid still
+        -- mixed Jev's rows with the engine's and the colour said /this one
+        -- came from Jev/. Exclusion landed the same day: **every cell is
+        -- Jev's now**, so the mark coloured the whole grid and marked
+        -- nothing. A mark that is always on is not a mark.
         cell i (k, label) =
           withAttr (attrName "strip.key") (str (stripKeyLabel k))
-            <+> mark (str ("  " <> clip room label))
+            <+> str ("  " <> clip room label)
             <+> str (pad "")
           where
             pad = if i == lastIx then id else padRight (cellW - 3 - 2 - length (clip room label))
-            -- | **Jev's own picks wear Jev's colour** — `~zt4jk`, his report
-            -- of 2026-11-19: /"Why doesn't Jev's suggestion have the Jev's
-            -- colored background?"/ It is the same @jevpick@ surface the
-            -- dropdown drew, so the thing he already knows means the same
-            -- thing in the pane that replaced it.
-            --
-            -- **The label only, never the cell's padding.** A filled block
-            -- running the cell's whole width would read as /this one/ — the
-            -- reading `~w2tk2` has no selection precisely to avoid — where a
-            -- mark the width of the word reads as /this came from Jev/.
-            mark = if k <= jevPicked then withAttr (attrName "strip.jev") else id
 
 -- | Text cut to a width, with an ellipsis standing for the rest — the same
 -- rule a dropdown row follows past 'Tui.App.popupTextCap'.
