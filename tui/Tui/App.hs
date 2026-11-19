@@ -1755,6 +1755,17 @@ draw st =
     -- widget's own reported extent is one column wide, so the row was
     -- clickable only in its first column — measured under a pty, a click
     -- three columns in did nothing at all until this was 'fill'.
+    -- | **What the reply row's editor draws: its own text, or the dim
+    -- sentence while there is none.** See 'stripReplyWidget' for why this is
+    -- a content function and not a widget beside the editor.
+    --
+    -- **@all Text.null@ rather than @null@**: an editor's contents are
+    -- always at least one line, and that line is the empty string while
+    -- nothing has been typed.
+    replyContent ts
+      | all Text.null ts = withAttr (attrName "strip.dim") (str (Text.unpack hintPlaceholder))
+      | otherwise = vBox (map (str . Text.unpack) ts)
+
     stripReplyWidget =
       clickable StripReply $ withAttr (attrName "strip.hint") $ vLimit 1 $
         hBox
@@ -1764,27 +1775,33 @@ draw st =
                 -- ask** — his design. It is not a hint about a feature; it
                 -- is the feature's only control.
                 Nothing -> [withAttr (attrName "strip.dim") (str (Text.unpack hintPlaceholder))]
-                -- **Open and still empty: the sentence is a ghost behind
-                -- the cursor, and Tab is what makes it real** — his ruling
-                -- of 2026-11-19. Enter sends it either way, so the ghost is
+                -- **Open and still empty: the sentence is a ghost UNDER the
+                -- cursor, and Tab is what makes it real** — his ruling of
+                -- 2026-11-19. Enter sends it either way, so the ghost is
                 -- never a lie about what would go out; Tab is there for
                 -- when he wants to edit it rather than send it.
                 --
-                -- **The editor is held to the width of its own text** so
-                -- the ghost can sit after it. 'renderEditor' is greedy
-                -- across the row otherwise and would cover the whole line,
-                -- leaving nowhere for the ghost to be drawn; one column
-                -- past the text is where the cursor goes.
+                -- **THE GHOST IS DRAWN BY THE EDITOR'S OWN CONTENT
+                -- FUNCTION, NOT BESIDE THE EDITOR** — his report,
+                -- 2026-11-19: /"there's extra space in front of the dim
+                -- hint sentence and the space goes away when I tap tab.
+                -- weird. unexpected. not good."/ He was right, and the
+                -- cause was the first build's shape: the editor was held to
+                -- one column so a ghost could sit after it, and that column
+                -- was the blank the ghost then followed.
+                --
+                -- **'renderEditor' takes the function that draws its
+                -- contents** — the same door 'renderInputContent' uses to
+                -- put the whisper on the main prompt — so the ghost goes
+                -- *inside* it at offset zero, and the cursor lands on its
+                -- first character the way a shell's suggestion does. **The
+                -- row is then the same width before and after Tab**, which
+                -- is what he was asking for.
                 Just ed ->
                   [ withAttr (attrName "strip.key") (str "❯ ")
-                  , hLimit (Text.length (typedReply ed) + 1)
-                      ( overrideAttr editFocusedAttr (attrName "strip.hint")
-                          (renderEditor (vBox . map (str . Text.unpack)) True ed)
-                      )
+                  , overrideAttr editFocusedAttr (attrName "strip.hint")
+                      (renderEditor replyContent True ed)
                   ]
-                    <> [ withAttr (attrName "strip.dim") (str (Text.unpack hintPlaceholder))
-                       | Text.null (typedReply ed)
-                       ]
               <> [fill ' ']
           )
 
