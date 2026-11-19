@@ -82,7 +82,15 @@ defaultConfig = Config
   , cfgLayout     = defaultLayout
   , cfgWidths     = []
   , cfgStrip      = defaultStrip
-  , cfgDropdownOn = True
+  -- **OFF, which is `~492hq` applied rather than deferred.** His ruling of
+  -- 2026-11-19 was that the dropdown is /"disabled pretty much immediately as
+  -- we start working"/ on the suggestion pane; it shipped on while the strip
+  -- could not yet accept anything, and that was recorded as a deviation. The
+  -- strip accepts, is Jev-authored and has a switch of its own now, and he
+  -- reaffirmed the direction on 2026-11-19 — /"I am literally designing this
+  -- so that the dropdown is replaced"/. **Nothing is deleted**: `:dropdown
+  -- on` brings it back, which is the second half of his ruling.
+  , cfgDropdownOn = False
   , cfgJevOn      = True
   }
 
