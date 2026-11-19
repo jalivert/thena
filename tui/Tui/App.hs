@@ -120,7 +120,8 @@ import Thena.View
   , statementOfferView
   )
 import Thena.View.Choices (ChoiceView (..))
-import Thena.View.Rules (RuleView (..))
+import Thena.View.Matches (MatchView (..))
+import Thena.View.Type (SignatureView (..), TypeView (..))
 import Thena.View.Proofs
   ( ProofsView (..)
   , QuestClaim (..)
@@ -2046,16 +2047,50 @@ draw st =
 
     -- | **The matches pane's rows.** Which rules apply at the focus, in
     -- dispatch order — 'matchesView' is a look and running it never moves
-    -- the session. **One entry each, the exact line @:matches@ prints**:
-    -- a rule's name then its params, each already spelled and already a
-    -- `:matches`-style placeholder (a bare variable keeps its corners,
-    -- anything else is shown as written) — 'RuleView' hands both over
-    -- pre-formatted, so there is no printer policy left for this pane to
-    -- choose. 'thena-boundary' crosses this exact formula against
-    -- @:matches@ itself.
-    matchRows rvs =
-      [Heading "matches" (Just (length rvs)) | not (null rvs)]
-        <> [Entry (unwords (ruleViewName rv : ruleViewParams rv)) | rv <- rvs]
+    -- the session. **One entry per rule-arity now, not per clause**
+    -- (MS12 phase 323, his ruling of 2026-11-19), and 'MatchView' hands the
+    -- placeholders over bare: every one, variable or not, takes the corners
+    -- here, which is the one thing that changed about how a row reads —
+    -- 'Thena.Render.renderMatches' draws the same corners the same way.
+    -- The type beside it is inferred, never looked up, so it is always
+    -- there for a base that loaded ('matchViewType' is 'Maybe' only against
+    -- a lookup miss, which cannot arise).
+    matchRows mvs =
+      [Heading "matches" (Just (length mvs)) | not (null mvs)]
+        <> [Entry (matchLine mv) | mv <- mvs]
+
+    matchLine mv =
+      unwords (matchViewName mv : map corners (matchViewParams mv))
+        <> maybe "" ((" : " <>) . drawSignature) (matchViewType mv)
+
+    corners placeholder = "\8249" <> placeholder <> "\8250"
+
+    -- | The redraw 'Thena.View.Type' asks a frontend to keep — an arrow
+    -- chain, 'AFenced' the only place a parenthesis is drawn. Kept in step
+    -- with 'Thena.Instral.Type.renderSignature' by 'thena-boundary'.
+    drawSignature sg =
+      intercalate " -> " (map drawType (signatureViewParams sg)
+                            <> [maybe "()" drawType (signatureViewResult sg)])
+
+    drawType tv = case tv of
+      AString          -> "String"
+      AName            -> "Name"
+      AnInt            -> "Int"
+      AChar            -> "Char"
+      ABool            -> "Bool"
+      ASurface         -> "Surface"
+      ACore            -> "Core"
+      ADevelopment     -> "Development"
+      ALevel           -> "Level"
+      APattern         -> "Pattern"
+      ABinder          -> "Binder"
+      AMethodShape     -> "MethodShape"
+      AList a          -> "List " <> drawType a
+      AnOption a       -> "Option " <> drawType a
+      APair a b        -> "(" <> drawType a <> ", " <> drawType b <> ")"
+      AFunction as r   -> intercalate " -> " (map drawType as <> [drawType r])
+      ASchemeVar l     -> l
+      AFenced a        -> "(" <> drawType a <> ")"
 
     -- | One quest: the word, then what it is. **A statement is drawn at the
     -- root address and with no fold** — a parked quest's claim is not a

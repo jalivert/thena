@@ -101,8 +101,11 @@ data Pane
     -- ^ **which rules apply at the focus, the same list @:matches@ already
     -- prints** — his ask, 2026-11-16, read back at cold-start as uncertain
     -- whether he had asked it at all. No blocked read this time:
-    -- @Thena.View.matchesView :: Budget -> Session -> [RuleView]@ has been
+    -- @Thena.View.matchesView :: Budget -> Session -> [RuleView]@ had been
     -- on the boundary since MS7 and was simply never drawn anywhere.
+    -- **Since MS12 phase 323 the signature is
+    -- @Budget -> Session -> [MatchView]@, one row per rule-arity rather
+    -- than per clause** — pulled in 2026-11-19, see `~w2tk2`'s board.
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Every pane there is, placed or not. **The width map is built over this and
