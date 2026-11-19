@@ -1764,29 +1764,14 @@ draw st =
                 -- ask** — his design. It is not a hint about a feature; it
                 -- is the feature's only control.
                 Nothing -> [withAttr (attrName "strip.dim") (str (Text.unpack hintPlaceholder))]
+                -- **Open, and its text is real text** — `openStripReply`
+                -- put the sentence there on the click, so there is no ghost
+                -- to keep beside the editor and no width to hold it to.
                 Just ed ->
                   [ withAttr (attrName "strip.key") (str "❯ ")
-                  -- | **THE SENTENCE SURVIVES THE CLICK — HIS, 2026-11-19**:
-                  -- /"when I click on \"give me a hint\" the sentence
-                  -- disappears. That's not what we agreed on."/ It is a
-                  -- placeholder and not a prompt-and-clear: it says what
-                  -- Enter will send, and Enter on an untouched row does send
-                  -- it, so a row that blanked itself on a click was showing
-                  -- him the opposite of what it would do.
-                  --
-                  -- **The editor is held to the width of its own text** so
-                  -- the sentence can sit after it. 'renderEditor' is greedy
-                  -- across the row otherwise and would cover the whole
-                  -- line, leaving nowhere for the placeholder to be drawn;
-                  -- one column past the text is where the cursor goes.
-                  , hLimit (Text.length (typedReply ed) + 1)
-                      ( overrideAttr editFocusedAttr (attrName "strip.hint")
-                          (renderEditor (vBox . map (str . Text.unpack)) True ed)
-                      )
+                  , overrideAttr editFocusedAttr (attrName "strip.hint")
+                      (renderEditor (vBox . map (str . Text.unpack)) True ed)
                   ]
-                    <> [ withAttr (attrName "strip.dim") (str (Text.unpack hintPlaceholder))
-                       | Text.null (typedReply ed)
-                       ]
               <> [fill ' ']
           )
 
@@ -3143,8 +3128,19 @@ handlePaneClick ev = case ev of
     st <- get
     case stStripReply st of
       Just _ -> pure True
+      -- | **THE CLICK TURNS THE DIM LINE INTO A REAL ONE — HIS,
+      -- 2026-11-19**: /"When I click into the \"give me a hint\" tab should
+      -- turn the dimmed line into a real line. That's how it usually
+      -- works."/ So the sentence is put into the editor as ordinary text
+      -- with the cursor behind it, there to edit or to send as it stands.
+      --
+      -- **It replaces the placeholder that was there for one round.** That
+      -- one kept the sentence on screen through the click, which fixed his
+      -- first report (/"the sentence disappears"/) and left a ghost he could
+      -- not edit. Real text is the honest form of the same promise: the ask
+      -- goes out as written, so it should be written.
       Nothing -> do
-        put st { stStripReply = Just (E.editorText StripReply (Just 1) Text.empty) }
+        put st { stStripReply = Just (openStripReply hintPlaceholder) }
         pure True
   _ -> pure False
   where
@@ -6625,7 +6621,10 @@ hintFields st =
 askHintNow :: EventM Name St ()
 askHintNow = do
   st <- get
-  let typed = Text.strip (Text.concat (maybe [] getEditContents (stStripReply st)))
+  let typed = Text.strip (maybe Text.empty typedReply (stStripReply st))
+      -- **An emptied row still asks**, which is the placeholder's promise
+      -- kept: he can clear the sentence and press Enter, and what goes out
+      -- is the sentence rather than nothing at all.
       asked = if Text.null typed then hintPlaceholder else typed
   case stHintConfig st of
     -- **The cleared state is what is handed on, not the one in hand.**
@@ -6730,6 +6729,16 @@ hintLabel st
 -- held to.
 typedReply :: Editor Text Name -> Text
 typedReply = Text.concat . getEditContents
+
+-- | **The reply row as a click leaves it: the text in place and the cursor
+-- behind it** — `~3p9g2`, his /"turn the dimmed line into a real line"/.
+--
+-- **The cursor is sent to the end rather than left at the start**, which is
+-- where 'E.editorText' puts it: a line he is meant to edit or send wants the
+-- caret after the words, not in front of them, and a first keystroke landing
+-- before the sentence would read as the text having been pushed aside.
+openStripReply :: Text -> Editor Text Name
+openStripReply t = E.applyEdit Zip.gotoEOF (E.editorText StripReply (Just 1) t)
 
 hintNoKeySaid :: String
 hintNoKeySaid =
