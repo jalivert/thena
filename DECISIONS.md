@@ -7057,6 +7057,41 @@ nothing else.
 Every view is reachable with nothing but `thena:view` on the `build-depends`
 line, and a test suite that depends on exactly that is what keeps it so.
 
+### A declaration that did not go in reports as a kind, typed parts, and whether anything is wrong
+
+*Decided 2026-11-19, MS12.*
+
+A module loads as far as it can, so a frontend is handed items that did not
+finish. **What it is handed is not a message.** `Thena.View.Failure` gives one
+shape for every failure: which failure it is, and its parts — a name as a name,
+a term as the display a term already has, a count as a count — each labelled
+with the role it plays in *that* failure.
+
+**The alternative was one constructor per failure**, which would let a type
+mismatch be drawn as a side-by-side diff that no other failure gets. It was
+refused on measurement: the engine's own error types run to over a hundred
+constructors between them and a total walk costs the same either way, so the
+whole difference falls on the frontend — a hundred-odd layouts to write, growing
+every time the engine gains an error, against one. **What it gives up is
+written down**: a failure that earns a layout of its own needs an arm added for
+it, and if that keeps happening the choice was wrong.
+
+**What was refused outright is a headline plus pieces of text to print.** A
+format that hands a pane pieces of a sentence never says what the pieces *are*,
+so the pane can print `nonesuch` and can never know it is a name — never colour
+it, never offer the module that declares it. And a format that accepts anything
+gets given everything: the next failure is always cheaper to add as another
+headline than to give a view of its own, and the pane ends as a text pane with a
+border.
+
+**Whether anything is wrong is a separate field, with four values**, because
+three of the ways an item can be unfinished are not faults: it may be sitting on
+a question or out of fuel, the kernel may have accepted it while the session's
+trust level did not, and the user may have abandoned it themselves. A pane takes
+its glyph and its wording from that field, so *you typed `:abandon`* never reads
+like an error, and a stop added later draws correctly without anything being
+told.
+
 ### A region is written text and splices, and may name its production
 
 A region of object syntax is not a string. It is the runs the user typed with the

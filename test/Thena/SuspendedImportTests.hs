@@ -29,6 +29,7 @@ import Thena.Driver
   , Response (..)
   , Session
   , Unfinished (..)
+  , NotDone (..)
   , currentQuest
   , declaredByModule
   , importSuspended
@@ -43,7 +44,8 @@ import Thena.Driver
   , refuseSuspension
   )
 import Thena.Files (consultRuleFiles, following, importModule, startingSession)
-import Thena.View (Budget (..), proofsView)
+import Thena.View (Budget (..), failureView, proofsView)
+import Thena.View.Failure (Nature (..), StopView (..), Why (..))
 import Thena.View.Proofs (ProofsView (..), QuestClaim (..), QuestView (..))
 
 -- | The session with the pausing base pushed, which is what makes a placeholder
@@ -445,7 +447,20 @@ parking = testGroup "parking it, so that a lemma can be proved"
           [ unfinishedWhy u
             | ProofLoadedPartly _ _ _ _ unfin <- out
             , u <- unfin, unfinishedDeclares u == ["picked"] ]
-            @?= [Rejected GaveItUp]
+            @?= [ItWasAbandoned]
+
+      , -- **And a pane does not draw it as an error either** (MS12 phase 325).
+        -- The note this track sent that track at phase 317 asked them to
+        -- special-case the constructor and render it as a statement; the nature
+        -- is that note, in the type, so no pane has to be told.
+        testCase "its view is given up, with nothing wrong and no fault" $ do
+          (s, _) <- suspendedMore
+          (s1, out) <- lenientLine s ":abandon"
+          [ (stopViewNature v, stopViewWhy v)
+            | ProofLoadedPartly _ _ _ _ unfin <- out
+            , u <- unfin, unfinishedDeclares u == ["picked"]
+            , let v = failureView (Budget 200) s1 (unfinishedWhy u) ]
+            @?= [(GivenUp, WasGivenUp)]
 
       , testCase "the module is recorded partly, not loaded whole" $ do
           (s, _) <- suspendedMore

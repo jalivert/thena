@@ -72,6 +72,7 @@ module Thena.View
   , matchesView
   , MatchView
   , trustView
+  , failureView
   , proofsView
   , parseView
   , offerView
@@ -91,7 +92,8 @@ import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefix, rebuild)
 import Thena.Development.Partial (Partial (..))
 import Thena.Driver
-  ( Session
+  ( NotDone
+  , Session
   , currentQuest
   , fuelOf
   , machineOf
@@ -129,6 +131,7 @@ import Thena.View.Machine (MachineView, displayMachine)
 import Thena.View.Proofs (ProofsView, displayProofs)
 import Thena.View.Goals (GoalKind (..), GoalView (..), goalsOf)
 import Thena.View.Statement (statementOffer)
+import Thena.View.Failure (StopView, displayStop)
 import Thena.View.Trust (TrustView, displayTrust)
 import Thena.View.Rules (RuleView, displayRule)
 
@@ -388,6 +391,25 @@ trustView budget s =
     (focusAddress s)
     (sessionTrust s)
     (restsOn s)
+
+-- | __Why an item in a partly-loaded module did not finish__ (MS12 phase 325).
+--
+-- **The 'NotDone' comes from the response that reported the module** —
+-- 'Thena.Driver.unfinishedWhy' of one of 'Thena.Driver.ProofLoadedPartly'\'s
+-- unfinished items — and not from the session, because a load's answer is said
+-- once and this view is of what it said. Everything a pane needs to lay it out
+-- is in 'Thena.View.Failure.StopView'; the session is here for the spelling,
+-- the grammars and the display names, as it is for every other view.
+failureView :: Budget -> Session -> NotDone -> StopView
+failureView budget s =
+  displayStop
+    (spellingOf s)
+    (sessionGrammars s)
+    budget
+    (envAt s)
+    (binderAddresses s)
+    (sessionNames s)
+    (focusAddress s)
 
 -- | Is this region one term of this language, and if not, why.
 parseView :: Session -> String -> Maybe String -> [Written] -> Either FailureView TreeView

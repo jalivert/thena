@@ -73,6 +73,7 @@ module Thena.Driver
     -- * What a load came to, and what a frontend draws from it (MS12 phase 315)
   , Leniency (..)
   , Unfinished (..)
+  , NotDone (..)
   , Partly (..)
   , modulesPartly
   , modulePartly
@@ -3217,7 +3218,7 @@ walkItems leniency brought ns = go
             -- down, and the loader goes to the next one.
             Lenient ->
               go (rolledBack st st') ws done
-                 (Unfinished (declaredNames it) other : unfin) rest
+                 (Unfinished (declaredNames it) (stoppedAs other) : unfin) rest
 
 -- **AND THE @open@S IT STARTS WITH ARE THE PRELUDE'S ALONE** (MS11 phase 283,
 -- @~w46f8@, narrowed at phase 293 by his ruling of 2026-11-06) — the third
@@ -3714,8 +3715,8 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
         (done0, unfin0) = case gaveUp of
           Nothing  -> ( importingOn imp : reverse (importingDone imp)
                       , reverse (importingUnfinished imp) )
-          Just why -> ( reverse (importingDone imp)
-                      , Unfinished (declaredNames (importingOn imp)) (Rejected why)
+          Just _   -> ( reverse (importingDone imp)
+                      , Unfinished (declaredNames (importingOn imp)) ItWasAbandoned
                           : reverse (importingUnfinished imp) )
         -- What the abandon is told to say, in front of the module's own answer:
         -- 'ProofLoadedPartly' names the item but cannot know that a lemma of
@@ -4426,10 +4427,42 @@ data Unfinished = Unfinished
   { unfinishedDeclares :: [String]
     -- ^ what the item would have declared, as 'ProofLoaded' names what did —
     -- the namespace included, so these are keys and not bare words
-  , unfinishedWhy      :: Response
-    -- ^ the answer the item's own run gave
+  , unfinishedWhy      :: NotDone
+    -- ^ why it did not finish.
+    --
+    -- **It was a whole 'Response' until MS12 phase 325**, under phase 315's
+    -- choice to keep the run's own answer rather than reduce it to a reason —
+    -- and that is what left a frontend no way to draw this but
+    -- 'Thena.Render.renderResponse', since a 'Response' is every answer the
+    -- prompt can give and a pane cannot lay out sixty-one of them. **Only two
+    -- of those answers could ever be in here**, which is what 'NotDone' is.
   }
   deriving (Eq, Show)
+
+-- | __Why an item in a partly-loaded module did not finish__ (MS12 phase 325).
+--
+-- **Two things can be, and the second is not a failure at all.** A run that
+-- stopped is 'ItStopped' — 'progress' has one return point and it builds a
+-- 'Ran', so a run's answer is always its messages, its warnings and a 'Stop' —
+-- and @:abandon@ typed while the item was elaborating is 'ItWasAbandoned', the
+-- user's own act.
+--
+-- **'Thena.View.Failure' is the view**, and its @Nature@ is the field that
+-- keeps a pane from drawing those two the same way.
+data NotDone
+  = ItStopped [Message] [Warning] Stop
+  | ItWasAbandoned
+  deriving (Eq, Show)
+
+-- | What an unfinished item carries, from the answer its run gave.
+--
+-- **The first arm is the only one a run can reach**: 'spending' returns through
+-- its own @stop@ helper and that builds a 'Ran'. A 'Response' that is not one
+-- did not come from a run, so there is no stop to report and none is invented.
+stoppedAs :: Response -> NotDone
+stoppedAs r = case r of
+  Ran msgs ws what -> ItStopped msgs ws what
+  _                -> ItStopped [] [] Completed
 
 -- | __A module that went in as far as it could__ (MS12 phase 315).
 --

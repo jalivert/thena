@@ -30,18 +30,21 @@ import System.Exit (exitFailure)
 
 import Thena.Driver
   ( Entry (..)
+  , Leniency (..)
   , Response (..)
   , Session
   , Stop (..)
   , digestText
   , filesRead
+  , moduleName
+  , unfinishedWhy
   , fuelOf
   , oneLine
   , oneProgram
   , provedSlices
   , recordOf
   )
-import Thena.Files (startingSession)
+import Thena.Files (importModule, startingSession)
 import Thena.Render (renderResponse)
 import Data.List (nub)
 
@@ -65,7 +68,18 @@ import Thena.View
   , sessionTrust
   , trustView
   )
+import Thena.View (failureView)
 import Thena.View.Chart (BoundView (..), OfferView (..), Written (..))
+import Thena.View.Failure
+  ( FaultKind (..)
+  , FaultView (..)
+  , Nature (..)
+  , PartView (..)
+  , Piece (..)
+  , Role (..)
+  , StopView (..)
+  , Why (..)
+  )
 import Thena.View.Choices (ChoiceView (..))
 import Thena.View.Development (LinkView (..))
 import Thena.View.Goals (GoalKind (..), GoalView (..))
@@ -92,10 +106,14 @@ main = do
         , "attack"
         ]
       booted = [ "FAILED: startingSession: " <> show t | t <- trouble ]
-  failures <- pure (booted <> concatMap ($ s) checks)
+  -- **The one view that is not computed from the session alone** (MS12 phase
+  -- 325), so it needs a module that did not all go in and cannot be reached
+  -- from the shared session above.
+  unfinished <- partial
+  failures <- pure (booted <> unfinished <> concatMap ($ s) checks)
   mapM_ putStrLn failures
   unless (null failures) exitFailure
-  putStrLn ("the boundary holds: " <> show (length checks) <> " views reached")
+  putStrLn ("the boundary holds: " <> show (length checks + 1) <> " views reached")
   where
     step acc l = fst (oneLine acc l)
 
@@ -283,3 +301,32 @@ job s = slice False (200 :: Int) (oneLine (fst (oneLine s ":step on")) claim)
     slice _ n (s', Ran _ _ (Paused 1)) | n > 0 = slice True (n - 1) (oneLine s' ":step")
     slice paused _ (_, Ran _ _ Completed) = paused
     slice _ _ _ = False
+
+-- | **A module that loads as far as it can, and the view of what did not**
+-- (MS12 phase 325).
+--
+-- Its own check because a frontend reaches this one differently from every
+-- other view: the 'Thena.Driver.NotDone' comes out of the response that
+-- reported the module, not out of the session. So what is asserted here is that
+-- a frontend can get from @import@ to a laid-out failure without naming an
+-- engine type — and in particular that it never needs 'Thena.Errors', which it
+-- cannot import.
+--
+-- **The parts are checked and not just the arrival.** A 'StopView' whose kind
+-- came through and whose name did not would pass a non-empty check and be
+-- useless: the name is the part the tui track asked for by name.
+partial :: IO [String]
+partial = do
+  (s0, _) <- startingSession
+  case moduleName "test.modules.PartlyGood" of
+    Nothing -> pure ["FAILED: the fixture's name does not read"]
+    Just m -> do
+      (s, out, _) <- importModule Lenient s0 m
+      pure $ case [ failureView (Budget 200) s (unfinishedWhy u)
+                  | ProofLoadedPartly _ _ _ _ unfin <- out, u <- unfin ] of
+        [v] | Broken <- stopViewNature v
+            , Faulty [f] <- stopViewWhy v
+            , NotInScope <- faultViewKind f
+            , [AName "nonesuch"] <-
+                [ pc | PartView TheWord pc <- faultViewParts f ] -> []
+        other -> ["FAILED: failureView: " <> show other]
