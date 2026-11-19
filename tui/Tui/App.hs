@@ -543,6 +543,13 @@ data St = St
                                              -- frame behind — 'Brick.Main'
                                              -- has no way to ask for an
                                              -- extent mid-'draw'
+  , stStripWidth :: Maybe Int
+    -- ^ **how wide the suggestion strip's content was in the last frame
+    -- drawn** — `~w2tk2` slice 3a, same post-render lag as 'stInputExtent'
+    -- and for the same reason. The grid's shape is a function of this
+    -- ('Tui.Layout.stripGrid'), and the keymap has to know the same shape the
+    -- drawing worked out, or an F-key lands on a cell that is not there.
+    -- 'Nothing' before the first frame and while the strip is closed.
   , stPaneExtent :: Maybe (Extent Name)  -- ^ same lag, the repl pane's own
                                              -- viewport bounds, needed to
                                              -- decide whether the dropdown
@@ -850,6 +857,7 @@ runTui = do
         , stPicker      = Nothing
         , stEscRun      = Nothing
         , stInputExtent = Nothing
+        , stStripWidth  = Nothing
         , stPaneExtent  = Nothing
         , stArrowsReleased = False
         , stJevConfig   = jevCfg
@@ -2192,6 +2200,48 @@ stripSlateOf st
   | not (stripOpen (stStrip st)) = []
   | otherwise = slateRows (stSlate st)
 
+-- | **The grid as the keymap can know it** — `~w2tk2` slice 3a.
+--
+-- **The drawing works the same arithmetic out from the width it is handed,
+-- and this works it out from the width the last frame reported.** Two
+-- sources, one function ('Tui.Layout.stripGrid'), which is what keeps the
+-- keys and the cells the same set: the alternative is the keymap capping at
+-- 'Tui.Layout.stripSlotKeys' and the grid capping at its slots, and those
+-- two numbers are not equal — at his geometry they are ten and nine.
+--
+-- **The one frame it can be wrong about is the frame after a resize**, where
+-- the width it holds is the width before it. A narrower window for one frame
+-- means an F-key could take a candidate that frame no longer draws; the
+-- screen itself is never wrong, because 'draw' uses the live width. The
+-- strip's own drag does not have this exposure at all — a drag changes
+-- 'Tui.Layout.stripRows', which is read from state by both.
+--
+-- **An empty grid before the first frame.** With no width reported there is
+-- no grid to speak of, so no key takes anything until something has been
+-- drawn — which is a frame earlier than anyone can press one.
+stripGridFor :: St -> Maybe Grid
+stripGridFor st = (\w -> stripGrid w (stripRows (stStrip st))) <$> stStripWidth st
+
+-- | **What is actually on a cell, and therefore what an F-key may take** —
+-- `~w2tk2` slice 3a, the cap his property 2 asks for: /"it should not list
+-- tens or hundreds of options"/.
+--
+-- **The slate is longer than this and deliberately so.** The heading says
+-- @offers  9 of 318@ — how many he can press and how many the engine
+-- offered, which are two different facts and the second is the one that
+-- tells him the grid is a selection and not the whole list. So the cap is on
+-- the cells and the keys, never on the count.
+--
+-- **Capped by today's ranking, which is the order the slate is already in**:
+-- Jev's picks floated to the top ('floatJevRows') and the engine's own
+-- tokens-before-productions order below them. Taking the grid's worth off
+-- the front is therefore taking the best of them, for whatever ranking there
+-- is on the day.
+stripShownOf :: St -> [OfferRow]
+stripShownOf st = case stripGridFor st of
+  Nothing -> []
+  Just grid -> take (gridSlots grid) (stripSlateOf st)
+
 -- | **The slate for the line as it stands, from the session and the line and
 -- nothing else** — `~3gn2r`. Pure, so every place that changes either of
 -- those two can put a fresh one in state without an 'EventM'.
@@ -2620,8 +2670,16 @@ handleEvent ev = do
   when (focusAfter /= focusBefore) (vScrollToEnd (viewportScroll (PaneVP Output)))
   inputExt <- lookupExtent Input
   paneExt <- lookupExtent HistoryVP
+  -- | **The strip's own width, for the grid the keymap has to agree with** —
+  -- `~w2tk2` slice 3a. The extent is the viewport 'pane' reports, and the
+  -- body is drawn inside a @padAll 1@, so the content has two columns fewer.
+  stripExt <- lookupExtent StripVP
   st <- get
-  put st { stInputExtent = inputExt, stPaneExtent = paneExt }
+  put st
+    { stInputExtent = inputExt
+    , stPaneExtent = paneExt
+    , stStripWidth = (\e -> max 0 (fst (extentSize e) - 2)) <$> stripExt
+    }
 
 -- | Three keyboards in one app, and which one an event reaches is decided
 -- here rather than guarded at twenty branches: the command bar while it is
@@ -3524,13 +3582,15 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 --
 -- **Nothing happens when there is no such slot**, and the two cases are the
 -- same case: the strip is closed, or the grid is smaller than this key's
--- number. 'stripSlateOf' is empty in the first and short in the second, and
+-- number. 'stripShownOf' is empty in the first and short in the second, and
 -- 'nthOf' answers 'Nothing' either way — so a key is never swallowed on
 -- behalf of a cell that is not on screen.
 --
--- **It is cut to the grid's capacity here as well as in 'draw', from the
--- same function.** A slate longer than the grid would otherwise let F9 take
--- a candidate nobody could see.
+-- **It is cut to the grid's capacity, which is 'stripShownOf' and not
+-- 'stripSlateOf'** — `~w2tk2` slice 3a. It read the uncapped slate until
+-- then, and the two numbers are not the same: measured under a pty on
+-- 2026-11-19 at a three-cell strip, **F4 inserted @app-function@**, the
+-- fourth candidate, which was drawn on no cell at all.
 --
 -- **This clause is in the repl's handler and live-script mode falls through
 -- to it**, so the gesture is one gesture in both keyboards — which is the
@@ -3543,7 +3603,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 handleReplEvent (VtyEvent (V.EvKey (V.KFun k) []))
   | k `elem` stripSlotKeys = do
       st <- get
-      case nthOf (k - 1) (stripSlateOf st) of
+      case nthOf (k - 1) (stripShownOf st) of
         Just row | Just ins <- rowInsert row -> acceptSlateRow st ins
         _ -> pure ()
 handleReplEvent (VtyEvent (V.EvKey V.KEsc [])) = do
