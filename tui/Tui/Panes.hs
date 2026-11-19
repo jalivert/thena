@@ -429,8 +429,8 @@ stripKeyLabel k = padRight 3 ("F" <> show k)
 -- not one attributed string: 'withAttr' replaces the attribute in force
 -- rather than composing with it (the lesson @placeholder.recovered@ is
 -- named for), so a cell is the key, then the text, side by side.
-offerGridWidget :: Ord n => Int -> Int -> [String] -> Widget n
-offerGridWidget cellW cols labels
+offerGridWidget :: Ord n => Int -> Int -> Int -> [String] -> Widget n
+offerGridWidget cellW cols jevPicked labels
   | cols <= 0 || null labels = emptyWidget
   | otherwise = vBox (map line (chunk (zip [1 :: Int ..] labels)))
   where
@@ -445,8 +445,21 @@ offerGridWidget cellW cols labels
         lastIx = length cells - 1
         cell i (k, label) =
           withAttr (attrName "strip.key") (str (stripKeyLabel k))
-            <+> str (pad ("  " <> clip room label))
-          where pad = if i == lastIx then id else padRight (cellW - 3)
+            <+> mark (str ("  " <> clip room label))
+            <+> str (pad "")
+          where
+            pad = if i == lastIx then id else padRight (cellW - 3 - 2 - length (clip room label))
+            -- | **Jev's own picks wear Jev's colour** — `~zt4jk`, his report
+            -- of 2026-11-19: /"Why doesn't Jev's suggestion have the Jev's
+            -- colored background?"/ It is the same @jevpick@ surface the
+            -- dropdown drew, so the thing he already knows means the same
+            -- thing in the pane that replaced it.
+            --
+            -- **The label only, never the cell's padding.** A filled block
+            -- running the cell's whole width would read as /this one/ — the
+            -- reading `~w2tk2` has no selection precisely to avoid — where a
+            -- mark the width of the word reads as /this came from Jev/.
+            mark = if k <= jevPicked then withAttr (attrName "strip.jev") else id
 
 -- | Text cut to a width, with an ellipsis standing for the rest — the same
 -- rule a dropdown row follows past 'Tui.App.popupTextCap'.

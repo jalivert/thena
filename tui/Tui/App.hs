@@ -343,6 +343,22 @@ freshPending t = ScriptLine t Nothing Nothing [] True
 data Turn = Turn
   { turnPrompt :: Maybe String
   , turnOutput :: [String]
+  , turnSession :: Session
+    -- ^ **the session this turn left behind** — `~hxzjq`, his instruction of
+    -- 2026-11-19: /"ctr + l, when removing a command that change the
+    -- machine-state\/proof-state, does not revert to a previous snapshot. It
+    -- should."/
+    --
+    -- **The session AFTER the turn's line ran, not before it.** Taking @n@
+    -- turns off the transcript then restores the session of the turn that is
+    -- now last, which is the state the screen is left showing — and with
+    -- every turn gone it is the launch session, which is why 'stSession0'
+    -- exists. Storing the state before each line would answer the same
+    -- question with an off-by-one and no gain.
+    --
+    -- **A 'Session' is an immutable value and the turns share their
+    -- structure**, so a transcript of a hundred turns holds a hundred
+    -- references and not a hundred copies.
   }
 
 -- | The live `:load` completion dropdown — his request 2026-09-29: appears
@@ -525,6 +541,11 @@ data St = St
                               -- append-only document, his correction 2026-09-29
   , stInput       :: Editor Text Name
   , stSession     :: Session
+  , stSession0    :: Session
+    -- ^ **the session as the TUI launched with it** — `~hxzjq`. What
+    -- @:clear@ restores when it takes the last turn off the transcript and
+    -- there is no earlier one to go back to. Never written after 'runTui'
+    -- builds the state: a reload replaces the whole 'St'.
   , stTheme       :: Theme
   , stFoldOn      :: Bool
   , stDropdown    :: Maybe LoadDropdown
@@ -833,9 +854,10 @@ runTui = do
   let st0 = St
         { stTurns       = case concatMap (renderTrouble s0) trouble of
             []  -> []
-            out -> [Turn Nothing out]
+            out -> [Turn Nothing out s0]
         , stInput       = emptyInput
         , stSession     = s0
+        , stSession0    = s0
         , stTheme       = theme0
         , stFoldOn      = True
         , stDropdown    = Nothing
@@ -1262,6 +1284,14 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- unpaired one would have punched a three-row hole in the panel whenever
   -- the hint was short.
   , (attrName "strip.hint",     surface (themePanel th) (themeInk th))
+  -- | **A cell Jev picked, in the same surface the dropdown's row wore** —
+  -- `~zt4jk`, his report of 2026-11-19: /"Why doesn't Jev's suggestion have
+  -- the Jev's colored background?"/ Literally the same two colours as
+  -- @dropdown.jevpick@, so his eye does not have to learn a second mark for
+  -- one fact. **A separate attr all the same**: the dropdown's fills a whole
+  -- row and this one fills a word, and a theme that retunes one may want to
+  -- retune the other.
+  , (attrName "strip.jev",      surface (themeJevPick th) (themeStage th))
   -- | A list pane's group heading and its small print. **Both dim, and the
   -- same dim**: a heading is not a thing in the list and neither is a module's
   -- file, so what separates them from the entries is weight, not hue — the
@@ -1489,47 +1519,56 @@ draw st =
     -- wide one; 'Tui.Layout.stripGrid' is the whole of that arithmetic and
     -- nothing here repeats it.
     --
-    -- **The hint region is drawn from 'stHint' and the reply row is still
-    -- blank** — `~w2tk2` slice 4 is the first half of the reserve, slice 5
-    -- the second. The region's height is 'Tui.Layout.stripHintUsed' and the
-    -- grid is sized from the same number, so a hint that outgrows its floor
-    -- takes rows off the grid rather than off the pane. **'stripHintRowsFor'
-    -- is literally the function the keymap calls** — not a second copy of
-    -- the arithmetic — with the live width where the keymap passes
-    -- 'stStripWidth''s.
+    -- **The hint region is drawn from 'stHint', and the reply row with it** —
+    -- `~w2tk2` slice 4 draws the first, slice 5 fills the second. The
+    -- region's height is 'Tui.Layout.stripHintUsed' and the grid is sized
+    -- from the same number, so a hint that outgrows its floor takes rows off
+    -- the grid rather than off the pane. **'stripHintRowsFor' is literally
+    -- the function the keymap calls** — not a second copy of the arithmetic —
+    -- with the live width where the keymap passes 'stStripWidth''s.
+    --
+    -- **NEITHER REGION TAKES A ROW WHEN THERE IS NOTHING IN IT, AND THERE IS
+    -- NO HEADING AT ALL** — `~8cr56`, his report of 2026-11-19: /"Why do I
+    -- only get 2 suggestions?"/ Three things made that number, all of them
+    -- ours: his strip has seven body rows, the hint and reply rows were
+    -- reserved whether or not anything was in them, and a heading row said
+    -- @offers 2 of 318@ beneath a pane whose own title already says
+    -- @suggestions@. **The heading is gone** — /"Why does it help the user to
+    -- know 318?"/, and it does not: the cells are numbered and the numbers
+    -- are the information — **and the reserve now follows the content.**
+    -- Seven cells at his geometry where there were two.
+    --
+    -- **What it costs, stated rather than hidden: a hint arriving reflows the
+    -- grid**, so a key he has just learned can move. That is the trade the
+    -- question chose, and the alternative is the two cells he objected to.
     --
     -- **THE HINT DRAWS WHETHER OR NOT THERE ARE OPTIONS**, which is the
     -- answer slice 4 gives his §15 question 7 (/"does the strip ever hold a
     -- hint with no options at all"/): yes. A slate is empty mid-proof
     -- whenever nothing applies, which is one of the moments a hint is worth
-    -- most, and his own property 3 says the two are the same kind of content
-    -- from two sources. **With neither, the strip is one blank row** — the
-    -- call the output pane already makes for an empty pane.
+    -- most, and his own property 3 says offers and hints are the same kind of
+    -- content from two sources. **With neither, the strip is one blank row** —
+    -- the call the output pane already makes for an empty pane.
     stripBody = Widget Fixed Fixed $ do
       ctx <- getContext
       let width = ctx ^. availWidthL
           hintRows = stripHintRowsFor st width
-          grid = stripGrid width (stripBodyRows (stripRows (stStrip st))) hintRows
+          grid =
+            stripGrid
+              width
+              (stripBodyRows (stripRows (stStrip st)))
+              (stripReserveOf st width)
           cellW = max stripCellWidth (width `div` gridCols grid)
           shown = take (gridSlots grid) (map rowLabel stripSlate)
-          -- | **The heading counts the whole candidate list, not the grid.**
-          -- @offers  9 of 318@ is the gap between this slice and slice 3a on
-          -- screen, where an argument about it would have to be believed;
-          -- with nothing to offer there is no heading and no grid, the same
-          -- call the output pane makes.
-          heading
-            | null stripSlate = []
-            | otherwise =
-                [ paneRowWidget
-                    (Heading (headingFor (length shown) (length stripSlate)) Nothing
-                       :: PaneRow Name)
-                ]
           offers
             | null stripSlate = []
-            | otherwise = heading <> [offerGridWidget cellW (gridCols grid) shown]
-          reserve =
-            hintRegionWidget width hintRows (stHint st)
-              : replicate stripReplyRows (str " ")
+            | otherwise =
+                [offerGridWidget cellW (gridCols grid) (slateJevPicked (stSlate st)) shown]
+          reserve = case stHint st of
+            Nothing -> []
+            Just _ ->
+              hintRegionWidget width hintRows (stHint st)
+                : replicate stripReplyRows (str " ")
       render
         ( vBox
             ( if null offers && isNothing (stHint st)
@@ -1537,13 +1576,6 @@ draw st =
                 else offers <> reserve
             )
         )
-
-    -- | What the heading says. **\"9 of 318\" and not a bare count**, because
-    -- the two numbers are different facts: how many he can press, and how
-    -- many the engine offered. The second is the one his property 2 is about.
-    headingFor shownN totalN
-      | shownN >= totalN = "offers  " <> show totalN
-      | otherwise = "offers  " <> show shownN <> " of " <> show totalN
 
     -- | **The slate: what the grid is drawn from and what an F-key takes** —
     -- `~w2tk2` slice 2. 'stripSlateOf' is the whole of it, so the drawing and
@@ -2289,8 +2321,22 @@ stripSlateOf st
 -- source of shrinking.
 stripGridFor :: St -> Maybe Grid
 stripGridFor st =
-  (\w -> stripGrid w (stripBodyRows (stripRows (stStrip st))) (stripHintRowsFor st w))
+  (\w -> stripGrid w (stripBodyRows (stripRows (stStrip st))) (stripReserveOf st w))
     <$> stStripWidth st
+
+-- | **The rows the grid does not get** — `~8cr56`. The hint's own height
+-- plus the reply row when there is a hint, and **zero when there is not**:
+-- his /"Why do I only get 2 suggestions?"/ was five of seven body rows held
+-- for regions with nothing in them.
+--
+-- **The reply row goes with the hint and not with the strip.** It is a row
+-- to answer a hint in, so a strip that is not saying anything has nothing to
+-- answer; reserving it unconditionally was reserving a row for a
+-- conversation that had not started.
+stripReserveOf :: St -> Int -> Int
+stripReserveOf st w = case stHint st of
+  Nothing -> 0
+  Just _ -> stripHintRowsFor st w + stripReplyRows
 
 -- | **How tall the hint region is at a given content width** — `~w2tk2`
 -- slice 4.
@@ -4267,8 +4313,8 @@ tuiHelpLines =
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
     , (":clear [n]",        "take the last line and its output off the transcript;")
     , ("",                  "  with n, the last n of them. Ctrl+L is :clear 1")
-    , ("",                  "  It clears the view and never the session — the panes")
-    , ("",                  "  still say where the proof is. :script cut is the other one")
+    , ("",                  "  The session goes back with them, to where the turn now")
+    , ("",                  "  last left it — so the panes and the transcript agree")
     , (":script sessions",  "pick a stored session from a list and resume it")
     , ("",                  "  ↑↓ move, Enter resumes, Esc cancels. In the bar too")
     , (":script resume ‹slug›", "the same, by handle, with no list to walk")
@@ -4841,11 +4887,36 @@ closeDropdowns = do
   put st
     { stDropdown = Nothing
     , stOfferDropdown = Nothing
-    , stSlate = slateFor st
+    , stSlate = keepJevOrder (stSlate st) (slateFor st)
     , stRecoveredSpan = Nothing
     , stDismissed = Nothing
     , stArrowsReleased = False
     }
+
+-- | **A rebuilt slate keeps the order the old one had when it offers the same
+-- things** — `~7prxf`, his report of 2026-11-19: /"Why does the suggestion
+-- list revert to abandon and along when I hit ctr + x? That is proper
+-- dumb."/
+--
+-- **What was happening.** 'closeDropdowns' rebuilt the slate from the engine,
+-- and the engine's order is tokens-before-productions — @abandon@, @along@,
+-- @app-first-argument@. Jev's ranking lives in the *order* of 'slateRows'
+-- ('floatJevRows'), nowhere else, so rebuilding threw it away. Ctrl+X does
+-- not change the line, so there was nothing to rebuild for.
+--
+-- **The test is the candidate set and not the order**, which is the same
+-- comparison 'refreshOfferDropdown' already makes before asking Jev again: if
+-- the engine offers the same things, the slate in hand is that list already
+-- ranked and is strictly better than a fresh one. A different set means the
+-- line moved and the fresh slate is the right one — and Jev is asked again by
+-- the path that moved it.
+keepJevOrder :: Slate -> Slate -> Slate
+keepJevOrder old new
+  | slateJevPicked old > 0, sameSet = old { slateStart = slateStart new, slateReplaceLen = slateReplaceLen new }
+  | otherwise = new
+  where
+    sameSet = sortOn key (slateRows old) == sortOn key (slateRows new)
+    key r = (rowLabel r, rowInsert r)
 
 -- | Enter in the document. Composing past the end appends; standing on line
 -- @i@ **replaces** it — rewind to @i@, run what is written there now, then
@@ -5525,7 +5596,7 @@ configOf st = Config
 
 appendTurn :: St -> Maybe String -> [String] -> EventM Name St ()
 appendTurn st prompt output = do
-  put (submitted st) { stTurns = stTurns st <> [Turn prompt output] }
+  put (submitted st) { stTurns = stTurns st <> [Turn prompt output (stSession st)] }
   followInput
   -- The slate 'submitted' just computed is the new session's, and nothing has
   -- asked Jev about it — `~3gn2r`. Scheduling rather than firing, so a run of
@@ -5561,25 +5632,42 @@ submitted st = after { stSlate = slateFor after }
 -- never echoed what was typed. Those are still one turn each, which is what
 -- he means by the thing on screen he wants gone.
 --
--- **It clears the view and never the session** — the terminal's own meaning,
--- and the only coherent one here: `Cmd+L` in Terminal.app clears back to the
--- previous mark and does not un-run anything. **The reason it does not lie**
--- is that this frontend has panes: the proof term, the goals and the globals
--- say what the session *is*, continuously and regardless of what the
--- transcript still holds, so a transcript with a line taken out of it is a
--- shortened log beside a state that is still on screen. `:script cut` is the
--- other thing — that one does move the session, because there the document
--- *is* the record.
+-- **IT TAKES THE SESSION BACK WITH THE TURNS — HIS INSTRUCTION, 2026-11-19,
+-- AND IT REVERSES WHAT THIS FUNCTION USED TO SAY** (`~hxzjq`): /"ctr + l,
+-- when removing a command that change the machine-state\/proof-state, does
+-- not revert to a previous snapshot. It should."/ The session restored is
+-- 'turnSession' of the turn that is now last, or 'stSession0' with every
+-- turn gone.
 --
--- **Over-clearing is clamped and silent**, same reason: clearing to a mark
--- that is not there does nothing in a terminal either.
+-- **Why the old rule was wrong, in his own terms.** It was argued from
+-- @Cmd+L@ in Terminal.app, which clears a log and un-runs nothing — and the
+-- argument was that the panes make the shortened log honest, since the proof
+-- term and the goals keep saying what the session *is*. **That is exactly
+-- what makes it dishonest here**: this transcript is not a log beside a
+-- state, it is the only record of how the state was reached, so taking the
+-- line out leaves a proof state on screen with nothing on screen that
+-- produced it. @:script cut@ was always the other way round and was always
+-- the better model: there the document is the record, and cutting moves the
+-- session.
+--
+-- **Over-clearing is clamped and silent** — clearing to a mark that is not
+-- there does nothing in a terminal either, and here it lands on the session
+-- the TUI launched with.
 --
 -- **'stHistory' is deliberately untouched.** He wants the clutter gone, not
 -- his Up-arrow, and the `:clear` line itself is recorded by 'recordHistory'
 -- before dispatch like any other — so `:clear 1` is one Up away from being
 -- repeated.
 dropTurns :: Int -> St -> St
-dropTurns n st = st { stTurns = take (max 0 (length (stTurns st) - n)) (stTurns st) }
+dropTurns n st = st { stTurns = kept, stSession = back }
+  where
+    kept = take (max 0 (length (stTurns st) - n)) (stTurns st)
+    -- | **The state the screen is left showing** — `~hxzjq`. Each turn
+    -- carries the session its own line left behind, so the turn now at the
+    -- bottom of the transcript is the one whose session belongs with it.
+    back = case reverse kept of
+      t : _ -> turnSession t
+      []    -> stSession0 st
 
 -- | A count for `:clear`, or 'Nothing' if the word is not one. Non-negative:
 -- @:clear 0@ is a legitimate "clear nothing" and is silent, where
@@ -5592,9 +5680,13 @@ readCount w = case reads w of
 -- | **No turn is appended, which is the whole point.** A `:clear` that
 -- answered /cleared 1/ would put a line on screen for every line it took
 -- off, and the clutter he is clearing would just change its wording.
+-- **'dropTurns' runs first and 'submitted' second** — `~hxzjq`. 'submitted'
+-- recomputes the slate from the session in hand, and the session in hand is
+-- the one the clear just went back to; the other order offered the cleared
+-- session's rules.
 clearTurns :: Int -> St -> EventM Name St ()
 clearTurns n st = do
-  put (dropTurns n (submitted st))
+  put (submitted (dropTurns n st))
   followInput
 
 -- | **`:clear 1` as a keystroke** — what Ctrl+L and Cmd+L both run, so there

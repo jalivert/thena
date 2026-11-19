@@ -453,8 +453,8 @@ stripHintRows = 3
 -- **The grid keeps one row, always.** The hint grows by taking rows off the
 -- grid, and the row it may not take is the last one: a strip showing a hint
 -- and no options at all would have stopped being the pane the F-keys are
--- bound to. One heading, one grid row and the reply row are what the hint
--- is not allowed to have.
+-- bound to. One grid row and the reply row are what the hint is not allowed
+-- to have.
 --
 -- **It is never below 'stripHintRows', even in a strip too short to pay
 -- for it.** At 'stripMinRows' the arithmetic wants fewer than three, and
@@ -462,7 +462,7 @@ stripHintRows = 3
 -- remedy is the drag slice 1 built: pull the strip taller and both regions
 -- grow.
 stripHintBudget :: Int -> Int
-stripHintBudget rows = max stripHintRows (rows - 2 - stripReplyRows)
+stripHintBudget rows = max stripHintRows (rows - 1 - stripReplyRows)
 
 -- | **The rows the hint region actually occupies**, given how tall the strip
 -- is and how many lines the hint wrapped to — `~w2tk2` slice 4.
@@ -519,28 +519,27 @@ data Grid = Grid
 --   * **A taller strip offers more suggestions**, up to ten — which makes
 --     the drag of slice 1 a control over the slate and not only over how
 --     much is on screen.
---   * **A long hint offers fewer**, because @hintRows@ is what the hint
---     actually took and not the floor — `~w2tk2` slice 4. The grid is the
---     region that gives way, which is his /"I just don't want them to take
---     **all** the vertical space"/ read in the other direction.
+--   * **A hint offers fewer**, because @reserved@ is what the hint and the
+--     reply row actually took — `~w2tk2` slice 4. The grid is the region
+--     that gives way, which is his /"I just don't want them to take **all**
+--     the vertical space"/ read in the other direction. **With no hint it is
+--     zero and the grid has the whole body** (`~8cr56`).
 --   * **At his measured geometry — a 99-column script pane — there are
 --     three columns and three grid rows, so NINE options**, and F10 has no
 --     slot to take. That is not a gap: the keys bound are exactly the cells
 --     drawn, so nothing is advertised that cannot be pressed.
 stripGrid :: Int -> Int -> Int -> Grid
-stripGrid width rows hintRows =
+stripGrid width rows reserved =
   Grid { gridCols = cols, gridRows = used, gridSlots = slots }
   where
     cols = max 1 (width `div` stripCellWidth)
-    -- | **One row for the heading, then the reserve.** The heading is inside
-    -- the grid's budget and not outside it, because it is drawn in the
-    -- strip's own rows like everything else.
-    --
-    -- **The hint's rows are an argument and not 'stripHintRows' any more** —
-    -- `~w2tk2` slice 4. A hint longer than its floor takes rows from here,
-    -- which is what makes the reserve a floor rather than a cap, and
-    -- 'stripHintUsed' is the only thing that decides the number.
-    allowance = max 1 (rows - 1 - hintRows - stripReplyRows)
+    -- | **Every row the grid does not get is the caller's third argument,
+    -- and with nothing to reserve for it is zero** — `~8cr56`, his report of
+    -- 2026-11-19: /"Why do I only get 2 suggestions?"/ He had seven body
+    -- rows and five of them were spent on a hint that did not exist, a reply
+    -- row with nothing in it and a heading duplicating the pane's own title.
+    -- **A region that is empty takes no row.**
+    allowance = max 1 (rows - reserved)
     slots = min (length stripSlotKeys) (cols * allowance)
     -- | **The rows the slots need, not the rows they are allowed.** A strip
     -- pulled tall enough for twelve cells still draws four rows of ten, and
