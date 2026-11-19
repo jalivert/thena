@@ -18,7 +18,8 @@ module Tui.Panes
   , moduleRows
   , FileKind (..)
   , outputRows
-  , offerStripRows
+  , offerGridWidget
+  , stripKeyLabel
   , paneRowWidget
   , BarSpot (..)
   , paneBarWidget
@@ -26,7 +27,7 @@ module Tui.Panes
 
 import Data.List (intercalate, intersperse, nub, sort)
 
-import Brick (Widget, clickable, hBox, str, strWrapWith, withAttr)
+import Brick (Widget, (<+>), clickable, emptyWidget, hBox, str, strWrapWith, vBox, withAttr)
 import Brick.AttrMap (attrName)
 import Graphics.Text.Width (safeWcwidth)
 import Text.Wrap
@@ -382,28 +383,76 @@ outputRows :: Maybe String -> [String] -> [PaneRow n]
 outputRows Nothing _ = []
 outputRows (Just line) out = Heading line Nothing : map Entry out
 
--- | **The suggestion strip's rows, slice 1 of `~w2tk2`: today's completion
--- offers as a flat list.**
+-- | **How a slot's key is written in its cell** — `~w2tk2` slice 2.
 --
--- **Nothing clever, and that is the slice's own instruction.** No grid, no
--- numbering, no accept key — those are slice 2. What this is for is the one
--- question slice 1 exists to answer: whether reading a slate of offers
--- /below/ the prompt is easier than reading one floating /over/ it, which is
--- the argument that let a pane back into this design after he refuted one on
--- locality in 2026-11-13.
+-- **The key, not an abstract number, and that is a deliberate reading of his
+-- design.** His words were /"they are all numbered with numbers 1 - 9 or
+-- something and the user can just hit … F1 through F12"/ — so a cell reading
+-- @3@ would be numbered and would still leave him to learn that the number
+-- means an F-key. @F3@ is the keystroke, printed, and it teaches itself.
 --
--- **The count is drawn and it is the point of drawing it.** The launch list
--- is 287 rows and his second property of the finished pane is that it
--- /"should not list tens or hundreds of options"/ — so a heading reading
--- @offers  287@ is the gap between today and slice 3a, on screen, where an
--- argument about it would otherwise have to be believed.
+-- **Padded to a fixed field**, so every label in the grid starts at the same
+-- column of its own cell and the eye reads down a column of labels rather
+-- than a ragged edge: @F1 @ and @F10@ are both three.
+stripKeyLabel :: Int -> String
+stripKeyLabel k = padRight 3 ("F" <> show k)
+
+-- | **The grid of numbered options** — `~w2tk2` slice 2, his
+-- /"options in a matrix"/.
 --
--- **Takes labels and not 'OfferRow's.** Whether a row can be accepted is the
--- dropdown's business and the strip has no accept; a 'Tui.App.rowInsert' in
--- here would be a field nothing reads.
-offerStripRows :: [String] -> [PaneRow n]
-offerStripRows [] = []
-offerStripRows labels = Heading "offers" (Just (length labels)) : map Entry labels
+-- Takes the cell width, how many cells across, and the slate already cut to
+-- the grid's capacity; answers the lines to draw. **The key is the slot's
+-- 1-based position**, so the first cell is F1 and the grid is filled
+-- **row-major** — 1 2 3 across, then 4 5 6 — which is how @:pane@'s own six
+-- positions are numbered and the order a reader does not have to be taught.
+--
+-- **NOTHING HERE IS SELECTED, HIGHLIGHTED OR PRESELECTED, AND THAT IS THE
+-- POINT OF THE SLICE** — his ruling: /"this means there is no concept of
+-- selected\/highlighted or preselection, that UX would be dropped
+-- completely."/ So there is no index to pass in and no attribute to vary:
+-- every cell is drawn the same, and a cell is reached by its own key and by
+-- nothing else. **Three things fall out of that, all of them wanted**: the
+-- arrows belong to the document always (`~sfs2n` stops being a question), the
+-- whisper is whatever is in slot 1 (so a slate that changes moves it by
+-- construction, which is part one §4 dissolved rather than fixed), and
+-- @:preselect@ has nothing in this pane to toggle.
+--
+-- **A label too long for its cell is cut with an ellipsis**, not wrapped: a
+-- cell is one line by construction, and a label that flowed would put its
+-- tail in the cell beside it.
+-- | **The key is drawn in the strip's accent and the label in ordinary
+-- ink**, which is the whole of how a cell says /press this/. Two widgets and
+-- not one attributed string: 'withAttr' replaces the attribute in force
+-- rather than composing with it (the lesson @placeholder.recovered@ is
+-- named for), so a cell is the key, then the text, side by side.
+offerGridWidget :: Ord n => Int -> Int -> [String] -> Widget n
+offerGridWidget cellW cols labels
+  | cols <= 0 || null labels = emptyWidget
+  | otherwise = vBox (map line (chunk (zip [1 :: Int ..] labels)))
+  where
+    chunk [] = []
+    chunk xs = take cols xs : chunk (drop cols xs)
+    room = max 1 (cellW - 3 - 2 - 1)
+    -- | **The last cell of a row is not padded**, so a row never carries
+    -- trailing blanks out to the pane's edge. Everything before it is, which
+    -- is what lines the columns up.
+    line cells = hBox (zipWith cell [0 :: Int ..] cells)
+      where
+        lastIx = length cells - 1
+        cell i (k, label) =
+          withAttr (attrName "strip.key") (str (stripKeyLabel k))
+            <+> str (pad ("  " <> clip room label))
+          where pad = if i == lastIx then id else padRight (cellW - 3)
+
+-- | Text cut to a width, with an ellipsis standing for the rest — the same
+-- rule a dropdown row follows past 'Tui.App.popupTextCap'.
+clip :: Int -> String -> String
+clip n t
+  | length t > n = take (max 0 (n - 1)) t <> "\x2026"
+  | otherwise = t
+
+padRight :: Int -> String -> String
+padRight n t = t <> replicate (max 0 (n - length t)) ' '
 
 -- | One row of a list pane, with its attribute and its indent — the whole of
 -- the second column's drawing, since 'Tui.Panes' decided the text.

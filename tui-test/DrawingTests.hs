@@ -10,7 +10,6 @@
 module DrawingTests (drawingTests) where
 
 import Data.List (dropWhileEnd)
-import Data.Maybe (listToMaybe)
 import qualified Data.Text.Lazy as TL
 import Data.Char (isSpace)
 import qualified Data.Vector as V
@@ -40,10 +39,11 @@ import Tui.Panes
   , markColumns
   , markGlyph
   , moduleRows
-  , offerStripRows
+  , offerGridWidget
   , outputRows
   , paneBarWidget
   , paneRowWidget
+  , stripKeyLabel
   )
 import Tui.Render (Fold (..), foldAttr, renderDisplay, renderMachineView)
 
@@ -171,6 +171,7 @@ drawingTests =
     , testGroup "a term too wide for its pane breaks rather than clipping" wrapCases
     , testGroup "a production's words and slots are spaced, which is `~mxhfj`" spacingCases
     , testGroup "the bar that names every pane, `~7tfhd`" paneBarCases
+    , testGroup "the suggestion strip's grid, `~w2tk2`" stripGridCases
     ]
 
 -- | **`~7tfhd`, his instruction of 2026-11-13**: /"lists all the available
@@ -222,6 +223,55 @@ paneBarCases =
       assertEqual ""
         " globals 1    suggestions"
         (drawLine (paneBarWidget [("globals", BarAt 1), ("suggestions", BarClosed)]))
+  ]
+
+-- | **The grid of numbered options** — `~w2tk2` slice 2, his /"options in a
+-- matrix"/.
+--
+-- **The whole of what is asserted here is the text, which is this suite's
+-- rule** — so what these cases hold is the arithmetic a reader cannot do in
+-- their head: where a cell starts, how a row of them lines up, and what
+-- happens to a label that does not fit. **The colours are not asserted**: the
+-- key's accent is in 'Tui.App''s attribute table.
+stripGridCases :: [TestTree]
+stripGridCases =
+  [ -- | **The key is the keystroke, printed** — not an abstract number he
+    -- would have to learn maps to an F-key. Padded to three so @F1@ and @F10@
+    -- start their labels at the same column.
+    testCase "a slot's key is the key, in a field both one and ten fit" $ do
+      assertEqual "" "F1 " (stripKeyLabel 1)
+      assertEqual "" "F10" (stripKeyLabel 10)
+      assertEqual "" 3 (length (stripKeyLabel 9))
+  , testCase "one row of three cells, every label starting at its cell's column 5" $
+      assertEqual ""
+        "F1   intro                F2   along                F3   abandon"
+        (drawLine (offerGridWidget 26 3 ["intro", "along", "abandon"]))
+  , -- | **Row-major, the way @:pane@'s own six positions are numbered.** 1 2 3
+    -- across and then 4 5 6, which is the order a reader does not have to be
+    -- taught.
+    testCase "the grid fills across before it fills down" $
+      assertEqual ""
+        [ "F1   a                    F2   b                    F3   c"
+        , "F4   d                    F5   e"
+        ]
+        (take 2 (drawToLines (offerGridWidget 26 3 ["a", "b", "c", "d", "e"])))
+  , -- | **A label too long for its cell is cut, not wrapped.** A cell is one
+    -- line by construction, and a label that flowed would put its tail in the
+    -- cell beside it — which is the defect `~r4gvd` was in a list pane and
+    -- would be worse here, the neighbour being a different option.
+    testCase "a label too long for its cell ends in an ellipsis" $
+      assertEqual ""
+        "F1   constructor-recursi… F2   intro"
+        (drawLine (offerGridWidget 26 2 ["constructor-recursive-arguments", "intro"]))
+  , -- | **One column is the narrow case and it still works** — the strip is
+    -- as wide as the document column, and closing the panes is not the only
+    -- way that gets small.
+    testCase "one column is a column" $
+      assertEqual ""
+        ["F1   intro", "F2   along"]
+        (take 2 (drawToLines (offerGridWidget 26 1 ["intro", "along"])))
+  , testCase "nothing to offer draws nothing at all" $
+      assertEqual "" "" (drawLine (offerGridWidget 26 3 []))
   ]
 
 -- | **HIS REPORT, 2026-11-12, and the suite could not have caught it** —
@@ -631,23 +681,6 @@ paneRowCases =
   , testCase "and nothing is capped, which is the point of the move off the foot" $
       assertEqual "" 21
         (length (outputRows (Just ":show subst") [show n | n <- [1 .. 20 :: Int]]))
-  , -- | **The suggestion strip, slice 1 of `~w2tk2`.** Nothing offered is no
-    -- rows at all — not a row saying so — the same call 'outputRows' makes:
-    -- an empty strip is what /"there is nothing to suggest here"/ looks like,
-    -- and a sentence in its place would be the frontend inventing one.
-    testCase "nothing offered is no rows at all" $
-      assertEqual "" (asRows []) (offerStripRows [])
-  , -- | **The count is drawn and that is the point of drawing it.** The
-    -- launch list is 287 rows against his /"should not list tens or hundreds
-    -- of options"/, so @offers  287@ is the gap between slice 1 and slice 3a
-    -- on screen rather than in an argument.
-    testCase "the offers are a counted heading and one entry each" $
-      assertEqual ""
-        (asRows [Heading "offers" (Just 3), Entry ":theorem", Entry "data", Entry "intro"])
-        (offerStripRows [":theorem", "data", "intro"])
-  , testCase "and the count is the whole list, not what fits" $
-      assertEqual "" (Just (Just 287))
-        (listToMaybe [c | Heading _ c <- offerStripRows (map show [1 .. 287 :: Int])])
   ]
 
 -- | The three row kinds, drawn. **The indents are the structure**, so they

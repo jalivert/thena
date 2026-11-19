@@ -39,6 +39,12 @@ import Tui.Layout
   , stripMinRows
   , stripName
   , stripSized
+  , Grid (..)
+  , stripCellWidth
+  , stripGrid
+  , stripHintRows
+  , stripReplyRows
+  , stripSlotKeys
   )
 
 layoutTests :: TestTree
@@ -199,4 +205,57 @@ layoutTests =
         stripRows (stripSized (-40) defaultStrip) @?= stripMinRows
         stripRows (stripSized stripMinRows defaultStrip) @?= stripMinRows
         stripRows (stripSized 99 defaultStrip) @?= 99
+    , -- | **The grid is a function of the strip's size, which is HIS
+      -- instruction of 2026-11-19** — /"it could also change depending on how
+      -- wide the double-pane (main + suggestions) is"/. So 3×4 and 4×3 are
+      -- two readings of one curve and neither is a constant to be picked.
+      --
+      -- **His measured geometry is the case to hold**: a 99-column script
+      -- pane, three columns of cells, and at the strip's default height three
+      -- grid rows — so **nine options**, which is what he will see.
+      testCase "at his measured geometry the grid is three by three" $ do
+        let g = stripGrid 96 stripDefaultRows
+        gridCols g @?= 3
+        gridRows g @?= 3
+        gridSlots g @?= 9
+    , -- | **A wider double-pane offers more suggestions, and a taller strip
+      -- does too** — which makes slice 1's drag a control over the slate and
+      -- not only over how much of it is on screen.
+      testCase "more width is more columns, more height is more slots" $ do
+        gridCols (stripGrid 52 stripDefaultRows) @?= 2
+        gridCols (stripGrid 140 stripDefaultRows) @?= 5
+        assertBool "a taller strip offers more"
+          (gridSlots (stripGrid 96 14) > gridSlots (stripGrid 96 stripDefaultRows))
+    , -- | **An option with no key and a key with no option are both
+      -- unreachable, and that is the invariant of the whole slice.** The
+      -- slate is sized by the grid and the grid is bounded by the keys, so
+      -- every cell drawn can be pressed and every key bound has a cell.
+      testCase "the slate never outruns the keys there are" $ do
+        let keys = length stripSlotKeys
+        gridSlots (stripGrid 400 40) @?= keys
+        assertBool "never more than the keys" $
+          and [ gridSlots (stripGrid w r) <= keys
+              | w <- [1, 20, 52, 96, 140, 400], r <- [stripMinRows, 8, 14, 40] ]
+        assertBool "never none" $
+          and [ gridSlots (stripGrid w r) >= 1
+              | w <- [1, 20, 52, 96, 140, 400], r <- [stripMinRows, 8, 14, 40] ]
+    , -- | **The rows the slots NEED, not the rows they are allowed.** A strip
+      -- pulled tall enough for fifteen cells still draws four rows of ten,
+      -- and the room left over goes to the hint rather than to blank cells.
+      testCase "a tall strip draws the rows its slots need and no more" $ do
+        let g = stripGrid 96 40
+        gridSlots g @?= length stripSlotKeys
+        gridRows g @?= 4
+    , -- | **The hint and the reply keep their rows whatever the grid does** —
+      -- his /"I want like bottom half or three lines-worth to always be free
+      -- for an LLM suggestion"/ plus /"one row at the bottom, for a reply"/.
+      -- The heading is the fifth row this leaves out, and it is inside the
+      -- grid's budget because it is drawn in the strip's own rows.
+      testCase "the reserve is kept out of the grid's budget at every height" $ do
+        stripHintRows + stripReplyRows @?= 4
+        assertBool "the grid never eats the reserve" $
+          and [ gridRows (stripGrid 96 r) <= max 1 (r - 1 - stripHintRows - stripReplyRows)
+              | r <- [stripMinRows .. 40] ]
+    , testCase "a cell is wide enough for the key field and a typical label" $
+        assertBool "" (stripCellWidth >= 3 + 2 + 18)
     ]

@@ -148,7 +148,8 @@ import Tui.Render
   )
 import Tui.Config (Config (..), loadConfig, saveConfig)
 import Tui.Layout
-  ( Layout
+  ( Grid (..)
+  , Layout
   , Pane (..)
   , Position
   , Strip (..)
@@ -165,9 +166,14 @@ import Tui.Layout
   , placedPanes
   , positionOf
   , positions
+  , stripCellWidth
+  , stripGrid
+  , stripHintRows
   , stripMinRows
   , stripName
+  , stripReplyRows
   , stripSized
+  , stripSlotKeys
   )
 import Tui.Panes
   ( BarSpot (..)
@@ -178,7 +184,7 @@ import Tui.Panes
   , globalRows
   , wideGlyphs
   , moduleRows
-  , offerStripRows
+  , offerGridWidget
   , outputRows
   , paneBarWidget
   , paneRowWidget
@@ -576,7 +582,7 @@ data St = St
   , stScriptBar :: Maybe (Editor Text Name)
     -- ^ the command bar, his own design call: **nothing typed in the
     -- document is ever a command**, so a command needs somewhere else to be
-    -- typed. Summoned (Esc, or F2), one line, closes on Enter or Esc.
+    -- typed. Summoned (F12, or Ctrl+X), one line, closes on Enter or Esc.
     -- 'Nothing' when it is not showing — a permanent input row at the pane's
     -- foot reads as a second REPL, which is exactly the confusion it exists
     -- to prevent.
@@ -1134,6 +1140,17 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- both paired with 'themePanel' so neither punches the hole `~bv2wj` was.
   , (attrName ("edge." <> stripName),  surface (themePanel th) (themeSuggest th))
   , (attrName ("title." <> stripName), surface (themePanel th) (themeSuggest th))
+  -- | **A grid cell's key, in the strip's own accent** — `~w2tk2` slice 2.
+  -- The thing a cell is asking him to press, and the only part of the strip
+  -- that is not ordinary text.
+  --
+  -- **An accent ink on the panel, not a filled block.** A fill is what
+  -- `panebar.open` and `dropdown.selected` are, and both of those mean
+  -- /this one/ — which is exactly the reading this pane must not have: there
+  -- is no selected cell, so ten filled blocks would be ten rows all claiming
+  -- to be chosen. **Paired with 'themePanel' explicitly**, `~bv2wj`'s
+  -- lesson, or it punches a hole in the pane's own fill.
+  , (attrName "strip.key",      surface (themePanel th) (themeSuggest th))
   -- | A list pane's group heading and its small print. **Both dim, and the
   -- same dim**: a heading is not a thing in the list and neither is a module's
   -- file, so what separates them from the entries is weight, not hue — the
@@ -1349,21 +1366,60 @@ draw st =
     -- which is what makes it a pane rather than a widget pretending to be one.
     suggestionStrip =
       withAttr (attrName "panel") $
-        pane stripName StripVP (paneBody (offerStripRows stripLabels))
+        pane stripName StripVP (padAll 1 stripBody)
 
-    -- | **What the strip says today: the labels the completion dropdown
-    -- would have shown** — slice 1's /"contents are today's offer rows as a
-    -- flat list"/.
+    -- | **The strip's contents: a counted heading, then the grid, then the
+    -- rows kept for the hint and the reply** — `~w2tk2` slice 2.
     --
-    -- **The offer dropdown's rows and not the ':load' dropdown's.** The two
-    -- are mutually exclusive by construction ('stOfferDropdown''s own note),
-    -- and a path listing is a different job that already has its own popup;
-    -- what this design replaces is the statement completion.
+    -- **A 'Widget' that reads its own width**, because the grid's shape is a
+    -- function of it — his instruction of 2026-11-19, /"it could also change
+    -- depending on how wide the double-pane (main + suggestions) is"/. Three
+    -- columns at his measured geometry, two in a narrow window, five in a
+    -- wide one; 'Tui.Layout.stripGrid' is the whole of that arithmetic and
+    -- nothing here repeats it.
     --
-    -- **Read off the same state the dropdown reads, so the two cannot
-    -- disagree.** That is the point at slice 1: both are on screen at once
-    -- and he is comparing the same list in two places.
-    stripLabels = maybe [] (map rowLabel . odRows) (stOfferDropdown st)
+    -- **The reserved rows are blank at this slice and that is deliberate**,
+    -- not an oversight: see 'Tui.Layout.stripHintRows'. A reserve that only
+    -- appears once there is something to put in it is a reserve that was
+    -- never tested.
+    stripBody = Widget Fixed Fixed $ do
+      ctx <- getContext
+      let grid = stripGrid (ctx ^. availWidthL) (stripRows (stStrip st))
+          cellW = max stripCellWidth (ctx ^. availWidthL `div` gridCols grid)
+          shown = take (gridSlots grid) (map rowLabel stripSlate)
+          -- | **The heading counts the whole candidate list, not the grid.**
+          -- @offers  9 of 318@ is the gap between this slice and slice 3a on
+          -- screen, where an argument about it would have to be believed;
+          -- with nothing to offer there is no heading and no grid, the same
+          -- call the output pane makes.
+          heading
+            | null stripSlate = []
+            | otherwise =
+                [ paneRowWidget
+                    (Heading (headingFor (length shown) (length stripSlate)) Nothing
+                       :: PaneRow Name)
+                ]
+          reserved = replicate (stripHintRows + stripReplyRows) (str " ")
+      render
+        ( vBox
+            ( if null heading
+                then [str " "]
+                else heading <> [offerGridWidget cellW (gridCols grid) shown] <> reserved
+            )
+        )
+
+    -- | What the heading says. **\"9 of 318\" and not a bare count**, because
+    -- the two numbers are different facts: how many he can press, and how
+    -- many the engine offered. The second is the one his property 2 is about.
+    headingFor shownN totalN
+      | shownN >= totalN = "offers  " <> show totalN
+      | otherwise = "offers  " <> show shownN <> " of " <> show totalN
+
+    -- | **The slate: what the grid is drawn from and what an F-key takes** —
+    -- `~w2tk2` slice 2. 'stripSlateOf' is the whole of it, so the drawing and
+    -- the keymap read the same list and a key can never land on a cell that
+    -- is not there.
+    stripSlate = stripSlateOf st
 
     -- | 'Input' reported here, on the editor itself, not the "❯ " ahead of
     -- it — so 'stInputExtent's own upper-left is column 0 of the *text*,
@@ -1398,7 +1454,25 @@ draw st =
         -- outright rather than 'ghostAt' itself carrying the flag — the
         -- accept-span math it returns alongside the text isn't wanted by
         -- anything else, so there's nothing to lose by short-circuiting here.
-        (ghost, skip) = if stWhisperOn st then ghostAt line col (stDropdown st) (liveOffers st) else ("", 0)
+        -- | **The whisper is whatever is in slot 1 once the strip is
+        -- open** — his ruling, `~w2tk2` slice 2: /"perhaps the concept of
+        -- the whisper would be tied to the option number 1"/. With the
+        -- strip closed it is still the dropdown's selected row, which is
+        -- the old behaviour and stays while the dropdown does.
+        --
+        -- **This is what dissolves part one §4 rather than fixing it.** The
+        -- whisper was stale because the selection was pinned to a candidate
+        -- by label, so Jev's answer arriving a moment later left the guess
+        -- whispered underneath its picks. Slot 1 is a position, so a slate
+        -- Jev reorders moves the whisper by construction and there is no
+        -- highlight to travel under him.
+        (ghost, skip) = if stWhisperOn st then whisper else ("", 0)
+        whisper
+          | stripOpen (stStrip st)
+          , Just od <- stOfferDropdown st
+          , Just ins <- rowInsert =<< listToMaybe (stripSlateOf st)
+          = maybe ("", 0) id (offerGhostFor col od ins)
+          | otherwise = ghostAt line col (stDropdown st) (liveOffers st)
         line = concatMap Text.unpack (getEditContents (stInput st))
         (_, col) = getCursorPosition (stInput st)
 
@@ -2030,6 +2104,33 @@ offerDropdownLayer st = case liveOffers st of
 liveOffers :: St -> Maybe OfferDropdown
 liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 
+-- | **The suggestion strip's slate: every candidate that can actually be
+-- taken, in the order the dropdown has them** — `~w2tk2` slice 2.
+--
+-- **Read by the drawing and by the keymap, which is the point of its being a
+-- function.** 'draw' cuts it to the grid's capacity and the F-keys index
+-- into it; if the two computed it separately a key could land on a cell that
+-- was not drawn, which is the class of defect this slice is otherwise wide
+-- open to.
+--
+-- **Filtered to rows with something to insert.** A row that cannot be
+-- accepted has no business occupying a numbered slot — his design has no
+-- unselectable rows in it, every cell being reachable by its own key. Since
+-- `~bkzw9` the engine's offers are all insertable anyway, so this filter is
+-- a guard and not a policy; if hint rows ever come back (`~5f3k6` is open),
+-- they will need somewhere that is not a slot.
+--
+-- **Empty with the strip closed**, so nothing computes a slate for a pane
+-- that is not on screen and no F-key does anything.
+--
+-- **'stOfferDropdown' and NOT 'liveOffers'.** The strip is not the dropdown:
+-- it keeps working with @:dropdown off@, which is the whole of what
+-- `~492hq`'s /disabled, not deleted/ buys.
+stripSlateOf :: St -> [OfferRow]
+stripSlateOf st
+  | not (stripOpen (stStrip st)) = []
+  | otherwise = filter (isJust . rowInsert) (maybe [] odRows (stOfferDropdown st))
+
 offerRowToPopup :: Maybe Int -> Int -> Int -> OfferRow -> PopupRow
 offerRowToPopup selected jevPicked i (OfferRow label ins) =
   PopupRow label (Just i == selected) (isNothing ins) (i < jevPicked)
@@ -2343,10 +2444,22 @@ offerGhost :: Int -> OfferDropdown -> Maybe (String, Int)
 offerGhost col od = do
   i <- odSelected od
   ins <- rowInsert (odRows od !! i)
+  offerGhostFor col od ins
+
+-- | The same arithmetic, for an insertion the caller has already chosen —
+-- `~w2tk2` slice 2, where the whisper's row is **slot 1 of the strip** and
+-- not the dropdown's selection.
+--
+-- **Split out rather than parameterised by an index**, because the strip's
+-- slate is a filtered list and an index into it is not an index into
+-- 'odRows'. What both callers genuinely share is this: given the text an
+-- accept would write, how much of it has the caret already walked past.
+offerGhostFor :: Int -> OfferDropdown -> String -> Maybe (String, Int)
+offerGhostFor col od ins =
   let typedLen = col - odWordStart od
-  if typedLen < 0 || typedLen > length ins
-    then Nothing
-    else Just (drop typedLen ins, max 0 (odReplaceLen od - typedLen))
+   in if typedLen < 0 || typedLen > length ins
+        then Nothing
+        else Just (drop typedLen ins, max 0 (odReplaceLen od - typedLen))
 
 -- | A line, run against the session, and its 'Response' rendered as lines
 -- via 'Thena.Render.renderResponse' — a status-line-shaped placeholder for
@@ -2945,7 +3058,7 @@ transcriptGoneSaid stored =
 -- completion dropdown, Option+Backspace — falls through to the REPL's own
 -- handler, because editing the text of a line is editing text either way.
 --
--- **F2 or Ctrl+X summons the command bar, and Esc deliberately does not.**
+-- **F12 or Ctrl+X summons the command bar, and Esc deliberately does not.**
 -- Esc was tried first, on the reasoning that it is the one key every terminal
 -- delivers identically — and it was wrong, measured under a pty: Esc already
 -- means "dismiss", in two steps (his `.jalivert/TUI.md` #14), and how many
@@ -2954,10 +3067,12 @@ transcriptGoneSaid stored =
 -- submitted and was not. **Esc keeps exactly its old meaning here**; the bar
 -- gets keys that mean nothing else.
 --
--- F2 arrives as @ESC O Q@ (SS3 Q) and decodes to 'V.KFun' 2 — checked through
--- the pty, not assumed. Ctrl+X is the second way in, because a terminal that
--- rewrites function keys should not be able to strand someone in a mode whose
--- only exit is the bar.
+-- **It was F2 until his ruling of 2026-11-19 gave F2 to the suggestion
+-- strip's second slot** (`~w2tk2`); F12 arrives as @ESC[24~@ and decodes to
+-- 'V.KFun' 12, read off his own keyboard rather than assumed. Ctrl+X is the
+-- second way in, because a terminal that rewrites function keys should not be
+-- able to strand someone in a mode whose only exit is the bar — which is
+-- also why the F-key could be moved at no cost.
 -- | **Editing a committed line makes every line below it stale, the instant it
 -- is edited — and leaves them standing.** His ruling of 2026-10-21 (@~sv5v8@)
 -- said the lines were *dropped* on that keystroke; **his ruling of 2026-11-11
@@ -3079,7 +3194,7 @@ dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 -- decodes to 'V.KEnter' with 'V.MMeta', verified under the pty. **And
 -- `:script cut` in the command bar does the same thing with no modifier
 -- at all**, so no terminal can strand the feature — the same belt-and-
--- braces F2 and Ctrl+X already have.
+-- braces F12 and Ctrl+X already have.
 -- | **Backspace with nothing to its left wraps to the end of the line
 -- above** — his feature, 2026-10-20. In a document the caret should not
 -- stop dead at column 0 when there is a line above it to back into, and
@@ -3135,7 +3250,17 @@ dispatchScriptEvent ev@(VtyEvent (V.EvKey V.KBS [])) = do
 -- bytes itself.
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptOpenLine
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
-dispatchScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
+-- | **F12 or Ctrl+X summons the command bar. It used to be F2, and F2 is now
+-- the suggestion strip's second slot — HIS RULING, 2026-11-19**: /"we take F2
+-- for suggestions, replacing its original functionality with some other
+-- shortcut or command."/
+--
+-- **The move costs nothing, which is why F12 and not a new command.** Ctrl+X
+-- was built as the bar's second way in precisely so a terminal that rewrites
+-- function keys could not strand anyone, so the bar never depended on an
+-- F-key alone; and F12 is the one F-key no grid cell will ever reach for —
+-- 'Tui.Layout.stripSlotKeys' stops at ten.
+dispatchScriptEvent (VtyEvent (V.EvKey (V.KFun 12) [])) = openScriptBar
 dispatchScriptEvent (VtyEvent (V.EvKey (V.KChar 'x') [V.MCtrl])) = openScriptBar
 -- | **Live-script mode does not need a clause for the clear keys.** It falls
 -- through to the repl's, and 'clearOneTurn' asks 'stScriptMode' itself — see
@@ -3278,6 +3403,34 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- only ever true from inside this frontend.
         [":help"] -> runEngineLine st0 line tuiHelpLines
         _ -> runEngineLine st0 line []
+-- | **An F-key takes the option in its slot** — `~w2tk2` slice 2, his
+-- proposal: /"perhaps they are all numbered … and the user can just hit … F1
+-- through F12"/.
+--
+-- **One clause for every key, because the slot is the key's own number.**
+-- 'Tui.Layout.stripSlotKeys' is the list and this guard is the only place it
+-- is consulted for dispatch, so freeing F11 is an entry in that list and no
+-- change here.
+--
+-- **Nothing happens when there is no such slot**, and the two cases are the
+-- same case: the strip is closed, or the grid is smaller than this key's
+-- number. 'stripSlateOf' is empty in the first and short in the second, and
+-- 'nthOf' answers 'Nothing' either way — so a key is never swallowed on
+-- behalf of a cell that is not on screen.
+--
+-- **It is cut to the grid's capacity here as well as in 'draw', from the
+-- same function.** A slate longer than the grid would otherwise let F9 take
+-- a candidate nobody could see.
+--
+-- **This clause is in the repl's handler and live-script mode falls through
+-- to it**, so the gesture is one gesture in both keyboards — which is the
+-- whole reason F2 had to leave the command bar.
+handleReplEvent (VtyEvent (V.EvKey (V.KFun k) []))
+  | k `elem` stripSlotKeys = do
+      st <- get
+      case (stOfferDropdown st, nthOf (k - 1) (stripSlateOf st)) of
+        (Just od, Just row) | Just ins <- rowInsert row -> acceptOfferRow st od ins
+        _ -> pure ()
 handleReplEvent (VtyEvent (V.EvKey V.KEsc [])) = do
   st <- get
   case (stDropdown st, liveOffers st) of
@@ -3795,6 +3948,11 @@ tuiHelpLines =
     , ("",                  "  the document — it has no position, and nothing else does")
     , ("",                  "  either. Pull its accent bar UP to make it taller;")
     , ("",                  "  the rows come off the document. :pane " <> stripName <> " close")
+    , ("F1 … F10",          "take the option in that slot of the suggestion strip.")
+    , ("",                  "  Nothing is selected or highlighted there and nothing can")
+    , ("",                  "  be: a cell is reached by its own key and by no other way,")
+    , ("",                  "  so Up and Down always belong to the document. A wider or")
+    , ("",                  "  taller strip has more slots — pull it and see")
     , (":dropdown on|off",  "whether the completion dropdown appears and takes keys")
     , ("",                  "  at all. Off leaves :load's own path listing alone")
     , ("a click in a list pane", "folds a namespace in globals — ▾ is open, ▸ folded,")
@@ -3818,7 +3976,7 @@ tuiHelpLines =
     , ("",                  "  stale, drawn dim, until an Enter decides them:")
     , ("",                  "  Enter runs this line and re-runs the lines below it,")
     , ("",                  "  Option+Enter runs this line and discards the lines below it.")
-    , ("",                  "  F2 or Ctrl+X opens the command bar — :script leaves,")
+    , ("",                  "  F12 or Ctrl+X opens the command bar — :script leaves,")
     , ("",                  "  :script cut is Option+Enter with no modifier, :script reload")
     , ("",                  "  re-runs from the caret down (from the top, if the caret is")
     , ("",                  "  past the end) and says what changed on disc, :script drop")

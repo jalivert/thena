@@ -50,6 +50,12 @@ module Tui.Layout
   , openStrip
   , closeStrip
   , stripSized
+  , Grid (..)
+  , stripGrid
+  , stripSlotKeys
+  , stripCellWidth
+  , stripHintRows
+  , stripReplyRows
   ) where
 
 import qualified Data.Map.Strict as Map
@@ -344,3 +350,112 @@ closeStrip s = s { stripOpen = False }
 -- not know and will not read.
 stripSized :: Int -> Strip -> Strip
 stripSized n s = s { stripRows = max stripMinRows n }
+
+-- * The grid of numbered options — `~w2tk2` slice 2
+
+-- | **The F-keys a slot can be taken by, in order** — `~w2tk2` slice 2, and
+-- **this list is the one place the keymap's size is decided.**
+--
+-- **F1 to F10, and the two absences are each for their own reason.**
+--
+--   * **F11 never reaches the TUI on his machine**, measured 2026-11-19 by
+--     reading the bytes his own terminal sends: every other F-key arrived as
+--     the sequence vty names and F11 sent nothing at all. It is macOS, not
+--     his terminal — /Show Desktop/ owns it (System Settings → Keyboard →
+--     Keyboard Shortcuts → Mission Control). **Freeing it is one entry in
+--     this list and no other change.**
+--   * **F12 is the live-script command bar's, and that is HIS ruling of
+--     2026-11-19**: /"we take F2 for suggestions, replacing its original
+--     functionality with some other shortcut or command."/ F2 was the bar's
+--     and would have put a hole in the middle of the grid. **The move costs
+--     nothing**: Ctrl+X was always the bar's second way in, deliberately, so
+--     /"a terminal that rewrites function keys should not be able to strand
+--     someone in a mode whose only exit is the bar"/ — and F12 is the one
+--     F-key no grid cell will ever reach for.
+--
+-- **Ctrl+digit is not an option and that is measured, not assumed.** vty does
+-- not name the CSI-u encoding, so `ESC[49;5u` is typed into the line
+-- verbatim (`~xmd5b`'s path); and the legacy encoding for Ctrl+1 is the bare
+-- digit, which he must be able to type. **So the keymap is F-keys or
+-- nothing.**
+stripSlotKeys :: [Int]
+stripSlotKeys = [1 .. 10]
+
+-- | **The narrowest a cell may be**: the key field (@F10@ and two spaces),
+-- then a label.
+--
+-- **Labels run to about twenty characters** — @constructor-recursive-arguments@
+-- is the long tail and @intro-arm-binders@ is typical — so this is the key
+-- field plus a typical label plus a column of air between cells.
+stripCellWidth :: Int
+stripCellWidth = 26
+
+-- | **Rows kept for the LLM's hint, whatever the grid is doing** — his
+-- instruction: /"I want like bottom half or three lines-worth to always be
+-- free for an LLM suggestion"/. Three is the /"three lines-worth"/ reading,
+-- which is the one that does not take half the strip away from the grid.
+--
+-- **Reserved from slice 2, filled at slice 4.** Blank rows now rather than a
+-- grid that grows into them and has to be shrunk later: the geometry is the
+-- thing this slice is establishing, and a reserve that only appears once
+-- there is something to put in it is a reserve that was never tested.
+stripHintRows :: Int
+stripHintRows = 3
+
+-- | **One row at the bottom to reply to the LLM in** — his instruction,
+-- /"there needs to be a room for one row at the bottom, for a reply from the
+-- user"/. Built at slice 5; reserved here for the reason 'stripHintRows' is.
+stripReplyRows :: Int
+stripReplyRows = 1
+
+-- | **The grid the strip's size implies** — `~w2tk2` slice 2.
+--
+-- **The shape is NOT a constant, which is his own instruction** of
+-- 2026-11-19: /"It could also change depending on how wide the double-pane
+-- (main + suggestions) is."/ So 3×4 and 4×3 are two points on a curve
+-- rather than a choice to be made once, and the 99-column measurement his
+-- discussion records is one reading of it.
+data Grid = Grid
+  { gridCols :: Int
+    -- ^ how many cells across — the width divided by 'stripCellWidth'.
+  , gridRows :: Int
+    -- ^ how many rows the slots actually need, which is never more than the
+    -- allowance and is usually fewer.
+  , gridSlots :: Int
+    -- ^ **how many options there are, which is the grid's own capacity** —
+    -- never more than 'stripSlotKeys' has keys for. **An option with no key
+    -- and a key with no option are both states this makes unreachable**: the
+    -- slate is sized by the grid, and the grid is sized by the strip.
+  }
+  deriving (Eq, Show)
+
+-- | The grid for a strip this wide and this tall. Width is the room the
+-- /content/ has, not the pane's own — the caller takes the accent bar and
+-- the padding off first.
+--
+-- **Three consequences worth stating, because each is a thing he will see:**
+--
+--   * **A wider double-pane offers more suggestions.** Pulling the pane
+--     columns in gives the document more width, which gives the strip more
+--     cells across.
+--   * **A taller strip offers more suggestions**, up to ten — which makes
+--     the drag of slice 1 a control over the slate and not only over how
+--     much is on screen.
+--   * **At his measured geometry — a 99-column script pane — there are
+--     three columns and three grid rows, so NINE options**, and F10 has no
+--     slot to take. That is not a gap: the keys bound are exactly the cells
+--     drawn, so nothing is advertised that cannot be pressed.
+stripGrid :: Int -> Int -> Grid
+stripGrid width rows =
+  Grid { gridCols = cols, gridRows = used, gridSlots = slots }
+  where
+    cols = max 1 (width `div` stripCellWidth)
+    -- | **One row for the heading, then the reserve.** The heading is inside
+    -- the grid's budget and not outside it, because it is drawn in the
+    -- strip's own rows like everything else.
+    allowance = max 1 (rows - 1 - stripHintRows - stripReplyRows)
+    slots = min (length stripSlotKeys) (cols * allowance)
+    -- | **The rows the slots need, not the rows they are allowed.** A strip
+    -- pulled tall enough for twelve cells still draws four rows of ten, and
+    -- the room left over goes to the hint.
+    used = max 1 ((slots + cols - 1) `div` cols)
