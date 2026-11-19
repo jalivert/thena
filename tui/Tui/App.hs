@@ -6071,6 +6071,15 @@ fireJevForCurrentOffers = do
       offered = slateRows (stSlate st)
       onScreen = stripOpen (stStrip st) || isJust (liveOffers st)
   case stJevConfig st of
+    -- **`~n7vfq` — `:jev off` has to be checked HERE as well as in
+    -- 'scheduleJevRanking', and that it was not is a defect `~zttnz`
+    -- promised against** — /"off sends nothing at all"/, /"nothing of his
+    -- quota is spent"/. This function is also called once unconditionally
+    -- from the post-launch 'Tick' (see below), which is not a scheduled
+    -- request and so never passed the switch: measured 2026-11-19 under a
+    -- pty with @jev=off@ in the dotfile, one @request: 255 candidates@ went
+    -- out on launch regardless.
+    _ | not (stJevOn st) -> liftIO (jevLog "skip: :jev off")
     Nothing -> liftIO (jevLog "skip: no key loaded")
     Just jcfg
       | not onScreen -> liftIO (jevLog "skip: neither the strip nor the dropdown is on screen")
