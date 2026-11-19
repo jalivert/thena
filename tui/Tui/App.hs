@@ -974,7 +974,7 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- pane in another mode, not a fifth pane, so a second colour would say
   -- something untrue about the layout.
   , (attrName "edge.script",    surface (themePanel th) (themeRepl th))
-  , (attrName "title.script",   ink (themeRepl th))
+  , (attrName "title.script",   surface (themePanel th) (themeRepl th))
   -- The caret's own row marker, his suggested '⟩'. The accent, because it
   -- answers "where am I in the document" and nothing else on screen does.
   , (attrName "script.marker",  ink (themeRepl th))
@@ -1010,10 +1010,10 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "edge.proofterm", surface (themePanel th) (themeProof th))
   , (attrName "edge.goals",     surface (themePanel th) (themeGoals th))
   , (attrName "edge.machine",   surface (themePanel th) (themeMachine th))
-  , (attrName "title.repl",     ink (themeRepl th))
-  , (attrName "title.proofterm", ink (themeProof th))
-  , (attrName "title.goals",    ink (themeGoals th))
-  , (attrName "title.machine",  ink (themeMachine th))
+  , (attrName "title.repl",     surface (themePanel th) (themeRepl th))
+  , (attrName "title.proofterm", surface (themePanel th) (themeProof th))
+  , (attrName "title.goals",    surface (themePanel th) (themeGoals th))
+  , (attrName "title.machine",  surface (themePanel th) (themeMachine th))
   -- | **The second column** — `~z5dmq`. Same scheme, three more accents: the
   -- edge and the title carry a pane's colour and nothing else does.
   , (attrName "edge.globals",   surface (themePanel th) (themeGlobals th))
@@ -1021,18 +1021,40 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "edge.output",    surface (themePanel th) (themeOutput th))
   , (attrName "edge.choices",   surface (themePanel th) (themeChoices th))
   , (attrName "edge.matches",   surface (themePanel th) (themeMatches th))
-  , (attrName "title.globals",  ink (themeGlobals th))
-  , (attrName "title.modules",  ink (themeModules th))
-  , (attrName "title.output",   ink (themeOutput th))
-  , (attrName "title.choices",  ink (themeChoices th))
-  , (attrName "title.matches",  ink (themeMatches th))
+  , (attrName "title.globals",  surface (themePanel th) (themeGlobals th))
+  , (attrName "title.modules",  surface (themePanel th) (themeModules th))
+  , (attrName "title.output",   surface (themePanel th) (themeOutput th))
+  , (attrName "title.choices",  surface (themePanel th) (themeChoices th))
+  , (attrName "title.matches",  surface (themePanel th) (themeMatches th))
   -- | A list pane's group heading and its small print. **Both dim, and the
   -- same dim**: a heading is not a thing in the list and neither is a module's
   -- file, so what separates them from the entries is weight, not hue — the
   -- accents are the panes' and a fourth colour inside a pane would compete
   -- with them.
-  , (attrName "pane.heading",   ink (themeDim th))
-  , (attrName "pane.detail",    ink (themeDim th))
+  --
+  -- **Both name their background explicitly, and that is `~bv2wj`** — his
+  -- report of 2026-11-18: /"lines like `modules  3` and `shipped with thena  2`
+  -- lost their background color. The bg is black, when it should be pane's
+  -- background color."/ They were plain 'ink', which sets a foreground and
+  -- leaves the background at 'V.defAttr' — the terminal's own, not
+  -- 'themePanel'. An attr that has to sit on the panel's colour pairs the two
+  -- itself, the way `panebar.closed` just below already did.
+  --
+  -- **Why 'ink' punches a hole rather than inheriting: a pane's body IS filled
+  -- with 'themePanel', and an entry carrying no attr at all inherits that
+  -- fill.** What does not inherit is an explicit 'withAttr' whose background is
+  -- 'Default' — vty merges the named attr over the inherited one and
+  -- /"terminal default"/ replaces the fill instead of deferring to it.
+  -- Measured under a pty: with 'ink', a heading read `bg=000000` sitting in a
+  -- band of `bg=100a0e`.
+  --
+  -- **Every `title.*` had the same hole and all ten were fixed with these two**
+  -- — his report named two headings, but the cause is one and the pane titles
+  -- showed it just as plainly. The test is now structural: a `title.X` sits on
+  -- the panel exactly as its `edge.X` sibling already did, so the two cannot
+  -- drift.
+  , (attrName "pane.heading",   surface (themePanel th) (themeDim th))
+  , (attrName "pane.detail",    surface (themePanel th) (themeDim th))
   , (attrName "dim",            ink (themeDim th))
   -- | **The pane bar, `~7tfhd`** — an open pane against a closed one. His
   -- instruction was that the two be /"rendered a bit differently"/, and the
