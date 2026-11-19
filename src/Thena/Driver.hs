@@ -27,6 +27,7 @@ module Thena.Driver
   , newSession
   , withRuleBases
   , Response (..)
+  , MatchedRule (..)
   , Stop (..)
   , SyntaxError (..)
   , CommandError (..)
@@ -278,11 +279,10 @@ import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
   ( RuleBase (..)
   , RuleError
-  , RuleIter
   , Reading (..)
   , rootReading
-  , matches
-  , next
+  , matchingRules
+  , groupParams
   , resolveRule
   , resolveBlock
   , surfaceBlocks
@@ -1319,6 +1319,43 @@ newSession = Session
 
 -- | What the driver hands back for a frontend to render. Data, never a line of
 -- text: rendering is "Thena.Repl"'s (§2.5).
+-- | __One row of @:matches@: a rule, not a clause__ — his ruling, 2026-11-19.
+--
+-- /"Each rule-arity, in other words — each rule, gets to be represented by one
+-- entry. So I could have @foo\/2@ and @foo\/4@ but never two @foo@s."/
+--
+-- **The placeholders come from the group's first clause and the type does
+-- not.** Clauses of one name and arity need not agree about what they call
+-- their parameters ('Thena.Rules.clauses'), so a row showing names has to pick
+-- a clause and the first one is the one a reader would mean — it is the clause
+-- dispatch reaches first. The type is not picked at all: inference gives
+-- exactly one signature per name and arity, so there is nothing to choose
+-- between.
+--
+-- **The patterns are not here and that is the change.** A row used to carry the
+-- clause's own patterns — @reverse-onto [] ‹acc›@ beside
+-- @reverse-onto [x, ...xs] ‹acc›@ — which is what made one name print many
+-- times, and what nothing in the surface could act on: a call picks its clause
+-- by matching, and @retry@ names a choice point and never a clause. A pane that
+-- shows the clauses behind a row is a separate feature he has asked for.
+data MatchedRule = MatchedRule
+  { matchedName   :: GlobalName
+    -- ^ the rule's name, spelled by whoever prints it
+  , matchedArity  :: Int
+    -- ^ how many arguments it takes. With 'matchedName' this is the key — what
+    -- 'Thena.Instral.Infer.Callable' is
+  , matchedParams :: [Ops.Pattern]
+    -- ^ the group's parameters, for placeholders — 'Thena.Rules.groupParams',
+    -- so each position is named by the first clause that binds a name there.
+    -- @length@ is 'matchedArity'
+  , matchedType   :: Maybe Signature
+    -- ^ **what the system worked out it takes and gives**, declared or
+    -- inferred. 'Nothing' cannot arise for a base that loaded, since a rule
+    -- whose types do not work out is refused — it is 'Maybe' so that a lookup
+    -- miss is a blank row rather than a crash
+  }
+  deriving (Eq, Show)
+
 data Response
   = Blank                     -- ^ an empty line; nothing to do
   | RenderedSurface Surface
@@ -1685,7 +1722,7 @@ data Response
     -- saying what it does. The spelling carries the grouping: §2.4's rule is
     -- that a bare word acts and a colon looks, so "Thena.Repl" splits the list
     -- on the leading colon rather than being told twice
-  | Matched [Rule]
+  | Matched [MatchedRule]
   | Fitting String Ty [(GlobalName, Int, Bool, Signature)]
     -- ^ **what accepts or produces a type** (MS5 phase 71) — which question was
     -- asked, the type asked about, and for each callable its name, its arity, whether it is a rule (as
@@ -1699,7 +1736,11 @@ data Response
     -- into a pair if we ever need one.\"*
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
     -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
-    -- executed to find out whether one would succeed (§2.2)
+    -- executed to find out whether one would succeed (§2.2).
+    --
+    -- **One entry per name and arity, not per clause** — his ruling, 2026-11-19.
+    -- 'Thena.Rules.matchingRules' does the grouping and 'MatchedRule' says what
+    -- a row carries
   | Ran [Message] [Warning] Stop
     -- ^ what the machine said, what is worth warning about, and where it
     -- stopped.
@@ -5532,8 +5573,27 @@ dispatch s name arg = case name of
 
 
     matching =
-      unfoldIter (matches (rules machine) (globals machine)
-                          (cursor (development machine)))
+      [ MatchedRule nm k (groupParams grp) (lookup (nm, k) inferredTypes)
+      | ((nm, k), grp) <-
+          matchingRules (rules machine) (globals machine)
+                        (cursor (development machine))
+      ]
+
+    -- **The type comes from inference and not from the file's declaration**
+    -- (his, 2026-11-19): /"There will always be one, because we do inference.
+    -- We will show not only user-written type when they wrote it, but when they
+    -- didn't, what the system inferred."/ 'Thena.Instral.Infer.inferProgram'
+    -- is keyed by name and arity — 'Thena.Instral.Infer.Callable' — which is
+    -- exactly the key a row has, so a name carrying two arities gets the right
+    -- type for each. Looking a signature up by name alone, which is what
+    -- 'baseSignatures' allows, could not.
+    --
+    -- **Worked out here rather than kept on the session**, for the reason
+    -- @:accepts@ already gives below: it is cheap, and storing it would be
+    -- session state that @:undo@ and every snapshot would have to carry.
+    inferredTypes =
+      fst (inferProgram (allSignatures (rules machine))
+                        (reachingAll (allCallable (rules machine))))
 
     -- | @:accepts@ and @:produces@ (MS5 phase 71), which differ only in the
     -- question they ask of a signature.
@@ -8522,16 +8582,6 @@ nameOf m d = shortestEnding known (scope m) g
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right
 
--- | Drain the iterator (§7.6). The REPL shows the whole match list rather than
--- a few with more on scroll, because MS1's terminal has no scroll and a list
--- silently cut short would be a worse lie than a long one. The incremental
--- reads — 'Thena.Rules.next' and 'Thena.Rules.hasNext' — are what phase 16's
--- peek and a real frontend use, and this is written in terms of the first so
--- that the display and the dispatcher walk the same iterator.
-unfoldIter :: RuleIter -> [Rule]
-unfoldIter it = case next it of
-  Nothing        -> []
-  Just (r, rest) -> r : unfoldIter rest
 
 -- | Parse a term of an installed language and say what it is (MS6 phase 102).
 -- **THE WRITTEN NAME IS RESOLVED TO THE PARSER'S KEY — MS12 PHASE 313.** A

@@ -67,6 +67,7 @@ module Thena.View
   , focusTypeView
   , rulesView
   , matchesView
+  , MatchView
   , trustView
   , proofsView
   , parseView
@@ -104,7 +105,14 @@ import Thena.Global.Env (GlobalEnv)
 import Thena.Instral.Type (Signature)
 import Thena.Instral.Ops (ruleName, Instr, Rule)
 import Thena.Language.Grammar (Grammar)
-import Thena.Rules (RuleBase (..), RuleIter, matches, next)
+import Thena.Instral.Infer (inferProgram, reachingAll)
+import Thena.Rules
+  ( RuleBase (..)
+  , allCallable
+  , allSignatures
+  , groupParams
+  , matchingRules
+  )
 import Thena.Syntax.Print (Env, freshen)
 import Thena.View.Address (Address (..), Move (..), addressOf, extend, focusing)
 import Thena.View.Chart
@@ -117,6 +125,7 @@ import Thena.View.Chart
   , displayParse
   )
 import Thena.View.Choices (ChoiceView, displayChoice)
+import Thena.View.Matches (MatchView, displayMatch)
 import Thena.View.Core (Budget (..), Display, displayCore)
 import Thena.View.Development (LinkView, displayDevelopment)
 import Thena.View.Machine (MachineView, displayMachine)
@@ -316,27 +325,42 @@ rulesView budget s =
   where
     declaredIn b r = lookup (globalString (ruleName r)) (baseSignatures b)
 
--- | The rules whose heads hold at the focus — the match list, the same one
--- @:matches@ prints.
--- **A matched rule's signature is looked up across the bases in order**
--- (MS7 phase 131), because 'matches' says which rule held and not which file it
--- came from. Definition order is dispatch order (@.claude\/spec\/machine.md@ §8), so the
--- first declaration of a name is the one a reader would mean.
-matchesView :: Budget -> Session -> [RuleView]
-matchesView budget s =
-  [ ruleOf budget s (declared r) r
-  | r <- drain (matches (sessionRules s) (sessionGlobals s) (sessionCursor s))
+-- | The rules that apply at the focus — the match list, the same one
+-- @:matches@ prints, **one entry per name and arity**.
+--
+-- **His ruling, 2026-11-19**: /"each rule-arity, in other words — each rule,
+-- gets to be represented by one entry. So I could have @foo\/2@ and @foo\/4@
+-- but never two @foo@s."/ This answered with one entry per clause until then,
+-- which made a name with twenty-two clauses twenty-two rows that no reader
+-- could tell apart and no command could act on. 'Thena.Rules.matchingRules'
+-- does the grouping and 'Thena.View.Matches.MatchView' is what a row carries.
+--
+-- **The type is inferred and not looked up by name.**
+-- 'Thena.Instral.Infer.inferProgram' is keyed by name and arity, which is
+-- exactly a row\'s key, so a name carrying two arities gets the right type for
+-- each — a lookup in 'baseSignatures', which is keyed by name alone, could not
+-- and was what this did before. It is also why a row always has one: inference
+-- answers for a rule whose file declared nothing, and a rule whose types do not
+-- work out never loads.
+--
+-- **Worked out per call rather than kept on the session**, which is
+-- "Thena.Driver"\'s own policy for @:accepts@: a base is a few hundred
+-- instructions, and storing it would be session state that @:undo@ and every
+-- snapshot would have to carry. Measured 2026-11-19 at well under a
+-- millisecond over the shipped base.
+--
+-- **The clauses are not lost.** 'rulesView' is still per clause, which is what
+-- @:rules@ shows, and a pane that shows the clauses behind one of these rows is
+-- a feature of its own.
+matchesView :: Budget -> Session -> [MatchView]
+matchesView _ s =
+  [ displayMatch (spellingOf s) nm (groupParams grp) (lookup (nm, k) inferred)
+  | ((nm, k), grp) <- matchingRules (sessionRules s) (sessionGlobals s) (sessionCursor s)
   ]
   where
-    declared r =
-      case [ sig | b <- sessionRules s
-                 , Just sig <- [lookup (globalString (ruleName r)) (baseSignatures b)] ] of
-        sig : _ -> Just sig
-        []      -> Nothing
-    drain :: RuleIter -> [Rule]
-    drain it = case next it of
-      Nothing        -> []
-      Just (r, rest) -> r : drain rest
+    inferred =
+      fst (inferProgram (allSignatures (sessionRules s))
+                        (reachingAll (allCallable (sessionRules s))))
 
 -- | What the development currently rests on that nothing derived, and the rung
 -- that decides whether @qed@ will accept it (MS8 phase 151).

@@ -4158,6 +4158,51 @@ Elaboration had been given the directed version already; the tactic had not, and
 the same operation answered differently depending on which one you reached it
 through.
 
+### The match list is one line per rule, with its type
+
+*Decided 2026-11-19.*
+
+`:matches` asks what you could do where you are standing, and it answers with **one
+line per rule**, where a rule is a name together with how many arguments it takes. A
+name written with twenty-two clauses is one line.
+
+```
+thena spine> :matches
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+eliminate-core ‹t› : Core -> ()
+prove : ()
+fill ‹t› : Core -> ()
+claim ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+…
+```
+
+**The reason is that nothing you can type picks a clause.** A call chooses one by
+matching your arguments against each clause's patterns in order, and `retry` names a
+choice point and never a clause. So a list with one row per clause was offering a
+choice the language does not have, and offering it most loudly where it helped least:
+`elaborate`'s clauses differ only in which surface node their head asks about, and
+with no term supplied every one of them matched.
+
+**Each argument is a placeholder and the type says what goes there.** A placeholder is
+the name some clause gives that position; where no clause names it, it says what kind
+of thing the position takes — `‹list›`, `‹option›`, `‹pair›`. **The type after the
+colon is always there**: it is the one the file declared if it declared one, and
+otherwise the one inference worked out, so a rule nobody wrote a signature for still
+tells you what it takes.
+
+**`:rules` is the other half and it is still per clause.** It lists what is written in
+each loaded base, and what is written there is clauses — with their patterns as
+written, which is what tells one clause from the next.
+
+**What this does not settle**: whether a rule whose arguments you have not supplied
+belongs in the answer at all. It is listed today. Deciding otherwise means deciding
+when a system should narrow an answer on your behalf, which is a question about the
+interface rather than about the engine.
+
 ### Elaboration is a rule with one clause per surface node
 
 *Decided 2026-09-03.*

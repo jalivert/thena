@@ -45,6 +45,7 @@ module Thena.Render
   , renderTree
   , parseFailureReason
   , renderMatches
+  , renderRuleClause
   , renderOperand
   ) where
 
@@ -104,6 +105,7 @@ import Thena.Development.Cursor
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Driver
   ( CommandError (..)
+  , MatchedRule (..)
   , Unfinished (..)
   , RuleFileError (..)
   , LoadError (..)
@@ -192,7 +194,7 @@ import Thena.Instral.Ops
   , operandsOf
   )
 import Thena.Tactics.Specialise (binderWord)
-import Thena.Rules (RuleBase (..), RuleError (..))
+import Thena.Rules (RuleBase (..), RuleError (..), patternKind)
 import qualified Thena.Instral.Ops as Ops
 import Thena.Syntax.Lexer (BlockKind (..), LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
@@ -2561,12 +2563,43 @@ renderBases bs = concatMap one bs
     one b = (baseName b ++ maybe "" ("   " ++) (baseDescription b)) : ["    " ++ basePath b]
 
 -- | @:rules@ — the rules themselves, under the base each came from, in search
--- order. The per-rule line is @:matches@\', so a rule reads the same in both.
+-- order, **one line per CLAUSE**.
+--
+-- **It stopped sharing a line with @:matches@ on 2026-11-19**, and the two now
+-- answer different questions on purpose. @:matches@ is /what could I do here/,
+-- so his ruling collapsed it to one row per name and arity. This is /what is in
+-- this file/, where a clause is the thing that is in it: a base listing that
+-- showed @elaborate ‹t›@ once would be hiding twenty-two written rules from
+-- someone reading the file they came from.
+--
+-- **So the clause\'s patterns stay here as written** — @reverse-onto []
+-- ‹acc›@ beside @reverse-onto [x, ...xs] ‹acc›@ — which is what they are for:
+-- they say what shape that clause takes, and here there is a second row for
+-- them to be told apart from.
 renderRuleBases :: Rendering -> [RuleBase] -> [String]
 renderRuleBases _ [] = ["no rule base is loaded"]
 renderRuleBases ren bs = concatMap one bs
   where
-    one b = baseName b : map ("  " ++) (renderMatches ren (baseRules b))
+    one b = baseName b : map (("  " ++) . renderRuleClause ren) (baseRules b)
+
+-- | One clause's own line: its name and its parameters as written.
+--
+-- **A variable keeps its corners and anything else is shown as written.** The
+-- corners say /put something here/, which is true of @x@ and false of
+-- @[a, ...rest]@ — that one says what shape the something must be (MS5 phase
+-- 82). This is the half of the old @:matches@ line that stayed true when a row
+-- became a rule: here there is a second row for a shape to be told apart from.
+--
+-- **Exported so one spelling serves the listing and the check on it**:
+-- "Thena.View.Rules" draws the same line from a 'Thena.View.Rules.RuleView',
+-- and @Thena.View.RulesTests@ crosses the two.
+renderRuleClause :: Rendering -> Rule -> String
+renderRuleClause ren r =
+  unwords (nameString ren (ruleName r) : map written (ruleParams r))
+  where
+    written pt = case pt of
+      PVar n -> "‹" ++ n ++ "›"
+      _      -> renderPattern pt
 
 renderRuleFileError :: Rendering -> FilePath -> RuleFileError -> [String]
 renderRuleFileError ren path e = case e of
@@ -2746,19 +2779,33 @@ renderPattern pt = case pt of
                  Nothing -> []
                  Just t  -> ["..." ++ renderPattern t]
 
-renderMatches :: Rendering -> [Rule] -> [String]
+renderMatches :: Rendering -> [MatchedRule] -> [String]
 renderMatches _ [] = ["no rule applies here"]
 renderMatches ren rs = map one rs
   where
-    one r = unwords (nameString ren (ruleName r) : map placeholder (ruleParams r))
-    -- **A variable keeps its corners and anything else is shown as written.**
-    -- The corners say /put something here/, which is true of @x@ and false of
-    -- @[a, ...rest]@ — that one says what shape the something must be, and
-    -- hiding it behind a placeholder would make two clauses of one name print
-    -- identically (MS5 phase 82).
+    one r =
+      unwords (nameString ren (matchedName r) : map placeholder (matchedParams r))
+        ++ maybe "" ((" : " ++) . renderSignature) (matchedType r)
+
+    -- **Every parameter gets corners now, whatever the clause wrote there.**
+    -- Until 2026-11-19 a pattern that was not a variable printed as written —
+    -- @reverse-onto [] ‹acc›@ — because a row was one clause and the shape was the
+    -- only thing telling two rows of one name apart. A row is a rule now, so
+    -- there is no second row to tell it from, and the shape belongs to a clause
+    -- this row does not name: printing @[]@ here would say /type an empty list/
+    -- when the other clause takes a cons. **The corners say put something here,
+    -- which is the whole of what a row can honestly promise**, and the type
+    -- beside it says what.
+    --
+    -- A pattern that binds no name has none to show, so it shows what kind of
+    -- thing it is instead — @‹list›@, @‹some›@ — which is still a promise the
+    -- row can keep, since every clause of this arity is behind it.
     placeholder pt = case pt of
-      PVar n -> "‹" ++ n ++ "›"
-      _      -> renderPattern pt
+      PVar n -> corners n
+      _      -> corners (patternKind pt)
+
+    corners n = "‹" ++ n ++ "›"
+
 
 -- | @:choices@ — the live choice points, nearest first (§7.7).
 --

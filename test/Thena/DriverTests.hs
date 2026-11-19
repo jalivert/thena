@@ -16,6 +16,7 @@ import Thena.Development.Partial (Partial (..))
 import Thena.Standard (withRules)
 import Thena.Driver
   ( CommandError (..)
+  , MatchedRule (..)
   , Response (..)
   , Session
   , machineOf
@@ -359,6 +360,34 @@ tests =
         , testCase "a trailing semicolon is a complete entry" $
             snd (say [":theorem t : Type\8320", "h = here ;"])
               @?= Ran [] [] Completed
+        ]
+    , testGroup
+        "the match list is one row per rule"
+        -- **His ruling, 2026-11-19**: /"each rule-arity, in other words — each
+        -- rule, gets to be represented by one entry. So I could have @foo/2@
+        -- and @foo/4@ but never two @foo@s."/ The transcript goldens pin the
+        -- whole listing; these pin the property, which a golden cannot — an
+        -- accepted golden records duplicates as happily as it records none.
+        [ testCase "no name and arity is listed twice" $
+            let rows = matchedKeys (snd (command withRules ":matches"))
+             in (length rows, length (nub rows)) @?= (length rows, length rows)
+          -- @elaborate@ is the sharpest case in the shipped base: twenty-two
+          -- clauses, differing only in which surface node their head asks
+          -- about, and all twenty-two passed at a hole because a head test
+          -- about an argument nobody supplied does not exclude a rule
+          -- ('Thena.Rules.holds').
+        , testCase "elaborate is one row, not one per clause" $
+            length [ k | k@(n, _) <- matchedKeys (snd (command withRules ":matches"))
+                       , n == "elaborate" ]
+              @?= 1
+          -- **Every row carries a type**, declared or inferred — his, the same
+          -- day: /"There will always be one, because we do inference."/ A rule
+          -- whose types do not work out never loads, so a row without one would
+          -- mean the lookup key had drifted from inference's.
+        , testCase "every row carries a type" $
+            case snd (command withRules ":matches") of
+              Matched rows -> [ matchedName r | r <- rows, matchedType r == Nothing ] @?= []
+              other        -> assertFailure (show other)
         ]
     , testGroup
         "the second matching instruction"
@@ -772,6 +801,12 @@ reached :: (Session, Response) -> (Development, GlobalEnv)
 reached (s, _) = (development (machineOf s), globals (machineOf s))
 
 -- | The names a @:accepts@ / @:produces@ listing came back with (MS5 phase 71).
+-- | The @:matches@ rows as the key they are grouped by.
+matchedKeys :: Response -> [(String, Int)]
+matchedKeys r = case r of
+  Matched rows -> [ (nameDotted (matchedName m), matchedArity m) | m <- rows ]
+  _            -> []
+
 fittingNames :: Response -> [String]
 fittingNames r = case r of
   Fitting _ _ fs -> [ nameDotted g | (g, _, _, _) <- fs ]

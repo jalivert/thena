@@ -2,7 +2,7 @@
 -- and 115i).
 --
 -- **The crossing, in three already-proven pieces.** The name and params
--- cross against 'Thena.Render.renderMatches' — the same line
+-- cross against 'Thena.Render.renderRuleClause' — the same line
 -- @:matches@\/@:rules@ show. The body reuses 115d's own
 -- 'redrawStatement'\/'redrawOperand'\/'redrawSkeleton'\/'redrawValue'.
 -- **The head (115i) crosses each test's word against 'Thena.Rules.testWord'
@@ -41,7 +41,7 @@ import Thena.Files (startingSession)
 import Thena.Render
   ( rendering
   , rendering
-  ,renderInstr, renderMatches, renderOperand)
+  ,renderInstr, renderRuleClause, renderOperand)
 import Thena.Rules (RuleBase (..), allRules, testOperands, testWord)
 
 tests :: TestTree
@@ -123,9 +123,7 @@ mismatch r
         )
   where
     rv = displayRule wholePath [] (Budget 200) [] [] 500 (Address []) Nothing r
-    shownLine = case renderMatches (rendering [] 0) [r] of
-      [line] -> line
-      other  -> "wrong count: " <> show (length other)
+    shownLine = renderRuleClause (rendering [] 0) r
     drawnLine = unwords (ruleViewName rv : ruleViewParams rv)
     shownBody = map (renderInstr (rendering [] 500) []) (ruleBody r)
     drawnBody = map redrawStatement (ruleViewBody rv)
