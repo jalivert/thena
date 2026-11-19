@@ -344,8 +344,8 @@ layoutTests =
       -- and what the dotfile stores; the context window and the price are
       -- what distinguishes two rows of one family.
       testCase "a model row leads with the id and carries context and price" $ do
-        fst (modelRow (head catalogue)) @?= "anthropic/claude-haiku-5.5"
-        snd (modelRow (head catalogue)) @?= "1000k   $0.0000001/tok"
+        fst (modelRow (catalogue !! 0)) @?= "anthropic/claude-haiku-5.5"
+        snd (modelRow (catalogue !! 0)) @?= "1000k   $0.0000001/tok"
         snd (modelRow (catalogue !! 2)) @?= "8k"
     , -- | **THE ONE THAT IS THE DEFECT** — `~swxcf`. A 'Choice' answers a
       -- probability for every option it was sent, so a flat answer over 255

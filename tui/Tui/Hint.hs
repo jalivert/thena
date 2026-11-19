@@ -36,6 +36,7 @@ module Tui.Hint
   , askHint
   , hintPlaceholder
   , hintPromptPath
+  , resetHintPrompt
   , loadHintPrompt
   , defaultHintPrompt
   , hintLog
@@ -240,31 +241,106 @@ loadHintPrompt = do
       TIO.writeFile path defaultHintPrompt `catch` (\(_ :: SomeException) -> pure ())
       pure defaultHintPrompt
 
--- | The instruction that ships. **It names each state field**, because a
--- field name is not a definition — the same reason 'Tui.Jev.requestPayload'
--- spells @applies_here@ out.
+-- | **Rewrite the file from 'defaultHintPrompt' and answer where it is** —
+-- `:hint-prompt reset`.
+--
+-- **It exists because the file is his and 'loadHintPrompt' will not touch
+-- one that is already there.** That is the right rule — an edit of his must
+-- not be overwritten by an upgrade — and it means a better default shipped
+-- later would never reach him. So there is one command that takes it, and
+-- taking it is his keystroke rather than ours.
+resetHintPrompt :: IO FilePath
+resetHintPrompt = do
+  path <- hintPromptPath
+  TIO.writeFile path defaultHintPrompt
+  pure path
+
+-- | The instruction that ships. **Three parts, and each is here for
+-- something he said on 2026-11-19.**
+--
+-- **The format, and it is the strictest part** — /"It is very chatty. We
+-- need to make the prompt somehow force it to really, really limit its
+-- wordiness … I don't need it to narrate what I am doing. I didn't ask for
+-- this."/ His own four-line answer on the identity theorem is quoted in
+-- here as the worked negative example, because a rule about length lands
+-- less firmly than the reply that broke it.
+--
+-- **The mechanics** — /"It doesn't seem to understand that we need to do
+-- \`attack\` before dealing with universals and I expect it also doesn't
+-- understand our other specific Oleg-based mechanics. Perhaps it should be
+-- given some short brief in each prompt."/ **Every claim in that section is
+-- read off @rules\/standard.thena.rules@ and not from memory**: @attack@ and
+-- @intro@ are both nullary there, @attack@ fires @when focus-is-hole@ and
+-- @intro@ @when focus-is-guess goal-type-is-pi@, which is exactly the
+-- ordering he says it gets wrong — and @fill : Core -> ()@ is why a term
+-- argument needs a @core@ fence. His model had offered @intro T@ and
+-- @fill x@, and neither is spellable.
+--
+-- **The vocabulary is NOT here.** It rides as the @vocabulary@ state field,
+-- generated from the engine's own 'Thena.Driver.commandSummary', so the one
+-- part of this that could go stale cannot.
 defaultHintPrompt :: Text
 defaultHintPrompt =
   Text.unlines
-    [ "You are helping someone prove a theorem in Thena, a proof assistant they are"
-    , "driving from a terminal. They have asked you for a hand with the proof in front"
-    , "of them."
+    [ "You are the suggestion line of a proof assistant called Thena. The user is part"
+    , "way through a proof and has asked what to do next."
     , ""
-    , "The state you are given:"
+    , "ANSWER WITH ONE LINE AND NOTHING ELSE."
     , ""
-    , "  goals          the goals still open, the first one being where they stand"
+    , "  At most twenty words. Give the next command, or the two or three that follow"
+    , "  one another, separated by \" ; \"."
+    , "  Do not restate the goal. Do not say what the user is doing, has done, or will"
+    , "  see. Do not explain what a command does. No preamble, no closing remark, no"
+    , "  lists, no markdown, no backticks around the whole answer."
+    , "  If the state does not tell you enough, answer with the one command that would:"
+    , "  :where or :matches."
+    , "  One line is the target. `room` below is the hard ceiling, and it says how many"
+    , "  lines of how many characters the box your answer is drawn in has, at the size"
+    , "  the user has pulled it to right now. Anything past `room` is not shown to them"
+    , "  at all, so an answer that overruns it is an answer they never read."
+    , ""
+    , "  For a goal of `forall (A : Type0) -> A -> A`:"
+    , "    good: attack ; intro ; intro"
+    , "    bad:  The goal is a plain function type, so just introduce the two binders"
+    , "          and hand back the argument: run `intro T` then `intro x`, which leaves"
+    , "          a goal of T with x : T in scope."
+    , "  The bad one is bad for four separate reasons: it narrates, it explains, it is"
+    , "  four lines, and both commands in it are unspellable."
+    , ""
+    , "HOW THENA WORKS. You will get these wrong without them."
+    , ""
+    , "  A goal is a hole in a term, and the proof is that term. Tactics build it; the"
+    , "  kernel re-checks what they built."
+    , "  `attack` takes no argument and turns the focused HOLE into a GUESS. It is the"
+    , "  first move on every hole."
+    , "  `intro` takes no argument and peels exactly ONE binder, and it only applies to"
+    , "  a GUESS. So a universal needs `attack` first and then one bare `intro` per"
+    , "  binder. There is no `intro x`."
+    , "  A command's term argument is written in a fence: `fill core`x``, not `fill x`."
+    , "  `fill` closes a HOLE; `try-core core`t`` proposes a term at a hole and `solve`"
+    , "  accepts the guess."
+    , "  Holes are named positions, so arms can be closed in any order: `goto-named`"
+    , "  \"the-hole\"` moves to one, `goto-root` back to the top, and `along`, `into` and"
+    , "  `back` walk the chain."
+    , "  Several rules matching leaves a choice point; `retry` backtracks to it."
+    , "  `qed` asks the kernel to certify and admit the proof. A refused `qed` leaves"
+    , "  the proof standing."
+    , ""
+    , "WHAT YOU ARE GIVEN."
+    , ""
+    , "  goals          the goals still open, the first being where the user stands"
     , "  proof_term     the proof term as it stands, holes included"
-    , "  applies_here   the tactics and rules that apply at the current focus, nearest"
-    , "                 first. Evidence, not a shortlist: something outside it may still"
-    , "                 be the right move"
-    , "  in_scope       the names available to them"
-    , "  executed       what they have already run in this session, oldest first"
-    , "  typed_so_far   the line they are part way through typing, if any"
-    , ""
-    , "Answer in two or three sentences of plain prose. Say what you would do next and"
-    , "why it moves the proof forward. Name the command if you are confident about it."
-    , "If the state does not tell you enough to be useful, say which part is missing"
-    , "rather than guessing. No preamble, no restating the goal back to them, no lists."
+    , "  applies_here   the rules that apply at the focus, nearest first. Evidence and"
+    , "                 not a shortlist: something outside it may still be the move"
+    , "  in_scope       the names available, by namespace"
+    , "  executed       what has already been run this session, oldest first"
+    , "  typed_so_far   the line being typed, if any"
+    , "  room           how much space your answer has. Never exceed it"
+    , "  vocabulary     every command the engine itself takes, one line each"
+    , "  tactics        every rule in the loaded rule bases, as its head with its"
+    , "                 argument shape. THIS is where attack, intro, fill, solve and"
+    , "                 the rest live, and the shape is the arity: `intro` takes none,"
+    , "                 `fill ‹t›` takes one. A rule not listed here does not exist"
     ]
 
 -- | **One call, and it is the user's keystroke that caused it.** The state

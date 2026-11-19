@@ -87,6 +87,7 @@ import Thena.Driver
   ( Leniency (..)
   , Partly (..)
   , Response (..)
+  , commandSummary
   , Unfinished (..)
   , Session
   , Stop (..)
@@ -173,6 +174,8 @@ import Tui.Layout
   , stripMinRows
   , stripName
   , stripReplyRows
+  , stripHintBudget
+  , stripHintGapRows
   , stripSeparatorRows
   , stripSized
   , stripSlotKeys
@@ -212,10 +215,12 @@ import Tui.Hint
   , askHint
   , fetchModels
   , hintPlaceholder
+  , hintPromptPath
   , loadHintConfig
   , loadHintPrompt
   , matchingModels
   , modelRow
+  , resetHintPrompt
   )
 import Tui.Jev (JevConfig, JevState (..), jevLog, jevNucleus, loadJevConfig, rankCandidates)
 import Tui.Theme (Theme (..), neonPinkDark, themeByName, themes)
@@ -1688,8 +1693,19 @@ draw st =
           -- is kept where it still applies: the hint's three rows cost
           -- nothing until something is in them.
           llm =
-            [hintRegionWidget width hintRows (stHint st) | isJust (stHint st)]
-              <> [stripReplyWidget]
+            concat
+              [ [hintRegionWidget width hintRows (stHint st) | isJust (stHint st)]
+              -- | **The line he asked for, and it stays empty** — HIS,
+              -- 2026-11-19: /"Give me one empty line between the AI reply and
+              -- my AI prompt. That one will stay empty."/ Drawn in the hint's
+              -- own surface rather than left bare, so the LLM's half of the
+              -- pane reads as one block down to the row he types in
+              -- (`~bv2wj`: an attr-less row would punch the panel's fill).
+              , [ withAttr (attrName "strip.hint") (vLimit stripHintGapRows (fill ' '))
+                | isJust (stHint st)
+                ]
+              , [stripReplyWidget]
+              ]
           -- | **THE ROW HE TYPES IN IS THE PANE'S LAST LINE, AND THE GAP
           -- ABOVE IT IS HIS** — HIS, 2026-11-19: /"I told you that the
           -- prompt for the AI is supposed to be on the bottom line at the
@@ -1714,7 +1730,7 @@ draw st =
           slack =
             max stripSeparatorRows
               (stripBodyRows (stripRows (stStrip st)) - drawnRows - hintUsed - stripReplyRows)
-          hintUsed = if isJust (stHint st) then hintRows else 0
+          hintUsed = if isJust (stHint st) then hintRows + stripHintGapRows else 0
           gap = [vLimit slack (fill ' ')]
       render (vBox (offers <> gap <> llm))
 
@@ -2557,7 +2573,10 @@ stripGridFor st =
 stripReserveOf :: St -> Int -> Int
 stripReserveOf st w = stripSeparatorRows + hint + stripReplyRows
   where
-    hint = if isJust (stHint st) then stripHintRowsFor st w else 0
+    -- **The hint's rows and the blank one under them go together**, so that
+    -- an answer arriving never pushes the ask row off the bottom and the
+    -- line he asked for is there whenever there is an answer to separate.
+    hint = if isJust (stHint st) then stripHintRowsFor st w + stripHintGapRows else 0
 
 -- | **How tall the hint region is at a given content width** — `~w2tk2`
 -- slice 4.
@@ -4055,6 +4074,16 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
           appendTurn st' Nothing [said]
         -- | **`:models` and `:models ‹filter›`** — the picker.
         (":models" : rest) -> openModelPicker st0 (Text.pack (unwords rest))
+        -- | **`:hint-prompt` and `:hint-prompt reset`** — `~3p9g2`. The
+        -- file is his, so 'Tui.Hint.loadHintPrompt' will not overwrite one
+        -- that is already there; **this is how a better default shipped
+        -- later reaches him**, and taking it is his keystroke.
+        [":hint-prompt"] -> do
+          path <- liftIO hintPromptPath
+          appendTurn st0 Nothing ["the prompt the model is sent is " <> path]
+        [":hint-prompt", "reset"] -> do
+          path <- liftIO resetHintPrompt
+          appendTurn st0 Nothing [path <> " is back to the one that ships"]
         -- | **`:confirm-quit on|off`**, his instruction of 2026-11-18 — same
         -- standing as the two above. See 'maybeQuit'.
         [":confirm-quit", mode] | mode `elem` ["on", "off"] -> do
@@ -4607,6 +4636,8 @@ scriptLocal st text = case words text of
   (":models" : rest) -> Just $ do
     openModelPicker st (Text.pack (unwords rest))
     pure ("models: " <> Text.unpack (stModel st) <> " is the one in use")
+  [":hint-prompt"] -> Just (("the prompt the model is sent is " <>) <$> liftIO hintPromptPath)
+  [":hint-prompt", "reset"] -> Just ((<> " is back to the one that ships") <$> liftIO resetHintPrompt)
   [":confirm-quit", mode] | mode `elem` ["on", "off"] -> Just $ do
     let st' = st { stConfirmQuit = mode == "on" }
     liftIO (saveConfig (configOf st'))
@@ -6488,6 +6519,20 @@ hintFields st =
       , ("in_scope", unlines' scopeLines)
       , ("executed", unlines' executed)
       , ("typed_so_far", typedSoFar)
+      -- | **How much room the answer has, in his own terms** — HIS,
+      -- 2026-11-19: /"the AI needs to always cap its response to 5 lines at
+      -- most. That is always a little bit different. So perhaps that should
+      -- be part of the prompt — telling it how many words/characters it
+      -- has."/
+      --
+      -- **Measured off the live geometry rather than fixed at five.** The
+      -- region's height is a function of how tall he has pulled the pane
+      -- ('stripHintBudget') and its width is the pane's own, so the number
+      -- he would count on screen is the number that goes out — a constant
+      -- would be wrong the moment he drags the accent bar.
+      , ("room", room)
+      , ("vocabulary", vocabulary)
+      , ("tactics", tactics)
       ]
   , not (null v)
   ]
@@ -6522,6 +6567,45 @@ hintFields st =
 
     typedSoFar = take col (concatMap Text.unpack (getEditContents (stInput st)))
     (_, col) = getCursorPosition (stInput st)
+
+    -- | **The width is the one the last frame reported** — 'stStripWidth',
+    -- the same one the F-key cap reads and one frame old for the reason
+    -- `~ptg78` records. A frame's lag in a character count is not a defect;
+    -- it is the same number he is looking at.
+    room = case stStripWidth st of
+      Nothing -> ""
+      Just w ->
+        show maxLines <> " lines of " <> show w <> " characters, so "
+          <> show (maxLines * w) <> " characters at the very most"
+      where
+        maxLines = stripHintBudget (stripBodyRows (stripRows (stStrip st)))
+
+    -- | **The engine's own list, not a copy of it** —
+    -- 'Thena.Driver.commandSummary' is what `:help` prints, so the one part
+    -- of the brief that could drift out of step with the engine cannot. His
+    -- ask was for /"some short brief"/; the mechanics half of that is in the
+    -- prompt file he owns, and this half is generated.
+    vocabulary = unlines' [word <> "   " <> gloss | (word, gloss) <- commandSummary]
+
+    -- | **`:rules`, and WITHOUT IT THE MODEL CANNOT KNOW THE TACTICS AT
+    -- ALL** — his ask of 2026-11-19 for /"complete information about all
+    -- the commands in our system"/, so that /"what if I want to do intro
+    -- but specify the name of the argument?"/ has an answer.
+    --
+    -- **`commandSummary` does not cover them and that is not an omission in
+    -- it**: @attack@, @intro@, @fill@, @solve@, @try-core@ and @prove@ are
+    -- ordinary instral rules in a rule base, not words the engine knows, so
+    -- the engine's own command list has no business listing them. The two
+    -- fields are the two halves of the vocabulary and neither contains the
+    -- other.
+    --
+    -- **Read through `:rules` rather than off @rules\/standard.thena.rules@**,
+    -- which is the same discipline `applies_here` follows: a base he has
+    -- @consult@ed this session is in the answer, and the shipped file would
+    -- have been a guess about what is loaded. **It is each rule's head with
+    -- its argument shape** — @intro@ against @fill ‹t›@ — which is exactly
+    -- the arity question he asked.
+    tactics = unlines' (case oneLine s ":rules" of (s', resp) -> renderResponse s' resp)
 
 -- | **One ask, caused by his Enter on the reply row and by nothing else** —
 -- `~w2tk2` slice 6. HIS ruling, 2026-11-19: /"We have no autohint …

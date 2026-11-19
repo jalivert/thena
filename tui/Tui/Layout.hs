@@ -60,6 +60,7 @@ module Tui.Layout
   , stripHintUsed
   , stripReplyRows
   , stripSeparatorRows
+  , stripHintGapRows
   ) where
 
 import qualified Data.Map.Strict as Map
@@ -463,7 +464,8 @@ stripHintRows = 3
 -- remedy is the drag slice 1 built: pull the strip taller and both regions
 -- grow.
 stripHintBudget :: Int -> Int
-stripHintBudget rows = max stripHintRows (rows - 1 - stripReplyRows - stripSeparatorRows)
+stripHintBudget rows =
+  max stripHintRows (rows - 1 - stripReplyRows - stripSeparatorRows - stripHintGapRows)
 
 -- | **The rows the hint region actually occupies**, given how tall the strip
 -- is and how many lines the hint wrapped to — `~w2tk2` slice 4.
@@ -498,6 +500,19 @@ stripReplyRows = 1
 -- grid is sized one row shorter and the gap is there at every height.
 stripSeparatorRows :: Int
 stripSeparatorRows = 1
+
+-- | **One blank row between the model's answer and the row he types in** —
+-- HIS instruction, 2026-11-19: /"Give me one empty line between the AI reply
+-- and my AI prompt. That one will stay empty."/
+--
+-- **Reserved only while there is an answer**, unlike
+-- 'stripSeparatorRows'. With no hint on screen there is nothing for it to
+-- separate the ask row from, and the air above that row is already the
+-- whole of the pane's slack — reserving it unconditionally would spend a row
+-- to separate a row from nothing, which is the shape `~8cr56` was reported
+-- for.
+stripHintGapRows :: Int
+stripHintGapRows = 1
 
 -- | **The grid the strip's size implies** — `~w2tk2` slice 2.
 --
