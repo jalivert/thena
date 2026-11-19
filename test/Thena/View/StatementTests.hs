@@ -521,12 +521,17 @@ pairSlot = do
 -- | **The case the phase exists for.** @h = here@ then @goto @ is one entry, @h@
 -- is in scope on the second line, and before this phase the offer came back stuck
 -- with nothing at all.
+--
+-- **@goal@ is the session's own, and comes first** (MS12 phase 324): a typed line
+-- starts with every hole and guess bound, and the scratch goal this fixture is
+-- holding is one. It is seeded before the entry's own lines, so it is offered
+-- ahead of them.
 boundAbove :: IO ()
 boundAbove = do
   s <- withLC
   let o = offerIn s "h = here\ngoto "
   offeredStuck o @?= Nothing
-  offeredBound o @?= [BoundView "h" ACore]
+  offeredBound o @?= [BoundView "goal" ACore, BoundView "h" ACore]
 
 -- | The offside rule and a written @;@ separate instructions equally, so the two
 -- spellings of one entry must answer the same. **They did not**: an explicit @;@
@@ -545,15 +550,18 @@ severalBindings :: IO ()
 severalBindings = do
   s <- withLC
   offeredBound (offerIn s "h = here\ng = goal\ngoto ")
-    @?= [BoundView "h" ACore, BoundView "g" ACore]
+    @?= [BoundView "goal" ACore, BoundView "h" ACore, BoundView "g" ACore]
 
 -- | **Filtered by the engine, not by the frontend.** @m@ holds a @String@, so it
--- is offered at @say@'s slot and not at @goto@'s, which wants a @Core@.
+-- is offered at @say@'s slot and not at @goto@'s, which wants a @Core@ — and the
+-- session's own @goal@ is the other way round, which is what makes the pair of
+-- assertions below say that the filter is on the type and not on where a name
+-- came from.
 typedToTheSlot :: IO ()
 typedToTheSlot = do
   s <- withLC
   offeredBound (offerIn s "m = \"hi\"\nsay ") @?= [BoundView "m" AString]
-  offeredBound (offerIn s "m = \"hi\"\ngoto ") @?= []
+  offeredBound (offerIn s "m = \"hi\"\ngoto ") @?= [BoundView "goal" ACore]
 
 -- | **The ordering constraint inside the type checker.** 'Thena.Instral.Infer'
 -- defers a text literal and pins its variable in @settleText@, at the very end —
@@ -567,11 +575,15 @@ settled = do
 -- | A prefix the system would refuse contributes nothing, rather than names read
 -- out of code that will not run. @say 3@ is ill-typed — @say@ wants a @String@ —
 -- so the binding below it is not reported even though it reads.
+--
+-- **The session's @goal@ survives a broken prefix** (MS12 phase 324) and that is
+-- the point of it being here: it is bound by the session and not by the lines
+-- above, so nothing the reader has mistyped can take it away.
 brokenPrefix :: IO ()
 brokenPrefix = do
   s <- withLC
   let o = offerIn s "say 3\nh = here\ngoto "
-  offeredBound o @?= []
+  offeredBound o @?= [BoundView "goal" ACore]
 
 -- | **Not every newline starts an instruction.** A line indented past the entry
 -- continues the one above, so this is one statement and there is nothing bound.

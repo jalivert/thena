@@ -91,7 +91,7 @@ writtenLines =
 
     , testCase "the scope check counts the same lines" $
         case loadRaw "rule base a where\ntwice s = concat s s\nrule go t :- do\n  m = twice (twice t)\n  say nope\n" of
-          RuleFileRefused _ (RuleIllFormed [UnboundInRule (GlobalName [] "go") 1 "nope"]) -> pure ()
+          RuleFileRefused _ (RuleIllFormed [UnboundInRule (GlobalName [] "go") 1 "nope" TString]) -> pure ()
           other -> assertFailure ("expected nope refused at the second line, got " ++ show other)
 
       -- **Inside a lambda, the lambda's own line is what is named** — the
@@ -120,7 +120,7 @@ writtenLines =
     , testCase "a rule error and a type error print the same number" $
         assertBool "both say instruction 2"
           (all ("instruction 2" `isInfixOf`)
-             [ renderRuleError (rendering [] 0) (UnboundInRule (rootName "go") 1 "nope")
+             [ renderRuleError (rendering [] 0) (UnboundInRule (rootName "go") 1 "nope" TString)
              , renderInstralTypeError (Clash (InBody (rootName "go") 1) TCore TString) ])
     ]
   where
@@ -787,7 +787,7 @@ spliceTemplates =
     , testCase "a splice naming nothing is refused at load" $
         case loadRaw "rule base s where\nrule go :- do h = here ; u = resolve-core core`${h} -> ${nope}` ; prim-prove\n" of
           RuleFileRefused _ (RuleIllFormed es)
-            | [UnboundInRule _ _ "nope"] <- es -> pure ()
+            | [UnboundInRule _ _ "nope" _] <- es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **The values a splice carries are ones no text could.** Every term the
@@ -894,7 +894,7 @@ spliceTemplates =
     , testCase "a name splice naming nothing is refused at load" $
         case loadRaw "rule base s where\nrule go :- do d = goal ; t = resolve-core core`\955 (${nope} : ${d}) -> ${d}` ; prim-prove\n" of
           RuleFileRefused _ (RuleIllFormed es)
-            | [UnboundInRule _ _ "nope"] <- es -> pure ()
+            | [UnboundInRule _ _ "nope" _] <- es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
     ]
   where
@@ -1378,7 +1378,7 @@ annotations =
     , testCase "an unbound name inside a lambda is a load error, like anywhere else" $
         case load "rule go :- do g = \\ z -> concat z nosuchname ; prim-prove" of
           RuleFileRefused _ (RuleIllFormed es)
-            | UnboundInRule (rootName "go") 0 "nosuchname" `elem` es -> pure ()
+            | UnboundInRule (rootName "go") 0 "nosuchname" TString `elem` es -> pure ()
           other -> assertFailure ("expected an unbound name, got " ++ show other)
 
       -- …and one that IS bound by the lambda is not reported, which is the
@@ -1392,7 +1392,7 @@ annotations =
     , testCase "and it looks inside a lambda inside a lambda" $
         case load "rule go :- do g = \\ z -> (\\ w -> concat w deepermissing) ; prim-prove" of
           RuleFileRefused _ (RuleIllFormed es)
-            | UnboundInRule (rootName "go") 0 "deepermissing" `elem` es -> pure ()
+            | UnboundInRule (rootName "go") 0 "deepermissing" TString `elem` es -> pure ()
           other -> assertFailure ("expected an unbound name, got " ++ show other)
 
       -- **A RESULT may be a function, and could not be said until 2026-09-12.**
@@ -1516,7 +1516,7 @@ functions =
     , testCase "is validated like a rule" $
         case load "f x = concat x y" of
           RuleFileRefused _ (RuleIllFormed es)
-            | UnboundInRule (rootName "f") 0 "y" `elem` es -> pure ()
+            | UnboundInRule (rootName "f") 0 "y" TString `elem` es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **A name may not be a rule and a function at one arity** (MS5 review).

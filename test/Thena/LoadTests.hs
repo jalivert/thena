@@ -2493,7 +2493,7 @@ moduleTests =
     testCase "a name bound in one top-level block is not in scope in the next" $ do
       (s0, _) <- startingSession
       case loadProofSource Strict s0 twoBlockModule of
-        (_, Ran _ _ (BlockRefused [UnboundInRule _ _ "x"])) -> pure ()
+        (_, Ran _ _ (BlockRefused [UnboundInRule _ _ "x" _])) -> pure ()
         (_, other) -> assertFailure (show other)
 
   , -- **A global block is a call to a rule** (MS6 phase 104b), so how a module

@@ -3,7 +3,7 @@ proving t : Type₀
 thena spine> m = concat "a" "b" ; say m
 ab
 thena spine> say m
-no parameter or earlier binding is called m
+nothing in this line binds m
 thena spine> n = 42 ; p = (1, true) ; l = [1, 2, 3] ; say "bound"
 bound
 thena spine> f = \ z -> concat z z ; r = f "q" ; say r

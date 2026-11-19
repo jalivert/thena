@@ -107,6 +107,7 @@ library
         Thena.View.Choices
         Thena.View.Core
         Thena.View.Development
+        Thena.View.Goals
         Thena.View.Entry
         Thena.View.Instral
         Thena.View.Machine
@@ -170,6 +171,7 @@ library view
         Thena.View.Choices,
         Thena.View.Core,
         Thena.View.Development,
+        Thena.View.Goals,
         Thena.View.Instral,
         Thena.View.Machine,
         Thena.View.Matches,

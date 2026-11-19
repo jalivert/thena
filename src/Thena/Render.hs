@@ -205,6 +205,7 @@ import Thena.Syntax.Parser (ParseError (..))
 import Data.Foldable (toList)
 import Data.List (isPrefixOf, stripPrefix, intercalate, nub, partition)
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
+import qualified Thena.Instral.Type as Ty
 import Thena.Instral.Infer (renderInstralTypeError)
 
 -- | A 'Trouble' as the lines it would have been printed as.
@@ -486,7 +487,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   Failed e       -> [renderSyntaxError e]
   -- The same errors a rule file is refused with, said without the /in rule ‹r›,
   -- instruction ‹i›/ that a typed line has no use for (MS5 phase 62b).
-  LineRefused es -> map whatRuleError es
+  LineRefused es -> map whatLineError es
   Rejected e     -> [renderCommandError ren e]
   Quit           -> []
 
@@ -518,7 +519,7 @@ renderStop ren s stop = case stop of
   -- The same words the prompt gives for the same two mistakes ('LineRefused'
   -- and 'EntryMistyped'), because a block is checked by the same checker —
   -- it is only reached later now (MS6 phase 104b).
-  BlockRefused es        -> map whatRuleError es
+  BlockRefused es        -> map whatLineError es
   BlockIllTyped errs     -> map (dropEntry . renderInstralTypeError) errs
   -- **The machine, and not a word about the spend** (phase 128). The number is
   -- for a job's pane; here the printed machine /is/ the sign that the run is not
@@ -2631,7 +2632,7 @@ whereRuleError :: Rendering -> RuleError -> String
 whereRuleError ren e = case e of
   DeclarationInBody g i   -> inRule g i
   BoundNonProducing g i _ -> inRule g i
-  UnboundInRule g i _     -> inRule g i
+  UnboundInRule g i _ _   -> inRule g i
   NoSuchTest g _          -> inName g
   ObjectRegionUnparsed g i _ _ _ -> inRule g i
   ObjectRegionNotATerm g i _ _   -> inRule g i
@@ -2667,12 +2668,39 @@ whereRuleError ren e = case e of
     inName g   = "in " ++ nameString ren g ++ ": "
     inSignature n = "in the signature of " ++ n ++ ": "
 
+-- | The same, for a TYPED LINE rather than a rule (MS12 phase 324).
+--
+-- **One reason differs and the rest do not**, which is why this delegates:
+-- 'UnboundInRule' is worded for a rule, and a rule has parameters. A typed line
+-- has none and can never have one, so /no parameter or earlier binding is
+-- called id1/ named something the reader\'s context cannot contain — found from
+-- his own transcript, 2026-11-19. The split follows 'whereRuleError'\'s, made at
+-- MS5 phase 62b for the same reason: a line and a file want the same reasons
+-- said differently.
+whatLineError :: RuleError -> String
+whatLineError e = case e of
+  UnboundInRule _ _ n ty -> "nothing in this line binds " ++ n ++ nameHint ty n
+  _                      -> whatRuleError e
+
+-- | How to write what belongs there, when the position says a name.
+--
+-- **Only for 'Ty.TName'**, and that is the whole of the rule: a bare word is a
+-- reference everywhere in @instral@, and the one position where a reader
+-- plausibly meant a literal instead is the one that wants a name. A @'TCore'@
+-- or @'TString'@ position gets nothing, because quoting the word there would be
+-- a different mistake — @say "m"@ prints the letter @m@.
+nameHint :: Ty -> String -> String
+nameHint ty n = case ty of
+  Ty.TName -> " \8212 a name is written \"" ++ n ++ "\""
+  _     -> ""
+
 -- | What was wrong, said without saying where.
 whatRuleError :: RuleError -> String
 whatRuleError e = case e of
   DeclarationInBody _ _   -> "a declaration is a command, not a rule-body operation"
   BoundNonProducing _ _ n -> n ++ " is bound to an operation that leaves nothing"
-  UnboundInRule _ _ n     -> "no parameter or earlier binding is called " ++ n
+  UnboundInRule _ _ n ty  -> "no parameter or earlier binding is called " ++ n
+                               ++ nameHint ty n
   NoSuchTest _ w          -> "no such test: " ++ w
   -- **The words @:parse@ uses**, from the same renderer, because it is the
   -- same parser and the same grammar (MS6 phase 104c).

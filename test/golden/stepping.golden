@@ -4,6 +4,7 @@ pc
   0  assume "A" ⌜1⌝
 env
   ⌜1⌝ = core`Type₀`
+  goal = core`‹Var 0›`
 stack
   (empty)
 thena spine> :step
@@ -11,6 +12,7 @@ pc
   (empty)
 env
   ⌜1⌝ = core`Type₀`
+  goal = core`‹Var 0›`
 stack
   (empty)
 thena spine> :step
@@ -32,6 +34,8 @@ pc
   0  call unify-refine-core ⌜1⌝
 env
   ⌜1⌝ = core`A`
+  h = core`h`
+  goal = core`‹Var 3›`
 stack
   (empty)
 thena spine> :step

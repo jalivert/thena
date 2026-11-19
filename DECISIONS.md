@@ -5732,6 +5732,42 @@ name. `goto` there needs a `do` block with something bound in it.
 
 ---
 
+### Every goal is bound at the prompt, so `goto ‹its name›` reaches it
+
+*Decided 2026-11-19. Changes what you type to move around a proof.*
+
+A typed line is read as a rule body, so a bare word in an argument position is a
+*reference* to something bound — which is why reaching a hole used to mean
+writing its name as a string, `goto-named "id1"`. The session now binds every
+goal before it reads your line: a goal is a hole or a guess, and each one is
+bound, under the identifier the development prints it by, to the variable that
+reaches that position.
+
+```
+❯ :theorem id : ∀ (T : Type) -> T -> T
+❯ attack ; intro ; intro
+❯ goto id1             -- the inner hole
+❯ goto id              -- the guess at the root
+```
+
+**Nothing about the language changed.** A bare word is still a reference and
+still means nothing else anywhere; what changed is that the prompt's scope is no
+longer empty. A rule file is loaded with no session in hand, so a misspelled
+reference in a rule body is still refused when the base loads — the names exist
+only in a line you type.
+
+**It is the variable and not the name, and that is the point.** `goto-named`
+searches from the root for a component of that name. Names are unique in a
+development, but the name a nested position *asks* for is not always the name it
+gets, so a search inside a nested split can land on the enclosing position. The
+variable names one position and cannot. `goto-named` stays for the case where
+what you have really is only a name.
+
+**Goals and guesses only.** Hypotheses and solved positions are not bound: the
+first bind a value rather than something left to prove, and the second is
+finished. `goto-named` still finds a solved position, which is the one place the
+two words differ in what they can reach.
+
 ### `goto-root` goes to the top, and it is the one move that cannot fail
 
 *Decided 2026-09-27. Adds a word.*

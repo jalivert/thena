@@ -48,6 +48,7 @@ import qualified Thena.Engine as Engine
 import Thena.Instral.Ops (Value (..))
 import Thena.Errors (FailReason (..))
 import Thena.Instral.Ops (Rule (..), Pattern (..))
+import Thena.Instral.Type (Ty (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
 import Thena.View.Source (printItem)
 
@@ -361,7 +362,7 @@ loading =
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do frobnicate; prim-solve x")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [UnboundInRule (rootName "r") 1 "x"]
+                , RuleIllFormed [UnboundInRule (rootName "r") 1 "x" (TVar 0)]
                 )
 
     , -- The load-time pass §2.4 asked for, now running at load rather than in
@@ -370,7 +371,7 @@ loading =
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do prim-try nothing")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [UnboundInRule (rootName "r") 0 "nothing"] )
+                , RuleIllFormed [UnboundInRule (rootName "r") 0 "nothing" TCore] )
     ]
   where
     refusal fs = case snd (load1 fs) of

@@ -82,6 +82,7 @@ import Thena.Instral.Ops
   , Test (..)
   , Value (..)
   , operandsOf
+  , operandTypes
   , refsIn
   , partOf
   , partWords
@@ -651,8 +652,15 @@ data RuleError
     -- instruction's position in the body.
   | BoundNonProducing GlobalName Int Name
     -- ^ @x = attack@: a destination on an op that leaves nothing ('produces')
-  | UnboundInRule     GlobalName Int Name
-    -- ^ a @Ref@ to a name no parameter and no earlier @Bind@ introduced
+  | UnboundInRule     GlobalName Int Name Ty
+    -- ^ a @Ref@ to a name no parameter and no earlier @Bind@ introduced.
+    --
+    -- **It carries the type the operand\'s position wants** (MS12 phase 324),
+    -- which 'Thena.Instral.Ops.operandTypes' already pairs with the operand, so
+    -- a message can say how to write the thing that belongs there instead of
+    -- only that nothing is bound. A @'Ty.TName'@ position is the case that
+    -- matters: @assume x core`Nat`@ wants @assume "x" core`Nat`@, and nothing in
+    -- the old wording said so.
     -- The three below are 'resolveRule'\'s, phase 21. They join this type
     -- rather than starting another because they are the same question asked
     -- one step earlier — /is this rule well formed?/ — and a rule file's
@@ -878,9 +886,14 @@ validate r = reserved ++ repeated ++ headScope
 
     headOr d xs = case xs of { x : _ -> x ; [] -> d }
 
+    -- **Paired with the position\'s type**, which is why this reads
+    -- 'operandTypes' and not 'operandsOf' — the latter is @map fst@ of the
+    -- former, so nothing new is computed. Every name an operand mentions
+    -- shares that operand\'s type.
     scope i bound o =
-      [ UnboundInRule nm i n
-      | n <- concatMap refsIn (operandsOf o)
+      [ UnboundInRule nm i n ty
+      | (a, ty) <- operandTypes o
+      , n <- refsIn a
       , n `notElem` bound
       ]
 

@@ -323,7 +323,7 @@ validateTests =
 
     , testCase "a Ref to nothing is rejected" $
         validate (named "bad" [] [Do (Ops.Say (Ref "z"))])
-          @?= [UnboundInRule (rootName "bad") 0 "z"]
+          @?= [UnboundInRule (rootName "bad") 0 "z" TString]
 
     , testCase "a parameter binds it" $
         validate (named "ok" ["z"] [Do (Ops.Say (Ref "z"))]) @?= []
@@ -343,7 +343,7 @@ validateTests =
             [ Do (Ops.Say (Ref "z"))
             , Bind (Ops.PVar "z") Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
             ])
-          @?= [UnboundInRule (rootName "bad") 0 "z"]
+          @?= [UnboundInRule (rootName "bad") 0 "z" TString]
 
       -- Every error, not the first: a rule author fixing one at a time would
       -- reload once per mistake.
@@ -356,7 +356,7 @@ validateTests =
             ])
           @?= [ BoundNonProducing (rootName "bad") 0 "x"
               , DeclarationInBody (rootName "bad") 1
-              , UnboundInRule (rootName "bad") 2 "z"
+              , UnboundInRule (rootName "bad") 2 "z" TString
               ]
 
     , testCase "validateBase checks every rule" $
@@ -398,7 +398,7 @@ dataTests =
       -- when the base loads, which needs 'Thena.Instral.Ops.refsIn' to look inside.
       testCase "an unbound name inside a list is refused at load" $
         validate (named "r" [] [Do (Ops.Say (ListOf [Ref "nope"]))])
-          @?= [UnboundInRule (rootName "r") 0 "nope"]
+          @?= [UnboundInRule (rootName "r") 0 "nope" TString]
 
       -- **The five destructors are gone** (MS5 phase 86): @list-head@,
       -- @list-tail@, @pair-first@, @pair-second@ and @option-value@. What they

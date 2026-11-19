@@ -403,7 +403,7 @@ holeTests =
     -- 'Thena.Rules.UnboundInRule' at entry time.
   , refuses "a bare argument is a reference, not a term"
       (natGoal ++ ["attack", "into", "try-core zero"])
-      [UnboundInRule (rootName "entry") 0 "zero"]
+      [UnboundInRule (rootName "entry") 0 "zero" (TVar 0)]
     -- And the vocabularies still do not mix: the surface fence makes a
     -- 'Thena.Instral.Ops.VSurface', which a core tactic will not take. **The refusal is
     -- the type system's now**, where it used to be the op's at run time.
