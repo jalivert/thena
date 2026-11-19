@@ -47,6 +47,17 @@ import Thena.Driver
 import Thena.Core.Term (nameDotted)
 import Thena.Files (importModule, startingSession)
 import Thena.Render (renderResponse)
+import Thena.View (Budget (..), failureView)
+import Thena.View.Failure
+  ( FaultKind (..)
+  , FaultView (..)
+  , Nature (..)
+  , PartView (..)
+  , Piece (..)
+  , Role (..)
+  , StopView (..)
+  , Why (..)
+  )
 
 -- | A session with the shipped base and prelude in it, and nothing else.
 fresh :: IO Session
@@ -80,6 +91,113 @@ about what out = case [ r | r <- out, names r == Just what ] of
       ProofLoaded nm _ _ _         -> Just nm
       ProofLoadedPartly nm _ _ _ _ -> Just nm
       _                            -> Nothing
+
+
+-- | The view of one unfinished item, from the response that reported it.
+--
+-- **The first unfinished item is the root** — the one whose reason a pane
+-- shows — so every test below asks about that one.
+viewOf :: Session -> Response -> IO StopView
+viewOf s r = case r of
+  ProofLoadedPartly _ _ _ _ (root : _) ->
+    pure (failureView (Budget 200) s (unfinishedWhy root))
+  other -> assertFailure ("expected a partial load with an unfinished item, got " ++ show other)
+
+-- | The one fault a 'Broken' item carries.
+faultOf :: StopView -> IO FaultView
+faultOf sv = case stopViewWhy sv of
+  Faulty [one] -> pure one
+  other -> assertFailure ("expected exactly one fault, got " ++ show other)
+
+-- | What a fault says is playing this role.
+playing :: Role -> FaultView -> [Piece]
+playing r f = [ partViewPiece p | p <- faultViewParts f, partViewRole p == r ]
+
+viewTests :: TestTree
+viewTests = testGroup "the view of an unfinished item (MS12 phase 325)"
+  [ -- **The row the tui track measured**, which is what the view exists for:
+    -- @broken did not go in: stuck: not in scope: nonesuch@, drawn from parts
+    -- rather than from text.
+    testCase "a name that resolves to nothing is NotInScope, and the name is a part" $ do
+      (s, out) <- importing Lenient "test.modules.PartlyGood"
+      r <- about "test.modules.PartlyGood" out
+      sv <- viewOf s r
+      stopViewNature sv @?= Broken
+      f <- faultOf sv
+      faultViewKind f @?= NotInScope
+      playing TheWord f @?= [AName "nonesuch"]
+      -- **A leaf, so there is nothing indented under it.**
+      faultViewInside f @?= Nothing
+
+  , -- **The crossing against the text door.** The convention for every view:
+    -- the pane and the prompt must not disagree about what the failure is
+    -- about, and a name is the one part both of them say out loud.
+    testCase "the name in the part is the name the prompt prints" $ do
+      (s, out) <- importing Lenient "test.modules.PartlyGood"
+      r <- about "test.modules.PartlyGood" out
+      sv <- viewOf s r
+      f <- faultOf sv
+      let text = unlines (renderResponse s r)
+      case playing TheWord f of
+        [AName n] -> assertBool ("the prompt says " ++ n ++ ": " ++ text)
+                                (("not in scope: " ++ n) `isInfixOf` text)
+        other -> assertFailure ("expected one name, got " ++ show other)
+
+  , -- **Two terms and neither is /found/**: @Mismatch@ is symmetric, so the
+    -- second one is 'TheOther' and not 'TheFound'. A pane drawing a
+    -- side-by-side has to know which of those it has.
+    testCase "two types that cannot be made equal are two typed term parts" $ do
+      (s, out) <- importing Lenient "test.modules.PartlyMistyped"
+      r <- about "test.modules.PartlyMistyped" out
+      sv <- viewOf s r
+      stopViewNature sv @?= Broken
+      f <- faultOf sv
+      faultViewKind f @?= TypesDiffer
+      assertBool ("the term: " ++ show f) (length (playing TheTerm f) == 1)
+      assertBool ("the other: " ++ show f) (length (playing TheOther f) == 1)
+      assertBool ("both are terms: " ++ show f)
+                 (all isTerm (playing TheTerm f ++ playing TheOther f))
+
+  , -- **The item that fails is the only one that gets a view**, and the two
+    -- that landed are not in the list at all. Said here because a pane draws
+    -- the fold from this list.
+    testCase "only the unfinished item has a view" $ do
+      (s, out) <- importing Lenient "test.modules.PartlyMistyped"
+      r <- about "test.modules.PartlyMistyped" out
+      case r of
+        ProofLoadedPartly _ ds _ _ unfin -> do
+          map unfinishedDeclares unfin @?= [["mistyped"]]
+          assertBool ("what went in: " ++ show ds) ("first" `elem` ds)
+          assertBool ("what went in: " ++ show ds) ("after" `elem` ds)
+          _ <- viewOf s r
+          pure ()
+        other -> assertFailure ("expected a partial load, got " ++ show other)
+
+  , -- **Four natures and not three** — the tui track asked for /fault, halt,
+    -- given up/, and @Untrusted@ is in none of them. The closed list is their
+    -- one condition on the shape, so it is asserted rather than described.
+    testCase "a pane can enumerate the natures, and there are four" $
+      [minBound .. maxBound] @?= [Broken, Stopped, NotTrusted, GivenUp]
+
+  , -- **Nothing in the parts is a sentence.** The whole of what separates this
+    -- shape from the one he rejected on 2026-11-19 is that a part is a typed
+    -- value, so a fault whose every part was text would be the rejected shape
+    -- wearing this one's type.
+    testCase "the parts of a real failure are not text" $ do
+      (s, out) <- importing Lenient "test.modules.PartlyGood"
+      r <- about "test.modules.PartlyGood" out
+      sv <- viewOf s r
+      f <- faultOf sv
+      assertBool ("no part is loose text: " ++ show f)
+                 (not (any isLooseText (map partViewPiece (faultViewParts f))))
+  ]
+  where
+    isTerm pc = case pc of
+      ATerm _ -> True
+      _       -> False
+    isLooseText pc = case pc of
+      AText _ -> True
+      _       -> False
 
 tests :: TestTree
 tests = testGroup "a module that loads as far as it can (MS12 phase 315)"
@@ -218,4 +336,6 @@ tests = testGroup "a module that loads as far as it can (MS12 phase 315)"
       (s, _) <- importing Lenient "test.modules.PartlyWorse"
       Just m <- pure (moduleName "test.modules.PartlyWorse")
       map moduleText (moduleImportsOf m s) @?= ["test.modules.Bit"]
+
+  , viewTests
   ]

@@ -107,6 +107,7 @@ import Thena.Driver
   ( CommandError (..)
   , MatchedRule (..)
   , Unfinished (..)
+  , NotDone (..)
   , RuleFileError (..)
   , LoadError (..)
   , Response (..)
@@ -348,7 +349,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
            [] -> []
            root : pending ->
              ( "  " ++ named root ++ " did not go in:" )
-               : map ("    " ++) (renderResponse s (unfinishedWhy root))
+               : map ("    " ++) (renderNotDone ren s (unfinishedWhy root))
                ++ [ "  and " ++ plural (length pending) "more" ++ " pending: "
                       ++ intercalate ", " (map named pending)
                   | not (null pending) ]
@@ -500,6 +501,16 @@ renderResponse s resp = let ren = renderingOf s in case resp of
 -- number. @:show@ renders from the root and needs no seed.
 contextOf :: Session -> Context
 contextOf = focusContext . development . machineOf
+
+-- | Why an item in a partly-loaded module did not finish (MS12 phase 325).
+--
+-- **The text door's half of the narrowing.** 'Thena.Driver.unfinishedWhy' was a
+-- whole 'Response' and this was 'renderResponse'; a 'NotDone' says the same two
+-- things in a type a pane can also lay out, so the words here do not move.
+renderNotDone :: Rendering -> Session -> NotDone -> [String]
+renderNotDone ren s nd = case nd of
+  ItStopped msgs ws stop -> msgs ++ map renderWarning ws ++ renderStop ren s stop
+  ItWasAbandoned         -> [renderCommandError ren GaveItUp]
 
 renderStop :: Rendering -> Session -> Stop -> [String]
 renderStop ren s stop = case stop of

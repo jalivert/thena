@@ -118,6 +118,7 @@ library
         Thena.View.Statement
         Thena.View.Surface
         Thena.View.Tokens
+        Thena.View.Failure
         Thena.View.Trust
         Thena.View.Type
     other-modules:
@@ -181,6 +182,7 @@ library view
         Thena.View.Statement,
         Thena.View.Surface,
         Thena.View.Tokens,
+        Thena.View.Failure,
         Thena.View.Trust,
         Thena.View.Type,
         -- The file door: reading what a command named, and starting a session
