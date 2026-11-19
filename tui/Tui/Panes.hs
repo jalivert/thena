@@ -20,6 +20,8 @@ module Tui.Panes
   , outputRows
   , offerGridWidget
   , stripKeyLabel
+  , stripHintLines
+  , hintRegionWidget
   , paneRowWidget
   , BarSpot (..)
   , paneBarWidget
@@ -30,10 +32,12 @@ import Data.List (intercalate, intersperse, nub, sort)
 import Brick (Widget, (<+>), clickable, emptyWidget, hBox, str, strWrapWith, vBox, withAttr)
 import Brick.AttrMap (attrName)
 import Graphics.Text.Width (safeWcwidth)
+import qualified Data.Text as T
 import Text.Wrap
   ( FillStrategy (FillIndent)
   , WrapSettings (..)
   , defaultWrapSettings
+  , wrapTextToLines
   )
 
 -- | One row of a list pane.
@@ -453,6 +457,69 @@ clip n t
 
 padRight :: Int -> String -> String
 padRight n t = t <> replicate (max 0 (n - length t)) ' '
+
+-- | **How a hint breaks** — `~w2tk2` slice 4.
+--
+-- **Not 'paneWrap', and the difference is that a hint is prose.** A pane's
+-- row is a name or a term, so 'paneWrap' preserves its indent and hangs its
+-- continuations two columns in to say /this line belongs to the one above/.
+-- A hint is a sentence: there is no row for a continuation to belong to, and
+-- an indent would read as structure that is not there.
+--
+-- **A word too long for the strip still breaks**, the same call 'paneWrap'
+-- makes and for a weaker version of the same reason: the one unbreakable
+-- word a hint is likely to contain is a rule's name, and a clipped rule name
+-- is the half of the sentence that was worth reading.
+hintWrap :: WrapSettings
+hintWrap = defaultWrapSettings { breakLongWords = True }
+
+-- | **The hint wrapped to the strip's content width** — `~w2tk2` slice 4.
+--
+-- **This is the one place a hint's height is decided**, and it is decided by
+-- producing the lines rather than predicting them: 'hintRegionWidget' draws
+-- exactly this list and 'Tui.Layout.stripHintUsed' counts exactly this list,
+-- so the region cannot take a number of rows it then fails to fill. Slice
+-- 3a's defect was two sides of one pane disagreeing about a size; the grid's
+-- size now depends on this number, so this is the same hazard one step on.
+--
+-- **A strip with no content width has no lines**, rather than one line of
+-- nothing: at that point the pane is a sliver and there is nothing to say.
+stripHintLines :: Int -> String -> [String]
+stripHintLines width hint
+  | width <= 0 = []
+  | otherwise = map T.unpack (wrapTextToLines hintWrap width (T.pack hint))
+
+-- | **The rows kept for the model's hint, with the hint in them** — `~w2tk2`
+-- slice 4, his /"I want like bottom half or three lines-worth to always be
+-- free for an LLM suggestion"/.
+--
+-- Takes the content width, the rows the region occupies
+-- ('Tui.Layout.stripHintUsed') and the hint if there is one.
+--
+-- **The text sits at the BOTTOM of the region and the blanks go above it.**
+-- Two things come out of that and both were the reason:
+--
+--   * **It separates the hint from the grid without spending a row on a
+--     separator.** Three rows is what he asked for and a blank rule through
+--     the middle of them would have left two.
+--   * **The hint lands directly above the row it is answered in** (slice 5's
+--     reply row), so the sentence and the reply to it are adjacent rather
+--     than at opposite ends of the region.
+--
+-- **A hint longer than the region keeps its head, not its tail.** The region
+-- has already grown as far as 'Tui.Layout.stripHintBudget' allows by the
+-- time this clips anything, and the first words of a sentence are the ones
+-- that say whether the rest is worth pulling the strip taller for.
+--
+-- **Drawn in @strip.hint@ even where it is blank**, so the pane's own fill
+-- shows through every row of the region alike — `~bv2wj`, where an attr
+-- whose background was left to the terminal punched a hole in the panel.
+hintRegionWidget :: Ord n => Int -> Int -> Maybe String -> Widget n
+hintRegionWidget width rows hint = vBox (map line (take rows (blanks <> shown)))
+  where
+    shown = maybe [] (stripHintLines width) hint
+    blanks = replicate (max 0 (rows - length shown)) ""
+    line t = withAttr (attrName "strip.hint") (str (if null t then " " else t))
 
 -- | One row of a list pane, with its attribute and its indent — the whole of
 -- the second column's drawing, since 'Tui.Panes' decided the text.

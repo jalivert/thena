@@ -169,11 +169,13 @@ import Tui.Layout
   , stripCellWidth
   , stripGrid
   , stripHintRows
+  , stripHintUsed
   , stripMinRows
   , stripName
   , stripReplyRows
   , stripSized
   , stripSlotKeys
+  , stripBodyRows
   )
 import Tui.Panes
   ( BarSpot (..)
@@ -182,9 +184,11 @@ import Tui.Panes
   , ModuleMark (..)
   , PaneRow (..)
   , globalRows
+  , hintRegionWidget
   , wideGlyphs
   , moduleRows
   , offerGridWidget
+  , stripHintLines
   , outputRows
   , paneBarWidget
   , paneRowWidget
@@ -741,6 +745,27 @@ data St = St
     -- strip's own source, @:preselect@ still toggles, and every attr and
     -- test it has stays — which is exactly the state his ruling asks for
     -- between \"disabled\" and the deletion he has not authorised.
+  , stHint :: Maybe String
+    -- ^ **what the suggestion strip's hint region is saying** — `~w2tk2`
+    -- slice 4, his /"when it sees that the user is clearly taking the wrong
+    -- turn in a proof (chosing to do induction on the wrong value), it could
+    -- just give a hint"/.
+    --
+    -- **Nothing behind it yet, and that is the slice.** @:hint ‹text›@ puts
+    -- a string here and @:hint@ alone takes it away, so the geometry — the
+    -- region's floor, a long hint taking rows off the grid, the keymap
+    -- agreeing with the grid that shrank — is real and measurable before any
+    -- model exists to write one. Slice 6 replaces the command and not this
+    -- field.
+    --
+    -- **Not persisted, unlike the four toggles above it.** A hint is
+    -- content, not a preference: a sentence about the proof he was in last
+    -- week has no business arriving with the dotfile.
+    --
+    -- **Nothing clears it but @:hint@** — not an Enter, not an Esc, not a
+    -- mode switch. That is `~3gn2r`'s rule applied to the other half of the
+    -- strip: a region that blanked itself whenever the dropdown would have
+    -- closed would be empty in exactly the frames he is reading it.
   , stPicker :: Maybe Picker
     -- ^ **the session picker, and while it is open it owns the keyboard** —
     -- see 'Picker' and 'handlePickerEvent'. It is the one widget in the TUI
@@ -858,6 +883,7 @@ runTui = do
         , stEscRun      = Nothing
         , stInputExtent = Nothing
         , stStripWidth  = Nothing
+        , stHint        = Nothing
         , stPaneExtent  = Nothing
         , stArrowsReleased = False
         , stJevConfig   = jevCfg
@@ -1219,6 +1245,23 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- to be chosen. **Paired with 'themePanel' explicitly**, `~bv2wj`'s
   -- lesson, or it punches a hole in the pane's own fill.
   , (attrName "strip.key",      surface (themePanel th) (themeSuggest th))
+  -- | **The hint region's text** — `~w2tk2` slice 4.
+  --
+  -- **Ordinary ink, which is the same ink a cell's label carries**, and the
+  -- difference between a hint and an option is left to shape: a grid cell is
+  -- @F3@ and a terse name, a hint is a sentence with air above it. **The
+  -- alternative was 'themeDim'**, whose own haddock calls it the colour for
+  -- /hints/ — and it is wrong here for the one reason that matters: he asked
+  -- for half this pane to be kept free for the model, and a region reserved
+  -- that hard is not secondary text.
+  --
+  -- **It is an attr of its own so that retuning it is one line** rather than
+  -- a hunt through 'draw' — his to move, the same standing 'themeSuggest'
+  -- has. **Paired with 'themePanel'**, `~bv2wj` again, and here it matters
+  -- for the blank rows too: the region draws its padding in this attr, so an
+  -- unpaired one would have punched a three-row hole in the panel whenever
+  -- the hint was short.
+  , (attrName "strip.hint",     surface (themePanel th) (themeInk th))
   -- | A list pane's group heading and its small print. **Both dim, and the
   -- same dim**: a heading is not a thing in the list and neither is a module's
   -- file, so what separates them from the entries is weight, not hue — the
@@ -1446,14 +1489,28 @@ draw st =
     -- wide one; 'Tui.Layout.stripGrid' is the whole of that arithmetic and
     -- nothing here repeats it.
     --
-    -- **The reserved rows are blank at this slice and that is deliberate**,
-    -- not an oversight: see 'Tui.Layout.stripHintRows'. A reserve that only
-    -- appears once there is something to put in it is a reserve that was
-    -- never tested.
+    -- **The hint region is drawn from 'stHint' and the reply row is still
+    -- blank** — `~w2tk2` slice 4 is the first half of the reserve, slice 5
+    -- the second. The region's height is 'Tui.Layout.stripHintUsed' and the
+    -- grid is sized from the same number, so a hint that outgrows its floor
+    -- takes rows off the grid rather than off the pane. **'stripHintRowsFor'
+    -- is literally the function the keymap calls** — not a second copy of
+    -- the arithmetic — with the live width where the keymap passes
+    -- 'stStripWidth''s.
+    --
+    -- **THE HINT DRAWS WHETHER OR NOT THERE ARE OPTIONS**, which is the
+    -- answer slice 4 gives his §15 question 7 (/"does the strip ever hold a
+    -- hint with no options at all"/): yes. A slate is empty mid-proof
+    -- whenever nothing applies, which is one of the moments a hint is worth
+    -- most, and his own property 3 says the two are the same kind of content
+    -- from two sources. **With neither, the strip is one blank row** — the
+    -- call the output pane already makes for an empty pane.
     stripBody = Widget Fixed Fixed $ do
       ctx <- getContext
-      let grid = stripGrid (ctx ^. availWidthL) (stripRows (stStrip st))
-          cellW = max stripCellWidth (ctx ^. availWidthL `div` gridCols grid)
+      let width = ctx ^. availWidthL
+          hintRows = stripHintRowsFor st width
+          grid = stripGrid width (stripBodyRows (stripRows (stStrip st))) hintRows
+          cellW = max stripCellWidth (width `div` gridCols grid)
           shown = take (gridSlots grid) (map rowLabel stripSlate)
           -- | **The heading counts the whole candidate list, not the grid.**
           -- @offers  9 of 318@ is the gap between this slice and slice 3a on
@@ -1467,12 +1524,17 @@ draw st =
                     (Heading (headingFor (length shown) (length stripSlate)) Nothing
                        :: PaneRow Name)
                 ]
-          reserved = replicate (stripHintRows + stripReplyRows) (str " ")
+          offers
+            | null stripSlate = []
+            | otherwise = heading <> [offerGridWidget cellW (gridCols grid) shown]
+          reserve =
+            hintRegionWidget width hintRows (stHint st)
+              : replicate stripReplyRows (str " ")
       render
         ( vBox
-            ( if null heading
+            ( if null offers && isNothing (stHint st)
                 then [str " "]
-                else heading <> [offerGridWidget cellW (gridCols grid) shown] <> reserved
+                else offers <> reserve
             )
         )
 
@@ -2219,8 +2281,31 @@ stripSlateOf st
 -- **An empty grid before the first frame.** With no width reported there is
 -- no grid to speak of, so no key takes anything until something has been
 -- drawn — which is a frame earlier than anyone can press one.
+--
+-- **The hint is now one of the grid's inputs** — `~w2tk2` slice 4 — so this
+-- reads 'stripHintRowsFor' where 'draw' reads the same two functions off the
+-- live width. A hint long enough to take a row off the grid takes the keys
+-- on that row with it, which is the whole point of 3a stated for a second
+-- source of shrinking.
 stripGridFor :: St -> Maybe Grid
-stripGridFor st = (\w -> stripGrid w (stripRows (stStrip st))) <$> stStripWidth st
+stripGridFor st =
+  (\w -> stripGrid w (stripBodyRows (stripRows (stStrip st))) (stripHintRowsFor st w))
+    <$> stStripWidth st
+
+-- | **How tall the hint region is at a given content width** — `~w2tk2`
+-- slice 4.
+--
+-- **The keymap's copy of what 'draw' works out**, and the two are the same
+-- two calls in the same order ('Tui.Panes.stripHintLines' for the lines,
+-- 'Tui.Layout.stripHintUsed' for the height) rather than two pieces of
+-- arithmetic that happen to agree today. The width is the argument because
+-- that is the one thing the two sides do not share: 'draw' has the live one
+-- and this has 'stStripWidth''s, one frame behind.
+stripHintRowsFor :: St -> Int -> Int
+stripHintRowsFor st w =
+  stripHintUsed
+    (stripBodyRows (stripRows (stStrip st)))
+    (maybe 0 (length . stripHintLines w) (stHint st))
 
 -- | **What is actually on a cell, and therefore what an F-key may take** —
 -- `~w2tk2` slice 3a, the cap his property 2 asks for: /"it should not list
@@ -3547,6 +3632,20 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
           let st' = st0 { stDropdownOn = mode == "on" }
           liftIO (saveConfig (configOf st'))
           appendTurn st' Nothing ["dropdown: " <> mode]
+        -- | **`:hint ‹text›` and `:hint`** — `~w2tk2` slice 4, and it is a
+        -- **stub on purpose**: the hint region has to be drawable, and its
+        -- geometry measurable, before the model that would write one
+        -- exists. Slice 6 replaces this command with the model's own
+        -- channel and the field under it does not move.
+        --
+        -- **Not persisted**, unlike the four toggles above: see 'stHint'.
+        -- **`:hint` with nothing after it clears**, which is why this takes
+        -- the tail rather than requiring an argument — an empty hint and no
+        -- hint are the same state and spelling them differently would have
+        -- invented a third.
+        (":hint" : rest) -> do
+          let st' = st0 { stHint = hintFrom rest }
+          appendTurn st' Nothing [hintSaid (hintFrom rest)]
         -- | **`:confirm-quit on|off`**, his instruction of 2026-11-18 — same
         -- standing as the two above. See 'maybeQuit'.
         [":confirm-quit", mode] | mode `elem` ["on", "off"] -> do
@@ -4071,6 +4170,12 @@ scriptLocal st text = case words text of
     liftIO (saveConfig (configOf st'))
     put st'
     pure ("dropdown: " <> mode)
+  -- | `:hint` runs from a script line too, his ruling `~g5wjz` — a
+  -- TUI-local word is a TUI-local word wherever it is typed. **No
+  -- 'saveConfig'**: 'stHint' is content and is not in the dotfile.
+  (":hint" : rest) -> Just $ do
+    put st { stHint = hintFrom rest }
+    pure (hintSaid (hintFrom rest))
   [":confirm-quit", mode] | mode `elem` ["on", "off"] -> Just $ do
     let st' = st { stConfirmQuit = mode == "on" }
     liftIO (saveConfig (configOf st'))
@@ -4083,6 +4188,17 @@ scriptLocal st text = case words text of
       then halt >> pure "quit"
       else put st { stQuitArmed = True } >> pure quitNote
   _ -> Nothing
+
+-- | **What `:hint`'s tail means** — `~w2tk2` slice 4. Nothing after the
+-- word is no hint; anything else is the hint, spaces collapsed.
+hintFrom :: [String] -> Maybe String
+hintFrom rest = case unwords rest of
+  "" -> Nothing
+  t  -> Just t
+
+-- | What the line says back, so the bar and a script line say the same thing.
+hintSaid :: Maybe String -> String
+hintSaid = maybe "hint: cleared" ("hint: " <>)
 
 -- | **Where a committed line actually goes through** — the composing line
 -- at the end, or an edit to an existing one with a tail below it
@@ -4140,6 +4256,10 @@ tuiHelpLines =
     , ("",                  "  taller strip has more slots — pull it and see")
     , (":dropdown on|off",  "whether the completion dropdown appears and takes keys")
     , ("",                  "  at all. Off leaves :load's own path listing alone")
+    , (":hint ‹text›",      "put a line in the strip's hint region, the rows kept for")
+    , ("",                  "  a model that watches — " <> show stripHintRows <> " of them at least, and a")
+    , ("",                  "  longer hint takes rows off the grid. :hint alone clears it.")
+    , ("",                  "  A stub: nothing writes one yet")
     , ("a click in a list pane", "folds a namespace in globals — ▾ is open, ▸ folded,")
     , ("",                  "  and the count stays either way; unfolds a ⚠️ or ❌ module's")
     , ("",                  "  row in modules. Anywhere along the row, not just the symbol")

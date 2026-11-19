@@ -42,7 +42,10 @@ import Tui.Layout
   , Grid (..)
   , stripCellWidth
   , stripGrid
+  , stripHintBudget
+  , stripBodyRows
   , stripHintRows
+  , stripHintUsed
   , stripReplyRows
   , stripSlotKeys
   )
@@ -214,7 +217,7 @@ layoutTests =
       -- pane, three columns of cells, and at the strip's default height three
       -- grid rows — so **nine options**, which is what he will see.
       testCase "at his measured geometry the grid is three by three" $ do
-        let g = stripGrid 96 stripDefaultRows
+        let g = stripGrid 96 (stripBodyRows stripDefaultRows) stripHintRows
         gridCols g @?= 3
         gridRows g @?= 3
         gridSlots g @?= 9
@@ -222,28 +225,28 @@ layoutTests =
       -- does too** — which makes slice 1's drag a control over the slate and
       -- not only over how much of it is on screen.
       testCase "more width is more columns, more height is more slots" $ do
-        gridCols (stripGrid 52 stripDefaultRows) @?= 2
-        gridCols (stripGrid 140 stripDefaultRows) @?= 5
+        gridCols (stripGrid 52 (stripBodyRows stripDefaultRows) stripHintRows) @?= 2
+        gridCols (stripGrid 140 (stripBodyRows stripDefaultRows) stripHintRows) @?= 5
         assertBool "a taller strip offers more"
-          (gridSlots (stripGrid 96 14) > gridSlots (stripGrid 96 stripDefaultRows))
+          (gridSlots (stripGrid 96 14 stripHintRows) > gridSlots (stripGrid 96 (stripBodyRows stripDefaultRows) stripHintRows))
     , -- | **An option with no key and a key with no option are both
       -- unreachable, and that is the invariant of the whole slice.** The
       -- slate is sized by the grid and the grid is bounded by the keys, so
       -- every cell drawn can be pressed and every key bound has a cell.
       testCase "the slate never outruns the keys there are" $ do
         let keys = length stripSlotKeys
-        gridSlots (stripGrid 400 40) @?= keys
+        gridSlots (stripGrid 400 40 stripHintRows) @?= keys
         assertBool "never more than the keys" $
-          and [ gridSlots (stripGrid w r) <= keys
+          and [ gridSlots (stripGrid w r stripHintRows) <= keys
               | w <- [1, 20, 52, 96, 140, 400], r <- [stripMinRows, 8, 14, 40] ]
         assertBool "never none" $
-          and [ gridSlots (stripGrid w r) >= 1
+          and [ gridSlots (stripGrid w r stripHintRows) >= 1
               | w <- [1, 20, 52, 96, 140, 400], r <- [stripMinRows, 8, 14, 40] ]
     , -- | **The rows the slots NEED, not the rows they are allowed.** A strip
       -- pulled tall enough for fifteen cells still draws four rows of ten,
       -- and the room left over goes to the hint rather than to blank cells.
       testCase "a tall strip draws the rows its slots need and no more" $ do
-        let g = stripGrid 96 40
+        let g = stripGrid 96 40 stripHintRows
         gridSlots g @?= length stripSlotKeys
         gridRows g @?= 4
     , -- | **The hint and the reply keep their rows whatever the grid does** —
@@ -254,8 +257,62 @@ layoutTests =
       testCase "the reserve is kept out of the grid's budget at every height" $ do
         stripHintRows + stripReplyRows @?= 4
         assertBool "the grid never eats the reserve" $
-          and [ gridRows (stripGrid 96 r) <= max 1 (r - 1 - stripHintRows - stripReplyRows)
+          and [ gridRows (stripGrid 96 r stripHintRows) <= max 1 (r - 1 - stripHintRows - stripReplyRows)
               | r <- [stripMinRows .. 40] ]
+    , -- | **The reserve is a FLOOR and a long hint takes rows off the grid**
+      -- — `~w2tk2` slice 4, which is what his /"always be free"/ asks for:
+      -- three rows are the hint's whether it fills them or not, and a hint
+      -- that needs more is not truncated to fit a grid.
+      testCase "no hint and a short hint both take the floor" $ do
+        stripHintUsed stripDefaultRows 0 @?= stripHintRows
+        stripHintUsed stripDefaultRows 1 @?= stripHintRows
+        stripHintUsed stripDefaultRows stripHintRows @?= stripHintRows
+    , -- | **The grid is the region that gives way**, which is his /"I just
+      -- don't want them to take **all** the vertical space"/ read in the
+      -- other direction. A two-column strip is the case that shows it: at
+      -- three columns the ten keys are the binding constraint and the grid
+      -- has rows to spare.
+      testCase "a hint past its floor takes the rows it needs, off the grid" $ do
+        stripHintUsed 10 6 @?= 6
+        assertBool "a longer hint is fewer options" $
+          gridSlots (stripGrid 52 10 6) < gridSlots (stripGrid 52 10 stripHintRows)
+    , -- | **The grid keeps one row, always.** A strip that showed a hint and
+      -- no options at all would have stopped being the pane the F-keys are
+      -- bound to, so the hint's growth stops one row short of that.
+      testCase "a hint can never take the grid's last row" $ do
+        assertBool "a row of cells survives any hint" $
+          and [ gridRows (stripGrid 96 r (stripHintUsed r n)) >= 1
+              | r <- [stripMinRows .. 40], n <- [0, 1, 3, 7, 40, 400] ]
+        assertBool "the budget leaves the heading, a grid row and the reply" $
+          and [ stripHintBudget r <= max stripHintRows (r - 2 - stripReplyRows)
+              | r <- [stripMinRows .. 40] ]
+    , -- | **The floor wins in a strip too short to pay for it**, which is
+      -- the one place the region overflows: his /"always"/ is the rule and
+      -- the drag slice 1 built is the remedy.
+      testCase "the floor holds even where the strip cannot afford it" $ do
+        stripHintBudget stripMinRows @?= stripHintRows
+        stripHintUsed stripMinRows 9 @?= stripHintRows
+    , -- | **THE BODY IS A ROW SHORTER THAN THE STRIP, AND THE ROW THE
+      -- ARITHMETIC USED TO INVENT WAS THE REPLY ROW** — `~w2tk2` slice 4,
+      -- measured under a pty: at a strip of fourteen the body drew thirteen
+      -- rows and the fourteenth region fell past the viewport's last line.
+      -- See 'stripBodyRows'.
+      testCase "the body is one row shorter than the strip, floored at one" $ do
+        stripBodyRows 14 @?= 13
+        stripBodyRows stripDefaultRows @?= stripDefaultRows - 1
+        stripBodyRows 1 @?= 1
+        stripBodyRows 0 @?= 1
+    , -- | **At the default height all four regions fit the body exactly** —
+      -- a heading, his three rows of cells, the hint's floor and the reply
+      -- row, in the eight rows a nine-row strip gives its body. **This is
+      -- the case that holds 'stripDefaultRows' to its claim**: it was eight
+      -- and the reply row was off the screen.
+      testCase "at the default height the four regions fit the body exactly" $ do
+        let body = stripBodyRows stripDefaultRows
+            g = stripGrid 96 body stripHintRows
+        gridRows g @?= 3
+        gridSlots g @?= 9
+        1 + gridRows g + stripHintRows + stripReplyRows @?= body
     , testCase "a cell is wide enough for the key field and a typical label" $
         assertBool "" (stripCellWidth >= 3 + 2 + 18)
     ]

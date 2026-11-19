@@ -50,11 +50,14 @@ module Tui.Layout
   , openStrip
   , closeStrip
   , stripSized
+  , stripBodyRows
   , Grid (..)
   , stripGrid
   , stripSlotKeys
   , stripCellWidth
   , stripHintRows
+  , stripHintBudget
+  , stripHintUsed
   , stripReplyRows
   ) where
 
@@ -324,14 +327,51 @@ defaultStrip = Strip { stripOpen = False, stripRows = stripDefaultRows }
 stripMinRows :: Int
 stripMinRows = 3
 
--- | **Eight rows of content, which is what the finished strip needs and not
--- a number chosen for slice 1.** The design puts a grid of three or four
--- rows in the upper half, the LLM hint in the lower half, and a reply row
--- under that — so the strip he will eventually pull is about this tall, and
--- opening it at its eventual height is what makes slice 1 a test of the
--- premise rather than of a smaller thing.
+-- | **Nine rows, which is what the finished strip needs and not a number
+-- chosen for slice 1.** The design puts a grid of three or four rows in the
+-- upper half, the LLM hint in the lower half, and a reply row under that —
+-- so the strip he will eventually pull is about this tall, and opening it at
+-- its eventual height is what makes slice 1 a test of the premise rather
+-- than of a smaller thing.
+--
+-- **Eight until slice 4, and the extra row is the reply row he never saw.**
+-- Measured under a pty, 2026-11-19: at eight the body drew a heading, three
+-- rows of cells and the three hint rows, and the reply row was **below the
+-- viewport's last line** — reserved in the arithmetic and absent from the
+-- screen, which nothing could see while the reserve was blank. See
+-- 'stripBodyRows' for why the body is a row shorter than the strip. **Nine
+-- is the height at which his own measured geometry still holds**: three
+-- columns of three, the hint's floor, and a reply row that is actually
+-- drawn — @1 + 3 + 3 + 1@ in the eight rows a nine-row strip gives its body.
+--
+-- **His own dotfile holds a @suggestion-rows@ of its own and this default
+-- will not reach it.** At eight he now sees two rows of cells rather than
+-- three, with the reply row present; one pull of the accent bar is the
+-- difference.
 stripDefaultRows :: Int
-stripDefaultRows = 8
+stripDefaultRows = 9
+
+-- | **The rows the strip's body can actually draw**, which is one fewer than
+-- the strip's own height — `~w2tk2` slice 4, and it is a measurement rather
+-- than an argument.
+--
+-- **Where the row goes.** 'Tui.App' gives the strip @stripRows + 1@ rows; of
+-- those the pane's title takes one, leaving @stripRows@ for the viewport,
+-- and the body inside it is wrapped in a @padAll 1@ whose top row is the
+-- first thing the viewport shows. The bottom row of that padding falls past
+-- the viewport's last line and is never drawn, which is why the body gets
+-- @stripRows - 1@ and not @stripRows - 2@.
+--
+-- **Measured under a pty, 2026-11-19**, at a strip pulled to fourteen: the
+-- title on one row, one row of padding, then **thirteen** rows of body. The
+-- arithmetic had been handing 'stripGrid' the strip's own height, so every
+-- region was budgeted one row that did not exist — and the row the overflow
+-- fell on was the last one, the reply row.
+--
+-- **Floored at one.** A strip at 'stripMinRows' is a sliver and its body is
+-- still a body; nothing downstream is prepared for a region of no rows.
+stripBodyRows :: Int -> Int
+stripBodyRows rows = max 1 (rows - 1)
 
 openStrip :: Strip -> Strip
 openStrip s = s { stripOpen = True }
@@ -395,12 +435,50 @@ stripCellWidth = 26
 -- free for an LLM suggestion"/. Three is the /"three lines-worth"/ reading,
 -- which is the one that does not take half the strip away from the grid.
 --
--- **Reserved from slice 2, filled at slice 4.** Blank rows now rather than a
+-- **Reserved at slice 2, filled at slice 4.** Blank rows first rather than a
 -- grid that grows into them and has to be shrunk later: the geometry is the
--- thing this slice is establishing, and a reserve that only appears once
+-- thing slice 2 was establishing, and a reserve that only appears once
 -- there is something to put in it is a reserve that was never tested.
+--
+-- **THIS IS A FLOOR AND NOT A CAP — `~w2tk2` slice 4**, which is the reading
+-- his /"always be free"/ asks for: three rows are the hint's whether it uses
+-- them or not, and a hint that needs more takes more. 'stripHintUsed' is the
+-- whole of that rule and 'stripHintBudget' is where it stops.
 stripHintRows :: Int
 stripHintRows = 3
+
+-- | **The most rows the hint may take in a strip this tall** — `~w2tk2`
+-- slice 4.
+--
+-- **The grid keeps one row, always.** The hint grows by taking rows off the
+-- grid, and the row it may not take is the last one: a strip showing a hint
+-- and no options at all would have stopped being the pane the F-keys are
+-- bound to. One heading, one grid row and the reply row are what the hint
+-- is not allowed to have.
+--
+-- **It is never below 'stripHintRows', even in a strip too short to pay
+-- for it.** At 'stripMinRows' the arithmetic wants fewer than three, and
+-- the floor is what his /"always"/ means — the overflow clips, and the
+-- remedy is the drag slice 1 built: pull the strip taller and both regions
+-- grow.
+stripHintBudget :: Int -> Int
+stripHintBudget rows = max stripHintRows (rows - 2 - stripReplyRows)
+
+-- | **The rows the hint region actually occupies**, given how tall the strip
+-- is and how many lines the hint wrapped to — `~w2tk2` slice 4.
+--
+-- **Takes the line count rather than the text**, so the arithmetic is here
+-- and the wrapping is in 'Tui.Panes.stripHintLines', which is the one place
+-- that knows how a row of this pane breaks. The drawing and the keymap read
+-- the same two functions in the same order, which is how `~w2tk2` slice 3a's
+-- defect — a key on a cell the grid never drew — stays fixed when the grid's
+-- size starts depending on the hint as well as on the strip.
+--
+-- **No hint is @0@ lines and still three rows.** The region does not appear
+-- and disappear: a grid that reflowed every time the model spoke would move
+-- every key he had just learned.
+stripHintUsed :: Int -> Int -> Int
+stripHintUsed rows needed = min (stripHintBudget rows) (max stripHintRows needed)
 
 -- | **One row at the bottom to reply to the LLM in** — his instruction,
 -- /"there needs to be a room for one row at the bottom, for a reply from the
@@ -441,19 +519,28 @@ data Grid = Grid
 --   * **A taller strip offers more suggestions**, up to ten — which makes
 --     the drag of slice 1 a control over the slate and not only over how
 --     much is on screen.
+--   * **A long hint offers fewer**, because @hintRows@ is what the hint
+--     actually took and not the floor — `~w2tk2` slice 4. The grid is the
+--     region that gives way, which is his /"I just don't want them to take
+--     **all** the vertical space"/ read in the other direction.
 --   * **At his measured geometry — a 99-column script pane — there are
 --     three columns and three grid rows, so NINE options**, and F10 has no
 --     slot to take. That is not a gap: the keys bound are exactly the cells
 --     drawn, so nothing is advertised that cannot be pressed.
-stripGrid :: Int -> Int -> Grid
-stripGrid width rows =
+stripGrid :: Int -> Int -> Int -> Grid
+stripGrid width rows hintRows =
   Grid { gridCols = cols, gridRows = used, gridSlots = slots }
   where
     cols = max 1 (width `div` stripCellWidth)
     -- | **One row for the heading, then the reserve.** The heading is inside
     -- the grid's budget and not outside it, because it is drawn in the
     -- strip's own rows like everything else.
-    allowance = max 1 (rows - 1 - stripHintRows - stripReplyRows)
+    --
+    -- **The hint's rows are an argument and not 'stripHintRows' any more** —
+    -- `~w2tk2` slice 4. A hint longer than its floor takes rows from here,
+    -- which is what makes the reserve a floor rather than a cap, and
+    -- 'stripHintUsed' is the only thing that decides the number.
+    allowance = max 1 (rows - 1 - hintRows - stripReplyRows)
     slots = min (length stripSlotKeys) (cols * allowance)
     -- | **The rows the slots need, not the rows they are allowed.** A strip
     -- pulled tall enough for twelve cells still draws four rows of ten, and
