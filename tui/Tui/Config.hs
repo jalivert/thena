@@ -62,6 +62,12 @@ data Config = Config
     -- @suggestion-rows@) and one field here, because they are one pane.
   , cfgDropdownOn :: Bool
     -- ^ @:dropdown on|off@ — `~492hq`. Same shape as 'cfgAutoSelect'.
+  , cfgJevOn      :: Bool
+    -- ^ **@:jev on|off@ — `~zttnz`, his instruction of 2026-11-19.** Off
+    -- means no request is ever sent and the suggestion pane falls back to
+    -- its own candidates in alphabetical order. Same shape as the three
+    -- above; defaults to on, so a dotfile that has never heard of it behaves
+    -- as before.
   } deriving (Show, Eq)
 
 -- | The standing defaults as they already are in 'Tui.App.runTui' —
@@ -77,6 +83,7 @@ defaultConfig = Config
   , cfgWidths     = []
   , cfgStrip      = defaultStrip
   , cfgDropdownOn = True
+  , cfgJevOn      = True
   }
 
 -- | @~\/.config\/thena@ — not @thena-tui@: the TUI is the only frontend
@@ -125,6 +132,7 @@ applyLine cfg line = case break (== '=') line of
   ("suggestion-rows", '=' : v) | Just n <- readInt v ->
     cfg { cfgStrip = stripSized n (cfgStrip cfg) }
   ("dropdown", '=' : v) | Just b <- parseBool v -> cfg { cfgDropdownOn = b }
+  ("jev", '=' : v)      | Just b <- parseBool v -> cfg { cfgJevOn = b }
   _                      -> cfg
 
 parseBool :: String -> Maybe Bool
@@ -198,4 +206,5 @@ writeConfig path cfg = do
     , "suggestions=" <> (if stripOpen (cfgStrip cfg) then "on" else "off")
     , "suggestion-rows=" <> show (stripRows (cfgStrip cfg))
     , "dropdown=" <> (if cfgDropdownOn cfg then "on" else "off")
+    , "jev=" <> (if cfgJevOn cfg then "on" else "off")
     ]

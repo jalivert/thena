@@ -766,6 +766,21 @@ data St = St
     -- strip's own source, @:preselect@ still toggles, and every attr and
     -- test it has stays — which is exactly the state his ruling asks for
     -- between \"disabled\" and the deletion he has not authorised.
+  , stJevOn :: Bool
+    -- ^ **whether Jev is asked at all** — `~zttnz`, his instruction of
+    -- 2026-11-19. @:jev on|off@, persisted, the same shape as
+    -- 'stDropdownOn'.
+    --
+    -- **Off means no request is ever sent** — not sent and discarded, not
+    -- sent: 'scheduleJevRanking' returns at once, so nothing of his quota is
+    -- spent and nothing can arrive late and renumber a cell.
+    --
+    -- **And the suggestion pane falls back to its own candidates in
+    -- alphabetical order**, which is the one state where it shows a row Jev
+    -- did not name. His rule — /"We don't show suggestions that are not from
+    -- Jev"/ — is about the pane when Jev is answering; a switch that turned
+    -- the pane off along with Jev would have been a different instruction
+    -- from the one he gave.
   , stHint :: Maybe String
     -- ^ **what the suggestion strip's hint region is saying** — `~w2tk2`
     -- slice 4, his /"when it sees that the user is clearly taking the wrong
@@ -901,6 +916,7 @@ runTui = do
         , stStrip       = cfgStrip cfg
         , stStripDrag   = Nothing
         , stDropdownOn  = cfgDropdownOn cfg
+        , stJevOn       = cfgJevOn cfg
         , stPicker      = Nothing
         , stEscRun      = Nothing
         , stInputExtent = Nothing
@@ -2304,9 +2320,18 @@ liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 --
 -- **Empty with the strip closed**, so no F-key does anything for a pane that
 -- is not on screen.
+--
+-- **`:jev off` is the one state that shows a row Jev did not name** —
+-- `~zttnz`, his instruction of 2026-11-19: /"when Jev is disabled, the
+-- twelve or 11 or however many options are simply alphabetically sorted"/.
+-- The rows sorted are **this pane's own candidates** — what the statement
+-- grammar offers for the line, which is the only list whose rows carry an
+-- insertion — and not @matchesView@, which is the rules that apply at the
+-- focus and has no insertion to give a cell.
 stripSlateOf :: St -> [OfferRow]
 stripSlateOf st
   | not (stripOpen (stStrip st)) = []
+  | not (stJevOn st) = sortOn rowLabel (slateRows (stSlate st))
   | otherwise = take (slateJevPicked (stSlate st)) (slateRows (stSlate st))
 
 -- | **The grid as the keymap can know it** — `~w2tk2` slice 3a.
@@ -3693,6 +3718,12 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
           let st' = st0 { stDropdownOn = mode == "on" }
           liftIO (saveConfig (configOf st'))
           appendTurn st' Nothing ["dropdown: " <> mode]
+        -- | **`:jev on|off`** — `~zttnz`. See 'stJevOn' for what off means
+        -- on screen and for his quota.
+        [":jev", mode] | mode `elem` ["on", "off"] -> do
+          let st' = st0 { stJevOn = mode == "on" }
+          liftIO (saveConfig (configOf st'))
+          appendTurn st' Nothing ["jev: " <> mode]
         -- | **`:hint ‹text›` and `:hint`** — `~w2tk2` slice 4, and it is a
         -- **stub on purpose**: the hint region has to be drawable, and its
         -- geometry measurable, before the model that would write one
@@ -4231,6 +4262,11 @@ scriptLocal st text = case words text of
     liftIO (saveConfig (configOf st'))
     put st'
     pure ("dropdown: " <> mode)
+  [":jev", mode] | mode `elem` ["on", "off"] -> Just $ do
+    let st' = st { stJevOn = mode == "on" }
+    liftIO (saveConfig (configOf st'))
+    put st'
+    pure ("jev: " <> mode)
   -- | `:hint` runs from a script line too, his ruling `~g5wjz` — a
   -- TUI-local word is a TUI-local word wherever it is typed. **No
   -- 'saveConfig'**: 'stHint' is content and is not in the dotfile.
@@ -4317,6 +4353,9 @@ tuiHelpLines =
     , ("",                  "  taller strip has more slots — pull it and see")
     , (":dropdown on|off",  "whether the completion dropdown appears and takes keys")
     , ("",                  "  at all. Off leaves :load's own path listing alone")
+    , (":jev on|off",       "whether Jev is asked at all. The suggestion pane shows")
+    , ("",                  "  Jev's own candidates and nothing else, so with jev off it")
+    , ("",                  "  falls back to its candidates in alphabetical order")
     , (":hint ‹text›",      "put a line in the strip's hint region, the rows kept for")
     , ("",                  "  a model that watches — " <> show stripHintRows <> " of them at least, and a")
     , ("",                  "  longer hint takes rows off the grid. :hint alone clears it.")
@@ -5607,6 +5646,7 @@ configOf st = Config
       ]
   , cfgStrip      = stStrip st
   , cfgDropdownOn = stDropdownOn st
+  , cfgJevOn = stJevOn st
   }
 
 appendTurn :: St -> Maybe String -> [String] -> EventM Name St ()
@@ -5878,10 +5918,14 @@ jevDebounceMicros = 250000
 scheduleJevRanking :: EventM Name St ()
 scheduleJevRanking = do
   st <- get
-  let pending = stJevPending st + 1
-      chan = stJevChan st
-  put st { stJevPending = pending }
-  liftIO (void (forkIO (threadDelay jevDebounceMicros >> writeBChan chan (JevDue pending))))
+  -- | **`:jev off` sends nothing** — `~zttnz`. Stopping here rather than at
+  -- the request is deliberate: nothing is timed, nothing wakes up, and
+  -- nothing of his quota is spent.
+  when (stJevOn st) $ do
+    let pending = stJevPending st + 1
+        chan = stJevChan st
+    put st { stJevPending = pending }
+    liftIO (void (forkIO (threadDelay jevDebounceMicros >> writeBChan chan (JevDue pending))))
 
 -- | **A debounce timer coming due.** A generation that no longer matches
 -- 'stJevPending' was superseded by a later keystroke while it slept and is
