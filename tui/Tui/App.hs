@@ -1764,14 +1764,27 @@ draw st =
                 -- ask** — his design. It is not a hint about a feature; it
                 -- is the feature's only control.
                 Nothing -> [withAttr (attrName "strip.dim") (str (Text.unpack hintPlaceholder))]
-                -- **Open, and its text is real text** — `openStripReply`
-                -- put the sentence there on the click, so there is no ghost
-                -- to keep beside the editor and no width to hold it to.
+                -- **Open and still empty: the sentence is a ghost behind
+                -- the cursor, and Tab is what makes it real** — his ruling
+                -- of 2026-11-19. Enter sends it either way, so the ghost is
+                -- never a lie about what would go out; Tab is there for
+                -- when he wants to edit it rather than send it.
+                --
+                -- **The editor is held to the width of its own text** so
+                -- the ghost can sit after it. 'renderEditor' is greedy
+                -- across the row otherwise and would cover the whole line,
+                -- leaving nowhere for the ghost to be drawn; one column
+                -- past the text is where the cursor goes.
                 Just ed ->
                   [ withAttr (attrName "strip.key") (str "❯ ")
-                  , overrideAttr editFocusedAttr (attrName "strip.hint")
-                      (renderEditor (vBox . map (str . Text.unpack)) True ed)
+                  , hLimit (Text.length (typedReply ed) + 1)
+                      ( overrideAttr editFocusedAttr (attrName "strip.hint")
+                          (renderEditor (vBox . map (str . Text.unpack)) True ed)
+                      )
                   ]
+                    <> [ withAttr (attrName "strip.dim") (str (Text.unpack hintPlaceholder))
+                       | Text.null (typedReply ed)
+                       ]
               <> [fill ' ']
           )
 
@@ -3128,19 +3141,17 @@ handlePaneClick ev = case ev of
     st <- get
     case stStripReply st of
       Just _ -> pure True
-      -- | **THE CLICK TURNS THE DIM LINE INTO A REAL ONE — HIS,
-      -- 2026-11-19**: /"When I click into the \"give me a hint\" tab should
-      -- turn the dimmed line into a real line. That's how it usually
-      -- works."/ So the sentence is put into the editor as ordinary text
-      -- with the cursor behind it, there to edit or to send as it stands.
+      -- | **THE CLICK ONLY TAKES THE KEYBOARD; TAB IS WHAT MAKES THE
+      -- SENTENCE REAL — HIS, 2026-11-19**: /"I don't want the click to turn
+      -- it into a real prompt. I want the tab to do that. Like is usually
+      -- the UX in editors and prompts."/
       --
-      -- **It replaces the placeholder that was there for one round.** That
-      -- one kept the sentence on screen through the click, which fixed his
-      -- first report (/"the sentence disappears"/) and left a ghost he could
-      -- not edit. Real text is the honest form of the same promise: the ask
-      -- goes out as written, so it should be written.
+      -- So the row opens **empty** and the sentence stays dim behind the
+      -- cursor, which is the shape this TUI already uses at its own prompt:
+      -- the whisper is dimmed and Tab accepts what is lit (his
+      -- `.jalivert/TUI.md` #17). 'handleStripReplyEvent' has the Tab.
       Nothing -> do
-        put st { stStripReply = Just (openStripReply hintPlaceholder) }
+        put st { stStripReply = Just (E.editorText StripReply (Just 1) Text.empty) }
         pure True
   _ -> pure False
   where
@@ -3555,6 +3566,18 @@ handleStripReplyEvent st reply ev = case ev of
   -- slice 5 only because there was no model on the other end yet.
   VtyEvent (V.EvKey V.KEnter []) -> askHintNow
   VtyEvent (V.EvKey V.KEsc [])   -> closeStripReply
+  -- | **TAB MAKES THE GHOST REAL — HIS, 2026-11-19**: /"I want the tab to
+  -- do that. Like is usually the UX in editors and prompts."/ The same key
+  -- that accepts the whisper at the main prompt, so there is one gesture
+  -- for /take what is dimmed/ in the whole TUI rather than two.
+  --
+  -- **Only while the row is empty**, because that is when there is a ghost
+  -- on screen to accept. With text in the row Tab has nothing to take, and
+  -- inserting the sentence into the middle of what he is writing is the one
+  -- thing it must not do.
+  VtyEvent (V.EvKey (V.KChar '\t') []) | Text.null (typedReply reply) -> do
+    put st { stStripReply = Just (openStripReply hintPlaceholder) }
+  VtyEvent (V.EvKey (V.KChar '\t') []) -> pure ()
   -- | **A CLICK ANYWHERE ELSE GIVES THE KEYBOARD BACK — HIS, 2026-11-19**:
   -- /"when I click the AI pane, I can't click back to the repl. That's
   -- wrong too."/ He was right and it was a trap: this row claims every
@@ -6730,8 +6753,8 @@ hintLabel st
 typedReply :: Editor Text Name -> Text
 typedReply = Text.concat . getEditContents
 
--- | **The reply row as a click leaves it: the text in place and the cursor
--- behind it** — `~3p9g2`, his /"turn the dimmed line into a real line"/.
+-- | **The reply row as Tab leaves it: the sentence in place and the cursor
+-- behind it** — `~3p9g2`, his /"I want the tab to do that"/.
 --
 -- **The cursor is sent to the end rather than left at the start**, which is
 -- where 'E.editorText' puts it: a line he is meant to edit or send wants the
