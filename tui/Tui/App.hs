@@ -2265,34 +2265,49 @@ offerDropdownLayer st = case liveOffers st of
 liveOffers :: St -> Maybe OfferDropdown
 liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 
--- | **The suggestion strip's slate: every candidate that can actually be
--- taken, in the order the dropdown has them** — `~w2tk2` slice 2.
+-- | **The suggestion pane's cells, and they are Jev's or there are none** —
+-- `~w2tk2` slices 2 and 3b.
 --
 -- **Read by the drawing and by the keymap, which is the point of its being a
 -- function.** 'draw' cuts it to the grid's capacity and the F-keys index
 -- into it; if the two computed it separately a key could land on a cell that
--- was not drawn, which is the class of defect this slice is otherwise wide
--- open to.
+-- was not drawn.
+--
+-- **NOTHING IN THIS PANE IS ANYTHING BUT JEV'S — HIS INSTRUCTION,
+-- 2026-11-19, said five times and spelled out the last time**: /"the
+-- suggestion pane's 12 suggestions (or 11 because I don't know if we can
+-- capture F11) are all from Jev. **We don't show suggestions that are not
+-- from Jev**."/
+--
+-- So this is the **scored prefix** of 'stSlate' and never the whole of it.
+-- 'slateJevPicked' is how many leading rows Jev's answer named
+-- ('jevOrderRows' sorts them to the front in Jev's own order), so taking
+-- that many is exactly /the ones Jev suggested/ and nothing else can reach a
+-- cell.
+--
+-- **'stSlate' itself stays whole, and that is not a loophole.** It is the
+-- candidate pool the next request is built from — Jev has to be asked about
+-- something — so the pool is the engine's full offer list and what the pane
+-- shows is this prefix of it.
+--
+-- **With no answer in hand the pane is empty, and that is the instruction
+-- applied rather than a gap.** 'slateJevPicked' is zero before the first
+-- answer lands, so the strip shows nothing for the ~300ms a request takes,
+-- and shows nothing at all where Jev cannot be reached (no key, no network).
+-- The question we had raised about what to show in that window
+-- (@discussion/the-dropdown-is-the-wrong-element.md@ §15 q1) is answered by
+-- his rule: nothing that is not from Jev.
 --
 -- **Filtered to rows with something to insert.** A row that cannot be
 -- accepted has no business occupying a numbered slot — his design has no
--- unselectable rows in it, every cell being reachable by its own key. Since
--- `~bkzw9` the engine's offers are all insertable anyway, so this filter is
--- a guard and not a policy; if hint rows ever come back (`~5f3k6` is open),
--- they will need somewhere that is not a slot.
+-- unselectable rows in it, every cell being reachable by its own key.
 --
 -- **Empty with the strip closed**, so no F-key does anything for a pane that
 -- is not on screen.
---
--- **'stSlate' and not 'stOfferDropdown', which is `~3gn2r`.** The strip is
--- not the dropdown and is not a second view of its visibility: it keeps
--- working with @:dropdown off@ (`~492hq`'s /disabled, not deleted/) and it
--- keeps working after an Enter and after Esc, which reading the dropdown's
--- own field is exactly what it could not do.
 stripSlateOf :: St -> [OfferRow]
 stripSlateOf st
   | not (stripOpen (stStrip st)) = []
-  | otherwise = slateRows (stSlate st)
+  | otherwise = take (slateJevPicked (stSlate st)) (slateRows (stSlate st))
 
 -- | **The grid as the keymap can know it** — `~w2tk2` slice 3a.
 --
