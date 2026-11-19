@@ -4363,6 +4363,21 @@ handleReplEvent (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 1
 -- inert rather than quietly yanking.)
 handleReplEvent (MouseUp _ _ _) = pure ()
 handleReplEvent (MouseDown _ _ _ _) = pure ()
+-- | **The same two gestures in their other spelling, and leaving them out
+-- was `~9qpjn`** — his report, 2026-11-19: /"when I click the top bar with
+-- list of panes, it disappears the Jev's suggestions."/
+--
+-- **A press lands in 'BrickEvent'\'s named shape only when some widget
+-- reported an extent under it.** The pane bar does not — 'Tui.Panes.paneBarWidget'
+-- is plain text, the chips are not clickable — so a click there arrives as a
+-- raw 'V.EvMouseDown' and fell past the two cases above into the catch-all,
+-- which treats whatever it is handed as an edit: 'followInput' yanks the repl
+-- pane to the bottom and 'refreshOfferDropdown' rebuilds the slate. **The two
+-- shapes are one gesture and are paired everywhere else here**
+-- ('handlePaneClick', 'handleStripReplyEvent'); this was the one place only
+-- half of it was named.
+handleReplEvent (VtyEvent V.EvMouseUp {}) = pure ()
+handleReplEvent (VtyEvent V.EvMouseDown {}) = pure ()
 -- | The startup tick ('runTui', the only 'Tick' there is) always did
 -- nothing for the extents — the outer wrapper already recorded those by
 -- the time this runs, which was the whole point of it — but it is also
@@ -6336,7 +6351,16 @@ refreshOfferDropdown = do
         | isJust (loadPathPrefix line) = Nothing
         | otherwise = Just (statementOfferView (activeSession st0) before after)
       new = offered >>= buildOfferDropdown (stAutoSelect st0) col
-      slate = slateOfDropdown new
+      -- | **Jev's order survives a rebuild that offers the same things** —
+      -- `~7prxf`, and leaving it out here was the other half of `~9qpjn`.
+      -- 'slateJevPicked' is 0 in a freshly built dropdown and
+      -- 'stripSlateOf' shows @take@ that many rows while Jev is on, so a
+      -- rebuild on an unchanged set emptied the strip — and the refire
+      -- below declines, precisely because the set did not change. **The two
+      -- have to agree: the frames where Jev is not asked again are exactly
+      -- the frames whose ranking must be kept.** 'closeDropdowns' already
+      -- did this; this path, which runs on every keystroke, did not.
+      slate = keepJevOrder (stSlate st0) (slateOfDropdown new)
       oldSlateRows = slateRows (stSlate st0)
       st = st0 { stSlate = slate }
   -- Same dismissal as 'refreshDropdown': hidden while the line is as Esc
