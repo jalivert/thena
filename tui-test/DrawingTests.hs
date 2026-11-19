@@ -26,6 +26,19 @@ import Test.Tasty.HUnit (assertEqual, testCase)
 
 import Thena.View.Address (Address (..), Move (GoAlong))
 import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Shape (..))
+import Thena.View.Failure
+  ( FaultKind (..)
+  , FaultView (..)
+  , Nature (..)
+  , PartView (..)
+  , Piece (AName, AWanted)
+  , Role (..)
+  , StopView (..)
+  , Wanted (ACoreTerm)
+  , WarningView (..)
+  , Why (..)
+  , natureOf
+  )
 import Thena.View.Goals (GoalKind (..), GoalView (..))
 import Thena.View.Instral (ValueView (..))
 import Thena.View.Machine (MachineView (..))
@@ -548,6 +561,20 @@ whole n f = ModuleEntry n f AllIn False [] 0
 partial :: String -> ModuleEntry
 partial n = ModuleEntry n Nothing SomeIn False [] 0
 
+-- | **A stop, built by hand** — the same discipline as a 'Display' here: the
+-- suite draws from the view's own type and never from a session, so what a
+-- fold says is settled without loading a module.
+--
+-- **'natureOf' and not a nature written in beside it**, because
+-- 'stopViewNature' is derived in the engine and a test that spelled its own
+-- would be checking a value this pane never sees.
+stopOf :: Why -> StopView
+stopOf w = StopView (natureOf w) [] [] w
+
+-- | The commonest one: a declaration that names something not in scope.
+notInScope :: String -> StopView
+notInScope n = stopOf (Faulty [FaultView NotInScope [PartView TheWord (AName n)] Nothing])
+
 -- | The same module one step further down the import tree — `~84j24`.
 nested :: Int -> ModuleEntry -> ModuleEntry
 nested d me = me { meDepth = d }
@@ -632,8 +659,9 @@ paneRowCases =
         ]
         (moduleRows
           [ whole "whole" Nothing
-          , (partial "some") { meUnfinished = [("b", ["why"])] }
-          , (partial "none") { meMark = NoneIn, meUnfinished = [("b", ["why"])] }
+          , (partial "some") { meUnfinished = [("b", notInScope "nonesuch")] }
+          , (partial "none")
+              { meMark = NoneIn, meUnfinished = [("b", notInScope "nonesuch")] }
           ]
           [])
   , -- | **The three marks, spelled out, and the spelling is the decision** —
@@ -665,8 +693,8 @@ paneRowCases =
       assertEqual ""
         [ Heading "modules" (Just 1)
         , Tap "m" "\x26A0\xFE0F m"
-        , Detail "broken did not go in:"
-        , Detail "  stuck: not in scope: nonesuch"
+        , Alert "\x2717 broken did not go in:"
+        , Detail "  not in scope: nonesuch"
         , Detail "after is pending"
         , Detail "last is pending"
         ]
@@ -674,9 +702,132 @@ paneRowCases =
           [ (partial "m")
               { meOpen = True
               , meUnfinished =
-                  [ ("broken", ["stuck: not in scope: nonesuch"])
-                  , ("after", ["never asked"])
-                  , ("last", [])
+                  [ ("broken", notInScope "nonesuch")
+                  , ("after", notInScope "never asked")
+                  , ("last", stopOf (Faulty []))
+                  ]
+              }
+          ]
+          [])
+  , -- | **The four natures, and three of them are not faults** —
+    -- `.jalivert/FRONTEND.md`, /Why a declaration did not go in/, on MS12 phase
+    -- 325's `Nature`: an item sitting on a question or out of fuel can go on,
+    -- and @:abandon@ is the user's own act. **Before the phase every one of
+    -- these drew as /did not go in/**, because the reason was a whole
+    -- 'Thena.Driver.Response' and the fold had nothing to read a nature off.
+    --
+    -- **The fault is the only 'Alert'**, which is the ink half of the same
+    -- instruction.
+    testCase "a stop that is not a fault does not read as one" $
+      assertEqual ""
+        [ Heading "modules" (Just 4)
+        , Tap "a" "\x26A0\xFE0F a"
+        , Alert "\x2717 one did not go in:"
+        , Detail "  not in scope: nonesuch"
+        , Tap "b" "\x26A0\xFE0F b"
+        , Detail "\x22ef two is waiting for an answer:"
+        , Detail "  which one did you mean?"
+        , Tap "c" "\x26A0\xFE0F c"
+        , Detail "\x22ef three ran out of fuel after 200 instructions"
+        , Tap "d" "\x26A0\xFE0F d"
+        , Detail "\x2296 you abandoned four"
+        ]
+        (moduleRows
+          [ (partial "a") { meOpen = True, meUnfinished = [("one", notInScope "nonesuch")] }
+          , (partial "b")
+              { meOpen = True
+              , meUnfinished = [("two", stopOf (Asked "which one did you mean?"))]
+              }
+          , (partial "c")
+              { meOpen = True
+              , meUnfinished = [("three", stopOf (OutOfFuel 200))]
+              }
+          , (partial "d") { meOpen = True, meUnfinished = [("four", stopOf WasGivenUp)] }
+          ]
+          [])
+  , -- | **A kind says what went wrong and never what it went wrong about** —
+    -- the engine's rule, so the subject is a part. One part is allowed onto the
+    -- headline, the one whose role the kind is about, and the rest get a line
+    -- each: /not in scope/ with the word on the line below would be worse in a
+    -- fold two columns wide than what the prompt has always printed.
+    testCase "the kind's own part is on its headline and the rest are below it" $
+      assertEqual ""
+        [ Heading "modules" (Just 1)
+        , Tap "m" "\x26A0\xFE0F m"
+        , Alert "\x2717 t did not go in:"
+        , Detail "  expected a term"
+        , Detail "    the word  3"
+        ]
+        (moduleRows
+          [ (partial "m")
+              { meOpen = True
+              , meUnfinished =
+                  [ ( "t"
+                    , stopOf
+                        (Faulty
+                          [ FaultView WrongKindOfThing
+                              [ PartView TheWanted (AWanted ACoreTerm)
+                              , PartView TheWord (AName "3")
+                              ]
+                              Nothing
+                          ])
+                    )
+                  ]
+              }
+          ]
+          [])
+  , -- | **The failures nest, and the inner one is introduced by /because/** —
+    -- @faultViewInside@, and `.jalivert/FRONTEND.md`'s instruction to draw the
+    -- outer kind and indent the inner. Indentation alone would make it read as
+    -- another part of the outer fault, which is the one thing it is not.
+    testCase "a wrapped failure says why it is under the one that wraps it" $
+      assertEqual ""
+        [ Heading "modules" (Just 1)
+        , Tap "m" "\x26A0\xFE0F m"
+        , Alert "\x2717 t did not go in:"
+        , Detail "  that term has no type"
+        , Detail "    because not in scope: nonesuch"
+        ]
+        (moduleRows
+          [ (partial "m")
+              { meOpen = True
+              , meUnfinished =
+                  [ ( "t"
+                    , stopOf
+                        (Faulty
+                          [ FaultView TermHasNoType []
+                              (Just (FaultView NotInScope
+                                      [PartView TheWord (AName "nonesuch")]
+                                      Nothing))
+                          ])
+                    )
+                  ]
+              }
+          ]
+          [])
+  , -- | **What the run said and what it warned about are in the fold** — they
+    -- are raised by the run this fold is of, so nothing else in the pane has
+    -- them for this item, and **a warning never stops anything**: it sits under
+    -- the reason rather than reading as one.
+    testCase "what the run said and warned about follow the reason" $
+      assertEqual ""
+        [ Heading "modules" (Just 1)
+        , Tap "m" "\x26A0\xFE0F m"
+        , Alert "\x2717 t did not go in:"
+        , Detail "  not in scope: nonesuch"
+        , Detail "  it said: trying the left branch"
+        , Detail "  plus shadows Nat.plus"
+        ]
+        (moduleRows
+          [ (partial "m")
+              { meOpen = True
+              , meUnfinished =
+                  [ ( "t"
+                    , (notInScope "nonesuch")
+                        { stopViewSaid = ["trying the left branch"]
+                        , stopViewWarned = [ANameShadows "plus" "Nat.plus"]
+                        }
+                    )
                   ]
               }
           ]
@@ -756,8 +907,8 @@ paneRowCases =
         [ Heading "modules" (Just 2)
         , Entry "\x2705 top"
         , Tap "deep" "    \x26A0\xFE0F deep"
-        , Detail "    broken did not go in:"
-        , Detail "      stuck: not in scope: nonesuch"
+        , Alert "    \x2717 broken did not go in:"
+        , Detail "      not in scope: nonesuch"
         , Detail "    after is pending"
         ]
         (moduleRows
@@ -765,8 +916,8 @@ paneRowCases =
           , nested 2 (partial "deep")
               { meOpen = True
               , meUnfinished =
-                  [ ("broken", ["stuck: not in scope: nonesuch"])
-                  , ("after", ["never asked"])
+                  [ ("broken", notInScope "nonesuch")
+                  , ("after", notInScope "never asked")
                   ]
               }
           ]
@@ -777,7 +928,7 @@ paneRowCases =
         (moduleRows
           [ (partial "m")
               { meFile = Just "m.thena"
-              , meUnfinished = [("broken", ["stuck"])]
+              , meUnfinished = [("broken", notInScope "nonesuch")]
               }
           ]
           [])

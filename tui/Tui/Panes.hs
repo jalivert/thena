@@ -40,6 +40,10 @@ import Text.Wrap
   , wrapTextToLines
   )
 
+import Thena.View.Failure (StopView (..))
+
+import Tui.Failure (StopLine (..), natureIsFault, stopLines)
+
 -- | One row of a list pane.
 --
 -- **Three kinds and no more**, because a pane of this column is a list with
@@ -66,6 +70,20 @@ data PaneRow n
     -- folded group still says how much is behind it.
   | Entry String
   | Detail String
+  | Alert String
+    -- ^ **a detail line that is a fault, so it is not dim** — `~8btbp`, and the
+    -- instruction is `.jalivert/FRONTEND.md`'s: /take your glyph and your ink
+    -- from @stopViewNature@, and nothing else/. Three of the four natures an
+    -- unfinished declaration can carry are not faults, and before this every
+    -- line of a ⚠️ module's fold was drawn identically — @not in scope:
+    -- nonesuch@ and /you typed :abandon/ in the same dim small print.
+    --
+    -- **A sixth kind rather than a hue**, because 'Tui.Theme.Theme' has no
+    -- error colour and adding one is a decision of his. What this takes is the
+    -- distinction the theme already ships: 'Detail' is dim, which is how this
+    -- TUI says /present but not in play/ everywhere, and a fault is in play.
+    -- **Drawn at a 'Detail''s indent exactly**, so a fold's lines stay in one
+    -- column whichever nature they carry.
   | Tap n String
     -- ^ **an entry that answers to a click** — `~nf5tx`, the ⚠️ a module's
     -- unfinished list hangs off. **The whole row is the target, not the glyph**:
@@ -207,14 +225,28 @@ moduleRows modules files =
         -- named and nothing is said about why, **because nothing worked out
         -- why** — the loader tries every later declaration and records what
         -- does not go through, so a reason for the second would be an invention.
+        --
+        -- **The root's lines are "Tui.Failure"'s and the ink is its nature's**
+        -- — `~8btbp`, closed by MS12 phase 325. The fold's first line is the
+        -- only one whose nature is in question, so it is the only one that can
+        -- be an 'Alert'; a fault's parts under it are its small print like any
+        -- other detail.
         unfolded
           | not (meOpen me) = []
           | otherwise = case meUnfinished me of
               [] -> []
-              (name, why) : pending ->
-                Detail (indent <> name <> " did not go in:")
-                  : map (Detail . ((indent <> "  ") <>)) why
+              (name, sv) : pending ->
+                stopped name sv
                   <> [Detail (indent <> nm <> " is pending") | (nm, _) <- pending]
+        stopped name sv =
+          [ kindOf (slDepth sl) (indent <> step sl <> slText sl)
+          | sl <- stopLines name sv
+          ]
+          where
+            step sl = replicate (2 * slDepth sl) ' '
+            kindOf 0
+              | natureIsFault (stopViewNature sv) = Alert
+            kindOf _ = Detail
     group label kind =
       let ps = sort [shorten kind p | (k, p) <- files, k == kind]
        in concat [Heading label (Just (length ps)) : map Entry ps | not (null ps)]
@@ -350,10 +382,19 @@ data ModuleEntry = ModuleEntry
   , meOpen :: Bool
     -- ^ whether its unfinished list is unfolded. **Clicking the row toggles
     -- this** — his instruction: /"when I click again, it hides that list"/.
-  , meUnfinished :: [(String, [String])]
+  , meUnfinished :: [(String, StopView)]
     -- ^ what did not go in, **in file order**: what the item would have
-    -- declared, and the lines of the answer its own run gave. Only the first
-    -- entry's lines are drawn; see 'moduleRows'.
+    -- declared, and why it did not. Only the first entry's reason is drawn;
+    -- see 'moduleRows'.
+    --
+    -- **A view and no longer lines of text** — `~8btbp`, closed by MS12 phase
+    -- 325. 'Tui.App' used to flatten an 'Thena.Driver.Unfinished' here with
+    -- @Thena.Render.renderResponse@, the prompt's own text renderer, because
+    -- there was no view of an unfinished item to render instead and the reason
+    -- was a whole 'Thena.Driver.Response'. Now the engine hands over a
+    -- 'Thena.Driver.NotDone', 'Thena.View.failureView' is its view, and
+    -- "Tui.Failure" turns it into the fold's lines — so this pane decides what
+    -- it says, which is the rule it was breaking.
   , meDepth :: Int
     -- ^ **how deep in the import tree this row sits** — `~84j24`, his ruling
     -- of 2026-11-18. 0 is a module nothing else imported, which is one he
@@ -557,6 +598,7 @@ paneRowWidget row = case row of
     withAttr (attrName "pane.heading") (wrapped (headingText label count))
   Entry t -> wrapped ("  " <> t)
   Detail t -> withAttr (attrName "pane.detail") (wrapped ("    " <> t))
+  Alert t -> wrapped ("    " <> t)
   TapHeading n label count ->
     clickable n (withAttr (attrName "pane.heading") (wrapped (headingText label count)))
   Tap n t -> clickable n (wrapped ("  " <> t))

@@ -243,6 +243,7 @@ library tui
         Tui.App
         Tui.Config
         Tui.Database
+        Tui.Failure
         Tui.Hint
         Tui.Jev
         Tui.Layout

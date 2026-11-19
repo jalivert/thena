@@ -112,6 +112,7 @@ import Thena.Render (renderResponse, renderTrouble)
 import Thena.View
   ( choicesView
   , developmentView
+  , failureView
   , focusAddress
   , machineView
   , matchesView
@@ -1537,6 +1538,13 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
 -- at the dropdown below: appending it after the base layer put it fully
 -- behind the panes, invisible, no error, just never on screen. Verified
 -- with a hardcoded marker widget before trusting the fix.
+-- | **How much of a term a pane is allowed to show before it elides** — one
+-- number, named, because every pane is drawn with the same one and what Jev is
+-- told has to be elided at the same place as what is on screen. It was three
+-- copies of @Budget 200@ until the modules pane's fold needed a fourth.
+paneBudget :: Budget
+paneBudget = Budget 200
+
 draw :: St -> [Widget Name]
 draw st =
   pickerLayer st
@@ -1546,7 +1554,7 @@ draw st =
     -- the panes, so content reaches the screen's own bottom-right corner.
     <> [padTop (Pad 1) (padLeft (Pad 1) (vBox [paneBar, str " ", hBox [docColumn, gapH, paneColumns]]))]
   where
-    budget = Budget 200
+    budget = paneBudget
     s = activeSession st
 
     -- | **Every pane, which are open, and where** — `~7tfhd`. Above
@@ -2385,7 +2393,7 @@ moduleEntries st = concat [walk 0 m | m <- modulesLoaded s, m `notElem` imported
         , meFile = listToMaybe [p | (p, _) <- filesRead s, moduleOfFile p == Just m]
         , meMark = mark
         , meOpen = mark /= AllIn && Set.member (moduleText m) (stModulesOpen st)
-        , meUnfinished = maybe [] (map flatten . partlyUnfinished) partly
+        , meUnfinished = maybe [] (map stopOf . partlyUnfinished) partly
         , meDepth = depth
         }
       where
@@ -2401,19 +2409,23 @@ moduleEntries st = concat [walk 0 m | m <- modulesLoaded s, m `notElem` imported
       Nothing -> AllIn
       Just _ | null (declaredByModule m s) -> NoneIn
       Just _ -> SomeIn
-    -- | **The engine's own renderer, and that crossing is `~8btbp`.** An
-    -- 'Unfinished' carries its reason as a 'Response', and
-    -- 'Thena.Render.renderResponse' is the only thing that renders one —
-    -- `Thena.Driver`'s own haddock says as much: /"a frontend showing a ⚠️ node
-    -- wants to say what it says at the prompt, and renderResponse is already
-    -- that renderer."/ There is no `Thena.View` for an unfinished item, so the
-    -- pane rule — panes render through the views, `Thena.Render` being
-    -- status-line text — has no other path here. It is in `.claude/CLOSEOUT.md`.
-    flatten u =
+    -- | **`~8btbp` is closed and this is the line that closes it.** An
+    -- 'Unfinished' carried its reason as a whole 'Response' until MS12 phase
+    -- 325, and 'Thena.Render.renderResponse' was the only thing that rendered
+    -- one — so a pane showing a ⚠️ module's fold was calling the prompt's text
+    -- renderer, against the pane rule that panes render through the views and
+    -- `Thena.Render` is status-line text. The engine narrowed the field to a
+    -- 'Thena.Driver.NotDone' and gave it 'Thena.View.failureView';
+    -- "Tui.Failure" turns that into the fold's lines.
+    --
+    -- **Nothing is flattened to text here any more.** The view goes to
+    -- 'Tui.Panes.ModuleEntry' as it is, so the pane decides what the fold says
+    -- and the drawing suite can hold it to that.
+    stopOf u =
       ( case unfinishedDeclares u of
           [] -> "an item"
           xs -> intercalate ", " xs
-      , renderResponse s (unfinishedWhy u)
+      , failureView paneBudget s (unfinishedWhy u)
       )
 
 -- | **Every file the session read, sorted into what it is** — the other half
@@ -6554,7 +6566,7 @@ jevRequest s typedSoFar offered = (JevState fields, candidates)
   where
     -- The same 'Budget' every pane is drawn with, so that what Jev reads and
     -- what is on screen are elided at the same place.
-    budget = Budget 200
+    budget = paneBudget
     links = developmentView budget s
 
     fields =
@@ -6681,7 +6693,7 @@ hintFields st =
   ]
   where
     s = activeSession st
-    budget = Budget 200
+    budget = paneBudget
     links = developmentView budget s
     unlines' = intercalate "\n"
 
