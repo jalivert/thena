@@ -18,6 +18,7 @@ module Thena.Engine
   , Exec (..)
   , Frame (..)
   , rules
+  , setBases
   , Development (..)
   , newDevelopment
   , focusContext
@@ -163,8 +164,11 @@ import Thena.Tactics.Eliminate
 import Thena.Tactics.Recurse (resolveRecursion)
 import Thena.Tactics.Specialise
   (Binder (..), Specialisation (..), specialise, survivingEquations)
+import Thena.Instral.Infer (inferProgram, reachingAll)
+import Thena.Instral.Type (Signature)
 import Thena.Rules
-  (RuleBase, RuleError (..), RuleIter, arities, basePath, clauses, dispatch, hasNext, next, resolveBlock, rootReading)
+  ( RuleBase, RuleError (..), RuleIter, allCallable, allSignatures, arities
+  , basePath, clauses, dispatch, hasNext, next, resolveBlock, rootReading )
 import Thena.Syntax.Lexer (isIdentifier)
 import Thena.Surface.Zipper (SurfaceZipper)
 import qualified Thena.Surface.Zipper as Zipper
@@ -244,6 +248,33 @@ data Machine = Machine
     --
     -- **Emptied with the pool when the load ends**, since a base read for one
     -- module's blocks is not the session's.
+  , ruleTypes   :: [((GlobalName, Int), Signature)]
+    -- ^ __the type of every callable the loaded bases declare or imply__, keyed
+    -- by name and arity (MS12 phase 323), which is
+    -- 'Thena.Instral.Infer.Callable'.
+    --
+    -- **It is stored because it cannot change while the bases do not, and it
+    -- was being recomputed on every look.** `:matches` carries each rule\'s type
+    -- since his ruling of 2026-11-19, and both the prompt and
+    -- 'Thena.View.matchesView' were running 'Thena.Instral.Infer.inferProgram'
+    -- over the whole pool per call — 0.8 ms measured over the shipped base, and
+    -- the view is a pane a frontend may redraw on every keystroke. **This is
+    -- 'Thena.Global.Env.restingOnTrust'\'s bargain one table over**: the answer
+    -- is a property of the loaded bases alone, so it is worked out where they
+    -- are installed and read everywhere else.
+    --
+    -- **Over 'pool' AND 'held', which is why a push cannot stale it.**
+    -- 'Thena.Instral.Ops.PushBase' moves a base from @held@ into 'Exec'\'s
+    -- @pushes@, so @rules@ draws only from bases this table already covers, and
+    -- inference does not care in what order it sees them. @installReadBases@
+    -- types exactly this set together for the same reason — a held base\'s rules
+    -- may call a rule in the pool and the other way about.
+    --
+    -- **NOT backtrackable, like 'globals' and 'signatures' beside it**, and in
+    -- a session it is written only by 'setBases', which is what keeps it true:
+    -- nothing else may write 'pool' or 'held'. The engine suites build a bare
+    -- 'Machine' positionally and pass @[]@ here, which is right because they
+    -- drive @load@ and never ask a rule for its type.
   , signatures  :: [(Resolved, [Plicity])]
     -- ^ **which of a binding's argument positions were written implicit** (MS4
     -- phase 44b) — Brady's system state @(C, A, I)@, the @I@ of it. NOT
@@ -376,6 +407,32 @@ data Exec = Exec
     -- §7.4's /@pool@ is not backtrackable/ still holds.
   }
   deriving (Eq, Show)
+
+-- | __Install a pool and the bases its blocks hold, and work out their
+-- types__ (MS12 phase 323).
+--
+-- **The only way to write 'pool' or 'held'**, so 'ruleTypes' cannot drift from
+-- the bases it describes. That is the whole reason this function exists: a
+-- derived field with five writers is a field that is wrong in four places
+-- eventually, and 'Thena.Global.Env.addDefinition' owns @restingOnTrust@ for
+-- the same reason.
+--
+-- **The types are a thunk and cost nothing until something asks.** A load that
+-- never prints a type pays nothing; the first @:matches@ pays once and every
+-- one after it pays nothing.
+--
+-- **It infers over the pool and the held bases together**, which is the set
+-- @rules@ can ever draw from, and the set @installReadBases@ already types
+-- together.
+setBases :: [RuleBase] -> [RuleBase] -> Machine -> Machine
+setBases bs hs m =
+  m { pool      = bs
+    , held      = hs
+    , ruleTypes = fst (inferProgram (allSignatures everything)
+                                    (reachingAll (allCallable everything)))
+    }
+  where
+    everything = bs ++ hs
 
 -- | __The pool a search is run against__ (MS11 phase 300).
 --

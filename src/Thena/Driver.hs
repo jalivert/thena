@@ -184,6 +184,7 @@ import Thena.Development.Partial (Partial (..), extract, termsIn)
 import Thena.Engine
   ( ChoicePoint (..)
   , rules
+  , setBases
   , Exec (..)
   , Machine (..)
   , Message
@@ -819,7 +820,8 @@ pendingQuestion = sessionAsking
 -- in Haskell rather than read from disk ("Thena.Standard"). A frontend that
 -- builds a base with 'ruleBaseOfDecls' wants the same door.
 withRuleBases :: [RuleBase] -> Session -> Session
-withRuleBases bs s = s { sessionMachine = (sessionMachine s) { pool = bs } }
+withRuleBases bs s =
+  s { sessionMachine = setBases bs (held (sessionMachine s)) (sessionMachine s) }
 
 -- | What the session is working on.
 --
@@ -1294,7 +1296,7 @@ newSession = Session
   -- can never be met is refused and one merely unmet is not. It is deliberately
   -- not 'NoTrust', which is the guarantee a user steps /up/ to, and deliberately
   -- not 'AnyTrust', which reports and enforces nothing.
-  { sessionMachine   = Machine (Exec [] [] [] []) ps [] emptyGlobals [] [] [] [] rootScope n [] 0 NoUndischargeableTrust
+  { sessionMachine   = Machine (Exec [] [] [] []) ps [] emptyGlobals [] [] [] [] [] rootScope n [] 0 NoUndischargeableTrust
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionRecord    = Record { recordEntries = [], recordFloor = (Exec [] [] [] [], ps, []) }
@@ -3250,17 +3252,17 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
         -- 'reachedBy' was already computing and 'concealedFrom' was taking the
         -- complement of.
         brings    = opensFor (fileImports items ++ published) s
-        machine  = (sessionMachine s)
-                     { pool  = poolOf
+        machine  = (setBases poolOf
                      -- **AND THE ONES A CONSULTED BASE'S OWN BLOCKS HOLD**
                      -- (MS11 phase 300), which reach 'Thena.Engine.held' by
                      -- path because they are already compiled into that
                      -- base's rules. **The session's stay under them**: a rule
                      -- base in the session's pool may have blocks of its own
                      -- and its rules can run during this load.
-                     , held  = map heldBase heldBases ++ pushable
-                                 ++ held (sessionMachine s)
-                     , scope = (scope (sessionMachine s))
+                     (map heldBase heldBases ++ pushable
+                        ++ held (sessionMachine s))
+                     (sessionMachine s))
+                     { scope = (scope (sessionMachine s))
                                  { scopeConcealed =
                                      [concealedFrom (fileImports items ++ published) s]
                                  , scopeOpens     = brings ++ inherited
@@ -3304,10 +3306,10 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
         -- from its imports and never sees these.
         poolBack s'' =
           let final = scopeOpens (scope (sessionMachine s''))
-           in s'' { sessionMachine = (sessionMachine s'')
-                      { pool = pool (sessionMachine s)
-                      , held = held (sessionMachine s)
-                      , scope = (scope (sessionMachine s''))
+           in s'' { sessionMachine = (setBases (pool (sessionMachine s))
+                                                 (held (sessionMachine s))
+                                                 (sessionMachine s''))
+                      { scope = (scope (sessionMachine s''))
                                   { scopeConcealed =
                                       scopeConcealed (scope (sessionMachine s))
                                   , scopeOpens =
@@ -3742,10 +3744,10 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
         inherited = openedFrom at
         back st =
           let final = scopeOpens (scope (sessionMachine st))
-           in st { sessionMachine = (sessionMachine st)
-                     { pool  = pool (sessionMachine at)
-                     , held  = held (sessionMachine at)
-                     , scope = (scope (sessionMachine st))
+           in st { sessionMachine = (setBases (pool (sessionMachine at))
+                                                (held (sessionMachine at))
+                                                (sessionMachine st))
+                     { scope = (scope (sessionMachine st))
                                  { scopeConcealed =
                                      scopeConcealed (scope (sessionMachine at))
                                  , scopeOpens =
@@ -5582,18 +5584,16 @@ dispatch s name arg = case name of
     -- **The type comes from inference and not from the file's declaration**
     -- (his, 2026-11-19): /"There will always be one, because we do inference.
     -- We will show not only user-written type when they wrote it, but when they
-    -- didn't, what the system inferred."/ 'Thena.Instral.Infer.inferProgram'
-    -- is keyed by name and arity — 'Thena.Instral.Infer.Callable' — which is
-    -- exactly the key a row has, so a name carrying two arities gets the right
-    -- type for each. Looking a signature up by name alone, which is what
-    -- 'baseSignatures' allows, could not.
+    -- didn't, what the system inferred."/ It is keyed by name and arity —
+    -- 'Thena.Instral.Infer.Callable' — which is exactly the key a row has, so a
+    -- name carrying two arities gets the right type for each. Looking a
+    -- signature up by name alone, which is what 'baseSignatures' allows, could
+    -- not.
     --
-    -- **Worked out here rather than kept on the session**, for the reason
-    -- @:accepts@ already gives below: it is cheap, and storing it would be
-    -- session state that @:undo@ and every snapshot would have to carry.
-    inferredTypes =
-      fst (inferProgram (allSignatures (rules machine))
-                        (reachingAll (allCallable (rules machine))))
+    -- **It is READ and not worked out** (MS12 phase 323).
+    -- 'Thena.Engine.ruleTypes' is computed where the bases are installed, which
+    -- is where it can be, and this is a look.
+    inferredTypes = ruleTypes machine
 
     -- | @:accepts@ and @:produces@ (MS5 phase 71), which differ only in the
     -- question they ask of a signature.
@@ -7572,9 +7572,8 @@ installReadBases below heldBelow s = go []
         Right bss ->
           case snd (inferProgram (allSignatures everything) (scoped ++ concat bss)) of
             []   ->
-              ( s { sessionMachine = (sessionMachine s)
-                                       { pool = pool'
-                                       , held = heldNow ++ heldBelow } }
+              ( s { sessionMachine =
+                      setBases pool' (heldNow ++ heldBelow) (sessionMachine s) }
               -- **In the order the files were read**, which is the order they
               -- go into the pool: a warning about the third base of a push is
               -- read after the first two.

@@ -43,8 +43,9 @@ import Thena.Repl (entriesOf, unclosedEntry)
 -- | The names in a 'Fitting' listing, for the tests below.
 
 import Thena.Instral.Ops (AnswerKind (..), partWords)
-import Thena.Instral.Infer (InstralTypeError (..), Site (..))
-import Thena.Rules (RuleError (..))
+import Thena.Instral.Infer (InstralTypeError (..), Site (..), inferProgram, reachingAll)
+import Thena.Files (loadStandardRules)
+import Thena.Rules (RuleError (..), allCallable, allSignatures)
 
 -- | Run a script of command lines, answering nothing, and give back the last
 -- response and the session it left.
@@ -360,6 +361,24 @@ tests =
         , testCase "a trailing semicolon is a complete entry" $
             snd (say [":theorem t : Type\8320", "h = here ;"])
               @?= Ran [] [] Completed
+        ]
+    , testGroup
+        "the stored rule types agree with inference"
+        -- **The hazard of a derived field, pinned** (MS12 phase 323).
+        -- 'Thena.Engine.ruleTypes' is worked out by 'Thena.Engine.setBases' and
+        -- read by `:matches` and 'Thena.View.matchesView', so a future write of
+        -- 'Thena.Engine.pool' that bypasses the setter would serve types for
+        -- bases that are no longer loaded — silently, and a golden would accept
+        -- it. These compare the stored table against inference run from
+        -- scratch over the bases the machine actually holds.
+        [ testCase "on a Haskell-built base" $
+            agrees (machineOf withRules)
+          -- **And on a base read from disc**, which is the path that matters:
+          -- @installReadBases@ is where the table is set for a real session,
+          -- and it also fills 'Thena.Engine.held'.
+        , testCase "on the shipped base, read from disc" $ do
+            (s', _) <- loadStandardRules newSession
+            agrees (machineOf s')
         ]
     , testGroup
         "the match list is one row per rule"
@@ -801,6 +820,19 @@ reached :: (Session, Response) -> (Development, GlobalEnv)
 reached (s, _) = (development (machineOf s), globals (machineOf s))
 
 -- | The names a @:accepts@ / @:produces@ listing came back with (MS5 phase 71).
+-- | The stored table is what inference says, for the bases this machine holds.
+--
+-- **Over @pool ++ held@ and not over 'Thena.Engine.rules'**, which is what
+-- 'Thena.Engine.setBases' covers: a base a body pushed came out of @held@, so
+-- @rules@ can only ever draw from this set.
+agrees :: Machine -> Assertion
+agrees m =
+  ruleTypes m
+    @?= fst (inferProgram (allSignatures everything)
+                          (reachingAll (allCallable everything)))
+  where
+    everything = pool m ++ held m
+
 -- | The @:matches@ rows as the key they are grouped by.
 matchedKeys :: Response -> [(String, Int)]
 matchedKeys r = case r of

@@ -100,19 +100,13 @@ import Thena.Driver
   , workingOn
   )
 import Thena.Core.Trust (TrustLevel)
-import Thena.Engine (Machine (..), choicePoints, cursor, development, focusContext, knownTo, rules)
+import Thena.Engine
+  (Machine (..), choicePoints, cursor, development, focusContext, knownTo, ruleTypes, rules)
 import Thena.Global.Env (GlobalEnv)
 import Thena.Instral.Type (Signature)
 import Thena.Instral.Ops (ruleName, Instr, Rule)
 import Thena.Language.Grammar (Grammar)
-import Thena.Instral.Infer (inferProgram, reachingAll)
-import Thena.Rules
-  ( RuleBase (..)
-  , allCallable
-  , allSignatures
-  , groupParams
-  , matchingRules
-  )
+import Thena.Rules (RuleBase (..), groupParams, matchingRules)
 import Thena.Syntax.Print (Env, freshen)
 import Thena.View.Address (Address (..), Move (..), addressOf, extend, focusing)
 import Thena.View.Chart
@@ -343,11 +337,12 @@ rulesView budget s =
 -- answers for a rule whose file declared nothing, and a rule whose types do not
 -- work out never loads.
 --
--- **Worked out per call rather than kept on the session**, which is
--- "Thena.Driver"\'s own policy for @:accepts@: a base is a few hundred
--- instructions, and storing it would be session state that @:undo@ and every
--- snapshot would have to carry. Measured 2026-11-19 at well under a
--- millisecond over the shipped base.
+-- **The table is READ and not worked out** (MS12 phase 323).
+-- 'Thena.Engine.ruleTypes' is computed where the bases are installed and is a
+-- thunk until something asks, so a pane a frontend redraws on every keystroke
+-- pays nothing for it. It used to run 'Thena.Instral.Infer.inferProgram' here,
+-- per call, which measured 0.8 ms over the shipped base and grew with the
+-- bases.
 --
 -- **The clauses are not lost.** 'rulesView' is still per clause, which is what
 -- @:rules@ shows, and a pane that shows the clauses behind one of these rows is
@@ -358,9 +353,7 @@ matchesView _ s =
   | ((nm, k), grp) <- matchingRules (sessionRules s) (sessionGlobals s) (sessionCursor s)
   ]
   where
-    inferred =
-      fst (inferProgram (allSignatures (sessionRules s))
-                        (reachingAll (allCallable (sessionRules s))))
+    inferred = ruleTypes (machineOf s)
 
 -- | What the development currently rests on that nothing derived, and the rung
 -- that decides whether @qed@ will accept it (MS8 phase 151).
