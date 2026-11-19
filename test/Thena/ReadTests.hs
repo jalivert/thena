@@ -60,7 +60,7 @@ machine = machineIn emptyGlobals
 
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] [] []) (Development cur) [] env' [] [] [] [] rootScope 1000 [] 0
+  load is (Machine (Exec [] [] [] []) (Development cur) [] env' [] [] [] [] [] rootScope 1000 [] 0
                    NoUndischargeableTrust)
 
 -- | Run to a stop, and hand back the environment or the reason.
@@ -73,7 +73,7 @@ go :: Machine -> Either FailReason Machine
 go m = case step m of
   Continue m'       -> go m'
   Saying _ m'       -> go m'
-  Declaring _ m'    -> go m'
+  Declaring _ _ m'    -> go m'
   Defining _ _ _ _ m' -> go m'
   Primitively _ _ m' -> go m'
   DeclaringGrammar _ m' -> go m'

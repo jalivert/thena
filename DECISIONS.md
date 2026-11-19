@@ -3267,10 +3267,39 @@ prints it:
 
 ```
 data typing : Ctx -> LC -> Ty -> Type₀ where
-  T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in x T Γ -> typing Γ (var x) T
-  T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC)
+  T-var : ∀ {x : String} {T : Ty} {Γ : Ctx} -> extend-in x T Γ -> typing Γ (var x) T
+  T-app : ∀ {Γ : Ctx} {M : LC} {S : Ty} {T : Ty} {N : LC}
             -> typing Γ M (arrow S T) -> typing Γ N S -> typing Γ (app M N) T
 ```
+
+**The metavariables are IMPLICIT and the premises are not, so a derivation does
+not repeat what its own statement says.** *Decided 2026-11-18.* A rule's
+metavariables are determined by the judgment you are proving, and writing them
+again is noise:
+
+```
+idTyped : typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`
+idTyped = T-abs (T-var extend-here)
+```
+
+Before this they were explicit, and the same proof read
+`T-abs empty "x" base (var "x") base (T-var "x" base (extend empty "x" base)
+(extend-here empty "x" base))` — thirteen arguments, every one of them forced by
+the type on the line above. A generated lookup relation is the same: `extend-here`
+takes none, and `extend-there-extend ne i` takes the inequality and the smaller
+lookup.
+
+**Three things stay explicit, and each for its own reason.** A **premise** is an
+argument you supply, named or not. A **named premise** stays explicit even though
+the quantifier that binds it is written by you — `p1 : Γ ⊢ M : T` is a premise. And
+**a pattern binds every argument**: plicity is a permission not to write something
+at a call, so `case d of { T-abs Γ x S E T d1 -> … }` still names all six. The same
+goes for a term inside `` core`…` ``, which is the kernel's language and has no
+implicit positions at all.
+
+**Writing one anyway is allowed**: `T-var {Γ} …` puts the brace back where you need
+it, and `:show` prints a constructor with its braces so the signature a proof is
+written against is visible.
 
 **Every metavariable is quantified, in the order it first appears**, reading
 the premises and then the conclusion. A metavariable is one a `language` or
@@ -3308,7 +3337,9 @@ order and may range over a derivation:
 ```
 
 There, a metavariable the `∀` does not bind is refused, and so is a name it
-binds twice: the `∀` lists the rule's metavariables, it does not nest. **The notation is
+binds twice: the `∀` lists the rule's metavariables, it does not nest. **The parens
+are how you write it and not what you get**: the generated constructor makes a
+metavariable implicit, and a binder standing at a premise — `d` above — explicit. **The notation is
 installed**, as a context's lookup is: `` typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )` ``
 is a type, and `:parse typing …` reads one.
 
@@ -4126,6 +4157,51 @@ subsumes anyway — so what the unification there is for is solving, not decidin
 Elaboration had been given the directed version already; the tactic had not, and
 the same operation answered differently depending on which one you reached it
 through.
+
+### The match list is one line per rule, with its type
+
+*Decided 2026-11-19.*
+
+`:matches` asks what you could do where you are standing, and it answers with **one
+line per rule**, where a rule is a name together with how many arguments it takes. A
+name written with twenty-two clauses is one line.
+
+```
+thena spine> :matches
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+eliminate-core ‹t› : Core -> ()
+prove : ()
+fill ‹t› : Core -> ()
+claim ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+…
+```
+
+**The reason is that nothing you can type picks a clause.** A call chooses one by
+matching your arguments against each clause's patterns in order, and `retry` names a
+choice point and never a clause. So a list with one row per clause was offering a
+choice the language does not have, and offering it most loudly where it helped least:
+`elaborate`'s clauses differ only in which surface node their head asks about, and
+with no term supplied every one of them matched.
+
+**Each argument is a placeholder and the type says what goes there.** A placeholder is
+the name some clause gives that position; where no clause names it, it says what kind
+of thing the position takes — `‹list›`, `‹option›`, `‹pair›`. **The type after the
+colon is always there**: it is the one the file declared if it declared one, and
+otherwise the one inference worked out, so a rule nobody wrote a signature for still
+tells you what it takes.
+
+**`:rules` is the other half and it is still per clause.** It lists what is written in
+each loaded base, and what is written there is clauses — with their patterns as
+written, which is what tells one clause from the next.
+
+**What this does not settle**: whether a rule whose arguments you have not supplied
+belongs in the answer at all. It is listed today. Deciding otherwise means deciding
+when a system should narrow an answer on your behalf, which is a question about the
+interface rather than about the engine.
 
 ### Elaboration is a rule with one clause per surface node
 
@@ -5216,6 +5292,43 @@ above are not.
 
 The same limit applies to an application whose head is not a name — a β-redex
 like `(\ p -> e) v` — where there is no annotation to write. Use a `let`.
+
+### A `let`-bound name may have implicit arguments
+
+*Decided 2026-11-18, built 2026-11-19.* A brace on a `let` binding's type means what
+it means on a top-level signature: callers may leave that argument out, and
+elaboration writes it in.
+
+```
+shortest : String
+shortest = let { f : ∀ {A : Type₀} -> A -> A = \ A a -> a } in f "z"
+```
+
+Before this the brace parsed and meant nothing, so `"z"` went into `A`'s position
+and the line was refused with *String and Type₀ cannot be made equal*.
+
+**Idris 1 does not allow this** — Brady restricts implicit binders to the prenex of
+a top-level declaration — and we do not adopt the restriction. A `let` binds a
+name, and everything the mechanism needs is a name to hang the permission on.
+Writing the argument anyway, `f {String} "z"`, still works, and so does a bare
+`f` whose implicit the goal determines.
+
+**A local's braces are its own.** The permission is recorded against the
+*binding*, not against the word, so a `let`-bound `f` neither inherits the braces
+of a global `f` nor loses its own to one, and of two nested `let`s of one word only
+the one you wrote the brace on has it.
+
+**A brace still reaches nothing where no name is bound** — on a λ's binder, or
+inside the type of a higher-order argument:
+
+```
+hof : (∀ {A : Type₀} -> A -> A) -> String
+hof = \ f -> f String "z"       -- accepted: the brace on f's type means nothing
+```
+
+That is not a local-versus-global matter. Plicity is not part of a type in Thena
+— `∀ {A : Type₀} -> A -> A` and `∀ (A : Type₀) -> A -> A` are the same type — so
+a brace can only ever be a fact about something that has a name.
 
 ### `instral` has types, and a name is not a string
 

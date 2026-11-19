@@ -169,14 +169,12 @@ twoKinds =
   , testCase "a term lookup steps over a type binding with nothing to prove" $ do
       _ <- loaded (fsubHeader ++
         [ "pastType : bindTm-in`x : \8868 \8712 \183 , x : \8868 , X <: \8868`"
-        , "pastType = bindTm-there-bindTy (bindTm empty \"x\" top) \"x\" top \"X\" top"
-        , "             (bindTm-here empty \"x\" top)" ])
+        , "pastType = bindTm-there-bindTy bindTm-here" ])
       pure ()
   , testCase "and a type lookup over a term binding the same way" $ do
       _ <- loaded (fsubHeader ++
         [ "pastTerm : bindTy-in`X <: \8868 \8712 \183 , X <: \8868 , x : \8868`"
-        , "pastTerm = bindTy-there-bindTm (bindTy empty \"X\" top) \"X\" top \"x\" top"
-        , "             (bindTy-here empty \"X\" top)" ])
+        , "pastTerm = bindTy-there-bindTm bindTy-here" ])
       pure ()
     -- **Shadowing within one namespace is unchanged**: stepping a term lookup
     -- over another term binding still needs the inequality, so a binding hidden
@@ -184,8 +182,7 @@ twoKinds =
   , testCase "stepping over a binding of its own kind still needs the inequality" $ do
       r <- load (fsubHeader ++
         [ "shadowed : bindTm-in`x : \8868 \8712 \183 , x : \8868 , x : \8868`"
-        , "shadowed = bindTm-there-bindTm (bindTm empty \"x\" top) \"x\" top \"x\" top"
-        , "             (bindTm-here empty \"x\" top)" ])
+        , "shadowed = bindTm-there-bindTm bindTm-here" ])
       either (const (pure ())) (const (assertFailure "it was reached with no ne")) r
   ]
 
@@ -232,11 +229,16 @@ substituted =
         , "            --------------------"
         , "            \915 \8866 S <: S'"
         , "open sub" ])
+      -- **The metavariables are implicit and undetermined** (MS12 phase 320),
+      -- so @:infer@ quantifies them — and under the holes' own names, since a
+      -- signature records which positions are implicit and not what the
+      -- declaration called them. The premise is still an argument you supply,
+      -- so it is still an arrow.
       said s ":infer S-narrow" @?=
-        [ "S-narrow : \8704 (\915 : Ctx) (X : String) (T : Ty) (S : Ty)"
-            ++ " (S' : Ty)"
-            ++ " -> sub`${\915} [ ${X} -> ${T} ] \8866 ${S} <: ${S'}`"
-            ++ " -> sub`${\915} \8866 ${S} <: ${S'}`" ]
+        [ "S-narrow : \8704 {a : Ctx} {a1 : String} {a2 : Ty} {a3 : Ty}"
+            ++ " {a4 : Ty}"
+            ++ " -> sub`${a} [ ${a1} -> ${a2} ] \8866 ${a3} <: ${a4}`"
+            ++ " -> sub`${a} \8866 ${a3} <: ${a4}`" ]
     -- **A context whose entries can hold no name gets nothing**, which is
     -- STLC's: its @Ty@ has no variable production, so there is nothing in a Γ
     -- to substitute for.
@@ -289,10 +291,10 @@ declared =
       s <- loaded header
       said s ":show extend-in" @?=
         [ "data extend-in : String -> Ty -> Ctx -> Type₀ where"
-        , "  { extend-here : ∀ (Γ : Ctx) (x : String) (T : Ty)"
+        , "  { extend-here : ∀ {Γ : Ctx} {x : String} {T : Ty}"
             ++ " -> extend-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
-        , "  ; extend-there-extend : ∀ (Γ : Ctx) (x : String) (T : Ty)"
-            ++ " (x' : String) (T' : Ty)"
+        , "  ; extend-there-extend : ∀ {Γ : Ctx} {x : String} {T : Ty}"
+            ++ " {x' : String} {T' : Ty}"
             ++ " -> (Eq {0} String x x' -> Empty {0})"
             ++ " -> extend-in`${x} : ${T} ∈ ${Γ}` -> extend-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }"
         ]
@@ -349,29 +351,35 @@ notation =
     con n = Global (named ("Ctx." ++ n)) []
     apps f = foldl App (con f)
 
+-- | **A proof names no metavariable** (MS12 phase 320, `~td9j6`): a generated
+-- lookup relation quantifies its @Γ@, @x@ and @T@ implicitly, so a proof is
+-- @extend-here@ and a step past another binding is @extend-there-extend ne i@.
+-- The two refusals below are refusals of the proof and not of its arity — with
+-- the metavariables still written they would be refused for the wrong reason,
+-- which is the trap this family is here to avoid.
 proofs :: [TestTree]
 proofs =
   [ testCase "a lookup at the top is extend-here" $ do
       _ <- loaded (header ++
         [ "found : Ctx.extend-in`x : \953 \8712 \183, x : \953`"
-        , "found = extend-here empty \"x\" base" ])
+        , "found = extend-here" ])
       pure ()
   , testCase "one under a later binding of another name is extend-there-extend, with ne proved" $ do
       _ <- loaded (header ++ xNotY ++
         [ "under : Ctx.extend-in`x : \953 \8712 \183, x : \953, y : \953`"
-        , "under = extend-there-extend (extend empty \"x\" base) \"x\" base \"y\" base xNotY (extend-here empty \"x\" base)" ])
+        , "under = extend-there-extend xNotY extend-here" ])
       pure ()
   , testCase "extend-here does not reach under a later binding" $ do
       r <- load (header ++
         [ "wrong : Ctx.extend-in`x : \953 \8712 \183, x : \953, y : \953`"
-        , "wrong = extend-here (extend empty \"x\" base) \"x\" base" ])
+        , "wrong = extend-here" ])
       either (const (pure ())) (const (assertFailure "extend-here was accepted under y")) r
     -- The shadowing: to reach the earlier x past a later x, ne must prove
     -- x ≠ x, and xNotY is a proof of something else.
   , testCase "and extend-there-extend cannot skip a binding of the same name" $ do
       r <- load (header ++ xNotY ++
         [ "shadowed : Ctx.extend-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
-        , "shadowed = extend-there-extend (extend empty \"x\" base) \"x\" base \"x\" (arrow base base) xNotY (extend-here empty \"x\" base)" ])
+        , "shadowed = extend-there-extend xNotY extend-here" ])
       either (const (pure ())) (const (assertFailure "a shadowed binding was reached")) r
     -- And what it would take is exactly a refutation of refl: reaching the
     -- earlier x needs Eq String "x" "x" -> Empty, which applied to refl is
@@ -379,7 +387,7 @@ proofs =
   , testCase "what it would take is a proof that x is not x" $ do
       _ <- loaded (header ++
         [ "needs : (Eq String \"x\" \"x\" -> Empty) -> Ctx.extend-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
-        , "needs = \\ ne -> extend-there-extend (extend empty \"x\" base) \"x\" base \"x\" (arrow base base) ne (extend-here empty \"x\" base)"
+        , "needs = \\ ne -> extend-there-extend ne extend-here"
         , ""
         , "absurdly : (Eq String \"x\" \"x\" -> Empty) -> Empty"
         , "absurdly = \\ ne -> ne (refl String \"x\")" ])

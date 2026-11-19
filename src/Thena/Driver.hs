@@ -27,6 +27,7 @@ module Thena.Driver
   , newSession
   , withRuleBases
   , Response (..)
+  , MatchedRule (..)
   , Stop (..)
   , SyntaxError (..)
   , CommandError (..)
@@ -157,7 +158,7 @@ import Data.Word (Word64)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, declarationWord, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), close, freeVars, innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, declarationWord, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -183,6 +184,7 @@ import Thena.Development.Partial (Partial (..), extract, termsIn)
 import Thena.Engine
   ( ChoicePoint (..)
   , rules
+  , setBases
   , Exec (..)
   , Machine (..)
   , Message
@@ -252,6 +254,7 @@ import Thena.Core.Trust
   , unmet
   )
 import Thena.Core.Typing (infer, sortOf)
+import qualified Thena.Development.Component as Component
 import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Ops
   ( partOf
@@ -277,11 +280,10 @@ import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
   ( RuleBase (..)
   , RuleError
-  , RuleIter
   , Reading (..)
   , rootReading
-  , matches
-  , next
+  , matchingRules
+  , groupParams
   , resolveRule
   , resolveBlock
   , surfaceBlocks
@@ -297,6 +299,7 @@ import Thena.Rules
   )
 import Thena.Surface.Concrete
   ( Plicity (..)
+  , plicitiesIn
   , Surface (..)
   , SurfaceBinder (..)
   , SurfaceConstructor (..)
@@ -817,7 +820,8 @@ pendingQuestion = sessionAsking
 -- in Haskell rather than read from disk ("Thena.Standard"). A frontend that
 -- builds a base with 'ruleBaseOfDecls' wants the same door.
 withRuleBases :: [RuleBase] -> Session -> Session
-withRuleBases bs s = s { sessionMachine = (sessionMachine s) { pool = bs } }
+withRuleBases bs s =
+  s { sessionMachine = setBases bs (held (sessionMachine s)) (sessionMachine s) }
 
 -- | What the session is working on.
 --
@@ -1292,7 +1296,7 @@ newSession = Session
   -- can never be met is refused and one merely unmet is not. It is deliberately
   -- not 'NoTrust', which is the guarantee a user steps /up/ to, and deliberately
   -- not 'AnyTrust', which reports and enforces nothing.
-  { sessionMachine   = Machine (Exec [] [] [] []) ps [] emptyGlobals [] [] [] [] rootScope n [] 0 NoUndischargeableTrust
+  { sessionMachine   = Machine (Exec [] [] [] []) ps [] emptyGlobals [] [] [] [] [] rootScope n [] 0 NoUndischargeableTrust
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionRecord    = Record { recordEntries = [], recordFloor = (Exec [] [] [] [], ps, []) }
@@ -1317,6 +1321,43 @@ newSession = Session
 
 -- | What the driver hands back for a frontend to render. Data, never a line of
 -- text: rendering is "Thena.Repl"'s (§2.5).
+-- | __One row of @:matches@: a rule, not a clause__ — his ruling, 2026-11-19.
+--
+-- /"Each rule-arity, in other words — each rule, gets to be represented by one
+-- entry. So I could have @foo\/2@ and @foo\/4@ but never two @foo@s."/
+--
+-- **The placeholders come from the group's first clause and the type does
+-- not.** Clauses of one name and arity need not agree about what they call
+-- their parameters ('Thena.Rules.clauses'), so a row showing names has to pick
+-- a clause and the first one is the one a reader would mean — it is the clause
+-- dispatch reaches first. The type is not picked at all: inference gives
+-- exactly one signature per name and arity, so there is nothing to choose
+-- between.
+--
+-- **The patterns are not here and that is the change.** A row used to carry the
+-- clause's own patterns — @reverse-onto [] ‹acc›@ beside
+-- @reverse-onto [x, ...xs] ‹acc›@ — which is what made one name print many
+-- times, and what nothing in the surface could act on: a call picks its clause
+-- by matching, and @retry@ names a choice point and never a clause. A pane that
+-- shows the clauses behind a row is a separate feature he has asked for.
+data MatchedRule = MatchedRule
+  { matchedName   :: GlobalName
+    -- ^ the rule's name, spelled by whoever prints it
+  , matchedArity  :: Int
+    -- ^ how many arguments it takes. With 'matchedName' this is the key — what
+    -- 'Thena.Instral.Infer.Callable' is
+  , matchedParams :: [Ops.Pattern]
+    -- ^ the group's parameters, for placeholders — 'Thena.Rules.groupParams',
+    -- so each position is named by the first clause that binds a name there.
+    -- @length@ is 'matchedArity'
+  , matchedType   :: Maybe Signature
+    -- ^ **what the system worked out it takes and gives**, declared or
+    -- inferred. 'Nothing' cannot arise for a base that loaded, since a rule
+    -- whose types do not work out is refused — it is 'Maybe' so that a lookup
+    -- miss is a blank row rather than a crash
+  }
+  deriving (Eq, Show)
+
 data Response
   = Blank                     -- ^ an empty line; nothing to do
   | RenderedSurface Surface
@@ -1324,7 +1365,7 @@ data Response
   | Rendered Core             -- ^ @:core@ (§2.6)
   | RenderedDev Partial       -- ^ @:dev@ (§2.7)
   | Shown Cursor              -- ^ @:show@, and the new state after @:goal@
-  | ShownData InductiveDefinition
+  | ShownData InductiveDefinition [(GlobalName, [Plicity])]
   | ShownRules InductiveDefinition
     -- ^ @:rules ‹judgment›@ — its constructors in the paper's form (MS8 phase
     -- 174). **A second command rather than a change to @:show@**: @:show@ gives
@@ -1418,7 +1459,7 @@ data Response
   | ParsingEntered String   -- ^ @:parse ‹L›@: the interactive mode began (phase 102b)
   | ParsingLeft String      -- ^ @:done@: it ended
     -- ^ @:parse@: the language, the text, and why it is not one term
-  | InferredSurface Surface Core
+  | InferredSurface Surface [Plicity] Core
     -- ^ @:infer ‹surface›@ (MS4 phase 43): the term as written and the type
     -- elaborating it produced. The **surface** term, not the core one it built,
     -- because the development it built was rewound and printing a term the
@@ -1683,7 +1724,7 @@ data Response
     -- saying what it does. The spelling carries the grouping: §2.4's rule is
     -- that a bare word acts and a colon looks, so "Thena.Repl" splits the list
     -- on the leading colon rather than being told twice
-  | Matched [Rule]
+  | Matched [MatchedRule]
   | Fitting String Ty [(GlobalName, Int, Bool, Signature)]
     -- ^ **what accepts or produces a type** (MS5 phase 71) — which question was
     -- asked, the type asked about, and for each callable its name, its arity, whether it is a rule (as
@@ -1697,7 +1738,11 @@ data Response
     -- into a pair if we ever need one.\"*
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
     -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
-    -- executed to find out whether one would succeed (§2.2)
+    -- executed to find out whether one would succeed (§2.2).
+    --
+    -- **One entry per name and arity, not per clause** — his ruling, 2026-11-19.
+    -- 'Thena.Rules.matchingRules' does the grouping and 'MatchedRule' says what
+    -- a row carries
   | Ran [Message] [Warning] Stop
     -- ^ what the machine said, what is worth warning about, and where it
     -- stopped.
@@ -2653,17 +2698,6 @@ surfaceProgramIn ns0 brought n0 items = foldl (item ns0) ([], n0) items
               ++ [ Do LeaveOpen | _ <- [1 .. pushed] ] ++ [Do LeaveNamespace]
         , n1 )
 
-  -- | The plicity of each argument position a signature writes.
-  --
-  -- Only a leading run of @∀@ groups is read: once the type stops being a
-  -- quantifier there are no more named positions to speak of, and an arrow
-  -- contributes an 'Explicit' one.
-  plicitiesIn t = case t of
-    SurfacePi bs body ->
-      [ p | SurfaceBinder p _ _ <- NE.toList bs ] ++ plicitiesIn body
-    SurfaceArrow _ body -> Explicit : plicitiesIn body
-    _ -> []
-
   -- A constructor's type is written in the scope of the parameters, so they
   -- are put back in front of it and peeled off again by
   -- 'Thena.Global.Declare.buildInductive'.
@@ -2801,7 +2835,14 @@ datatypeProgram ns n d roles =
                      -- that: @data Nat where { Pos.one : Nat }@ is @Nat.Pos.one@.
                      -- Nothing in the corpus writes one, and nesting is what a
                      -- namespace already does, so no refusal had to be invented.
-                     [ GlobalName (nameSteps dn ++ cps) cn | SurfaceConstructor cps cn _ <- cs ] roles
+                     -- **With the plicity of each argument position as it was
+                     -- written** (MS12 phase 320, `~td9j6`): the parameters
+                     -- 'paramsAround' puts back are explicit positions of the
+                     -- constructor, so the list is read off the same type that
+                     -- is elaborated above.
+                     [ ( GlobalName (nameSteps dn ++ cps) cn
+                       , plicitiesIn (paramsAround ps cty) )
+                     | SurfaceConstructor cps cn cty <- cs ] roles
                      (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
              ]
       , n1 )
@@ -3211,17 +3252,17 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
         -- 'reachedBy' was already computing and 'concealedFrom' was taking the
         -- complement of.
         brings    = opensFor (fileImports items ++ published) s
-        machine  = (sessionMachine s)
-                     { pool  = poolOf
+        machine  = (setBases poolOf
                      -- **AND THE ONES A CONSULTED BASE'S OWN BLOCKS HOLD**
                      -- (MS11 phase 300), which reach 'Thena.Engine.held' by
                      -- path because they are already compiled into that
                      -- base's rules. **The session's stay under them**: a rule
                      -- base in the session's pool may have blocks of its own
                      -- and its rules can run during this load.
-                     , held  = map heldBase heldBases ++ pushable
-                                 ++ held (sessionMachine s)
-                     , scope = (scope (sessionMachine s))
+                     (map heldBase heldBases ++ pushable
+                        ++ held (sessionMachine s))
+                     (sessionMachine s))
+                     { scope = (scope (sessionMachine s))
                                  { scopeConcealed =
                                      [concealedFrom (fileImports items ++ published) s]
                                  , scopeOpens     = brings ++ inherited
@@ -3265,10 +3306,10 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
         -- from its imports and never sees these.
         poolBack s'' =
           let final = scopeOpens (scope (sessionMachine s''))
-           in s'' { sessionMachine = (sessionMachine s'')
-                      { pool = pool (sessionMachine s)
-                      , held = held (sessionMachine s)
-                      , scope = (scope (sessionMachine s''))
+           in s'' { sessionMachine = (setBases (pool (sessionMachine s))
+                                                 (held (sessionMachine s))
+                                                 (sessionMachine s''))
+                      { scope = (scope (sessionMachine s''))
                                   { scopeConcealed =
                                       scopeConcealed (scope (sessionMachine s))
                                   , scopeOpens =
@@ -3703,10 +3744,10 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
         inherited = openedFrom at
         back st =
           let final = scopeOpens (scope (sessionMachine st))
-           in st { sessionMachine = (sessionMachine st)
-                     { pool  = pool (sessionMachine at)
-                     , held  = held (sessionMachine at)
-                     , scope = (scope (sessionMachine st))
+           in st { sessionMachine = (setBases (pool (sessionMachine at))
+                                                (held (sessionMachine at))
+                                                (sessionMachine st))
+                     { scope = (scope (sessionMachine st))
                                  { scopeConcealed =
                                      scopeConcealed (scope (sessionMachine at))
                                  , scopeOpens =
@@ -5534,8 +5575,25 @@ dispatch s name arg = case name of
 
 
     matching =
-      unfoldIter (matches (rules machine) (globals machine)
-                          (cursor (development machine)))
+      [ MatchedRule nm k (groupParams grp) (lookup (nm, k) inferredTypes)
+      | ((nm, k), grp) <-
+          matchingRules (rules machine) (globals machine)
+                        (cursor (development machine))
+      ]
+
+    -- **The type comes from inference and not from the file's declaration**
+    -- (his, 2026-11-19): /"There will always be one, because we do inference.
+    -- We will show not only user-written type when they wrote it, but when they
+    -- didn't, what the system inferred."/ It is keyed by name and arity —
+    -- 'Thena.Instral.Infer.Callable' — which is exactly the key a row has, so a
+    -- name carrying two arities gets the right type for each. Looking a
+    -- signature up by name alone, which is what 'baseSignatures' allows, could
+    -- not.
+    --
+    -- **It is READ and not worked out** (MS12 phase 323).
+    -- 'Thena.Engine.ruleTypes' is computed where the bases are installed, which
+    -- is where it can be, and this is a look.
+    inferredTypes = ruleTypes machine
 
     -- | @:accepts@ and @:produces@ (MS5 phase 71), which differ only in the
     -- question they ask of a signature.
@@ -5545,10 +5603,20 @@ dispatch s name arg = case name of
     -- are one thing with and without a head (§1.1). The listing says which is
     -- which.
     --
-    -- **The signatures are worked out here rather than kept on the session.**
-    -- They are already recomputed at every load and a rule base is a few hundred
-    -- instructions; storing them would be session state that @:undo@ and every
-    -- snapshot would then have to carry.
+    -- **This one still infers per call, and that is a choice rather than the
+    -- policy it used to state** (MS12 phase 323). The paragraph here used to
+    -- argue that signatures should not be kept on the session at all;
+    -- 'Thena.Engine.ruleTypes' keeps them, so that claim is gone and is not to
+    -- be read back out of this comment.
+    --
+    -- **Why this command does not read that table**: the table is over the pool
+    -- and the bases its blocks hold, and this answers /what can I pass a
+    -- @Surface@ to from where I stand/, which is 'Thena.Engine.rules' — a
+    -- smaller set, since a held base answers nothing until its block pushes it.
+    -- Reading the table would quietly start listing callables that cannot be
+    -- called. Filtering it back down is possible and would be worth doing if
+    -- this were ever on a redraw path; it is a word a user types, and the
+    -- inference measures 0.7 ms over the shipped base (2026-11-19, 400 calls).
     byType verb question = case parseInstralType arg of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
@@ -5643,10 +5711,16 @@ dispatch s name arg = case name of
     showGlobal what = case argumentNamed anywhere what of
       Left amb -> noGlobal what amb
       Right g  -> case lookupInductive g (globals machine) of
-        Just d  -> (s, ShownData d)
+        -- **With each constructor's plicities** (MS12 phase 320, `~td9j6`), so
+        -- that a brace a @data@ block wrote, or a @judgment@ block's
+        -- metavariable, prints back as one. 'Core' has no plicity, so without
+        -- this the answer contradicted what the elaborator does with the name.
+        Just d  -> (s, ShownData d
+                        [ (constructorName c, fromMaybe [] (lookup (Engine.AsGlobal (constructorName c)) (signatures machine)))
+                        | c <- inductiveConstructors d ])
         Nothing -> case lookupDefinition g (globals machine) of
           Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
-                           (fromMaybe [] (lookup g (signatures machine)))
+                           (fromMaybe [] (lookup (Engine.AsGlobal g) (signatures machine)))
                                       (definitionType d) (Just (definitionBody d)))
           Nothing -> case lookupConstant g (globals machine) of
             Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
@@ -5997,6 +6071,33 @@ dispatch s name arg = case name of
     -- succeed while owing one; reporting a type for a development that does not
     -- check would be the gap @ms3\/CLOSEOUT.md@ item 25 describes, one command
     -- further on.
+    -- | **An undetermined implicit becomes a quantifier** (MS12 phase 320,
+    -- `~td9j6`). @:infer@ rewinds the development, so a hole the elaboration
+    -- claimed and did not solve is gone by the time the answer is printed —
+    -- and the answer mentions it. Before a name EXPANDed there were no such
+    -- holes and the question never came up; now @:infer S-refl@ is exactly
+    -- this case, and left alone it printed the hole as a bare variable.
+    --
+    -- **Quantifying is the truthful reading of the answer**: the type is
+    -- @sub ?a ?a1 S@ /for some/ @?a@ and @?a1@, which is what a @∀@ over them
+    -- says. They are implicit because the positions they came from are, so
+    -- 'Thena.Render.signature' prints them in braces.
+    --
+    -- **The names are the holes'**, @a@, @a1@, not the declaration's @Γ@, @T@:
+    -- a signature records which positions are implicit and not what their
+    -- binders were called, so the better names are not reachable from here.
+    quantifyUnknowns dev ty =
+      let claims = [ (v, i, dom) | Component.Claim v i dom <- chainOf (flatten dev) ]
+          loose  = [ c | c@(v, _, _) <- claims, v `elem` freeVars ty ]
+       in ( map (const Implicit) loose
+          , foldr (\(v, i, dom) acc -> Pi i dom (close v acc)) ty loose
+          )
+
+    chainOf p = case p of
+      Under c rest   -> c : chainOf rest
+      Pending _ rest -> chainOf rest
+      Trailing _     -> []
+
     inferSurface t =
       let (l, n1) = freshLevelMeta (names machine)
           before  = snapshotOf machine
@@ -6026,8 +6127,10 @@ dispatch s name arg = case name of
                     -- **The two agree up to conversion, not syntactically**, and
                     -- they print the same.
                     (Right _, _) -> case expectedType (cursor dev) of
-                      Just ty -> (back, InferredSurface t
-                                          (whnf (globals m') (focusContext dev) ty))
+                      Just ty ->
+                        let (ps, gen) = quantifyUnknowns dev
+                                          (whnf (globals m') (focusContext dev) ty)
+                         in (back, InferredSurface t ps gen)
                       -- Unreachable as the program is written — the focus is the
                       -- component @Elaborate@ was pointed at — but the cursor
                       -- type admits it and inventing an answer would be worse.
@@ -7479,9 +7582,8 @@ installReadBases below heldBelow s = go []
         Right bss ->
           case snd (inferProgram (allSignatures everything) (scoped ++ concat bss)) of
             []   ->
-              ( s { sessionMachine = (sessionMachine s)
-                                       { pool = pool'
-                                       , held = heldNow ++ heldBelow } }
+              ( s { sessionMachine =
+                      setBases pool' (heldNow ++ heldBelow) (sessionMachine s) }
               -- **In the order the files were read**, which is the order they
               -- go into the pool: a warning about the third base of a push is
               -- read after the first two.
@@ -8070,13 +8172,21 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- global environment is not part of 'Development' and no instruction writes it
   -- (§7.4, §7.5). On refusal the rest of the program is dropped — the command
   -- is abandoned, and there is nothing to retry the way there is at 'Halted'.
-  Engine.Declaring d m -> case declare (globals m) (names m) d of
+  Engine.Declaring d cps m -> case declare (globals m) (names m) d of
     Left e -> stop (load [] m) msgs warns (Refused e)
     Right (g, n1)
       | exhausted -> stop installed msgs took (Paused spent)
       | otherwise -> spending fuel spent s { sessionMachine = installed } msgs took
       where
-        installed = m { globals = g, names = n1 }
+        -- **A constructor's braces are recorded here** (MS12 phase 320,
+        -- `~td9j6`), at the same point in the same door that installs the
+        -- declaration, and only for a constructor that wrote one: a block
+        -- whose every position is explicit adds nothing, which keeps a
+        -- generated grammar's dozens of constructors out of the table.
+        installed = m { globals = g, names = n1
+                      , signatures =
+                          [ (Engine.AsGlobal nm', ps) | (nm', ps) <- cps, Implicit `elem` ps ]
+                            ++ signatures m }
         -- **Every name the declaration added is asked, and the word it takes
         -- besides** (MS10 phase 264; the word at MS11 phase 305). A @data@
         -- block's names all land inside its own namespace, so no name it
@@ -8195,7 +8305,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
                  , names      = n1
                  , signatures = if Explicit `elem` ps && Implicit `notElem` ps
                                   then signatures m
-                                  else (nm, ps) : signatures m
+                                  else (Engine.AsGlobal nm, ps) : signatures m
                  }
           -- **The word this definition takes, if it takes one** (MS10 phase
           -- 264): this is the door a theorem in a file comes in by, and the
@@ -8481,16 +8591,6 @@ nameOf m d = shortestEnding known (scope m) g
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right
 
--- | Drain the iterator (§7.6). The REPL shows the whole match list rather than
--- a few with more on scroll, because MS1's terminal has no scroll and a list
--- silently cut short would be a worse lie than a long one. The incremental
--- reads — 'Thena.Rules.next' and 'Thena.Rules.hasNext' — are what phase 16's
--- peek and a real frontend use, and this is written in terms of the first so
--- that the display and the dispatcher walk the same iterator.
-unfoldIter :: RuleIter -> [Rule]
-unfoldIter it = case next it of
-  Nothing        -> []
-  Just (r, rest) -> r : unfoldIter rest
 
 -- | Parse a term of an installed language and say what it is (MS6 phase 102).
 -- **THE WRITTEN NAME IS RESOLVED TO THE PARSER'S KEY — MS12 PHASE 313.** A

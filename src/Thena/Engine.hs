@@ -14,9 +14,11 @@
 module Thena.Engine
   ( -- * The machine
     Machine (..)
+  , Resolved (..)
   , Exec (..)
   , Frame (..)
   , rules
+  , setBases
   , Development (..)
   , newDevelopment
   , focusContext
@@ -162,8 +164,11 @@ import Thena.Tactics.Eliminate
 import Thena.Tactics.Recurse (resolveRecursion)
 import Thena.Tactics.Specialise
   (Binder (..), Specialisation (..), specialise, survivingEquations)
+import Thena.Instral.Infer (inferProgram, reachingAll)
+import Thena.Instral.Type (Signature)
 import Thena.Rules
-  (RuleBase, RuleError (..), RuleIter, arities, basePath, clauses, dispatch, hasNext, next, resolveBlock, rootReading)
+  ( RuleBase, RuleError (..), RuleIter, allCallable, allSignatures, arities
+  , basePath, clauses, dispatch, hasNext, next, resolveBlock, rootReading )
 import Thena.Syntax.Lexer (isIdentifier)
 import Thena.Surface.Zipper (SurfaceZipper)
 import qualified Thena.Surface.Zipper as Zipper
@@ -243,10 +248,55 @@ data Machine = Machine
     --
     -- **Emptied with the pool when the load ends**, since a base read for one
     -- module's blocks is not the session's.
-  , signatures  :: [(GlobalName, [Plicity])]
-    -- ^ **which of a global's argument positions were written implicit** (MS4
+  , ruleTypes   :: [((GlobalName, Int), Signature)]
+    -- ^ __the type of every callable the loaded bases declare or imply__, keyed
+    -- by name and arity (MS12 phase 323), which is
+    -- 'Thena.Instral.Infer.Callable'.
+    --
+    -- **It is stored because it cannot change while the bases do not, and it
+    -- was being recomputed on every look.** `:matches` carries each rule\'s type
+    -- since his ruling of 2026-11-19, and both the prompt and
+    -- 'Thena.View.matchesView' were running 'Thena.Instral.Infer.inferProgram'
+    -- over the whole pool per call — 0.8 ms measured over the shipped base, and
+    -- the view is a pane a frontend may redraw on every keystroke. **This is
+    -- 'Thena.Global.Env.restingOnTrust'\'s bargain one table over**: the answer
+    -- is a property of the loaded bases alone, so it is worked out where they
+    -- are installed and read everywhere else.
+    --
+    -- **Over 'pool' AND 'held', which is why a push cannot stale it.**
+    -- 'Thena.Instral.Ops.PushBase' moves a base from @held@ into 'Exec'\'s
+    -- @pushes@, so @rules@ draws only from bases this table already covers, and
+    -- inference does not care in what order it sees them. @installReadBases@
+    -- types exactly this set together for the same reason — a held base\'s rules
+    -- may call a rule in the pool and the other way about.
+    --
+    -- **NOT backtrackable, like 'globals' and 'signatures' beside it**, and in
+    -- a session it is written only by 'setBases', which is what keeps it true:
+    -- nothing else may write 'pool' or 'held'. The engine suites build a bare
+    -- 'Machine' positionally and pass @[]@ here, which is right because they
+    -- drive @load@ and never ask a rule for its type.
+  , signatures  :: [(Resolved, [Plicity])]
+    -- ^ **which of a binding's argument positions were written implicit** (MS4
     -- phase 44b) — Brady's system state @(C, A, I)@, the @I@ of it. NOT
     -- backtrackable, like 'globals' beside it.
+    --
+    -- **A @let@-bound local has entries here too since MS12 phase 321**
+    -- (`~rskkv`), which is why the key is a 'Resolved' and not a 'GlobalName':
+    -- the brace on a @let@ annotation was parsed and thrown away, so
+    -- @let { f : ∀ {A : Type₀} -> A -> A = \\ A a -> a } in f "z"@ put the
+    -- string in @A@\'s position and refused with /String and Type₀ cannot be
+    -- made equal/. Brady restricts implicit binders to the prenex of a
+    -- top-level declaration; **his ruling of 2026-11-18 is that we do not
+    -- enforce that restriction** — /"local definitions by name (let-bound)
+    -- … I feel like they could"/ — and a local is the same by-name case one
+    -- scope down.
+    --
+    -- **A local's entry outlives the development that bound it, and that is
+    -- harmless rather than overlooked.** The table is not backtrackable, so a
+    -- rule that fails past the @define@ leaves the pair standing — but a
+    -- 'Thena.Core.Term.Var' is minted from 'names', which is not backtrackable
+    -- either, so the key can never be handed to a second binding and nothing
+    -- in scope can ever reach it again.
     --
     -- **It is here and not in 'Thena.Global.Env.GlobalEnv' because the core has
     -- no plicity at all** — his decision: /"the DC does not need implicits. I
@@ -357,6 +407,32 @@ data Exec = Exec
     -- §7.4's /@pool@ is not backtrackable/ still holds.
   }
   deriving (Eq, Show)
+
+-- | __Install a pool and the bases its blocks hold, and work out their
+-- types__ (MS12 phase 323).
+--
+-- **The only way to write 'pool' or 'held'**, so 'ruleTypes' cannot drift from
+-- the bases it describes. That is the whole reason this function exists: a
+-- derived field with five writers is a field that is wrong in four places
+-- eventually, and 'Thena.Global.Env.addDefinition' owns @restingOnTrust@ for
+-- the same reason.
+--
+-- **The types are a thunk and cost nothing until something asks.** A load that
+-- never prints a type pays nothing; the first @:matches@ pays once and every
+-- one after it pays nothing.
+--
+-- **It infers over the pool and the held bases together**, which is the set
+-- @rules@ can ever draw from, and the set @installReadBases@ already types
+-- together.
+setBases :: [RuleBase] -> [RuleBase] -> Machine -> Machine
+setBases bs hs m =
+  m { pool      = bs
+    , held      = hs
+    , ruleTypes = fst (inferProgram (allSignatures everything)
+                                    (reachingAll (allCallable everything)))
+    }
+  where
+    everything = bs ++ hs
 
 -- | __The pool a search is run against__ (MS11 phase 300).
 --
@@ -538,6 +614,40 @@ goalAtNamed i v ty = Under (Component.Claim v i ty) (Trailing (Free v))
 focusContext :: Development -> Context
 focusContext = Cursor.context . cursor
 
+-- | **Whose argument positions an entry in 'Machine'\'s @signatures@ is about**
+-- (MS12 phase 321): a declared global, keyed by the name it went in under, or a
+-- @let@-bound local, keyed by the variable its 'Component.Define' bound.
+--
+-- **A local is keyed by its variable and not by its word**, because a word is
+-- not an identity: @let f = … in let f = … in …@ writes two bindings and only
+-- one of them may have written a brace, and a local shadowing a global of the
+-- same word must not inherit the global\'s positions. A 'Var' is unique within
+-- a session (§3.5), which is exactly the identity wanted.
+data Resolved = AsGlobal GlobalName | AsLocal Var
+  deriving (Eq, Show)
+
+-- | **The innermost local binding of a written name**, or 'Nothing' if the name
+-- cannot be one.
+--
+-- Shadowing is what "innermost" means and Γ runs outermost-first, so this
+-- folds rather than taking the head. **A qualified name skips Γ entirely**
+-- (MS10): the context\'s entries are 'Ident's in the development\'s own scope,
+-- which has no namespaces, so @Nat.zero@ cannot be a local — and a path is how
+-- the writer says they did not mean one.
+--
+-- **One walk, read by two places since MS12 phase 321**: @resolve-name@, which
+-- turns a written name into a term, and 'Machine'\'s @signatures@, which has to
+-- ask the same question to know whether a name\'s implicit positions are a
+-- local\'s or a global\'s. They answered it separately for one phase and the
+-- answers have to agree — a name that resolves locally whose plicities are read
+-- off a global of the same word inserts arguments into the wrong call.
+localNamed :: GlobalName -> Context -> Maybe Var
+localNamed g ctx = case nameSteps g of
+  _ : _ -> Nothing
+  []    -> foldl (\acc e -> if entryIdent e == Ident (nameWord g)
+                              then Just (entryVar e) else acc)
+                 Nothing ctx
+
 -- | The development, rebuilt. O(depth), with most structure shared (§4.2).
 flatten :: Development -> Partial
 flatten = rebuild . cursor
@@ -657,8 +767,17 @@ data Outcome
     -- yielding machine yields again; unlike 'Asking' the driver does not owe it
     -- a value, only the word that lets it carry on.
   | Saying    Message    Machine  -- ^ the driver renders, then steps again
-  | Declaring InductiveDefinition Machine
+  | Declaring InductiveDefinition [(GlobalName, [Plicity])] Machine
                                   -- ^ the driver checks, installs, then steps again
+                                  --
+                                  -- **The plicities ride beside it** (MS12
+                                  -- phase 320, `~td9j6`), one entry per
+                                  -- constructor that wrote a brace, exactly as
+                                  -- 'Defining' carries a definition's: 'Core'
+                                  -- has no plicity, so what a @data@ block
+                                  -- wrote cannot be read back off the
+                                  -- declaration, and the driver is what owns
+                                  -- the table it goes in.
   | Defining GlobalName [Plicity] Core Core Machine
   | Primitively GlobalName Core Machine
   | DeclaringGrammar Block Machine
@@ -1146,7 +1265,9 @@ perform instr rest m = case operation instr of
   -- Nothing to check here: the checks are "Thena.Global.Declare"'s and the
   -- driver runs them (§7.5). The op's whole job is to make the declaration a
   -- step you can watch rather than something that happens between commands.
-  DefineData d -> Declaring d (advance m)
+  -- **No plicities**: a prebuilt declaration was never written down, so there
+  -- are no braces to carry (MS12 phase 320).
+  DefineData d -> Declaring d [] (advance m)
 
   -- Purity and extraction are one traversal (§5.3); the kernel itself is the
   -- driver's to run, exactly as a declaration's checks are.
@@ -1240,9 +1361,10 @@ perform instr rest m = case operation instr of
         | length ctys /= length cns -> failure (NotTypeable (UnknownDatatype d)) m
         | otherwise ->
             case buildInductive (globals m) d nps
-                   (zip3 cns ctys (maybe (map (const Nothing) cns) (map Just) roles)) dty (names m) of
+                   (zip3 (map fst cns) ctys
+                         (maybe (map (const Nothing) cns) (map Just) roles)) dty (names m) of
               Left e            -> failure (CannotBuildDatatype e) m
-              Right (def, n1)   -> Declaring def (advance m { names = n1 })
+              Right (def, n1)   -> Declaring def cns (advance m { names = n1 })
 
   -- Out through the channel, exactly as 'DefineGlobal' goes: the driver checks
   -- the name is one with a reduction rule and installs the constant.
@@ -2014,25 +2136,17 @@ perform instr rest m = case operation instr of
       globally = globalNamed m
 
       -- **The INNERMOST binding of that name**, which is what shadowing means
-      -- and what "Thena.Syntax.Resolve" gives. Γ runs outermost-first, so this
-      -- folds rather than taking the head.
+      -- and what "Thena.Syntax.Resolve" gives. 'localNamed' is the walk, shared
+      -- with the plicity lookup since MS12 phase 321 and documented there.
       --
       -- **It took the head until MS4 phase 49**, so a shadowed name resolved to
       -- the binding it was shadowing. Nothing had asked: phase 48 shipped the
       -- op with a test that had only one binding of the name in scope, and no
       -- rule used it until the leaf clauses did.
       --
-      -- **A QUALIFIED NAME SKIPS Γ ENTIRELY** (MS10). The context's entries are
-      -- 'Ident's in the development's own scope, which has no namespaces, so
-      -- @Nat.zero@ cannot be a local — and a path is how the writer says they
-      -- did not mean one. Only a root name can be shadowed, which is what makes
-      -- a path a way out of a shadowing.
-      inScopeAt g = case nameSteps g of
-        _ : _ -> Nothing
-        []    ->
-          foldl (\acc e -> if entryIdent e == Ident (nameWord g)
-                             then Just (entryVar e) else acc)
-                Nothing contextAt
+      -- **Only a root name can be shadowed**, which is what makes a path a way
+      -- out of a shadowing.
+      inScopeAt g = localNamed g contextAt
 
   -- **The two surface readers** (MS4 phase 49). Each is paired with the test
   -- that makes it total in the clause that uses it, and fails rather than
@@ -2250,6 +2364,25 @@ perform instr rest m = case operation instr of
   Op.ExpandImplicits x -> case operandSurface (env (exec m)) x of
     Left r  -> failure r m
     Right z -> case Zipper.focus z of
+      -- **A BARE NAME IS A SPINE WITH NO ARGUMENTS WRITTEN** (MS12 phase 320,
+      -- `~td9j6`), and until this phase @EXPAND@ fired only at an application
+      -- — so a declaration whose arguments are all implicit could not be used
+      -- at all: @vz : ∀ {n : Nat} -> V n@ written as @vz@ was elaborated as
+      -- the whole Π and refused against @V zero@ with /they differ by one
+      -- argument/. A judgment's premise-less rule is exactly that shape, which
+      -- is why the gap had to close here and not only at an application.
+      --
+      -- **Unchanged when there is nothing to insert**, which is every name
+      -- with no entry in the table: the answer is the zipper it was handed, so
+      -- the clause that called it goes on to the bare-name case with the
+      -- path it started from.
+      Concrete.SurfaceName ns w ->
+        case expand (plicitiesOf (GlobalName ns w)) [] of
+          Just (a : bs) ->
+            produce (VSurface (Zipper.rootedAt
+                                 (Concrete.SurfaceApp (Concrete.SurfaceName ns w)
+                                                      (a NE.:| bs)))) m
+          _ -> produce (VSurface z) m
       Concrete.SurfaceApp h as
         | Concrete.SurfaceName ps w <- h
         , Just as' <- expand (plicitiesOf (GlobalName ps w)) (NE.toList as) ->
@@ -2269,6 +2402,38 @@ perform instr rest m = case operation instr of
             failure (NoElaborationRule
                        "an application whose head's plicities do not fit") m
       _ -> failure (ExpectedSurfaceShape "an application") m
+
+  -- **@EXPAND@\'s other half, for a binding that is not a global** (MS12 phase
+  -- 321, `~rskkv`). @expand-implicits@ reads the table; this writes it, for the
+  -- one binding form whose annotation a user writes inside a term.
+  --
+  -- **It takes the @let@ node and not the variable @define@ produced**, for the
+  -- reason every other reader here does: the clause that calls it has already
+  -- asked @let-is-annotated@, so the shape is known, and the node carries both
+  -- halves of what has to be recorded — the written type the braces are in, and
+  -- the name they were written for. The alternative, an operand holding the
+  -- variable, is the same fact arriving twice.
+  --
+  -- **The name is resolved, not trusted**: @define@ has just inserted the
+  -- component above the focus, so the innermost binding of that word is the one
+  -- being recorded for, and a word that is bound nowhere means the clause ran
+  -- this before its @define@ — which is a rule-author error and is reported as
+  -- one rather than silently recording nothing.
+  --
+  -- **Nothing is recorded when nothing was written in braces**, which is the
+  -- condition the global side applies too: an entry of all-explicit positions
+  -- says exactly what no entry says.
+  Op.RecordImplicits x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right s -> case s of
+      Concrete.SurfaceLet w (Just ty) _ _
+        | ps <- Concrete.plicitiesIn ty
+        , Implicit `elem` ps ->
+            case localNamed (rootName w) contextAt of
+              Nothing -> failure (CannotRead (ResolveFailed (NotInScope w))) m
+              Just v  -> Continue (advance m { signatures = (AsLocal v, ps) : signatures m })
+      Concrete.SurfaceLet {} -> Continue (advance m)
+      _ -> failure (ExpectedSurfaceShape "an annotated let") m
 
   Op.AppHead x -> surfaceMove x "an application" $ \s -> case s of
     Concrete.SurfaceApp h as -> Just (Zipper.intoHead as h)
@@ -2674,7 +2839,18 @@ perform instr rest m = case operation instr of
 
     -- What the machine recorded about this name\'s argument positions, if it
     -- recorded anything. A name with no entry — every DC-declared global, and
-    -- every local — takes what was written and nothing more.
+    -- every local that was written with no brace — takes what was written and
+    -- nothing more.
+    -- **A LOCAL IS ASKED ABOUT FIRST, AND IT IS THE SAME WALK @resolve-name@
+    -- TAKES — MS12 PHASE 321** (`~rskkv`). A @let@-bound name with a braced
+    -- annotation has its positions under 'AsLocal', so the clause that elaborates
+    -- a use of it inserts the arguments the writer left out; before this phase
+    -- the table held globals only and @f "z"@ for
+    -- @f : ∀ {A : Type₀} -> A -> A@ put the string in @A@\'s position.
+    -- **Resolving first is what makes shadowing come out right**: a local @f@
+    -- must not take an unrelated global @f@\'s braces, and asking the context
+    -- before the globals is how @resolve-name@ already decides which @f@ the
+    -- call even means.
     -- **THE WRITTEN NAME IS RESOLVED FIRST — MS12 PHASE 313.** The table is
     -- keyed by the name the definition went in under and the caller hands over
     -- the name as the user wrote it; a module's declarations live under the
@@ -2684,9 +2860,13 @@ perform instr rest m = case operation instr of
     -- refused with @Nat and Type\8320 cannot be made equal@.
     -- 'Thena.Core.Term.globalUnder' is the one walk; two answers or none means
     -- nothing is recorded, which is the same as an unrecorded name.
-    plicitiesOf g = case lookup (resolved g) (signatures m) of
+    plicitiesOf g = case lookup (keyFor g) (signatures m) of
       Just ps -> ps
       Nothing -> []
+
+    keyFor g = case localNamed g contextAt of
+      Just v  -> AsLocal v
+      Nothing -> AsGlobal (resolved g)
 
     resolved g = either (const g) id (globalNamed m g)
 
@@ -2712,7 +2892,17 @@ perform instr rest m = case operation instr of
           <$> expand more rest'
       (Explicit : more, a@(Concrete.SurfaceArg Explicit _) : rest') ->
         (a :) <$> expand more rest'
-      -- An explicit position written in braces, or one not written at all.
+      -- **An explicit position the user stopped before** (MS12 phase 320): a
+      -- partial application is ordinary, as it is in the @([], rest')@ case
+      -- above, and this used to refuse one whenever the head had an entry in
+      -- the table at all — @mid String@, for
+      -- @mid : ∀ (A : Type₀) -> ∀ {B : Type₀} -> A -> A@, failed EXPAND and
+      -- was reported as /an application whose head's plicities do not fit/.
+      -- **It is also what stops the clause above from running away with a bare
+      -- name**: inserting the leading implicit run and stopping is what makes
+      -- @vz@ a spine of one inserted argument rather than a refusal.
+      (Explicit : _, [])                  -> Just []
+      -- An explicit position written in braces.
       (Explicit : _, _)                   -> Nothing
 
     written (Concrete.SurfaceArg Explicit _) = True

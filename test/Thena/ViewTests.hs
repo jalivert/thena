@@ -54,7 +54,8 @@ import Thena.View
 import Thena.View.Address (follow)
 import Thena.View.Choices (ChoiceView (..))
 import Thena.View.Redraw (markedChainText, redraw, redrawChain)
-import Thena.View.Rules (RuleView (..))
+import Thena.View.Matches (MatchView (..))
+import Thena.View.TypeTests (redrawSignature)
 
 tests :: TestTree
 tests =
@@ -158,17 +159,23 @@ typeCase (name, s) = testCase name (drawn @?= typed)
 -- The match list
 -- ---------------------------------------------------------------------------
 
--- | 'matchesView' against @:matches@, which is 'Thena.Rules.matches' plus
--- 'Thena.Render.renderMatches' and no part of this module — including the order,
--- which is dispatch order and the reason the seam drains the iterator rather
--- than sorting anything.
+-- | 'matchesView' against @:matches@, which is 'Thena.Rules.matchingRules' plus
+-- 'Thena.Render.renderMatches' and no part of this module — including the
+-- order, which is dispatch order by each name's first matching clause.
+--
+-- **The type is part of the line now** (2026-11-19), so this redraws it the way
+-- @Thena.View.TypeTests@ does: a view that dropped the signature, or carried a
+-- different one from the one the prompt prints, would pass a name-only check.
 matchCase :: (String, Session) -> TestTree
 matchCase (name, s) = testCase name (drawn @?= turnOutput (turn s ":matches"))
   where
     drawn = case map line (matchesView (Budget 200) s) of
       [] -> ["no rule applies here"]
       ls -> ls
-    line rv = unwords (ruleViewName rv : ruleViewParams rv)
+    line mv =
+      unwords (matchViewName mv : map corners (matchViewParams mv))
+        ++ maybe "" ((" : " ++) . redrawSignature) (matchViewType mv)
+    corners p = "‹" ++ p ++ "›"
 
 -- ---------------------------------------------------------------------------
 -- The choice points

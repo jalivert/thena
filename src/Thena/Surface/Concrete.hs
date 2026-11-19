@@ -33,6 +33,7 @@ module Thena.Surface.Concrete
   , Analysis (..)
   , Plicity (..)
   , blocksIn
+  , plicitiesIn
   , surfaceName
   ) where
 
@@ -541,6 +542,24 @@ data PairingError
   = SignatureWithNoEquation String
   | EquationWithNoSignature String
   deriving (Eq, Show)
+
+-- | The plicity of each argument position a written type gives, outermost
+-- first.
+--
+-- Only a leading run of @∀@ groups is read: once the type stops being a
+-- quantifier there are no more named positions to speak of, and an arrow
+-- contributes an 'Explicit' one.
+--
+-- **Here and not in "Thena.Driver" since MS12 phase 321** (`~rskkv`), because a
+-- @let@ binding\'s annotation needs it and the op that reads one is below the
+-- driver. It was a local of @surfaceProgram@ until phase 320, when a @data@
+-- block\'s constructors needed it too.
+plicitiesIn :: Surface -> [Plicity]
+plicitiesIn t = case t of
+  SurfacePi bs body ->
+    [ p | SurfaceBinder p _ _ <- toList bs ] ++ plicitiesIn body
+  SurfaceArrow _ body -> Explicit : plicitiesIn body
+  _ -> []
 
 -- | Every @do@ block written inside a surface term, outermost first.
 --

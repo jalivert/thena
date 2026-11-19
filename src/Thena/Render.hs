@@ -45,6 +45,7 @@ module Thena.Render
   , renderTree
   , parseFailureReason
   , renderMatches
+  , renderRuleClause
   , renderOperand
   ) where
 
@@ -104,6 +105,7 @@ import Thena.Development.Cursor
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Driver
   ( CommandError (..)
+  , MatchedRule (..)
   , Unfinished (..)
   , RuleFileError (..)
   , LoadError (..)
@@ -192,7 +194,7 @@ import Thena.Instral.Ops
   , operandsOf
   )
 import Thena.Tactics.Specialise (binderWord)
-import Thena.Rules (RuleBase (..), RuleError (..))
+import Thena.Rules (RuleBase (..), RuleError (..), patternKind)
 import qualified Thena.Instral.Ops as Ops
 import Thena.Syntax.Lexer (BlockKind (..), LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
@@ -258,7 +260,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   Rendered t     -> [renderCore ren (contextOf s) t]
   RenderedDev p  -> [renderPartial ren (contextOf s) p]
   Shown c        -> [renderCursor ren c]
-  ShownData d    -> renderInductive ren d
+  ShownData d cps -> renderInductive ren d cps
   ShownRules d   -> renderRules ren d
   ShownEliminator g ty  -> renderEliminator ren g ty
   ShownGlobal g lvs cs ps ty body -> renderGlobal ren g lvs cs ps ty body
@@ -269,8 +271,8 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   -- phase 43). The core term it built is deliberately not shown: it was rewound
   -- with the rest of the line, and naming a hole the session no longer has
   -- would invite a @goto@ into nothing.
-  InferredSurface t ty ->
-    [renderSurface t ++ " : " ++ renderCore ren (contextOf s) ty]
+  InferredSurface t ps ty ->
+    [renderSurface t ++ " : " ++ signatureIn ren (contextOf s) ps ty]
   IllTyped e     -> renderTypeError ren e
   -- The two terms are restated, because with η a yes is printed about terms
   -- that still look different (§5.2).
@@ -1838,8 +1840,8 @@ renderMoveError m = case m of
 -- (§3.7), while the indices are printed as the type they bind, so that
 -- 'renderCore' decides between @Nat -> Type\8320@ and @\8704 (n : Nat) -> \8230@ by
 -- its own rule (§2.6).
-renderInductive :: Rendering -> InductiveDefinition -> [String]
-renderInductive ren d = case inductiveConstructors d of
+renderInductive :: Rendering -> InductiveDefinition -> [(GlobalName, [Plicity])] -> [String]
+renderInductive ren d cps = case inductiveConstructors d of
   -- @header@ already ends in @where@ — a datatype with no constructors gets
   -- the empty brace group and nothing else. It said @where where { }@ until
   -- phase 33c, which is when a bare @Type@ made @data Box : Type where { }@
@@ -1871,10 +1873,18 @@ renderInductive ren d = case inductiveConstructors d of
     -- own arguments. Its stored type abstracts the parameters as well — that is
     -- what makes it a function (§3.7) — and printing /that/ here would rebind
     -- them and freshen the second copy to @A1@.
+    -- **A brace it was written with is printed back** (MS12 phase 320,
+    -- `~td9j6`), by the same table and the same leading-run rule a
+    -- definition's signature is printed by — see 'signature'. The parameters
+    -- are dropped off the front of the list because they are already in scope
+    -- here: the record covers every argument position of the constructor as a
+    -- function, parameters first ('Thena.Driver.datatypeProgram').
     line c =
       nameString ren (constructorName c)
         ++ " : "
-        ++ renderCore ren ps (piOver (constructorArguments c) (constructorTarget d c))
+        ++ signatureIn ren ps
+             (drop (length ps) (fromMaybe [] (lookup (constructorName c) cps)))
+             (piOver (constructorArguments c) (constructorTarget d c))
 
     closed ls = init ls ++ [last ls ++ " }"]
 
@@ -2023,20 +2033,47 @@ scheme ren lvs cs ps ty =
 -- application with its inserted arguments dropped would not be the term that
 -- is there.
 signature :: Rendering -> [Plicity] -> Core -> String
-signature ren@(Rendering _ n0 _ _) ps0 ty0 = braced n0 [] ps0 ty0
+signature ren ps0 ty0 = signatureIn ren [] ps0 ty0
+
+-- | 'signature' with the binders already in scope — a @data@ block's
+-- parameters (MS12 phase 320), which the constructor lines are printed under.
+signatureIn :: Rendering -> Context -> [Plicity] -> Core -> String
+signatureIn ren@(Rendering _ n0 _ _) ctx0 ps0 ty0 = braced n0 ctx0 [] ps0 ty0
   where
     -- Only the **leading** implicit binders are peeled. The moment a position
-    -- is explicit the rest is an ordinary core type and 'renderCore' prints it
-    -- — grouping the binders the way it always has, which peeling them one at a
-    -- time here would lose.
+    -- is explicit the rest is an ordinary core type and 'renderCore' prints it.
+    --
+    -- **The whole run is ONE @∀@** (MS12 phase 320): it is how 'renderCore'
+    -- prints a run of explicit binders and it is what an author writes, and
+    -- until this phase the peel printed a @∀@ apiece — which nothing noticed
+    -- while the only implicit signatures in the tree had one binder, and which
+    -- made a judgment's rule unreadable the moment its metavariables became
+    -- implicit: @∀ {Γ : Ctx} -> ∀ {x : String} -> ∀ {T : Ty} -> …@ for what a
+    -- paper writes as three names.
     --
     -- The opened binder goes into the context, so the codomain prints it by
     -- name rather than as a bare variable.
-    braced n ctx (Implicit : more) (Pi i dom sc) =
-      let (v, n1) = fresh n
-       in "∀ {" ++ identString i ++ " : " ++ renderCore (at n) ctx dom ++ "} -> "
-            ++ braced n1 (ctx ++ [Hypothesis v i dom]) more (open v sc)
-    braced n ctx _ ty = renderCore (at n) ctx ty
+    braced n ctx bs (p : more) (Pi i dom sc)
+      -- **An explicit position is peeled too, when something names it** — a
+      -- judgment's named premise, `p1 : Γ ⊢ M : T`, which is a premise and
+      -- stays explicit while the metavariables around it do not. Peeling it
+      -- keeps the run in one @∀@; stopping here would print
+      -- @∀ {Γ : Ctx} -> ∀ (p1 : …) -> …@, two quantifiers for one telescope.
+      --
+      -- **An explicit position nothing names is left to 'renderCore'**, which
+      -- prints it as an arrow — @Premise -> …@ — and that is the right spelling
+      -- for all but one of a rule's premises. So the run ends there, with the
+      -- @->@ the fall-through writes.
+      | Implicit <- p = peel ("{" ++ shown ++ "}")
+      | named         = peel ("(" ++ shown ++ ")")
+      where
+        (v, n1)  = fresh n
+        shown    = identString i ++ " : " ++ renderCore (at n) ctx dom
+        named    = v `elem` freeVars (open v sc)
+        peel one = braced n1 (ctx ++ [Hypothesis v i dom]) (bs ++ [one]) more (open v sc)
+    braced n ctx bs _ ty
+      | null bs   = renderCore (at n) ctx ty
+      | otherwise = "∀ " ++ unwords bs ++ " -> " ++ renderCore (at n) ctx ty
 
     -- The counter moves as the binders are peeled, so each nested render gets
     -- the one that is current rather than the one this call started with.
@@ -2526,12 +2563,43 @@ renderBases bs = concatMap one bs
     one b = (baseName b ++ maybe "" ("   " ++) (baseDescription b)) : ["    " ++ basePath b]
 
 -- | @:rules@ — the rules themselves, under the base each came from, in search
--- order. The per-rule line is @:matches@\', so a rule reads the same in both.
+-- order, **one line per CLAUSE**.
+--
+-- **It stopped sharing a line with @:matches@ on 2026-11-19**, and the two now
+-- answer different questions on purpose. @:matches@ is /what could I do here/,
+-- so his ruling collapsed it to one row per name and arity. This is /what is in
+-- this file/, where a clause is the thing that is in it: a base listing that
+-- showed @elaborate ‹t›@ once would be hiding twenty-two written rules from
+-- someone reading the file they came from.
+--
+-- **So the clause\'s patterns stay here as written** — @reverse-onto []
+-- ‹acc›@ beside @reverse-onto [x, ...xs] ‹acc›@ — which is what they are for:
+-- they say what shape that clause takes, and here there is a second row for
+-- them to be told apart from.
 renderRuleBases :: Rendering -> [RuleBase] -> [String]
 renderRuleBases _ [] = ["no rule base is loaded"]
 renderRuleBases ren bs = concatMap one bs
   where
-    one b = baseName b : map ("  " ++) (renderMatches ren (baseRules b))
+    one b = baseName b : map (("  " ++) . renderRuleClause ren) (baseRules b)
+
+-- | One clause's own line: its name and its parameters as written.
+--
+-- **A variable keeps its corners and anything else is shown as written.** The
+-- corners say /put something here/, which is true of @x@ and false of
+-- @[a, ...rest]@ — that one says what shape the something must be (MS5 phase
+-- 82). This is the half of the old @:matches@ line that stayed true when a row
+-- became a rule: here there is a second row for a shape to be told apart from.
+--
+-- **Exported so one spelling serves the listing and the check on it**:
+-- "Thena.View.Rules" draws the same line from a 'Thena.View.Rules.RuleView',
+-- and @Thena.View.RulesTests@ crosses the two.
+renderRuleClause :: Rendering -> Rule -> String
+renderRuleClause ren r =
+  unwords (nameString ren (ruleName r) : map written (ruleParams r))
+  where
+    written pt = case pt of
+      PVar n -> "‹" ++ n ++ "›"
+      _      -> renderPattern pt
 
 renderRuleFileError :: Rendering -> FilePath -> RuleFileError -> [String]
 renderRuleFileError ren path e = case e of
@@ -2711,19 +2779,33 @@ renderPattern pt = case pt of
                  Nothing -> []
                  Just t  -> ["..." ++ renderPattern t]
 
-renderMatches :: Rendering -> [Rule] -> [String]
+renderMatches :: Rendering -> [MatchedRule] -> [String]
 renderMatches _ [] = ["no rule applies here"]
 renderMatches ren rs = map one rs
   where
-    one r = unwords (nameString ren (ruleName r) : map placeholder (ruleParams r))
-    -- **A variable keeps its corners and anything else is shown as written.**
-    -- The corners say /put something here/, which is true of @x@ and false of
-    -- @[a, ...rest]@ — that one says what shape the something must be, and
-    -- hiding it behind a placeholder would make two clauses of one name print
-    -- identically (MS5 phase 82).
+    one r =
+      unwords (nameString ren (matchedName r) : map placeholder (matchedParams r))
+        ++ maybe "" ((" : " ++) . renderSignature) (matchedType r)
+
+    -- **Every parameter gets corners now, whatever the clause wrote there.**
+    -- Until 2026-11-19 a pattern that was not a variable printed as written —
+    -- @reverse-onto [] ‹acc›@ — because a row was one clause and the shape was the
+    -- only thing telling two rows of one name apart. A row is a rule now, so
+    -- there is no second row to tell it from, and the shape belongs to a clause
+    -- this row does not name: printing @[]@ here would say /type an empty list/
+    -- when the other clause takes a cons. **The corners say put something here,
+    -- which is the whole of what a row can honestly promise**, and the type
+    -- beside it says what.
+    --
+    -- A pattern that binds no name has none to show, so it shows what kind of
+    -- thing it is instead — @‹list›@, @‹some›@ — which is still a promise the
+    -- row can keep, since every clause of this arity is behind it.
     placeholder pt = case pt of
-      PVar n -> "‹" ++ n ++ "›"
-      _      -> renderPattern pt
+      PVar n -> corners n
+      _      -> corners (patternKind pt)
+
+    corners n = "‹" ++ n ++ "›"
+
 
 -- | @:choices@ — the live choice points, nearest first (§7.7).
 --

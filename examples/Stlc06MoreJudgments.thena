@@ -50,20 +50,27 @@ done : LC
 done = LC`( λ z : ι . z )`
 
 -- The first step is inside the function position, the second is a β-step.
+--
+-- The inner β-step is named rather than written inside `E-app1`, and that is
+-- forced: a rule's metavariables are inferred from the judgment being proved,
+-- and E-beta's conclusion puts `E[x->N]` — a substitution — on the right of
+-- the arrow. Reading it backwards is not something unification can do, so
+-- E-beta needs a statement to read its metavariables off. Inside `E-app1` it
+-- has none yet: `E-app1`'s own premise is `?M --> ?M'` with both unknown until
+-- `E-app1` itself is checked against the goal.
+innerStep : step`( ( λ x : ( ( ι -> ι ) -> ( ι -> ι ) ) . x ) ( λ y : ( ι -> ι ) . y ) ) --> ( λ y : ( ι -> ι ) . y )`
+innerStep = E-beta V-abs
+
 firstStep : step`${twice} --> ${once}`
-firstStep =
-  E-app1 LC`( ( λ x : ( ( ι -> ι ) -> ( ι -> ι ) ) . x ) ( λ y : ( ι -> ι ) . y ) )`
-         LC`( λ y : ( ι -> ι ) . y )` done
-    (E-beta LC`( λ y : ( ι -> ι ) . y )` "x" Ty`( ( ι -> ι ) -> ( ι -> ι ) )` LC`x`
-      (V-abs "y" Ty`( ι -> ι )` LC`y`))
+firstStep = E-app1 innerStep
 
 secondStep : step`${once} --> ${done}`
-secondStep = E-beta done "y" Ty`( ι -> ι )` LC`y` (V-abs "z" base LC`z`)
+secondStep = E-beta V-abs
 
--- S-step's arguments are M, M', N — in the order they first appear — then its
--- two premises.
+-- S-step's metavariables are M, M', N — in the order they first appear — and
+-- they are implicit, so what is written is its two premises.
 run : steps`${twice} -->* ${done}`
-run = S-step twice once done firstStep (S-step once done done secondStep (S-refl done))
+run = S-step firstStep (S-step secondStep S-refl)
 
 
 -- ---------------------------------------------------------------------------
@@ -89,7 +96,7 @@ judgment halts = M ⇓ where
 open halts
 
 onceHalts : halts`${once} ⇓`
-onceHalts = H-step once done secondStep (H-value done (V-abs "z" base LC`z`))
+onceHalts = H-step secondStep (H-value V-abs)
 
 
 -- ---------------------------------------------------------------------------
@@ -109,7 +116,7 @@ open swap
 
 -- The kernel runs LC.subst-* to check the right-hand side.
 swapped : swap`( a b ) ⇄ ( b a )`
-swapped = Swap "a" "b"
+swapped = Swap
 
 -- Chained brackets are one after the other, and that is the wrong swap:
 -- ( a b ) becomes ( b b ), then ( a a ).
@@ -121,7 +128,7 @@ judgment swapInTurn = M ⇉ N where
 open swapInTurn
 
 inTurn : swapInTurn`( a b ) ⇉ ( a a )`
-inTurn = InTurn "a" "b"
+inTurn = InTurn
 
 
 -- ---------------------------------------------------------------------------
@@ -141,7 +148,7 @@ open keepsType
 
 -- A value runs to itself and keeps its type.
 doneTyped : typing`· ⊢ ${done} : ( ι -> ι )`
-doneTyped = T-abs Ctx`·` "z" base LC`z` base (T-var "z" base Ctx`·, z : ι` (extend-here Ctx`·` "z" base))
+doneTyped = T-abs (T-var extend-here)
 
 doneKeeps : keepsType`· ⊢ ${done} ⇒ ${done} : ( ι -> ι )`
-doneKeeps = K-run Ctx`·` done Ty`( ι -> ι )` done doneTyped (S-refl done) doneTyped
+doneKeeps = K-run doneTyped S-refl doneTyped

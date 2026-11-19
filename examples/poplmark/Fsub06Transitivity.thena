@@ -50,14 +50,14 @@ open sub
 
 subRefl : forall (G : Ctx) (T : Ty) (h : ty G T) (o : ok G) -> sub G T T
 subRefl = \ G T h o -> induction h of
-  { ty-tvar X T1 C0 lk -> SA-Refl-TVar C0 X
-  ; ty-top C0 -> SA-Top C0 Ty`⊤`
+  { ty-tvar X T1 C0 lk -> SA-Refl-TVar
+  ; ty-top C0 -> SA-Top
   ; ty-arrow C0 T1 T2 h1 h2 ->
-      SA-Arrow C0 T1 T1 T2 T2 (subRefl C0 T1 h1 o) (subRefl C0 T2 h2 o)
+      SA-Arrow (subRefl C0 T1 h1 o) (subRefl C0 T2 h2 o)
   ; ty-all X C0 T1 T2 f h1 h2 ->
-      SA-All C0 T1 T1 X T2 T2 (subRefl C0 T1 h1 o)
-        (ok-bindTy C0 X T1 o f h1)
-        (subRefl (bindTy C0 X T1) T2 h2 (ok-bindTy C0 X T1 o f h1)) }
+      SA-All (subRefl C0 T1 h1 o)
+        (ok-bindTy o f h1)
+        (subRefl (bindTy C0 X T1) T2 h2 (ok-bindTy o f h1)) }
 
 
 -- ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ Wk = \ Q -> forall (G : Ctx) (Xn : String) (D : Ctx) (P : Ty)
 -- Q = ⊤. Nothing is above ⊤, so the right premise says T is ⊤.
 transTop : TransAt Ty`⊤`
 transTop = \ G S T d1 d2 -> case d2 of
-  { SA-Top G0 S0 -> SA-Top G0 S }
+  { SA-Top G0 S0 -> SA-Top }
 
 -- Q = X. Either SA-Refl-TVar, and the right premise IS the conclusion, or
 -- SA-Trans-TVar, and the inner hypothesis does it.
@@ -111,21 +111,21 @@ transTVar : forall (Z : String) -> TransAt Ty`${Z}`
 transTVar = \ Z G S T d1 d2 -> induction d1 of
   { SA-Refl-TVar G0 W -> d2
   ; SA-Trans-TVar W U G0 T1 lk p1 ->
-      SA-Trans-TVar W U G0 T lk (transTVar Z G0 U T p1 d2) }
+      SA-Trans-TVar lk (transTVar Z G0 U T p1 d2) }
 
 -- Q = Q₁ -> Q₂. The first case that uses the outer hypothesis, at both parts.
 transArrow : forall (Q1 : Ty) (Q2 : Ty) (ihQ1 : TransAt Q1) (ihQ2 : TransAt Q2)
                -> TransAt Ty`( ${Q1} -> ${Q2} )`
 transArrow = \ Q1 Q2 ihQ1 ihQ2 G S T d1 d2 -> induction d1 of
   { SA-Trans-TVar W U G0 T1 lk p1 ->
-      SA-Trans-TVar W U G0 T lk (transArrow Q1 Q2 ihQ1 ihQ2 G0 U T p1 d2)
+      SA-Trans-TVar lk (transArrow Q1 Q2 ihQ1 ihQ2 G0 U T p1 d2)
   -- **The inner split IS the inversion**, so `arrowSuper` is not needed here:
   -- `d2`'s lower type is `Q1 -> Q2`, and the three rules that cannot conclude
   -- that have no arm.
   ; SA-Arrow G0 T1 S1 S2 T2 p1 p2 -> case d2 of
-      { SA-Top G1 S3 -> SA-Top G0 Ty`( ${S1} -> ${S2} )`
+      { SA-Top G1 S3 -> SA-Top
       ; SA-Arrow G1 T3 S3 S4 T4 q1 q2 ->
-          SA-Arrow G0 T3 S1 S2 T4 (ihQ1 G0 T3 S1 q1 p1) (ihQ2 G0 S2 T4 p2 q2) } }
+          SA-Arrow (ihQ1 G0 T3 S1 q1 p1) (ihQ2 G0 S2 T4 p2 q2) } }
 
 
 -- ---------------------------------------------------------------------------
@@ -147,12 +147,12 @@ narrowFromAt : forall (Q : Ty) (tr : TransAt Q) (wk : Wk Q)
                  (o : ok (append (bindTy G Xn Q) D)) (tp : ty G P) (dp : sub G P Q)
                  -> sub (append (bindTy G Xn P) D) M N
 narrowFromAt = \ Q tr wk C M N d G Xn D P e o tp dp -> induction d of
-  { SA-Top C0 S0 -> SA-Top (append (bindTy G Xn P) D) S0
-  ; SA-Refl-TVar C0 W -> SA-Refl-TVar (append (bindTy G Xn P) D) W
+  { SA-Top C0 S0 -> SA-Top
+  ; SA-Refl-TVar C0 W -> SA-Refl-TVar
   ; SA-Trans-TVar W U C0 N0 lk p1 ->
       case (narrowLookup G Xn Q P D W U
               (substEq Ctx (\ c -> bindTy-in W U c) C0 (append (bindTy G Xn Q) D) e lk)) of
-        { orLeft h -> SA-Trans-TVar W U (append (bindTy G Xn P) D) N0 h
+        { orLeft h -> SA-Trans-TVar h
                         (narrowFromAt Q tr wk C0 U N0 p1 G Xn D P e o tp dp)
         ; orRight h ->
             substEq String (\ z -> sub (append (bindTy G Xn P) D) Ty`${z}` N0) Xn W
@@ -160,7 +160,7 @@ narrowFromAt = \ Q tr wk C M N d G Xn D P e o tp dp -> induction d of
                 (andLeft (Eq String W Xn) (Eq Ty U Q)
                   (andLeft (And (Eq String W Xn) (Eq Ty U Q))
                            (bindTy-in Xn P (append (bindTy G Xn P) D)) h)))
-              (SA-Trans-TVar Xn P (append (bindTy G Xn P) D) N0
+              (SA-Trans-TVar
                 (andRight (And (Eq String W Xn) (Eq Ty U Q))
                           (bindTy-in Xn P (append (bindTy G Xn P) D)) h)
                 (tr (append (bindTy G Xn P) D) P N0
@@ -171,11 +171,11 @@ narrowFromAt = \ Q tr wk C M N d G Xn D P e o tp dp -> induction d of
                                (bindTy-in Xn P (append (bindTy G Xn P) D)) h))
                     (narrowFromAt Q tr wk C0 U N0 p1 G Xn D P e o tp dp)))) }
   ; SA-Arrow C0 T1 S1 S2 T2 p1 p2 ->
-      SA-Arrow (append (bindTy G Xn P) D) T1 S1 S2 T2
+      SA-Arrow
         (narrowFromAt Q tr wk C0 T1 S1 p1 G Xn D P e o tp dp)
         (narrowFromAt Q tr wk C0 S2 T2 p2 G Xn D P e o tp dp)
   ; SA-All C0 T1 S1 W S2 T2 p1 okW p2 ->
-      SA-All (append (bindTy G Xn P) D) T1 S1 W S2 T2
+      SA-All
         (narrowFromAt Q tr wk C0 T1 S1 p1 G Xn D P e o tp dp)
         (okRebind G Xn Q P (bindTy D W T1)
           (substEq Ctx (\ c -> ok (bindTy c W T1)) C0 (append (bindTy G Xn Q) D) e okW)
@@ -207,11 +207,11 @@ transAll : forall (Z : String) (Q1 : Ty) (Q2 : Ty)
              -> TransAt Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )`
 transAll = \ Z Q1 Q2 trQ1 naQ1 trQ2 G S T d1 d2 -> induction d1 of
   { SA-Trans-TVar W U G0 T1 lk p1 ->
-      SA-Trans-TVar W U G0 T lk (transAll Z Q1 Q2 trQ1 naQ1 trQ2 G0 U T p1 d2)
+      SA-Trans-TVar lk (transAll Z Q1 Q2 trQ1 naQ1 trQ2 G0 U T p1 d2)
   ; SA-All G0 T1 S1 W S2 T2 p1 okW p2 -> case d2 of
-      { SA-Top G1 S3 -> SA-Top G0 Ty`( ∀ ${W} <: ${S1} . ${S2} )`
+      { SA-Top G1 S3 -> SA-Top
       ; SA-All G1 T3 S3 W1 S4 T4 q1 oq q2 ->
-          SA-All G0 T3 S1 W S2 T4
+          SA-All
             (trQ1 G0 T3 S1 q1 p1)
             oq
             (trQ2 (bindTy G0 W T3) S2 T4
@@ -288,27 +288,27 @@ zNotB : Eq String "Z" "B" -> Empty
 zNotB = \ q -> substEq String (\ z -> isSame (String.eq "Z" z)) "Z" "B" q unit
 
 okB : ok`⊢ · , B <: ⊤ ok`
-okB = ok-bindTy Ctx`·` "B" Ty`⊤` ok-empty (NI-empty "B") (ty-top Ctx`·`)
+okB = ok-bindTy ok-empty NI-empty ty-top
 
 zFreshInB : notIn`Z # · , B <: ⊤`
-zFreshInB = NI-bindTy "Z" Ctx`·` "B" Ty`⊤` zNotB (NI-empty "Z")
+zFreshInB = NI-bindTy zNotB NI-empty
 
 -- The derivation binds Z, and its SA-All premise says Z is fresh for · , B <: ⊤.
 bindsZ : sub`· , B <: ⊤ ⊢ ( ∀ Z <: ⊤ . Z ) <: ( ∀ Z <: ⊤ . ⊤ )`
 bindsZ =
-  SA-All Ctx`· , B <: ⊤` Ty`⊤` Ty`⊤` "Z" Ty`Z` Ty`⊤`
-    (SA-Top Ctx`· , B <: ⊤` Ty`⊤`)
-    (ok-bindTy Ctx`· , B <: ⊤` "Z" Ty`⊤` okB zFreshInB (ty-top Ctx`· , B <: ⊤`))
-    (SA-Top Ctx`· , B <: ⊤ , Z <: ⊤` Ty`Z`)
+  SA-All
+    SA-Top
+    (ok-bindTy okB zFreshInB ty-top)
+    SA-Top
 
 -- Weakening by Z <: ( ∀ Z <: ⊤ . Z ) is a WELL-FORMED extension: Z is not
 -- declared in · , B <: ⊤, and the bound is a well-formed type there.
 okTarget : ok`⊢ · , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z ) ok`
 okTarget =
-  ok-bindTy Ctx`· , B <: ⊤` "Z" Ty`( ∀ Z <: ⊤ . Z )` okB zFreshInB
-    (ty-all "Z" Ctx`· , B <: ⊤` Ty`⊤` Ty`Z` zFreshInB (ty-top Ctx`· , B <: ⊤`)
-      (ty-tvar "Z" Ty`⊤` Ctx`· , B <: ⊤ , Z <: ⊤`
-        (bindTy-here Ctx`· , B <: ⊤` "Z" Ty`⊤`)))
+  ok-bindTy okB zFreshInB
+    (ty-all zFreshInB ty-top
+      (ty-tvar
+        bindTy-here))
 
 -- And yet the derivation does not survive into it.
 noBindsZ : forall (d : sub Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )`

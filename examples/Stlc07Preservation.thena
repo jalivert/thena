@@ -281,9 +281,9 @@ inclExtend = \ G G1 x S inc y U i -> case (ctxInvExtend G x S y U i) of
       { both ey eU ->
           subst String (\ z -> extend-in z U (extend G1 x S)) x y (sym String y x ey)
             (subst Ty (\ V -> extend-in x V (extend G1 x S)) S U (sym Ty U S eU)
-               (extend-here G1 x S)) }
+               extend-here) }
   ; orRight h -> case h of
-      { both ne i2 -> extend-there-extend G1 y U x S ne (inc y U i2) } }
+      { both ne i2 -> extend-there-extend ne (inc y U i2) } }
 
 weaken : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (G1 : Ctx) (inc : Incl G G1) -> typing G1 t T
 -- **`G1` and `inc` are introduced INSIDE the arms, and that is not a
@@ -293,12 +293,12 @@ weaken : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (G1 : Ctx) (inc :
 -- there is pinned to the ambient `G` while the recursion is at `G , x : S`.
 -- That it is left this way is his decision, not an oversight.
 weaken = \ G t T d G1 inc -> induction d of
-  { T-var x T0 G0 i -> T-var x T0 G1 (inc x T0 i)
+  { T-var x T0 G0 i -> T-var (inc x T0 i)
   ; T-abs G0 x S E T0 d0 ->
-      T-abs G1 x S E T0
+      T-abs
         (weaken (extend G0 x S) E T0 d0 (extend G1 x S) (inclExtend G0 G1 x S inc))
   ; T-app G0 M S T0 N d1 d2 ->
-      T-app G1 M S T0 N (weaken G0 M (arrow S T0) d1 G1 inc) (weaken G0 N S d2 G1 inc) }
+      T-app (weaken G0 M (arrow S T0) d1 G1 inc) (weaken G0 N S d2 G1 inc) }
 
 -- A closed derivation holds in every context.
 weakenEmpty : forall (t : LC) (T : Ty) (d : typing empty t T) (D : Ctx) -> typing D t T
@@ -455,7 +455,7 @@ goodExtend = \ G D s x S g y U i ->
                           (And (typing empty (look x (cons (And String LC) (both String LC x (var x)) s)) S)
                                (Eq (List String) (LC.fv.x (look x (cons (And String LC) (both String LC x (var x)) s))) (nil String)))
                           (both (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S))
-                                (lookHit x (var x) s) (extend-here D x S)))))
+                                (lookHit x (var x) s) extend-here))))
      (\ h -> subst LC (\ m -> Entry (extend D x S) y U m) (look y s) (look y (cons (And String LC) (both String LC x (var x)) s))
                (sym LC (look y (cons (And String LC) (both String LC x (var x)) s)) (look y s)
                   (lookMiss y x (var x) s (andLeft (Eq String y x -> Empty) (extend-in y U G) h)))
@@ -466,7 +466,7 @@ goodExtend = \ G D s x S g y U i ->
                                   (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String)))
                                   (both (Eq LC (look y s) (var y)) (extend-in y U (extend D x S))
                                         (andLeft (Eq LC (look y s) (var y)) (extend-in y U D) e)
-                                        (extend-there-extend D y U x S (andLeft (Eq String y x -> Empty) (extend-in y U G) h)
+                                        (extend-there-extend (andLeft (Eq String y x -> Empty) (extend-in y U G) h)
                                            (andRight (Eq LC (look y s) (var y)) (extend-in y U D) e))))
                    (\ c -> orRight (And (Eq LC (look y s) (var y)) (extend-in y U (extend D x S)))
                                    (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String)))
@@ -530,7 +530,7 @@ substAll = \ G E T d -> induction d of
         (\ o -> typing D (look x s) T0)
         ((\ e -> subst LC (\ m -> typing D m T0) (var x) (look x s)
                    (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (extend-in x T0 D) e))
-                   (T-var x T0 D (andRight (Eq LC (look x s) (var x)) (extend-in x T0 D) e)))
+                   (T-var (andRight (Eq LC (look x s) (var x)) (extend-in x T0 D) e)))
          (\ c -> weakenEmpty (look x s) T0
                    (andLeft (typing empty (look x s) T0) (Eq (List String) (LC.fv.x (look x s)) (nil String)) c) D))
         () (g x T0 i)
@@ -541,12 +541,11 @@ substAll = \ G E T d -> induction d of
         x (LC.fresh.x x (images s (LC.fv.x (abs x S E0))))
         (sym String (LC.fresh.x x (images s (LC.fv.x (abs x S E0)))) x
            (freshKeeps x (images s (LC.fv.x (abs x S E0))) (notCaptured G0 D s x S E0 T0 d0 g)))
-        (T-abs D x S (LC.subst-* E0 (cons (And String LC) (both String LC x (var x)) s)) T0
+        (T-abs
            (substAll (extend G0 x S) E0 T0 d0 (extend D x S)
               (cons (And String LC) (both String LC x (var x)) s) (goodExtend G0 D s x S g)))
   ; T-app G0 M S T0 N d1 d2 -> \ D s g ->
-      T-app D (LC.subst-* M s) S T0 (LC.subst-* N s)
-        (substAll G0 M (arrow S T0) d1 D s g) (substAll G0 N S d2 D s g) }
+      T-app (substAll G0 M (arrow S T0) d1 D s g) (substAll G0 N S d2 D s g) }
 
 -- E[x -> N] for a closed N of x's type.
 substLemma : forall (x : String) (S : Ty) (E : LC) (T : Ty) (N : LC)
@@ -650,11 +649,11 @@ preservation = \ M M1 T d s -> induction s of
   -- A step in the function position.
   ; E-app1 A A1 N sr -> case d of
       { T-app G0 M0 S T0 N0 d1 d2 ->
-          T-app empty A1 S T N (preservation A A1 (arrow S T) d1 sr) d2 }
+          T-app (preservation A A1 (arrow S T) d1 sr) d2 }
   -- A step in the argument, once the function is a value.
   ; E-app2 A N N1 v sr -> case d of
       { T-app G0 M0 S T0 N0 d1 d2 ->
-          T-app empty A S T N1 d1 (preservation N N1 S d2 sr) } }
+          T-app d1 (preservation N N1 S d2 sr) } }
 
 
 -- ---------------------------------------------------------------------------
@@ -663,10 +662,7 @@ preservation = \ M M1 T d s -> induction s of
 -- ⊢ ( λ x : ι -> ι . x ) ( λ y : ι . y )  :  ι -> ι
 redexTyped : typing`· ⊢ ( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) ) : ( ι -> ι )`
 redexTyped =
-  T-app Ctx`·` LC`( λ x : ( ι -> ι ) . x )` Ty`( ι -> ι )` Ty`( ι -> ι )` LC`( λ y : ι . y )`
-    (T-abs Ctx`·` "x" Ty`( ι -> ι )` LC`x` Ty`( ι -> ι )`
-       (T-var "x" Ty`( ι -> ι )` Ctx`·, x : ( ι -> ι )` (extend-here Ctx`·` "x" Ty`( ι -> ι )`)))
-    (T-abs Ctx`·` "y" base LC`y` base (T-var "y" base Ctx`·, y : ι` (extend-here Ctx`·` "y" base)))
+  T-app (T-abs (T-var extend-here)) (T-abs (T-var extend-here))
 
 -- 03's betaStep takes it to λ y : ι . y, and preservation types that.
 reductTyped : typing`· ⊢ ( λ y : ι . y ) : ( ι -> ι )`

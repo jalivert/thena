@@ -21,6 +21,9 @@ module Thena.Rules
     -- * Finding rules (§7.6)
   , RuleIter
   , matches
+  , matchingRules
+  , byCallable
+  , groupParams
   , dispatch
   , clauses
   , arities
@@ -48,6 +51,7 @@ module Thena.Rules
   , opArities
   , surfaceBlocks
   , testWord
+  , patternKind
   , testOperands
   , testTypes
   , everyTest
@@ -110,6 +114,7 @@ import Thena.Instral.Concrete
   , RawTest (..)
   )
 import Data.Either (partitionEithers)
+import Data.List (nub)
 import qualified Data.List.NonEmpty as NE
 
 -- --------------------------------------------------------------------------
@@ -226,6 +231,111 @@ newtype RuleIter = RuleIter [Rule]
 matches :: [RuleBase] -> GlobalEnv -> Cursor -> RuleIter
 matches bases env cur =
   RuleIter [ r | r <- allRules bases, all (holds env cur []) (ruleHead r) ]
+
+-- | __The matching RULES, as against the matching clauses__ — his ruling,
+-- 2026-11-19: /"each rule-arity, in other words — each rule, gets to be
+-- represented by one entry. So I could have @foo\/2@ and @foo\/4@ but never two
+-- @foo@s."/
+--
+-- 'matches' answers with one entry per /clause/, because a clause is what the
+-- engine dispatches into. That is the wrong unit for a list a person reads: a
+-- name with twenty-two clauses printed the same word twenty-two times, and
+-- nothing in the surface lets the reader ask for one of them — 'clauses' picks
+-- a clause by name, arity, patterns and head when the call is made, and @retry@
+-- names a choice point and never a clause.
+--
+-- **The key is the name and the parameter count, and that is already what this
+-- system means by a rule.** 'Thena.View.rulesView' says so of its own output —
+-- a frontend wanting a rule's clauses together groups them by name and the
+-- length of its params — and 'Thena.Instral.Infer.Callable' /is/ this pair,
+-- with one inferred signature per pair. So this function introduces no new
+-- notion; it makes the match list use the one that was already there.
+--
+-- **In search order, by each name's first matching clause**, so a reader sees
+-- the same order 'matches' gave and simply sees it once.
+--
+-- **The clauses come with the group.** Nothing printing a row needs more than
+-- the first, but a pane that shows which clauses matched is a feature he has
+-- asked for separately, and throwing the list away here would put it behind a
+-- second traversal of the base.
+matchingRules
+  :: [RuleBase] -> GlobalEnv -> Cursor -> [((GlobalName, Int), [Rule])]
+matchingRules bases env cur = byCallable (drain (matches bases env cur))
+  where
+    drain it = case next it of
+      Nothing        -> []
+      Just (r, rest) -> r : drain rest
+
+-- | Group rules by name and arity, **keeping first-appearance order** for the
+-- groups and for the clauses inside each.
+--
+-- Separate from 'matchingRules' because the grouping is not about matching:
+-- @Prove@\'s candidates and a choice point\'s untried alternatives are the same
+-- kind of list, and a caller that wants them by rule rather than by clause
+-- groups them the same way.
+byCallable :: [Rule] -> [((GlobalName, Int), [Rule])]
+byCallable rs = [ (k, [ r | r <- rs, key r == k ]) | k <- keys ]
+  where
+    key r = (ruleName r, length (ruleParams r))
+    keys  = nub (map key rs)
+
+-- | __What kind of thing a pattern\'s position takes__, in one word.
+--
+-- For a row that stands for every clause of one name and arity: a clause\'s own
+-- shape is not something such a row may show, since a sibling clause takes a
+-- different one, but every clause writing a list pattern at a position does
+-- agree that a list goes there.
+--
+-- **One spelling, used by the prompt and by the view.** 'Thena.Render' and
+-- 'Thena.View.Matches' both need this word and MS7 phase 133 settled what
+-- happens when two spellings of one thing stand beside each other.
+patternKind :: Pattern -> String
+patternKind pt = case pt of
+  PVar n    -> n
+  PWild     -> "_"
+  PList _ _ -> "list"
+  PPair _ _ -> "pair"
+  -- **Both option patterns say @option@ and not @some@ or @none@.** A row
+  -- stands for every clause at this position and the clauses are exactly what
+  -- disagree here — one writes @none@ and its sibling @(some f)@ — so naming
+  -- either would promise the wrong one. The type beside the row says
+  -- @Option Core@, and this agrees with it.
+  PSome _   -> "option"
+  PNone     -> "option"
+  PObject _ -> "term"
+  PInt _    -> "int"
+  PChar _   -> "char"
+  PBool _   -> "bool"
+  PText _   -> "text"
+
+-- | __One parameter list for a whole group__, each position named by the first
+-- clause that binds a name there.
+--
+-- Clauses of one name and arity need not agree about what they call their
+-- parameters ('clauses'), and they need not use a name at all: @reverse-onto []
+-- ‹acc›@ writes a list literal where @reverse-onto [x, ...xs] ‹acc›@ writes a
+-- pattern, and neither names that position. **So taking the first clause\'s
+-- parameters wholesale gives a row with no names in it where a later clause had
+-- one**, which is what this walks the group to avoid — @intro-arm-binders@ has
+-- a clause writing @ps@ and @bs@ at the two positions its first clause fills
+-- with list patterns.
+--
+-- **Where no clause binds a name at a position**, the position keeps the first
+-- clause\'s pattern and whoever prints it decides what to say about it: there is
+-- no name to find and inventing one here would put a presentation choice in the
+-- one module that has no business making one.
+--
+-- The list is as long as the group\'s arity, so an empty group answers @[]@.
+groupParams :: [Rule] -> [Pattern]
+groupParams []           = []
+groupParams rs@(first : _) =
+  [ named i (ruleParams first !! i) | i <- [0 .. length (ruleParams first) - 1] ]
+  where
+    named i fallback =
+      case [ p | r <- rs, Just p@(PVar _) <- [at i (ruleParams r)] ] of
+        p : _ -> p
+        []    -> fallback
+    at i ps = if i < length ps then Just (ps !! i) else Nothing
 
 -- | The rules @Prove@ may actually run: 'matches', less the ones it could not
 -- supply arguments for.
@@ -347,6 +457,9 @@ holds env cur args t = case t of
   FocusIsComponent -> case focus cur of
     OnComponent _ -> True
     _             -> False
+  FocusIsDefinition -> case focus cur of
+    OnComponent (Component.Define {}) -> True
+    _                                 -> False
   GoalTypeIsPi  -> case reduced of
     Just (Pi {}) -> True
     _            -> False
@@ -1630,6 +1743,8 @@ unaryOps =
   , ("app-first-argument", Op.AppFirstArgument)
   , ("app-tail", Op.AppTail)
   , ("expand-implicits", Op.ExpandImplicits)
+    -- Its other half, for a @let@-bound local (MS12 phase 321).
+  , ("record-implicits", Op.RecordImplicits)
   , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
   , ("lambda-body", Op.LambdaBody), ("lambda-annot-type", Op.LambdaAnnotType)
   , ("let-name", Op.LetName), ("let-type", Op.LetType)
@@ -1867,6 +1982,7 @@ data TestError = NoSuchTestWord | WrongTestArity Int Int
 withOperands :: Test -> [Operand] -> Maybe Test
 withOperands t os = case (t, os) of
   (FocusIsHole,      []) -> Just FocusIsHole
+  (FocusIsDefinition, []) -> Just FocusIsDefinition
   (FocusIsGuess,     []) -> Just FocusIsGuess
   (FocusIsComponent, []) -> Just FocusIsComponent
   (GoalTypeIsPi,     []) -> Just GoalTypeIsPi
@@ -1930,6 +2046,7 @@ withOperands t os = case (t, os) of
 testTypes :: Test -> [(Operand, Ty.Ty)]
 testTypes t = case t of
   FocusIsHole     -> []
+  FocusIsDefinition -> []
   FocusIsGuess    -> []
   FocusIsComponent -> []
   GoalTypeIsPi    -> []
@@ -1989,6 +2106,7 @@ testOperands = map fst . testTypes
 testWord :: Test -> String
 testWord t = case t of
   FocusIsHole     -> "focus-is-hole"
+  FocusIsDefinition -> "focus-is-definition"
   FocusIsGuess    -> "focus-is-guess"
   FocusIsComponent -> "focus-is-component"
   GoalTypeIsPi    -> "goal-type-is-pi"
@@ -2041,7 +2159,8 @@ testWord t = case t of
 -- not what any written one says.
 everyTest :: [Test]
 everyTest =
-  [ FocusIsHole, FocusIsGuess, FocusIsComponent, GoalTypeIsPi, GoalTypeIsLet
+  [ FocusIsHole, FocusIsGuess, FocusIsComponent, FocusIsDefinition
+  , GoalTypeIsPi, GoalTypeIsLet
   , SurfaceIsName (Lit (VText ""))
   , SurfaceIsLiteral (Lit (VText ""))
   , SurfaceIsObject (Lit (VText ""))

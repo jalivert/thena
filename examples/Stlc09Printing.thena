@@ -40,7 +40,7 @@ open Ex
 --   thena spine> :infer idIsValue
 --   idIsValue : value`( λ x : ι . x ) value`
 idIsValue : value (abs "x" base (var "x"))
-idIsValue = V-abs "x" base LC`x`
+idIsValue = V-abs
 
 -- **The printer does not reduce.** A name the user gave a term stays that name
 -- and goes in a splice, printed in the development calculus's own syntax —
@@ -52,7 +52,7 @@ theId : LC
 theId = LC`( λ x : ι . x )`
 
 theIdIsValue : value theId
-theIdIsValue = V-abs "x" base LC`x`
+theIdIsValue = V-abs
 
 
 -- ---------------------------------------------------------------------------
@@ -81,12 +81,12 @@ open written
 --   thena spine> :infer leftWritten
 --   leftWritten : written`${Ex`f a`} b !`
 leftWritten : written (juxt (juxt (ref "f") (ref "a")) (ref "b"))
-leftWritten = W (juxt (juxt (ref "f") (ref "a")) (ref "b"))
+leftWritten = W
 
 --   thena spine> :infer rightWritten
 --   rightWritten : written`f ${Ex`a b`} !`
 rightWritten : written (juxt (ref "f") (juxt (ref "a") (ref "b")))
-rightWritten = W (juxt (ref "f") (juxt (ref "a") (ref "b")))
+rightWritten = W
 
 
 -- ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ open fine
 --   thena spine> :infer plainLet
 --   plainLet : fine`l f = a b i c !`
 plainLet : fine (clet "f" (cjux (cref "a") (cref "b")) (cref "c"))
-plainLet = F (clet "f" (cjux (cref "a") (cref "b")) (cref "c"))
+plainLet = F
 
 -- The same production in the same position, with the bound name spelled `i`:
 -- `l f = a i i b` reads two ways, so the first slot is fenced. No rule
@@ -133,7 +133,7 @@ plainLet = F (clet "f" (cjux (cref "a") (cref "b")) (cref "c"))
 --   thena spine> :infer collidingLet
 --   collidingLet : fine`l f = ${Coll`a i`} i b !`
 collidingLet : fine (clet "f" (cjux (cref "a") (cref "i")) (cref "b"))
-collidingLet = F (clet "f" (cjux (cref "a") (cref "i")) (cref "b"))
+collidingLet = F
 
 
 -- ---------------------------------------------------------------------------

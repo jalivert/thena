@@ -71,14 +71,14 @@ bases rs = [ruleBase "test" Nothing "" [] [] rs]
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
-  load is (Machine (Exec [] [] [] []) (Development hole) [] emptyGlobals base [] [] [] rootScope 1000 [] 0
+  load is (Machine (Exec [] [] [] []) (Development hole) [] emptyGlobals base [] [] [] [] rootScope 1000 [] 0
                    NoUndischargeableTrust)
 
 runOut :: Machine -> ([String], Either FailReason Machine)
 runOut m = case step m of
   Continue m'       -> runOut m'
   Saying msg m'     -> let (ms, r) = runOut m' in (msg : ms, r)
-  Declaring _ m'    -> runOut m'
+  Declaring _ _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
   Primitively _ _ m' -> runOut m'
   DeclaringGrammar _ m' -> runOut m'

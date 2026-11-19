@@ -43,6 +43,8 @@ import Thena.Driver
   )
 import Thena.Files (startingSession)
 import Thena.Render (renderResponse)
+import Data.List (nub)
+
 import Thena.View
   ( Budget (..)
   , binderAddresses
@@ -66,6 +68,7 @@ import Thena.View.Chart (BoundView (..), OfferView (..), Written (..))
 import Thena.View.Choices (ChoiceView (..))
 import Thena.View.Development (LinkView (..))
 import Thena.View.Machine (MachineView (..))
+import Thena.View.Matches (MatchView (..))
 import Thena.View.Proofs (ProofsView (..), QuestClaim (..), QuestView (..))
 import Thena.View.Rules (RuleView (..))
 import Thena.View.Tokens (TokenView (..), tokensView)
@@ -107,7 +110,16 @@ checks =
   , \s -> want "machineView" (machineReached (machineView budget s))
   , \s -> want "focusTypeView" (maybe True (const True) (focusTypeView budget s))
   , \s -> want "rulesView" (not (null [ r | (_, rs) <- rulesView budget s, r <- rs ]))
-  , \s -> want "matchesView" (not (null (map ruleViewName (matchesView budget s))))
+    -- **One row per name and arity, and the row carries its type** (his
+    -- ruling, 2026-11-19). The boundary's business is that a frontend can
+    -- reach both: a view that lost the signature would still be non-empty.
+  , \s -> want "matchesView" (not (null (map matchViewName (matchesView budget s))))
+  , \s -> want "matchesView carries a type"
+            (any (\mv -> matchViewType mv /= Nothing) (matchesView budget s))
+  , \s -> want "matchesView names each rule once"
+            (let ns = map (\mv -> (matchViewName mv, matchViewArity mv))
+                          (matchesView budget s)
+              in length ns == length (nub ns))
     -- **A standalone choice-points pane is reachable from the boundary** (his
     -- ruling, 2026-11-16), and the one thing worth asserting is that it is not
     -- always empty: at a settled prompt there is nothing to retry, so this

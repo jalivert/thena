@@ -25,11 +25,15 @@ open Ty
 -- moved to the right of `∈`:
 --
 --   data extend-in : String -> Ty -> Ctx -> Type₀ where       -- x : T ∈ Γ
---     extend-here  : ∀ (Γ : Ctx) (x : String) (T : Ty) -> extend-in x T (extend Γ x T)
---     extend-there-extend : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)
+--     extend-here  : ∀ {Γ : Ctx} {x : String} {T : Ty} -> extend-in x T (extend Γ x T)
+--     extend-there-extend : ∀ {Γ : Ctx} {x : String} {T : Ty} {x' : String} {T' : Ty}
 --                   -> (Eq String x x' -> Empty)        -- the names differ
 --                   -> extend-in x T Γ
 --                   -> extend-in x T (extend Γ x' T')
+--
+-- The metavariables are in braces because they are implicitly quantified: the
+-- lookup you are proving says what Γ, x and T are, so a proof does not repeat
+-- them. What is left to write is the premises.
 context Ctx, Γ where
   empty  -> ·
   extend -> Γ , x : T
@@ -47,7 +51,7 @@ twoVars = Ctx`·, x : ι, f : ( ι -> ι )`
 
 -- f is the last entry, so it is `here`.
 fIsThere : extend-in`f : ( ι -> ι ) ∈ ·, x : ι, f : ( ι -> ι )`
-fIsThere = extend-here Ctx`·, x : ι` "f" Ty`( ι -> ι )`
+fIsThere = extend-here
 
 -- x is one further down, past f. `extend-there-extend` asks for a proof that x is not f.
 -- There is no axiom for that: `String.eq` compares the two literals, and
@@ -63,7 +67,7 @@ xNotF = \ q ->
 xIsFurther : extend-in`x : ι ∈ ·, x : ι, f : ( ι -> ι )`
 -- Read it as: under ·, x : ι there is x : ι (that is `here`), and the entry
 -- on top, f, is a different name.
-xIsFurther = extend-there-extend Ctx`·, x : ι` "x" base "f" Ty`( ι -> ι )` xNotF (extend-here Ctx`·` "x" base)
+xIsFurther = extend-there-extend xNotF extend-here
 
 
 -- ---------------------------------------------------------------------------
@@ -73,7 +77,7 @@ xIsFurther = extend-there-extend Ctx`·, x : ι` "x" base "f" Ty`( ι -> ι )` x
 -- first x would need `extend-there-extend` with a proof that x is not x — so the lookup
 -- below can only be built from an absurdity, and here is the absurdity it needs:
 reachingTheHiddenX : (Eq String "x" "x" -> Empty) -> extend-in`x : ι ∈ ·, x : ι, x : ( ι -> ι )`
-reachingTheHiddenX = \ ne -> extend-there-extend Ctx`·, x : ι` "x" base "x" Ty`( ι -> ι )` ne (extend-here Ctx`·` "x" base)
+reachingTheHiddenX = \ ne -> extend-there-extend ne extend-here
 
 -- …and that absurdity is refuted by `refl`.
 xIsX : (Eq String "x" "x" -> Empty) -> Empty

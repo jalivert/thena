@@ -71,8 +71,4 @@ thena spine> :core /a\/b/ Comparison
 thena spine> :infer (/[a-z]/ : Token Char)
 /[a-z]/ : Token Char : Token Char
 thena spine> :infer /[a-z]/
-parked 1 constraint(s), blocked on T, Tinfer
-stuck: that term does not have the hole's type
-  refined has type Token T
-    but Tinfer was expected
-    Tinfer and Token T do not match
+/[a-z]/ : ∀ {T : Type₀} -> Token T

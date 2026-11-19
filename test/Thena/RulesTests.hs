@@ -569,6 +569,11 @@ producesTests =
         -- row that stood here before it; the three accessors only read the
         -- surface term they are handed.
       , ("expand-implicits", nat, holeAt natType, [], Ops.ExpandImplicits succZero)
+        -- **Its other half** (MS12 phase 321). The row is a @let@ whose
+        -- annotation wrote no brace, which is the case that records nothing and
+        -- needs no local in scope — what is crossed here is that it produces
+        -- nothing, which is the whole of what this table is about.
+      , ("record-implicits", e, hole, [], Ops.RecordImplicits explicitLet)
       , ("app-head",         e,   hole, [],           Ops.AppHead succZero)
       , ("app-first-argument", e, hole, [],           Ops.AppFirstArgument succZero)
       , ("app-tail",         e,   hole, [],           Ops.AppTail succZero)
@@ -589,6 +594,13 @@ producesTests =
       , ("apply-next",       nat, holeAt natType, [],
            Ops.ApplyNext (term (Global (nameFromText "Nat.succ") [])) (text "a"))
       ]
+
+    -- @let x : Type\8320 = Type\8320 in x@, as a focused surface term: an
+    -- annotated @let@ with no brace in it (MS12 phase 321).
+    explicitLet =
+      Lit (VSurface (rootedAt
+        (SurfaceLet "x" (Just (SurfaceUniverse 0)) (SurfaceUniverse 0)
+                    (SurfaceName [] "x"))))
 
     -- @succ zero@, as a focused surface term.
     succZero =
@@ -728,7 +740,7 @@ text = Lit . VText
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
   load is (Machine (Exec [] [] [] []) (Development cur) [] env
-                   (expectedBase ++ [returning]) [] [] [] rootScope 1000 [] 0 NoUndischargeableTrust)
+                   (expectedBase ++ [returning]) [] [] [] [] rootScope 1000 [] 0 NoUndischargeableTrust)
 
 -- | A base with one rule in it that returns something (MS5 phase 63).
 --
@@ -770,7 +782,7 @@ runOut :: Machine -> Either FailReason Machine
 runOut m = case step m of
   Continue m'       -> runOut m'
   Saying _ m'       -> runOut m'
-  Declaring _ m'    -> runOut m'
+  Declaring _ _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
   Primitively _ _ m' -> runOut m'
   DeclaringGrammar _ m' -> runOut m'

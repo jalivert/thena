@@ -289,10 +289,20 @@ proveGuess = Rule (rootName "prove") [] [FocusIsGuess] [Do Prove]
 -- move.
 elaborateClauses :: [Rule]
 elaborateClauses =
+  -- **A bare name EXPANDs too** (MS12 phase 320, `~td9j6`): a name whose
+  -- declaration has implicit positions and no written arguments — @V-abs@, a
+  -- rule with no premises — is @E⟦x ⃗a⟧@ with an empty @⃗a@, so it goes through
+  -- the same walk as an application rather than filling the hole with the name
+  -- itself. **Asking whether a name has implicit positions is not a head
+  -- test**: a head test sees the focus and the operand, not the machine's
+  -- signatures, so @expand-implicits@ answers it and gives back the name
+  -- unchanged when there is nothing to insert.
   [ clause SurfaceIsName
-      [ Bind (Op.PVar "w") Nothing (Op.SurfaceNameOf (Ref "t"))
-      , Bind (Op.PVar "x") Nothing (Op.ResolveName (Ref "w"))
-      , call "fill" [Ref "x"], call "solve" []
+      [ Bind (Op.PVar "h") Nothing Here
+      , Bind (Op.PVar "e") Nothing (Op.ExpandImplicits (Ref "t"))
+      , Bind (Op.PVar "w") Nothing (Op.SurfaceNameOf (Ref "t"))
+      , Bind (Op.PVar "f") Nothing (Op.ResolveName (Ref "w"))
+      , Do (Call "spine-arguments" [Ref "h", Ref "f", Ref "e"])
       ]
   , clause SurfaceIsLiteral
       [ Bind (Op.PVar "l") Nothing (Op.SurfaceLiteralOf (Ref "t"))
@@ -615,9 +625,9 @@ elaborateClauses =
         [ Do (Goto (Ref "x"))
         , Bind (Op.PVar "ty") Nothing (Op.LetType (Ref "t"))
         , call "elaborate" [Ref "ty"]
-        ] ++ letBody)
+        ] ++ letBody [Do (Op.RecordImplicits (Ref "t"))])
   , Rule (rootName "elaborate") [PVar "t"] [FocusIsHole, LetIsBare (Ref "t")]
-      (letPrelude ++ letBody)
+      (letPrelude ++ letBody [])
   , clause SurfaceIsAscription
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "xn") Nothing (FreshName (Lit (VText "X")))
@@ -681,14 +691,20 @@ elaborateClauses =
       , Bind (Op.PVar "vn") Nothing (FreshName (Lit (VText "V")))
       , Bind (Op.PVar "v") Nothing (Claim (Ref "vn") (Ref "x"))
       ]
-    letBody =
+    -- **Only the annotated clause records plicities** (MS12 phase 321), so the
+    -- shared tail takes what goes after the @define@ — the one instruction the
+    -- two clauses differ by below the annotation, and a brace is the only thing
+    -- an annotation can say that a bare binding cannot.
+    letBody recording =
       [ Do (Goto (Ref "v"))
       , Bind (Op.PVar "val") Nothing (Op.LetValue (Ref "t"))
       , Do (Call "elaborate" [Ref "val"])
       , Do (Goto (Ref "h"))
       , Bind (Op.PVar "w") Nothing (Op.LetName (Ref "t"))
       , Do (Define (Ref "w") (Ref "v"))
-      , Bind (Op.PVar "b") Nothing (Op.LetBody (Ref "t"))
+      ]
+      ++ recording ++
+      [ Bind (Op.PVar "b") Nothing (Op.LetBody (Ref "t"))
       , Do (Call "elaborate" [Ref "b"])
       ]
 

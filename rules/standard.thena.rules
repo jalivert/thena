@@ -194,13 +194,24 @@ rule quantify ty :-
 -- prim-elaborate any more and there is no Haskell elaborator behind it; what
 -- follows is the whole of E⟦·⟧.
 
--- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
+-- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case, and since MS12 phase 320 it is
+-- the application clause below with nothing written: EXPAND first, then walk
+-- the spine. A name whose leading arguments are implicit is a spine of the
+-- arguments nobody wrote — `vz : ∀ {n : Nat} -> V n` is used by writing `vz` —
+-- and spine-arguments' base case is the bare name, so when EXPAND inserts
+-- nothing this is FILL x ; SOLVE and nothing else.
+--
+-- Asking whether a name has implicit positions is NOT a head test: the table
+-- that records them sits beside the session and a head reads the focus and the
+-- operand, so the two cases cannot be two clauses. They do not have to be —
+-- the walk is the same either way.
 elaborate : Surface -> ()
 rule elaborate t :- when focus-is-hole (surface-is-name t)
-  do w = surface-name t
-     ; x = resolve-name w
-     ; fill x
-     ; solve
+  do h = here
+     ; e = expand-implicits t
+     ; w = surface-name t
+     ; f = resolve-name w
+     ; call spine-arguments h f e
 
 -- E⟦"ab"⟧, E⟦'c'⟧, E⟦3⟧, E⟦/[a-z]/⟧ — a literal is its own term (MS6 phases
 -- 97c and 100). Nothing has to be looked up, so the term is ready; apply-core
@@ -1165,6 +1176,13 @@ rule elaborate t :- when focus-is-hole (surface-is-arrow t)
 --
 -- Two clauses, because the annotation is optional and the head language has no
 -- negation. With one, X is left for the value's own FILL to unify against.
+-- **The annotated clause records the braces its annotation wrote** (MS12 phase
+-- 321): record-implicits is expand-implicits' other half, and without it the
+-- brace on a let's type was accepted and meant nothing, so
+-- `let { f : ∀ {A : Type₀} -> A -> A = \ A a -> a } in f "z"` put the string in
+-- A's position. It goes after the define, because what it records is the local
+-- that define bound; the bare clause below has no annotation and so has nothing
+-- to record.
 rule elaborate t :- when focus-is-hole (let-is-annotated t)
   do h  = here
      ; xn = fresh-name "X"
@@ -1181,6 +1199,7 @@ rule elaborate t :- when focus-is-hole (let-is-annotated t)
      ; goto h
      ; w  = let-name t
      ; define w v
+     ; record-implicits t
      ; b  = let-body t
      ; call elaborate b
 
@@ -1359,13 +1378,22 @@ rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-an
 
 -- The walk itself, and it is a recursion over the surface spine: take the first
 -- argument, claim a hole for it, elaborate into that hole, and call on what is
--- left. The term is its own counter, exactly as the λ group is at
--- intro-binders — which is what lets a rule apply a head to any number of
--- arguments without ever holding a list (ms4/CLOSEOUT.md 28).
+-- left. The term is its own counter, exactly as the λ
+-- group is at intro-binders — which is what lets a rule apply a head to any
+-- number of arguments without ever holding a list (ms4/CLOSEOUT.md 28).
 --
 -- **goto h before each claim.** Every claim goes directly above the focus, so
 -- claiming from the one fixed place is what puts the domains in telescope order
 -- and lets a later domain mention an earlier hole.
+--
+-- **THE ORDER IS THE ARGUMENTS FIRST AND THE FILL LAST, AND THAT IS NOT
+-- BRADY'S PRINTED ORDER** — his is CLAIM, FILL, ELAB ARG, SOLVE (`IDRIS.md`
+-- §4). Measured at MS12 phase 320: his order cannot be run here, because the
+-- head's telescope is only as deep as the arguments already elaborated make
+-- it. A spine whose later domain appears only once an earlier argument is
+-- known — a head whose result type is a variable that an earlier argument
+-- instantiates — refuses at the claim with `that head does not take that many
+-- arguments`, and the prelude has such a spine.
 --
 -- focus-is-component is there for enter-binders' reason (phase 49c): a head of
 -- argument tests alone is true of every state, so the clause would be offered
@@ -1385,9 +1413,11 @@ rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
 
 -- The base case: the arguments are gone and what is left is the head. Only now
 -- is the spine filled in — the arguments are elaborated BEFORE the FILL,
--- against Brady's printed order, because unifying the spine's type with the
--- goal solves the argument holes and a solved hole is a definition, so a goto
--- afterwards would find nothing.
+-- against Brady's printed order, because the head's telescope is only as deep
+-- as the arguments already elaborated make it: with the FILL first, a spine
+-- whose later domains appear only once an earlier argument is known refuses at
+-- the claim with `that head does not take that many arguments`, measured at
+-- MS12 phase 320 over the prelude.
 rule spine-arguments h f t :- when focus-is-component (surface-is-name t)
   do goto h
      ; fill f

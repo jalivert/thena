@@ -195,7 +195,7 @@ scoped =
       -- where before the second class's language could not appear in a pair at
       -- all and the two lists were keyed by the one word.
       drop 1 (said s ":show ok")
-        @?= [ "  { ok.R-both : ∀ (C : Compiles) (x : String) (N : LC) (P : Mach) -> ok`${Compiles.subst-* {0 0 0 0 0 0} C (cons {0} (And {0 0} String LC) (both {0 0} String LC x N) (nil {0} (And {0 0} String LC))) (cons {0} (And {0 0} String Mach) (both {0 0} String Mach x P) (nil {0} (And {0 0} String Mach)))} good` }" ]
+        @?= [ "  { ok.R-both : ∀ {C : Compiles} {x : String} {N : LC} {P : Mach} -> ok`${Compiles.subst-* {0 0 0 0 0 0} C (cons {0} (And {0 0} String LC) (both {0 0} String LC x N) (nil {0} (And {0 0} String LC))) (cons {0} (And {0 0} String Mach) (both {0 0} String Mach x P) (nil {0} (And {0 0} String Mach)))} good` }" ]
 
     -- **A block's own word opens where it is written** (MS10 phase 258): the
     -- @open Ty@ inside the namespace is what every one of those blocks needs,
