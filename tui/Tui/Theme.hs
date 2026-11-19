@@ -43,6 +43,15 @@ data Theme = Theme
                              -- accent here.
   , themeMatches :: V.Color -- ^ the matches pane's accent. Same provisional
                              -- status as 'themeChoices'.
+  , themeSuggest :: V.Color -- ^ **the suggestion strip's accent** — `~w2tk2`
+                             -- slice 1. An accent of its own and not the
+                             -- repl's, even though the strip sits directly
+                             -- under the repl pane and is the same width: the
+                             -- pair is his /"double-pane"/, two panes, and two
+                             -- panes wearing one colour would say they are one
+                             -- thing — which is exactly the reading
+                             -- 'themeStage'-separated panes exist to prevent.
+                             -- Provisional like 'themeChoices', his to retune.
   , themeFold    :: V.Color -- ^ a folded literal's background tint
   , themeSplice  :: V.Color -- ^ a folded splice's background tint — distinct
                              -- from a literal's, his ruling, 2026-09-28
@@ -142,6 +151,10 @@ neonPinkDark = Theme
   , themeOutput  = rgb 255 115 215
   , themeChoices = rgb 255 70 150
   , themeMatches = rgb 230 130 200
+  -- The palest of the pink family, so a strip spanning the document's whole
+  -- width reads as present rather than as a second repl accent shouting
+  -- under the first.
+  , themeSuggest = rgb 255 200 240
   , themeFold    = rgb 40 12 32
   , themeSplice  = rgb 30 20 14
   -- **Deep magenta, 2026-10-21 (@~bmgr7@)**, replacing the `(28, 16, 22)` this was
@@ -184,6 +197,8 @@ gruyere = Theme
   , themeOutput  = rgb 255 110 150
   , themeChoices = rgb 140 180 255
   , themeMatches = rgb 255 220 140
+  -- Between its teal and its green, both already spoken for elsewhere.
+  , themeSuggest = rgb 170 255 240
   , themeFold    = rgb 44 36 74
   , themeSplice  = rgb 34 44 40
   , themePopup   = rgb 86 34 136
@@ -213,6 +228,8 @@ synthwave84 = Theme
   , themeOutput  = rgb 255 152 102
   , themeChoices = rgb 255 90 140
   , themeMatches = rgb 180 255 210
+  -- Between its purple globals and its pink repl, and lighter than both.
+  , themeSuggest = rgb 200 180 255
   , themeFold    = rgb 52 41 79
   , themeSplice  = rgb 40 50 46
   , themePopup   = rgb 112 50 152

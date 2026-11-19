@@ -17,20 +17,28 @@ import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 
 import Tui.Layout
   ( Pane (..)
+  , Strip (..)
   , allPanes
   , closePane
+  , closeStrip
   , columnsOf
   , defaultLayout
+  , defaultStrip
   , layoutFrom
   , layoutPairs
   , paneBarEntries
   , openPane
+  , openStrip
   , paneAt
   , paneByName
   , paneName
   , placedPanes
   , positionOf
   , positions
+  , stripDefaultRows
+  , stripMinRows
+  , stripName
+  , stripSized
   )
 
 layoutTests :: TestTree
@@ -161,4 +169,34 @@ layoutTests =
         let shut = foldr closePane defaultLayout allPanes
         paneBarEntries shut @?= [(p, Nothing) | p <- allPanes]
         length (paneBarEntries shut) @?= 9
+    , -- | **The suggestion strip is not in the layout at all** — `~w2tk2`
+      -- slice 1, and this is the test that keeps it that way. It has no
+      -- position, so it is in neither column, in neither 'paneBarEntries'
+      -- list, and in nothing the six numbers address; 'Tui.App' appends it to
+      -- the bar itself. If it ever acquires a 'Pane' constructor this fails,
+      -- which is the point.
+      testCase "the strip is in no position and in neither column" $ do
+        length allPanes @?= 9
+        paneByName stripName @?= Nothing
+        assertBool "named unlike every pane" (stripName `notElem` map paneName allPanes)
+    , -- | **Closed, and nothing he has on screen moves until he says so.**
+      testCase "the strip starts closed, at the height the finished pane wants" $ do
+        stripOpen defaultStrip @?= False
+        stripRows defaultStrip @?= stripDefaultRows
+        assertBool "tall enough to be worth drawing" (stripDefaultRows > stripMinRows)
+    , testCase "opening and closing the strip leaves its height alone" $ do
+        let pulled = stripSized 14 defaultStrip
+        stripRows (openStrip pulled) @?= 14
+        stripRows (closeStrip (openStrip pulled)) @?= 14
+        stripOpen (closeStrip (openStrip pulled)) @?= False
+    , -- | **The floor is here and the ceiling is not** — 'stripSized' knows
+      -- 'stripMinRows' and nothing about the terminal, which is
+      -- 'Tui.App.maxStripRows'' job. A dotfile edited by hand goes through
+      -- this same function, so a nonsense height is a short strip and never
+      -- a strip with no rows.
+      testCase "a strip can never be pulled below its floor" $ do
+        stripRows (stripSized 0 defaultStrip) @?= stripMinRows
+        stripRows (stripSized (-40) defaultStrip) @?= stripMinRows
+        stripRows (stripSized stripMinRows defaultStrip) @?= stripMinRows
+        stripRows (stripSized 99 defaultStrip) @?= 99
     ]

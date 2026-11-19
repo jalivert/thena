@@ -42,6 +42,14 @@ module Tui.Layout
   , layoutPairs
   , layoutFrom
   , paneBarEntries
+  , Strip (..)
+  , stripName
+  , defaultStrip
+  , stripMinRows
+  , stripDefaultRows
+  , openStrip
+  , closeStrip
+  , stripSized
   ) where
 
 import qualified Data.Map.Strict as Map
@@ -248,3 +256,91 @@ paneBarEntries :: Layout -> [(Pane, Maybe Position)]
 paneBarEntries layout =
   [(p, Just n) | (n, p) <- layoutPairs layout]
     <> [(p, Nothing) | p <- allPanes, positionOf p layout == Nothing]
+
+-- * The suggestion strip — `~w2tk2`
+
+-- | **The suggestion strip: where it is, and how tall** — `~w2tk2` slice 1,
+-- the pane that replaces the completion dropdown. A strip under the prompt,
+-- the width of the script column; **his term for the pair is the
+-- "double-pane"**.
+--
+-- **It is deliberately NOT a 'Pane', and that is the whole of why this type
+-- exists.** A 'Pane' is a thing a 'Position' holds: it is addressed by one of
+-- six numbers, it is sized in /columns/, and it is laid out in one of two
+-- columns to the right of the document. The strip is none of those. It has
+-- exactly one place it can be — under the prompt, which is the design's own
+-- argument for it (/"eyes moving down is easier than eyes moving
+-- sideways"/) — it is sized in /rows/, and its width is not its own but the
+-- document column's. Adding it to 'Pane' would have made
+-- @:pane suggestions open 3@ a sentence the type accepts and the screen
+-- cannot honour, and would have given it a width in the pane-width map that
+-- nothing ever reads.
+--
+-- **So what it shares with a pane is only what it genuinely shares**: it is
+-- named in the pane bar, it is opened and closed by @:pane@, it is pulled by
+-- its accent bar, and it is remembered in the dotfile.
+data Strip = Strip
+  { stripOpen :: Bool
+    -- ^ whether it is on screen at all. **Closed is the default** — see
+    -- 'defaultStrip'.
+  , stripRows :: Int
+    -- ^ **how many screen rows its viewport is given — the title row not
+    -- counted**, the same reckoning a pane's width uses, which measures the
+    -- pane and not its accent bar. The one row of breathing space a pane's
+    -- body is padded with is inside this, so the rows of text visible are
+    -- one fewer, exactly as in every other pane.
+    --
+    -- Never below 'stripMinRows'; **the ceiling is not here** — how tall it
+    -- may be depends on what the document is left, which depends on the
+    -- terminal, which this module does not know and will not read.
+  }
+  deriving (Eq, Show)
+
+-- | What the strip is called — in @:pane@, in the pane bar, and in its own
+-- title. **One function, for the reason 'paneName' is one function**: the
+-- word on screen and the word he types cannot drift apart.
+--
+-- **His word, and the discussion settled on it**: /"let's just leave it at
+-- 'suggestion pane' for now"/. Singular @suggestions@ rather than
+-- @suggestion-pane@ because every other pane is named by what it holds.
+stripName :: String
+stripName = "suggestions"
+
+-- | **Closed, and that is deliberate for slice 1.** Nothing he has on screen
+-- today moves until he types @:pane suggestions open@: the strip takes its
+-- rows from the document, and a half-built pane that shrinks the document on
+-- launch would be charging him for a thing he has not asked to see yet.
+defaultStrip :: Strip
+defaultStrip = Strip { stripOpen = False, stripRows = stripDefaultRows }
+
+-- | Fewer rows than this and the strip holds nothing worth drawing: a
+-- heading and two offers under it.
+stripMinRows :: Int
+stripMinRows = 3
+
+-- | **Eight rows of content, which is what the finished strip needs and not
+-- a number chosen for slice 1.** The design puts a grid of three or four
+-- rows in the upper half, the LLM hint in the lower half, and a reply row
+-- under that — so the strip he will eventually pull is about this tall, and
+-- opening it at its eventual height is what makes slice 1 a test of the
+-- premise rather than of a smaller thing.
+stripDefaultRows :: Int
+stripDefaultRows = 8
+
+openStrip :: Strip -> Strip
+openStrip s = s { stripOpen = True }
+
+closeStrip :: Strip -> Strip
+closeStrip s = s { stripOpen = False }
+
+-- | The strip at a height, floored at 'stripMinRows'. **No snap, unlike a
+-- pane's width** — @paneWidthStep@ exists because a column is a fine unit
+-- and "about the same width" should mean the same width; a row is already
+-- coarse, and a strip snapped to every fourth row could not be put where he
+-- means.
+--
+-- **The ceiling is not here.** How tall the strip may be depends on what the
+-- document is left, which depends on the terminal, which this module does
+-- not know and will not read.
+stripSized :: Int -> Strip -> Strip
+stripSized n s = s { stripRows = max stripMinRows n }

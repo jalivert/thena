@@ -10,6 +10,7 @@
 module DrawingTests (drawingTests) where
 
 import Data.List (dropWhileEnd)
+import Data.Maybe (listToMaybe)
 import qualified Data.Text.Lazy as TL
 import Data.Char (isSpace)
 import qualified Data.Vector as V
@@ -29,7 +30,8 @@ import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Shape (..))
 import Thena.View.Instral (ValueView (..))
 import Thena.View.Machine (MachineView (..))
 import Tui.Panes
-  ( FileKind (..)
+  ( BarSpot (..)
+  , FileKind (..)
   , ModuleEntry (..)
   , ModuleMark (..)
   , PaneRow (..)
@@ -38,6 +40,7 @@ import Tui.Panes
   , markColumns
   , markGlyph
   , moduleRows
+  , offerStripRows
   , outputRows
   , paneBarWidget
   , paneRowWidget
@@ -190,15 +193,15 @@ paneBarCases =
       assertEqual ""
         " globals 1    proofterm 2    proofs"
         (drawLine (paneBarWidget
-                    [("globals", Just 1), ("proofterm", Just 2), ("proofs", Nothing)]))
+                    [("globals", BarAt 1), ("proofterm", BarAt 2), ("proofs", BarClosed)]))
   , -- The default screen, which is what he sees before he types anything.
     testCase "the default screen reads as the sketch he picked" $
       assertEqual ""
         " globals 1    proofterm 2    modules 3    goals 4    output 5    machine 6    proofs"
         (drawLine (paneBarWidget
-                    [ ("globals", Just 1), ("proofterm", Just 2), ("modules", Just 3)
-                    , ("goals", Just 4), ("output", Just 5), ("machine", Just 6)
-                    , ("proofs", Nothing)
+                    [ ("globals", BarAt 1), ("proofterm", BarAt 2), ("modules", BarAt 3)
+                    , ("goals", BarAt 4), ("output", BarAt 5), ("machine", BarAt 6)
+                    , ("proofs", BarClosed)
                     ]))
   , -- | **The case his own ruling made reachable** — every pane closed, so the
     -- bar is the only thing on screen that says a pane exists at all.
@@ -206,7 +209,19 @@ paneBarCases =
       assertEqual ""
         " globals    modules    output"
         (drawLine (paneBarWidget
-                    [("globals", Nothing), ("modules", Nothing), ("output", Nothing)]))
+                    [("globals", BarClosed), ("modules", BarClosed), ("output", BarClosed)]))
+  , -- | **The suggestion strip's chip carries no number** — `~w2tk2` slice 1.
+    -- Open and closed read the same in text and differ only by the fill, which
+    -- this suite does not assert; what it does assert is that **no number is
+    -- invented for it**, because a number in this bar is an address
+    -- @:pane ‹name› open ‹n›@ accepts and the strip has none.
+    testCase "the strip's chip says its name and no position, open or closed" $ do
+      assertEqual ""
+        " globals 1    suggestions"
+        (drawLine (paneBarWidget [("globals", BarAt 1), ("suggestions", BarUnder)]))
+      assertEqual ""
+        " globals 1    suggestions"
+        (drawLine (paneBarWidget [("globals", BarAt 1), ("suggestions", BarClosed)]))
   ]
 
 -- | **HIS REPORT, 2026-11-12, and the suite could not have caught it** —
@@ -616,6 +631,23 @@ paneRowCases =
   , testCase "and nothing is capped, which is the point of the move off the foot" $
       assertEqual "" 21
         (length (outputRows (Just ":show subst") [show n | n <- [1 .. 20 :: Int]]))
+  , -- | **The suggestion strip, slice 1 of `~w2tk2`.** Nothing offered is no
+    -- rows at all — not a row saying so — the same call 'outputRows' makes:
+    -- an empty strip is what /"there is nothing to suggest here"/ looks like,
+    -- and a sentence in its place would be the frontend inventing one.
+    testCase "nothing offered is no rows at all" $
+      assertEqual "" (asRows []) (offerStripRows [])
+  , -- | **The count is drawn and that is the point of drawing it.** The
+    -- launch list is 287 rows against his /"should not list tens or hundreds
+    -- of options"/, so @offers  287@ is the gap between slice 1 and slice 3a
+    -- on screen rather than in an argument.
+    testCase "the offers are a counted heading and one entry each" $
+      assertEqual ""
+        (asRows [Heading "offers" (Just 3), Entry ":theorem", Entry "data", Entry "intro"])
+        (offerStripRows [":theorem", "data", "intro"])
+  , testCase "and the count is the whole list, not what fits" $
+      assertEqual "" (Just (Just 287))
+        (listToMaybe [c | Heading _ c <- offerStripRows (map show [1 .. 287 :: Int])])
   ]
 
 -- | The three row kinds, drawn. **The indents are the structure**, so they

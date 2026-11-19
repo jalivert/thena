@@ -151,10 +151,13 @@ import Tui.Layout
   ( Layout
   , Pane (..)
   , Position
+  , Strip (..)
   , allPanes
   , closePane
+  , closeStrip
   , columnsOf
   , openPane
+  , openStrip
   , paneBarEntries
   , paneAt
   , paneByName
@@ -162,15 +165,20 @@ import Tui.Layout
   , placedPanes
   , positionOf
   , positions
+  , stripMinRows
+  , stripName
+  , stripSized
   )
 import Tui.Panes
-  ( FileKind (..)
+  ( BarSpot (..)
+  , FileKind (..)
   , ModuleEntry (..)
   , ModuleMark (..)
   , PaneRow (..)
   , globalRows
   , wideGlyphs
   , moduleRows
+  , offerStripRows
   , outputRows
   , paneBarWidget
   , paneRowWidget
@@ -214,6 +222,13 @@ data Name
     -- the pointer and a row inside the viewport is reported after the pane, so
     -- the row wins and the pane's accent-bar drag is untouched — that bar is
     -- outside the viewport.
+  | StripVP
+    -- ^ **the suggestion strip's own viewport and clickable extent** —
+    -- `~w2tk2` slice 1. Not @PaneVP@ with a tenth 'Tui.Layout.Pane' in it:
+    -- see 'Tui.Layout.Strip' for why the strip is not one, and note that
+    -- every function keyed on 'PaneVP' — 'resizablePanes', 'barRightOf',
+    -- 'paneWidthOf' — asks a question about /columns/ that has no answer
+    -- here.
   | LoadPopup
   | OfferPopup
   | PickerVP
@@ -426,6 +441,27 @@ data Drag = Drag
     -- two, and the press is the moment he decided which gesture this is.
   }
 
+-- | **The suggestion strip being pulled taller or shorter by its accent
+-- bar** — `~w2tk2` slice 1, and slice 5's /"we just let the user resize the
+-- pane upwards taking space from the main prompt\/script"/ is the gesture
+-- this is.
+--
+-- **Latched on the press, for the same reason 'Drag' is**: the strip's own
+-- top edge moves as it grows, so neither it nor the widget under the pointer
+-- can say how far the pointer has travelled. What does not move is the row
+-- the press landed on and the height the strip had then.
+--
+-- **A row and not a column, which is the whole difference from 'Drag'.**
+-- Pulling the bar /up/ grows the strip, because the bar travels up with the
+-- strip's own top edge — so the edge follows the pointer, the same property
+-- 'resizeTo' has sideways.
+data StripDrag = StripDrag
+  { sdFrom :: Int
+    -- ^ the absolute screen row the press landed on.
+  , sdRows :: Int
+    -- ^ the strip's content height at the moment of the press.
+  }
+
 data St = St
   { stTurns       :: [Turn]  -- ^ forward chronological — oldest first, an
                               -- append-only document, his correction 2026-09-29
@@ -615,6 +651,27 @@ data St = St
   , stDrag :: Maybe Drag
     -- ^ a resize in progress — see 'Drag'. 'Nothing' between drags, which is
     -- almost always.
+  , stStrip :: Strip
+    -- ^ **the suggestion strip: whether it is on screen, and how tall** —
+    -- `~w2tk2` slice 1. Persisted, like the layout and the widths.
+  , stStripDrag :: Maybe StripDrag
+    -- ^ the strip being pulled taller or shorter — see 'StripDrag'. **A
+    -- field of its own and not 'stDrag'**: a 'Drag' latches a pane and a
+    -- /column/, and the strip has neither; the two gestures also cannot be
+    -- in flight at once, which is an invariant the separate fields make
+    -- plain rather than one a shared field would have to keep.
+  , stDropdownOn :: Bool
+    -- ^ **whether the completion dropdown appears and takes keys at all** —
+    -- `~492hq`, his sequencing ruling of 2026-11-19: /"The dropdown will be
+    -- disabled pretty much immediately as we start working. It will however
+    -- not be deleted right away."/ @:dropdown on|off@, persisted, the same
+    -- shape as 'stAutoSelect' and 'stWhisperOn'.
+    --
+    -- **Off means it stops appearing and stops taking keys, and nothing
+    -- more.** Its rows are still built, 'stOfferDropdown' is still the
+    -- strip's own source, @:preselect@ still toggles, and every attr and
+    -- test it has stays — which is exactly the state his ruling asks for
+    -- between \"disabled\" and the deletion he has not authorised.
   , stPicker :: Maybe Picker
     -- ^ **the session picker, and while it is open it owns the keyboard** —
     -- see 'Picker' and 'handlePickerEvent'. It is the one widget in the TUI
@@ -721,6 +778,9 @@ runTui = do
           -- because the terminal's width is not known until there is a vty.
         , stPaneWidths  = Map.fromList (cfgWidths cfg)
         , stDrag        = Nothing
+        , stStrip       = cfgStrip cfg
+        , stStripDrag   = Nothing
+        , stDropdownOn  = cfgDropdownOn cfg
         , stPicker      = Nothing
         , stEscRun      = Nothing
         , stInputExtent = Nothing
@@ -855,8 +915,25 @@ resizablePanes = map PaneVP . placedPanes . stLayout
 -- **One function for both keyboards.** The REPL and live-script mode's command
 -- bar each dispatch their own commands, and a command built twice is a command
 -- that will eventually behave two ways.
-paneCommand :: [String] -> Layout -> Maybe (Layout, String)
-paneCommand ws layout = case ws of
+paneCommand :: [String] -> Layout -> Strip -> Maybe (Layout, Strip, String)
+paneCommand ws layout strip = case ws of
+  -- | **The suggestion strip, which has no position** — `~w2tk2` slice 1.
+  -- Three arms of its own rather than a 'Tui.Layout.Pane' that ignores its
+  -- argument: the strip has exactly one place it can be, so @open@ takes
+  -- nothing and @open ‹3›@ is a sentence to refuse rather than to honour by
+  -- dropping half of it.
+  [":pane", name, "open"] | name == stripName ->
+    Just (layout, openStrip strip, stripName <> " open under the prompt")
+  [":pane", name, "close"] | name == stripName ->
+    Just (layout, closeStrip strip, stripName <> " closed")
+  [":pane", name, "open", _] | name == stripName ->
+    Just
+      ( layout
+      , strip
+      , stripName <> " has no position — it sits under the prompt, the width "
+          <> "of the script column, so \":pane " <> stripName <> " open\" is "
+          <> "the whole of it"
+      )
   [":pane", name, "close"] ->
     withPane name (\p -> (closePane p layout, paneName p <> " closed"))
   [":pane", name, "open", n] -> withPane name $ \p -> case readPosition n of
@@ -866,15 +943,15 @@ paneCommand ws layout = case ws of
           <> "numbered across"
       )
     Just pos -> placed p pos
-  (":pane" : _) -> Just (layout, paneUsage)
+  (":pane" : _) -> Just (layout, strip, paneUsage)
   _ -> Nothing
   where
     withPane name k = Just $ case paneByName name of
-      Just p -> k p
+      Just p -> let (l, said) = k p in (l, strip, said)
       Nothing ->
         ( layout
-        , "no pane called " <> name <> " — "
-            <> intercalate ", " (map paneName allPanes)
+        , strip
+        , "no pane called " <> name <> " — " <> intercalate ", " paneWords
         )
     -- | **What a move cost is said, not left to be noticed.** A swap moves the
     -- pane that was there, and opening a closed pane onto a taken position
@@ -894,10 +971,17 @@ paneCommand ws layout = case ws of
       )
       where (after, shut) = openPane p pos layout
 
+-- | **Every pane @:pane@ knows, the positionless one last** — `~w2tk2`.
+-- Last and not sorted in, so a word that behaves differently from the other
+-- nine is not hidden in the middle of them.
+paneWords :: [String]
+paneWords = map paneName allPanes <> [stripName]
+
 paneUsage :: String
 paneUsage =
-  ":pane ‹name› open ‹1-6›, :pane ‹name› close — "
-    <> intercalate ", " (map paneName allPanes)
+  ":pane ‹name› open ‹1-6›, :pane ‹name› close, :pane " <> stripName
+    <> " open|close — "
+    <> intercalate ", " paneWords
 
 readPosition :: String -> Maybe Position
 readPosition w = case reads w of
@@ -915,9 +999,12 @@ paneVocabulary line
     ws = words line
     -- | A line ending in a space is one word further on than its words say.
     slot = if not (null line) && last line /= ' ' then length ws - 1 else length ws
-    vocab 1 = map paneName allPanes
+    vocab 1 = paneWords
     vocab 2 = ["open", "close"]
-    vocab 3 | ws !! 2 == "open" = map show positions
+    -- | **No positions offered after @:pane suggestions open@** — `~w2tk2`.
+    -- The strip has none, and a completion that offers six numbers the very
+    -- next word will refuse is the dropdown telling him something untrue.
+    vocab 3 | ws !! 2 == "open", ws !! 1 /= stripName = map show positions
     vocab _ = []
 
 paneCommandPrefix :: String
@@ -953,6 +1040,22 @@ minPaneWidth = 12
 -- take the screen away from the thing being edited.
 docMinWidth :: Int
 docMinWidth = 24
+
+-- | The same floor downwards — `~w2tk2`, the suggestion strip being the
+-- first thing that can take /rows/ off the document. **A title, the input
+-- line, and six rows of transcript above it**: below that the pane is no
+-- longer somewhere a proof is being read.
+docMinHeight :: Int
+docMinHeight = 8
+
+-- | How tall the strip may be pulled on a terminal of this many rows —
+-- `~w2tk2`.
+--
+-- **The five rows taken off are 'draw''s own and are counted there, not
+-- guessed**: the outer top margin, the pane bar, the blank row under it, the
+-- spacer row between the document and the strip, and the strip's own title.
+maxStripRows :: Int -> Int
+maxStripRows screen = max stripMinRows (screen - 5 - docMinHeight)
 
 requestBlinkingCursor :: IO ()
 requestBlinkingCursor = hPutStr stdout "\ESC[1 q" >> hFlush stdout
@@ -1026,6 +1129,11 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "title.output",   surface (themePanel th) (themeOutput th))
   , (attrName "title.choices",  surface (themePanel th) (themeChoices th))
   , (attrName "title.matches",  surface (themePanel th) (themeMatches th))
+  -- | **The suggestion strip** — `~w2tk2` slice 1. Same scheme as every
+  -- other pane and no special case: the edge and the title carry the accent,
+  -- both paired with 'themePanel' so neither punches the hole `~bv2wj` was.
+  , (attrName ("edge." <> stripName),  surface (themePanel th) (themeSuggest th))
+  , (attrName ("title." <> stripName), surface (themePanel th) (themeSuggest th))
   -- | A list pane's group heading and its small print. **Both dim, and the
   -- same dim**: a heading is not a thing in the list and neither is a module's
   -- file, so what separates them from the entries is weight, not hue — the
@@ -1156,7 +1264,7 @@ draw st =
     -- **The outer margin runs along the top and the left only** — his
     -- ruling of 2026-11-16: the bottom row and the right column belong to
     -- the panes, so content reaches the screen's own bottom-right corner.
-    <> [padTop (Pad 1) (padLeft (Pad 1) (vBox [paneBar, str " ", hBox [replColumn, gapH, paneColumns]]))]
+    <> [padTop (Pad 1) (padLeft (Pad 1) (vBox [paneBar, str " ", hBox [docColumn, gapH, paneColumns]]))]
   where
     budget = Budget 200
     s = activeSession st
@@ -1170,8 +1278,15 @@ draw st =
     -- (brick's trap, and the reason `padLeft` is avoided elsewhere here);
     -- 'Tui.Layout.paneBarEntries' decides the order and
     -- 'Tui.Panes.paneBarWidget' how the line reads, so neither is decided here.
+    -- **The strip is last in the bar, always** — `~w2tk2`. The nine
+    -- positioned panes come in position order and then the closed ones, which
+    -- is an order that changes as he moves them; the strip's place never
+    -- changes, so it sits at the end where it will not travel.
     paneBar =
-      paneBarWidget [(paneName p, pos) | (p, pos) <- paneBarEntries (stLayout st)]
+      paneBarWidget
+        ( [(paneName p, maybe BarClosed BarAt pos) | (p, pos) <- paneBarEntries (stLayout st)]
+            <> [(stripName, if stripOpen (stStrip st) then BarUnder else BarClosed)]
+        )
 
     -- | **Neither dropdown is drawn while the picker is open**, and the
     -- state behind them is untouched: a completion popup hanging over a
@@ -1210,6 +1325,46 @@ draw st =
             pane "repl" HistoryVP
               (padAll 1 (vBox (renderTurns (stTurns st) <> [inputLine])))
 
+    -- | **The document and the suggestion strip under it — his
+    -- "double-pane"** (`~w2tk2` slice 1). One 'vBox', which is the whole of
+    -- why the strip needs no width of its own: it is as wide as the document
+    -- column, and the document column is whatever the panes leave.
+    --
+    -- **The strip is height-limited and the document is not**, so the
+    -- document is the greedy child and the strip takes exactly what it has
+    -- been pulled to — slice 5's /"we just let the user resize the pane
+    -- upwards taking space from the main prompt\/script"/, which is his own
+    -- first choice over a mode switch.
+    --
+    -- **One spacer row between them, the same 'gapRow' a pane column uses
+    -- between its panes.** The pair is two panes and the gap is what says so.
+    docColumn
+      | stripOpen (stStrip st) =
+          vBox [replColumn, gapRow, vLimit (stripRows (stStrip st) + 1) suggestionStrip]
+      | otherwise = replColumn
+
+    -- | **The suggestion strip** — `~w2tk2` slice 1, and it is drawn through
+    -- the same 'pane' the other nine go through: the accent edge, the title
+    -- strip, the viewport. Nothing about it is special-cased in the drawing,
+    -- which is what makes it a pane rather than a widget pretending to be one.
+    suggestionStrip =
+      withAttr (attrName "panel") $
+        pane stripName StripVP (paneBody (offerStripRows stripLabels))
+
+    -- | **What the strip says today: the labels the completion dropdown
+    -- would have shown** — slice 1's /"contents are today's offer rows as a
+    -- flat list"/.
+    --
+    -- **The offer dropdown's rows and not the ':load' dropdown's.** The two
+    -- are mutually exclusive by construction ('stOfferDropdown''s own note),
+    -- and a path listing is a different job that already has its own popup;
+    -- what this design replaces is the statement completion.
+    --
+    -- **Read off the same state the dropdown reads, so the two cannot
+    -- disagree.** That is the point at slice 1: both are on screen at once
+    -- and he is comparing the same list in two places.
+    stripLabels = maybe [] (map rowLabel . odRows) (stOfferDropdown st)
+
     -- | 'Input' reported here, on the editor itself, not the "❯ " ahead of
     -- it — so 'stInputExtent's own upper-left is column 0 of the *text*,
     -- and every text offset ('pathStartOff', the cursor, anything later)
@@ -1243,7 +1398,7 @@ draw st =
         -- outright rather than 'ghostAt' itself carrying the flag — the
         -- accept-span math it returns alongside the text isn't wanted by
         -- anything else, so there's nothing to lose by short-circuiting here.
-        (ghost, skip) = if stWhisperOn st then ghostAt line col (stDropdown st) (stOfferDropdown st) else ("", 0)
+        (ghost, skip) = if stWhisperOn st then ghostAt line col (stDropdown st) (liveOffers st) else ("", 0)
         line = concatMap Text.unpack (getEditContents (stInput st))
         (_, col) = getCursorPosition (stInput st)
 
@@ -1842,11 +1997,38 @@ loadRow selected i name = PopupRow (takeFileName (dropTrailingPathSeparator name
 
 -- | The completion dropdown, positioned the same way — see 'popupAt'.
 offerDropdownLayer :: St -> [Widget Name]
-offerDropdownLayer st = case stOfferDropdown st of
+offerDropdownLayer st = case liveOffers st of
   Just od | not (null (odRows od)) ->
     popupAt st (odWordStart od) (length (odRows od)) OfferPopup
       (zipWith (offerRowToPopup (odSelected od) (odJevPicked od)) [0 :: Int ..] (odRows od))
   _ -> []
+
+-- | **The completion dropdown as the keyboard and the screen see it:
+-- 'Nothing' under @:dropdown off@** — `~492hq`, his sequencing ruling of
+-- 2026-11-19.
+--
+-- **One function and not a flag tested at each binding, which is the whole
+-- reason it exists.** The dropdown is consulted in six places — Enter, Tab
+-- and Esc in both keyboards, the arrows, the whisper and the drawing — and
+-- /disabled/ has to mean the same thing in all six or the switch leaves a
+-- key that still accepts a row nobody can see.
+--
+-- **'stOfferDropdown' itself is untouched and is still built on every
+-- keystroke.** That is what @disabled, not deleted@ comes to: the rows are
+-- the suggestion strip's own source ('draw''s @stripLabels@), Jev still
+-- ranks them, @:preselect@ still sets a selection in them, and nothing of
+-- the dropdown's code, attrs or tests has moved.
+--
+-- **The whisper goes with it, deliberately.** @offerGhost@ renders the
+-- selected row's untyped remainder, and a whisper driven by a list that is
+-- not on screen is the staleness part one §4 of
+-- @discussion/the-dropdown-is-the-wrong-element.md@ is about, with the one
+-- thing that explained it removed.
+--
+-- **The @:load@ path dropdown is NOT gated.** It is a different element with
+-- a different job, and nothing in this design replaces it.
+liveOffers :: St -> Maybe OfferDropdown
+liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 
 offerRowToPopup :: Maybe Int -> Int -> Int -> OfferRow -> PopupRow
 offerRowToPopup selected jevPicked i (OfferRow label ins) =
@@ -2301,13 +2483,21 @@ handleResize ev = case ev of
   -- event's own name says which pane, and that is the whole of the hit test —
   -- each pane's bar sits at its own left edge since `~rr8bx`, so the name is
   -- enough and the row never has to be consulted here.
-  MouseDown n V.BLeft mods (Location (c, _)) -> do
-    left <- paneLeft n
+  MouseDown n V.BLeft mods (Location (c, r)) -> do
+    corner <- paneCorner n
     st <- get
-    case (stDrag st, left) of
-      (Just d, Just l) -> resizeTo d (l + c) >> pure True
-      (Just _, Nothing) -> pure True
-      (Nothing, Just l)
+    case (stStripDrag st, stDrag st, corner) of
+      -- | **A strip drag in flight wins, and it is read in ROWS** —
+      -- `~w2tk2`. The pointer leaves the strip the moment it is pulled up
+      -- (the document is above it), so the motion reports arrive named for
+      -- whatever is under the hand; what is needed from them is the absolute
+      -- row, which is that widget's own top plus the event's.
+      (Just sd, _, Just (_, t)) -> resizeStripTo sd (t + r) >> pure True
+      (Just _, _, Nothing) -> pure True
+      (_, Just d, Just (l, _)) -> resizeTo d (l + c) >> pure True
+      (_, Just _, Nothing) -> pure True
+      (Nothing, Nothing, Just (l, t))
+        | c == 0, StripVP <- n -> startStripDrag (t + r) >> pure True
         | c == 0, PaneVP p <- n, n `elem` resizablePanes st ->
             startDrag p l (wholeColumn mods) >> pure True
       _ -> pure False
@@ -2319,13 +2509,21 @@ handleResize ev = case ev of
   -- raw event are both absolute.
   VtyEvent (V.EvMouseDown c r V.BLeft mods) -> do
     st <- get
-    case stDrag st of
-      Just d -> resizeTo d c >> pure True
-      Nothing -> do
+    case (stStripDrag st, stDrag st) of
+      (Just sd, _) -> resizeStripTo sd r >> pure True
+      (_, Just d) -> resizeTo d c >> pure True
+      _ -> do
         hit <- barRightOf st c r
-        case hit of
-          Just p -> startDrag p c (wholeColumn mods) >> pure True
-          Nothing -> pure False
+        -- | **The screen's own left margin, beside the strip, is the strip's
+        -- bar too** — `~w2tk2`, the same doubling of a one-column target
+        -- `~rr8bx` was reported as. The column left of the strip's edge is
+        -- 'draw''s outer margin and belongs to no clickable extent, so
+        -- nothing else is competing for it.
+        onStrip <- stripBarRightOf c r
+        case (hit, onStrip) of
+          (Just p, _) -> startDrag p c (wholeColumn mods) >> pure True
+          (Nothing, True) -> startStripDrag r >> pure True
+          _ -> pure False
   MouseUp _ (Just V.BLeft) _ -> release
   VtyEvent (V.EvMouseUp _ _ (Just V.BLeft)) -> release
   _ -> pure False
@@ -2333,22 +2531,45 @@ handleResize ev = case ev of
     startDrag p from whole = do
       st <- get
       put st { stDrag = Just (Drag p from (paneWidthOf st p) whole) }
+    startStripDrag from = do
+      st <- get
+      put st { stStripDrag = Just (StripDrag from (stripRows (stStrip st))) }
     -- | **The width is persisted when the drag ENDS, not while it runs** —
     -- `~vqsd8`. A drag arrives as a run of mouse-downs (vty asks for
     -- @ESC[?1002h@), so saving in 'resizeTo' would rewrite the dotfile on every
     -- report of every pull. This is the one place both mouse-up shapes meet.
     release = do
       st <- get
-      case stDrag st of
-        Nothing -> pure False
-        Just _ -> do
-          let st' = st { stDrag = Nothing }
+      case (stDrag st, stStripDrag st) of
+        (Nothing, Nothing) -> pure False
+        _ -> do
+          let st' = st { stDrag = Nothing, stStripDrag = Nothing }
           put st'
           liftIO (saveConfig (configOf st'))
           pure True
 
-paneLeft :: Name -> EventM Name St (Maybe Int)
-paneLeft n = fmap (locationColumn . extentUpperLeft) <$> lookupExtent n
+-- | A widget's upper-left corner, @(column, row)@. **Both halves from one
+-- extent lookup**, because a horizontal drag needs the column and the strip's
+-- vertical one needs the row, and two lookups of the same extent in one
+-- frame could not disagree but would read as though they might.
+paneCorner :: Name -> EventM Name St (Maybe (Int, Int))
+paneCorner n = fmap (corner . extentUpperLeft) <$> lookupExtent n
+  where corner loc = (locationColumn loc, locationRow loc)
+
+-- | Whether @(col, row)@ is the column immediately left of the suggestion
+-- strip's accent bar, within the strip's own rows — `~w2tk2`, the rectangle
+-- test the margin press needs. 'False' with the strip closed, there being no
+-- extent to be beside.
+stripBarRightOf :: Int -> Int -> EventM Name St Bool
+stripBarRightOf col row = do
+  ext <- lookupExtent StripVP
+  pure $ case ext of
+    Just e
+      | locationColumn (extentUpperLeft e) == col + 1
+      , let top = locationRow (extentUpperLeft e)
+      , row >= top
+      , row < top + snd (extentSize e) -> True
+    _ -> False
 
 -- | The pane whose accent bar is in the column just right of @(col, row)@ —
 -- the rectangle test the gap press needs, and the reason a pane's extent is
@@ -2416,6 +2637,27 @@ resizeTo d col = do
         | dragWhole d = columnOf st (dragPane d)
         | otherwise = [dragPane d]
   put st { stPaneWidths = foldr (\p -> Map.insert p capped) (stPaneWidths st) moving }
+
+-- | One frame of a strip drag: the strip's height is what it was at the
+-- press, plus however far the pointer has travelled back towards the
+-- screen's top edge — so **pulling up grows it**, which is the gesture he
+-- asked for in his own words, /"resize the pane upwards taking space from
+-- the main prompt\/script"/.
+--
+-- **No snap**, unlike 'resizeTo': see 'Tui.Layout.stripSized'. A row is
+-- already a coarse unit and a strip that could only land on every fourth row
+-- could not be put where he means.
+--
+-- **Floored by 'Tui.Layout.stripSized' and capped by 'maxStripRows'**, which
+-- is the vertical twin of 'docMinWidth': a drag cannot take the screen away
+-- from the thing being edited.
+resizeStripTo :: StripDrag -> Int -> EventM Name St ()
+resizeStripTo sd row = do
+  st <- get
+  vty <- getVtyHandle
+  (_, screen) <- liftIO (V.displayBounds (V.outputIface vty))
+  let pulled = sdRows sd + (sdFrom sd - row)
+  put st { stStrip = stripSized (min (maxStripRows screen) pulled) (stStrip st) }
 
 -- | The panes sharing a column with this one, itself included — the column
 -- the layout puts it in now, not the one it was built in.
@@ -2805,7 +3047,7 @@ keepTheEdit = do
 dispatchScriptEvent :: BrickEvent Name AppEvent -> EventM Name St ()
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
   st <- get
-  case (stDropdown st, stOfferDropdown st) of
+  case (stDropdown st, liveOffers st) of
     (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
       acceptLoadRow st entries i
     (_, Just od) | Just i <- odSelected od, Just ins <- rowInsert (odRows od !! i) ->
@@ -2903,7 +3145,7 @@ dispatchScriptEvent ev = handleReplEvent ev
 handleReplEvent :: BrickEvent Name AppEvent -> EventM Name St ()
 handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
   st <- get
-  case (stDropdown st, stOfferDropdown st) of
+  case (stDropdown st, liveOffers st) of
     -- | Enter accepts the highlighted candidate into the input instead of
     -- submitting — his spec: "Enter selects it" — and Tab does the same
     -- (his `.jalivert/TUI.md` #10, VS Code's rule). Only fires with a
@@ -2933,8 +3175,8 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- TUI-local like `:theme` and `:fold`: the engine has no panes, so
         -- this never reaches it.
         paneLine@(":pane" : _)
-          | Just (layout', said) <- paneCommand paneLine (stLayout st0) -> do
-              let st' = st0 { stLayout = layout' }
+          | Just (layout', strip', said) <- paneCommand paneLine (stLayout st0) (stStrip st0) -> do
+              let st' = st0 { stLayout = layout', stStrip = strip' }
               liftIO (saveConfig (configOf st'))
               appendTurn st' Nothing [said]
         -- | `:script` enters live-script mode (`~5vtt3`). TUI-local like the
@@ -3004,6 +3246,14 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
           let st' = st0 { stWhisperOn = mode == "on" }
           liftIO (saveConfig (configOf st'))
           appendTurn st' Nothing ["whisper: " <> mode]
+        -- | **`:dropdown on|off`** — `~492hq`, his sequencing ruling of
+        -- 2026-11-19. Same standing as the three above: a preference, not an
+        -- Esc, persisted to the dotfile. See 'stDropdownOn' for what \"off\"
+        -- does and does not touch.
+        [":dropdown", mode] | mode `elem` ["on", "off"] -> do
+          let st' = st0 { stDropdownOn = mode == "on" }
+          liftIO (saveConfig (configOf st'))
+          appendTurn st' Nothing ["dropdown: " <> mode]
         -- | **`:confirm-quit on|off`**, his instruction of 2026-11-18 — same
         -- standing as the two above. See 'maybeQuit'.
         [":confirm-quit", mode] | mode `elem` ["on", "off"] -> do
@@ -3030,7 +3280,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         _ -> runEngineLine st0 line []
 handleReplEvent (VtyEvent (V.EvKey V.KEsc [])) = do
   st <- get
-  case (stDropdown st, stOfferDropdown st) of
+  case (stDropdown st, liveOffers st) of
     -- | Esc walks an open dropdown back in two steps (his `.jalivert/TUI.md`
     -- #14): first the highlight, then the list itself, which stays hidden
     -- until an edit brings it back ('stDismissed'). With nothing open, Esc
@@ -3083,7 +3333,7 @@ handleReplEvent ev@(VtyEvent (V.EvKey V.KUp [])) = do
 -- open), silence everywhere else.
 handleReplEvent (VtyEvent (V.EvKey (V.KChar '\t') [])) = do
   st <- get
-  case (stDropdown st, stOfferDropdown st) of
+  case (stDropdown st, liveOffers st) of
     (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
       acceptLoadRow st entries i
     (_, Just od) | Just i <- odSelected od, Just ins <- rowInsert (odRows od !! i) ->
@@ -3211,7 +3461,7 @@ navigateCompletion
   -> EventM Name St ()
 navigateCompletion moveLoad moveOffer ev = do
   st <- get
-  case (stDropdown st, stOfferDropdown st) of
+  case (stDropdown st, liveOffers st) of
     -- | **Esc already handed these keys over, so do not take them back.**
     -- The comment above has always said history gets them "once nothing is
     -- left to navigate there — Esc, or nothing offered"; the Esc half was
@@ -3463,8 +3713,8 @@ scriptLocal st text = case words text of
     put st { stFoldOn = mode == "on" }
     pure ("fold: " <> mode)
   paneLine@(":pane" : _)
-    | Just (layout', said) <- paneCommand paneLine (stLayout st) -> Just $ do
-        let st' = st { stLayout = layout' }
+    | Just (layout', strip', said) <- paneCommand paneLine (stLayout st) (stStrip st) -> Just $ do
+        let st' = st { stLayout = layout', stStrip = strip' }
         liftIO (saveConfig (configOf st'))
         put st'
         pure said
@@ -3478,6 +3728,11 @@ scriptLocal st text = case words text of
     liftIO (saveConfig (configOf st'))
     put st'
     pure ("whisper: " <> mode)
+  [":dropdown", mode] | mode `elem` ["on", "off"] -> Just $ do
+    let st' = st { stDropdownOn = mode == "on" }
+    liftIO (saveConfig (configOf st'))
+    put st'
+    pure ("dropdown: " <> mode)
   [":confirm-quit", mode] | mode `elem` ["on", "off"] -> Just $ do
     let st' = st { stConfirmQuit = mode == "on" }
     liftIO (saveConfig (configOf st'))
@@ -3536,6 +3791,12 @@ tuiHelpLines =
     , ("",                  "  1 2 / 3 4 / 5 6, so odd is the left column and even the right")
     , ("",                  "  " <> intercalate ", " (map paneName allPanes))
     , (":pane ‹name› close", "take it off the screen — its width is remembered")
+    , (":pane " <> stripName <> " open", "the suggestion strip, under the prompt and as wide as")
+    , ("",                  "  the document — it has no position, and nothing else does")
+    , ("",                  "  either. Pull its accent bar UP to make it taller;")
+    , ("",                  "  the rows come off the document. :pane " <> stripName <> " close")
+    , (":dropdown on|off",  "whether the completion dropdown appears and takes keys")
+    , ("",                  "  at all. Off leaves :load's own path listing alone")
     , ("a click in a list pane", "folds a namespace in globals — ▾ is open, ▸ folded,")
     , ("",                  "  and the count stays either way; unfolds a ⚠️ or ❌ module's")
     , ("",                  "  row in modules. Anywhere along the row, not just the symbol")
@@ -4789,6 +5050,8 @@ configOf st = Config
       | (p, w) <- Map.toAscList (stPaneWidths st)
       , Just w /= Map.lookup p (stDefaultWidths st)
       ]
+  , cfgStrip      = stStrip st
+  , cfgDropdownOn = stDropdownOn st
   }
 
 appendTurn :: St -> Maybe String -> [String] -> EventM Name St ()

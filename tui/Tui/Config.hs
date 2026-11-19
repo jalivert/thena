@@ -26,11 +26,14 @@ import Tui.Layout
   ( Layout
   , Pane
   , Position
+  , Strip (..)
   , defaultLayout
+  , defaultStrip
   , layoutFrom
   , layoutPairs
   , paneByName
   , paneName
+  , stripSized
   )
 import Tui.Theme (neonPinkDark, themeName)
 
@@ -53,6 +56,12 @@ data Config = Config
     -- so a pane he has never touched keeps taking its width from the terminal's
     -- own, which is what 'Tui.App.appStart' computes and what makes an unwritten
     -- dotfile indistinguishable from no feature.
+  , cfgStrip      :: Strip
+    -- ^ **whether the suggestion strip is on screen and how tall** —
+    -- `~w2tk2` slice 1, two keys in the file (@suggestions@ and
+    -- @suggestion-rows@) and one field here, because they are one pane.
+  , cfgDropdownOn :: Bool
+    -- ^ @:dropdown on|off@ — `~492hq`. Same shape as 'cfgAutoSelect'.
   } deriving (Show, Eq)
 
 -- | The standing defaults as they already are in 'Tui.App.runTui' —
@@ -66,6 +75,8 @@ defaultConfig = Config
   , cfgConfirmQuit = True
   , cfgLayout     = defaultLayout
   , cfgWidths     = []
+  , cfgStrip      = defaultStrip
+  , cfgDropdownOn = True
   }
 
 -- | @~\/.config\/thena@ — not @thena-tui@: the TUI is the only frontend
@@ -105,6 +116,15 @@ applyLine cfg line = case break (== '=') line of
   ("confirm-quit", '=' : v) | Just b <- parseBool v -> cfg { cfgConfirmQuit = b }
   ("panes", '=' : v)     -> cfg { cfgLayout = layoutFrom (mapMaybe parsePane (commas v)) }
   ("widths", '=' : v)    -> cfg { cfgWidths = mapMaybe parseWidth (commas v) }
+  ("suggestions", '=' : v) | Just b <- parseBool v ->
+    cfg { cfgStrip = (cfgStrip cfg) { stripOpen = b } }
+  -- | **A height out of range is clamped and not dropped**, unlike a bad
+  -- @widths@ entry: 'stripSized' has a floor and a nonsense number there is
+  -- still a number he meant as a height, where @globals:banana@ is not a
+  -- width at all.
+  ("suggestion-rows", '=' : v) | Just n <- readInt v ->
+    cfg { cfgStrip = stripSized n (cfgStrip cfg) }
+  ("dropdown", '=' : v) | Just b <- parseBool v -> cfg { cfgDropdownOn = b }
   _                      -> cfg
 
 parseBool :: String -> Maybe Bool
@@ -175,4 +195,7 @@ writeConfig path cfg = do
         [show n <> ":" <> paneName p | (n, p) <- layoutPairs (cfgLayout cfg)]
     , "widths=" <> intercalate ","
         [paneName p <> ":" <> show w | (p, w) <- cfgWidths cfg]
+    , "suggestions=" <> (if stripOpen (cfgStrip cfg) then "on" else "off")
+    , "suggestion-rows=" <> show (stripRows (cfgStrip cfg))
+    , "dropdown=" <> (if cfgDropdownOn cfg then "on" else "off")
     ]

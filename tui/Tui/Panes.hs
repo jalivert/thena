@@ -18,7 +18,9 @@ module Tui.Panes
   , moduleRows
   , FileKind (..)
   , outputRows
+  , offerStripRows
   , paneRowWidget
+  , BarSpot (..)
   , paneBarWidget
   ) where
 
@@ -380,6 +382,29 @@ outputRows :: Maybe String -> [String] -> [PaneRow n]
 outputRows Nothing _ = []
 outputRows (Just line) out = Heading line Nothing : map Entry out
 
+-- | **The suggestion strip's rows, slice 1 of `~w2tk2`: today's completion
+-- offers as a flat list.**
+--
+-- **Nothing clever, and that is the slice's own instruction.** No grid, no
+-- numbering, no accept key — those are slice 2. What this is for is the one
+-- question slice 1 exists to answer: whether reading a slate of offers
+-- /below/ the prompt is easier than reading one floating /over/ it, which is
+-- the argument that let a pane back into this design after he refuted one on
+-- locality in 2026-11-13.
+--
+-- **The count is drawn and it is the point of drawing it.** The launch list
+-- is 287 rows and his second property of the finished pane is that it
+-- /"should not list tens or hundreds of options"/ — so a heading reading
+-- @offers  287@ is the gap between today and slice 3a, on screen, where an
+-- argument about it would otherwise have to be believed.
+--
+-- **Takes labels and not 'OfferRow's.** Whether a row can be accepted is the
+-- dropdown's business and the strip has no accept; a 'Tui.App.rowInsert' in
+-- here would be a field nothing reads.
+offerStripRows :: [String] -> [PaneRow n]
+offerStripRows [] = []
+offerStripRows labels = Heading "offers" (Just (length labels)) : map Entry labels
+
 -- | One row of a list pane, with its attribute and its indent — the whole of
 -- the second column's drawing, since 'Tui.Panes' decided the text.
 --
@@ -457,20 +482,42 @@ paneWrap =
 -- number read as one thing and the gap between two panes is plainly wider than
 -- the gap inside one. A closed pane is its name alone — there is no position to
 -- draw — and the attribute is the other half of the difference he asked for.
-paneBarWidget :: [(String, Maybe Int)] -> Widget n
+paneBarWidget :: [(String, BarSpot)] -> Widget n
 paneBarWidget entries = hBox (intersperse gap (map chip entries))
   where
     -- | **One pane is one filled block, padded a column either side** — his
     -- instruction of 2026-11-13: /"Each 'item' in the bar should be visually
     -- its own thing."/ The padding is inside the background, so the fill does
     -- not sit tight against the glyphs.
-    chip (name, pos) =
-      withAttr (attrName (attr pos)) (str (" " <> name <> number pos <> " "))
+    chip (name, spot) =
+      withAttr (attrName (attr spot)) (str (" " <> name <> number spot <> " "))
     -- | **Two columns of the stage's own black between chips** — /"between the
     -- items there is the black background space"/. Unstyled on purpose: the
     -- attribute in force across this row is the stage, so a gap that names no
     -- attribute of its own is exactly the background he asked for, and it stays
     -- right when a theme changes the stage.
     gap = str "  "
-    number = maybe "" (\n -> " " <> show n)
-    attr = maybe "panebar.closed" (const "panebar.open")
+    number spot = case spot of
+      BarAt n -> " " <> show n
+      _ -> ""
+    attr spot = case spot of
+      BarClosed -> "panebar.closed"
+      _ -> "panebar.open"
+
+-- | **Where the bar says a pane is.** Three states, because `~w2tk2` added a
+-- pane with no position: the suggestion strip is either on screen under the
+-- prompt or not, and there is no number that could be drawn beside it.
+--
+-- **'BarUnder' draws as open with no number, which is the honest rendering.**
+-- The alternative considered was to give the strip a tenth position and draw
+-- it, and it was rejected for the reason 'Tui.Layout.Strip' is not a
+-- 'Tui.Layout.Pane' at all: a number in the bar is an address
+-- @:pane ‹name› open ‹n›@ accepts, and there is no such address here.
+data BarSpot
+  = BarClosed
+    -- ^ not on screen. Dim, its name alone.
+  | BarAt Int
+    -- ^ on screen at this position — one of 'Tui.Layout.positions'.
+  | BarUnder
+    -- ^ on screen, in the one place it can be: under the prompt.
+  deriving (Eq, Show)
