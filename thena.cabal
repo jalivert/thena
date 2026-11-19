@@ -237,6 +237,7 @@ library tui
         Tui.App
         Tui.Config
         Tui.Database
+        Tui.Hint
         Tui.Jev
         Tui.Layout
         Tui.Json

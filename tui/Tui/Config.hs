@@ -35,6 +35,9 @@ import Tui.Layout
   , paneName
   , stripSized
   )
+import qualified Data.Text as Text
+
+import Tui.Hint (defaultModelId)
 import Tui.Theme (neonPinkDark, themeName)
 
 data Config = Config
@@ -68,6 +71,15 @@ data Config = Config
     -- its own candidates in alphabetical order. Same shape as the three
     -- above; defaults to on, so a dotfile that has never heard of it behaves
     -- as before.
+  , cfgModel      :: String
+    -- ^ **which OpenRouter model answers the hint region** — `~w2tk2`
+    -- slice 6, set by @:model ‹id›@ or by Enter in the @:models@ picker.
+    --
+    -- **An id and not an enumeration**, because the catalogue is 479 rows
+    -- and moves without us: a model this build has never heard of is still
+    -- a model he may have chosen, so what is stored is whatever string
+    -- OpenRouter answers to. 'Tui.Hint.defaultModelId' is the fallback and
+    -- the only name this code knows.
   } deriving (Show, Eq)
 
 -- | The standing defaults as they already are in 'Tui.App.runTui' —
@@ -92,6 +104,7 @@ defaultConfig = Config
   -- on` brings it back, which is the second half of his ruling.
   , cfgDropdownOn = False
   , cfgJevOn      = True
+  , cfgModel      = Text.unpack defaultModelId
   }
 
 -- | @~\/.config\/thena@ — not @thena-tui@: the TUI is the only frontend
@@ -141,6 +154,11 @@ applyLine cfg line = case break (== '=') line of
     cfg { cfgStrip = stripSized n (cfgStrip cfg) }
   ("dropdown", '=' : v) | Just b <- parseBool v -> cfg { cfgDropdownOn = b }
   ("jev", '=' : v)      | Just b <- parseBool v -> cfg { cfgJevOn = b }
+  -- | **Not validated against anything, and deliberately so** — see
+  -- 'cfgModel'. An empty value falls back to the default rather than
+  -- storing a model id of @""@, which would come back as a 400 on his
+  -- first ask with nothing on screen to explain it.
+  ("model", '=' : v)    -> cfg { cfgModel = if null v then Text.unpack defaultModelId else v }
   _                      -> cfg
 
 parseBool :: String -> Maybe Bool
@@ -215,4 +233,5 @@ writeConfig path cfg = do
     , "suggestion-rows=" <> show (stripRows (cfgStrip cfg))
     , "dropdown=" <> (if cfgDropdownOn cfg then "on" else "off")
     , "jev=" <> (if cfgJevOn cfg then "on" else "off")
+    , "model=" <> cfgModel cfg
     ]

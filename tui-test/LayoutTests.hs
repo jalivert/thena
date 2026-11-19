@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- | **Which panes are on screen and where** — `~fxc89`'s two operations, held
 -- to their results.
 --
@@ -49,6 +50,9 @@ import Tui.Layout
   , stripReplyRows
   , stripSlotKeys
   )
+import qualified Data.Text as Text
+
+import Tui.Hint (HintModel (..), matchingModels, modelRow)
 import Tui.Jev (jevNucleus, jevPickLimit)
 
 layoutTests :: TestTree
@@ -326,6 +330,23 @@ layoutTests =
         gridRows g + stripHintRows + stripReplyRows @?= body
     , testCase "a cell is wide enough for the key field and a typical label" $
         assertBool "" (stripCellWidth >= 3 + 2 + 18)
+    , -- | **The filter is what makes `:models` usable at all** — 479 rows
+      -- is a list you scroll past rather than read. Matches an id or a
+      -- name, case ignored; **empty is every row**, which is what bare
+      -- `:models` passes.
+      testCase "the model filter matches id or name, case ignored" $ do
+        map (Text.unpack . mdId) (matchingModels "haiku" catalogue) @?= ["anthropic/claude-haiku-5.5"]
+        map (Text.unpack . mdId) (matchingModels "HAIKU" catalogue) @?= ["anthropic/claude-haiku-5.5"]
+        map (Text.unpack . mdId) (matchingModels "openai" catalogue) @?= ["openai/gpt-5"]
+        length (matchingModels "" catalogue) @?= 3
+        map (Text.unpack . mdId) (matchingModels "nothing-like-this" catalogue) @?= []
+    , -- | **A row is the id first**, because the id is what `:model` takes
+      -- and what the dotfile stores; the context window and the price are
+      -- what distinguishes two rows of one family.
+      testCase "a model row leads with the id and carries context and price" $ do
+        fst (modelRow (head catalogue)) @?= "anthropic/claude-haiku-5.5"
+        snd (modelRow (head catalogue)) @?= "1000k   $0.0000001/tok"
+        snd (modelRow (catalogue !! 2)) @?= "8k"
     , -- | **THE ONE THAT IS THE DEFECT** — `~swxcf`. A 'Choice' answers a
       -- probability for every option it was sent, so a flat answer over 255
       -- candidates used to count as 255 picks and the pane drew the whole
@@ -358,3 +379,13 @@ layoutTests =
         jevNucleus [9.5, 0.2, 0.1, 0.1, 0.1] @?= 1
         jevNucleus [3.0, 1.2, 0.3, 0.1] @?= 2
     ]
+
+-- | Three rows of OpenRouter's shape, enough to tell a filter from a sort:
+-- two of one family so a substring hits one and not both, one from another
+-- provider, and one with no price at all (a free endpoint has none).
+catalogue :: [HintModel]
+catalogue =
+  [ HintModel "anthropic/claude-haiku-5.5" "Anthropic: Claude Haiku 5.5" 1000000 (Just "0.0000001")
+  , HintModel "openai/gpt-5" "OpenAI: GPT-5" 400000 (Just "0.00000125")
+  , HintModel "someone/tiny-free" "Someone: Tiny (free)" 8192 Nothing
+  ]

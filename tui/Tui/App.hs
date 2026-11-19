@@ -205,6 +205,19 @@ import Tui.Database
   , storedNamed
   , writeTranscript
   )
+import Tui.Hint
+  ( HintConfig (..)
+  , HintModel (..)
+  , askHint
+  , defaultModelId
+  , fetchModels
+  , hintPlaceholder
+  , hintPromptPath
+  , loadHintConfig
+  , loadHintPrompt
+  , matchingModels
+  , modelRow
+  )
 import Tui.Jev (JevConfig, JevState (..), jevLog, jevNucleus, loadJevConfig, rankCandidates)
 import Tui.Theme (Theme (..), neonPinkDark, themeByName, themes)
 
@@ -483,15 +496,34 @@ emptySlate = Slate [] 0 0 0
 -- session you were in most recently, which is the one a picker should open on,
 -- and the rows above it are a history in the order you left them.
 data Picker = Picker
-  { pkRows     :: [Stored]
-    -- ^ never empty: with nothing stored there is nothing to select, and
-    -- 'openSessionPicker' says so in the transcript instead of opening a
-    -- dialog onto an empty list.
+  { pkFor      :: PickerFor
+    -- ^ never empty: with nothing to select the command that would open the
+    -- dialog says so in the transcript instead of opening one onto an empty
+    -- list.
   , pkSelected :: Int
-    -- ^ an index into 'pkRows', always in range — 'pickerMove' clamps rather
-    -- than wrapping, so Up at the top and Down at the bottom are no-ops and
-    -- the highlight cannot be lost off either edge.
+    -- ^ an index into 'pkFor''s rows, always in range — 'pickerMove' clamps
+    -- rather than wrapping, so Up at the top and Down at the bottom are
+    -- no-ops and the highlight cannot be lost off either edge.
   }
+
+-- | **What a picker is picking** — one dialog, two lists.
+--
+-- `~w2tk2` slice 6 added the second, and **his instruction was that it be
+-- the first one again**: /"make it navigable by arrow keys, like session and
+-- selectable by enter."/ So the widget, the keys, the scrolling, the clamp
+-- and the box are shared outright rather than reimplemented beside each
+-- other — what differs is the rows, the title, and what Enter does with the
+-- row it is on, and those are the three functions below.
+data PickerFor
+  = PickSession [Stored]
+  | PickModel [HintModel]
+
+-- | How many rows there are, whichever list it is — the one number the keys
+-- clamp against.
+pickerCount :: Picker -> Int
+pickerCount pk = case pkFor pk of
+  PickSession rows -> length rows
+  PickModel rows -> length rows
 
 -- | **A pane being pulled wider or narrower by its accent bar** — `~gs8tj`,
 -- his request of 2026-11-12: /"can you make the panes resizeable by
@@ -865,6 +897,28 @@ data St = St
     -- it scored is not the one on screen any more, so it isn't a stale
     -- reordering of the same list, it's an answer to a question nobody is
     -- asking.
+  , stModel :: Text
+    -- ^ **the OpenRouter model id the hint region asks** — `~w2tk2` slice
+    -- 6. Persisted ('Tui.Config.cfgModel'); set by @:model ‹id›@ or by Enter
+    -- in the @:models@ picker.
+  , stHintConfig :: Maybe HintConfig
+    -- ^ loaded once at startup from @OPENROUTER_API_KEY@, the same shape as
+    -- 'stJevConfig'. **Carries 'stModel' as it stood at startup**, so a
+    -- @:model@ since then is read from 'stModel' at ask time rather than
+    -- from here.
+  , stModels :: Maybe [HintModel]
+    -- ^ OpenRouter's catalogue once it has been fetched, and 'Nothing'
+    -- until the first @:models@. **Held for the session**: 479 rows is
+    -- about 900 KB and the list does not change while he is proving.
+  , stHintAsking :: Bool
+    -- ^ **a request is out** — HIS, 2026-11-19: /"there needs to be some
+    -- visual que of when a new request is sent to the API"/. It is what the
+    -- strip's label reads off, and it is also the guard that keeps Enter
+    -- from firing a second ask on top of the first.
+  , stHintAsked :: Int
+    -- ^ how many asks this session, drawn beside the label — his /"I need
+    -- to know how often it is asked"/. A count and not a log line, because
+    -- the question is answered by glancing at the pane.
   , stJevPending :: Int
     -- ^ bumped every time a dropdown change schedules a ranking. A
     -- 'JevDue' timer whose generation doesn't match was superseded by a
@@ -883,6 +937,7 @@ runTui = do
   (s0, trouble) <- startingSession
   cfg <- loadConfig
   jevCfg <- loadJevConfig
+  hintCfg <- loadHintConfig (Text.pack (cfgModel cfg))
   shipped <- shippedPaths
   chan <- newBChan 16
   let theme0 = maybe neonPinkDark id (themeByName (cfgTheme cfg))
@@ -950,6 +1005,11 @@ runTui = do
         , stJevChan     = chan
         , stJevGen      = 0
         , stJevPending  = 0
+        , stModel       = Text.pack (cfgModel cfg)
+        , stHintConfig  = hintCfg
+        , stModels      = Nothing
+        , stHintAsking  = False
+        , stHintAsked   = 0
         }
   -- One synthetic event after startup: extents only exist once something
   -- has rendered, so the launch dropdown cannot position on the very first
@@ -1010,6 +1070,17 @@ data AppEvent
   | JevDue Int
   | JevRanked Int (Either String (Map.Map Text Double))
   | RerunStep Int [ScriptLine] Bool Bool
+  -- | **The model's answer to one ask** — `~w2tk2` slice 6. **No
+  -- generation tag, unlike 'JevRanked'**, and that is not an oversight: Jev
+  -- fires on a keystroke, so an earlier answer can land after a later one
+  -- and has to be dropped. A hint is fired by Enter and only ever by Enter
+  -- ('stHintAsking' refuses a second while one is out), so there is never
+  -- more than one in flight and nothing to put in order.
+  | HintAnswered (Either String Text)
+  -- | OpenRouter's catalogue, with the filter the `:models` that asked for
+  -- it carried — so the picker opens on the rows he asked for rather than
+  -- on all 479 and a second command.
+  | ModelsListed Text (Either String [HintModel])
 
 app :: App St AppEvent Name
 app = App
@@ -1330,6 +1401,14 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- row and this one fills a word, and a theme that retunes one may want to
   -- retune the other.
   , (attrName "strip.jev",      surface (themeJevPick th) (themeStage th))
+  -- | **The reply row's unanswered state** — `~w2tk2` slice 6: the label
+  -- that names the region and the dim sentence that fires it. HIS, on the
+  -- sentence: /"it by default has a dim line with text like \"give me a
+  -- hand\""/, and dim is the whole signal — it reads as something offered
+  -- rather than as text that is already there. 'themeDim' is the colour
+  -- whose own haddock calls it /hints/, which is finally what this is.
+  -- **Paired with 'themePanel'**, `~bv2wj`.
+  , (attrName "strip.dim",      surface (themePanel th) (themeDim th))
   -- | A list pane's group heading and its small print. **Both dim, and the
   -- same dim**: a heading is not a thing in the list and neither is a module's
   -- file, so what separates them from the entries is weight, not hue — the
@@ -1602,16 +1681,19 @@ draw st =
             | null stripSlate = []
             | otherwise =
                 [offerGridWidget cellW (gridCols grid) (slateJevPicked (stSlate st)) shown]
-          reserve = case stHint st of
-            Nothing -> []
-            Just _ -> [hintRegionWidget width hintRows (stHint st), stripReplyWidget]
-      render
-        ( vBox
-            ( if null offers && isNothing (stHint st)
-                then [str " "]
-                else offers <> reserve
-            )
-        )
+          -- **The reply row is drawn whenever the strip is open, and the
+          -- hint's own rows only when there is a hint** — `~w2tk2` slice 6
+          -- moved the first of those. Slice 4 drew the row only beside a
+          -- hint, which was right while a hint could only arrive from
+          -- `:hint`; it is wrong now that **the row is how a hint is asked
+          -- for in the first place** — a row that is not on screen cannot
+          -- be clicked, and his design has no other door. `~8cr56`'s rule
+          -- is kept where it still applies: the hint's three rows cost
+          -- nothing until something is in them.
+          reserve =
+            [hintRegionWidget width hintRows (stHint st) | isJust (stHint st)]
+              <> [stripReplyWidget]
+      render (vBox (offers <> reserve))
 
     -- | **The reply row — `~w2tk2` slice 5.** Blank and clickable while
     -- 'stStripReply' is 'Nothing'; the click that opens it is
@@ -1636,15 +1718,20 @@ draw st =
     -- three columns in did nothing at all until this was 'fill'.
     stripReplyWidget =
       clickable StripReply $ withAttr (attrName "strip.hint") $ vLimit 1 $
-        case stStripReply st of
-          Nothing -> fill ' '
-          Just ed ->
-            hBox
-              [ withAttr (attrName "strip.key") (str "❯ ")
-              , overrideAttr editFocusedAttr (attrName "strip.hint")
-                  (renderEditor (vBox . map (str . Text.unpack)) True ed)
-              , fill ' '
-              ]
+        hBox
+          ( [withAttr (attrName "strip.key") (str (hintLabel st <> "  "))]
+              <> case stStripReply st of
+                -- **The dim sentence, and clicking it is what fires the
+                -- ask** — his design. It is not a hint about a feature; it
+                -- is the feature's only control.
+                Nothing -> [withAttr (attrName "strip.dim") (str (Text.unpack hintPlaceholder))]
+                Just ed ->
+                  [ withAttr (attrName "strip.key") (str "❯ ")
+                  , overrideAttr editFocusedAttr (attrName "strip.hint")
+                      (renderEditor (vBox . map (str . Text.unpack)) True ed)
+                  ]
+              <> [fill ' ']
+          )
 
     -- | **The slate: what the grid is drawn from and what an F-key takes** —
     -- `~w2tk2` slice 2. 'stripSlateOf' is the whole of it, so the drawing and
@@ -2427,9 +2514,9 @@ stripGridFor st =
 -- answer; reserving it unconditionally was reserving a row for a
 -- conversation that had not started.
 stripReserveOf :: St -> Int -> Int
-stripReserveOf st w = case stHint st of
-  Nothing -> 0
-  Just _ -> stripHintRowsFor st w + stripReplyRows
+stripReserveOf st w = hint + stripReplyRows
+  where
+    hint = if isJust (stHint st) then stripHintRowsFor st w else 0
 
 -- | **How tall the hint region is at a given content width** — `~w2tk2`
 -- slice 4.
@@ -2545,7 +2632,7 @@ renderPicker pk = Widget Fixed Fixed $ do
 -- columns going spare. Measured under a pty, 2026-11-12, before and after:
 -- @from examples\/Stlc08PreservationBy…@ against the whole path.
 pickerBox :: Int -> Picker -> Widget Name
-pickerBox avail (Picker rows selected) =
+pickerBox avail pk@(Picker for selected) =
   withAttr (attrName "dropdown") $
     hLimit boxWidth $
       vBox
@@ -2568,12 +2655,12 @@ pickerBox avail (Picker rows selected) =
     -- 'padAll' 1) — a modal flush against the terminal's edge reads as part
     -- of the furniture rather than as something floating over it.
     cap = max 24 (avail - 2 - 2 * dropdownMarkerWidth)
-    texts = map (capText cap) (pickerTexts rows)
-    titleText = "stored sessions in " <> databaseDir
-    keysText = "↑↓ move · Enter resume · Esc cancel"
-    handleText = maybe "" ((":script resume " <>) . stSlug) (listToMaybe (drop selected rows))
+    texts = map (capText cap) (pickerTexts for)
+    titleText = pickerTitle for
+    keysText = pickerKeys for
+    handleText = pickerHandle pk
     boxWidth = maximum (0 : map length (texts <> [titleText, keysText, handleText])) + 2 * dropdownMarkerWidth
-    visibleH = popupVisibleH (length rows)
+    visibleH = popupVisibleH (pickerCount pk)
     blank = str (replicate boxWidth ' ')
     faint t = withAttr (attrName "dropdown.faint") (str (padTo boxWidth (dropdownMargin <> t)))
     row i t = mark (styled (str (padTo boxWidth (dropdownMargin <> t))))
@@ -2589,14 +2676,47 @@ pickerBox avail (Picker rows selected) =
 -- column at a time. @from@ is last because it is the one field that is
 -- usually absent (a typed session came from nowhere) and the only one long
 -- enough to ellide.
-pickerTexts :: [Stored] -> [String]
-pickerTexts rows =
+pickerTexts :: PickerFor -> [String]
+pickerTexts (PickSession rows) =
   [ padTo nameW (stName s) <> "   " <> padTo placeW (place s) <> from s | s <- rows ]
   where
     place s = show (stCaret s) <> "/" <> show (stLines s) <> " lines"
     from s = maybe "" ("   from " <>) (stFrom s)
     nameW = maximum (0 : map (length . stName) rows)
     placeW = maximum (0 : map (length . place) rows)
+-- | **A model as its id, then its context window and price** — padded into
+-- the same two columns down the list, for the reason the session rows are:
+-- the eye scans one column at a time. 'Tui.Hint.modelRow' decides what the
+-- two fields are; this only lines them up.
+pickerTexts (PickModel rows) =
+  [ padTo idW i <> "   " <> extra | (i, extra) <- cells ]
+  where
+    cells = map modelRow rows
+    idW = maximum (0 : map (length . fst) cells)
+
+pickerTitle :: PickerFor -> String
+pickerTitle (PickSession _) = "stored sessions in " <> databaseDir
+-- | **Says the count, because this list is long enough that the filter is
+-- the feature.** `:models` on its own is 479 rows; `:models claude` is the
+-- handful he meant, and the title is where he can see which of the two he
+-- is looking at.
+pickerTitle (PickModel rows) = show (length rows) <> " models at openrouter"
+
+pickerKeys :: PickerFor -> String
+pickerKeys (PickSession _) = "↑↓ move · Enter resume · Esc cancel"
+pickerKeys (PickModel _) = "↑↓ move · Enter use this model · Esc cancel"
+
+-- | **The typed form of the row that is lit** — the same reasoning the
+-- session picker's own foot carries: the row does not show the handle
+-- because the whole point of the dialog is that you no longer type it, and
+-- it stays on the foot anyway because the typed door is still open.
+pickerHandle :: Picker -> String
+pickerHandle pk = case pkFor pk of
+  PickSession rows -> maybe "" ((":script resume " <>) . stSlug) (at rows)
+  PickModel rows -> maybe "" ((":model " <>) . Text.unpack . mdId) (at rows)
+  where
+    at :: [a] -> Maybe a
+    at = listToMaybe . drop (pkSelected pk)
 
 
 -- | One row of any dropdown, before it becomes a 'Widget' — shared by
@@ -3374,7 +3494,10 @@ handleBarEvent st bar ev = case ev of
 -- something nowhere.
 handleStripReplyEvent :: St -> Editor Text Name -> BrickEvent Name AppEvent -> EventM Name St ()
 handleStripReplyEvent st reply ev = case ev of
-  VtyEvent (V.EvKey V.KEnter []) -> closeStripReply
+  -- | **Enter asks** — `~w2tk2` slice 6 and his ruling of 2026-11-19. Esc
+  -- is still the ordinary never-mind; the two keys did the same thing in
+  -- slice 5 only because there was no model on the other end yet.
+  VtyEvent (V.EvKey V.KEnter []) -> askHintNow
   VtyEvent (V.EvKey V.KEsc [])   -> closeStripReply
   _ -> do
     reply' <- nestEventM' reply (handleEditorEvent ev)
@@ -3395,13 +3518,16 @@ closeReplyIfStripClosed strip' st'
   | stripOpen strip' = st'
   | otherwise = st' { stStripReply = Nothing }
 
--- | **The reply row has nothing left to answer once the hint it replies to
--- is cleared** — `~w2tk2` slice 5, the same rule as above for @:hint@
--- rather than @:pane@.
-closeReplyIfHintCleared :: Maybe String -> St -> St
-closeReplyIfHintCleared hint st'
-  | isJust hint = st'
-  | otherwise = st' { stStripReply = Nothing }
+-- | **WITHDRAWN IN SLICE 6, AND IT IS KEPT AS A NOTE RATHER THAN A
+-- FUNCTION.** Slice 5 closed the reply row whenever the hint it replied to
+-- was cleared, because the row was drawn only beside a hint and would
+-- otherwise have been a key claim with nothing on screen to name it.
+--
+-- **Slice 6 makes the row permanent while the strip is open** — it is how a
+-- hint is asked for, so it cannot depend on one existing — and the rule
+-- stops applying: there is nothing to orphan. @:hint@ with no argument now
+-- clears the text above the row and leaves the row alone.
+-- 'closeReplyIfStripClosed' is still needed and still does its job.
 
 -- | The session picker's keys, and they are the three a list dialog has
 -- everywhere: Up and Down move the highlight, Enter takes the session it is
@@ -3425,13 +3551,13 @@ handlePickerEvent pk ev = case ev of
   VtyEvent (V.EvKey V.KPageUp [])   -> moveBy (-popupMaxRows)
   VtyEvent (V.EvKey V.KPageDown []) -> moveBy popupMaxRows
   VtyEvent (V.EvKey V.KHome [])     -> moveTo 0
-  VtyEvent (V.EvKey V.KEnd [])      -> moveTo (length (pkRows pk) - 1)
+  VtyEvent (V.EvKey V.KEnd [])      -> moveTo (pickerCount pk - 1)
   -- The wheel moves the highlight rather than scrolling the box under it:
   -- there is one thing to choose here, so a scroll that left the selection
   -- behind would be scrolling away from the only state the dialog has.
   MouseDown _ V.BScrollUp _ _       -> moveBy (-1)
   MouseDown _ V.BScrollDown _ _     -> moveBy 1
-  VtyEvent (V.EvKey V.KEnter [])    -> resumePicked pk
+  VtyEvent (V.EvKey V.KEnter [])    -> pickerTake pk
   VtyEvent (V.EvKey V.KEsc [])      -> closePicker
   AppEvent _                        -> handleReplEvent ev
   _                                 -> pure ()
@@ -3439,7 +3565,7 @@ handlePickerEvent pk ev = case ev of
     moveBy d = moveTo (pkSelected pk + d)
     moveTo i = do
       st <- get
-      put st { stPicker = Just pk { pkSelected = max 0 (min (length (pkRows pk) - 1) i) } }
+      put st { stPicker = Just pk { pkSelected = max 0 (min (pickerCount pk - 1) i) } }
 
 closePicker :: EventM Name St ()
 closePicker = do
@@ -3465,22 +3591,33 @@ openSessionPicker st = do
     rows -> do
       sayEither st (storedCountSaid (length rows))
       st' <- get
-      put st' { stPicker = Just (Picker rows (length rows - 1)) }
+      put st' { stPicker = Just (Picker (PickSession rows) (length rows - 1)) }
 
 -- | Enter on a row: the same path `:script resume ‹slug›` takes, from the
 -- entry in hand rather than from a handle that had to be matched — so the
 -- staleness check, the caret and the note are one piece of code and cannot
 -- come to differ between the two doors.
-resumePicked :: Picker -> EventM Name St ()
-resumePicked pk = case listToMaybe (drop (pkSelected pk) (pkRows pk)) of
-  Nothing -> closePicker
-  Just stored -> do
-    st <- get
-    let st' = st { stPicker = Nothing }
-    held <- liftIO (readTranscript (stSlug stored))
-    case held of
-      Nothing -> sayEither st' (transcriptGoneSaid stored)
-      Just texts -> resumeStored st' stored texts
+pickerTake :: Picker -> EventM Name St ()
+pickerTake pk = case pkFor pk of
+  PickSession rows -> case listToMaybe (drop (pkSelected pk) rows) of
+    Nothing -> closePicker
+    Just stored -> do
+      st <- get
+      let st' = st { stPicker = Nothing }
+      held <- liftIO (readTranscript (stSlug stored))
+      case held of
+        Nothing -> sayEither st' (transcriptGoneSaid stored)
+        Just texts -> resumeStored st' stored texts
+  -- | **Enter on a model row is `:model ‹id›`**, down to the same function,
+  -- so the dialog and the typed command cannot come to mean different
+  -- things — the rule 'pickerTake''s session arm already follows.
+  PickModel rows -> case listToMaybe (drop (pkSelected pk) rows) of
+    Nothing -> closePicker
+    Just m -> do
+      st <- get
+      said <- setModel st { stPicker = Nothing } (mdId m)
+      st' <- get
+      sayEither st' said
 
 -- | **Says one line in whichever of the two places is on screen** — the
 -- repl's transcript, or live-script mode's pane foot. The picker is reachable
@@ -3845,8 +3982,16 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- hint are the same state and spelling them differently would have
         -- invented a third.
         (":hint" : rest) -> do
-          let st' = closeReplyIfHintCleared (hintFrom rest) st0 { stHint = hintFrom rest }
+          let st' = st0 { stHint = hintFrom rest }
           appendTurn st' Nothing [hintSaid (hintFrom rest)]
+        -- | **`:model` and `:model ‹id›`** — `~w2tk2` slice 6.
+        [":model"] -> appendTurn st0 Nothing ["model: " <> Text.unpack (stModel st0)]
+        [":model", m] -> do
+          said <- setModel st0 (Text.pack m)
+          st' <- get
+          appendTurn st' Nothing [said]
+        -- | **`:models` and `:models ‹filter›`** — the picker.
+        (":models" : rest) -> openModelPicker st0 (Text.pack (unwords rest))
         -- | **`:confirm-quit on|off`**, his instruction of 2026-11-18 — same
         -- standing as the two above. See 'maybeQuit'.
         [":confirm-quit", mode] | mode `elem` ["on", "off"] -> do
@@ -4046,6 +4191,15 @@ handleReplEvent (MouseDown _ _ _ _) = pure ()
 handleReplEvent (AppEvent Tick) = fireJevForCurrentOffers
 handleReplEvent (AppEvent (JevDue gen)) = handleJevDue gen
 handleReplEvent (AppEvent (JevRanked gen result)) = applyJevRanking gen result
+handleReplEvent (AppEvent (HintAnswered result)) = applyHintAnswer result
+handleReplEvent (AppEvent (ModelsListed filt result)) = do
+  st <- get
+  case result of
+    Left err -> sayEither st ("models: openrouter could not be reached — " <> err)
+    Right ms -> do
+      put st { stModels = Just ms }
+      st' <- get
+      showModels st' filt ms
 handleReplEvent (AppEvent (RerunStep gen soFar shown finished)) =
   handleRerunStep gen soFar shown finished
 handleReplEvent ev =
@@ -4380,8 +4534,16 @@ scriptLocal st text = case words text of
   -- TUI-local word is a TUI-local word wherever it is typed. **No
   -- 'saveConfig'**: 'stHint' is content and is not in the dotfile.
   (":hint" : rest) -> Just $ do
-    put (closeReplyIfHintCleared (hintFrom rest) st { stHint = hintFrom rest })
+    put st { stHint = hintFrom rest }
     pure (hintSaid (hintFrom rest))
+  -- | `:model` and `:models` run from a script line and from the bar too,
+  -- his ruling `~g5wjz` — a TUI-local word is a TUI-local word wherever it
+  -- is typed.
+  [":model"] -> Just (pure ("model: " <> Text.unpack (stModel st)))
+  [":model", m] -> Just (setModel st (Text.pack m))
+  (":models" : rest) -> Just $ do
+    openModelPicker st (Text.pack (unwords rest))
+    pure ("models: " <> Text.unpack (stModel st) <> " is the one in use")
   [":confirm-quit", mode] | mode `elem` ["on", "off"] -> Just $ do
     let st' = st { stConfirmQuit = mode == "on" }
     liftIO (saveConfig (configOf st'))
@@ -5756,6 +5918,7 @@ configOf st = Config
   , cfgStrip      = stStrip st
   , cfgDropdownOn = stDropdownOn st
   , cfgJevOn = stJevOn st
+  , cfgModel = Text.unpack (stModel st)
   }
 
 appendTurn :: St -> Maybe String -> [String] -> EventM Name St ()
@@ -6230,6 +6393,196 @@ jevRequest s typedSoFar offered = (JevState fields, candidates)
 -- field and never its mark.
 matchesSent :: Int
 matchesSent = 40
+
+-- | **What the model is told** — `~w2tk2` slice 6, and the six fields are
+-- HIS list, 2026-11-19: /"it has to be told the proof term, it has to be
+-- told what's in scope and this and that … It also has to know what is
+-- already executed (in either modes, repl and script) and what is on my
+-- current line."/
+--
+-- **Four of the six were already going to Jev and two were not.** @goals@,
+-- @proof_term@, @applies_here@ and @typed_so_far@ are `~d4qvm`'s payload;
+-- **@in_scope@ and @executed@ are new here**, and @executed@ is the one his
+-- sentence turned on — without it the model cannot see how he arrived at
+-- the state it is looking at.
+--
+-- **@executed@ comes from whichever mode he is in**, which is why this takes
+-- an 'St' where 'jevRequest' takes only a 'Session': the repl's history is
+-- 'stTurns' and the document's is 'stScript' down to 'scriptFrontier', and
+-- neither is reachable from the engine — a 'Session' holds state, not a
+-- narrative of how it was reached.
+--
+-- **A field with nothing in it is left out rather than sent empty**, the
+-- rule 'jevRequest' already follows: "no proof is open" and "a proof is open
+-- whose goal is the empty string" are different situations.
+hintFields :: St -> [(Text, Text)]
+hintFields st =
+  [ (Text.pack k, Text.pack v)
+  | (k, v) <-
+      [ ("goals", unlines' (goalTexts links))
+      , ("proof_term", unlines' (developmentText links))
+      , ("applies_here", unlines' (take matchesSent applying))
+      , ("in_scope", unlines' scopeLines)
+      , ("executed", unlines' executed)
+      , ("typed_so_far", typedSoFar)
+      ]
+  , not (null v)
+  ]
+  where
+    s = activeSession st
+    budget = Budget 200
+    links = developmentView budget s
+    unlines' = intercalate "\n"
+
+    applying = case oneLine s ":matches" of
+      (s', resp) -> renderResponse s' resp
+
+    -- | **Namespace by namespace, the way the globals pane groups them** —
+    -- one flat list of every exported name would be the same information
+    -- with the module it came from thrown away, and which module a name is
+    -- from is most of what makes it usable in a suggestion.
+    scopeLines =
+      [ group <> ": " <> intercalate ", " names
+      | (group, names) <- globalGroups st
+      , not (null names)
+      ]
+
+    -- | **The lines he has run, oldest first, in whichever mode he is in.**
+    -- In the document it is the prefix that has actually run
+    -- ('scriptFrontier') and not everything on screen: a line below the
+    -- frontier is text he has typed and not yet executed, and calling that
+    -- /executed/ would be a lie about the state the rest of the payload
+    -- describes.
+    executed
+      | stScriptMode st = [slText l | l <- take (scriptFrontier st) (stScript st)]
+      | otherwise = [prompt | Turn (Just prompt) _ _ <- stTurns st]
+
+    typedSoFar = take col (concatMap Text.unpack (getEditContents (stInput st)))
+    (_, col) = getCursorPosition (stInput st)
+
+-- | **One ask, caused by his Enter on the reply row and by nothing else** —
+-- `~w2tk2` slice 6. HIS ruling, 2026-11-19: /"We have no autohint …
+-- Everything is explicit … The user has to hit enter on the \"give me a
+-- hand\"."/ He had asked for an automatic ask behind a switch earlier in the
+-- same message and withdrew it on landing this design; **there is no timer
+-- and no switch, because there is nothing to switch off.**
+--
+-- **The dim sentence is sent when he has typed nothing over it** — also
+-- his: /"sending the dimmed sentence makes sense to me too"/. So the ask is
+-- never empty and what went out is always something he can read off his own
+-- screen.
+--
+-- **A second Enter while one is out is refused in words** rather than
+-- queued or fired: one ask is one charge, and two answers racing for one
+-- region is the shape `~swxcf` was.
+askHintNow :: EventM Name St ()
+askHintNow = do
+  st <- get
+  let typed = Text.strip (Text.concat (maybe [] getEditContents (stStripReply st)))
+      asked = if Text.null typed then hintPlaceholder else typed
+  case stHintConfig st of
+    -- **The cleared state is what is handed on, not the one in hand.**
+    -- 'sayEither' builds the next state from its argument and puts that, so
+    -- a 'put' before it is discarded — measured under a pty: the row still
+    -- held the typed sentence after the refusal.
+    Nothing -> do
+      let st' = st { stStripReply = Nothing }
+      put st'
+      sayEither st' hintNoKeySaid
+    Just cfg
+      | stHintAsking st -> sayEither st hintBusySaid
+      | otherwise -> do
+          let fields = hintFields st
+              chan = stJevChan st
+              cfg' = cfg { hintModel = stModel st }
+          put
+            st
+              { stHintAsking = True
+              , stHintAsked = stHintAsked st + 1
+              , stStripReply = Nothing
+              }
+          -- **The prompt file is read inside the fork and not here**, so a
+          -- slow disc cannot sit between his Enter and the next frame; the
+          -- whole point of reading it per ask is that an edit lands on the
+          -- next one without a restart.
+          liftIO . void . forkIO $ do
+            prompt <- loadHintPrompt
+            answer <- askHint cfg' prompt fields asked
+            writeBChan chan (HintAnswered answer)
+
+-- | The answer coming back. **A failure is shown in the hint region rather
+-- than only logged**: he pressed a key and is owed a reply, and a region
+-- that stays empty after an ask reads as a feature that does not work.
+applyHintAnswer :: Either String Text -> EventM Name St ()
+applyHintAnswer result = do
+  st <- get
+  put
+    st
+      { stHintAsking = False
+      , stHint = Just (either ("the model could not be reached — " <>) Text.unpack result)
+      }
+
+-- | **`:model ‹id›`, and the picker's Enter goes through here too.** The id
+-- is not checked against the catalogue: see 'Tui.Config.cfgModel' for why a
+-- model this build has never heard of is still one he may have chosen.
+setModel :: St -> Text -> EventM Name St String
+setModel st m = do
+  let st' = st { stModel = m }
+  liftIO (saveConfig (configOf st'))
+  put st'
+  pure ("model: " <> Text.unpack m)
+
+-- | **`:models` and `:models ‹filter›`** — the catalogue in the session
+-- picker's own dialog, his instruction.
+--
+-- **Fetched once and held** ('stModels'): the list is about 900 KB and does
+-- not move while he is proving. **The fetch is off the main thread** and
+-- reports back through 'ModelsListed', so a cold connection cannot freeze a
+-- keystroke.
+openModelPicker :: St -> Text -> EventM Name St ()
+openModelPicker st filt = case stModels st of
+  Just ms -> showModels st filt ms
+  Nothing -> do
+    let chan = stJevChan st
+    liftIO . void . forkIO $ fetchModels >>= writeBChan chan . ModelsListed filt
+    sayEither st "models: asking openrouter for the catalogue…"
+
+-- | **An empty result says so and opens nothing** — the rule
+-- 'openSessionPicker' already follows: a dialog whose only content is
+-- /there is nothing here/ is one you dismiss to be told what a line of text
+-- could have told you.
+showModels :: St -> Text -> [HintModel] -> EventM Name St ()
+showModels st filt ms = case matchingModels filt ms of
+  [] -> sayEither st ("models: nothing at openrouter matches " <> show (Text.unpack filt))
+  rows -> put st { stPicker = Just (Picker (PickModel rows) 0) }
+
+-- | **The label on the reply row, and the cue that a call went out** —
+-- `~w2tk2` slice 6. HIS, 2026-11-19: the label itself (/"a small label, like
+-- \`AI hint\`"/), and then /"there needs to be some visual que of when a new
+-- request is sent to the API"/ with /"I need to know how often it is
+-- asked"/. All three are this one string.
+--
+-- **It reads @AI hint@ before the first ask, @AI hint · asking…@ while one
+-- is out, and @AI hint · 3@ after three** — so the cue and the count are
+-- the same field rather than two things competing for the row, and the row
+-- costs no extra height to carry either.
+--
+-- **No row of its own**, which is `~8cr56`'s lesson applied before he has to
+-- report it twice: a label on a row of its own would be a second heading
+-- over a pane whose title already says @suggestions@, and it would cost a
+-- row of cells to say one word.
+hintLabel :: St -> String
+hintLabel st
+  | stHintAsking st = "AI hint · asking…"
+  | stHintAsked st == 0 = "AI hint"
+  | otherwise = "AI hint · " <> show (stHintAsked st)
+
+hintNoKeySaid :: String
+hintNoKeySaid =
+  "no OPENROUTER_API_KEY in this process's environment — set it and restart to ask for a hint"
+
+hintBusySaid :: String
+hintBusySaid = "a hint is already on its way — one ask at a time"
 
 -- | Reads a ranking answer back in — 'Left' (a failed call) and a
 -- generation that no longer matches both mean the same thing: do
