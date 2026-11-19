@@ -5603,10 +5603,20 @@ dispatch s name arg = case name of
     -- are one thing with and without a head (§1.1). The listing says which is
     -- which.
     --
-    -- **The signatures are worked out here rather than kept on the session.**
-    -- They are already recomputed at every load and a rule base is a few hundred
-    -- instructions; storing them would be session state that @:undo@ and every
-    -- snapshot would then have to carry.
+    -- **This one still infers per call, and that is a choice rather than the
+    -- policy it used to state** (MS12 phase 323). The paragraph here used to
+    -- argue that signatures should not be kept on the session at all;
+    -- 'Thena.Engine.ruleTypes' keeps them, so that claim is gone and is not to
+    -- be read back out of this comment.
+    --
+    -- **Why this command does not read that table**: the table is over the pool
+    -- and the bases its blocks hold, and this answers /what can I pass a
+    -- @Surface@ to from where I stand/, which is 'Thena.Engine.rules' — a
+    -- smaller set, since a held base answers nothing until its block pushes it.
+    -- Reading the table would quietly start listing callables that cannot be
+    -- called. Filtering it back down is possible and would be worth doing if
+    -- this were ever on a redraw path; it is a word a user types, and the
+    -- inference measures 0.7 ms over the shipped base (2026-11-19, 400 calls).
     byType verb question = case parseInstralType arg of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
