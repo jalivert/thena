@@ -45,6 +45,7 @@ import Thena.Repl (entriesOf, unclosedEntry)
 import Thena.Instral.Ops (AnswerKind (..), partWords)
 import Thena.Instral.Infer (InstralTypeError (..), Site (..), inferProgram, reachingAll)
 import Thena.Files (loadStandardRules)
+import Thena.Instral.Type (Ty (..))
 import Thena.Rules (RuleError (..), allCallable, allSignatures)
 
 -- | Run a script of command lines, answering nothing, and give back the last
@@ -256,7 +257,7 @@ tests =
             -- gone is reported before anything runs rather than halting mid-way.
             snd (say [ natCommand, ":theorem t : Nat"
                      , "m = concat \"a\" \"b\"", "say m" ])
-              @?= LineRefused [UnboundInRule (rootName "entry") 0 "m"]
+              @?= LineRefused [UnboundInRule (rootName "entry") 0 "m" TString]
           -- A value may be bound at the prompt now too (phase 68a's `Op.Value`).
         , testCase "a literal may be bound" $
             snd (say [natCommand, ":theorem t : Nat", "n = 42 ; say \"ok\""])
@@ -273,7 +274,7 @@ tests =
               other -> assertFailure ("expected a type error, got " ++ show other)
         , testCase "and an unbound name in one is refused" $
             snd (say [":theorem t : Type\8320", "do { say nope }"])
-              @?= LineRefused [UnboundInRule (rootName "entry") 0 "nope"]
+              @?= LineRefused [UnboundInRule (rootName "entry") 0 "nope" TString]
         , testCase "and the development is as it was" $
             devOf (fst (say [":theorem t : Type\8320", "do { attack ; prim-try 3 }"]))
               @?= devOf (fst (say [":theorem t : Type\8320"]))

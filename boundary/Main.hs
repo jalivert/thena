@@ -53,6 +53,7 @@ import Thena.View
   , focusAddress
   , focusProgram
   , focusTypeView
+  , goalsView
   , machineView
   , matchesView
   , nameDotted
@@ -67,6 +68,7 @@ import Thena.View
 import Thena.View.Chart (BoundView (..), OfferView (..), Written (..))
 import Thena.View.Choices (ChoiceView (..))
 import Thena.View.Development (LinkView (..))
+import Thena.View.Goals (GoalKind (..), GoalView (..))
 import Thena.View.Machine (MachineView (..))
 import Thena.View.Matches (MatchView (..))
 import Thena.View.Proofs (ProofsView (..), QuestClaim (..), QuestView (..))
@@ -120,6 +122,24 @@ checks =
             (let ns = map (\mv -> (matchViewName mv, matchViewArity mv))
                           (matchesView budget s)
               in length ns == length (nub ns))
+    -- **The goals pane's own view** (MS12 phase 324, his request of 2026-11-19):
+    -- every goal left, each with the word that reaches it, and guesses listed
+    -- as goals as well as holes. The session here is one @attack@ in, so the
+    -- root is a guess and there is a hole inside it — both kinds, which is the
+    -- half of his request that the development view could not answer.
+  , \s -> want "goalsView lists a guess and a hole"
+            (let ks = map goalViewKind (goalsView budget s)
+              in AGuess `elem` ks && AHole `elem` ks)
+    -- **The word and the address reach the same place, and this is the check
+    -- that matters.** A pane draws 'goalViewVar' for the reader to type; if the
+    -- prompt did not bind that word, or bound it to another position, the pane
+    -- would be offering a move that goes somewhere else. Running @goto ‹word›@
+    -- and comparing where the focus lands against the row's own address is the
+    -- contract said in the frontend's own terms.
+  , \s -> want "every goal's word reaches its address"
+            (all (\g -> focusAddress (advance s ["goto " <> goalViewVar g])
+                          == goalViewAt g)
+                 (goalsView budget s))
     -- **A standalone choice-points pane is reachable from the boundary** (his
     -- ruling, 2026-11-16), and the one thing worth asserting is that it is not
     -- always empty: at a settled prompt there is nothing to retry, so this
@@ -153,8 +173,21 @@ checks =
     -- **The entry offer, and that its bound names cross** (MS7 phase 140): a
     -- frontend sees the names the lines above the cursor left in scope, with their
     -- types, without importing anything past this boundary.
+    -- **The session's own goals are in the offer too, since MS12 phase 324**:
+    -- a typed line starts with every hole and guess bound, so @t@ (the attacked
+    -- root, a guess) and @t1@ (the hole inside it) stand where a @Core@ stands,
+    -- ahead of what the entry's own lines bound.
+    --
+    -- **The innermost goal comes first here and the outermost first in
+    -- 'goalsView'**, and the two orders are not an accident to be made to agree:
+    -- this is the offer at a cursor, where the nearest binding is the one a
+    -- reader most likely means, and that list is already /nearest first/
+    -- ('Thena.Instral.Infer.blockResult'\'s @live@). A goals pane is the other
+    -- question — what is left to prove — and answers in the order the
+    -- development is written.
   , \s -> want "statementOfferView names what the entry bound"
-            (map boundName (offeredBound (statementOfferView s [WrittenText "h = here\ngoto "] [])) == ["h"])
+            (map boundName (offeredBound (statementOfferView s [WrittenText "h = here\ngoto "] []))
+               == ["t1", "t", "h"])
   , \s -> want "focusProgram" (not (null (focusProgram (focusAddress s))) || True)
   , \s -> want "oneProgram accepts a click" (isSession (fst (oneProgram s (focusProgram (focusAddress s)))))
   , \s -> want "renderResponse" (not (null (renderResponse s (snd (oneLine s ":show")))))
@@ -224,7 +257,13 @@ checks =
     -- At rest the program is empty, so \"non-empty\" is the wrong shape of check;
     -- what says the view was computed is that its three panes agree with a
     -- machine that has nothing left to run.
-    machineReached mv = null (machinePc mv) == null (machineEnv mv)
+    -- **At rest the program is empty and the environment is not** (MS12 phase
+    -- 324). It read @null pc == null env@ until then, on the premise that the
+    -- environment is what a running program bound — and a line now starts with
+    -- the session's goals in it ('Thena.Engine.goalEnv'), so a settled prompt
+    -- has an empty program and a populated environment. Both halves of the view
+    -- are still what is being reached; the invariant between them is what moved.
+    machineReached mv = null (machinePc mv) && not (null (machineEnv mv))
 
 -- | **What a job is, in full** (phase 128): set a budget, advance a slice at a
 -- time, and stop by not asking for the next slice.

@@ -35,6 +35,7 @@ import Thena.Driver
   , oneLine
   , withRuleBases
   )
+import Thena.Engine (goalEnv)
 import Thena.Render
   ( rendering
   ,renderCursor)
@@ -45,6 +46,10 @@ import Thena.View
   , binderAddresses
   , developmentView
   , focusTypeView
+  , goalsView
+  , GoalKind (..)
+  , GoalView (..)
+  , machineOf
   , choicesView
   , matchesView
   , sessionCursor
@@ -66,6 +71,7 @@ tests =
     , testGroup "the focus's type, against :where" (map typeCase fixtures)
     , testGroup "the match list, against :matches" (map matchCase fixtures)
     , testGroup "the choice points, against :choices" (map choiceCase choiceFixtures)
+    , testGroup "the goals, against what a line is given" (map goalCase fixtures)
     , testGroup "and the fixtures really exercise it" notVacuous
     ]
 
@@ -95,6 +101,24 @@ fixtures =
   ]
   where
     theorem = [":theorem t : \8704 (A : Type\8320) -> A -> A"]
+
+-- ---------------------------------------------------------------------------
+-- The goals
+-- ---------------------------------------------------------------------------
+
+-- | __The one way the goals pane can lie.__ 'goalsView' hands a frontend a word
+-- per goal for the reader to type; 'Thena.Engine.goalEnv' is what a typed line is
+-- actually given. If they disagree, a pane draws a move that does not run — or,
+-- worse, one that runs and goes somewhere else.
+--
+-- Both are derived from the same walk ('Thena.Development.Cursor.goalsIn' and the
+-- chain the development view prints), which is why this is an equality and not a
+-- subset: the order has to match too, since the pane's first row is the
+-- development's first goal.
+goalCase :: (String, Session) -> TestTree
+goalCase (name, s) =
+  testCase name $
+    map goalViewVar (goalsView (Budget 200) s) @?= map fst (goalEnv (machineOf s))
 
 -- ---------------------------------------------------------------------------
 -- The chain
@@ -239,6 +263,12 @@ notVacuous =
       -- so that case is trivially green; what makes it a test is the paused
       -- one, and that it has untried alternatives to list.
       assertBool (show chosen) (chosen == [0, 1] && untried >= 3)
+  , testCase "some fixture has both a guess and a hole to list" $
+      -- 'goalCase' is an equality between two empty lists before a theorem is
+      -- started, so what makes it a test is a fixture that has goals of both
+      -- kinds — which is also the half of his 2026-11-19 request that the
+      -- development view could not answer, a guess being a goal.
+      assertBool (show kinds) ([AGuess, AHole] `elem` kinds)
   , testCase "some fixture has a type at the focus, and some has none" $
       -- Both sides of 'typeCase' answer 'Nothing' at a bare root, so the
       -- crossing there is trivially green; what makes it a test is a fixture
@@ -250,6 +280,7 @@ notVacuous =
     matched = [ length (matchesView (Budget 200) s) | (_, s) <- fixtures ]
     marks = [ map fst (redrawChain (developmentView (Budget 200) s)) | (_, s) <- fixtures ]
     types = [ Just (maybe False (const True) (focusTypeView (Budget 200) s)) | (_, s) <- fixtures ]
+    kinds = [ map goalViewKind (goalsView (Budget 200) s) | (_, s) <- fixtures ]
     chosen = [ length (choicesView s) | (_, s) <- choiceFixtures ]
     untried =
       maximum (0 : [ length (choiceViewUntried c) | (_, s) <- choiceFixtures, c <- choicesView s ])

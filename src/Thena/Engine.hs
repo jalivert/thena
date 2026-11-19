@@ -33,6 +33,8 @@ module Thena.Engine
   , Message
   , Answer
   , load
+  , loadWith
+  , goalEnv
   , isAsking
   , isYielding
   , resumeYield
@@ -88,6 +90,7 @@ import Thena.Development.Cursor
   , down
   , enter
   , focus
+  , goalsIn
   , insertAbove
   , into
   , rebuild
@@ -808,8 +811,39 @@ data Outcome
 
 -- | Put a program into the machine's @pc@ (§7.8). A command is a program loaded
 -- into the /current/ machine, not a new machine.
+-- | Every goal the session is holding, as a binding a typed line starts with
+-- (MS12 phase 324).
+--
+-- A hole or a guess printed @? id1 : T@ is bound to the variable that reaches
+-- it, so @goto id1@ is the exact move and not a search by name. 'Cursor.goalsIn'
+-- decides what counts as a goal; this only says what the value is.
+--
+-- **The value is the handle and not the name — his ruling of 2026-11-19**,
+-- /"I don't want to use @goto-named@ I want @goto@ now."/ 'GotoNamed' searches
+-- from the root and takes the first component of that identifier, which is the
+-- wrong one when a split nests; a 'Var' names one position and cannot.
+goalEnv :: Machine -> Env
+goalEnv m =
+  [ (nm, VTerm (Free x)) | (Ident nm, x) <- goalsIn (cursor (development m)) ]
+
 load :: [Instr] -> Machine -> Machine
-load is m
+load = loadWith []
+
+-- | 'load', with an environment the program starts in (MS12 phase 324).
+--
+-- **What it is for: the session's own goals.** A typed line is resolved as a
+-- rule body, so a bare word in an operand is a reference — and until this phase
+-- a line began with nothing bound, which is why reaching a hole meant naming it
+-- as a string. The prompt now binds every hole and guess ('goalEnv'), so
+-- @goto id1@ is an ordinary reference to the variable that hole binds, and the
+-- rule language gains nothing and loses nothing: the word means what it has
+-- always meant.
+--
+-- **The seed goes on the END of what is already there**, which is what makes
+-- the yielding case need no rule of its own: a suspended rule\'s own bindings
+-- are nearer than the session\'s, so a rule that bound @id1@ itself keeps it.
+loadWith :: Env -> [Instr] -> Machine -> Machine
+loadWith seed is m
   -- **A suspended program survives; a dead one does not** (MS4 phase 45b).
   --
   -- The design conversation had this prepending unconditionally, and that is
@@ -830,8 +864,9 @@ load is m
   -- into the yielding rule's own earlier choice point takes a route on which
   -- that rule never yielded, so the command that was typed could not have been.
   -- One rule, no case analysis about which kind of line it was.
-  | isYielding m = (floored m) { exec = (exec m) { pc = is ++ pc (exec m) } }
-  | otherwise    = (floored m) { exec = (exec m) { pc = is, env = [] } }
+  | isYielding m = (floored m) { exec = (exec m) { pc  = is ++ pc (exec m)
+                                                 , env = env (exec m) ++ seed } }
+  | otherwise    = (floored m) { exec = (exec m) { pc = is, env = seed } }
   where
     -- **AND WHAT THE POOL IS, FOR THE SAME REASON** (MS11 phase 300):
     -- 'floorPushes' says what a halt goes back to, and a line's floor is where

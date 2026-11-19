@@ -432,8 +432,8 @@ inferBlock sigs rs bound r =
 --
 -- **A name bound twice appears once, as its last binding**, which is the one in
 -- scope at the end of the block.
-boundBy :: [(String, Signature)] -> [Rule] -> Rule -> [(Name, Ty)]
-boundBy sigs rs r = snd (blockResult sigs rs [] r)
+boundBy :: [(String, Signature)] -> [Rule] -> [(Name, Value)] -> Rule -> [(Name, Ty)]
+boundBy sigs rs bound r = snd (blockResult sigs rs bound r)
 
 -- | Type one block and answer both halves: **what is wrong with it, and what it
 -- bound.** One walk, because two walks over the same instructions would be two

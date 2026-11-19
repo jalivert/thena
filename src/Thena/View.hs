@@ -62,6 +62,9 @@ module Thena.View
   , Budget (..)
   , spellingOf
   , developmentView
+  , goalsView
+  , GoalView (..)
+  , GoalKind (..)
   , machineView
   , choicesView
   , focusTypeView
@@ -101,7 +104,7 @@ import Thena.Driver
   )
 import Thena.Core.Trust (TrustLevel)
 import Thena.Engine
-  (Machine (..), choicePoints, cursor, development, focusContext, knownTo, ruleTypes, rules)
+  (Machine (..), choicePoints, cursor, development, focusContext, goalEnv, knownTo, ruleTypes, rules)
 import Thena.Global.Env (GlobalEnv)
 import Thena.Instral.Type (Signature)
 import Thena.Instral.Ops (ruleName, Instr, Rule)
@@ -124,6 +127,7 @@ import Thena.View.Core (Budget (..), Display, displayCore)
 import Thena.View.Development (LinkView, displayDevelopment)
 import Thena.View.Machine (MachineView, displayMachine)
 import Thena.View.Proofs (ProofsView, displayProofs)
+import Thena.View.Goals (GoalKind (..), GoalView (..), goalsOf)
 import Thena.View.Statement (statementOffer)
 import Thena.View.Trust (TrustView, displayTrust)
 import Thena.View.Rules (RuleView, displayRule)
@@ -249,6 +253,16 @@ developmentView budget s =
     (Address [])
     (Just (route (sessionCursor s)))
     (rebuild (sessionCursor s))
+
+-- | Every goal left, flat, each with the word that reaches it.
+--
+-- **Derived from 'developmentView' and not from a walk of its own** — the types
+-- and addresses must be the ones the development view prints. 'Thena.View.Goals'
+-- says why, and @ViewTests@ pins the list against 'Thena.Engine.goalEnv', which
+-- is what the prompt actually binds: a pane offering a word the prompt does not
+-- bind would be the one way this can go wrong.
+goalsView :: Budget -> Session -> [GoalView]
+goalsView budget = goalsOf . developmentView budget
 
 -- | The running machine: its program, its bindings, and the calls underneath.
 machineView :: Budget -> Session -> MachineView
@@ -433,7 +447,7 @@ proofsView budget s =
 statementOfferView :: Session -> [Written] -> [Written] -> OfferView
 statementOfferView s =
   statementOffer (sessionGrammars s) (scope (machineOf s)) (sessionRules s)
-                 (openableNamespaces s)
+                 (openableNamespaces s) (goalEnv (machineOf s))
 
 -- ---------------------------------------------------------------------------
 -- The plumbing itself

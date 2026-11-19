@@ -37,6 +37,7 @@ module Thena.Development.Cursor
   , gotoNamed
   , toRoot
   , identsIn
+  , goalsIn
   , freshIdent
   , into
   , crossType
@@ -439,6 +440,39 @@ identsIn = idents . rebuild
       Claim  _ i _   -> i
       Guess  _ i _ _ -> i
       Quantify _ i _ -> i
+
+-- | Every hole and guess in the whole development, outermost first, as the
+-- identifier it is printed by and the variable that reaches it.
+--
+-- **The pair is the point.** 'goto' takes the 'Var' and 'gotoNamed' the 'Ident',
+-- so anything holding only the printed name cannot aim the exact move; this
+-- answers both halves at once. It is 'identsIn' narrowed to the components that
+-- are goals and widened to say what each one binds.
+--
+-- **Goals and guesses only — his ruling of 2026-11-19**, /"goals and guesses
+-- only for now"/. 'Assume' and 'Quantify' bind a hypothesis rather than a
+-- position elaboration claimed, and a 'Define' is a position already solved. So
+-- this and 'gotoNamed' disagree in exactly one place: 'searchFrom' has found a
+-- 'Define' since MS12 phase 320 and this does not list one.
+goalsIn :: Cursor -> [(Ident, Var)]
+goalsIn = goals . rebuild
+  where
+    goals q = case q of
+      Under   c rest -> at c ++ within c ++ goals rest
+      Pending _ rest -> goals rest
+      Trailing _     -> []
+
+    -- **A guess's body holds goals too**, for 'identsIn'\'s reason: 'gotoNamed'
+    -- searches the whole development, so a hole under an @attack@ has to be
+    -- listed here or it is reachable by a name nothing offered.
+    within c = case c of
+      Guess _ _ g _ -> goals g
+      _             -> []
+
+    at c = case c of
+      Claim  x i _   -> [(i, x)]
+      Guess  x i _ _ -> [(i, x)]
+      _              -> []
 
 -- | An identifier not already taken: the hint, or the hint with the first
 -- number that frees it.

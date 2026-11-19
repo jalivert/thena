@@ -195,6 +195,7 @@ import Thena.Engine
   , isAsking
   , flatten
   , load
+  , loadWith
   , newDevelopment
   , focusContext
   , resumeAt
@@ -2058,8 +2059,9 @@ checkBlock gs bases bound r =
 -- **The same grammar a rule body has**, so nothing is \"@instral@, except at the
 -- REPL\".
 instralEntry
-  :: [Grammar] -> InScope -> [RuleBase] -> String -> Either LineError [Instr]
-instralEntry gs sc bases src = do
+  :: [Grammar] -> InScope -> [RuleBase] -> [(Ops.Name, Value)] -> String
+  -> Either LineError [Instr]
+instralEntry gs sc bases bound src = do
   ts  <- mapLeft LineSyntax (tokensOf src)
   -- **An entry is laid out, like a rule file** (MS5 phase 78). One line gets a
   -- block around it and nothing else changes; a @:{ … :}@ entry gets a @;@
@@ -2068,12 +2070,17 @@ instralEntry gs sc bases src = do
   ts' <- mapLeft (LineSyntax . LayoutFailed) (layoutFile ts)
   is  <- mapLeft (LineSyntax . ParseFailed) (parseEntry ts')
   prog <- mapLeft LineIllFormed
-            -- **A prompt entry starts with nothing bound** (the @[]@, MS5
-            -- phase 82). Its own lines bind as it goes, which 'resolveBlock'
-            -- threads; what it does not inherit is a yielded rule\'s
-            -- environment, and that is the behaviour already recorded — the
-            -- driver has only ever built literals, so a typed command names a
-            -- hole and never a reference.
+            -- **A prompt entry starts with the session\'s goals bound** (MS12
+            -- phase 324, his ruling of 2026-11-19) and with nothing else. Its
+            -- own lines bind as it goes, which 'resolveBlock' threads; the
+            -- goals come in as 'Thena.Engine.goalEnv' and are what make
+            -- @goto id1@ an ordinary reference. It began with nothing bound at
+            -- all (MS5 phase 82) on the grounds that /the driver has only ever
+            -- built literals, so a typed command names a hole and never a
+            -- reference/ — true then, and the whole of what his ruling
+            -- reversed. **What it still does not inherit is a yielded rule\'s
+            -- environment**: a @do@ block shares that and a typed line does
+            -- not, which is unchanged.
             -- **AND IN THE SESSION'S SCOPE SINCE MS12 PHASE 313.** It was in
             -- none, on the grounds that nothing handed @instral@ a scope and a
             -- prompt entry has no @open@ of its own to honour (MS10 phase 267)
@@ -2088,7 +2095,7 @@ instralEntry gs sc bases src = do
             -- @~jmw4k@'s seam, recorded at 'Thena.Engine.Play': a block inside a
             -- surface literal is the file's and this one is the session's, so
             -- the only scope both could agree on was none.
-            (resolveBlock (Reading gs sc) (rootName "entry") []
+            (resolveBlock (Reading gs sc) (rootName "entry") (map fst bound)
                (concatMap hoist (reverse is)))
   -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
   -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
@@ -2101,7 +2108,7 @@ instralEntry gs sc bases src = do
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts. All three checks are 'checkBlock' since phase 90.
-  case checkBlock gs bases [] (Rule (rootName "entry") [] [] prog) of
+  case checkBlock gs bases bound (Rule (rootName "entry") [] [] prog) of
     Just (BlockIll es)      -> Left (LineIllFormed es)
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
@@ -2130,11 +2137,13 @@ instralEntry gs sc bases src = do
 -- reporting names read out of code the system has already rejected. The offer then
 -- says what /kind/ of thing goes at the cursor and lists nothing, which is the
 -- honest answer while the lines above are broken.
-entryBindings :: [Grammar] -> InScope -> [RuleBase] -> String -> [(Ops.Name, Ty)]
-entryBindings gs sc bases src = case instralEntry gs sc bases src of
+entryBindings
+  :: [Grammar] -> InScope -> [RuleBase] -> [(Ops.Name, Value)] -> String
+  -> [(Ops.Name, Ty)]
+entryBindings gs sc bases bound src = case instralEntry gs sc bases bound src of
   Left _     -> []
   Right prog ->
-    boundBy (allSignatures bases) (allCallable bases)
+    boundBy (allSignatures bases) (allCallable bases) bound
       (Rule (rootName "entry") [] [] prog)
 
 -- | Hoist every written core term out of a line, resolving it first.
@@ -5463,11 +5472,12 @@ dispatch s name arg = case name of
   -- **A block typed at the REPL is played** (MS4 phase 45b), and it is how the
   -- REPL types the instruction language at all.
   --
-  -- **This is what makes standing inside a yield useful.** The driver's own
-  -- commands take /terms/ and /names/ — @goto h@ looks for a hole called @h@,
-  -- not for whatever @h@ is bound to — so nothing typed as a command can read a
-  -- suspended rule's locals. A block can: its operands are references, and with
-  -- 'Thena.Engine.load' prepending, the rule's environment is still there.
+  -- **This is what makes standing inside a yield useful**, and MS12 phase 324
+  -- narrowed it rather than removing it. A typed line is resolved with the
+  -- session's goals bound and nothing else, so it can reach a hole by name but
+  -- still cannot read a suspended rule's locals. A block can: its operands are
+  -- references, and with 'Thena.Engine.loadWith' prepending the instructions,
+  -- the rule's environment is still there.
   --
   -- > elaborate (do { h = here ; yield "look" ; goto h })
   -- > do { goto h }          -- reads the rule's own h
@@ -5486,7 +5496,12 @@ dispatch s name arg = case name of
     -- shares its environment, so what the rule bound is in scope and typed by
     -- its value. Outside a yield 'load' clears the environment, and nothing is.
     Right (SurfaceDo body) ->
-      let bound = if Engine.isYielding machine then env (exec machine) else []
+      let goals = Engine.goalEnv machine
+          -- **The rule\'s own bindings come FIRST and so win** (MS12 phase 324):
+          -- a lookup takes the nearest, and 'Thena.Engine.loadWith' puts the
+          -- session\'s goals on the end of the environment for the same reason.
+          bound = (if Engine.isYielding machine then env (exec machine) else [])
+                    ++ goals
        in case resolveBlock (Reading (grammars machine) (scope machine))
                             (rootName "entry") (map fst bound) body of
         Left errs -> (s, Failed (blockProblem errs))
@@ -5494,7 +5509,7 @@ dispatch s name arg = case name of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionFuel s)
-                              s { sessionMachine = load is machine } [] []
+                              s { sessionMachine = loadWith goals is machine } [] []
     Right _ -> (s, Rejected (UnexpectedArgument name))
 
   -- **@yield@ hands control back to a rule that yielded** — his, 2026-09-03,
@@ -6235,12 +6250,13 @@ dispatch s name arg = case name of
     -- no such shape: it is a sequence of instructions, of which one op and its
     -- operands is the degenerate case.
     line = case instralEntry (grammars machine) (scope machine) (rules machine)
-                             (name ++ " " ++ arg) of
+                             (Engine.goalEnv machine) (name ++ " " ++ arg) of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
       Left (LineMistyped es)  -> (s, EntryMistyped es)
       Right is ->
-        progress (sessionFuel s) s { sessionMachine = load is machine } [] []
+        progress (sessionFuel s)
+                 s { sessionMachine = loadWith (Engine.goalEnv machine) is machine } [] []
 
 -- | What @:help@ shows: one line per command the driver has, the spelling on
 -- the left and what it does on the right.
@@ -6297,7 +6313,12 @@ commandSummary =
   , ("cross type / cross val",   "move into a term")
   , (unwords bareParts,          "descend into a field of the focused term")
   , (unwords numberedParts,      "descend into a numbered field")
-  , ("goto-named \"‹hole›\"",      "move to a hole by name")
+    -- **@goto@ is listed as of MS12 phase 324**, when the prompt began binding
+    -- every goal to a variable of its name: it was absent because the word took
+    -- something only a rule body held, which is no longer true and was the whole
+    -- reason a reader had to reach for the searching one.
+  , ("goto ‹goal›",              "move to a hole or guess by its name")
+  , ("goto-named \"‹hole›\"",      "search the development for that name")
   , ("goto-root",                "move to the root of the development")
   , ("reduce",                   "reduce the focused term in place")
   , ("quantify \"‹x›\" core`‹S›`",  "add a ∀-binder above the focus")

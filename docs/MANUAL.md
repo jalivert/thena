@@ -430,14 +430,32 @@ thena spine> :show
 ```
 
 The inner hole is `id1`, not `id`: every component in a development has a name
-of its own, so that `goto-named "‹name›"` always means one place.
+of its own, so that one word always means one place.
 
-There are three `goto`s and they differ in what they take. `goto-named "h"`
-searches for a hole by the name you can see; `goto` is the one a rule body uses,
-taking the variable it is holding rather than a name; and `goto-root` takes
-nothing and goes to the top of the development. `goto-root` is the only move
-that cannot fail — `back` refuses when there is nothing above it, and
-`goto-root` is already where it is going.
+**Every goal is bound to a variable of its own name, so `goto id1` is what you
+type.** A goal is a hole or a guess — `id` above is a guess, `id1` a hole — and
+the session binds each of them before it reads your line. So the word you can
+see in the development is a variable holding that position, and `goto` takes it:
+
+```
+thena spine> goto id1
+thena spine> goto id
+```
+
+There are three `goto`s and they differ in what they take. `goto` is the exact
+one, taking the variable that binds a position: a rule body holds one because
+`claim` and `define` hand it over, and at the prompt the session hands you one
+per goal. `goto-named "h"` searches the development for a component of that
+name, which is the one to reach for when what you have is only a name — read off
+a printed term, say — and it takes a string rather than a variable, so it is
+written `goto-named "h"` and not `goto-named h`. `goto-root` takes nothing and
+goes to the top. `goto-root` is the only move that cannot fail — `back` refuses
+when there is nothing above it, and `goto-root` is already where it is going.
+
+`goto` is also the more precise of the first two. A search by name takes the
+first component of that name from the root, and a name is unique in a
+development — but the name a nested position *asks* for is not always the name
+it gets, so a search can land on an outer position while the variable cannot.
 
 Two λs have appeared, and the remaining hole now has type `A`. Move the cursor
 down to it — `into` enters the guess body, `along` steps past a binder — and ask
@@ -727,9 +745,9 @@ says where the term begins and ends, and inside it nothing needs parenthesising.
 language is entitled to, and an argument in no fence is neither language: it is
 a name, a number or a string, read exactly as a rule body reads one. That is why
 `goto-named` takes `goto-named "h"` and not `goto-named h` — the second is a
-*reference*, and at the prompt there is usually nothing bound to it. (`goto` is
-a separate word taking the *variable* a hole binds, which a rule body holds and
-the prompt rarely does.)
+*reference*, and what it refers to is a goal if the development has one of that
+name and nothing otherwise. (`goto` is the separate word taking the *variable* a
+position binds, which is what a goal's name is bound to; §5 has it.)
 
 The `-core` suffix marks the tactics that take a **development-calculus** term.
 The surface language exists beside it — `:infer`, `declare` and a `.thena` proof

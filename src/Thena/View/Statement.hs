@@ -49,7 +49,8 @@ import Data.List (find, isPrefixOf)
 import Thena.Language.Grammar (Grammar, grammarForTag, grammarKey)
 import Thena.Core.Term (InScope)
 import Thena.Driver (entryBindings)
-import Thena.Instral.Type (Ty)
+import Thena.Instral.Ops (Name, Value)
+import Thena.Instral.Type (Ty (..))
 import Thena.Instral.Commands (isCommandLine, isWholeLine)
 import Thena.Language.Instral
   (commandHead, commandRules, lineHead, lineRules, standsAt)
@@ -79,9 +80,9 @@ import Thena.View.Tokens
 -- 'offeredStuck' — which is phase 134's field, and is exactly the condition
 -- \"the text left of the cursor did not read\".
 statementOffer
-  :: [Grammar] -> InScope -> [RuleBase] -> [String]
+  :: [Grammar] -> InScope -> [RuleBase] -> [String] -> [(Name, Value)]
   -> [Written] -> [Written] -> OfferView
-statementOffer gs sc bs namespaces before after = answer { offeredBound = bound }
+statementOffer gs sc bs namespaces goals before after = answer { offeredBound = bound }
   where
     text   = textOf before ++ textOf after
     cursor = length (textOf before)
@@ -154,11 +155,19 @@ statementOffer gs sc bs namespaces before after = answer { offeredBound = bound 
     -- from the type checker over those lines ('Thena.Driver.entryBindings'); which
     -- of them fit is 'standsAt', asked against the slots this offer named. A
     -- frontend is handed the answer and never the rule.
+    -- **The session's goals are listed too, since MS12 phase 324.** A typed
+    -- line starts with every hole and guess bound ('Thena.Engine.goalEnv'), so
+    -- an offer that left them out would be hiding names the line can use — and
+    -- @goto@ is exactly the word a reader needs them at.
     bound =
       [ BoundView n (displayType t)
-      | (n, t) <- if null prefix then [] else entryBindings gs sc bs prefix
+      | (n, t) <- written ++ unwritten
       , fits t
       ]
+
+    written = if null prefix then [] else entryBindings gs sc bs goals prefix
+    unwritten =
+      [ (n, TCore) | (n, _) <- goals, n `notElem` map fst written ]
 
     slots = [ nm | ANonterminalSymbol nm <- offeredOptions answer ++ offeredWanted answer ]
 
