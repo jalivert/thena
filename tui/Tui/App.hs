@@ -2060,10 +2060,7 @@ draw st =
         <> [Entry (matchLine mv) | mv <- mvs]
 
     matchLine mv =
-      unwords (matchViewName mv : map corners (matchViewParams mv))
-        <> maybe "" ((" : " <>) . drawSignature) (matchViewType mv)
-
-    corners placeholder = "\8249" <> placeholder <> "\8250"
+      matchViewLine mv <> maybe "" ((" : " <>) . drawSignature) (matchViewType mv)
 
     -- | The redraw 'Thena.View.Type' asks a frontend to keep — an arrow
     -- chain, 'AFenced' the only place a parenthesis is drawn. Kept in step
@@ -6494,6 +6491,15 @@ fireJevRanking jcfg s typedSoFar offered = do
       writeBChan chan (JevRanked gen result)
     pure ()
 
+-- | **A 'MatchView' as the name and its placeholders, nothing else** —
+-- 'matchViewType' left out on purpose. Shared by the matches pane, which adds
+-- the type back beside it, and by what Jev and the hint are told, which do
+-- not: his report of 2026-11-19 was that the type roughly doubled
+-- @applies_here@'s weight for a tactic Jev did not need it to pick.
+matchViewLine :: MatchView -> String
+matchViewLine mv = unwords (matchViewName mv : map corners (matchViewParams mv))
+  where corners p = "\8249" <> p <> "\8250"
+
 -- | **What Jev is told, and it is the whole of `~d4qvm`'s fix.** HIS
 -- instruction, 2026-11-13: /"Jev needs to be given enough information to make
 -- an informed choice."/
@@ -6505,16 +6511,19 @@ fireJevRanking jcfg s typedSoFar offered = do
 -- again."/
 --
 -- **The state and the candidates are built together because they share the
--- expensive part.** @:matches@ is run once; its text goes out as
--- @applies_here@, and the rule names in it are what marks a candidate as
--- applying here. Marking the candidate itself matters as much as the list
--- does: a 'Choice' scores criteria, so a note on the criterion is read where
--- the decision is made rather than cross-referenced out of a separate field.
+-- expensive part.** 'matchesView' is read once (via 'matchViewLine'); its
+-- lines go out as @applies_here@, and the rule names in them are what marks
+-- a candidate as applying here. Marking the candidate itself matters as much
+-- as the list does: a 'Choice' scores criteria, so a note on the criterion is
+-- read where the decision is made rather than cross-referenced out of a
+-- separate field.
 --
--- **@:matches@ is a look and the driver says so** — /"no body runs, and
--- nothing is speculatively executed"/ ('Thena.Driver.Matched') — so running it
--- for context cannot move the session. The returned 'Session' is dropped on
--- purpose, and is not the same thing as discarding a write.
+-- **The type is left out, his report of 2026-11-19.** @matchesView@ started
+-- carrying each row's inferred signature at the same time its rows stopped
+-- being one per clause, and @applies_here@ went out at roughly 2.4x its old
+-- weight for a tactic Jev was never asked to pick by its type. 'matchViewLine'
+-- reads the name and placeholders only; the matches pane still draws the type
+-- beside it.
 jevRequest :: Session -> Text -> [OfferRow] -> (JevState, [(Text, Text)])
 jevRequest s typedSoFar offered = (JevState fields, candidates)
   where
@@ -6550,10 +6559,10 @@ jevRequest s typedSoFar offered = (JevState fields, candidates)
         "nothing — the session is on the import " <> word <> ", standing in a yield"
       Nothing -> ""
 
-    -- | @:matches@, rendered. The driver's own order is kept — nearest first,
-    -- dispatch order — because that is the only ranking in it.
-    applying = case oneLine s ":matches" of
-      (s', resp) -> renderResponse s' resp
+    -- | 'matchesView', one line per row, name and placeholders only — no
+    -- type ('matchViewLine'). The driver's own order is kept — nearest
+    -- first, dispatch order — because that is the only ranking in it.
+    applying = map matchViewLine (matchesView budget s)
 
     -- | **The rule's own name is the first word of its match line**, the rest
     -- being its head's pattern (@claim ‹ty›@, @one-case ‹t› ‹c› ‹sub› ‹bs›
@@ -6651,8 +6660,7 @@ hintFields st =
     links = developmentView budget s
     unlines' = intercalate "\n"
 
-    applying = case oneLine s ":matches" of
-      (s', resp) -> renderResponse s' resp
+    applying = map matchViewLine (matchesView budget s)
 
     -- | **Namespace by namespace, the way the globals pane groups them** —
     -- one flat list of every exported name would be the same information
