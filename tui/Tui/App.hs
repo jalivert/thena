@@ -239,6 +239,9 @@ data Name
     -- every function keyed on 'PaneVP' — 'resizablePanes', 'barRightOf',
     -- 'paneWidthOf' — asks a question about /columns/ that has no answer
     -- here.
+  | StripReply
+    -- ^ **the reply row's own clickable extent and editor name** —
+    -- `~w2tk2` slice 5. A click here is what opens it; see 'stStripReply'.
   | LoadPopup
   | OfferPopup
   | PickerVP
@@ -802,6 +805,24 @@ data St = St
     -- mode switch. That is `~3gn2r`'s rule applied to the other half of the
     -- strip: a region that blanked itself whenever the dropdown would have
     -- closed would be empty in exactly the frames he is reading it.
+  , stStripReply :: Maybe (Editor Text Name)
+    -- ^ **the reply row's own editor, and the strip owns every key while it
+    -- holds one** — `~w2tk2` slice 5, his instruction on who owns the
+    -- keyboard: the suggestion strip, not the document. 'Nothing' until the
+    -- row is clicked (it is drawn only while 'stHint' is 'Just', so there is
+    -- never a row to click without one); 'handleStripReplyEvent' then takes
+    -- every key the way 'handleBarEvent' already does for the command bar.
+    --
+    -- **What becomes of a submitted reply is slice 6's, not this one's** —
+    -- there is no model on the other end yet to hand it to. Enter and Esc
+    -- both close the row unused until there is; that is a stub, not a
+    -- ruling, and it is the one thing slice 6 replaces here.
+    --
+    -- **Cleared along with whatever would otherwise orphan it**: a @:hint@
+    -- that clears the hint, and a @:pane suggestions close@, both take the
+    -- reply row's keyboard claim away with them. Without that a key typed
+    -- after either would vanish into an editor nothing on screen names any
+    -- more — the dead-key shape his `~sshbb` report already found once.
   , stPicker :: Maybe Picker
     -- ^ **the session picker, and while it is open it owns the keyboard** —
     -- see 'Picker' and 'handlePickerEvent'. It is the one widget in the TUI
@@ -922,6 +943,7 @@ runTui = do
         , stInputExtent = Nothing
         , stStripWidth  = Nothing
         , stHint        = Nothing
+        , stStripReply  = Nothing
         , stPaneExtent  = Nothing
         , stArrowsReleased = False
         , stJevConfig   = jevCfg
@@ -1582,9 +1604,7 @@ draw st =
                 [offerGridWidget cellW (gridCols grid) (slateJevPicked (stSlate st)) shown]
           reserve = case stHint st of
             Nothing -> []
-            Just _ ->
-              hintRegionWidget width hintRows (stHint st)
-                : replicate stripReplyRows (str " ")
+            Just _ -> [hintRegionWidget width hintRows (stHint st), stripReplyWidget]
       render
         ( vBox
             ( if null offers && isNothing (stHint st)
@@ -1592,6 +1612,39 @@ draw st =
                 else offers <> reserve
             )
         )
+
+    -- | **The reply row — `~w2tk2` slice 5.** Blank and clickable while
+    -- 'stStripReply' is 'Nothing'; the click that opens it is
+    -- 'handlePaneClick''s @MouseDown StripReply@ case. Drawn in the same
+    -- @strip.hint@ surface as the region above it, which is what pairs the
+    -- two — the hint and the reply to it are one region reading top to
+    -- bottom, not two.
+    --
+    -- **The mark borrows @strip.key@, the grid's own F-key colour**, rather
+    -- than a new attr: both are "how you act on this pane," and a theme that
+    -- retunes one already means the other. 'overrideAttr' on
+    -- 'editFocusedAttr' is 'scriptFoot''s own fix for the same thing — an
+    -- editor paints its focused background from that attr, and without the
+    -- override it was the input's own colour rather than the strip's.
+    -- **'vLimit 1' around both branches, and it is load-bearing.** 'fill'
+    -- is 'Greedy' in both directions, so without it a blank row claimed
+    -- the viewport's whole remaining height — the same trap 'scriptFoot'
+    -- already names for the command bar's own row. **And it is why the
+    -- unopened row is 'fill' and not 'str " "'**: a single-character
+    -- widget's own reported extent is one column wide, so the row was
+    -- clickable only in its first column — measured under a pty, a click
+    -- three columns in did nothing at all until this was 'fill'.
+    stripReplyWidget =
+      clickable StripReply $ withAttr (attrName "strip.hint") $ vLimit 1 $
+        case stStripReply st of
+          Nothing -> fill ' '
+          Just ed ->
+            hBox
+              [ withAttr (attrName "strip.key") (str "❯ ")
+              , overrideAttr editFocusedAttr (attrName "strip.hint")
+                  (renderEditor (vBox . map (str . Text.unpack)) True ed)
+              , fill ' '
+              ]
 
     -- | **The slate: what the grid is drawn from and what an F-key takes** —
     -- `~w2tk2` slice 2. 'stripSlateOf' is the whole of it, so the drawing and
@@ -1626,7 +1679,7 @@ draw st =
     -- bar.** 'showFirstCursor' takes the first cursor any widget reports in
     -- draw order, so an editor still rendered focused under a modal leaves
     -- the caret blinking in a document that is not taking keys.
-    editorWidget = reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) (isNothing (stScriptBar st) && isNothing (stPicker st)) (stInput st))
+    editorWidget = reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) (isNothing (stScriptBar st) && isNothing (stPicker st) && isNothing (stStripReply st)) (stInput st))
       where
         -- | `:whisper off` (his `.jalivert/TUI.md` #23) silences this
         -- outright rather than 'ghostAt' itself carrying the flag — the
@@ -2902,6 +2955,17 @@ handlePaneClick ev = case ev of
     st <- get
     put st { stGlobalsClosed = toggle label (stGlobalsClosed st) }
     pure True
+  -- | **A click on the reply row opens it** — `~w2tk2` slice 5. There is
+  -- nothing to do if it is already open: a second click lands in the
+  -- editor's own text, which brick's own cursor placement already handles,
+  -- so this only ever fires the row's first click.
+  MouseDown StripReply V.BLeft _ _ -> do
+    st <- get
+    case stStripReply st of
+      Just _ -> pure True
+      Nothing -> do
+        put st { stStripReply = Just (E.editorText StripReply (Just 1) Text.empty) }
+        pure True
   _ -> pure False
   where
     toggle x set
@@ -3153,14 +3217,20 @@ handleEventForKeys ev = do
   st <- get
   case (stRerun st, ev) of
     (Just _, VtyEvent _) -> pure ()
-    _ -> case (stPicker st, stScriptBar st) of
+    _ -> case (stPicker st, stScriptBar st, stStripReply st) of
       -- | **The picker is checked first, and that is what makes it modal** —
       -- the one widget here that takes the keyboard off whichever of the three
       -- keyboards below it was holding it. Up, Down and Enter mean something in
       -- each of them, so a picker that merely added bindings would be a fourth
       -- claim on the same three keys.
-      (Just pk, _) -> handlePickerEvent pk ev
-      (_, Just bar) -> handleBarEvent st bar ev
+      (Just pk, _, _) -> handlePickerEvent pk ev
+      (_, Just bar, _) -> handleBarEvent st bar ev
+      -- | **The reply row, same tier as the bar — `~w2tk2` slice 5.** The two
+      -- cannot be open at once in practice (one is the script document's,
+      -- the other the strip's), but if they ever were, the bar's own command
+      -- line is the one a stray key is more dangerous in, so it keeps its
+      -- place ahead of this.
+      (_, _, Just reply) -> handleStripReplyEvent st reply ev
       _
         | stScriptMode st -> handleScriptEvent ev
         | otherwise -> handleReplEvent ev
@@ -3293,6 +3363,45 @@ handleBarEvent st bar ev = case ev of
   _ -> do
     bar' <- nestEventM' bar (handleEditorEvent ev)
     put st { stScriptBar = Just bar' }
+
+-- | **The reply row owns every key while it is open** — `~w2tk2` slice 5,
+-- his ruling on who holds the keyboard: the strip, not the document.
+--
+-- **Enter and Esc both close it unused.** Esc is the ordinary "never mind";
+-- Enter is a stub and says so at the call site — there is no model on the
+-- other end to hand a submitted reply to yet, so until slice 6 exists the
+-- two keys do the same thing rather than one of them pretending to send
+-- something nowhere.
+handleStripReplyEvent :: St -> Editor Text Name -> BrickEvent Name AppEvent -> EventM Name St ()
+handleStripReplyEvent st reply ev = case ev of
+  VtyEvent (V.EvKey V.KEnter []) -> closeStripReply
+  VtyEvent (V.EvKey V.KEsc [])   -> closeStripReply
+  _ -> do
+    reply' <- nestEventM' reply (handleEditorEvent ev)
+    put st { stStripReply = Just reply' }
+
+closeStripReply :: EventM Name St ()
+closeStripReply = do
+  st <- get
+  put st { stStripReply = Nothing }
+
+-- | **The reply row has nothing left to answer once the strip it lives in
+-- closes** — `~w2tk2` slice 5. Carried into both @:pane@ handlers so
+-- @:pane suggestions close@ never leaves a key claim behind it: without
+-- this, a key typed afterwards would vanish into an editor nothing on
+-- screen names any more, the dead-key shape `~sshbb` already found once.
+closeReplyIfStripClosed :: Strip -> St -> St
+closeReplyIfStripClosed strip' st'
+  | stripOpen strip' = st'
+  | otherwise = st' { stStripReply = Nothing }
+
+-- | **The reply row has nothing left to answer once the hint it replies to
+-- is cleared** — `~w2tk2` slice 5, the same rule as above for @:hint@
+-- rather than @:pane@.
+closeReplyIfHintCleared :: Maybe String -> St -> St
+closeReplyIfHintCleared hint st'
+  | isJust hint = st'
+  | otherwise = st' { stStripReply = Nothing }
 
 -- | The session picker's keys, and they are the three a list dialog has
 -- everywhere: Up and Down move the highlight, Enter takes the session it is
@@ -3640,7 +3749,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- this never reaches it.
         paneLine@(":pane" : _)
           | Just (layout', strip', said) <- paneCommand paneLine (stLayout st0) (stStrip st0) -> do
-              let st' = st0 { stLayout = layout', stStrip = strip' }
+              let st' = closeReplyIfStripClosed strip' st0 { stLayout = layout', stStrip = strip' }
               liftIO (saveConfig (configOf st'))
               appendTurn st' Nothing [said]
         -- | `:script` enters live-script mode (`~5vtt3`). TUI-local like the
@@ -3736,7 +3845,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- hint are the same state and spelling them differently would have
         -- invented a third.
         (":hint" : rest) -> do
-          let st' = st0 { stHint = hintFrom rest }
+          let st' = closeReplyIfHintCleared (hintFrom rest) st0 { stHint = hintFrom rest }
           appendTurn st' Nothing [hintSaid (hintFrom rest)]
         -- | **`:confirm-quit on|off`**, his instruction of 2026-11-18 — same
         -- standing as the two above. See 'maybeQuit'.
@@ -4243,7 +4352,7 @@ scriptLocal st text = case words text of
     pure ("fold: " <> mode)
   paneLine@(":pane" : _)
     | Just (layout', strip', said) <- paneCommand paneLine (stLayout st) (stStrip st) -> Just $ do
-        let st' = st { stLayout = layout', stStrip = strip' }
+        let st' = closeReplyIfStripClosed strip' st { stLayout = layout', stStrip = strip' }
         liftIO (saveConfig (configOf st'))
         put st'
         pure said
@@ -4271,7 +4380,7 @@ scriptLocal st text = case words text of
   -- TUI-local word is a TUI-local word wherever it is typed. **No
   -- 'saveConfig'**: 'stHint' is content and is not in the dotfile.
   (":hint" : rest) -> Just $ do
-    put st { stHint = hintFrom rest }
+    put (closeReplyIfHintCleared (hintFrom rest) st { stHint = hintFrom rest })
     pure (hintSaid (hintFrom rest))
   [":confirm-quit", mode] | mode `elem` ["on", "off"] -> Just $ do
     let st' = st { stConfirmQuit = mode == "on" }
