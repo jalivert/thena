@@ -59,8 +59,9 @@ import qualified Brick.Widgets.Edit as E
 import Brick.Widgets.Center (centerLayer)
 import Brick.BChan (BChan, newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Exception (SomeException, try)
-import Control.Monad (void, when)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryTakeMVar)
+import Control.Exception (SomeException, evaluate, try)
+import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
 import Data.List (intercalate, intersperse, isPrefixOf, isSuffixOf, sort, sortOn)
@@ -931,7 +932,37 @@ data St = St
     -- 'JevDue' timer whose generation doesn't match was superseded by a
     -- later keystroke while it slept, so 'handleJevDue' drops it and only
     -- the trailing edge of a burst ever reaches 'fireJevForCurrentDropdown'.
+  , stOfferBox :: MVar OfferAsk
+    -- ^ **the offer worker's mailbox, and it holds at most one request** —
+    -- `~wvtz2`. 'askOffers' empties it before filling it, so a burst of
+    -- keystrokes leaves the latest position in it and the ones it overwrote
+    -- are never computed at all. See 'offerWorker'.
+  , stOfferGen :: Int
+    -- ^ bumped by every 'askOffers'. 'applyOffers' drops an answer whose
+    -- generation is not the latest — the same role 'stJevGen' plays for a
+    -- ranking, and for the same reason: the line it describes is not the one
+    -- on screen any more.
   }
+
+-- | **One request for the offers a line stands in** — `~wvtz2`. Everything
+-- the computation needs is carried in the value, so the worker never reads
+-- 'St': a 'Session' is immutable and every call made of it here is pure, so
+-- handing one to another thread is passing a value rather than sharing state
+-- (the same argument 'fireJevRanking' already makes).
+data OfferAsk = OfferAsk
+  { askGen        :: Int
+  , askSession    :: Session
+  , askBefore     :: [Written]
+  , askAfter      :: [Written]
+  , askCol        :: Int
+  , askAutoSelect :: Bool
+  }
+
+-- | **What the worker answers with**: the popup as it would be built, and the
+-- span the input line underlines. Both are fully forced before they are
+-- posted ('forceOffers'), which is the whole point — a lazy answer would hand
+-- the cost straight back to the keystroke that is waiting for the frame.
+data Offers = Offers (Maybe OfferDropdown) (Maybe (Int, Int))
 
 stInputL :: Lens' St (Editor Text Name)
 stInputL = lens stInput (\st i -> st { stInput = i })
@@ -947,8 +978,16 @@ runTui = do
   hintCfg <- loadHintConfig (Text.pack (cfgModel cfg))
   shipped <- shippedPaths
   chan <- newBChan 16
+  offerBox <- newEmptyMVar
   let theme0 = maybe neonPinkDark id (themeByName (cfgTheme cfg))
       autoSelect0 = cfgAutoSelect cfg
+      -- | **The launch offers, computed once and read twice** — `~wvtz2`.
+      -- This is the one offer computation that still runs on the main thread,
+      -- and it belongs here: the empty line opens with the full rule list
+      -- already showing (his `.jalivert/TUI.md` #14), so the first frame has
+      -- to have it. It used to be computed twice over, once for the popup and
+      -- once for the strip, which is 174ms of startup spent for nothing.
+      launchOffers = statementOfferView s0 [] []
   let st0 = St
         { stTurns       = case concatMap (renderTrouble s0) trouble of
             []  -> []
@@ -963,11 +1002,11 @@ runTui = do
         -- `.jalivert/TUI.md` #14): the empty line offers the full rule
         -- list, first row lit — the same state deleting back to empty
         -- reaches.
-        , stOfferDropdown = buildOfferDropdown autoSelect0 0 (statementOfferView s0 [] [])
+        , stOfferDropdown = buildOfferDropdown autoSelect0 0 launchOffers
         -- The strip's own source, from the same view — `~3gn2r`. Built here
         -- rather than left empty for the first keystroke to fill, because
         -- the strip is open on launch for anyone whose dotfile had it open.
-        , stSlate       = slateFromView 0 (statementOfferView s0 [] [])
+        , stSlate       = slateFromView 0 launchOffers
         , stDismissed   = Nothing
         , stRecoveredSpan = Nothing
         , stAutoSelect  = autoSelect0
@@ -1012,6 +1051,8 @@ runTui = do
         , stJevChan     = chan
         , stJevGen      = 0
         , stJevPending  = 0
+        , stOfferBox    = offerBox
+        , stOfferGen    = 0
         , stModel       = Text.pack (cfgModel cfg)
         , stHintConfig  = hintCfg
         , stModels      = Nothing
@@ -1026,6 +1067,10 @@ runTui = do
   -- first draw somehow hasn't happened yet, the tick is a harmless no-op
   -- and the dropdown arrives on the first keystroke as before.
   _ <- forkIO (threadDelay 200000 >> writeBChan chan Tick)
+  -- | **The thread that asks the engine what may stand at the caret** —
+  -- `~wvtz2`. Started before the first frame and never stopped; it sits
+  -- blocked on its mailbox until a keystroke puts something in it.
+  _ <- forkIO (offerWorker chan offerBox)
   declareWideGlyphs
   vty <- mkVty V.defaultConfig
   _ <- customMain vty (mkVty V.defaultConfig) (Just chan) app st0
@@ -1088,6 +1133,13 @@ data AppEvent
   -- it carried — so the picker opens on the rows he asked for rather than
   -- on all 479 and a second command.
   | ModelsListed Text (Either String [HintModel])
+  -- | **The offers for a line, computed off the keyboard's thread** —
+  -- `~wvtz2`. The 'Int' is the generation 'askOffers' stamped the request
+  -- with; 'applyOffers' drops an answer that is no longer the latest, because
+  -- the caret has moved on and the list it describes is not the list the line
+  -- now stands in. A 'Left' is a failure in the offer computation itself,
+  -- said on the status line rather than swallowed — the worker survives it.
+  | OffersComputed Int (Either String Offers)
 
 app :: App St AppEvent Name
 app = App
@@ -2675,31 +2727,21 @@ stripShownOf st = case stripGridFor st of
   Nothing -> []
   Just grid -> take (gridSlots grid) (stripSlateOf st)
 
--- | **The slate for the line as it stands, from the session and the line and
--- nothing else** — `~3gn2r`. Pure, so every place that changes either of
--- those two can put a fresh one in state without an 'EventM'.
+-- | **The slate once the view is in hand** — the launch slate's own path,
+-- where 'runTui' has a 'Session' and no 'St' to ask yet.
 --
--- **Built through 'buildOfferDropdown' rather than beside it.** The strip's
--- order is then the dropdown's order by construction, instead of two lists
--- that have to be kept agreeing; the selection it builds is thrown away, so
--- 'False' goes in for @:preselect@ whatever 'stAutoSelect' says — the strip
+-- **The strip's order is the dropdown's order by construction**, because this
+-- goes through 'buildOfferDropdown' rather than beside it, instead of two
+-- lists that have to be kept agreeing; the selection it builds is thrown away,
+-- so 'False' goes in for @:preselect@ whatever 'stAutoSelect' says — the strip
 -- has no highlight to preselect.
 --
--- **A `:load` path line is 'emptySlate'**, the one case 'refreshOfferDropdown'
--- also declines: the path's own candidates are a directory listing and
--- 'stDropdown' owns them, so asking the statement grammar would be asking
--- the wrong question a second time.
-slateFor :: St -> Slate
-slateFor st
-  | isJust (loadPathPrefix line) = emptySlate
-  | otherwise = slateFromView col (statementOfferView (activeSession st) before after)
-  where
-    line = concatMap Text.unpack (getEditContents (stInput st))
-    (_, col) = getCursorPosition (stInput st)
-    (before, after) = splitWritten line col
-
--- | 'slateFor' once the view is in hand — also the launch slate's own path,
--- where 'runTui' has a 'Session' and no 'St' to ask yet.
+-- **There used to be a @slateFor :: St -> Slate@ beside this** — the same
+-- thing for the line as it stands, pure so that any place changing the line
+-- could put a fresh slate in state without an 'EventM'. It is gone with
+-- `~wvtz2`: the computation it hid is the 44–174ms one, and a pure function
+-- is exactly the wrong shape for work that has to leave the thread. Its three
+-- callers all go through 'askOffers' now.
 slateFromView :: Int -> OfferView -> Slate
 slateFromView col ov = slateOfDropdown (buildOfferDropdown False col ov)
 
@@ -3463,11 +3505,24 @@ maxPaneWidth st p screen =
 -- flight — 'rerunTail' would otherwise have no way to stop a second one
 -- starting on top of the first, each racing the other to splice the same
 -- document.
+--
+-- **AN 'AppEvent' IS NOT A KEY, SO NO KEYBOARD OWNS IT** — `~wvtz2`. The
+-- three tiers below are keyboards: the picker, the command bar and the
+-- strip's reply row each take every key while they are open, and their
+-- catch-all hands whatever it is given to an 'Editor'. An answer from a
+-- background thread was going into that editor and being lost — which did not
+-- show while every such answer was a Jev ranking or a hint, both of which
+-- simply go stale, but the offers themselves arrive this way now and the
+-- strip would have sat on the previous line's list until the next keystroke.
+-- **Ctrl+X was the case that made it visible**: it closes the dropdowns and
+-- asks for the line's offers again ('closeDropdowns'), and the bar it opens
+-- then swallowed the reply.
 handleEventForKeys :: BrickEvent Name AppEvent -> EventM Name St ()
 handleEventForKeys ev = do
   st <- get
   case (stRerun st, ev) of
     (Just _, VtyEvent _) -> pure ()
+    (_, AppEvent ae) -> handleAppEvent ae
     _ -> case (stPicker st, stScriptBar st, stStripReply st) of
       -- | **The picker is checked first, and that is what makes it modal** —
       -- the one widget here that takes the keyboard off whichever of the three
@@ -3485,6 +3540,33 @@ handleEventForKeys ev = do
       _
         | stScriptMode st -> handleScriptEvent ev
         | otherwise -> handleReplEvent ev
+
+-- | **Everything that arrives from a background thread, and it is the same
+-- handling wherever the keyboard happens to be** — `~wvtz2`. Dispatched ahead
+-- of the three keyboards for the reason 'handleEventForKeys' gives: none of
+-- these is a key.
+--
+-- **The startup tick** ('runTui', the only 'Tick' there is) always did nothing
+-- for the extents — the outer wrapper already recorded those by the time this
+-- runs, which was the whole point of it — but it is also the first and only
+-- chance to score the launch dropdown, which 'refreshOfferDropdown' never
+-- built and so never would have scored on its own.
+handleAppEvent :: AppEvent -> EventM Name St ()
+handleAppEvent Tick = fireJevForCurrentOffers
+handleAppEvent (JevDue gen) = handleJevDue gen
+handleAppEvent (JevRanked gen result) = applyJevRanking gen result
+handleAppEvent (OffersComputed gen result) = applyOffers gen result
+handleAppEvent (HintAnswered result) = applyHintAnswer result
+handleAppEvent (ModelsListed filt result) = do
+  st <- get
+  case result of
+    Left err -> sayEither st ("models: openrouter could not be reached — " <> err)
+    Right ms -> do
+      put st { stModels = Just ms }
+      st' <- get
+      showModels st' filt ms
+handleAppEvent (RerunStep gen soFar shown finished) =
+  handleRerunStep gen soFar shown finished
 
 -- | **The byte runs vty hands over as literal text, and what each one means.**
 -- vty decodes neither the kitty keyboard protocol's @CSI ‹key›;‹mods› u@ nor
@@ -4391,26 +4473,6 @@ handleReplEvent (MouseDown _ _ _ _) = pure ()
 -- half of it was named.
 handleReplEvent (VtyEvent V.EvMouseUp {}) = pure ()
 handleReplEvent (VtyEvent V.EvMouseDown {}) = pure ()
--- | The startup tick ('runTui', the only 'Tick' there is) always did
--- nothing for the extents — the outer wrapper already recorded those by
--- the time this runs, which was the whole point of it — but it is also
--- the first and only chance to score the launch dropdown, which
--- 'refreshOfferDropdown' never built and so never would have scored on
--- its own ('fireJevForCurrentDropdown').
-handleReplEvent (AppEvent Tick) = fireJevForCurrentOffers
-handleReplEvent (AppEvent (JevDue gen)) = handleJevDue gen
-handleReplEvent (AppEvent (JevRanked gen result)) = applyJevRanking gen result
-handleReplEvent (AppEvent (HintAnswered result)) = applyHintAnswer result
-handleReplEvent (AppEvent (ModelsListed filt result)) = do
-  st <- get
-  case result of
-    Left err -> sayEither st ("models: openrouter could not be reached — " <> err)
-    Right ms -> do
-      put st { stModels = Just ms }
-      st' <- get
-      showModels st' filt ms
-handleReplEvent (AppEvent (RerunStep gen soFar shown finished)) =
-  handleRerunStep gen soFar shown finished
 handleReplEvent ev =
   Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
 
@@ -5434,17 +5496,25 @@ leaveScriptMode = do
 -- closed because it would be drawn at stale coordinates; the offers have not
 -- gone anywhere, and on a mode switch the active session has changed, so the
 -- strip wants a fresh answer and not a blank one.
+--
+-- **The recomputation is asked for, not done here** — `~wvtz2`. This is the
+-- function 'afterScriptEdit' calls, so it is on the path of every Up and
+-- every Down in the document as well as of every Ctrl+X; running
+-- 'statementOfferView' inline made those keys cost the same 44–174ms the
+-- arrows did. **The slate is left standing until the answer lands**, which is
+-- what `~7prxf` asks for anyway: the rows in hand are the old list already
+-- ranked, and 'applyOffers' keeps that order if the new set matches.
 closeDropdowns :: EventM Name St ()
 closeDropdowns = do
   st <- get
   put st
     { stDropdown = Nothing
     , stOfferDropdown = Nothing
-    , stSlate = keepJevOrder (stSlate st) (slateFor st)
     , stRecoveredSpan = Nothing
     , stDismissed = Nothing
     , stArrowsReleased = False
     }
+  askOffers
 
 -- | **A rebuilt slate keeps the order the old one had when it offers the same
 -- things** — `~7prxf`, his report of 2026-11-19: /"Why does the suggestion
@@ -6165,9 +6235,10 @@ appendTurn :: St -> Maybe String -> [String] -> EventM Name St ()
 appendTurn st prompt output = do
   put (submitted st) { stTurns = stTurns st <> [Turn prompt output (stSession st)] }
   followInput
-  -- The slate 'submitted' just computed is the new session's, and nothing has
-  -- asked Jev about it — `~3gn2r`. Scheduling rather than firing, so a run of
-  -- lines (a `:script reload`'s replay) coalesces into one request.
+  -- The slate the submission leaves behind is the new session's, and nothing
+  -- has asked Jev about it — `~3gn2r`. Scheduling rather than firing, so a run
+  -- of lines (a `:script reload`'s replay) coalesces into one request.
+  askOffers
   scheduleJevRanking
 
 -- | **What a submitted line leaves behind, apart from its own turn.**
@@ -6179,12 +6250,16 @@ appendTurn st prompt output = do
 -- **The dropdown closes and the slate does not** — `~3gn2r`. Closing the
 -- popup on Enter is the popup's own rule; the offers for the empty line in
 -- the session the submission just produced are a different fact, and they
--- exist. The slate is recomputed from the state /after/ the input is
--- emptied, so it is the launch slate of the new session and not the slate of
--- the line that was just run.
+-- exist.
+--
+-- **The new session's slate is asked for by the caller, not computed here** —
+-- `~wvtz2`. It used to be this function's own 'slateFor', which on an empty
+-- line is the whole rule list and the most expensive offer there is: 174ms,
+-- measured, paid on the Enter. Both callers ('appendTurn', 'clearTurns') run
+-- 'askOffers' straight after, so the slate on screen is the submitted line's
+-- for one frame and the new session's from the next.
 submitted :: St -> St
-submitted st = after { stSlate = slateFor after }
-  where after = st { stInput = emptyInput, stDropdown = Nothing, stOfferDropdown = Nothing }
+submitted st = st { stInput = emptyInput, stDropdown = Nothing, stOfferDropdown = Nothing }
 
 -- | **`:clear ‹n›` — the last @n@ turns off the transcript, and nothing else**
 -- (`~p6g53`, his request of 2026-11-13: /"some shortcut removes the latest
@@ -6255,6 +6330,7 @@ clearTurns :: Int -> St -> EventM Name St ()
 clearTurns n st = do
   put (submitted (dropTurns n st))
   followInput
+  askOffers
 
 -- | **`:clear 1` as a keystroke** — what Ctrl+L and Cmd+L both run, so there
 -- is one description of the gesture rather than one per encoding.
@@ -6340,10 +6416,37 @@ refreshDropdown = do
           then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll LoadPopup)
           else pure ()
 
--- | Recomputes the completion dropdown from 'Thena.View.statementOfferView'
--- — called from the same places 'refreshDropdown' is, same reasoning.
+-- | **Recomputes the completion dropdown and the strip's slate for the line
+-- as it now stands — by asking for them, never by computing them here.**
+-- Called from the same places 'refreshDropdown' is, same reasoning.
 --
--- **Only a path-taking command's own line gets none from here**
+-- **`~wvtz2`, HIS instruction of 2026-11-20: /"nothing, __nothing__ should
+-- block caret movement"/.** Until today this function ran
+-- 'Thena.View.statementOfferView' inline, which is the engine answering what
+-- may stand at the caret. **Measured under a pty, 2026-11-20**: 44–64ms per
+-- keypress with one module imported and **174ms on an empty line**, where the
+-- offer is the whole rule list; the draw that followed was 5ms. Autorepeat
+-- delivers an arrow about every 30ms, so holding Left queued two to six
+-- keystrokes' worth of engine work per frame and the caret fell further behind
+-- for as long as the key was down. That is the stutter he reported, and the
+-- cost was never Jev's — Jev has been debounced and off-thread since `~d4qvm`.
+--
+-- **So the expensive half is 'offerWorker''s and this half is the keyboard's.**
+-- What stays here is everything cheap and everything that must be true in the
+-- very next frame: whether the line is a `:load` path (then there is nothing to
+-- ask the statement grammar, and the strip is empty by construction), and
+-- whether Esc has dismissed the popup for the line as it reads. What leaves is
+-- the rows, the slate and the underlined span, which arrive in an
+-- 'OffersComputed' and land in 'applyOffers'.
+--
+-- **What that costs is up to one frame of staleness**, and it is the cost he
+-- named: the strip goes on showing the previous caret position's suggestions
+-- until the answer lands. An accelerator pressed in that window takes the row
+-- the frame actually drew, at the span that row was computed for — which is
+-- `~w2tk2` slice 3a's rule unchanged, and for a caret move it is also still
+-- the right span, because moving the caret does not change the text.
+--
+-- **Only a path-taking command's own line gets no offers at all**
 -- ('pathCommands') — its path is a directory listing, not a grammar
 -- question, and 'refreshDropdown' already owns that answer ('stDropdown');
 -- asking the statement grammar about ":load foo" too would just be asking
@@ -6357,65 +6460,183 @@ refreshDropdown = do
 -- 'statementOfferView' call, no new one — the guard here just never
 -- caught up to ask.
 --
--- **The strip's slate is recomputed on every branch, including the two that
--- blank the dropdown** — `~3gn2r`. A dismissal and a `:load` line are about
--- the popup and about this grammar's relevance respectively; neither is the
--- engine withdrawing an offer, and only the second of the two leaves the
--- strip with nothing ('slateFor' answers 'emptySlate' there for the same
--- reason the dropdown declines).
+-- **The strip's slate is cleared on the `:load` branch and nowhere else** —
+-- `~3gn2r`. A dismissal and a `:load` line are about the popup and about this
+-- grammar's relevance respectively; neither is the engine withdrawing an
+-- offer, and only the second of the two leaves the strip with nothing.
 refreshOfferDropdown :: EventM Name St ()
 refreshOfferDropdown = do
-  st0 <- get
-  let line = concatMap Text.unpack (getEditContents (stInput st0))
-      (_, col) = getCursorPosition (stInput st0)
+  st <- get
+  let line = concatMap Text.unpack (getEditContents (stInput st))
+      dismissed = stDismissed st == Just line
+  if isJust (loadPathPrefix line)
+    then put st
+      { stOfferDropdown = Nothing
+      , stSlate = emptySlate
+      , stDismissed = Nothing
+      , stRecoveredSpan = Nothing
+      , stArrowsReleased = False
+      }
+    else do
+      -- **Esc hides the popup in this frame, not in the one the answer lands
+      -- in.** Dismissal is about the box and is decided from the line alone,
+      -- so it costs nothing and must not wait; 'applyOffers' asks the same
+      -- question again when the rows arrive, against a line the generation
+      -- check guarantees is the same one.
+      put st
+        { stOfferDropdown = if dismissed then Nothing else stOfferDropdown st
+        , stDismissed = if dismissed then stDismissed st else Nothing
+        , stArrowsReleased = False
+        }
+      askOffers
+
+-- | **Hand the worker the line the caret now stands in, and stamp the ask so
+-- a stale answer can be told apart from the live one** — `~wvtz2`.
+--
+-- **The mailbox is emptied before it is filled**, which is the whole of the
+-- coalescing: a burst of keystrokes leaves exactly the last position in it,
+-- and the positions it overwrote are never computed. There is one writer (the
+-- event loop) and one reader ('offerWorker'), so 'tryTakeMVar' then 'putMVar'
+-- cannot block and cannot lose the newer of two asks.
+--
+-- **No timer and no interval**, unlike 'scheduleJevRanking'. A debounce is
+-- what you need when the work leaves the machine and costs quota; this work is
+-- local and the only thing worth avoiding is doing it twice over, which
+-- latest-wins already does — and without a number to tune against his typing
+-- speed, the answer arrives as early as it possibly can when he stops.
+askOffers :: EventM Name St ()
+askOffers = do
+  st <- get
+  let line = concatMap Text.unpack (getEditContents (stInput st))
+      (_, col) = getCursorPosition (stInput st)
       (before, after) = splitWritten line col
-      -- **One view, read two ways** — `~3gn2r`. A `:load` path line asks
-      -- nothing of the statement grammar (see 'slateFor'), so 'Nothing' here
-      -- is both /no dropdown/ and /an empty slate/.
-      offered
-        | isJust (loadPathPrefix line) = Nothing
-        | otherwise = Just (statementOfferView (activeSession st0) before after)
-      new = offered >>= buildOfferDropdown (stAutoSelect st0) col
-      -- | **Jev's order survives a rebuild that offers the same things** —
-      -- `~7prxf`, and leaving it out here was the other half of `~9qpjn`.
-      -- 'slateJevPicked' is 0 in a freshly built dropdown and
-      -- 'stripSlateOf' shows @take@ that many rows while Jev is on, so a
-      -- rebuild on an unchanged set emptied the strip — and the refire
-      -- below declines, precisely because the set did not change. **The two
-      -- have to agree: the frames where Jev is not asked again are exactly
-      -- the frames whose ranking must be kept.** 'closeDropdowns' already
-      -- did this; this path, which runs on every keystroke, did not.
-      slate = keepJevOrder (stSlate st0) (slateOfDropdown new)
-      oldSlateRows = slateRows (stSlate st0)
-      st = st0 { stSlate = slate }
-  -- Same dismissal as 'refreshDropdown': hidden while the line is as Esc
-  -- left it, back on any edit. **The slate is already in 'st' and survives
-  -- it** — `~3gn2r`: Esc is about the popup, not about what is offered.
-  if stDismissed st == Just line
-    then put st { stOfferDropdown = Nothing }
-    else case offered of
-      Nothing -> put st { stOfferDropdown = Nothing, stDismissed = Nothing, stRecoveredSpan = Nothing, stArrowsReleased = False }
-      Just ov -> do
-        let oldRows = maybe [] odRows (stOfferDropdown st)
-        put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = underlineSpan ov, stArrowsReleased = False }
-        -- Same rule as 'refreshDropdown': new rows start at the top, same
-        -- rows keep their scroll — above the line, at the bottom instead.
-        if maybe [] odRows new /= oldRows
-          then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll OfferPopup)
-          else pure ()
-  -- Score the slate, not every keystroke: only when the candidate set
-  -- actually changed, and then on a trailing-edge timer rather than on the
-  -- keystroke itself ('scheduleJevRanking'). The set comparison sorts both
-  -- sides first: 'applyJevRanking' floats Jev's picks to the top, so an
-  -- order-sensitive check would see a change after every answer landed and
-  -- refire on the next keystroke even when the set is the same.
-  --
-  -- **Off the slate and outside the branches** — `~3gn2r`. It was inside the
-  -- else, so a dismissed dropdown was never re-ranked; the strip is on screen
-  -- in that frame now, and what is on screen is what Jev is asked about.
-  when (sortOn sortKey (slateRows slate) /= sortOn sortKey oldSlateRows) scheduleJevRanking
+      gen = stOfferGen st + 1
+      box = stOfferBox st
+  put st { stOfferGen = gen }
+  liftIO $ do
+    _ <- tryTakeMVar box
+    putMVar box OfferAsk
+      { askGen = gen
+      , askSession = activeSession st
+      , askBefore = before
+      , askAfter = after
+      , askCol = col
+      , askAutoSelect = stAutoSelect st
+      }
+
+-- | **The offers, arrived** — `~wvtz2`. Everything 'refreshOfferDropdown' used
+-- to do with the view in hand, done here with the view computed elsewhere.
+--
+-- **An answer whose generation has been superseded is dropped and nothing is
+-- said about it**: the caret moved while it was being computed, so it
+-- describes a line that is not on screen. That is his ruling — /"Jev's
+-- response will simply be thrown away when it arrives and is no longer
+-- relevant"/ — and it holds for the engine's own offers for the same reason.
+--
+-- **A 'Left' is said on the status line.** The computation is pure engine
+-- work and is not expected to fail; it used to run on the main thread, where a
+-- failure would have taken the TUI down with it. Swallowing it instead would
+-- leave the strip silently frozen, which is the worse of the two.
+applyOffers :: Int -> Either String Offers -> EventM Name St ()
+applyOffers gen answer = do
+  st <- get
+  when (gen == stOfferGen st) $ case answer of
+    Left err -> sayEither st ("offers: " <> err)
+    Right (Offers new span') -> do
+      let line = concatMap Text.unpack (getEditContents (stInput st))
+          dismissed = stDismissed st == Just line
+          -- | **Jev's order survives a rebuild that offers the same things** —
+          -- `~7prxf`, and leaving it out was the other half of `~9qpjn`.
+          -- 'slateJevPicked' is 0 in a freshly built dropdown and
+          -- 'stripSlateOf' shows @take@ that many rows while Jev is on, so a
+          -- rebuild on an unchanged set emptied the strip — and the refire
+          -- below declines, precisely because the set did not change. **The two
+          -- have to agree: the frames where Jev is not asked again are exactly
+          -- the frames whose ranking must be kept.**
+          slate = keepJevOrder (stSlate st) (slateOfDropdown new)
+          oldSlateRows = slateRows (stSlate st)
+          oldRows = maybe [] odRows (stOfferDropdown st)
+      put st
+        { stSlate = slate
+        , stOfferDropdown = if dismissed then Nothing else new
+        , stRecoveredSpan = if dismissed then stRecoveredSpan st else span'
+        }
+      -- Same rule as 'refreshDropdown': new rows start at the top, same
+      -- rows keep their scroll — above the line, at the bottom instead.
+      when (maybe [] odRows new /= oldRows) $
+        (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll OfferPopup)
+      -- Score the slate, not every keystroke: only when the candidate set
+      -- actually changed, and then on a trailing-edge timer rather than on the
+      -- keystroke itself ('scheduleJevRanking'). The set comparison sorts both
+      -- sides first: 'applyJevRanking' floats Jev's picks to the top, so an
+      -- order-sensitive check would see a change after every answer landed and
+      -- refire on the next keystroke even when the set is the same.
+      --
+      -- **Outside the dismissal branch** — `~3gn2r`. It was inside the else,
+      -- so a dismissed dropdown was never re-ranked; the strip is on screen in
+      -- that frame now, and what is on screen is what Jev is asked about.
+      when (sortOn sortKey (slateRows slate) /= sortOn sortKey oldSlateRows) scheduleJevRanking
   where
     sortKey r = (rowLabel r, rowInsert r)
+
+-- | **The one thread that asks the engine what may stand at the caret** —
+-- `~wvtz2`, started once by 'runTui' and never stopped.
+--
+-- **It is a loop around a one-slot mailbox, not a queue.** 'takeMVar' blocks
+-- until there is an ask, so an idle TUI costs nothing; 'askOffers' overwrites
+-- whatever is waiting, so at most one computation is ever in flight and at
+-- most one is ever pending. Holding an arrow key down therefore costs one
+-- offer computation per frame the worker can finish, not one per keystroke,
+-- and the intermediate caret positions are never asked about at all.
+--
+-- **The answer is forced here, not where it is used.** A lazy 'OfferView'
+-- handed back through the channel would be a thunk the event loop evaluates —
+-- the cost paid on exactly the keystroke this exists to protect, with the
+-- indirection added for nothing. 'forceOffers' is what makes the hand-off
+-- real.
+--
+-- **Nothing this thread does may escape it**, the same contract 'Tui.Jev'
+-- states for its own fork: an unhandled exception in a 'forkIO' prints to
+-- stderr, and stderr under brick is the screen. A failure is reported as the
+-- answer and the loop goes round again.
+offerWorker :: BChan AppEvent -> MVar OfferAsk -> IO ()
+offerWorker chan box = forever $ do
+  ask <- takeMVar box
+  outcome <- try (evaluate (forceOffers (computeOffers ask)))
+  writeBChan chan . OffersComputed (askGen ask) $ case outcome of
+    Left (e :: SomeException) -> Left (show e)
+    Right offers -> Right offers
+
+-- | The offers for one ask — 'statementOfferView' and the dropdown built from
+-- it, which is also where the strip's slate comes from ('slateOfDropdown'), so
+-- the popup's list and the strip's list stay one computation read two ways
+-- rather than two that could disagree.
+computeOffers :: OfferAsk -> Offers
+computeOffers ask = Offers (buildOfferDropdown (askAutoSelect ask) (askCol ask) ov) (underlineSpan ov)
+  where ov = statementOfferView (askSession ask) (askBefore ask) (askAfter ask)
+
+-- | **Forces an answer down to the strings the drawing will read**, by hand
+-- rather than through 'Control.DeepSeq' — 'OfferView' is the engine's type and
+-- bringing an instance for it into scope is not this frontend's to do.
+--
+-- A row's label and its insert are the only text in it; the three 'Int's and
+-- the selection are what the keymap reads. Forcing all of them is what leaves
+-- the event loop with nothing to evaluate but a record update.
+forceOffers :: Offers -> Offers
+forceOffers offers@(Offers new span') = depth `seq` offers
+  where
+    depth = case new of
+      Nothing -> spanDepth
+      Just od ->
+        spanDepth
+          + length (show (odSelected od))
+          + odWordStart od
+          + odReplaceLen od
+          + odJevPicked od
+          + sum [ length l + maybe 0 length i | OfferRow l i <- odRows od ]
+    spanDepth = case span' of
+      Nothing -> 0
+      Just (a, b) -> a + b
 
 -- | **How long a burst of keystrokes may run before Jev is asked** — 250ms
 -- of quiet. Measured against @~/.cache/thena/jev.log@: typing and
