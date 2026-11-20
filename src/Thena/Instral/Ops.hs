@@ -498,6 +498,18 @@ data Op
   | IntroLet (Maybe Operand)
     -- ^ table 2.8's @intro-let@, Brady's @LET@ — the type is read **as
     -- written**, so the author's binding is kept rather than substituted away.
+  | Rename Operand
+    -- ^ **the word the component at the focus is bound under** — @rename@ (MS12
+    -- phase 330), his ruling of 2026-11-20, /THERE IS ONE NAME/, part four.
+    --
+    -- **It is the repair that replaced the printer's rename.** A word written
+    -- twice kills the outer binder, which then prints marked; walking up to it
+    -- and renaming gives it a free word in the term, so every position that
+    -- mentions it prints that word and print-parse is restored.
+    --
+    -- **A hole-life op in shape** — it acts on the component at the focus and
+    -- answers with nothing — and it is the one of them that takes a name,
+    -- because the word is the whole of what it does.
     -- What @intro@'s @goal-type-is-let@ clause runs.
     --
     -- **There is deliberately no op that is both.** @prim-intro@ was, deciding
@@ -1738,6 +1750,9 @@ resultOf o = case o of
   -- need an op of its own in an earlier attempt.
   IntroPi _    -> Just TCore
   IntroLet _   -> Just TCore
+  -- **Nothing, like 'Attack'**: it changes a word and binds nothing, so there
+  -- is no variable for a clause to go on with.
+  Rename _     -> Nothing
   Try _        -> Nothing
   Regret       -> Nothing
   Solve        -> Nothing
@@ -1999,6 +2014,7 @@ operandTypes o = case o of
   Attack       -> []
   IntroPi m    -> maybe [] (\x -> [(x, TName)]) m
   IntroLet m   -> maybe [] (\x -> [(x, TName)]) m
+  Rename x     -> [(x, TName)]
   Regret       -> []
   Solve        -> []
   Abandon      -> []
@@ -2434,6 +2450,7 @@ opKeyword o = case o of
   Attack       -> "prim-attack"
   IntroPi _    -> "prim-lambda"
   IntroLet _   -> "prim-let"
+  Rename _     -> "prim-rename"
   Try _        -> "prim-try"
   Regret       -> "prim-regret"
   Solve        -> "prim-solve"

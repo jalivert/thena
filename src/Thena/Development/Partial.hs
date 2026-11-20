@@ -4,6 +4,7 @@ module Thena.Development.Partial
   , Constraint (..)
   , freeVarsPartial
   , termsIn
+  , wordsTaken
   , Impure (..)
   , extract
   ) where
@@ -109,6 +110,88 @@ termsIn = go []
 
     goConstraint ctx (Equate xi s t ty) =
       [ (ctx ++ xi, u) | u <- [s, t, ty] ]
+
+-- | Every binder the predicate accepts that __took a word an outer binder of
+-- its own chain already carried__: the word, the components below it whose own
+-- terms still refer to the binder it killed, and whether anything below refers
+-- to that binder at all.
+--
+-- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /THERE IS ONE NAME/, part
+-- three: shadowing is allowed and warned about, in two shapes. Plain shadowing
+-- gets a general warning; **shadowing that leaves existing references pointing
+-- at the now-dead binder gets one naming those references**, because they are
+-- the part the user cannot see from where they are standing.
+--
+-- **The predicate is \"did this binder enter on this line\"**, which
+-- "Thena.Driver" answers by comparing a variable against the name counter the
+-- line started with. Asking it of the binder rather than of the focus is what
+-- makes the warning about the act: the focus may end up anywhere, and merely
+-- /walking/ into a scope where a word was written twice is not an event.
+--
+-- **The nearest outer binder carrying the word is the one that dies**, which is
+-- 'Thena.Core.Context.wordReaches' read the other way round: a word reaches the
+-- nearest binder carrying it, so the binder that loses its word is the nearest
+-- one that had it, and any further out was dead already.
+--
+-- **The third component is exact and the second is an aid.** Whether anything
+-- below refers to the dead binder is 'freeVarsPartial', which misses nothing;
+-- the names are the components whose own type or value holds the reference, and
+-- a reference standing in a chain's trailing term has no component to name —
+-- so the shape of the warning is decided by the flag and never by the list
+-- being empty.
+--
+-- Here with the other two walks for their reason: it is the same walk over the
+-- same five components, and a copy of it elsewhere would be a second thing to
+-- keep in step.
+wordsTaken :: (Var -> Bool) -> Partial -> [(Ident, [Ident], Bool)]
+wordsTaken isNew = go []
+  where
+    go outer p = case p of
+      Trailing _     -> []
+      Pending _ rest -> go outer rest
+      Under c rest    ->
+        let v = boundBy c
+            i = wordOf c
+            -- The guess's body stands under everything above it and not under
+            -- the guess's own binder, exactly as 'termsIn' walks it.
+            inside = case c of
+              Guess _ _ g _ -> go outer g
+              _             -> []
+            took = case [ w | (w, j) <- outer, j == i ] of
+              dead : _ | isNew v -> [(i, named dead rest, dead `elem` freeVarsPartial rest)]
+              _                  -> []
+         in took ++ inside ++ go ((v, i) : outer) rest
+
+    -- The components below whose own type or value holds a reference, in the
+    -- order the chain is written, without repeats.
+    named dead p = nub (go' p)
+      where
+        go' q = case q of
+          Trailing _      -> []
+          Pending _ rest  -> go' rest
+          Under c rest    ->
+            [ wordOf c | dead `elem` holds c ] ++ go' rest
+
+        holds c = case c of
+          Assume _ _ ty    -> freeVars ty
+          Define _ _ v ty  -> freeVars v ++ freeVars ty
+          Claim  _ _ ty    -> freeVars ty
+          Guess  _ _ g ty  -> freeVarsPartial g ++ freeVars ty
+          Quantify _ _ ty  -> freeVars ty
+
+    boundBy c = case c of
+      Assume   x _ _   -> x
+      Define   x _ _ _ -> x
+      Claim    x _ _   -> x
+      Guess    x _ _ _ -> x
+      Quantify x _ _   -> x
+
+    wordOf c = case c of
+      Assume   _ i _   -> i
+      Define   _ i _ _ -> i
+      Claim    _ i _   -> i
+      Guess    _ i _ _ -> i
+      Quantify _ i _   -> i
 
 -- --------------------------------------------------------------------------
 -- Reading the term off a finished construction (§5.3, §7.5)

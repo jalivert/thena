@@ -1548,6 +1548,24 @@ perform instr rest m = case operation instr of
   IntroPi mn -> introOp introduceLambda mn
   IntroLet mn -> introOp introduceLet mn
 
+  -- **The repair that replaced the printer's rename** (MS12 phase 330), his
+  -- ruling of 2026-11-20, /THERE IS ONE NAME/, part four: the word the focused
+  -- component is bound under, changed in the development and therefore in the
+  -- term. Nothing else moves — the variable is the identity, so every reference
+  -- already points at this binder and simply prints the new word.
+  --
+  -- **The word is not checked against the context.** Any word is allowed (his
+  -- second principle, 2026-09-01); a taken one makes another dead binder, which
+  -- the warning this phase also added is what says.
+  Rename name -> case operandIdent (env (exec m)) name of
+    Left r  -> failure r m
+    Right i -> case focus (cursor (development m)) of
+      OnComponent c ->
+        case replaceComponent (Component.renamed i c) (cursor (development m)) of
+          Left e    -> failure (CannotMove e) m
+          Right cur -> Continue (advance m { development = Development cur })
+      _ -> failure NotABinderHere m
+
   -- **@intro@'s twin, and the only op that can start a Π** (MS4 phase 41f).
   --
   -- It is a hole-life op and not a component op like @assume@, and the level

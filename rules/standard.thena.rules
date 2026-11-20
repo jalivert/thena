@@ -52,6 +52,19 @@ rule intro n :- when focus-is-guess goal-type-is-pi do prim-lambda n
 
 rule intro n :- when focus-is-guess goal-type-is-let do prim-let n
 
+-- RENAMING THE BINDER AT THE FOCUS — 2026-11-20, his ruling *THERE IS ONE
+-- NAME*, part four. A word written twice kills the outer binder: nothing
+-- reaches it, it prints marked, and so does every reference to it. **This is
+-- the way back** — walk up to that binder and give it a word, which changes the
+-- development and therefore the term. `DECISIONS.md`, *A word that reaches
+-- nothing is marked*, says what it repairs.
+--
+-- The head is `focus-is-component` because a word belongs to a binder and all
+-- five components are one; a constraint and a position inside a core term are
+-- not, and `prim-rename` refuses there for the same reason the head does.
+rename : Name -> ()
+rule rename n :- when focus-is-component do prim-rename n
+
 solve : ()
 rule solve :- when focus-is-guess do prim-solve
 

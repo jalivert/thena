@@ -412,6 +412,10 @@ data Wanted
   | AnObjectTerm
   | AHole
   | AGuess
+  | ABinder
+    -- ^ **a position that binds a word** — what @rename@ wants (MS12 phase
+    -- 330). Any of the five components is one; a constraint and a position
+    -- inside a core term are not.
   | AnArgument
   | AnIndex
   | AMethod
@@ -488,6 +492,14 @@ data WarningView
   | ANameShadows String String
     -- ^ the name just declared, and the one it shadows.
   | AProofShadows String String
+  | ABinderShadows String
+    -- ^ **the word a binder just took, which an outer binder of its own chain
+    -- carried** (MS12 phase 330) — nothing below refers to the one it killed.
+  | ABinderShadowsReferenced String [String]
+    -- ^ the same word, and the components below whose terms still refer to the
+    -- dead binder. **The list may be empty and the shape still holds**: a
+    -- reference in a chain's trailing term has no component to name, and this
+    -- constructor is chosen by there being a reference, not by the naming.
   | APublicConsultIdles String
   | APublicImportUnlisted String [String]
   | APublicIdlesAtThePrompt String
@@ -614,6 +626,7 @@ displayStop sp grammars budget env binders counter here nd = case nd of
       E.NoEnclosingDevelopment -> bare NothingToWorkOn
       E.GoalIsNotAUniverse -> fault WrongShapeOfGoal [is TheWanted (AWanted AUniverse)]
       E.NothingToIntroduce -> fault WrongShapeOfGoal [is TheWanted (AWanted AnArgument)]
+      E.NotABinderHere -> fault WrongShapeOfGoal [is TheWanted (AWanted ABinder)]
       E.NotYetPure pos -> fault NotYetPure [is TheSpot (ASpot (spotOf pos))]
       E.NoGoalHere -> bare NothingToWorkOn
       E.NoRuleMatched -> bare NoRuleApplies
@@ -1145,6 +1158,8 @@ displayStop sp grammars budget env binders counter here nd = case nd of
       E.TokenClassNotOpen k g prod x l -> ATokenClassNotOpen (block k) g prod x l
       E.NameShadows new old -> ANameShadows (spelledIn sp new) (spelledIn sp old)
       E.ProofShadows new old -> AProofShadows (spelledIn sp new) (spelledIn sp old)
+      E.BinderShadows x -> ABinderShadows x
+      E.BinderShadowsReferenced x refs -> ABinderShadowsReferenced x refs
       E.PublicConsultIdle m -> APublicConsultIdles m
       E.PublicImportUnlisted m ms -> APublicImportUnlisted m ms
       E.PublicIdleAtPrompt m -> APublicIdlesAtThePrompt m

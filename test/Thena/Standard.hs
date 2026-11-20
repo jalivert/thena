@@ -91,6 +91,11 @@ expectedStandard =
       [Do (IntroPi (Just (Ref "n")))]
   , Rule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsLet]
       [Do (IntroLet (Just (Ref "n")))]
+    -- **The repair for a shadowed binder** (MS12 phase 330), his ruling of
+    -- 2026-11-20, /THERE IS ONE NAME/, part four: the word the component at the
+    -- focus is bound under, changed in the development and so in the term.
+  , Rule (rootName "rename") [PVar "n"] [FocusIsComponent]
+      [Do (Op.Rename (Ref "n"))]
   , Rule (rootName "solve")      []    [FocusIsGuess]                [Do Solve]
   , Rule (rootName "regret")     []    [FocusIsGuess]                [Do Regret]
     -- **Two rules, two constructions** (MS9 phase 211, `~84x46`):
