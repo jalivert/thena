@@ -136,9 +136,24 @@ global name = at (AGlobal name [])
 lam :: Display
 lam = at (AnAbstraction (Binding "x" (global "A")) (var "x"))
 
--- | @(y : A) -> B@
+-- | An occurrence of a binder that binds at the root — which is where every
+-- fixture here sits. **A 'Display' says which node binds each variable**, and
+-- since `~qh8vw` the drawer reads that: a 'bound' body is what keeps a binder
+-- on the screen, and a 'global' body is what turns it into an arrow.
+bound :: String -> Display
+bound name = at (AVariable name (Just (Address [])))
+
+-- | @(y : A) -> y@ — a function type whose binder is mentioned, so it draws
+-- with the binder. **It has to be the dependent one**: these cases ask where
+-- the brackets go, and a non-dependent Π has no brackets of its own to put
+-- them around (`~qh8vw`), so the arrow form is tested separately in
+-- 'arrowCases'.
 pity :: Display
-pity = at (AFunction (Binding "y" (global "A")) (global "B"))
+pity = at (AFunction (Binding "y" (global "A")) (bound "y"))
+
+-- | @A -> B@ — the same node with a body that mentions nothing.
+arrowy :: Display
+arrowy = at (AFunction (Binding "y" (global "A")) (global "B"))
 
 -- | @z = v : A . z@
 lett :: Display
@@ -184,6 +199,7 @@ drawingTests =
     [ testGroup "an argument is bracketed when it extends to the right" argumentCases
     , testGroup "so is a function position, which is `~r3fp9`" functionCases
     , testGroup "and a spine head is not" spineCases
+    , testGroup "a binder nothing mentions draws as an arrow, `~qh8vw`" arrowCases
     , testGroup "the engine's own lines, drawn" engineCases
     , testGroup "a value in an env pane" valueCases
     , testGroup "the second column's rows, decided" paneRowCases
@@ -985,12 +1001,48 @@ paneDrawCases =
         (drawLine (paneRowWidget (Detail "examples/Stlc01Syntax.thena")))
   ]
 
+-- | **`~qh8vw`.** Whether a function type prints as @A -> B@ or as
+-- @(y : A) -> B@ is the editor's call and nothing in the engine decides it:
+-- 'Thena.View.Core.AFunction' says /"whether it prints as an arrow is the
+-- editor's ... occurrences carry their binder, so the editor can see it
+-- without being told"/. We never asked, so every argument drew its binder --
+-- and an argument the statement never named carries the word the engine mints
+-- for a nameless binder, so the goals pane read
+-- @(T : Type\8320) -> (_ : T) -> (_1 : T) -> T@ where the repl pane beside it
+-- read @\8704 (T : Type\8320) -> T -> T -> T@.
+--
+-- **The reference is 'Thena.Render', `~kq45n`**, and the walk is the one
+-- @test\/Thena\/View\/Redraw.hs@ demonstrates on the engine's side.
+arrowCases :: [TestTree]
+arrowCases =
+  [ eq "a binder nothing mentions is not drawn" "A -> B" (AFunction (Binding "y" (global "A")) (global "B"))
+  , eq "a binder that is mentioned is drawn" "(y : A) -> y" (AFunction (Binding "y" (global "A")) (bound "y"))
+  , -- The domain is drawn at the application rung, exactly as 'Thena.Render'
+    -- draws it, so an arrow standing in a domain is bracketed and one standing
+    -- in a codomain is not. Getting this wrong reads as a different type.
+    eq "an arrow in the domain is bracketed" "(A -> B) -> C"
+      (AFunction (Binding "y" arrowy) (global "C"))
+  , eq "and one in the codomain is not" "A -> B -> C"
+      (AFunction (Binding "y" (global "A")) (at (AFunction (Binding "z" (global "B")) (global "C"))))
+  , -- **The binder stays when the subtree was elided**, because the budget
+    -- stopped before whatever mentions it: an arrow here would assert the name
+    -- is unused, which is the one thing the tree cannot say.
+    eq "an elided body keeps the binder" "(y : A) -> \8230"
+      (AFunction (Binding "y" (global "A")) (at AnElision))
+  , -- A mention inside a nested binder's *type* counts. @(y : A) -> (p : F y)
+    -- -> B@ names @y@ nowhere else, and the arrow form would take away the
+    -- word the reader has to write.
+    eq "a mention in a nested binding's type counts" "(y : A) -> F y -> B"
+      (AFunction (Binding "y" (global "A"))
+        (at (AFunction (Binding "p" (at (AnApplication (global "F") (bound "y")))) (global "B"))))
+  ]
+
 -- | The argument side is the rung every drawer gets right, so these are the
 -- control: if one of them fails the ladder is upside down.
 argumentCases :: [TestTree]
 argumentCases =
   [ eq "a lambda" "f (\\x : A . x)" (app (global "f") lam)
-  , eq "a function type" "f ((y : A) -> B)" (app (global "f") pity)
+  , eq "a function type" "f ((y : A) -> y)" (app (global "f") pity)
   , eq "a let" "f (z = v : A . z)" (app (global "f") lett)
   , eq "a saturated former" "f (cons n a as)" (app (global "f") former)
   , eq "an elimination" "f (elim Nat () P (step) () tgt)" (app (global "f") elimination)
@@ -1008,7 +1060,7 @@ functionCases :: [TestTree]
 functionCases =
   [ eq "an elimination" "(elim Nat () P (step) () tgt) a" (app elimination (var "a"))
   , eq "a lambda" "(\\x : A . x) a" (app lam (var "a"))
-  , eq "a function type" "((y : A) -> B) a" (app pity (var "a"))
+  , eq "a function type" "((y : A) -> y) a" (app pity (var "a"))
   , eq "a let" "(z = v : A . z) a" (app lett (var "a"))
   ]
 

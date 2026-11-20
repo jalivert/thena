@@ -233,10 +233,14 @@ displayPieces :: Fold -> Display -> [Piece]
 displayPieces fold = renderAt fold AtTop
 
 renderAt :: Fold -> Prec -> Display -> [Piece]
-renderAt fold prec (Display _at shape) = renderShape fold prec shape
+renderAt fold prec (Display at shape) = renderShape fold prec at shape
 
-renderShape :: Fold -> Prec -> Shape -> [Piece]
-renderShape fold prec shape = case shape of
+-- | Draw one node. **The 'Address' is the node's own**, which 'AFunction'
+-- needs and no other case does: whether a \(\Pi\) prints as an arrow is
+-- whether its binder occurs, and an occurrence names the node that binds it,
+-- so the question is answerable exactly here.
+renderShape :: Fold -> Prec -> Address -> Shape -> [Piece]
+renderShape fold prec at shape = case shape of
   AVariable name _ -> plain name
   AGlobal name levels -> plain (name <> levelArgs levels)
   AUniverse lvl -> plain lvl
@@ -247,10 +251,24 @@ renderShape fold prec shape = case shape of
   -- drew as @elim … tgt arg@ and the core grammar refuses that outright.
   AnApplication f a ->
     parensIf (prec > AtApp) (renderAt fold AtApp f <> plain " " <> renderAt fold AtAtom a)
-  AFunction b body ->
-    parensIf (prec > AtTop) $
-      plain ("(" <> bindingName b <> " : ") <> renderAt fold AtTop (bindingType b)
-        <> plain ") -> " <> renderAt fold AtTop body
+  -- **A function type whose binder is never mentioned draws as an arrow** --
+  -- `~qh8vw`. 'Thena.View.Core.AFunction' says outright that this one is the
+  -- editor's -- /"whether it prints as an arrow is the editor's ... and
+  -- occurrences carry their binder, so the editor can see it without being
+  -- told"/ -- and until now we never asked. Every argument drew its binder,
+  -- so an argument the statement never named drew the word the engine mints
+  -- for a nameless one: the goals pane read
+  -- @(T : Type\8320) -> (_ : T) -> (_1 : T) -> T@ beside a repl pane reading
+  -- @\8704 (T : Type\8320) -> T -> T -> T@ for the same type. 'Thena.Render'
+  -- is the reference (`~kq45n`) and it collapses this case.
+  AFunction b body
+    | mayMention at body ->
+        parensIf (prec > AtTop) $
+          plain ("(" <> bindingName b <> " : ") <> renderAt fold AtTop (bindingType b)
+            <> plain ") -> " <> renderAt fold AtTop body
+    | otherwise ->
+        parensIf (prec > AtTop) $
+          renderAt fold AtApp (bindingType b) <> plain " -> " <> renderAt fold AtTop body
   AnAbstraction b body ->
     parensIf (prec > AtTop) $
       plain ("\\" <> bindingName b <> " : ") <> renderAt fold AtTop (bindingType b)
@@ -325,6 +343,48 @@ levelArgs :: [String] -> String
 levelArgs [] = ""
 levelArgs ls = " {" <> unwords ls <> "}"
 
+-- | May the binder standing at this address be mentioned anywhere in this
+-- subtree?
+--
+-- **Every occurrence carries the address of the node that binds it**
+-- ('Thena.View.Core.AVariable'), so this is a search for one address and not a
+-- scope computation: nothing here has to know how binding works, and a
+-- shadowing inner binder is a different node with a different address.
+--
+-- **It descends through a binding's type as well as its body**, because
+-- @(A : Type\8320) -> (p : F A) -> B@ mentions @A@ in a type and nowhere else;
+-- an arrow there would take away the name the reader has to write.
+--
+-- **An 'AnElision' answers 'True', and that is the whole reason this is /may/
+-- rather than /does/.** The budget stopped there, so the occurrence may be
+-- inside what was not built; drawing the binder over a subtree we cannot see
+-- shows a name that is in scope, where the arrow would assert it is unused.
+mayMention :: Address -> Display -> Bool
+mayMention binder = go
+  where
+    go (Display _ shape) = case shape of
+      AVariable _ a -> a == Just binder
+      AGlobal {} -> False
+      AUniverse {} -> False
+      ALiteral {} -> False
+      AnApplication f a -> go f || go a
+      AFunction b body -> go (bindingType b) || go body
+      AnAbstraction b body -> go (bindingType b) || go body
+      ALet b val body -> go (bindingType b) || go val || go body
+      AFormer _ _ args -> any go args
+      AnElimination _ _ params motive methods indices target ->
+        any go params || go motive || any go methods || any go indices || go target
+      ATrusted claimed actual body -> go claimed || go actual || go body
+      ADangling {} -> False
+      AnElision -> True
+      ARegion d -> go d
+      AnObjectTerm _ _ items -> any item items
+      AToken {} -> False
+    item it = case it of
+      ObjectText {} -> False
+      ObjectToken d -> go d
+      ObjectChild _ d -> go d
+
 -- | 'ARegion' always wraps an 'AnObjectTerm' — the fold decision is made
 -- once, here, and handed down to every item inside as the `expanded` flag,
 -- so a nested inline child never re-derives it.
@@ -334,7 +394,7 @@ renderRegion fold (Display at shape) = case shape of
     | expanded  -> plain (lang <> "`") <> body <> plain "`"
     | otherwise -> inAttr foldAttr body
     where body = objectBody fold expanded items
-  other -> renderShape fold AtTop other
+  other -> renderShape fold AtTop at other
   where
     expanded = expandedAt fold at
 
