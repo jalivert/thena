@@ -146,8 +146,8 @@ path
 context
   m : Nat
   b : Below (succ m) (fz m)
-  bzMethod : ∀ (m : Nat) (q : Eq {0} Nat (succ m) (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) ((succ m) (succ m†)) q) (fz m)) (fz m†) -> Nat
-  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (∀ (q : Eq {0} Nat m (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) (m (succ m†)) q) j) (fz m†) -> Nat) -> ∀ (q : Eq {0} Nat (succ m) (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) ((succ m) (succ m†)) q) (fs m j)) (fz m†) -> Nat
+  bzMethod : ∀ (m : Nat) (q : Eq {0} Nat (succ m) (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) ((succ m) (succ m†)) q) (fz m)) (fz m†) -> Nat
+  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (∀ (q : Eq {0} Nat m (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) (m (succ m†)) q) j) (fz m†) -> Nat) -> ∀ (q : Eq {0} Nat (succ m) (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) ((succ m) (succ m†)) q) (fs m j)) (fz m†) -> Nat
 type
   Nat
 thena spine> :abandon

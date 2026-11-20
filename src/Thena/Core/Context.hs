@@ -8,6 +8,9 @@ module Thena.Core.Context
   , entryIdent
   , entryType
   , writableIn
+  , writableAmong
+  , writableRun
+  , writableRunAmong
   , freeIn
   , freshIdent
   , wordReaches
@@ -102,9 +105,47 @@ entryIdent e = case e of
 -- word the system supplied, and a caller that cannot tell the two apart must
 -- not ask it.
 writableIn :: Context -> Ident -> Ident
-writableIn ctx i
-  | i == anonymousIdent = freshIdent (map entryIdent ctx) (Ident "x")
-  | otherwise           = freeIn ctx i
+writableIn ctx = writableAmong (map entryIdent ctx)
+
+-- | 'writableIn' asked of the words in scope rather than of a context, for a
+-- binder that stands inside a term the system is building and so has binders
+-- of its own above it as well as the context's.
+--
+-- The rule is written once here and 'writableIn' is this with a context's
+-- words; 'Thena.Core.Term.freeAmong' is the same question without the word
+-- invented for a nameless binder.
+writableAmong :: [Ident] -> Ident -> Ident
+writableAmong taken i
+  | i == anonymousIdent = freshIdent taken (Ident "x")
+  | otherwise           = freeAmong taken i
+
+-- | A telescope of words the system is minting, each made writable among this
+-- context /and the ones the run has already placed outside it/ — innermost
+-- last, in the order the term binds them.
+--
+-- **This is what a tactic needs and 'writableIn' alone is not** (MS12 phase
+-- 333, @~44j68@): a tactic builds a motive that binds several words at once, so
+-- asking each of them of the context would let the second shadow the first. One
+-- walk over the telescope, threading what it has spent, is the whole of it —
+-- the same thing 'Thena.Core.Term.wordsMadeFree' does to a finished term, done
+-- where the words are minted because here the system's own binders are the only
+-- ones being asked about.
+--
+-- A repeated word is therefore numbered: @q@, @q1@, @q2@ for three tied
+-- equations, which his ruling requires — nested binders sharing a word mean the
+-- outer ones are reachable by no word at all.
+writableRun :: Context -> [Ident] -> [Ident]
+writableRun ctx = writableRunAmong (map entryIdent ctx)
+
+-- | 'writableRun' asked of the words in scope rather than of a context, for a
+-- telescope that stands inside a term the system is building.
+writableRunAmong :: [Ident] -> [Ident] -> [Ident]
+writableRunAmong = go
+  where
+    go _     []       = []
+    go taken (i : is) =
+      let i' = writableAmong taken i
+       in i' : go (taken ++ [i']) is
 
 -- | The word a binder already carries, made free in this context — and
 -- **nothing invented where there is no word.**

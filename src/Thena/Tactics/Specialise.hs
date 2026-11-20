@@ -74,7 +74,17 @@ module Thena.Tactics.Specialise
   ) where
 
 import Thena.Core.Context
-  (Context, Entry (..), entryIdent, entryType, entryVar, freeIn, lamOver, piOver)
+  ( Context
+  , Entry (..)
+  , entryIdent
+  , entryType
+  , entryVar
+  , freeIn
+  , lamOver
+  , piOver
+  , writableAmong
+  , writableRunAmong
+  )
 import Thena.Core.Level (Level, instantiateLevels, substLevel)
 import Thena.Core.Reduce (atLevels, whnf)
 import Thena.Core.Term
@@ -619,6 +629,12 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- each case below has to produce.
         prefix before e = delta ++ map entry (before ++ [e])
 
+        -- __The words in scope wherever a term this walk builds lands — MS12
+        -- phase 333, @~44j68@.__ Every term a transition shapes is wrapped in
+        -- @lamOver (prefix before e)@, so the ambient context and that
+        -- telescope are what a word minted inside it has to be free of.
+        wordsAt before e = map entryIdent (ctx ++ prefix before e)
+
         -- __deletion.__ The equation says nothing, so it is bound and ignored.
         deletion bfr e after n =
           let before = reverse bfr
@@ -639,7 +655,8 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                   { eliminated = emptiness
                   , levels     = [lv]
                   , parameters = []
-                  , motive     = Lam (Ident "impossible") (Global emptiness [lv])
+                  , motive     = Lam (writableAmong (wordsAt before e) (Ident "impossible"))
+                                     (Global emptiness [lv])
                                      (close v rest)
                   , methods    = []
                   , indices    = []
@@ -653,7 +670,8 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- claimed__, exactly as in @conflict@: this is the case the user
         -- correctly omitted, and what the user sees is that omitting it is
         -- accepted with nothing said.
-        refute bfr e after n dn path onLeft = case cycleProof dn path onLeft e n of
+        refute bfr e after n dn path onLeft =
+          case cycleProof (wordsAt (reverse bfr) e) dn path onLeft e n of
           Nothing -> go (e : bfr) after n
           Just (lv, absurd, n1) ->
             let before   = reverse bfr
@@ -663,7 +681,8 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                   { eliminated = emptiness
                   , levels     = [lv]
                   , parameters = []
-                  , motive     = Lam (Ident "impossible") (Global emptiness [lv])
+                  , motive     = Lam (writableAmong (wordsAt before e) (Ident "impossible"))
+                                     (Global emptiness [lv])
                                      (close v rest)
                   , methods    = []
                   , indices    = []
@@ -681,7 +700,8 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- transported along. 'pinnedApart' is the same transition reaching the
         -- same equations by another construction, and it declines outside the
         -- shapes it covers, where this is unchanged.
-        injection bfr e after n dn c = case conjuncts dn c e n of
+        injection bfr e after n dn c =
+          case conjuncts (wordsAt (reverse bfr) e) dn c e n of
           (Nothing, n1) -> go (e : bfr) after n1
           (Just (news, _), _)
             | chainStops news
@@ -718,7 +738,8 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- costs beyond this.
         crossing bfr e after n dn c = case backwards dn e of
           Nothing -> Nothing
-          Just (inv, (lv, i, lhs, rhs, law)) -> case conjuncts dn c e n of
+          Just (inv, (lv, i, lhs, rhs, law)) ->
+            case conjuncts (wordsAt (reverse bfr) e) dn c e n of
             (Just ([one], [prf]), n1) ->
               let before     = reverse bfr
                   qback      = inv (Free (eqnVar one))
@@ -726,7 +747,8 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                   t'         = substituting (eqnVar e) qback t
                   residueAt qq =
                     substituting (eqnVar e) qq (piOver (map entry after) t)
-                  (carry, n2) = transporting lv i lhs rhs law residueAt n1
+                  (carry, n2) = transporting (wordsAt before e) lv i lhs rhs law
+                                             residueAt n1
                in Just $ continue (before ++ [one] ++ after') t' n2 $ \g ->
                     lamOver (prefix before e)
                       (App carry
@@ -756,8 +778,10 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                     t'         = substituting (eqnVar e) qback t
                     residueAt qq =
                       substituting (eqnVar e) qq (piOver (map entry after) t)
-                    (carry, n2) = transporting lv i lhs rhs law residueAt n1
+                    (carry, n2) = transporting (wordsAt before e) lv i lhs rhs law
+                                               residueAt n1
                     (w, n3)     = fresh n2
+                    iChain      = writableAmong (wordsAt before e) (Ident "chain")
                  in Just $ continue (before ++ after') t' n3 $ \g ->
                       lamOver (prefix before e)
                         (App carry
@@ -765,7 +789,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                               { eliminated = truth
                               , levels     = [ul]
                               , parameters = []
-                              , motive     = Lam (Ident "chain") (unitType ul)
+                              , motive     = Lam iChain (unitType ul)
                                                (close w (residueAt (inv (Free w))))
                               , methods    = [ applyTo g (varsOf delta
                                                             ++ eqnVars before) ]
@@ -829,7 +853,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           case is of
             [i0] | length lefts == length args
                  , length rights == length args -> do
-              (news, ps, n1) <- components e d ls prm i0 cd
+              (news, ps, n1) <- components (wordsAt (reverse bfr) e) e d ls prm i0 cd
                                   (zip3 args lefts rights) 0 n
               let before = reverse bfr
               pure $ continue (before ++ news ++ after) t n1 $ \g ->
@@ -840,17 +864,19 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- One equation per argument, in argument order, each with the @cong@
         -- that proves it — and nothing at all for an argument whose two sides
         -- are already the same term.
-        components _ _ _ _ _ _ [] _ n = Just ([], [], n)
-        components e d ls prm i0 cd ((_, lft, rgt) : rest) pos n
+        components _ _ _ _ _ _ _ [] _ n = Just ([], [], n)
+        components taken e d ls prm i0 cd ((_, lft, rgt) : rest) pos n
           | whnf env ctx lft == whnf env ctx rgt =
-              components e d ls prm i0 cd rest (pos + 1) n
+              components taken e d ls prm i0 cd rest (pos + 1) n
           | otherwise = do
-              (f, tk, lvk, n1) <- accessorAt (ctx ++ delta) d ls prm i0 cd pos n
+              (f, tk, lvk, n1) <- accessorAt taken (ctx ++ delta) d ls prm i0 cd pos n
               let (v,  n2) = fresh n1
-                  (cg, n3) = congAt (eqnLevel e) (eqnCarrier e) (eqnLeft e)
+                  (cg, n3) = congAt taken (eqnLevel e) (eqnCarrier e) (eqnLeft e)
                                (eqnRight e) f tk lvk (Free (eqnVar e)) n2
-                  hyp = Eqn v (Ident "q") (equation lvk tk lft rgt) lvk tk lft rgt
-              (hs, cgs, n4) <- components e d ls prm i0 cd rest (pos + 1) n3
+                  iq  = writableAmong taken (Ident "q")
+                  hyp = Eqn v iq (equation lvk tk lft rgt) lvk tk lft rgt
+              (hs, cgs, n4) <- components (taken ++ [iq]) e d ls prm i0 cd rest
+                                          (pos + 1) n3
               pure (hyp : hs, cg : cgs, n4)
 
         -- __solution.__ The binder goes and everything to its right is
@@ -919,12 +945,13 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- rare one, in term size or in minted variables.
         built e onLeft x residueAt carries lvlCtx n
           | not carries =
-              let (co, n1) = coerce e onLeft (\z -> residueAt z (Free (eqnVar e))) n
+              let (co, n1) = coerce (map entryIdent lvlCtx) e onLeft
+                                    (\z -> residueAt z (Free (eqnVar e))) n
                in (Right co, n1)
           | otherwise = case sortOf env lvlCtx n (residueAt (Free x) (Free (eqnVar e))) of
               (Left te, _, n1) -> (Left (SpecialisedIllTyped te), n1)
               (Right l, _, n1) ->
-                let (co, n2) = coerceChained e onLeft x residueAt l n1
+                let (co, n2) = coerceChained (map entryIdent lvlCtx) e onLeft x residueAt l n1
                  in (Right co, n2)
 
         -- Solve the sub-problem, then shape this one's term out of its.
@@ -1037,7 +1064,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- discharges the constructors this index rules out and what moves the
     -- wanted argument into @Tₖ@; the whole thing is applied to @refl@, so at a
     -- constructor application it ι-reduces to that argument and nothing else.
-    accessorAt lvlCtx d ls prm i0 cd pos m0 = do
+    accessorAt taken lvlCtx d ls prm i0 cd pos m0 = do
       let args     = constructorArguments cd
           dn       = inductiveName d
           paramSub = zip (map entryVar (inductiveParameters d)) prm
@@ -1057,11 +1084,23 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
             (vx, n4) = fresh n3
             (vq, n5) = fresh n4
             famAt js = applyTo (Global dn ls) (prm ++ js)
-            motive   = Lam (Ident "i") ixTy (close vi
-                         (Lam (Ident "x") (famAt [Free vi]) (close vx
-                           (Pi (Ident "ie") (equation lvIx ixTy (Free vi) i0)
+
+            -- __The accessor's own argument and the motive's three words, each
+            -- free where it lands — MS12 phase 333, @~44j68@.__ The motive
+            -- stands inside the λ this answers with, so its words avoid that
+            -- one as well as the ambient ones.
+            iArg  = writableAmong taken (Ident "x")
+            under = taken ++ [iArg]
+            iIx   = writableAmong under (Ident "i")
+            iTgt  = writableAmong (under ++ [iIx]) (Ident "x")
+            iIeM  = writableAmong (under ++ [iIx, iTgt]) (Ident "ie")
+
+            motive   = Lam iIx ixTy (close vi
+                         (Lam iTgt (famAt [Free vi]) (close vx
+                           (Pi iIeM (equation lvIx ixTy (Free vi) i0)
                                (close vq tk)))))
-        (ms, n6) <- accessorMethods lvlCtx d ls prm i0 cd pos ek pin ixTy lvIx tk motive n5
+        (ms, n6) <- accessorMethods under lvlCtx d ls prm i0 cd pos ek pin ixTy lvIx tk
+                                    motive n5
         let (vz, n7) = fresh n6
             node = Eliminate
                      { eliminated = dn
@@ -1072,14 +1111,14 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                      , indices    = [i0]
                      , target     = Free vz
                      }
-        pure ( Lam (Ident "x") (famAt [i0])
+        pure ( Lam iArg (famAt [i0])
                  (close vz (App node (reflAt lvIx ixTy i0)))
              , tk, lvK, n7 )
 
     -- | One method per constructor: the wanted argument for the one being
     -- taken apart, and an @Empty@ elimination for every other, whose target
     -- index cannot be this one.
-    accessorMethods lvlCtx d ls prm i0 cd pos ek pin ixTy lvIx tk motive = walk cs
+    accessorMethods taken lvlCtx d ls prm i0 cd pos ek pin ixTy lvIx tk motive = walk cs
       where
         cs       = inductiveConstructors d
         dn       = inductiveName d
@@ -1101,40 +1140,58 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
 
         methodFor c' n = do
           tgt0 <- nth 0 (constructorIndices c')
-          let args'    = instantiated (constructorArguments c')
+          -- __Every word the method binds, free where it binds it — MS12 phase
+          -- 333, @~44j68@__, and in the order it binds them: the declaration's
+          -- own words for the arguments, then one @ih@ per recursive argument,
+          -- then the index equation.
+          let args0    = instantiated (constructorArguments c')
+              argWords = writableRunAmong taken (map entryIdent args0)
+              args'    = [ Hypothesis (entryVar a) i (entryType a)
+                         | (a, i) <- zip args0 argWords
+                         ]
+              inside   = taken ++ argWords
+              ihWords  = writableRunAmong inside
+                           (map (const (Ident "ih")) (recursive args'))
+              iIe      = writableAmong (inside ++ ihWords) (Ident "ie")
               tgt'     = inst tgt0
               (vq, n1) = fresh n
               ieTy     = equation lvIx ixTy tgt' i0
           (inner, n2) <-
             if constructorName c' == constructorName cd
-              then wanted args' (Free vq) n1
-              else unreachable tgt' (Free vq) n1
-          let (body, n3) = hypotheses args'
-                             (Lam (Ident "ie") ieTy (close vq inner)) n2
+              then wanted (inside ++ ihWords ++ [iIe]) args' (Free vq) n1
+              else unreachable (inside ++ ihWords ++ [iIe]) tgt' (Free vq) n1
+          let (body, n3) = hypotheses ihWords args'
+                             (Lam iIe ieTy (close vq inner)) n2
           pure (lamOver args' body, n3)
 
         -- One binder per recursive argument, in argument order and at this
         -- motive — the same reading "Thena.Global.Generate" makes, and nothing
         -- built here ever uses one.
-        hypotheses tel body = goH tel
+        hypotheses ihs tel body = goH (zip (recursive tel) ihs)
           where
-            goH []       m = (body, m)
-            goH (x : xs) m = case recursiveArgument dn np (entryType x) of
-              Nothing -> goH xs m
-              Just is ->
-                let (hv, m1)    = fresh m
-                    (below, m2) = goH xs m1
-                 in ( Lam (Ident "ih")
-                        (applyTo motive (is ++ [Free (entryVar x)]))
-                        (close hv below)
-                    , m2 )
+            goH []                  m = (body, m)
+            goH (((x, is), i) : rs) m =
+              let (hv, m1)    = fresh m
+                  (below, m2) = goH rs m1
+               in ( Lam i
+                      (applyTo motive (is ++ [Free (entryVar x)]))
+                      (close hv below)
+                  , m2 )
+
+        -- The recursive arguments of a telescope with the indices each stands
+        -- at, in argument order — one hypothesis is bound per entry.
+        recursive tel =
+          [ (x, is)
+          | x       <- tel
+          , Just is <- [recursiveArgument dn np (entryType x)]
+          ]
 
         -- The argument itself, moved into @Tₖ@ where its own type mentions an
         -- argument the index pins. The proof it moves along is read out of the
         -- index equation by the index type's own no-confusion, so it is
         -- @refl@ wherever the two indices are the same term — which is what
         -- makes the whole accessor compute.
-        wanted args' ie n = do
+        wanted taken' args' ie n = do
           ekArg <- nth pos args'
           let ekTy = inst (entryType ek)
           case [ x | x <- args', entryVar x `elem` freeVars ekTy ] of
@@ -1145,7 +1202,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
               drv         <- byIndex (entryVar x) tgt0 ie
               (lvX, n1)   <- levelOf (lvlCtx ++ args') (entryType x) n
               let residueAt z = substituting (entryVar x) z ekTy
-                  (carry, n2) = transporting lvX (entryType x)
+                  (carry, n2) = transporting taken' lvX (entryType x)
                                   (Free (entryVar x)) pinned drv residueAt n1
               pure (App carry (Free (entryVar ekArg)), n2)
             _   -> Nothing
@@ -1167,7 +1224,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
 
         -- This constructor's target index clashes with the carrier's at its
         -- head, so the index equation the method takes is absurd.
-        unreachable tgt' ie n = do
+        unreachable taken' tgt' ie n = do
           (g1, _, _) <- spineOf (whnf env ctx tgt')
           (g2, _, _) <- spineOf (whnf env ctx i0)
           if g1 == g2 then Nothing else do
@@ -1181,7 +1238,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                        { eliminated = emptiness
                        , levels     = [lv]
                        , parameters = []
-                       , motive     = Lam (Ident "impossible")
+                       , motive     = Lam (writableAmong taken' (Ident "impossible"))
                                         (Global emptiness [lv]) (close vz tk)
                        , methods    = []
                        , indices    = []
@@ -1199,23 +1256,24 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
 
     -- | @cong f q@ — the equation this one becomes under a function, built
     -- rather than named for 'andProject'\'s reason.
-    congAt lvE ity u v f tyR lvR prf n0' =
+    congAt taken lvE ity u v f tyR lvR prf n0' =
       ( Eliminate
           { eliminated = equality
           , levels     = [lvE]
           , parameters = [ity]
           , motive =
-              Lam (Ident "left") ity (close zl
-                (Lam (Ident "right") ity (close zr
-                  (Lam (Ident "q") (equation lvE ity (Free zl) (Free zr)) (close zq
+              Lam iLeft ity (close zl
+                (Lam iRight ity (close zr
+                  (Lam iQ (equation lvE ity (Free zl) (Free zr)) (close zq
                     (equation lvR tyR (App f (Free zl)) (App f (Free zr))))))))
-          , methods = [ Lam (Ident "same") ity (close za
+          , methods = [ Lam iSame ity (close za
                           (reflAt lvR tyR (App f (Free za)))) ]
           , indices = [u, v]
           , target  = prf
           }
       , n4 )
       where
+        (iLeft, iRight, iQ, _, iSame, _) = jWords taken
         (zl, n1) = fresh n0'
         (zr, n2) = fresh n1
         (zq, n3) = fresh n2
@@ -1352,9 +1410,9 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- hypotheses have to say; @tyP@ carries the /projection/, which is what the
     -- proof terms are actually typed at. They are destructured together, so a
     -- shape they disagree on is a decline rather than an ill-typed method.
-    conjuncts dn c e n = case (confusion dn e, confusionFamily dn e) of
+    conjuncts taken dn c e n = case (confusion dn e, confusionFamily dn e) of
       (Just (_, p), Just ty)
-        | Just _ <- lookupConstructor c env -> chain ty ty p n
+        | Just _ <- lookupConstructor c env -> chain taken ty ty p n
       _ -> (Nothing, n)
       where
         -- The chain, walked: one equation per constructor argument in argument
@@ -1364,7 +1422,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- of the @j@th is the @j@th equation with the earlier /projections/ in
         -- it — which is exactly what applying the earlier proofs to the
         -- sub-problem's Π type instantiates it to.
-        chain tyH tyP p n0' = case (linkOf env ctx tyH, linkOf env ctx tyP) of
+        chain taken' tyH tyP p n0' = case (linkOf env ctx tyH, linkOf env ctx tyP) of
           -- A nullary constructor, so @Unit@: there is no argument to state an
           -- equation about. __This is the bottom of the recursion and it is
           -- reachable__ — a blocked deletion is offered to injectivity (MS9
@@ -1373,29 +1431,29 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           (LinkUnit _, LinkUnit _) -> (Just ([], []), n0')
           (LinkLast, LinkLast) ->
             let (v, n1) = fresh n0'
-             in case eqnAt v tyH of
+             in case eqnAt taken' v tyH of
                   Nothing -> (Nothing, n1)
                   Just q  -> (Just ([q], [p]), n1)
           -- No later equation names this one's proof, so the generator held the
           -- pair in @And@ and the rest of the chain is independent of it.
           (LinkAnd _ aH bH, LinkAnd ls aP bP) ->
             let (v, n1) = fresh n0'
-                (l, n2) = andProject ls aP bP p True n1
-                (r, n3) = andProject ls aP bP p False n2
+                (l, n2) = andProject taken' ls aP bP p True n1
+                (r, n3) = andProject taken' ls aP bP p False n2
              in step v aH bH bP l r n3
           -- One does, so the pair is @DPair@ and the rest of the chain is a
           -- function of this equation's proof.
           (LinkPair _ aH bH, LinkPair ls aP bP) ->
             let (v,  n1) = fresh n0'
-                (hd, n2) = firstOf ls aP bP p n1
-                (tl, n3) = secondOf ls aP bP p n2
+                (hd, n2) = firstOf taken' ls aP bP p n1
+                (tl, n3) = secondOf taken' ls aP bP p n2
              in step v aH (App bH (Free v)) (App bP hd) hd tl n3
           _ -> (Nothing, n0')
           where
             -- This equation, bound at @v@, and then the rest of the chain.
-            step v aH restH restP prf rest n1 = case eqnAt v aH of
+            step v aH restH restP prf rest n1 = case eqnAt taken' v aH of
               Nothing -> (Nothing, n1)
-              Just q  -> case chain restH restP rest n1 of
+              Just q  -> case chain (taken' ++ [eqnIdent q]) restH restP rest n1 of
                 (Nothing, n2)       -> (Nothing, n2)
                 (Just (es, ps), n2) -> (Just (q : es, prf : ps), n2)
 
@@ -1410,9 +1468,9 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- was projected and nothing reduced on the way. 'reduceEqn' is what
     -- contracts the transports in the arguments, once a solution has supplied
     -- @refl@ for the proof they are along.
-    eqnAt v ty = case spineOf (whnf env ctx ty) of
+    eqnAt taken v ty = case spineOf (whnf env ctx ty) of
       Just (g, [l], [i, a, b]) | g == equalityName ->
-        Just (Eqn v (Ident "q") (equation l i a b) l i a b)
+        Just (Eqn v (writableAmong taken (Ident "q")) (equation l i a b) l i a b)
       _ -> Nothing
 
     -- ------------------------------------------------------------------
@@ -1481,7 +1539,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- come out of 'linkOf'; and the @Empty@ at the end is read rather than
     -- assumed, which is what makes a surprise a decline instead of an ill-typed
     -- method. 'conjuncts' strikes the same bargain one transition over.
-    cycleProof dn path onLeft e n0' = do
+    cycleProof taken dn path onLeft e n0' = do
       lem          <- cycleOf dn
       d            <- lookupInductive dn env
       def          <- lookupDefinition lem env
@@ -1493,11 +1551,11 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           big   | onLeft    = eqnRight e
                 | otherwise = eqnLeft e
           lemTy   = atLevels (definitionLevels def) ls (definitionType def)
-          (q, n1) = oriented e onLeft n0'
+          (q, n1) = oriented taken e onLeft n0'
       (chainTy, chainTm) <-
         applied lemTy (Global lem ls) (prm ++ is ++ [small] ++ is ++ [big])
       (tupleTy, tuple)  <- overChain small big q chainTy chainTm
-      (neTy, ne, n2)    <- search path tupleTy tuple n1
+      (neTy, ne, n2)    <- search taken path tupleTy tuple n1
       (emptyTy, absurd) <- overChain small big q neTy ne
       case spineOf (whnf env ctx emptyTy) of
         Just (g, [lv], []) | g == falsityName -> Just (lv, absurd, n2)
@@ -1506,26 +1564,26 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- The paper's search. @NotBelow‹D› x y@ is the tuple; each step takes its
     -- own conjunct, which is @NotBelowEq‹D› x aₖ@, and then __its sub-tuple
     -- half where the path goes on and its @≢@ half where it stops__.
-    search path ty p n = case path of
+    search taken path ty p n = case path of
       []              -> Nothing
       ((pos, m) : ks) -> do
-        (ty1, p1, n1) <- componentOf pos m ty p n
-        (ty2, p2, n2) <- half (not (null ks)) ty1 p1 n1
-        if null ks then Just (ty2, p2, n2) else search ks ty2 p2 n2
+        (ty1, p1, n1) <- componentOf taken pos m ty p n
+        (ty2, p2, n2) <- half taken (not (null ks)) ty1 p1 n1
+        if null ks then Just (ty2, p2, n2) else search taken ks ty2 p2 n2
 
     -- The @pos@th of @m@ conjuncts of a right-nested @And@. __@m@ is told rather
     -- than read__, for the reason 'Path' carries it.
-    componentOf pos m ty p n
+    componentOf taken pos m ty p n
       | m <= 1    = Just (ty, p, n)
-      | pos <= 0  = half True ty p n
+      | pos <= 0  = half taken True ty p n
       | otherwise = do
-          (ty', p', n1) <- half False ty p n
-          componentOf (pos - 1) (m - 1) ty' p' n1
+          (ty', p', n1) <- half taken False ty p n
+          componentOf taken (pos - 1) (m - 1) ty' p' n1
 
     -- One half of an @And@, with the type it leaves.
-    half wantLeft ty p n = case linkOf env ctx ty of
+    half taken wantLeft ty p n = case linkOf env ctx ty of
       LinkAnd ls a b ->
-        let (t, n1) = andProject ls a b p wantLeft n
+        let (t, n1) = andProject taken ls a b p wantLeft n
          in Just (if wantLeft then a else b, t, n1)
       _ -> Nothing
 
@@ -1573,23 +1631,24 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- @elim Eq (I) (λ l r q -> Eq I r l) ((λ a -> refl I a)) (u, v) q@, built
     -- rather than named for 'andProject'\'s reason: @sym@ is a prelude
     -- /definition/ and this module depends on the prelude's constructors alone.
-    oriented e onLeft n
+    oriented taken e onLeft n
       | onLeft    = (Free (eqnVar e), n)
       | otherwise =
           let ((zl, zr, zq), n1) = freshThree n
               (za, n2)           = fresh n1
               i  = eqnCarrier e
               lv = eqnLevel e
+              (iLeft, iRight, iQ, _, iSame, _) = jWords taken
            in ( Eliminate
                   { eliminated = equality
                   , levels     = [lv]
                   , parameters = [i]
                   , motive =
-                      Lam (Ident "left") i (close zl
-                        (Lam (Ident "right") i (close zr
-                          (Lam (Ident "q") (equation lv i (Free zl) (Free zr))
+                      Lam iLeft i (close zl
+                        (Lam iRight i (close zr
+                          (Lam iQ (equation lv i (Free zl) (Free zr))
                              (close zq (equation lv i (Free zr) (Free zl)))))))
-                  , methods = [ Lam (Ident "same") i
+                  , methods = [ Lam iSame i
                                   (close za (reflAt lv i (Free za))) ]
                   , indices = [eqnLeft e, eqnRight e]
                   , target  = Free (eqnVar e)
@@ -1609,7 +1668,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- the difference between @Eq I t x@ and @Eq I x t@: the domain is the
     -- residue at whichever side is /not/ the pattern variable, so that the
     -- motive at the equation's own two sides is always @residue t -> residue x@.
-    coerce e onLeft residueAt n0' =
+    coerce taken e onLeft residueAt n0' =
       ( Eliminate
           { eliminated = equality
           , levels     = [eqnLevel e]
@@ -1632,16 +1691,18 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         (from, to) | onLeft    = (zr, zl)
                    | otherwise = (zl, zr)
 
+        (iLeft, iRight, iQ, iAt, iSame, iAtSame) = jWords taken
+
         motiveTerm =
-          Lam (Ident "left") i (close zl
-            (Lam (Ident "right") i (close zr
-              (Lam (Ident "q") (equation (eqnLevel e) i (Free zl) (Free zr)) (close zq
-                (Pi (Ident "at") (residueAt (Free from))
+          Lam iLeft i (close zl
+            (Lam iRight i (close zr
+              (Lam iQ (equation (eqnLevel e) i (Free zl) (Free zr)) (close zq
+                (Pi iAt (residueAt (Free from))
                     (close zf (residueAt (Free to)))))))))
 
         methodTerm =
-          Lam (Ident "same") i (close za
-            (Lam (Ident "at") (residueAt (Free za)) (close zb (Free zb))))
+          Lam iSame i (close za
+            (Lam iAtSame (residueAt (Free za)) (close zb (Free zb))))
 
     -- @elim Eq (I) (λ x y w -> Φ x -> Φ y) ((λ z at -> at)) (a, b) prf@ — J over an
     -- equation this module holds as a /term/ rather than as a binder, which is
@@ -1651,25 +1712,26 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     --
     -- Non-dependent in the proof, as 'coerce' is: nothing either caller carries
     -- mentions it.
-    transporting lv i a b prf residueAt n0' =
+    transporting taken lv i a b prf residueAt n0' =
       ( Eliminate
           { eliminated = equality
           , levels     = [lv]
           , parameters = [i]
           , motive =
-              Lam (Ident "left") i (close zl
-                (Lam (Ident "right") i (close zr
-                  (Lam (Ident "q") (equation lv i (Free zl) (Free zr)) (close zq
-                    (Pi (Ident "at") (residueAt (Free zl))
+              Lam iLeft i (close zl
+                (Lam iRight i (close zr
+                  (Lam iQ (equation lv i (Free zl) (Free zr)) (close zq
+                    (Pi iAt (residueAt (Free zl))
                         (close zf (residueAt (Free zr)))))))))
-          , methods = [ Lam (Ident "same") i (close za
-                          (Lam (Ident "at") (residueAt (Free za))
+          , methods = [ Lam iSame i (close za
+                          (Lam iAtSame (residueAt (Free za))
                                (close zb (Free zb)))) ]
           , indices = [a, b]
           , target  = prf
           }
       , n6 )
       where
+        (iLeft, iRight, iQ, iAt, iSame, iAtSame) = jWords taken
         (zl, n1) = fresh n0'
         (zr, n2) = fresh n1
         (zq, n3) = fresh n2
@@ -1685,20 +1747,23 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- __The levels are the pair's own, read off the chain__ rather than assumed
     -- to be the datatype's: the generator states every equation at one level
     -- today, and nothing here has to know that.
-    andProject ls a b q wantLeft n0' =
+    andProject taken ls a b q wantLeft n0' =
       ( Eliminate
           { eliminated = conjunction
           , levels     = ls
           , parameters = [a, b]
-          , motive     = Lam (Ident "p") pair (close pv (if wantLeft then a else b))
-          , methods    = [ Lam (Ident "l") a (close av
-                             (Lam (Ident "r") b
+          , motive     = Lam iP pair (close pv (if wantLeft then a else b))
+          , methods    = [ Lam iL a (close av
+                             (Lam iR b
                                 (close bv (Free (if wantLeft then av else bv))))) ]
           , indices    = []
           , target     = q
           }
       , n3 )
       where
+        iP       = writableAmong taken (Ident "p")
+        iL       = writableAmong taken (Ident "l")
+        iR       = writableAmong (taken ++ [iL]) (Ident "r")
         pair     = foldl App (Global conjunction ls) [a, b]
         (pv, n1) = fresh n0'
         (av, n2) = fresh n1
@@ -1709,36 +1774,38 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- @λ p -> B (fst p)@ for the second, which is the rest of the chain at that
     -- proof. 'andProject'\'s reason for building rather than naming them: @fst@
     -- and @snd@ are prelude /definitions/.
-    firstOf ls a b p n0' =
+    firstOf taken ls a b p n0' =
       ( Eliminate
           { eliminated = dependentPair
           , levels     = ls
           , parameters = [a, b]
-          , motive     = Lam (Ident "p") (pairOf ls a b) (close zv a)
-          , methods    = [ Lam (Ident "x") a (close xv
-                             (Lam (Ident "y") (App b (Free xv))
+          , motive     = Lam iP (pairOf ls a b) (close zv a)
+          , methods    = [ Lam iX a (close xv
+                             (Lam iY (App b (Free xv))
                                 (close yv (Free xv)))) ]
           , indices    = []
           , target     = p
           }
       , n3 )
       where
+        (iP, iX, iY) = pairWords taken
         (zv, n1) = fresh n0'
         (xv, n2) = fresh n1
         (yv, n3) = fresh n2
 
-    secondOf ls a b p n0' =
+    secondOf taken ls a b p n0' =
       let (zv, n1)  = fresh n0'
-          (fp, n2)  = firstOf ls a b (Free zv) n1
+          (fp, n2)  = firstOf (taken ++ [iP]) ls a b (Free zv) n1
           (xv, n3)  = fresh n2
           (yv, n4)  = fresh n3
+          (iP, iX, iY) = pairWords taken
        in ( Eliminate
               { eliminated = dependentPair
               , levels     = ls
               , parameters = [a, b]
-              , motive     = Lam (Ident "p") (pairOf ls a b) (close zv (App b fp))
-              , methods    = [ Lam (Ident "x") a (close xv
-                                 (Lam (Ident "y") (App b (Free xv))
+              , motive     = Lam iP (pairOf ls a b) (close zv (App b fp))
+              , methods    = [ Lam iX a (close xv
+                                 (Lam iY (App b (Free xv))
                                     (close yv (Free yv)))) ]
               , indices    = []
               , target     = p
@@ -1746,6 +1813,14 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           , n4 )
 
     pairOf ls a b = foldl App (Global dependentPair ls) [a, b]
+
+    -- The three words a projection out of a pair binds, free where it lands
+    -- (@~44j68@) — the same question 'jWords' asks of a J.
+    pairWords taken =
+      let ip = writableAmong taken (Ident "p")
+          ix = writableAmong taken (Ident "x")
+          iy = writableAmong (taken ++ [ix]) (Ident "y")
+       in (ip, ix, iy)
 
     -- @Φ (fixed, refl) -> Φ (‹the binder›, its own proof)@, where @Φ z q@ is
     -- the residue at @z@ for the binder being removed and @q@ for this
@@ -1780,10 +1855,27 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- motive is @λ _ -> Type ℓ@, so @Φ (z, p)@ ι-contracts to the residue and
     -- the residue is not copied per occurrence. @ℓ@ is why 'built' reads the
     -- universe.
-    coerceChained e onLeft x residueAt lvl n0' = (carry, n9)
+    coerceChained taken e onLeft x residueAt lvl n0' = (carry, n9)
       where
         i  = eqnCarrier e
         lv = eqnLevel e
+
+        -- __Eleven words, each free where it lands — MS12 phase 333,
+        -- @~44j68@.__ The singleton's own @y@, @Φ@'s pair binders, and the two
+        -- Js; @jWords@ answers the Js, the rest are asked here in the order
+        -- they nest.
+        iY    = writableAmong taken (Ident "y")
+        iS    = writableAmong taken (Ident "s")
+        iP    = writableAmong (taken ++ [iS]) (Ident "p")
+        iZ    = writableAmong (taken ++ [iS]) (Ident "z")
+        iQ'   = writableAmong (taken ++ [iS, iZ]) (Ident "q")
+        iU    = writableAmong taken (Ident "u")
+        iV    = writableAmong (taken ++ [iU]) (Ident "v")
+        iW    = writableAmong (taken ++ [iU, iV]) (Ident "w")
+        iAtU  = writableAmong (taken ++ [iU, iV, iW]) (Ident "at")
+        iSame = writableAmong taken (Ident "same")
+        iAtS  = writableAmong (taken ++ [iSame]) (Ident "at")
+        (cLeft, cRight, cQ, _, cSame, _) = jWords taken
 
         -- The end that does not vary. A residual equation after this one is
         -- stated about a transport whose other index is this term, which is
@@ -1795,7 +1887,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- one 'coerce' reads.
         sideways z f | onLeft    = equation lv i z f
                      | otherwise = equation lv i f z
-        famOf f    = Lam (Ident "y") i (close yv (sideways (Free yv) f))
+        famOf f    = Lam iY i (close yv (sideways (Free yv) f))
         singOf f   = foldl App (Global dependentPair [lv, lv]) [i, famOf f]
         ptOf f z p = Canonical dependentPairMk [lv, lv] [i, famOf f, z, p]
 
@@ -1811,13 +1903,13 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
 
         -- @Φ@ as a function of the pair: @elim DPair (I, fam) (λ _ . Type ℓ)
         -- ((λ z p . residue)) () s@, under one λ so the residue is written once.
-        psi = Lam (Ident "s") sing (close sv (Eliminate
+        psi = Lam iS sing (close sv (Eliminate
                 { eliminated = dependentPair
                 , levels     = [lv, lv]
                 , parameters = [i, famOf fixed]
-                , motive     = Lam (Ident "p") sing (close mv (Universe lvl))
-                , methods    = [ Lam (Ident "z") i (close zv
-                                   (Lam (Ident "q") (sideways (Free zv) fixed) (close pv
+                , motive     = Lam iP sing (close mv (Universe lvl))
+                , methods    = [ Lam iZ i (close zv
+                                   (Lam iQ' (sideways (Free zv) fixed) (close pv
                                       (residueAt (Free zv) (Free pv))))) ]
                 , indices    = []
                 , target     = Free sv
@@ -1837,16 +1929,16 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           }
         (cl, cr, ce) = ca
         contractMotive =
-          Lam (Ident "left") i (close cl
-            (Lam (Ident "right") i (close cr
-              (Lam (Ident "q") (equation lv i (Free cl) (Free cr)) (close ce
+          Lam cLeft i (close cl
+            (Lam cRight i (close cr
+              (Lam cQ (equation lv i (Free cl) (Free cr)) (close ce
                 (let f  = if onLeft then Free cr else Free cl
                      vy = if onLeft then Free cl else Free cr
                   in equation lv (singOf f)
                        (ptOf f f (reflAt lv i f))
                        (ptOf f vy (Free ce))))))))
         contractMethod =
-          Lam (Ident "same") i (close cm
+          Lam cSame i (close cm
             (Canonical reflexivity [lv]
                [ singOf (Free cm)
                , ptOf (Free cm) (Free cm) (reflAt lv i (Free cm)) ]))
@@ -1862,16 +1954,35 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           { eliminated = equality
           , levels     = [lv]
           , parameters = [sing]
-          , motive     = Lam (Ident "u") sing (close tl
-              (Lam (Ident "v") sing (close tr
-                (Lam (Ident "w") (equation lv sing (Free tl) (Free tr)) (close tw
-                  (Pi (Ident "at") (App psi (Free tl))
+          , motive     = Lam iU sing (close tl
+              (Lam iV sing (close tr
+                (Lam iW (equation lv sing (Free tl) (Free tr)) (close tw
+                  (Pi iAtU (App psi (Free tl))
                       (close ta (App psi (Free tr)))))))))
-          , methods    = [ Lam (Ident "same") sing (close tz
-                             (Lam (Ident "at") (App psi (Free tz)) (close ta (Free ta)))) ]
+          , methods    = [ Lam iSame sing (close tz
+                             (Lam iAtS (App psi (Free tz)) (close ta (Free ta)))) ]
           , indices    = [ptFixed, ptBinder]
           , target     = contract
           }
+
+    -- __The words a J binds, each free where the elimination lands — MS12
+    -- phase 333, @~44j68@.__ Every J this module builds has the one shape —
+    -- motive @λ left right q -> at@, method @λ same at@ — so the question is
+    -- asked once here rather than at each of them: a theorem with a @q@ of its
+    -- own used to get a second @q@ inside the term it was proving, reachable by
+    -- no word at all, and @at@ shadowed an author's @at@ the same way.
+    --
+    -- Threaded by hand rather than by one pass over the finished term because a
+    -- residue embeds types the author wrote, whose binders are theirs to write
+    -- (his ruling of 2026-11-20, /THERE IS ONE NAME/).
+    jWords taken =
+      let l  = writableAmong taken (Ident "left")
+          r  = writableAmong (taken ++ [l]) (Ident "right")
+          q' = writableAmong (taken ++ [l, r]) (Ident "q")
+          a1 = writableAmong (taken ++ [l, r, q']) (Ident "at")
+          sm = writableAmong taken (Ident "same")
+          a2 = writableAmong (taken ++ [sm]) (Ident "at")
+       in (l, r, q', a1, sm, a2)
 
     -- @Eq {l} I a b@.
     equation l i a b = foldl App (Global equality [l]) [i, a, b]

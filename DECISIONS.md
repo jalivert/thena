@@ -7046,8 +7046,30 @@ Ladder.lemmata.noConfusion : ∀ (x : Nat) (x1 : Ladder x) (x' : Nat) (x'1 : Lad
 ```
 
 **So a generated lemma carries no marks** — a mark means a word reaches nothing,
-and nothing the system writes for you should be unreachable. Where you still meet
-one is a term built on top of what *you* wrote: a split's method, above.
+and nothing the system writes for you should be unreachable.
+
+**A term a tactic builds obeys it too**, which is where you are most likely to
+read one: the motive of the elimination `induction` writes, and every binder the
+machinery underneath it needs. The words there come from the datatype's own
+declaration, and they used to be copied in blind:
+
+```
+-- before, in a theorem whose own arguments are called x and target
+elim Vec {0} (N) (λ (_ : N) (target : Vec {0} N _) -> N) … (x) target
+-- now
+elim Vec {0} (N) (λ (x1 : N) (target1 : Vec {0} N x1) -> N) … (x) target
+```
+
+Two things changed in that line. The motive's first binder stands for `Vec`'s
+index, which the declaration left unnamed, so it was shown as `_` and now gets a
+word like any other unnamed argument; and `target` is numbered because the
+theorem has a `target` of its own two lines above it. **One word now means one
+thing in a term you are reading**, so a word you type inside a motive reaches
+what the screen says it reaches.
+
+**Where you still meet a mark is a word a tactic re-binds on purpose**: a split's
+method, above, and the arm of an induction, which re-binds the target under the
+word you gave it.
 
 ### A word that reaches nothing is marked, and nothing is renamed behind your back
 

@@ -464,7 +464,10 @@ friendlyTests =
     --     reach;
     --   * the generalised side is this method's own index carried there along
     --     the first equation, @q@ — one J, built as
-    --     "Thena.Tactics.Specialise"'s @coerce@ is.
+    --     "Thena.Tactics.Specialise"'s @coerce@ is. **Its own equation binder
+    --     is @q2@ and not @q@** since MS12 phase 333, @~44j68@: the motive
+    --     binds @q@ and @q1@ for the two tied indices, so a third @q@ here
+    --     would be reachable by no word at all.
     --
     -- @bsMethod@'s induction hypothesis carries the same chain at @m1@, which
     -- is what says the motive is right rather than just statable.
@@ -473,17 +476,24 @@ friendlyTests =
           (ctx, n1) = contextOf env n0
             [("m", "Nat"), ("b", "Below.Below (succ m) (fz m)")]
        in map (rendered ctx . thirdOf') (elimMethods (run "tiedDep" env ctx n1 "Nat" "b"))
-            @?= [ "∀ (m : Nat.Nat) (q : Eq.Eq {0} Nat.Nat (Nat.succ m) (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) ((Nat.succ m) (Nat.succ m†)) q) (Fin.fz m)) (Fin.fz m†) -> Nat.Nat"
-                , "∀ (m : Nat.Nat) (j : Fin.Fin m) -> Below.Below m j -> (∀ (q : Eq.Eq {0} Nat.Nat m (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) (m (Nat.succ m†)) q) j) (Fin.fz m†) -> Nat.Nat) -> ∀ (q : Eq.Eq {0} Nat.Nat (Nat.succ m) (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) ((Nat.succ m) (Nat.succ m†)) q) (Fin.fs m j)) (Fin.fz m†) -> Nat.Nat"
+            @?= [ "∀ (m : Nat.Nat) (q : Eq.Eq {0} Nat.Nat (Nat.succ m) (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) ((Nat.succ m) (Nat.succ m†)) q) (Fin.fz m)) (Fin.fz m†) -> Nat.Nat"
+                , "∀ (m : Nat.Nat) (j : Fin.Fin m) -> Below.Below m j -> (∀ (q : Eq.Eq {0} Nat.Nat m (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) (m (Nat.succ m†)) q) j) (Fin.fz m†) -> Nat.Nat) -> ∀ (q : Eq.Eq {0} Nat.Nat (Nat.succ m) (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) ((Nat.succ m) (Nat.succ m†)) q) (Fin.fs m j)) (Fin.fz m†) -> Nat.Nat"
                 ]
 
     -- The load-bearing artifact of phase 19, and the thing @check@ alone would
     -- not have caught: the motive's own telescope is dependent, and its second
     -- binder names /this motive's/ first binder rather than the one in the
     -- declaration, which is not in scope here at all.
+    --
+    -- **@n1@ and @i1@, not @n@ and @i@, since MS12 phase 333 (@~44j68@)**: the
+    -- datatype's own words for its indices are made free where the motive binds
+    -- them, and the context here has an @n@ and an @i@. That is also why the
+    -- generalised copy's reference reads @n1@ rather than the @n†@ it used to —
+    -- the motive's binder keeps a word instead of losing it to the copy, so
+    -- nothing is marked.
   , testCase "and the motive's telescope carries the dependency" $
       rendered (withMethods belowContext belowProbe) (elimTerm belowProbe)
-        @?= "(elim Below.Below () (λ (n : Nat.Nat) (i : Fin.Fin n) (target : Below.Below n i) -> ∀ (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat n† n -> Nat.Nat) (bzMethod bsMethod) (n i) b) n (Eq.refl {0} Nat.Nat n)"
+        @?= "(elim Below.Below () (λ (n1 : Nat.Nat) (i1 : Fin.Fin n1) (target : Below.Below n1 i1) -> ∀ (n : Nat.Nat) -> Eq.Eq {0} Nat.Nat n1 n -> Nat.Nat) (bzMethod bsMethod) (n i) b) n (Eq.refl {0} Nat.Nat n)"
 
     -- A 'Definition' has a value as well as a type, and abstracting the
     -- variable would leave the value behind. Conservative on purpose: tying it
