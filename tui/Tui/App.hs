@@ -2702,34 +2702,65 @@ liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 -- actually been taken from the strip, 'stUsageCounts' — ties still read
 -- alphabetically, since 'sortOn' is stable and every untouched candidate
 -- starts at the same count.
--- **A SOLE CANDIDATE IS SHOWN WITHOUT ASKING JEV, AND THAT IS HIS REPORT OF
--- 2026-11-21**: /"I run fresh session, I type @a@ I get the spinner and shortly
--- a suggestion, I type @t@ and get the spinner for moment but it stops soon and
--- suggestions are empty."/ Typing @at@ leaves the grammar offering exactly one
--- continuation, @attack@ — and 'fireJevForCurrentOffers' sends nothing when
--- fewer than two candidates are offered, so 'slateJevPicked' stayed at zero and
--- the one thing he could possibly type next was the one thing the pane would not
--- show him. Under a pty the log read @skip: only 1 candidate(s) offered@ while
--- the cells were blank.
+-- **WHAT ALREADY FITS ON SCREEN IS SHOWN WITHOUT ASKING JEV AT ALL — HIS
+-- RULING, 2026-11-21**: /"when fewer than 11 options are available, why call jev
+-- either?"/ Eleven is the grid's own size at his geometry, and the rule he gave
+-- is about *selection*: Jev is asked to choose which candidates get the cells,
+-- so where there are no more candidates than cells there is nothing to choose
+-- and nothing to ask.
 --
--- **Why showing it is not a loophole in /nothing but Jev's/.** That rule is
--- about a *choice*: it stops the grid from filling with the engine's own list in
--- Jev's order, cells at the bottom holding rows Jev gave two percent to. With one
--- candidate there is no choice to make and no order to put it in — the grammar is
--- saying that this is the only word that can continue the line. **Asking Jev to
--- choose from a set of one would cost a request and a round trip to be told what
--- was already certain**, and the API's own limit says a @choice@ is a question
--- about options in the plural.
+-- **His report that produced it, the same day**: /"I run fresh session, I type
+-- @a@ I get the spinner and shortly a suggestion, I type @t@ and get the spinner
+-- for moment but it stops soon and suggestions are empty."/ Typing @at@ leaves
+-- the grammar offering one continuation, @attack@; a ranking is not sent for a
+-- set of one, 'slateJevPicked' therefore stayed at zero, and the one word he
+-- could possibly type next was the one word the pane would not show. The log
+-- read @skip: only 1 candidate(s) offered@ with the cells blank.
 --
--- **It is the one row that reaches a cell unasked while Jev is on, so it is on
--- the record in `.claude/CLOSEOUT.md`** rather than only here, and his word
--- reverses it in one line.
+-- **Why this is not a loophole in /nothing but Jev's/.** That rule stops the
+-- grid filling with the engine's list in Jev's order, its bottom cells holding
+-- rows Jev gave two percent to — a *cut* nobody made. Here there is no cut: every
+-- candidate the line has is on screen, and no row is on a cell at the expense of
+-- another. Asking anyway would spend a request and a round trip to be told what
+-- was already certain.
+--
+-- **The threshold is the cells the frame has, not a constant** —
+-- 'stripCellsNow', the same function 'fireJevForCurrentOffers' decides by, so
+-- the pane cannot show an unasked row the request logic thinks was ranked. Ten
+-- at his geometry, three in a narrow window; a short strip offering seven cells
+-- for nine candidates still asks, because two of them cannot be shown and which
+-- two is exactly Jev's question.
+--
+-- **Unasked rows are ordered the way `~vkz67` orders them** — tokens before
+-- productions, most-used first within each — because that is already his ruling
+-- for rows no ranking has touched, and there is no second convention for the
+-- same situation.
 stripSlateOf :: St -> [OfferRow]
 stripSlateOf st
   | not (stripOpen (stStrip st)) = []
-  | not (stJevOn st) = usageOrdered (stUsageCounts st) (slateRows (stSlate st))
-  | [sole] <- slateRows (stSlate st) = [sole]
+  | not (stJevOn st) = ownOrder
+  | length (slateRows (stSlate st)) <= stripCellsNow st = ownOrder
   | otherwise = take (slateJevPicked (stSlate st)) (slateRows (stSlate st))
+  where
+    ownOrder = usageOrdered (stUsageCounts st) (slateRows (stSlate st))
+
+-- | **How many candidate cells the last frame drew, and 0 when the strip is
+-- not on screen** — the one number his /"why call jev either?"/ ruling is
+-- measured against, read by 'stripSlateOf' and by 'fireJevForCurrentOffers' so
+-- that what is shown unasked and what is not asked about are the same set.
+--
+-- **Closed means 0, which leaves the completion dropdown's ranking exactly as
+-- it was**: with no strip on screen every candidate list is longer than nothing,
+-- so a request goes out under the old condition alone (two candidates or more).
+--
+-- **It inherits `~ptg78`'s one frame of lag**, since the width comes from the
+-- last frame: immediately after the strip is dragged narrower, a list that now
+-- overflows can be drawn unasked for one frame. The screen is never wrong about
+-- what it drew, and the next keystroke asks.
+stripCellsNow :: St -> Int
+stripCellsNow st
+  | stripOpen (stStrip st) = maybe 0 gridSlots (stripGridFor st)
+  | otherwise = 0
 
 -- | **Tokens before productions, most-used first within each — his idea of
 -- 2026-11-21.** The split is read off the rows themselves ('isTokenRow')
@@ -6930,7 +6961,13 @@ fireJevForCurrentOffers = do
     Nothing -> skip "skip: no key loaded"
     Just jcfg
       | not onScreen -> skip "skip: neither the strip nor the dropdown is on screen"
-      | length offered >= 2 -> do
+      -- **Nothing is asked about a list that already fits the cells** — HIS
+      -- ruling, 2026-11-21, /"when fewer than 11 options are available, why
+      -- call jev either?"/ 'stripCellsNow' is the same count 'stripSlateOf'
+      -- draws by, so a list that is shown whole is never also a list a request
+      -- went out for. The two-candidate floor stays underneath it: with the
+      -- strip closed the cell count is 0 and this reads exactly as it did.
+      | length offered >= 2, length offered > stripCellsNow st -> do
         -- **The spinner is lit here too and not only in
         -- 'scheduleJevRanking'**, because the post-launch 'Tick' reaches this
         -- function without scheduling anything — the launch slate's own
@@ -6938,6 +6975,11 @@ fireJevForCurrentOffers = do
         -- title. `~swxcf`.
         beginJevWait
         fireJevRanking jcfg (activeSession st) (Text.pack (take col line)) offered
+      | length offered >= 2 ->
+        skip
+          ( "skip: " <> show (length offered) <> " candidate(s) all fit the grid's "
+              <> show (stripCellsNow st) <> " cell(s) — nothing to choose"
+          )
       | otherwise -> skip ("skip: only " <> show (length offered) <> " candidate(s) offered")
   where
     -- | **Every way of not sending a request puts the spinner out**, because
