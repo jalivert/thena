@@ -7,6 +7,7 @@ standard
   intro
   intro ‹n›
   intro ‹n›
+  rename ‹n›
   solve
   regret
   eliminate-core ‹t›
@@ -126,6 +127,7 @@ thena spine> :matches
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
+rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
 eliminate-generalising-core ‹t› : Core -> ()
 prove : ()
@@ -178,6 +180,7 @@ run-block ‹t› : Surface -> ()
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> attack
 thena spine> :matches
+rename ‹n› : Name -> ()
 solve : ()
 regret : ()
 prove : ()
@@ -270,6 +273,7 @@ thena spine> :matches
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
+rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
 eliminate-generalising-core ‹t› : Core -> ()
 prove : ()
@@ -324,6 +328,7 @@ thena spine> attack
 thena spine> :matches
 intro : ()
 intro ‹n› : Name -> ()
+rename ‹n› : Name -> ()
 solve : ()
 regret : ()
 prove : ()
@@ -384,6 +389,7 @@ thena spine> :matches
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
+rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
 eliminate-generalising-core ‹t› : Core -> ()
 prove : ()
@@ -443,6 +449,7 @@ thena spine> intro
 thena spine> :matches
 intro : ()
 intro ‹n› : Name -> ()
+rename ‹n› : Name -> ()
 solve : ()
 regret : ()
 prove : ()
@@ -497,6 +504,7 @@ thena spine> attack
 thena spine> :matches
 intro : ()
 intro ‹n› : Name -> ()
+rename ‹n› : Name -> ()
 solve : ()
 regret : ()
 prove : ()

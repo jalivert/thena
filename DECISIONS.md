@@ -4057,8 +4057,12 @@ links and a variable — a different development, printed identically.
 
 `claim`, `assume`, `define` and `quantify` take the identifier you give them and
 do not rename it, refuse it, or number it. Two components may carry the same
-name; `goto ‹name›` then takes the first, and what is printed is freshened for
-the screen only.
+name, and `goto ‹name›` then takes the first.
+
+**What is printed is no longer freshened for the screen**, which it was until
+2026-11-20: a binder whose word another binder has taken prints marked instead of
+renamed. *A word that reaches nothing is marked, and nothing is renamed behind your
+own back*, below, is that decision.
 
 This is what lets the surface language shadow. `\ x -> \ x -> x` and
 `let x = a in let x = b in x` mean what they mean in any other functional
@@ -7131,6 +7135,26 @@ own and everything pointing at it is pointing at the binder. Printing is the
 inverse of reading again for this term, which is what the repair is for. A
 position that is not a component binds nothing a word could reach, so `rename`
 there is refused rather than silently doing nothing.
+
+**A tactic that re-binds one of your words warns too, and that is deliberate.**
+Each arm of a split re-binds the target — and any index the split left friendly —
+under the word you wrote for it, so that writing that word inside the arm reaches
+the refined thing rather than the original argument. That costs the original its
+word exactly as your own second `intro "x"` would, so `induction-core` prints the
+warning once per word it re-bound:
+
+```
+induction-core core`n`
+subgoals: zeroMethod, succMethod
+subgoals: zeroCase
+subgoals: succCase
+warning: n shadows an outer binder of the same word, which no word reaches now
+         — walk up to that binder and rename it to give it one
+```
+
+**The warning is not narrowed to a word you typed yourself.** It reports what the
+development now looks like, whoever caused it, and the mark on the original binder
+is there either way.
 
 ## Building a frontend
 
