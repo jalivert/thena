@@ -693,7 +693,7 @@ paneRowCases =
       assertEqual ""
         [ Heading "modules" (Just 1)
         , Tap "m" "\x26A0\xFE0F m"
-        , Alert "\x2717 broken did not go in:"
+        , Alert "\x274C broken did not go in:"
         , Detail "  not in scope: nonesuch"
         , Detail "after is pending"
         , Detail "last is pending"
@@ -722,15 +722,15 @@ paneRowCases =
       assertEqual ""
         [ Heading "modules" (Just 4)
         , Tap "a" "\x26A0\xFE0F a"
-        , Alert "\x2717 one did not go in:"
+        , Alert "\x274C one did not go in:"
         , Detail "  not in scope: nonesuch"
         , Tap "b" "\x26A0\xFE0F b"
-        , Detail "\x22ef two is waiting for an answer:"
+        , Detail "\x22ef  two is waiting for an answer:"
         , Detail "  which one did you mean?"
         , Tap "c" "\x26A0\xFE0F c"
-        , Detail "\x22ef three ran out of fuel after 200 instructions"
+        , Detail "\x22ef  three ran out of fuel after 200 instructions"
         , Tap "d" "\x26A0\xFE0F d"
-        , Detail "\x2296 you abandoned four"
+        , Detail "\x2296  you abandoned four"
         ]
         (moduleRows
           [ (partial "a") { meOpen = True, meUnfinished = [("one", notInScope "nonesuch")] }
@@ -754,7 +754,7 @@ paneRowCases =
       assertEqual ""
         [ Heading "modules" (Just 1)
         , Tap "m" "\x26A0\xFE0F m"
-        , Alert "\x2717 t did not go in:"
+        , Alert "\x274C t did not go in:"
         , Detail "  expected a term"
         , Detail "    the word  3"
         ]
@@ -784,7 +784,7 @@ paneRowCases =
       assertEqual ""
         [ Heading "modules" (Just 1)
         , Tap "m" "\x26A0\xFE0F m"
-        , Alert "\x2717 t did not go in:"
+        , Alert "\x274C t did not go in:"
         , Detail "  that term has no type"
         , Detail "    because not in scope: nonesuch"
         ]
@@ -813,7 +813,7 @@ paneRowCases =
       assertEqual ""
         [ Heading "modules" (Just 1)
         , Tap "m" "\x26A0\xFE0F m"
-        , Alert "\x2717 t did not go in:"
+        , Alert "\x274C t did not go in:"
         , Detail "  not in scope: nonesuch"
         , Detail "  it said: trying the left branch"
         , Detail "  plus shadows Nat.plus"
@@ -907,7 +907,7 @@ paneRowCases =
         [ Heading "modules" (Just 2)
         , Entry "\x2705 top"
         , Tap "deep" "    \x26A0\xFE0F deep"
-        , Alert "    \x2717 broken did not go in:"
+        , Alert "    \x274C broken did not go in:"
         , Detail "      not in scope: nonesuch"
         , Detail "    after is pending"
         ]

@@ -80,7 +80,7 @@ data StopLine = StopLine
 -- disagree about which came first.
 stopLines :: String -> StopView -> [StopLine]
 stopLines what sv =
-  StopLine 0 (natureGlyph (stopViewNature sv) <> " " <> became what sv)
+  StopLine 0 (natureCell (stopViewNature sv) <> " " <> became what sv)
     : concatMap (whyLines 1) [stopViewWhy sv]
     <> [StopLine 1 ("it said: " <> oneLine m) | m <- stopViewSaid sv]
     <> [StopLine 1 (warningText w) | w <- stopViewWarned sv]
@@ -490,20 +490,54 @@ warningText w = case w of
         <> (if null prod then "" else ", production " <> prod)
         <> ": "
 
--- | The nature's glyph — **one column, and deliberately not an emoji**.
+-- | The nature's glyph.
 --
--- The ✅ ⚠️ ❌ a module's own row carries are emoji-presentation code points
--- that vty's built-in width table calls one column and a terminal spends two
--- on, which is why 'Tui.Panes.wideGlyphs' has to declare them (`~8ztt3`). These
--- four are plain symbols with no such disagreement, so nothing has to be
--- declared for them and a fold cannot shove the neighbouring pane's accent bar
--- sideways.
+-- **A fault is ❌, HIS instruction of 2026-11-20**, the same mark a module's
+-- own row carries when nothing of it went in — so one symbol means /broken/
+-- everywhere in the pane instead of two. It replaced ✗, which was this
+-- track's own pick and chosen for being one column.
+--
+-- **It is safe because it is already declared.** ❌ is U+274C, which
+-- 'Tui.Panes.wideGlyphs' has listed since `~8ztt3`: vty's built-in table calls
+-- an emoji-presentation code point one column where a terminal spends two, and
+-- an undeclared one shoves everything to its right — the neighbouring pane's
+-- accent bar included. Declared, it does not. **A new glyph here that is not in
+-- that list has to go in it.**
+--
+-- The other three are plain symbols that both reckonings call one column, so
+-- 'natureCell' is what lines them up beside the fault.
 natureGlyph :: Nature -> String
 natureGlyph n = case n of
-  Broken -> "\x2717"
+  Broken -> "\x274C"
   Stopped -> "\x22ef"
   NotTrusted -> "\x2298"
   GivenUp -> "\x2296"
+
+-- | The nature's glyph **in a two-column cell**, which is what the fold's first
+-- line is laid out from.
+--
+-- **Why a cell and not the glyph**: ❌ is two columns and the other three are
+-- one, so without the pad a fold holding both a broken declaration and a
+-- stopped one starts their sentences one column apart. Padding a /narrow/ glyph
+-- out to the width of a declared wide one is not the thing that failed in
+-- `~8ztt3` — that was padding an /undeclared/ wide glyph, where the terminal
+-- shoves the pad along with everything else and the shift survives.
+natureCell :: Nature -> String
+natureCell n = natureGlyph n <> replicate (2 - natureColumns n) ' '
+
+-- | How many columns a nature's glyph takes **once 'Tui.Panes.wideGlyphs' has
+-- been declared**, which "Tui.App" does before it makes a vty.
+--
+-- Stated here rather than measured with @safeWcwidth@ for the reason the
+-- drawing suite gives for @markColumns@: @safeWcwidth@ answers for a vty with
+-- no table installed and reports one for ❌, which is the state no running
+-- TUI is ever in.
+natureColumns :: Nature -> Int
+natureColumns n = case n of
+  Broken -> 2 -- ❌ U+274C, in 'Tui.Panes.wideGlyphs'
+  Stopped -> 1
+  NotTrusted -> 1
+  GivenUp -> 1
 
 -- | **Is this a fault?** The one question the pane's ink turns on: a fault's
 -- first line is ordinary ink and the other three natures stay in the fold's
