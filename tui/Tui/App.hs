@@ -4126,6 +4126,14 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
           let st' = st0 { stTheme = th }
           liftIO (saveConfig (configOf st'))
           appendTurn st' Nothing ["theme: " <> name]
+        -- | `~fn3d9`: an unknown theme used to fall through this guard and
+        -- reach the engine, which answered "no such command: :theme" — the
+        -- command exists, the argument doesn't. Matching the word itself
+        -- here names the actual choices, read off `themes` so they can't
+        -- drift from what `themeByName` accepts.
+        [":theme", name] ->
+          appendTurn st0 Nothing
+            ["no such theme: " <> name <> " — " <> intercalate ", " (map themeName themes)]
         [":fold", mode] | mode `elem` ["on", "off"] ->
           appendTurn st0 { stFoldOn = mode == "on" } Nothing ["fold: " <> mode]
         -- | **@:pane@ — which panes are on screen and where** — `~fxc89`.
@@ -4789,6 +4797,9 @@ scriptLocal st text = case words text of
     liftIO (saveConfig (configOf st'))
     put st'
     pure ("theme: " <> name)
+  -- | Same fix as the repl's clause, `~fn3d9` — see its haddock there.
+  [":theme", name] -> Just $
+    pure ("no such theme: " <> name <> " — " <> intercalate ", " (map themeName themes))
   [":fold", mode] | mode `elem` ["on", "off"] -> Just $ do
     put st { stFoldOn = mode == "on" }
     pure ("fold: " <> mode)
