@@ -5641,6 +5641,17 @@ openScriptFile st path upto = do
 -- **Opening a file, resuming a session and reloading are one code path at
 -- three speeds** — the design's own words, and this is where that is true
 -- rather than merely intended.
+--
+-- **The run is off the keypress, same as 'rerunTail' everywhere else —
+-- `~twdbp`'s own closeout note, finished rather than re-raised.** This used
+-- to be @liftIO (foldRun base runNow)@, blocking the whole call on the run:
+-- measured at 25.2s for `examples/Stlc08PreservationByTactics.thena.script`
+-- reloaded from line 10, frozen with no sign anything was happening — the
+-- identical shape `~twdbp` fixed for an edited line's tail, at a second call
+-- site that was out of scope for that round. The document appears at once,
+-- every line of @runNow@ dim, and the dimming turns normal line by line
+-- exactly as a tail re-run's already does; what used to be built inline below
+-- is now 'finish', run once 'rerunTail' has an answer.
 openDocument :: St -> Stored -> [String] -> Int -> String -> EventM Name St ()
 openDocument st stored texts upto said = do
   base <- case stScriptBase st of
@@ -5650,29 +5661,29 @@ openDocument st stored texts upto said = do
     Just s -> pure s
     Nothing -> fst <$> liftIO startingSession
   let (runNow, rest) = splitAt (max 0 (min upto (length texts))) texts
-  ran <- liftIO (foldRun base runNow)
-  let doc = ran ++ [ScriptLine t Nothing Nothing [] True | t <- rest]
-      caret = max 0 (length ran - 1)
-  put st
-    { stScriptMode = True
-    , stScriptBase = Just base
-    , stScript = doc
-    , stScriptPos = if null doc then Nothing else Just caret
-    , stScriptDraft = ""
-    , stScriptBar = Nothing
-    , stStored = Just stored
-    , stScriptNote =
-        Just
-          ( said <> " — " <> show (length doc) <> " lines, " <> show (length ran)
-              <> " run; Down runs the next"
-          )
-    , stInput = case nthOf caret doc of
-        Just sl -> E.editorText Input (Just 1) (Text.pack (slText sl))
-        Nothing -> emptyInput
-    }
-  closeDropdowns
-  followInput
-  persist
+      unrun = [ScriptLine t Nothing Nothing [] True | t <- rest]
+  put st { stScriptMode = True, stScriptBase = Just base, stStored = Just stored }
+  rerunTail 0 base runNow unrun $ \ran -> do
+    let doc = ran ++ unrun
+        caret = max 0 (length ran - 1)
+    st' <- get
+    put st'
+      { stScript = doc
+      , stScriptPos = if null doc then Nothing else Just caret
+      , stScriptDraft = ""
+      , stScriptBar = Nothing
+      , stScriptNote =
+          Just
+            ( said <> " — " <> show (length doc) <> " lines, " <> show (length ran)
+                <> " run; Down runs the next"
+            )
+      , stInput = case nthOf caret doc of
+          Just sl -> E.editorText Input (Just 1) (Text.pack (slText sl))
+          Nothing -> emptyInput
+      }
+    closeDropdowns
+    followInput
+    persist
 
 -- | **`:script resume ‹slug›` — take up a stored session where it was left** —
 -- `~22qjj`, and the reason the database stores a caret at all: resuming goes
