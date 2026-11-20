@@ -208,6 +208,7 @@ import Tui.Database
   ( Stored (..)
   , clockName
   , databaseDir
+  , forgetStored
   , freshStored
   , loadIndex
   , readTranscript
@@ -514,6 +515,20 @@ data Picker = Picker
     -- ^ an index into 'pkFor''s rows, always in range — 'pickerMove' clamps
     -- rather than wrapping, so Up at the top and Down at the bottom are
     -- no-ops and the highlight cannot be lost off either edge.
+  , pkArmed :: Bool
+    -- ^ **a forget has been asked for and the next one goes through** —
+    -- `~jkn2f`, and it is the shape 'stQuitArmed' already has for the other
+    -- irreversible thing in this TUI.
+    --
+    -- **Why a second press at all, when what he asked for was a shortcut.**
+    -- Forgetting a session deletes a transcript off the disc and nothing in
+    -- the TUI can bring it back — there is no undo for it the way there is
+    -- for a line. One keystroke, in a dialog reached by pressing Enter, would
+    -- let a mistyped key destroy a proof, so the gesture is the one key twice
+    -- and the foot says so between the presses.
+    --
+    -- **Any movement clears it**, which is what keeps the arming attached to
+    -- the row he read: arming on row 3 and then moving to row 4 arms nothing.
   }
 
 -- | **What a picker is picking** — one dialog, two lists.
@@ -2991,7 +3006,7 @@ renderPicker pk = Widget Fixed Fixed $ do
 -- columns going spare. Measured under a pty, 2026-11-12, before and after:
 -- @from examples\/Stlc08PreservationBy…@ against the whole path.
 pickerBox :: Int -> Picker -> Widget Name
-pickerBox avail pk@(Picker for selected) =
+pickerBox avail pk@(Picker for selected _) =
   withAttr (attrName "dropdown") $
     hLimit boxWidth $
       vBox
@@ -3016,7 +3031,7 @@ pickerBox avail pk@(Picker for selected) =
     cap = max 24 (avail - 2 - 2 * dropdownMarkerWidth)
     texts = map (capText cap) (pickerTexts for)
     titleText = pickerTitle for
-    keysText = pickerKeys for
+    keysText = pickerKeys pk
     handleText = pickerHandle pk
     boxWidth = maximum (0 : map length (texts <> [titleText, keysText, handleText])) + 2 * dropdownMarkerWidth
     visibleH = popupVisibleH (pickerCount pk)
@@ -3061,9 +3076,17 @@ pickerTitle (PickSession _) = "stored sessions in " <> databaseDir
 -- is looking at.
 pickerTitle (PickModel rows) = show (length rows) <> " models at openrouter"
 
-pickerKeys :: PickerFor -> String
-pickerKeys (PickSession _) = "↑↓ move · Enter resume · Esc cancel"
-pickerKeys (PickModel _) = "↑↓ move · Enter use this model · Esc cancel"
+-- | **The foot, and it is where an armed forget asks** — `~jkn2f`. The prompt
+-- names the session rather than saying /this one/, because the row it is about
+-- is one of nine and the foot is two lines below it.
+pickerKeys :: Picker -> String
+pickerKeys pk = case pkFor pk of
+  PickSession rows
+    | pkArmed pk
+    , Just stored <- listToMaybe (drop (pkSelected pk) rows) ->
+        "⌫ again to forget " <> stName stored <> " · any move cancels"
+    | otherwise -> "↑↓ move · Enter resume · ⌫ forget · Esc cancel"
+  PickModel _ -> "↑↓ move · Enter use this model · Esc cancel"
 
 -- | **The typed form of the row that is lit** — the same reasoning the
 -- session picker's own foot carries: the row does not show the handle
@@ -4032,14 +4055,29 @@ handlePickerEvent pk ev = case ev of
   MouseDown _ V.BScrollUp _ _       -> moveBy (-1)
   MouseDown _ V.BScrollDown _ _     -> moveBy 1
   VtyEvent (V.EvKey V.KEnter [])    -> pickerTake pk
+  -- | **Forget the session that is lit, and it takes the key twice** —
+  -- `~jkn2f`, his instruction of 2026-11-20. See 'pkArmed' for why twice.
+  --
+  -- **Both spellings of the key his keyboard has.** On a Mac the key marked
+  -- /delete/ sends a backspace and forward-delete is Fn+Delete, so binding
+  -- one of the two would have meant reaching for a modifier to delete a row
+  -- in a dialog that has nothing to type in. Nothing else here uses either.
+  VtyEvent (V.EvKey V.KBS [])       -> pickerForget pk
+  VtyEvent (V.EvKey V.KDel [])      -> pickerForget pk
   VtyEvent (V.EvKey V.KEsc [])      -> closePicker
   AppEvent _                        -> handleReplEvent ev
   _                                 -> pure ()
   where
     moveBy d = moveTo (pkSelected pk + d)
+    -- **A move disarms**, which is 'pkArmed''s own rule: the prompt in the
+    -- foot names a row, so it must not survive the highlight leaving it.
     moveTo i = do
       st <- get
-      put st { stPicker = Just pk { pkSelected = max 0 (min (pickerCount pk - 1) i) } }
+      put
+        st
+          { stPicker =
+              Just pk { pkSelected = max 0 (min (pickerCount pk - 1) i), pkArmed = False }
+          }
 
 closePicker :: EventM Name St ()
 closePicker = do
@@ -4065,7 +4103,7 @@ openSessionPicker st = do
     rows -> do
       sayEither st (storedCountSaid (length rows))
       st' <- get
-      put st' { stPicker = Just (Picker (PickSession rows) (length rows - 1)) }
+      put st' { stPicker = Just (Picker (PickSession rows) (length rows - 1) False) }
 
 -- | Enter on a row: the same path `:script resume ‹slug›` takes, from the
 -- entry in hand rather than from a handle that had to be matched — so the
@@ -4092,6 +4130,63 @@ pickerTake pk = case pkFor pk of
       said <- setModel st { stPicker = Nothing } (mdId m)
       st' <- get
       sayEither st' said
+
+-- | **⌫ on a row: forget that session, on the second press** — `~jkn2f`,
+-- his instruction of 2026-11-20: /"the :script sessions dialog needs a
+-- shortcut for deleting the selected session"/.
+--
+-- **The models list has nothing to forget**, so the key does nothing there: a
+-- model is OpenRouter's catalogue and not ours to delete.
+--
+-- **The dialog stays open on a forget**, because clearing out several stale
+-- sessions is the reason to want this, and re-opening the dialog between each
+-- would be the printed-listing workflow `~xf2hv` replaced. It closes when the
+-- list empties, which is 'openSessionPicker''s own rule — there is no dialog
+-- for nothing.
+--
+-- **The index is re-read afterwards rather than edited in hand**, the same
+-- reason 'openSessionPicker' re-reads it on every open: another TUI may have
+-- written since, and the rows under the highlight have to be the rows on disc.
+--
+-- **Forgetting the session the document is living in detaches it** rather
+-- than being refused. The lines on screen are untouched — they are in
+-- 'stScript' — and the next committed line starts a stored session of its
+-- own, which is exactly the state the TUI is in before the first commit. A
+-- refusal would have been the one case where the shortcut did not work, and
+-- for the session he is most likely to want gone.
+pickerForget :: Picker -> EventM Name St ()
+pickerForget pk = case pkFor pk of
+  PickModel _ -> pure ()
+  PickSession rows -> case listToMaybe (drop (pkSelected pk) rows) of
+    Nothing -> pure ()
+    Just stored
+      | not (pkArmed pk) -> do
+          st <- get
+          put st { stPicker = Just pk { pkArmed = True } }
+      | otherwise -> do
+          liftIO (forgetStored (stSlug stored))
+          left <- liftIO loadIndex
+          st <- get
+          let detached
+                | (stSlug <$> stStored st) == Just (stSlug stored) = st { stStored = Nothing }
+                | otherwise = st
+              picker' = case left of
+                [] -> Nothing
+                _ ->
+                  Just
+                    ( Picker
+                        (PickSession left)
+                        (max 0 (min (length left - 1) (pkSelected pk)))
+                        False
+                    )
+          sayEither detached { stPicker = picker' } (forgottenSaid stored (length left))
+
+-- | What a forget says in the transcript, so the dialog is not the only
+-- record of it — and the count, because the dialog closing is the only other
+-- sign that the last one has gone.
+forgottenSaid :: Stored -> Int -> String
+forgottenSaid stored 0 = "forgot " <> stName stored <> " — nothing is stored now"
+forgottenSaid stored n = "forgot " <> stName stored <> " — " <> show n <> " left"
 
 -- | **Says one line in whichever of the two places is on screen** — the
 -- repl's transcript, or live-script mode's pane foot. The picker is reachable
@@ -5179,7 +5274,7 @@ tuiHelpLines =
     , ("",                  "  with n, the last n of them. Ctrl+L is :clear 1")
     , ("",                  "  The session goes back with them, to where the turn now")
     , ("",                  "  last left it — so the panes and the transcript agree")
-    , (":script sessions",  "pick a stored session from a list and resume it")
+    , (":script sessions",  "pick a stored session from a list — Enter resumes it, ⌫ twice forgets it")
     , ("",                  "  ↑↓ move, Enter resumes, Esc cancels. In the bar too")
     , (":script resume ‹slug›", "the same, by handle, with no list to walk")
     , (":script [path]",    "live-script mode: the pane becomes an editable document")
@@ -5424,7 +5519,23 @@ enterScriptMode st = do
 -- simply not written.
 persist :: EventM Name St ()
 persist = do
-  st <- get
+  st0 <- get
+  -- | **A document with no entry mints one here** — `~jkn2f`. 'stStored' is
+  -- normally minted on the way into the mode ('enterScriptMode'), so the only
+  -- way to be in script mode with lines and no entry is to have forgotten the
+  -- live session in the picker. The next committed line then stores it again,
+  -- under a new name, which is what makes that forget a detach rather than a
+  -- document that silently stops being saved.
+  st <- case stStored st0 of
+    Just _ -> pure st0
+    Nothing
+      | null (stScript st0) -> pure st0
+      | otherwise -> do
+          index <- liftIO loadIndex
+          fresh <- liftIO (freshStored index Nothing)
+          let st' = st0 { stStored = Just fresh }
+          put st'
+          pure st'
   case stStored st of
     Nothing -> pure ()
     -- Nothing has been committed, so there is nothing to write — and no
@@ -7450,7 +7561,7 @@ openModelPicker st filt = case stModels st of
 showModels :: St -> Text -> [HintModel] -> EventM Name St ()
 showModels st filt ms = case matchingModels filt ms of
   [] -> sayEither st ("models: nothing at openrouter matches " <> show (Text.unpack filt))
-  rows -> put st { stPicker = Just (Picker (PickModel rows) 0) }
+  rows -> put st { stPicker = Just (Picker (PickModel rows) 0 False) }
 
 -- | **The label on the reply row, and the cue that a call went out** —
 -- `~w2tk2` slice 6. HIS, 2026-11-19: the label itself (/"a small label, like

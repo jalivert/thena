@@ -35,6 +35,7 @@ module Tui.Database
   , saveIndex
   , writeTranscript
   , readTranscript
+  , forgetStored
   , freshStored
   , clockStem
   , clockName
@@ -46,7 +47,7 @@ import Data.Char (isAlphaNum, toLower)
 import Data.List (isPrefixOf)
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Time (defaultTimeLocale, formatTime, getZonedTime)
-import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import System.FilePath ((<.>), (</>))
 import System.IO (readFile')
 
@@ -194,6 +195,28 @@ indexJson sessions =
                | not (null (stProofs s))
                ]
         )
+
+-- | **Forget one stored session: the index entry and the transcript file** —
+-- `~jkn2f`, his instruction of 2026-11-20 that the @:script sessions@ dialog
+-- needs a shortcut for deleting the session that is lit.
+--
+-- **Both halves or it is not forgotten.** The index entry alone would leave a
+-- transcript nothing can reach; the file alone would leave a row in the dialog
+-- whose Enter reports the transcript gone ('transcriptGoneSaid').
+--
+-- **It re-reads the index rather than being handed one**, the rule every other
+-- write here follows: two TUIs on one project are expected, and dropping one
+-- entry must not drop the other TUI's sessions along with it.
+--
+-- **Its trouble is swallowed like every other write's** — see this module's
+-- own header. A missing file is not an error: it is the state this function
+-- exists to reach.
+forgetStored :: String -> IO ()
+forgetStored slug = do
+  index <- loadIndex
+  saveIndex [s | s <- index, stSlug s /= slug]
+  _ <- try (removeFile (scriptPathFor slug)) :: IO (Either IOException ())
+  pure ()
 
 -- * The transcripts
 
