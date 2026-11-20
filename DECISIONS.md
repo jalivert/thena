@@ -7090,6 +7090,48 @@ interactively, and elaborating such a file would then have to rename for real �
 which means the words in your development would not be the words in your file.
 Lean 4 carries the same split and closes the same gap the same way.
 
+### You are told when a word you write kills a binder, and `rename` is the way back
+
+*Decided 2026-11-20.*
+
+**A line that takes a word an outer binder of the same chain carried warns.** The
+line still runs — shadowing is allowed — and the warning says what the word cost
+and the one act that undoes it:
+
+```
+:theorem plainer : ∀ (a : Type₀) -> ∀ (b : Type₀) -> b
+attack ; intro "x" ; intro "x"
+warning: x shadows an outer binder of the same word, which no word reaches now
+         — walk up to that binder and rename it to give it one
+```
+
+**Where something below still refers to the binder that died, the warning names
+it**, because that is the part you cannot see from where you are standing — and
+it states the cost, that the term stops reading back as itself:
+
+```
+:theorem shad : ∀ (a : Type₀) -> ∀ (b : Type₀) -> a
+attack ; intro "x" ; intro "x"
+warning: x shadows an outer binder of the same word, which no word reaches now,
+         and shad1 still refers to it — a reference to it prints marked until you
+         rename that binder
+  λ (x : Type₀) -> λ (x : Type₀) -> let ? shad1 : x† in shad1
+```
+
+**`rename` gives the binder at the focus a word.** It is an ordinary tactic over
+the five components, so you walk up to the dead binder and write it:
+
+```
+into ; rename "outer"
+  λ (outer : Type₀) -> λ (x : Type₀) -> let ? shad1 : outer in shad1
+```
+
+**The mark is gone and the reference followed**, because the word is the binder's
+own and everything pointing at it is pointing at the binder. Printing is the
+inverse of reading again for this term, which is what the repair is for. A
+position that is not a component binds nothing a word could reach, so `rename`
+there is refused rather than silently doing nothing.
+
 ## Building a frontend
 
 *Added 2026-09-24, MS7; rewritten 2026-09-27, when the decision below replaced a
