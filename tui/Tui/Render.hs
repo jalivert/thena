@@ -506,11 +506,12 @@ constraintPieces fold (ConstraintView _xi lhs rhs ty) =
 -- his first ask; it was already the string the development printed, and what
 -- changed underneath is that it now denotes something.
 --
--- **Three things are said beside the type, each the same way the development
+-- **Three things are said about a goal, each the same way the development
 -- pane says it**: @>@ marks the goal the cursor stands on ('developmentText''s
 -- own marker), @(guess)@ distinguishes a guess from a hole, and @(blocked)@ is
 -- 'linkPieces'\' suffix unchanged — something later still mentions it, which is
--- why @abandon@ would refuse.
+-- why @abandon@ would refuse. **Both tags follow the type** — his ruling of
+-- 2026-11-21, see 'goalPieces'.
 renderGoals :: Fold -> [GoalView] -> Widget n
 renderGoals _ [] = str " "
 renderGoals fold gs = vBox (map row gs)
@@ -524,16 +525,18 @@ renderGoals fold gs = vBox (map row gs)
 -- the screen and what Jev is told cannot drift — the same pairing
 -- 'linkPieces' and 'developmentText' already have.
 --
--- **@(guess)@ goes beside the word and not after the type**, because a type
--- wraps and a pane is thirty-odd columns wide: measured at his geometry, a
--- guess at @∀ (T : Type) -> T -> T@ pushed its own tag onto a third line, so
--- the one thing the row exists to say was the one thing off the first line.
--- @(blocked)@ stays at the end, where 'linkPieces' puts it.
+-- **Every tag sits after the type, @(guess)@ included** — his ruling of
+-- 2026-11-21, and his reason was alignment: the words up to the colon are then
+-- the same shape on every row, hole or guess. It replaces an earlier placement
+-- beside the word, taken because a wrapping type can push a trailing tag off
+-- the first line; he weighed that and preferred the column. The order is
+-- 'linkPieces'\' — what the goal *is* before what is standing in its way, as
+-- @(impure)@ comes before @(blocked)@ there.
 goalPieces :: Fold -> GoalView -> [Piece]
 goalPieces fold g =
-  plain ("? " <> goalViewVar g <> kind <> " : ")
+  plain ("? " <> goalViewVar g <> " : ")
     <> displayPieces fold (goalViewType g)
-    <> plain blocked
+    <> plain (kind <> blocked)
   where
     kind = case goalViewKind g of
       AHole -> ""

@@ -222,21 +222,29 @@ drawingTests =
 -- showed its inner hole and not the guess holding it. 'Thena.View.Goals' lists
 -- both and this asserts that both are drawn.
 --
--- **@(guess)@ is beside the word rather than after the type** — a pane is
--- thirty-odd columns and a type wraps, so a tag at the end of the row is the
--- part that falls off the first line. Asserted here at a width where nothing
--- wraps; where it breaks is the pty's question.
+-- **EVERY TAG FOLLOWS THE TYPE, @(guess)@ included — his ruling of
+-- 2026-11-21**, and the reason is alignment: @? id : @ is then the same width
+-- on a hole's row and a guess's, so the types line up under each other. The
+-- earlier placement beside the word is gone. Asserted here at a width where
+-- nothing wraps; where it breaks is the pty's question.
 goalRowCases :: [TestTree]
 goalRowCases =
   [ testCase "a guess and the hole inside it are both goals, the focused one marked" $
       assertEqual ""
-        [ "> ? id (guess) : A"
+        [ "> ? id : A (guess)"
         , "  ? id1 : A"
         ]
         (take 2 (drawToLines (renderGoals NoFold
                               [ goal "id" AGuess True False
                               , goal "id1" AHole False False
                               ])))
+  , -- | **A guess that is also blocked pins the order of the two tags** —
+    -- what the goal is, then what is standing in its way, which is
+    -- 'Tui.Render.linkPieces'\' own order for @(impure)@ and @(blocked)@.
+    testCase "a blocked guess says guess first, then blocked" $
+      assertEqual ""
+        ["  ? g : A (guess) (blocked)"]
+        (take 1 (drawToLines (renderGoals NoFold [goal "g" AGuess False True])))
   , -- | **@(blocked)@ is 'Tui.Render.linkPieces'\' own suffix, unchanged** —
     -- something later in the development still mentions the goal, which is what
     -- a pane needs in order to say why @abandon@ would refuse.
