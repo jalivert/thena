@@ -2702,7 +2702,7 @@ liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 -- actually been taken from the strip, 'stUsageCounts' — ties still read
 -- alphabetically, since 'sortOn' is stable and every untouched candidate
 -- starts at the same count.
--- **WHAT ALREADY FITS ON SCREEN IS SHOWN WITHOUT ASKING JEV AT ALL — HIS
+-- **WHAT ALREADY FITS ON SCREEN IS SHOWN WITHOUT ASKING JEV AT ALL — `~jtfx4`, HIS
 -- RULING, 2026-11-21**: /"when fewer than 11 options are available, why call jev
 -- either?"/ Eleven is the grid's own size at his geometry, and the rule he gave
 -- is about *selection*: Jev is asked to choose which candidates get the cells,
