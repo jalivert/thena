@@ -43,6 +43,28 @@ data Theme = Theme
                              -- accent here.
   , themeMatches :: V.Color -- ^ the matches pane's accent. Same provisional
                              -- status as 'themeChoices'.
+  , themeQuests  :: V.Color -- ^ **the proofs pane's accent** — `~b2pq5`. It
+                             -- had none at all until 2026-11-20: the pane is
+                             -- 'Tui.Layout.Quests' and the only one whose
+                             -- @edge.@/@title.@ attributes were missing, so
+                             -- it fell back to the bare panel surface while
+                             -- every neighbour carried a colour.
+                             --
+                             -- **Named for the constructor, not for the
+                             -- word on screen**, because 'themeProof' is
+                             -- already the proof-*term* pane's accent and
+                             -- @themeProofs@ beside @themeProof@ is one
+                             -- letter of difference between two different
+                             -- panes. 'Tui.Layout.paneName' is where
+                             -- @Quests@ becomes @proofs@, and the attribute
+                             -- names are built from that.
+                             --
+                             -- **A violet, in each theme's own family** — the
+                             -- one direction none of the other ten accents
+                             -- takes, so the pane reads as its own rather
+                             -- than as a second helping of a neighbour's.
+                             -- Provisional like 'themeChoices', his to
+                             -- retune.
   , themeSuggest :: V.Color -- ^ **the suggestion strip's accent** — `~w2tk2`
                              -- slice 1. An accent of its own and not the
                              -- repl's, even though the strip sits directly
@@ -151,6 +173,11 @@ neonPinkDark = Theme
   , themeOutput  = rgb 255 115 215
   , themeChoices = rgb 255 70 150
   , themeMatches = rgb 230 130 200
+  -- The one accent here that leans violet rather than pink: every other is
+  -- red-dominant (R at 230 or above), so a lower red with a raised blue is
+  -- the only free direction left in this family. 5.6:1 against the panel,
+  -- computed rather than eyeballed.
+  , themeQuests  = rgb 186 92 236
   -- The palest of the pink family, so a strip spanning the document's whole
   -- width reads as present rather than as a second repl accent shouting
   -- under the first.
@@ -197,6 +224,9 @@ gruyere = Theme
   , themeOutput  = rgb 255 110 150
   , themeChoices = rgb 140 180 255
   , themeMatches = rgb 255 220 140
+  -- A lavender, lighter and far less saturated than its deep violet goals
+  -- accent. 7.1:1 against the panel.
+  , themeQuests  = rgb 198 150 255
   -- Between its teal and its green, both already spoken for elsewhere.
   , themeSuggest = rgb 170 255 240
   , themeFold    = rgb 44 36 74
@@ -228,6 +258,10 @@ synthwave84 = Theme
   , themeOutput  = rgb 255 152 102
   , themeChoices = rgb 255 90 140
   , themeMatches = rgb 180 255 210
+  -- A saturated violet, which is what separates it from the soft purple of
+  -- this theme's globals and suggestion accents. 4.3:1 against the panel,
+  -- in line with its other accents on the same surface.
+  , themeQuests  = rgb 208 100 255
   -- Between its purple globals and its pink repl, and lighter than both.
   , themeSuggest = rgb 200 180 255
   , themeFold    = rgb 52 41 79

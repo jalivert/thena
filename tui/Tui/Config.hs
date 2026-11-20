@@ -73,7 +73,7 @@ data Config = Config
     -- as before.
   , cfgUsage      :: [(String, Int)]
     -- ^ **how many times each candidate has been taken from the strip by
-    -- its F-key** — his idea, 2026-11-21, feeding the Jev-off fallback's
+    -- its F-key** — his idea, 2026-11-20, feeding the Jev-off fallback's
     -- ordering. Same shape as 'cfgWidths': a list and not a total map, so a
     -- candidate never picked simply isn't here, and an old dotfile with no
     -- @usage=@ line reads as every count being zero.

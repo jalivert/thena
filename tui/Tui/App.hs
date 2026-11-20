@@ -827,7 +827,7 @@ data St = St
     -- from the one he gave.
   , stUsageCounts :: Map.Map String Int
     -- ^ **how many times each candidate has actually been taken from the
-    -- strip by its F-key** — his idea, 2026-11-21, for the Jev-off fallback:
+    -- strip by its F-key** — his idea, 2026-11-20, for the Jev-off fallback:
     -- /"an 'index' of the most common rules/commands used… stored either in
     -- the json config… so that this would serve as a sort of a likelihood
     -- heuristic."/ Keyed by 'usageKey', bumped in the one F-key clause that
@@ -943,7 +943,7 @@ data St = St
   , stJevWaiting :: Bool
     -- ^ **whether a ranking is on its way right now**, which is what the
     -- spinner beside the strip's title is drawn from — HIS instruction,
-    -- 2026-11-21, on `~swxcf`. True from the keystroke that schedules one
+    -- 2026-11-20, on `~swxcf`. True from the keystroke that schedules one
     -- (the debounce is part of the wait: the cells are already empty) until
     -- the answer lands, fails, or the request turns out not to be sent at
     -- all. **Only ever true when there is something to wait for** — with
@@ -1152,7 +1152,7 @@ data AppEvent
   | JevDue Int
   | JevRanked Int (Either String (Map.Map Text Double))
   -- | **One frame of the spinner beside the strip's title** — `~swxcf`, his
-  -- instruction of 2026-11-21. Posted by a thread that reschedules itself
+  -- instruction of 2026-11-20. Posted by a thread that reschedules itself
   -- for as long as 'stJevWaiting' holds, so an idle TUI wakes for nothing:
   -- there is no clock running when no ranking is out.
   | JevSpin
@@ -1449,11 +1449,19 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "edge.output",    surface (themePanel th) (themeOutput th))
   , (attrName "edge.choices",   surface (themePanel th) (themeChoices th))
   , (attrName "edge.matches",   surface (themePanel th) (themeMatches th))
+  -- | **The proofs pane, which had no accent of its own at all** — `~b2pq5`,
+  -- noticed while the choices and matches panes were being given theirs. Its
+  -- key is @proofs@ ('Tui.Layout.paneName' of 'Tui.Layout.Quests'), and with
+  -- no entry here both its edge and its title fell through to the plain
+  -- panel surface: measured under a pty, every other pane's '▎' carried its
+  -- colour and this one's did not.
+  , (attrName "edge.proofs",    surface (themePanel th) (themeQuests th))
   , (attrName "title.globals",  surface (themePanel th) (themeGlobals th))
   , (attrName "title.modules",  surface (themePanel th) (themeModules th))
   , (attrName "title.output",   surface (themePanel th) (themeOutput th))
   , (attrName "title.choices",  surface (themePanel th) (themeChoices th))
   , (attrName "title.matches",  surface (themePanel th) (themeMatches th))
+  , (attrName "title.proofs",   surface (themePanel th) (themeQuests th))
   -- | **The suggestion strip** — `~w2tk2` slice 1. Same scheme as every
   -- other pane and no special case: the edge and the title carry the accent,
   -- both paired with 'themePanel' so neither punches the hole `~bv2wj` was.
@@ -1723,7 +1731,7 @@ draw st =
     -- strip, the viewport. Nothing about it is special-cased in the drawing,
     -- which is what makes it a pane rather than a widget pretending to be one.
     -- **The title carries a spinner while a ranking is out** — HIS
-    -- instruction, 2026-11-21, on `~swxcf`: the cells hold Jev's picks and
+    -- instruction, 2026-11-20, on `~swxcf`: the cells hold Jev's picks and
     -- nothing else, so the pane is empty between a keystroke and Jev's
     -- answer, and the spinner is what makes that emptiness a wait.
     suggestionStrip =
@@ -2692,7 +2700,7 @@ liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 -- insertion — and not @matchesView@, which is the rules that apply at the
 -- focus and has no insertion to give a cell.
 --
--- **RETUNED 2026-11-21, SAME RULING, A FLATTER READING OF IT CORRECTED.**
+-- **RETUNED 2026-11-20, SAME RULING, A FLATTER READING OF IT CORRECTED.**
 -- 'slateRows' already carries tokens before productions, alphabetised
 -- within each — 'buildOfferDropdown''s own order. Re-sorting the whole list
 -- by 'rowLabel' flattened that, so a plain word like @along@ sat next to a
@@ -2703,7 +2711,7 @@ liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 -- alphabetically, since 'sortOn' is stable and every untouched candidate
 -- starts at the same count.
 -- **WHAT ALREADY FITS ON SCREEN IS SHOWN WITHOUT ASKING JEV AT ALL — `~jtfx4`, HIS
--- RULING, 2026-11-21**: /"when fewer than 11 options are available, why call jev
+-- RULING, 2026-11-20**: /"when fewer than 11 options are available, why call jev
 -- either?"/ Eleven is the grid's own size at his geometry, and the rule he gave
 -- is about *selection*: Jev is asked to choose which candidates get the cells,
 -- so where there are no more candidates than cells there is nothing to choose
@@ -2763,7 +2771,7 @@ stripCellsNow st
   | otherwise = 0
 
 -- | **Tokens before productions, most-used first within each — his idea of
--- 2026-11-21.** The split is read off the rows themselves ('isTokenRow')
+-- 2026-11-20.** The split is read off the rows themselves ('isTokenRow')
 -- rather than re-derived from the view, so this has no dependency beyond
 -- what 'stripSlateOf' already holds; 'partition' keeps each group's incoming
 -- order, which is already alphabetical, so a count of zero (everyone,
@@ -3727,7 +3735,7 @@ handleAppEvent (RerunStep gen soFar shown finished) =
 -- **Two gestures, four encodings, one table.** Shift+Enter and Ctrl+Enter
 -- are each the same key under the kitty and @modifyOtherKeys@ spellings; the
 -- @(run, action)@ shape was kept past the point where one gesture needed it
--- for exactly this — `~xmd5b`, his instruction of 2026-11-21: bind the key
+-- for exactly this — `~xmd5b`, his instruction of 2026-11-20: bind the key
 -- rather than let a run nothing names fall through and type itself into the
 -- line. **A run still not in this table is typed as before** — the fix is
 -- only as wide as the table.
@@ -3805,7 +3813,7 @@ shiftEnter = do
   st <- get
   if stScriptMode st then scriptOpenLine else pure ()
 
--- | **Ctrl+Enter's binding — his instruction of 2026-11-21.** `~xmd5b` found
+-- | **Ctrl+Enter's binding — his instruction of 2026-11-20.** `~xmd5b` found
 -- it typing punctuation into the line for want of anywhere to go; rather
 -- than only swallow the run, it is given a job: the mirror of Shift+Enter,
 -- opening the blank line *above* the caret instead of below it.
@@ -4494,7 +4502,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 -- Esc's second press, in exactly the frames where the strip was blank for the
 -- same reason.
 -- | **This is also the one place a pick is counted** — his idea of
--- 2026-11-21, feeding the Jev-off fallback's ordering ('usageOrdered'). A
+-- 2026-11-20, feeding the Jev-off fallback's ordering ('usageOrdered'). A
 -- row taken by its F-key is unambiguous evidence of what he reached for;
 -- the whisper's Tab-accept is not touched, the strip's own numbered pick
 -- being the whole of what the idea was about.
@@ -6873,7 +6881,7 @@ scheduleJevRanking = do
     -- **The wait starts here and not when the request goes out**, because the
     -- cells are already empty: a keystroke clears them and the debounce is
     -- part of the gap the spinner is there to explain — `~swxcf`, his
-    -- instruction of 2026-11-21. Nothing spins without a key, since then no
+    -- instruction of 2026-11-20. Nothing spins without a key, since then no
     -- request is coming however long one waits.
     when (isJust (stJevConfig st)) beginJevWait
     liftIO (void (forkIO (threadDelay jevDebounceMicros >> writeBChan chan (JevDue pending))))
@@ -6962,7 +6970,7 @@ fireJevForCurrentOffers = do
     Just jcfg
       | not onScreen -> skip "skip: neither the strip nor the dropdown is on screen"
       -- **Nothing is asked about a list that already fits the cells** — HIS
-      -- ruling, 2026-11-21, /"when fewer than 11 options are available, why
+      -- ruling, 2026-11-20, /"when fewer than 11 options are available, why
       -- call jev either?"/ 'stripCellsNow' is the same count 'stripSlateOf'
       -- draws by, so a list that is shown whole is never also a list a request
       -- went out for. The two-candidate floor stays underneath it: with the

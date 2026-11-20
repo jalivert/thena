@@ -323,7 +323,7 @@ stripName :: String
 stripName = "suggestions"
 
 -- | **The strip's title, with a turning spinner beside it while a ranking is
--- out** — HIS instruction, 2026-11-21, on `~swxcf`: /"You could show some ascii
+-- out** — HIS instruction, 2026-11-20, on `~swxcf`: /"You could show some ascii
 -- spinner next to the \"suggestions\" when we are waiting for the Jev's
 -- suggestions… Ideally it would move, like there are unicode characters that
 -- can be used for that."/

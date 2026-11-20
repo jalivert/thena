@@ -511,7 +511,7 @@ constraintPieces fold (ConstraintView _xi lhs rhs ty) =
 -- own marker), @(guess)@ distinguishes a guess from a hole, and @(blocked)@ is
 -- 'linkPieces'\' suffix unchanged — something later still mentions it, which is
 -- why @abandon@ would refuse. **Both tags follow the type** — his ruling of
--- 2026-11-21, see 'goalPieces'.
+-- 2026-11-20, see 'goalPieces'.
 renderGoals :: Fold -> [GoalView] -> Widget n
 renderGoals _ [] = str " "
 renderGoals fold gs = vBox (map row gs)
@@ -526,7 +526,7 @@ renderGoals fold gs = vBox (map row gs)
 -- 'linkPieces' and 'developmentText' already have.
 --
 -- **Every tag sits after the type, @(guess)@ included** — his ruling of
--- 2026-11-21, and his reason was alignment: the words up to the colon are then
+-- 2026-11-20, and his reason was alignment: the words up to the colon are then
 -- the same shape on every row, hole or guess. It replaces an earlier placement
 -- beside the word, taken because a wrapping type can push a trailing tag off
 -- the first line; he weighed that and preferred the column. The order is
