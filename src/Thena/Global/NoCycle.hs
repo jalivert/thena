@@ -84,6 +84,7 @@ import Thena.Core.Term
   , Ident (..)
   , close
   , fresh
+  , wordsMadeFree
   )
 import Thena.Core.Typing (check)
 import Thena.Errors (Skipped (..))
@@ -229,12 +230,21 @@ generateNoCycle env n0 d
     -- without them.
     admit e n []                      = Generated e n
     admit e n ((g, ty, body) : rest) =
-      let (t, n1) = ty n
-          (b, n2) = body n1
+      let (t, n1) = written ty n
+          (b, n2) = written body n1
        in case verdict (check e [] n2 b t) of
             Left err -> Rejected g err
             Right () ->
               admit (addDefinition g (MkDefinition (inductiveLevels d) [] t b) e) n2 rest
+
+    -- __Every word these lemmata bind is free where it stands__ — his ruling
+    -- of 2026-11-20, /THERE IS ONE NAME/, part one, and
+    -- 'Thena.Core.Term.wordsMadeFree' is the whole of it (MS12 phase 329). The
+    -- words are minted blind as the terms are built — the nested J builds a
+    -- step's motive before the binders that enclose it exist — so freeing them
+    -- is one question asked of each finished term, and asked before the kernel
+    -- sees it so that what was checked is what is stored.
+    written builder n = let (t, n1) = builder n in (wordsMadeFree [] t, n1)
 
     -- Everything checked here is generated, so it holds no level meta and can
     -- owe no obligation; the checks run in an empty context on closed terms.

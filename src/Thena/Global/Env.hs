@@ -72,10 +72,8 @@ import Thena.Core.Level
 import Thena.Core.Context
   ( Context
   , Entry (..)
-  , entryIdent
   , entryType
   , entryVar
-  , freshIdent
   , lamOver
   , piOver
   , substLevelsInEntry
@@ -97,6 +95,7 @@ import Thena.Core.Term
   , substLevelsIn
   , tokenName
   , tokenType
+  , wordsMadeFree
   )
 
 -- | A global with a body — the @definition@ kind of §3.3.1's table: proved
@@ -698,7 +697,7 @@ recursiveArgument dn np ty = case spine ty of
 -- cannot be a plain function of the record; that is the cost of \'Var\''s hidden
 -- constructor, paid here rather than by a second way to make a variable.
 eliminatorType :: InductiveDefinition -> Level -> Int -> (Core, Int)
-eliminatorType d l n0 = (piOver tel goal, n1)
+eliminatorType d l n0 = (wordsMadeFree [] (piOver tel goal), n1)
   where (tel, goal, _, n1) = eliminatorParts Inductive d l n0
 
 -- | Which scheme 'eliminatorParts' is building (MS9 phase 178).
@@ -762,7 +761,8 @@ eliminatorName d = inDeclarationOf d "elim"
 -- by construction. @make-elim@ wrote @[]@ there, which is why a polymorphic
 -- datatype could not be eliminated through it.
 eliminatorWrapper :: InductiveDefinition -> Level -> Int -> (Core, Core, Int)
-eliminatorWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
+eliminatorWrapper d l n0 =
+  (wordsMadeFree [] (piOver tel goal), wordsMadeFree [] (lamOver tel node), n1)
   where (tel, goal, node, n1) = eliminatorParts Inductive d l n0
 
 -- | The name of the generated case-analysis definition: @caseNat@, @caseVec@
@@ -800,7 +800,8 @@ caseName d = inDeclarationOf d "case"
 -- @caseD@ and a user who writes @elimD@ with the hypotheses ignored have written
 -- the same term.
 caseWrapper :: InductiveDefinition -> Level -> Int -> (Core, Core, Int)
-caseWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
+caseWrapper d l n0 =
+  (wordsMadeFree [] (piOver tel goal), wordsMadeFree [] (lamOver tel node), n1)
   where (tel, goal, node, n1) = eliminatorParts CaseAnalysis d l n0
 
 -- | The telescope, the conclusion under it, and the saturated node its own
@@ -834,10 +835,10 @@ eliminatorParts scheme d l n0 = (telescope, motiveAt indexVars (Free ctv), node,
     -- this telescope and nothing else.
     telescope =
       params
-        ++ [Hypothesis pv pIdent motiveType]
+        ++ [Hypothesis pv (Ident "P") motiveType]
         ++ methodEntries
         ++ indices
-        ++ [Hypothesis ctv tIdent (familyAt indexVars)]
+        ++ [Hypothesis ctv (Ident "target") (familyAt indexVars)]
 
     -- **The node is an 'Eliminate' for both schemes**, and that is the whole of
     -- why @caseD@ needs no new 'Core' node: case analysis is the eliminator
@@ -854,48 +855,39 @@ eliminatorParts scheme d l n0 = (telescope, motiveAt indexVars (Free ctv), node,
 
     -- @forall indices (t : D params indices) -> Type l@
     motiveType =
-      piOver indices
-        (Pi (freshIdent (map entryIdent indices) (Ident "target"))
-            (familyAt indexVars) (close mtv (Universe l)))
+      piOver indices (Pi (Ident "target") (familyAt indexVars) (close mtv (Universe l)))
 
     -- **Each method's binder and the term the node applies, built together**,
     -- because for 'CaseAnalysis' the second mentions the first and both need
     -- the counter. They were one list until MS9 phase 178.
     -- __Every word this telescope binds is free in it__ — his ruling of
-    -- 2026-11-20, /THERE IS ONE NAME/, part one. @P@, the methods and @target@
-    -- are words the system supplies, so each is numbered until nothing already
-    -- in scope holds it: a datatype with a parameter called @P@ or a method
-    -- called @method@ used to print @P1@ and @method1@ and store neither, so
-    -- @:show Nat.case@ offered words that reached nothing.
-    pIdent = freshIdent (map entryIdent params) (Ident "P")
-
-    tIdent =
-      freshIdent
-        (map entryIdent (params ++ methodEntries ++ indices) ++ [pIdent])
-        (Ident "target")
-
+    -- 2026-11-20, /THERE IS ONE NAME/, part one. The words are minted blind
+    -- here and freed in one place, by the 'wordsMadeFree' every caller of this
+    -- walk passes the finished term through: @P@, @method@, @target@ and @ih@
+    -- are words the system supplies, and a datatype with a parameter called
+    -- @P@ or a method called @method@ used to print @P1@ and @method1@ and
+    -- store neither, so @:show Nat.case@ offered words that reached nothing.
+    -- **Numbering them here as well would be a second spelling of one rule**,
+    -- and this walk cannot see the whole scope anyway — a method's own
+    -- hypotheses are numbered against binders that are not in this telescope
+    -- (MS12 phase 329, which replaced the threading phase 328 added here).
     (methodParts, nEnd) = methods (inductiveConstructors d) n3
     methodEntries = map fst methodParts
     methodTerms   = map snd methodParts
 
-    methods cs0 n0' = go cs0 n0' (pIdent : map entryIdent params)
-      where
-        go []       n _     = ([], n)
-        go (c : cs) n taken =
-          let (mty, na)    = methodType c n
-              (mv,  nb)    = fresh na
-              (tm,  nc)    = methodTerm c mv nb
-              mi           = freshIdent taken (Ident "method")
-              (below, nd)  = go cs nc (mi : taken)
-           in ((Hypothesis mv mi mty, tm) : below, nd)
+    methods []       n = ([], n)
+    methods (c : cs) n =
+      let (mty, na)    = methodType c n
+          (mv,  nb)    = fresh na
+          (tm,  nc)    = methodTerm c mv nb
+          (below, nd)  = methods cs nc
+       in ((Hypothesis mv (Ident "method") mty, tm) : below, nd)
 
     -- @forall D -> IH1 -> ... -> IHn -> P is (c params D)@ — and **without the
     -- hypotheses for 'CaseAnalysis'**, which is the whole of the difference
     -- between the two schemes.
     methodType c n = case scheme of
-      Inductive    ->
-        let (body, na) = hypotheses Pi args n (map entryIdent args) (goalOf c)
-         in (piOver args body, na)
+      Inductive    -> let (body, na) = hypotheses Pi args n (goalOf c) in (piOver args body, na)
       CaseAnalysis -> (piOver args (goalOf c), n)
       where args = constructorArguments c
 
@@ -917,7 +909,7 @@ eliminatorParts scheme d l n0 = (telescope, motiveAt indexVars (Free ctv), node,
       CaseAnalysis ->
         let args       = constructorArguments c
             applied    = foldl App (Free mv) (map (Free . entryVar) args)
-            (body, na) = hypotheses Lam args n (map entryIdent args) applied
+            (body, na) = hypotheses Lam args n applied
          in (lamOver args body, na)
 
     -- One inductive hypothesis per recursive argument, in argument order. The
@@ -929,19 +921,13 @@ eliminatorParts scheme d l n0 = (telescope, motiveAt indexVars (Free ctv), node,
     -- hypothesis and the λ that /discards/ one are the same walk over the same
     -- arguments, and 'recursiveArgument' is read once for both (the argument
     -- its own header makes).
-    hypotheses _   []       n _     acc = (acc, n)
-    hypotheses con (e : es) n taken acc = case recursiveArgument dn np (entryType e) of
-      Nothing -> hypotheses con es n taken acc
+    hypotheses _   []       n acc = (acc, n)
+    hypotheses con (e : es) n acc = case recursiveArgument dn np (entryType e) of
+      Nothing -> hypotheses con es n acc
       Just is ->
-        let (hv, na)    = fresh n
-            -- __Free against the constructor's own arguments and against the
-            -- hypotheses outside this one__, which is what numbered the second
-            -- and third @ih@ of a three-recursive-argument constructor. The
-            -- first argument's hypothesis is the outermost binder, so the
-            -- walk hands the words down as it descends.
-            hi          = freshIdent taken (Ident "ih")
-            (below, nb) = hypotheses con es na (hi : taken) acc
-         in (con hi (motiveAt is (Free (entryVar e))) (close hv below), nb)
+        let (hv, na)   = fresh n
+            (below, nb) = hypotheses con es na acc
+         in (con (Ident "ih") (motiveAt is (Free (entryVar e))) (close hv below), nb)
 
 -- | Every 'Var' the environment holds.
 --
