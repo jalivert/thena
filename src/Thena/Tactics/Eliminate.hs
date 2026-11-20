@@ -102,6 +102,10 @@ import Thena.Core.Context
   , entryVar
   , lamOver
   , piOver
+  , writableAmong
+  , writableIn
+  , writableRun
+  , writableRunAmong
   )
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
@@ -1035,7 +1039,8 @@ eliminate env ctx sch prem n0 goal tgt =
                 | Just (lv, qv)     <- equationAt j
                 , Just (_, left, _) <- lookup j stands =
                     let (u', ty', stands', p') =
-                          transport j lv left (asG !! j) (Free qv) u ty stands p
+                          transport motiveTaken j lv left (asG !! j) (Free qv) u ty
+                                    stands p
                      in walk js u' ty' stands' p'
                 | otherwise = (u, p)
 
@@ -1079,7 +1084,7 @@ eliminate env ctx sch prem n0 goal tgt =
               -- __With no dependent position this is phase 213's term exactly__:
               -- @deps@ is empty, both Π chains are empty, and every family that
               -- generated a transport before this phase generates the same one.
-              transport j lv left right q u ty stands p0 =
+              transport taken j lv left right q u ty stands p0 =
                 (uOut, tyOut, standsOut, p13)
                 where
                   cj = carrierTys !! j
@@ -1117,6 +1122,25 @@ eliminate env ctx sch prem n0 goal tgt =
                   (ys, p8) = freshen (length deps) p7
                   yArgs = map Free ys
 
+                  -- __The motive's own words, each free in the scope it lands
+                  -- in — MS12 phase 333, @~44j68@.__ A theorem with a @q@ of
+                  -- its own used to get a second @q@ here, reachable by no word
+                  -- at all, and the @y@s shadowed each other. Threaded by hand
+                  -- rather than by one pass over the finished term because the
+                  -- residue skeletons embed types the author wrote, whose
+                  -- binders are theirs (his ruling of 2026-11-20).
+                  iLeft  = writableAmong taken (Ident "left")
+                  iRight = writableAmong (taken ++ [iLeft]) (Ident "right")
+                  iQ     = writableAmong (taken ++ [iLeft, iRight]) (Ident "q")
+                  underQ = taken ++ [iLeft, iRight, iQ]
+                  iYs    = writableRunAmong underQ (map (const (Ident "y")) deps)
+                  iAt    = writableAmong (underQ ++ iYs) (Ident "at")
+
+                  iSame   = writableAmong taken (Ident "same")
+                  iZs     = writableRunAmong (taken ++ [iSame])
+                                             (map (const (Ident "y")) deps)
+                  iAtSame = writableAmong (taken ++ [iSame] ++ iZs) (Ident "at")
+
                   -- What stands for each moving position under the motive's own
                   -- binders, which is what the inner transport reads.
                   standsIn =
@@ -1128,19 +1152,19 @@ eliminate env ctx sch prem n0 goal tgt =
                   (depCarried, p9) = foldl carryDep ([], p8) (zip ys depSkels)
                   carryDep (acc1, n) (yv, sk) =
                     let (c, _, _, nAfter) =
-                          transport j lv (Free zl) (Free zr) (Free zq)
+                          transport (underQ ++ iYs) j lv (Free zl) (Free zr) (Free zq)
                                     (Free yv) (shaped (Free zl) yArgs sk) standsIn n
                      in (acc1 ++ [c], nAfter)
 
                   (zf, p10) = fresh p9
                   motiveT =
-                    Lam (Ident "left") cj (close zl
-                      (Lam (Ident "right") cj (close zr
-                        (Lam (Ident "q") (equationOf lv cj (Free zl) (Free zr)) (close zq
-                          (piOver [ Hypothesis yv (Ident "y") (shaped (Free zl) yArgs sk)
-                                  | (yv, sk) <- zip ys depSkels
+                    Lam iLeft cj (close zl
+                      (Lam iRight cj (close zr
+                        (Lam iQ (equationOf lv cj (Free zl) (Free zr)) (close zq
+                          (piOver [ Hypothesis yv i (shaped (Free zl) yArgs sk)
+                                  | (yv, i, sk) <- zip3 ys iYs depSkels
                                   ]
-                            (Pi (Ident "at")
+                            (Pi iAt
                                 (shaped (Free zl) yArgs skel)
                                 (close zf
                                   (shaped (Free zr) depCarried skel)))))))))
@@ -1150,11 +1174,11 @@ eliminate env ctx sch prem n0 goal tgt =
                   (zb,  p13) = fresh p12
                   zArgs = map Free zas
                   methodT =
-                    Lam (Ident "same") cj (close za
-                      (lamOver [ Hypothesis yv (Ident "y") (shaped (Free za) zArgs sk)
-                               | (yv, sk) <- zip zas depSkels
+                    Lam iSame cj (close za
+                      (lamOver [ Hypothesis yv i (shaped (Free za) zArgs sk)
+                               | (yv, i, sk) <- zip3 zas iZs depSkels
                                ]
-                        (Lam (Ident "at")
+                        (Lam iAtSame
                              (shaped (Free za) zArgs skel)
                              (close zb (Free zb)))))
 
@@ -1228,19 +1252,44 @@ eliminate env ctx sch prem n0 goal tgt =
           -- equation whose generalised side was transported names an earlier
           -- one's proof, which is exactly the dependency §3.2's telescopic
           -- equality introduces.
-          (equations, n6) = (constrain (zip qvs tied) goalGen, n5'')
-          constrain []                   b = b
-          constrain ((qv, (_, eq, _)) : cs) b =
-            Pi (Ident "q") eq (close qv (constrain cs b))
+          (equations, n6) = (constrain (zip3 qIdents qvs tied) goalGen, n5'')
+
+          -- __One word per tied equation, numbered rather than shared — MS12
+          -- phase 333, @~44j68@.__ Three tied indices used to bind @q@ three
+          -- times, nested, so the outer two were reachable by no word; and a
+          -- theorem with a @q@ of its own was shadowed by the first of them.
+          -- The run is over @qvs@ rather than @tied@ because @tied@ holds the
+          -- transported terms, which ask these words back.
+          qIdents =
+            writableRunAmong (map entryIdent (bodyCtx ++ genEntries))
+                             (map (const (Ident "q")) qvs)
+          constrain []                          b = b
+          constrain ((qi, qv, (_, eq, _)) : cs) b =
+            Pi qi eq (close qv (constrain cs b))
+
+          -- __The words in scope wherever the motive's body stands__, which is
+          -- what a transport built into it asks (@~44j68@): the context, the
+          -- motive's own binders, the generalised copies — which carry the
+          -- author's own words on purpose (@~pmpqg@) and so are words to avoid
+          -- here — and the equations' binders.
+          motiveTaken = map entryIdent (bodyCtx ++ genEntries) ++ qIdents
 
           -- The context the motive's body lives in, which is also where its
           -- universe is read.
           indexEntries =
-            [ Hypothesis iv (entryIdent e) ity
-            | (iv, e, ity) <- zip3 ivs (inductiveIndices d) indexTys
+            [ Hypothesis iv i ity
+            | (iv, i, ity) <- zip3 ivs indexIdents indexTys
             ]
+
+          -- __The datatype's own word for each index, made writable here__
+          -- (@~44j68@): a nameless index used to print @_@ — @Vec@'s is
+          -- nameless — and an index called @n@ inside a theorem with an @n@
+          -- bound the author's word away.
+          indexIdents = writableRun ctx [ entryIdent e | e <- inductiveIndices d ]
+          targetIdent = writableIn (ctx ++ indexEntries) (Ident "target")
+
           bodyCtx =
-            ctx ++ indexEntries ++ [Hypothesis xv (Ident "target") (familyAt (map Free ivs))]
+            ctx ++ indexEntries ++ [Hypothesis xv targetIdent (familyAt (map Free ivs))]
 
           -- @∀ y⃗' -> eqs -> G'@. **The copies stand outside the equations**
           -- because the equations are stated about them, and after the target
@@ -1249,7 +1298,7 @@ eliminate env ctx sch prem n0 goal tgt =
 
           motiveTerm =
             lamOver indexEntries
-              (Lam (Ident "target") (familyAt (map Free ivs)) (close xv motiveBody))
+              (Lam targetIdent (familyAt (map Free ivs)) (close xv motiveBody))
        in
           -- Reading the universe **is** the check that the abstraction was
           -- type-preserving; the level is needed anyway, so it costs nothing
