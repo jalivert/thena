@@ -7698,11 +7698,36 @@ underlineSpan ov = case offeredRecovered ov of
 -- term literal — draws from both, tokens first, then productions**, his
 -- own correction: a bare symbol ("λ") is still worth listing on its own,
 -- but a production ("abs: ( λ ‹x› : Ty . LC )") is what actually inserts
--- the rest of the shape, so both belong, not one or the other. Deduplicated
--- by what an accept would actually insert — a trivial single-literal
--- production (e.g. a statement keyword, always present in
--- 'offeredProductions' too) would otherwise show up twice for no reason,
--- once as a token and once as an identical production.
+-- the rest of the shape, so both belong, not one or the other.
+--
+-- **A ROW THAT ONLY ADDS BOXES IS NOT A SECOND ROW — HIS INSTRUCTION,
+-- 2026-11-20**: /"I think listing the instructions\/rules just once should be
+-- enough."/ An empty line offered **321** rows the day he asked, and **294 of
+-- them were the instruction vocabulary listed twice**: once as the word
+-- ("@say@") and once as the word with its operands ("@say: say
+-- Operand:String@"). The second row carries no text the first does not — only
+-- the boxes — so it is folded into the word's own row, which now **inserts the
+-- shape**: taking @say@ writes @say ␣@ with the box already there.
+--
+-- **Where the line is drawn, and his λ correction above is what draws it.** A
+-- production whose tail is nothing but slots adds only boxes, so it folds
+-- ('operandOnly'). A production carrying any further literal — @abs@'s @->@,
+-- @( surface term )@'s closing bracket, @open And@'s namespace — adds text the
+-- user would otherwise type, which is exactly the "worth listing on its own"
+-- his correction protects, and it keeps its row. **So term entry is untouched
+-- by this**: at a caret inside a term every production has a literal in its
+-- tail or no literal head at all.
+--
+-- **And nothing has to decide when the operand forms come back, because the
+-- engine already does it.** Measured 2026-11-20: with @open@ typed in full the
+-- offer *is* the 21 namespaces, with @say@ typed in full it is what a @String@
+-- may be, with @assume@ it is what a @Core@ may be. A word's operands are
+-- offered the moment the word is complete, at the position they belong to; a
+-- second row for them at the head of the line was the same information one
+-- step early.
+--
+-- Still deduplicated by what an accept would actually insert, for anything the
+-- fold does not catch.
 buildOfferDropdown :: Bool -> Int -> OfferView -> Maybe OfferDropdown
 buildOfferDropdown autoSelect col ov
   | null allRows = Nothing
@@ -7736,12 +7761,66 @@ buildOfferDropdown autoSelect col ov
     -- what it would take to honour the narrower rule are recorded on
     -- `~5f3k6`, which is also where the question of where this information
     -- goes instead now lives.
-    tokenRows =
-      sortOn rowLabel (filter (isJust . rowInsert) (map offerRow (offeredOptions ov)))
+    -- | **The words on offer**, which are the only 'offeredOptions' entries an
+    -- accept could write ('offerRow' gives a nonterminal or a scan class no
+    -- insertion, and `~bkzw9` drops those).
+    tokenWords = [ w | ALiteralSymbol w <- offeredOptions ov ]
+    -- | **The word a production continues, when it adds nothing to the word but
+    -- boxes to fill or a single value to pick** — the fold the haddock above is
+    -- about. 'Nothing' for a production that opens with a slot or a scan class,
+    -- and for one whose tail carries syntax of its own.
+    --
+    -- **The two halves, and why a value folds as well as a box.** A tail of
+    -- slots adds only boxes (@say Operand:String@). A tail that is one lone
+    -- literal adds no structure either — it names a *value* the word's own
+    -- argument may take, which is @open@ and only @open@ today: the grammar
+    -- spells each openable namespace as its own production, so @open And@,
+    -- @open And.lemmata@ … were 21 of the 321 rows an empty line offered.
+    -- **Measured 2026-11-20: with @open@ typed in full the offer is exactly
+    -- those 21 names**, so folding them costs nothing — they are one keystroke
+    -- away, at the position they belong to.
+    --
+    -- **A literal mixed in among slots is syntax and keeps its row, and that
+    -- is his λ correction above.** @λ surface binders -> surface term@ carries
+    -- one literal, the @->@ — a tail of one literal /and nothing else/ is a
+    -- value, a tail of one literal /among slots/ is a shape, and the two must
+    -- not be confused: folding the lambda would leave a row labelled @λ@ that
+    -- writes @λ ␣ -> ␣@, and take away any way to write the symbol alone.
+    -- **So term entry is untouched by this fold**, measured: at a caret inside
+    -- a term the rows are the same ones, bar the three words whose whole
+    -- production is the word itself.
+    operandOnly pv = case productionShape pv of
+      (ALiteralSymbol w : rest)
+        | w `elem` tokenWords
+        , allSlots rest || isLoneValue rest -> Just w
+      _ -> Nothing
+      where
+        allSlots = all (not . isText)
+        isLoneValue r = case r of
+          [sv] -> isText sv
+          _    -> False
+        isText sv = case sv of
+          ALiteralSymbol _ -> True
+          _                -> False
+    -- | **One row per word**, inserting the word's shape where the word has
+    -- exactly one — and the bare word where it has several, since choosing
+    -- between two shapes is not ours to do. @assume@, @claim@ and @quantify@
+    -- are the three that have two (one operand or two), measured 2026-11-20.
+    --
+    -- **Under bare-word recovery 'offeredProductions' is unfiltered**, as this
+    -- function's haddock says — every production the empty line offers. That
+    -- is harmless here and only here: the lookup is keyed by the word, and a
+    -- word's own productions are its own wherever the list came from.
+    wordRow w = case [ pv | pv <- offeredProductions ov, operandOnly pv == Just w ] of
+      [pv] -> OfferRow w (Just (writtenInsertText (productionInsert pv)))
+      _    -> OfferRow w (Just w)
+    tokenRows = sortOn rowLabel (map wordRow tokenWords)
     productionRows =
       sortOn rowLabel
         [ r
-        | r <- map productionRow (offeredProductions ov)
+        | pv <- offeredProductions ov
+        , isNothing (operandOnly pv)
+        , let r = productionRow pv
         , rowInsert r `notElem` map rowInsert tokenRows
         ]
     -- | Hints (a bare nonterminal or scan class — 'rowInsert' is 'Nothing',
@@ -7775,13 +7854,6 @@ buildOfferDropdown autoSelect col ov
     (wordStart, replaceLen) = case offeredRecovered ov of
       Just r | isNothing (recoveredLanguage r) -> (recoveredColumn r - 1, length (recoveredText r))
       _ -> (col, if offeredReplaces ov then 1 else 0)
-
--- | A literal is text to type; a scan class or a nonterminal names a *kind*
--- of thing that may stand here and is shown, not offered — see 'OfferRow'.
-offerRow :: SymbolView -> OfferRow
-offerRow sv = case sv of
-  ALiteralSymbol w -> OfferRow w (Just w)
-  _                -> OfferRow (symbolText sv) Nothing
 
 -- | The bracket convention for a scan class is TIER-A.md's own: "‹name›".
 symbolText :: SymbolView -> String
