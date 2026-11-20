@@ -25,7 +25,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertEqual, testCase)
 
 import Thena.View.Address (Address (..), Move (GoAlong))
-import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Shape (..))
+import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Reachable (..), Shape (..))
 import Thena.View.Failure
   ( FaultKind (..)
   , FaultView (..)
@@ -126,8 +126,12 @@ at = Display (Address [])
 draw :: Shape -> String
 draw = drawLine . renderDisplay NoFold . at
 
+-- | A word that reaches the binder it names — the ordinary case. A variable
+-- whose word reaches nothing carries 'Unreachable' and the frontend draws its
+-- own mark ("Tui.Render"'s @mark@); nothing about a bracket depends on which,
+-- which is why these tests only ever need this one.
 var :: String -> Display
-var name = at (AVariable name Nothing)
+var name = at (AVariable name Reachable Nothing)
 
 global :: String -> Display
 global name = at (AGlobal name [])
@@ -141,7 +145,7 @@ lam = at (AnAbstraction (Binding "x" (global "A")) (var "x"))
 -- since `~qh8vw` the drawer reads that: a 'bound' body is what keeps a binder
 -- on the screen, and a 'global' body is what turns it into an arrow.
 bound :: String -> Display
-bound name = at (AVariable name (Just (Address [])))
+bound name = at (AVariable name Reachable (Just (Address [])))
 
 -- | @(y : A) -> y@ — a function type whose binder is mentioned, so it draws
 -- with the binder. **It has to be the dependent one**: these cases ask where

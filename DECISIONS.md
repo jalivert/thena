@@ -7026,6 +7026,25 @@ and the inner binding wins, as in any other language; so is a surface `\ x -> \ 
 -> x`, where the words are the ones you wrote. This decision reaches only the
 words the system supplies for you.
 
+**A term Thena *generates* obeys this throughout, and that is where it shows.**
+Every eliminator, case wrapper and lemma a `data` declaration brings with it is
+written by the system from end to end, so every binder in one is given a word that
+is free where it stands. The words were minted blind until MS12 and the printer
+hid it:
+
+```
+-- before
+Ladder.lemmata.noConfusion : ∀ (x : Nat) (x : Ladder x) (x' : Nat) (x' : Ladder x')
+                               (q : Eq {0} Nat x† x'†) -> …
+-- now
+Ladder.lemmata.noConfusion : ∀ (x : Nat) (x1 : Ladder x) (x' : Nat) (x'1 : Ladder x')
+                               (q : Eq {0} Nat x x') -> …
+```
+
+**So a generated lemma carries no marks** — a mark means a word reaches nothing,
+and nothing the system writes for you should be unreachable. Where you still meet
+one is a term built on top of what *you* wrote: a split's method, above.
+
 ### A word that reaches nothing is marked, and nothing is renamed behind your back
 
 *Decided 2026-11-20.*

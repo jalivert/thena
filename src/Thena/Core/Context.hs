@@ -18,7 +18,16 @@ module Thena.Core.Context
 
 import Thena.Core.Level (Level, LevelVar)
 import Thena.Core.Term
-  (Core (..), Ident (..), Scope, Var, anonymousIdent, close, substLevelsIn)
+  ( Core (..)
+  , Ident (..)
+  , Scope
+  , Var
+  , anonymousIdent
+  , close
+  , freeAmong
+  , freshIdent
+  , substLevelsIn
+  )
 
 -- | An entry in a working context: a name with a type, or a name with a type
 -- and a value.
@@ -112,33 +121,12 @@ writableIn ctx i
 -- So an anonymous binder is passed through unchanged — @_@ numbered to @_1@ is
 -- the defect @~5g3tv@ named, not a repair of it — and a written word that is
 -- taken is numbered until it is free.
+--
+-- **The rule itself is 'Thena.Core.Term.freeAmong'**, which the same question
+-- asked of the binders enclosing a position also goes through
+-- ('Thena.Core.Term.wordsMadeFree') — this is it asked of a context.
 freeIn :: Context -> Ident -> Ident
-freeIn ctx i
-  | i == anonymousIdent = i
-  | otherwise           = freshIdent (map entryIdent ctx) i
-
--- | An identifier not already taken: the hint, or the hint with the first
--- number that frees it.
---
--- **Freshening happens when a binder is built, not when it is printed —
--- DECIDED by the user 2026-08-25 for a development\'s components, and
--- 2026-11-20 for a context\'s words.** Before this, two things could carry the
--- same 'Ident' and the printer told them apart for the screen only, so the name
--- you saw was not the name that was stored and @goto ‹name›@ could not find it.
---
--- **One numbering rule for both**, which is why it lives here rather than in
--- "Thena.Development.Cursor", which re-exports it: a word is freshened against
--- a development\'s identifiers there and against a context\'s words in
--- 'writableIn', and two spellings of the suffix would mean the two disagreed
--- about what a free word is.
-freshIdent :: [Ident] -> Ident -> Ident
-freshIdent taken i@(Ident hint)
-  | free i    = i
-  | otherwise = numbered (1 :: Int)
-  where
-    free j = j `notElem` taken
-    numbered k =
-      let j = Ident (hint ++ show k) in if free j then j else numbered (k + 1)
+freeIn ctx = freeAmong (map entryIdent ctx)
 
 -- | Whether the word a binder carries still reaches it: the words in scope
 -- with it, __innermost first__, and its own place among them.

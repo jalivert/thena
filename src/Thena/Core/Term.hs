@@ -18,6 +18,8 @@ module Thena.Core.Term
   , fresh
   , Ident (..)
   , anonymousIdent
+  , freshIdent
+  , freeAmong
   , GlobalName (..)
   , rootName
   , nameDotted
@@ -63,6 +65,7 @@ module Thena.Core.Term
   , beyond
   , substLevelsIn
   , substLevelsInScope
+  , wordsMadeFree
   , referencesAt
   , levelMetasIn
   ) where
@@ -109,6 +112,45 @@ newtype Ident = Ident String
 -- 'Thena.Core.Context.writableIn' is where that happens.
 anonymousIdent :: Ident
 anonymousIdent = Ident "_"
+
+-- | An identifier not already taken: the hint, or the hint with the first
+-- number that frees it.
+--
+-- **Freshening happens when a binder is built, not when it is printed —
+-- DECIDED by the user 2026-08-25 for a development\'s components, and
+-- 2026-11-20 for a context\'s words.** Before this, two things could carry the
+-- same 'Ident' and the printer told them apart for the screen only, so the name
+-- you saw was not the name that was stored and @goto ‹name›@ could not find it.
+--
+-- **ONE NUMBERING RULE FOR EVERY PLACE A WORD IS MADE FREE**, which is why it
+-- lives here, beside 'Ident', rather than beside any one of its callers: a word
+-- is freshened against a development\'s identifiers in
+-- "Thena.Development.Cursor", against a context\'s words in
+-- 'Thena.Core.Context.writableIn', and against the binders enclosing a
+-- position in 'wordsMadeFree'. Two spellings of the suffix would mean they
+-- disagreed about what a free word is. It was in "Thena.Core.Context" until
+-- MS12 phase 329, which needed it where 'Scope' is visible.
+freshIdent :: [Ident] -> Ident -> Ident
+freshIdent taken i@(Ident hint)
+  | free i    = i
+  | otherwise = numbered (1 :: Int)
+  where
+    free j = j `notElem` taken
+    numbered k =
+      let j = Ident (hint ++ show k) in if free j then j else numbered (k + 1)
+
+-- | The word a binder already carries, made free among these — and **nothing
+-- invented where there is no word.**
+--
+-- The rule 'Thena.Core.Context.freeIn' asks of a context and 'wordsMadeFree'
+-- asks of the binders enclosing a position, written once so that the two
+-- cannot disagree: an anonymous binder is passed through unchanged (@_@
+-- numbered to @_1@ is the defect @~5g3tv@ named, not a repair of it), and a
+-- word that is taken is numbered until it is free.
+freeAmong :: [Ident] -> Ident -> Ident
+freeAmong taken i
+  | i == anonymousIdent = i
+  | otherwise           = freshIdent taken i
 
 -- | A name in the global environment (§3.6, decided 2026-08-11; given a path
 -- 2026-10-30, MS10's module system).
@@ -941,6 +983,63 @@ referencesAt g ls = go
 -- carries scoped siblings of the field the focus went into.
 substLevelsInScope :: [(LevelVar, Level)] -> Scope Core -> Scope Core
 substLevelsInScope sub (MkScope b) = MkScope (substLevelsIn sub b)
+
+-- | Every binder of a term given a word that is free where it stands: the
+-- words already in scope around the term, and the term.
+--
+-- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /THERE IS ONE NAME/, part
+-- one: **every name the system puts into a scope is free in that scope.** This
+-- is that rule asked of a whole term at the moment it is built, and it is for a
+-- term the system WROTE — the eliminator and case wrappers, and the generated
+-- lemmata of "Thena.Global.NoConfusion" and "Thena.Global.NoCycle". **A term a
+-- user wrote never comes here**: their shadowing is theirs to write, allowed,
+-- and said where the outer binder is printed ('Thena.Core.Context.wordReaches').
+--
+-- **It is asked of the finished term rather than of each minting site, because
+-- a generator does not know its own scope.** Those terms are built inside out —
+-- @Thena.Global.Generate.stepMotive@ builds the motive\'s @λ u v w@ before
+-- @proofFrom@ puts it under the @λ u@ and @λ v@ of the step that eliminates it —
+-- so at the site where a word is minted the binders that will enclose it do not
+-- exist yet. Ninety-odd such sites across the three generator modules each
+-- minted a word blind, and the collisions they made are visible: before this,
+-- @:show Nat.lemmata.noConfusion@ printed @λ (u : Nat) (v : Nat) … (λ (u : Nat)
+-- (v : Nat) …)@, two live binders spelled @u@ in one scope, of which only the
+-- inner one answered to the word.
+--
+-- **It is the dual of 'Thena.Core.Context.wordReaches' and the two are one
+-- rule**: that one asks, at a position, whether the word printed there reaches
+-- the binder it names; this one makes the answer yes everywhere the system is
+-- the author. Which is why it replaces nothing at print time —
+-- @Thena.Syntax.Print.freshen@ was deleted in MS12 phase 328 because a printed
+-- rename is a word the user cannot type back, and this one is stored.
+--
+-- Only 'Ident's move. No 'Bound', no 'Free', no 'Level' and no structure, so
+-- the term stays the term the kernel accepted (reaching inside a 'Scope' is
+-- safe for 'substLevelsIn''s reason), and an anonymous binder stays anonymous.
+wordsMadeFree :: [Ident] -> Core -> Core
+wordsMadeFree = go
+  where
+    go taken t = case t of
+      Pi i s (MkScope b) ->
+        let i' = freeAmong taken i
+         in Pi i' (go taken s) (MkScope (go (i' : taken) b))
+      Lam i s (MkScope b) ->
+        let i' = freeAmong taken i
+         in Lam i' (go taken s) (MkScope (go (i' : taken) b))
+      Let i v s (MkScope b) ->
+        let i' = freeAmong taken i
+         in Let i' (go taken v) (go taken s) (MkScope (go (i' : taken) b))
+      App f a           -> App (go taken f) (go taken a)
+      Canonical g ls as -> Canonical g ls (map (go taken) as)
+      Eliminate dn ls ps m ms is tgt ->
+        Eliminate dn ls (map (go taken) ps) (go taken m) (map (go taken) ms)
+                  (map (go taken) is) (go taken tgt)
+      Trusted c a b     -> Trusted (go taken c) (go taken a) (go taken b)
+      Bound i           -> Bound i
+      Free x            -> Free x
+      Global g ls       -> Global g ls
+      Universe l        -> Universe l
+      Primitive l       -> Primitive l
 
 -- | Every level meta the term mentions, without duplicates, in first-seen
 -- order (MS3 phase 33).

@@ -390,7 +390,7 @@ so every equation is still between two terms of one type.
 thena spine> data Ladder : Nat -> Type₀ where { base : Ladder zero ; step : ∀ (n : Nat) (r : Ladder n) -> Ladder (succ n) }
 declared Ladder
 thena spine> :infer Ladder.lemmata.noConfusion
-Ladder.lemmata.noConfusion : ∀ (x : Nat) (x : Ladder x) (x' : Nat) (x' : Ladder x') (q : Eq {0} Nat x† x'†) -> Eq {0} (Ladder x'†) ((elim Eq {0} (Nat) (λ (u : Nat) (v : Nat) (w : Eq {0} Nat u v) -> Ladder u -> Ladder v) ((λ (a : Nat) (z : Ladder a) -> z)) (x† x'†) q) x) x' -> Ladder.lemmata.NoConfusion x† x x'† x'
+Ladder.lemmata.noConfusion : ∀ (x : Nat) (x1 : Ladder x) (x' : Nat) (x'1 : Ladder x') (q : Eq {0} Nat x x') -> Eq {0} (Ladder x') ((elim Eq {0} (Nat) (λ (u : Nat) (v : Nat) (w : Eq {0} Nat u v) -> Ladder u -> Ladder v) ((λ (a : Nat) (z : Ladder a) -> z)) (x x') q) x1) x'1 -> Ladder.lemmata.NoConfusion x x1 x' x'1
 ```
 
 `DECISIONS.md`, *Thena does not assume K*, says what that buys and what it does
