@@ -44,6 +44,8 @@ module Tui.Layout
   , paneBarEntries
   , Strip (..)
   , stripName
+  , stripTitle
+  , spinnerFrames
   , defaultStrip
   , stripMinRows
   , stripDefaultRows
@@ -319,6 +321,33 @@ data Strip = Strip
 -- @suggestion-pane@ because every other pane is named by what it holds.
 stripName :: String
 stripName = "suggestions"
+
+-- | **The strip's title, with a turning spinner beside it while a ranking is
+-- out** — HIS instruction, 2026-11-21, on `~swxcf`: /"You could show some ascii
+-- spinner next to the \"suggestions\" when we are waiting for the Jev's
+-- suggestions… Ideally it would move, like there are unicode characters that
+-- can be used for that."/
+--
+-- The pane's cells only ever hold Jev's own picks, so between a keystroke and
+-- Jev's answer there is nothing to draw; the spinner is what says the emptiness
+-- is a wait and not an answer. 'Nothing' is the ordinary title and the only
+-- thing drawn when no request is out.
+--
+-- **The frame is an index and the caller keeps it**, which is why this is a
+-- function of one: the animation's clock belongs to the event loop and the
+-- glyph table belongs here, beside the name it is drawn next to.
+stripTitle :: Maybe Int -> String
+stripTitle Nothing = stripName
+stripTitle (Just frame) = stripName <> " " <> [spinnerFrames !! (frame `mod` length spinnerFrames)]
+
+-- | **The spinner's glyphs, and every one of them is one column wide.** Braille
+-- patterns (U+2800…) are narrow in vty's own width table and in a terminal, so
+-- unlike ✅ or ⚠️ they need no entry in 'Tui.Panes.wideGlyphs' and cannot shift
+-- the pane to their right — `~8ztt3` is the defect that rule comes from.
+--
+-- Ten frames, read as one dot travelling round a 2×3 cell.
+spinnerFrames :: [Char]
+spinnerFrames = "\10251\10265\10297\10296\10300\10292\10278\10279\10247\10255"
 
 -- | **Closed, and that is deliberate for slice 1.** Nothing he has on screen
 -- today moves until he types @:pane suggestions open@: the strip takes its

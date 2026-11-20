@@ -61,7 +61,7 @@ import Brick.BChan (BChan, newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryTakeMVar)
 import Control.Exception (SomeException, evaluate, try)
-import Control.Monad (forever, void, when)
+import Control.Monad (forever, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
 import Data.List (intercalate, intersperse, isPrefixOf, isSuffixOf, partition, sort, sortOn)
@@ -177,6 +177,7 @@ import Tui.Layout
   , stripHintUsed
   , stripMinRows
   , stripName
+  , stripTitle
   , stripReplyRows
   , stripHintBudget
   , stripHintGapRows
@@ -939,6 +940,24 @@ data St = St
     -- 'JevDue' timer whose generation doesn't match was superseded by a
     -- later keystroke while it slept, so 'handleJevDue' drops it and only
     -- the trailing edge of a burst ever reaches 'fireJevForCurrentDropdown'.
+  , stJevWaiting :: Bool
+    -- ^ **whether a ranking is on its way right now**, which is what the
+    -- spinner beside the strip's title is drawn from — HIS instruction,
+    -- 2026-11-21, on `~swxcf`. True from the keystroke that schedules one
+    -- (the debounce is part of the wait: the cells are already empty) until
+    -- the answer lands, fails, or the request turns out not to be sent at
+    -- all. **Only ever true when there is something to wait for** — with
+    -- `:jev off` or no key nothing is coming, so nothing spins.
+  , stSpinFrame :: Int
+    -- ^ which of 'spinnerFrames' is on screen. Advanced by 'JevSpin' and
+    -- never reset: where the dot happens to be when a wait begins carries no
+    -- information, and resetting it would make two waits in a row stutter.
+  , stSpinLive :: Bool
+    -- ^ **whether a 'JevSpin' chain is already running**, so that two
+    -- overlapping waits cannot leave two timers posting into the same frame
+    -- counter and spin it at twice the rate. The chain is the only thing that
+    -- redraws while a request is out, and it stops itself the first time it
+    -- wakes to find 'stJevWaiting' false.
   , stOfferBox :: MVar OfferAsk
     -- ^ **the offer worker's mailbox, and it holds at most one request** —
     -- `~wvtz2`. 'askOffers' empties it before filling it, so a burst of
@@ -1059,6 +1078,9 @@ runTui = do
         , stJevChan     = chan
         , stJevGen      = 0
         , stJevPending  = 0
+        , stJevWaiting  = False
+        , stSpinFrame   = 0
+        , stSpinLive    = False
         , stOfferBox    = offerBox
         , stOfferGen    = 0
         , stModel       = Text.pack (cfgModel cfg)
@@ -1129,6 +1151,11 @@ data AppEvent
   = Tick
   | JevDue Int
   | JevRanked Int (Either String (Map.Map Text Double))
+  -- | **One frame of the spinner beside the strip's title** — `~swxcf`, his
+  -- instruction of 2026-11-21. Posted by a thread that reschedules itself
+  -- for as long as 'stJevWaiting' holds, so an idle TUI wakes for nothing:
+  -- there is no clock running when no ranking is out.
+  | JevSpin
   | RerunStep Int [ScriptLine] Bool Bool
   -- | **The model's answer to one ask** — `~w2tk2` slice 6. **No
   -- generation tag, unlike 'JevRanked'**, and that is not an oversight: Jev
@@ -1695,9 +1722,17 @@ draw st =
     -- the same 'pane' the other nine go through: the accent edge, the title
     -- strip, the viewport. Nothing about it is special-cased in the drawing,
     -- which is what makes it a pane rather than a widget pretending to be one.
+    -- **The title carries a spinner while a ranking is out** — HIS
+    -- instruction, 2026-11-21, on `~swxcf`: the cells hold Jev's picks and
+    -- nothing else, so the pane is empty between a keystroke and Jev's
+    -- answer, and the spinner is what makes that emptiness a wait.
     suggestionStrip =
       withAttr (attrName "panel") $
-        pane stripName StripVP (padAll 1 stripBody)
+        paneTitled
+          stripName
+          (stripTitle (if stJevWaiting st then Just (stSpinFrame st) else Nothing))
+          StripVP
+          (padAll 1 stripBody)
 
     -- | **The strip's contents: a counted heading, then the grid, then the
     -- rows kept for the hint and the reply** — `~w2tk2` slice 2.
@@ -2207,16 +2242,25 @@ draw st =
     -- own infinite-height crash.
     pane key vp content = paneWith key vp content []
 
+    -- | The same pane with a title that is not its key — the one pane whose
+    -- heading says something beyond its name, the suggestion strip's spinner
+    -- (`~swxcf`). The key still names the attributes and the viewport, so
+    -- nothing about the theme or the click target moves with the title.
+    paneTitled key title vp content =
+      paneRendered key title vp content []
+
     -- | The same pane, plus fixed rows pinned below the viewport — the
     -- command bar and its note. **Below the viewport, not inside it**, for
     -- the reason the title is: anything inside scrolls away with the content,
     -- and a bar you are typing into must not.
-    paneWith key vp content foot =
+    paneWith key vp content foot = paneRendered key key vp content foot
+
+    paneRendered key title vp content foot =
       clickable vp $
         hBox
           [ withAttr (attrName ("edge." <> key)) (hLimit 1 (fill '▎'))
           , vBox
-              ( [ withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key))
+              ( [ withAttr (attrName ("title." <> key)) (padLeftRight 1 (str title))
                 , viewport vp Vertical content
                 ]
                   <> foot
@@ -3605,6 +3649,7 @@ handleAppEvent :: AppEvent -> EventM Name St ()
 handleAppEvent Tick = fireJevForCurrentOffers
 handleAppEvent (JevDue gen) = handleJevDue gen
 handleAppEvent (JevRanked gen result) = applyJevRanking gen result
+handleAppEvent JevSpin = handleJevSpin
 handleAppEvent (OffersComputed gen result) = applyOffers gen result
 handleAppEvent (HintAnswered result) = applyHintAnswer result
 handleAppEvent (ModelsListed filt result) = do
@@ -6771,7 +6816,49 @@ scheduleJevRanking = do
     let pending = stJevPending st + 1
         chan = stJevChan st
     put st { stJevPending = pending }
+    -- **The wait starts here and not when the request goes out**, because the
+    -- cells are already empty: a keystroke clears them and the debounce is
+    -- part of the gap the spinner is there to explain — `~swxcf`, his
+    -- instruction of 2026-11-21. Nothing spins without a key, since then no
+    -- request is coming however long one waits.
+    when (isJust (stJevConfig st)) beginJevWait
     liftIO (void (forkIO (threadDelay jevDebounceMicros >> writeBChan chan (JevDue pending))))
+
+-- | **A ranking is on its way: light the spinner and, unless one is already
+-- turning, start the chain that turns it** — `~swxcf`.
+beginJevWait :: EventM Name St ()
+beginJevWait = do
+  st <- get
+  put st { stJevWaiting = True, stSpinLive = True }
+  unless (stSpinLive st) (scheduleSpin (stJevChan st))
+
+-- | **Nothing is on its way any more, so the spinner goes out.** The chain
+-- is not killed here — it stops itself at its next wake, which is at most
+-- 'spinMicros' away and costs one redraw.
+endJevWait :: EventM Name St ()
+endJevWait = modify (\st -> st { stJevWaiting = False })
+
+-- | One frame due. Advances the dot and books the next frame while the wait
+-- holds; otherwise the chain ends and 'stSpinLive' says so, which is what
+-- lets the next 'beginJevWait' start a fresh one.
+handleJevSpin :: EventM Name St ()
+handleJevSpin = do
+  st <- get
+  if stJevWaiting st
+    then do
+      put st { stSpinFrame = stSpinFrame st + 1 }
+      scheduleSpin (stJevChan st)
+    else put st { stSpinLive = False }
+
+scheduleSpin :: BChan AppEvent -> EventM Name St ()
+scheduleSpin chan = liftIO (void (forkIO (threadDelay spinMicros >> writeBChan chan JevSpin)))
+
+-- | **120ms a frame**, so the ten frames read as one turn in 1.2s. Fast
+-- enough to look alive next to a ranking that answers in 70–300ms, slow
+-- enough that the whole animation costs at most a handful of redraws per
+-- request.
+spinMicros :: Int
+spinMicros = 120000
 
 -- | **A debounce timer coming due.** A generation that no longer matches
 -- 'stJevPending' was superseded by a later keystroke while it slept and is
@@ -6816,13 +6903,25 @@ fireJevForCurrentOffers = do
     -- request and so never passed the switch: measured 2026-11-19 under a
     -- pty with @jev=off@ in the dotfile, one @request: 255 candidates@ went
     -- out on launch regardless.
-    _ | not (stJevOn st) -> liftIO (jevLog "skip: :jev off")
-    Nothing -> liftIO (jevLog "skip: no key loaded")
+    _ | not (stJevOn st) -> skip "skip: :jev off"
+    Nothing -> skip "skip: no key loaded"
     Just jcfg
-      | not onScreen -> liftIO (jevLog "skip: neither the strip nor the dropdown is on screen")
-      | length offered >= 2 ->
+      | not onScreen -> skip "skip: neither the strip nor the dropdown is on screen"
+      | length offered >= 2 -> do
+        -- **The spinner is lit here too and not only in
+        -- 'scheduleJevRanking'**, because the post-launch 'Tick' reaches this
+        -- function without scheduling anything — the launch slate's own
+        -- ranking would otherwise be the one wait with nothing beside the
+        -- title. `~swxcf`.
+        beginJevWait
         fireJevRanking jcfg (activeSession st) (Text.pack (take col line)) offered
-      | otherwise -> liftIO (jevLog ("skip: only " <> show (length offered) <> " candidate(s) offered"))
+      | otherwise -> skip ("skip: only " <> show (length offered) <> " candidate(s) offered")
+  where
+    -- | **Every way of not sending a request puts the spinner out**, because
+    -- a wait that was scheduled on the keystroke and then skipped here is a
+    -- wait for nothing — `~swxcf`. The log line is unchanged.
+    skip :: String -> EventM Name St ()
+    skip why = endJevWait >> liftIO (jevLog why)
 
 -- | Sends one ranking request to Jev in the background and returns
 -- immediately — nothing here ever blocks a keystroke on the network.
@@ -7252,11 +7351,16 @@ hintBusySaid = "a hint is already on its way — one ask at a time"
 applyJevRanking :: Int -> Either String (Map.Map Text Double) -> EventM Name St ()
 applyJevRanking gen result = do
   st <- get
+  -- **The spinner goes out on the latest generation's answer and on nothing
+  -- else** — `~swxcf`. A superseded answer landing does not end the wait,
+  -- because the request it was superseded by is still out; a 'Left' does,
+  -- because nothing further is coming for it.
+  when (gen == stJevGen st) endJevWait
   case (gen == stJevGen st, result) of
     (True, Right scores) ->
-      put st
-        { stOfferDropdown = floatJevPicks scores <$> stOfferDropdown st
-        , stSlate = floatJevSlate scores (stSlate st)
+      modify $ \st' -> st'
+        { stOfferDropdown = floatJevPicks scores <$> stOfferDropdown st'
+        , stSlate = floatJevSlate scores (stSlate st')
         }
     _ -> pure ()
 

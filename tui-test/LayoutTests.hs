@@ -13,6 +13,7 @@
 -- measured under a pty**, which is what that ruling protects.
 module LayoutTests (layoutTests) where
 
+import Graphics.Text.Width (safeWcwidth)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 
@@ -39,6 +40,8 @@ import Tui.Layout
   , stripDefaultRows
   , stripMinRows
   , stripName
+  , stripTitle
+  , spinnerFrames
   , stripSized
   , Grid (..)
   , stripCellWidth
@@ -193,6 +196,27 @@ layoutTests =
         length allPanes @?= 9
         paneByName stripName @?= Nothing
         assertBool "named unlike every pane" (stripName `notElem` map paneName allPanes)
+    , -- | **The spinner beside the title, and only while a ranking is out** —
+      -- HIS instruction, 2026-11-21, on `~swxcf`. The cells hold Jev's own
+      -- picks and nothing else, so the pane is empty between the keystroke
+      -- and the answer; the spinner is what tells him that gap is a wait.
+      testCase "the title spins only while something is on its way" $ do
+        stripTitle Nothing @?= stripName
+        assertBool "the frame is beside the name" (stripTitle (Just 0) /= stripName)
+        length (stripTitle (Just 0)) @?= length stripName + 2
+    , -- | **The frame index is never bounds-checked by the caller** — it only
+      -- ever counts up, so the table has to wrap for it.
+      testCase "a frame index past the table wraps instead of failing" $ do
+        stripTitle (Just (length spinnerFrames)) @?= stripTitle (Just 0)
+        stripTitle (Just (3 * length spinnerFrames + 4)) @?= stripTitle (Just 4)
+        assertBool "more than one frame to show" (length spinnerFrames > 1)
+    , -- | **Every spinner glyph is one column wide, and that is `~8ztt3`'s
+      -- rule applied before the fact**: a two-column glyph the TUI has not
+      -- declared to vty shifts every cell to its right, which is how the ✅
+      -- beside the prelude moved the next pane's accent bar. Braille is
+      -- narrow, so there is nothing to declare.
+      testCase "no spinner frame is a wide glyph" $
+        assertBool "all one column" (all ((== 1) . safeWcwidth) spinnerFrames)
     , -- | **Closed, and nothing he has on screen moves until he says so.**
       testCase "the strip starts closed, at the height the finished pane wants" $ do
         stripOpen defaultStrip @?= False
