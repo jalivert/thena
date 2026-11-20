@@ -3575,13 +3575,13 @@ handleAppEvent (RerunStep gen soFar shown finished) =
 -- — measured with a vty event dump under the pty, 2026-11-11. Recognising
 -- them here is the only route such a key has into this frontend.
 --
--- **One gesture, and it is a table anyway.** Both entries are Shift+Enter's
--- two encodings, both measured. The @(run, action)@ shape is kept past the
--- point where one gesture needs it because `~xmd5b` wants exactly it: a run
--- that is not in this table is typed into the line, so Ctrl+Enter still
--- deposits @[27;5;13~@ into a proof line, and closing that is an entry here
--- rather than a second mechanism. **It does not close `~xmd5b`** — that is
--- still his call.
+-- **Two gestures, four encodings, one table.** Shift+Enter and Ctrl+Enter
+-- are each the same key under the kitty and @modifyOtherKeys@ spellings; the
+-- @(run, action)@ shape was kept past the point where one gesture needed it
+-- for exactly this — `~xmd5b`, his instruction of 2026-11-21: bind the key
+-- rather than let a run nothing names fall through and type itself into the
+-- line. **A run still not in this table is typed as before** — the fix is
+-- only as wide as the table.
 --
 -- **DO NOT PUT CMD+L BACK. IT WAS TRIED AND IT DOES NOT ARRIVE.** `~p6g53`:
 -- @[108;9u@ (kitty protocol — @l@ is 108, modifier @1 + 8@ for super) and
@@ -3596,6 +3596,8 @@ escRuns :: [(String, EventM Name St ())]
 escRuns =
   [ ("[13;2u",    shiftEnter)
   , ("[27;2;13~", shiftEnter)
+  , ("[13;5u",    ctrlEnter)
+  , ("[27;5;13~", ctrlEnter)
   ]
 
 -- | Esc has just been handled, so the characters that follow it /may/ be the
@@ -3654,28 +3656,44 @@ shiftEnter = do
   st <- get
   if stScriptMode st then scriptOpenLine else pure ()
 
--- | **An empty line below the caret, with the caret seated on it** — the
--- other half of `~bmk98`.
+-- | **Ctrl+Enter's binding — his instruction of 2026-11-21.** `~xmd5b` found
+-- it typing punctuation into the line for want of anywhere to go; rather
+-- than only swallow the run, it is given a job: the mirror of Shift+Enter,
+-- opening the blank line *above* the caret instead of below it.
+--
+-- **Script mode only**, same as Shift+Enter — there is no document to
+-- insert into at the ordinary REPL, so the sequence is swallowed exactly as
+-- it always was there.
+ctrlEnter :: EventM Name St ()
+ctrlEnter = do
+  st <- get
+  if stScriptMode st then scriptOpenLineAbove else pure ()
+
+-- | **An empty line beside the caret, with the caret seated on it** — the
+-- other half of `~bmk98`, and shared with its mirror below. @place@ is the
+-- only difference between the two gestures: where the new line's index
+-- falls relative to the caret's own.
 --
 -- **It is 'insertScriptLine''s rebuild with no text and an explicit seat.**
 -- Inserting through the command bar hands over a line already written;
--- Shift+Enter is for a line he has not written yet, so the one thing it must
--- not do is 'reseated''s un-park — that would drop him on the composing line
--- at the end of the document, which is the one place the new line is not.
+-- these gestures are for a line not written yet, so the one thing neither
+-- must do is 'reseated''s un-park — that would drop him on the composing
+-- line at the end of the document, which is the one place the new line is
+-- not.
 --
 -- **An empty line costs nothing while it waits to be written.** `oneLine`
 -- answers @Blank@ for it, so the tail re-runs against a session the blank left
 -- exactly as it found it, and a blank he changes his mind about is removed by
 -- the Backspace that backs out of it (`~282h8`) or by Enter on the empty line.
 --
--- **On the composing line it appends and seats**, there being no "between" to
+-- **On the composing line both append and seat**, there being no "between" to
 -- insert into there. That is the honest reading rather than a refusal: the
 -- gesture means /give me a line here/, and at the end of the document here is
--- the end.
-scriptOpenLine :: EventM Name St ()
-scriptOpenLine = do
+-- the end — the same place either direction would land.
+scriptOpenLineAt :: (Int -> Int) -> EventM Name St ()
+scriptOpenLineAt place = do
   st <- get
-  let at = maybe (length (stScript st)) (+ 1) (stScriptPos st)
+  let at = maybe (length (stScript st)) place (stScriptPos st)
   case scriptSessionBefore st at of
     Nothing -> pure ()
     Just s -> do
@@ -3684,6 +3702,19 @@ scriptOpenLine = do
         st' <- get
         let doc = take at (stScript st') ++ rebuilt ++ unrun
         loadScriptAt st' { stScript = doc } at (stScriptDraft st')
+
+-- | **Shift+Enter — below the caret.** The new line's index is one past the
+-- caret's own, so the caret's line stays put and everything from the next
+-- line down shifts to make room.
+scriptOpenLine :: EventM Name St ()
+scriptOpenLine = scriptOpenLineAt (+ 1)
+
+-- | **Ctrl+Enter — above the caret.** The new line's index *is* the caret's
+-- own, so the caret's line (and everything below it) shifts down to make
+-- room, and the blank line takes the position the caret was just standing
+-- on.
+scriptOpenLineAbove :: EventM Name St ()
+scriptOpenLineAbove = scriptOpenLineAt id
 
 -- | The command bar owns every key while it is open. Enter submits it, Esc
 -- closes it unused, everything else edits its one line — no completion, no
@@ -4081,6 +4112,9 @@ dispatchScriptEvent ev@(VtyEvent (V.EvKey V.KBS [])) = do
 -- binding that actually fires is 'continueEscRun''s**, which recognises the
 -- bytes itself.
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptOpenLine
+-- | **Ctrl+Enter's mirror, same reason it is unreachable.** Kept beside the
+-- Shift clause so the two cannot drift when vty does learn to decode either.
+dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MCtrl]))  = scriptOpenLineAbove
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
 -- | **F12 or Ctrl+X summons the command bar. It used to be F2, and F2 is now
 -- the suggestion strip's second slot — HIS RULING, 2026-11-19**: /"we take F2
