@@ -802,7 +802,10 @@ baseTests =
       -- of it: the choice point between them is the search.
       testCase "every rule whose head passes is a candidate" $
         [ nameDotted g | Rule g _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
-          @?= [ "attack", "try-core", "abandon", "eliminate-core"
+          @?= [ "attack", "try-core", "abandon"
+                -- **@rename@ is offered at every component** (MS12 phase 330),
+                -- a hole among them, so it is a candidate here.
+              , "rename", "eliminate-core"
               , "eliminate-generalising-core"
               , "prove", "fill", "unify-refine-core", "apply-core"
               , "fit-core", "fit-core"

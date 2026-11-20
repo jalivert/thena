@@ -332,6 +332,8 @@ everyOp =
   , ("tie-recursion t", Op.TieRecursion (Ref "t"))
     -- The binder report's accessor (MS9 phase 192).
   , ("binder-name b", Op.BinderName (Ref "b"))
+    -- Giving the binder at the focus a word (MS12 phase 330).
+  , ("prim-rename n", Op.Rename (Ref "n"))
   ]
 
 vocabulary :: TestTree

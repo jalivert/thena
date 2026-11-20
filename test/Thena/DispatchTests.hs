@@ -413,7 +413,11 @@ dispatchableTests =
     [ testCase "matches shows try, dispatch does not" $ do
         let std = expectedBase
         names' (matches std emptyGlobals hole)
-          @?= ["attack", "try-core", "abandon", "eliminate-core"
+          @?= ["attack", "try-core", "abandon"
+               -- **@rename@ is offered here too** (MS12 phase 330): its head is
+               -- @focus-is-component@, and dispatch runs it no more than it runs
+               -- @try-core@ — it takes a parameter.
+             , "rename", "eliminate-core"
              , "eliminate-generalising-core", "prove", "fill"
              , "unify-refine-core", "apply-core"
                -- **@fit-core@'s two clauses both pass, and dispatch runs
