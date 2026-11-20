@@ -10,6 +10,7 @@ module Thena.Core.Context
   , writableIn
   , freeIn
   , freshIdent
+  , wordReaches
   , substLevelsInEntry
   , piOver
   , lamOver
@@ -138,6 +139,34 @@ freshIdent taken i@(Ident hint)
     free j = j `notElem` taken
     numbered k =
       let j = Ident (hint ++ show k) in if free j then j else numbered (k + 1)
+
+-- | Whether the word a binder carries still reaches it: the words in scope
+-- with it, __innermost first__, and its own place among them.
+--
+-- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /THERE IS ONE NAME/,
+-- part two. This is the dual of 'freeIn' and it is the whole of what replaced
+-- the printer's freshening: **a word reaches the nearest binder carrying it**,
+-- so a binder with a nearer namesake reaches nothing and is shown marked
+-- instead of being quietly renamed. The invariant it serves is his: the word
+-- printed at any position, typed back where it stands, reaches that same
+-- thing, or is visibly marked as reaching nothing.
+--
+-- **It is asked of a scope and not of a context**, because the two positions
+-- that need it are the same question: a context's rows at a focus, and a
+-- printer's own descent under the binders of the term it is printing. Both
+-- produce the words innermost first — 'Thena.Render.envOf' folds the context
+-- that way and every printer pushes a binder on the front — and a Pi binder
+-- inside a printed type shadows an ambient entry exactly as a later entry
+-- does. Two spellings of this rule would mean the development and the panes
+-- could disagree about which words are live.
+--
+-- Out of range it answers 'True': 'Thena.Syntax.Print.nameOf' has no word for
+-- a variable that is in no scope and prints the variable itself, which says so
+-- without a mark.
+wordReaches :: [String] -> Int -> Bool
+wordReaches ws k = case splitAt k ws of
+  (nearer, w : _) -> w `notElem` nearer
+  _               -> True
 
 -- | The type of an entry, whichever kind it is. Both constructors have one, in
 -- the same last position, which is why this accessor is total.

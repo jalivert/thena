@@ -51,7 +51,7 @@ import Brick.Widgets.Core (Padding (Pad))
 import Lens.Micro ((^.))
 
 import Thena.View.Address (Address (..))
-import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Shape (..))
+import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Reachable (..), Shape (..))
 import Thena.View.Development (ConstraintView (..), LinkShape (..), LinkView (..))
 import Thena.View.Goals (GoalKind (..), GoalView (..))
 import Thena.View.Instral
@@ -241,7 +241,12 @@ renderAt fold prec (Display at shape) = renderShape fold prec at shape
 -- so the question is answerable exactly here.
 renderShape :: Fold -> Prec -> Address -> Shape -> [Piece]
 renderShape fold prec at shape = case shape of
-  AVariable name _ -> plain name
+  -- **A word that reaches nothing is marked, and the mark is ours to pick** --
+  -- his ruling of 2026-11-20. The view hands over a flag precisely so a
+  -- frontend can style this rather than find a character in the text; a
+  -- dagger is the plainest thing a terminal can do with it, matching the
+  -- engine's own printer (`Thena.Render.mark`).
+  AVariable name reach _ -> plain (name <> mark reach)
   AGlobal name levels -> plain (name <> levelArgs levels)
   AUniverse lvl -> plain lvl
   ALiteral text -> plain text
@@ -390,7 +395,7 @@ mayMention :: Address -> Display -> Bool
 mayMention binder = go
   where
     go (Display _ shape) = case shape of
-      AVariable _ a -> a == Just binder
+      AVariable _ _ a -> a == Just binder
       AGlobal {} -> False
       AUniverse {} -> False
       ALiteral {} -> False
@@ -691,7 +696,7 @@ renderValue v = case v of
 -- (see the module header). Always expanded; the machine pane doesn't fold.
 renderPlain :: Display -> String
 renderPlain (Display _ shape) = case shape of
-  AVariable name _ -> name
+  AVariable name reach _ -> name <> mark reach
   AGlobal name _ -> name
   AUniverse lvl -> lvl
   ALiteral text -> text
@@ -715,3 +720,9 @@ renderPlain (Display _ shape) = case shape of
       ObjectChild True d -> "${" <> renderPlain d <> "}"
       ObjectChild False (Display _ (AnObjectTerm _ _ items)) -> plainBody items
       ObjectChild False d -> renderPlain d
+
+-- | The mark a word that reaches nothing carries here.
+mark :: Reachable -> String
+mark r = case r of
+  Reachable   -> ""
+  Unreachable -> "†"

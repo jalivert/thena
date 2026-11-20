@@ -31,7 +31,7 @@ import Thena.Development.Partial
 import Thena.Language.Grammar (Grammar)
 import Thena.View.Address (Address, Move (..), extend)
 import Thena.View.Core (Budget, Display, displayCore)
-import Thena.Syntax.Print (Env, freshen)
+import Thena.Syntax.Print (Env, naming)
 
 -- | One link, addressed and marked.
 data LinkView = LinkView
@@ -158,8 +158,8 @@ displayDevelopment sp gs budget n0 at0 route0 p0 = go [] [] n0 at0 route0 p0
             Claim    x i _   -> (x, i)
             Guess    x i _ _ -> (x, i)
             Quantify x i _   -> (x, i)
-          name = freshen hint env
-       in (v, name, (v, name) : env, (v, at) : bs)
+          name = hint
+       in (v, name, (v, naming name) : env, (v, at) : bs)
 
     pureGuess g = case extract g of
       Right _ -> True
@@ -182,8 +182,8 @@ displayDevelopment sp gs budget n0 at0 route0 p0 = go [] [] n0 at0 route0 p0
       let (v, hint, ty) = case e of
             Hypothesis x (Ident h) s   -> (x, h, s)
             Definition x (Ident h) _ s -> (x, h, s)
-          name = freshen hint env
-          env' = (v, name) : env
+          name = hint
+          env' = (v, naming name) : env
           (groups, env'') = telescope env' n at rest
        in ((name, displayCore sp gs budget env [] n at ty) : groups, env'')
 

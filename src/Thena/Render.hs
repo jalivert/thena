@@ -162,13 +162,16 @@ import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
 import Thena.Syntax.Print
-  ( Env
+  ( dagger
+  , Env
   , escapeChar
   , escapeRaw
   , escapeString
-  , freshen
   , levelArgs
-  , nameOf
+  , reachesIn
+  , Naming (..)
+  , naming
+  , nameAt
   , renderLevel
   , renderLevelAtom
   , renderSurface
@@ -881,8 +884,7 @@ owedArgument ren ctx a b = case (a, b) of
       "they differ by one argument, which the shorter side has to take first: "
         ++ renderCore ren ctx dom
 
--- | Display names for a context's variables, freshened as the chain printer
--- freshens a component's.
+-- | The scope a context is, as a printer sees it — innermost first.
 --
 -- __A variable that is definitionally another variable prints as that one__
 -- (MS9 phase 236, his direction of 2026-10-29). @fill@ parks every elaborated
@@ -917,10 +919,14 @@ envOf = foldl add []
             Definition x (Ident h) _ _ -> (x, h)
        in (v, nameFor e entry hint) : e
 
+    -- __The alias keeps its own word for reaching and borrows one for showing__
+    -- (his ruling of 2026-11-20): the word a reader types still has to find
+    -- the entry it finds, so only the shown half is borrowed. Judged on the
+    -- borrowed word instead, the alias would mark its own endpoint dead.
     nameFor e entry hint = case entry of
       Definition _ _ (Free w) _
-        | Just name <- lookup w e -> name
-      _                         -> freshen hint e
+        | Just n <- lookup w e -> Naming hint (namingShown n)
+      _                        -> naming hint
 
 go :: Rendering -> Env -> Prec -> Core -> String
 
@@ -935,7 +941,7 @@ go ren@(Rendering gs _ _ _) env _ term
   | Just txt <- printTerm gs (renderingScope ren) (go ren env AtTop) term = txt
 go ren@(Rendering _ n _ _) env prec term = case term of
   Bound i               -> "‹bound " ++ show i ++ "›"
-  Free v                -> nameOf v env
+  Free v                -> nameAt v env
   Global g ls -> nameString ren g ++ levelArgs ls
   Universe l            -> renderLevel l
 
@@ -963,12 +969,12 @@ go ren@(Rendering _ n _ _) env prec term = case term of
 
   Let (Ident hint) val ty sc ->
     let (v, n1) = fresh n
-        name    = freshen hint env
+        name    = hint
      in parensIf (prec > AtTop) $
           "let " ++ name
             ++ " = " ++ go (ren { renderingNames = n1 }) env AtTop val
             ++ " : " ++ go (ren { renderingNames = n1 }) env AtTop ty
-            ++ " in " ++ go (ren { renderingNames = n1 }) ((v, name) : env) AtTop (open v sc)
+            ++ " in " ++ go (ren { renderingNames = n1 }) ((v, naming name) : env) AtTop (open v sc)
 
   -- A 'Canonical' prints as its own wrapper applied — @succ zero@, not a
   -- bracketed internal form. DECIDED by the user 2026-08-22.
@@ -1041,9 +1047,9 @@ chainLam :: Rendering -> Env -> [String] -> Core -> String
 chainLam ren@(Rendering _ n _ _) env acc term = case term of
   Lam (Ident hint) dom sc ->
     let (v, n1) = fresh n
-        name    = freshen hint env
+        name    = hint
         group   = "(" ++ name ++ " : " ++ go (ren { renderingNames = n1 }) env AtTop dom ++ ")"
-     in chainLam (ren { renderingNames = n1 }) ((v, name) : env) (group : acc) (open v sc)
+     in chainLam (ren { renderingNames = n1 }) ((v, naming name) : env) (group : acc) (open v sc)
   _ -> unwords (reverse acc) ++ " -> " ++ go ren env AtTop term
 
 -- | The same for ∀, except that a non-dependent 'Pi' ends the run — it goes on
@@ -1053,9 +1059,9 @@ chainPi ren@(Rendering _ n _ _) env acc term = case term of
   Pi (Ident hint) dom sc
     | dependent n sc ->
         let (v, n1) = fresh n
-            name    = freshen hint env
+            name    = hint
             group   = "(" ++ name ++ " : " ++ go (ren { renderingNames = n1 }) env AtTop dom ++ ")"
-         in chainPi (ren { renderingNames = n1 }) ((v, name) : env) (group : acc) (open v sc)
+         in chainPi (ren { renderingNames = n1 }) ((v, naming name) : env) (group : acc) (open v sc)
   _ -> unwords (reverse acc) ++ " -> " ++ go ren env AtTop term
 
 parensIf :: Bool -> String -> String
@@ -1126,10 +1132,10 @@ goP ren env ind route p = case p of
 -- caller places them. Shared with @:where@, which prints exactly this line for
 -- a component focus.
 link :: Rendering -> Env -> Component -> (String, Env)
-link ren env c = (text, (v, name) : env)
+link ren env c = (text, (v, naming name) : env)
   where
     (v, hint) = bound c
-    name      = freshen hint env
+    name      = hint
     text      = case c of
       Assume _ _ ty     -> "λ (" ++ name ++ " : " ++ go ren env AtTop ty ++ ") ->"
       Define _ _ val ty ->
@@ -1179,7 +1185,7 @@ inward _                             = Nothing
 renderWhere :: Rendering -> Cursor -> [String]
 renderWhere ren cur =
   section "focus"   [focusText]
-    ++ section "path"    [intercalate " ▸ " ("root" : crumbs ++ coreCrumbs)]
+    ++ section "path"    [intercalate " ▸ " ("root" : map crumb crumbs ++ coreCrumbs)]
     ++ section "context" (if null ctx then ["(nothing in scope)"] else map entry ctx)
     ++ maybe [] (\t -> section "type" [go ren env' AtTop t]) (expectedType cur)
   where
@@ -1195,11 +1201,19 @@ renderWhere ren cur =
         let (e, ws) = walkTerm env (toList ts)
          in (e, crossingWord x : ws, go ren e AtTop t)
 
+    -- __A row whose word no longer reaches it is marked and still listed__ —
+    -- his ruling of 2026-11-20. A marked occurrence with no row to point at
+    -- would leave the reader nothing to look up.
     entry e = case e of
       Hypothesis v _ ty ->
-        nameOf v env' ++ " : " ++ go ren env' AtTop ty
+        nameAt v env' ++ " : " ++ go ren env' AtTop ty
       Definition v _ val ty ->
-        nameOf v env' ++ " = " ++ go ren env' AtTop val ++ " : " ++ go ren env' AtTop ty
+        nameAt v env' ++ " = " ++ go ren env' AtTop val ++ " : " ++ go ren env' AtTop ty
+
+    -- __The path is read from the focus__, which is where @goto@ is typed, so a
+    -- step whose word something nearer has taken is marked there too.
+    crumb (Just v, w) | not (reachesIn v env') = w ++ [dagger]
+    crumb (_, w)                               = w
 
 -- | Walk the prefix root first, collecting display names and breadcrumb words.
 --
@@ -1207,16 +1221,18 @@ renderWhere ren cur =
 -- rule, so the two agree wherever they overlap. A guess adds a crumb and no
 -- name, which is §4.5's Γ rule showing up in the display for the same reason it
 -- shows up in 'context'.
-walkSteps :: [Step] -> (Env, [String])
+walkSteps :: [Step] -> (Env, [(Maybe Var, String)])
 walkSteps = foldl add ([], [])
   where
     add (env, crumbs) s = case s of
       Along c ->
         let (v, hint) = bound c
-            name      = freshen hint env
-         in ((v, name) : env, crumbs ++ [name])
-      Past _ -> (env, crumbs ++ ["≟"])
-      IntoGuess _ (Ident hint) _ _ -> (env, crumbs ++ ["≐ " ++ freshen hint env])
+         in ((v, naming hint) : env, crumbs ++ [(Just v, hint)])
+      Past _ -> (env, crumbs ++ [(Nothing, "≟")])
+      -- A guess adds a crumb and no name, so there is no variable here to ask
+      -- about: the word is the hole's own identifier, freshened against the
+      -- development when the hole was built.
+      IntoGuess _ (Ident hint) _ _ -> (env, crumbs ++ [(Nothing, "≐ " ++ hint)])
 
 -- | The same for the core path. Only the three binder steps add a name.
 walkTerm :: Env -> [TermStep] -> (Env, [String])
@@ -1225,8 +1241,7 @@ walkTerm env0 = foldl add (env0, [])
     add (env, crumbs) s = case binderOf s of
       Nothing        -> (env, crumbs ++ [partWord (partOf s)])
       Just (v, hint) ->
-        let name = freshen hint env
-         in ((v, name) : env, crumbs ++ [partWord (partOf s)])
+        ((v, naming hint) : env, crumbs ++ [partWord (partOf s)])
 
 binderOf :: TermStep -> Maybe (Var, String)
 binderOf s = case s of
@@ -1335,9 +1350,9 @@ telescopeOf ren env (e : rest) =
   let (v, hint, ty) = case e of
         Hypothesis x (Ident h) s   -> (x, h, s)
         Definition x (Ident h) _ s -> (x, h, s)
-      name  = freshen hint env
+      name  = hint
       group = "(" ++ name ++ " : " ++ go ren env AtTop ty ++ ")"
-      (groups, env') = telescopeOf ren ((v, name) : env) rest
+      (groups, env') = telescopeOf ren ((v, naming name) : env) rest
    in (group : groups, env')
 
 pad :: Int -> String
@@ -1876,7 +1891,7 @@ renderInductive ren d cps = case inductiveConstructors d of
     -- A parameter's type sees the parameters before it and no more.
     group (i, e) =
       " ("
-        ++ nameOf (entryVar e) penv
+        ++ nameAt (entryVar e) penv
         ++ " : "
         ++ renderCore ren (take i ps) (entryType e)
         ++ ")"
@@ -1928,7 +1943,7 @@ renderRules ren d = case inductiveConstructors d of
     rule c =
       let args  = constructorArguments c
           at i  = ps ++ take i args
-          named i e = nameOf (entryVar e) (envOf (at (i + 1)))
+          named i e = nameAt (entryVar e) (envOf (at (i + 1)))
           above =
             [ named i e ++ " : " ++ paper (at i) (entryType e)
             | (i, e) <- zip [0 :: Int ..] args
@@ -2504,7 +2519,7 @@ renderClash ren clash = case clash of
 
 -- | A variable's display name, taken from the context the error carries.
 nameIn :: Context -> Var -> String
-nameIn ctx x = nameOf x (envOf ctx)
+nameIn ctx x = nameAt x (envOf ctx)
 
 -- | A name, written the way the reader of this text would write it (MS10
 -- phase 254) — see 'Thena.Core.Term.shortestEnding'.

@@ -86,8 +86,8 @@ module Thena.View
 
 import Data.Foldable (toList)
 
-import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (GlobalName (..), InScope, Spelling (..), nameDotted, Ident (..), Var)
+import Thena.Core.Context (Context)
+import Thena.Core.Term (GlobalName (..), InScope, Spelling (..), nameDotted, Var)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefix, rebuild)
 import Thena.Development.Partial (Partial (..))
@@ -112,7 +112,7 @@ import Thena.Instral.Type (Signature)
 import Thena.Instral.Ops (ruleName, Instr, Rule)
 import Thena.Language.Grammar (Grammar)
 import Thena.Rules (RuleBase (..), groupParams, matchingRules)
-import Thena.Syntax.Print (Env, freshen)
+import Thena.Syntax.Print (Env, scopeOf)
 import Thena.View.Address (Address (..), Move (..), addressOf, extend, focusing)
 import Thena.View.Chart
   ( FailureView
@@ -484,17 +484,11 @@ ruleOf budget s =
 globalString :: GlobalName -> String
 globalString = nameDotted
 
--- | Display names for the variables at the focus, freshened the way the chain
--- printer freshens a component's — 'Thena.Render.envOf's own fold, here because
--- a view must agree with it about what a variable is called.
+-- | The scope at the focus — 'Thena.Syntax.Print.scopeOf' over the focus's
+-- context, so a view cannot disagree with the terminal about what a variable is
+-- called or about which words are still live.
 envAt :: Session -> Env
-envAt = foldl add [] . sessionContext
-  where
-    add e entry =
-      let (v, hint) = case entry of
-            Hypothesis x (Ident h) _   -> (x, h)
-            Definition x (Ident h) _ _ -> (x, h)
-       in (v, freshen hint e) : e
+envAt = scopeOf . sessionContext
 
 route :: Cursor -> ([Step], Focus)
 route cur = (toList (prefix cur), focus cur)

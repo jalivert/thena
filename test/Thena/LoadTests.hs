@@ -1962,9 +1962,7 @@ preludeTests =
           -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
           -- which is a counter value and no business of this assertion.
           renderEliminator (rendering [] n0) (declaredAs "Eq") (atZero d (fst (eliminatorType d LZero n0)))
-            @?= [ "elim Eq.Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq.Eq {0} A _ _1 -> Type₀) \
-                  \-> (∀ (a : A) -> P a a (Eq.refl {0} A a)) \
-                  \-> ∀ (_ : A) (_1 : A) (target : Eq.Eq {0} A _ _1) -> P _ _1 target"
+            @?= [ "elim Eq.Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_ : A) -> Eq.Eq {0} A _† _ -> Type₀) -> (∀ (a : A) -> P a a (Eq.refl {0} A a)) -> ∀ (_ : A) (_ : A) (target : Eq.Eq {0} A _† _) -> P _† _ target"
                 ]
 
     -- "and can be used": eliminating a 'refl' must actually fire. The motive is

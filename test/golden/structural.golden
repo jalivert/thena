@@ -33,7 +33,7 @@ solved: ?ℓ15
 thena spine> :show
   let refined = Type₀ : Type₁ in
   let A = refined : Type₁ in
-▶ let pi = ∀ (A1 : A) -> let refined1 = A1 : A in let pi1 = refined1 : Type₀ in pi1 : Type₁ in
+▶ let pi = ∀ (A : A) -> let refined1 = A : A† in let pi1 = refined1 : Type₀ in pi1 : Type₁ in
   pi
 thena spine> qed
 pi : Type₁   ∎

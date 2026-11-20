@@ -7013,14 +7013,63 @@ under the word `x` and *displayed* as `x1`, the printer numbering a repeat on th
 way out: `x1` was in no scope, and `x` reached the inner binding while the screen
 said `x` on the outer one.
 
-**The binders of a split's method are the same case.** They carry the words the
-datatype's own declaration wrote, so a method of `Below` eliminated inside a
-theorem that has an `m` of its own binds `m1`, and `fill core`m1`` reaches it.
+**The binders of a split's method are the same case once you stand in one.**
+They carry the words the datatype's own declaration wrote, so attacking a method
+of `Below` inside a theorem that has an `m` of its own introduces `m1`, and
+`fill core`m1`` reaches it. **The method's *statement* keeps the declaration's
+own word**, because that word is right where it stands — see *A word that reaches
+nothing is marked* below for what the statement then shows about the theorem's
+own `m`.
 
 **A word you type is still yours, taken or not.** `intro "a"` twice is shadowing
 and the inner binding wins, as in any other language; so is a surface `\ x -> \ x
 -> x`, where the words are the ones you wrote. This decision reaches only the
 words the system supplies for you.
+
+### A word that reaches nothing is marked, and nothing is renamed behind your back
+
+*Decided 2026-11-20.*
+
+**Thena prints the word a binder really carries.** It used to rename a repeated
+word on the way out — a second `x` was shown as `x1` — and nothing read that back,
+so the screen offered a handle that was not one: `x1` was in no scope and `x`
+reached the *inner* binding while the screen put `x` on the outer.
+
+**Shadowing is allowed, and it kills the outer binder.** The moment a word is
+written twice, no word reaches the outer one. It is still shown, and so is every
+reference to it, with a mark saying that the word printed there reaches nothing —
+a dagger at the prompt, and a flag a frontend styles as it likes:
+
+```
+λ (x : Type₀) (x : Type₀) -> x†      -- the body means the OUTER binder
+λ (x : Type₀) (x : Type₀) -> x       -- the body means the inner one
+```
+
+**The two terms are different and now look different.** They are what a printer
+that renamed could not tell you apart, and the second is the one you can write
+down: a reference to a dead binder cannot be typed, so it only ever arises where
+Thena builds a term for you. A split's method is where you will meet it —
+eliminating `b : Below (succ m) (fz m)` in a theorem with its own `m`, the method
+reads
+
+```
+∀ (m : Nat) (q : Eq {0} Nat (succ m) (succ m†)) -> …
+```
+
+and the mark is what tells you the two `succ m`s are not the same `m`. Printed
+without it the equation would read as trivially true.
+
+**The cost, and it is accepted.** Printing is no longer the inverse of reading
+for a term that still mentions a dead binder, and only for such a term: a mark is
+not something you can type. **The repair is yours rather than the printer's** —
+renaming the binder gives it a free word for real, in the term, and everything
+pointing at it follows.
+
+**Why not forbid the shadowing instead.** A file may legitimately contain
+`λ x. λ x. x`, so a refusal could only live where you introduce a binder
+interactively, and elaborating such a file would then have to rename for real —
+which means the words in your development would not be the words in your file.
+Lean 4 carries the same split and closes the same gap the same way.
 
 ## Building a frontend
 

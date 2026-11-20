@@ -29,6 +29,7 @@ module Thena.View.Core
   ( Display (..)
   , Shape (..)
   , Binding (..)
+  , Reachable (..)
   , ObjectItem (..)
   , Budget (..)
   , displayCore
@@ -63,8 +64,9 @@ import Thena.Syntax.Print
   ( Env
   , escapeChar
   , escapeString
-  , freshen
+  , naming
   , nameOf
+  , reachesIn
   , renderLevel
   , renderLevelAtom
   )
@@ -78,8 +80,9 @@ data Display = Display
 
 -- | What a node is — never what it looks like.
 data Shape
-  = AVariable String (Maybe Address)
-    -- ^ the name it is shown under, and the binder it belongs to.
+  = AVariable String Reachable (Maybe Address)
+    -- ^ the name it is shown under, whether that name still reaches what it
+    -- names, and the binder it belongs to.
     --
     -- **Not a de Bruijn index and not a 'Var'.** The address is what makes
     -- /hover a binder, highlight its occurrences/ free rather than a separate
@@ -226,6 +229,19 @@ data Binding = Binding
   { bindingName :: String
   , bindingType :: Display
   }
+  deriving (Eq, Show)
+
+-- | Whether the word a name is shown under still reaches what it names.
+--
+-- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /THERE IS ONE NAME/.
+-- Shadowing kills the outer binder, and the word printed at any position must
+-- either reach the thing it is printed on or say that it reaches nothing.
+--
+-- **A flag and not a character, deliberately.** A dagger glued into a view's
+-- text would be unstyleable in a frontend and could be read back as part of a
+-- name, so the glyph is the frontend's choice; "Thena.Syntax.Print"\'s
+-- @dagger@ is the terminal's own.
+data Reachable = Reachable | Unreachable
   deriving (Eq, Show)
 
 -- | How deep to go before eliding.
@@ -375,7 +391,7 @@ displayCore spelling grammars budget env binders counter here term =
 
     shapeOf b e bs n at t = case t of
       Bound i -> ADangling i
-      Free v -> AVariable (nameOf v e) (lookup v bs)
+      Free v -> AVariable (nameOf v e) (reaching v e) (lookup v bs)
       Global g ls -> AGlobal (named g) (map renderLevelAtom ls)
       Universe l -> AUniverse (renderLevel l)
       Primitive l -> ALiteral (literal l)
@@ -384,8 +400,8 @@ displayCore spelling grammars budget env binders counter here term =
       Lam i dom sc -> binder AnAbstraction b e bs n at i dom sc Dom Body
       Let (Ident hint) val ty sc ->
         let (v, n1) = fresh n
-            nm = freshen hint e
-            e' = (v, nm) : e
+            nm = hint
+            e' = (v, naming nm) : e
             bs' = (v, at) : bs
          in ALet
               (Binding nm (go b e bs n (down at Type) ty))
@@ -412,10 +428,16 @@ displayCore spelling grammars budget env binders counter here term =
     -- names the body and in what the editor draws.
     binder con b e bs n at (Ident hint) dom sc domPart bodyPart =
       let (v, n1) = fresh n
-          nm = freshen hint e
+          nm = hint
        in con
             (Binding nm (go b e bs n (down at domPart) dom))
-            (go b ((v, nm) : e) ((v, at) : bs) n1 (down at bodyPart) (open v sc))
+            (go b ((v, naming nm) : e) ((v, at) : bs) n1 (down at bodyPart) (open v sc))
+
+    -- **A binder is never marked and an occurrence may be** — his invariant of
+    -- 2026-11-20, judged where the word is printed: at a binder the word does
+    -- reach what it binds, and under a nearer namesake an occurrence of the
+    -- outer one reaches nothing.
+    reaching v e = if reachesIn v e then Reachable else Unreachable
 
     -- **One-based**, because @down@'s @pick@ is one-based and an address has to
     -- mean the same thing to the cursor as it does here.

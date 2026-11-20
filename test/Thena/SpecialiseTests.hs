@@ -121,7 +121,7 @@ vtailTests =
 
   , testCase "cons's, before: a binder, a vector at it, and an equation" $
       shown vecContext (methodOf 1)
-        @?= "\8704 (n1 : Nat.Nat) -> A -> Vec.Vec A n1 -> (Eq.Eq {0} Nat.Nat n1 (Nat.succ n) -> Vec.Vec A n) -> Eq.Eq {0} Nat.Nat (Nat.succ n1) (Nat.succ n) -> Vec.Vec A n"
+        @?= "∀ (n : Nat.Nat) -> A -> Vec.Vec A n -> (Eq.Eq {0} Nat.Nat n (Nat.succ n†) -> Vec.Vec A n†) -> Eq.Eq {0} Nat.Nat (Nat.succ n) (Nat.succ n†) -> Vec.Vec A n†"
 
     -- **AND IT GENERALISES NOTHING, WHICH IS WHY THE TWO ABOVE READ AS THEY
     -- DID BEFORE MS9 PHASE 191.** A copy is demanded only where a rule's own
