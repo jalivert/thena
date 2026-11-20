@@ -5511,12 +5511,16 @@ scriptSubmit = do
     -- the tail is spliced up and re-run from the session the line *before*
     -- it left behind — the same rebuild an edit does, one line shorter.
     --
-    -- **@~sv5v8@ has made this unreachable and it is left standing on
-    -- purpose.** Clearing a committed line is now an edit like any other,
-    -- so the first Backspace severs the tail and un-parks the caret, and
-    -- this branch can no longer be entered with 'stScriptPos' set. It is
-    -- also the only splice left in the mode, which is half of @~c9rj9@ —
-    -- his open question of whether dropping a line truncates or splices.
+    -- **IT IS REACHABLE, AND A COMMENT HERE CLAIMING OTHERWISE IS WHAT LET
+    -- `~5fs42` SURVIVE — his report, 2026-11-20.** This said @~sv5v8@ had
+    -- made it unreachable because the first Backspace severs the tail and
+    -- un-parks the caret; it does not un-park when the caret is on the
+    -- document's *only* line, so backspacing that line empty leaves
+    -- 'stScriptPos' at @Just 0@ and Enter arrives here. Measured under a pty:
+    -- @:script@, a line that errors, Backspace to empty, Enter.
+    --
+    -- It is also the only splice left in the mode, which is half of @~c9rj9@
+    -- — his open question of whether dropping a line truncates or splices.
     -- Deleting it would answer that question by attrition, so it waits.
     Just i | all isSpace line -> case scriptSessionBefore st i of
       Nothing -> pure ()
@@ -5656,9 +5660,17 @@ runRerunBatch chan gen session texts = do
   go start start session texts []
   where
     go start lastPost s pending acc = case pending of
-      [] -> pure ()
-        -- unreachable: every recursive call below passes a non-empty list,
-        -- guarded by the 'null ts' checks that fire before it would be.
+      -- | **AN EMPTY BATCH STILL POSTS ITS FINISHED STEP, AND THAT IS THE
+      -- WHOLE OF `~5fs42`.** This arm used to be @pure ()@ with /unreachable/
+      -- beside it, which was true of the recursive calls and false of the
+      -- first one: 'rerunTail' is called with @[]@ whenever the tail being
+      -- re-run is empty, and then nothing was ever posted, 'stRerun' stayed
+      -- 'Just' for the life of the process, and 'handleEventForKeys' refused
+      -- **every** 'VtyEvent' from then on — a live TUI with no keyboard at
+      -- all, not even Ctrl+X or Ctrl+D. **The invariant to keep is that every
+      -- batch handed to 'forkIO' posts exactly one finished step**, so the
+      -- state machine is total and 'stRerun' cannot be stranded.
+      [] -> postRerunStep chan gen start True (reverse acc)
       (t : ts) -> do
         sl <- runScriptLine s t
         let acc' = sl : acc
