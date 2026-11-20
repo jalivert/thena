@@ -133,6 +133,27 @@ data Warning
     -- repair is cheap, since renaming the theorem before @qed@ costs nothing
     -- and renaming it after costs the proof. @qed@ is silent for that reason:
     -- the forecast was given when the proof opened.
+  | BinderShadows String
+    -- ^ **a word a binder just took, which an outer binder of the same chain
+    -- carried** (MS12 phase 330). His ruling of 2026-11-20, /THERE IS ONE
+    -- NAME/, part three, and the second principle's answer once more:
+    -- shadowing is allowed, the outer binder goes dead, and the UI says so.
+    --
+    -- **This is the shape with nothing below referring to the dead binder**, so
+    -- the only thing lost is the word: the binder is still there, still printed,
+    -- and @rename@ gives it a word again.
+  | BinderShadowsReferenced String [String]
+    -- ^ the same word, and **the components below it whose own terms still
+    -- refer to the binder it killed** (MS12 phase 330) — his second shape,
+    -- /naming those references/, because a reference the user cannot see from
+    -- where they are standing is the part that costs them something: it prints
+    -- marked from now on, and the printed term no longer re-parses to itself.
+    --
+    -- **The names are an aid and their absence decides nothing.** A reference
+    -- standing in a chain's trailing term has no component to name, so this
+    -- constructor is chosen by whether anything below refers to the dead binder
+    -- and never by the list being non-empty —
+    -- 'Thena.Development.Partial.wordsTaken' says which.
   | PublicConsultIdle String
     -- ^ **a rule file's @public consult ‹base›@, and the base it names** (MS11
     -- phase 298, his ruling of 2026-11-06, @~ckp39@). A plain @consult@ in a
@@ -380,6 +401,13 @@ data FailReason
   | NothingToIntroduce
     -- ^ @intro@ on the right shape, but the hole's type is neither a Π nor a
     -- @let@ once whnf'd
+  | NotABinderHere
+    -- ^ @rename@ where the focus is not a component (MS12 phase 330). A word
+    -- belongs to a binder, so the position has to be one: a constraint binds
+    -- nothing a word reaches, and a position inside a core term is not where
+    -- that term's binders are named. **Walking up to the binder is the whole of
+    -- the operation** — his ruling of 2026-11-20, /THERE IS ONE NAME/, part
+    -- four — so a focus that is not one is the ordinary way to meet this
   | NotYetPure Position
     -- ^ @Certify@ on a development that still has a hole, a guess or an
     -- undischarged constraint in it (§5.3). The 'Position' names the first one

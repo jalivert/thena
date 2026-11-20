@@ -159,7 +159,7 @@ import Data.Word (Word64)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
-import Thena.Core.Term (Core (..), close, freeVars, innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, declarationWord, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Core.Term (Core (..), Ident (..), close, freeVars, innermostOf, GlobalName (..), InScope (..), Opened (..), openedWhole, rootScope, revealing, shortestEnding, declarationNamed, declarationWord, globalUnder, nameDotted, nameFromText, rootName, Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
@@ -180,8 +180,9 @@ import Data.Bits ((.&.), shiftR, xor)
 import Data.Char (intToDigit, isAlpha, isAlphaNum, isSpace, ord)
 import Data.List ((\\), groupBy, intercalate, dropWhileEnd, isPrefixOf, isSuffixOf, nub, sort, stripPrefix)
 import qualified Data.List.NonEmpty as NE
-import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
-import Thena.Development.Partial (Partial (..), extract, termsIn)
+import Thena.Development.Cursor
+  (expectedType, Cursor, Focus (..), focus, overLevels, rebuild)
+import Thena.Development.Partial (Partial (..), extract, termsIn, wordsTaken)
 import Thena.Engine
   ( ChoicePoint (..)
   , rules
@@ -8192,7 +8193,63 @@ shadowings before sc gs =
   [ NameShadows g hid | g <- nub gs, Just hid <- [shadowed before sc g] ]
 
 progress :: Maybe Int -> Session -> [Message] -> [Warning] -> (Session, Response)
-progress fuel = spending fuel 0
+progress fuel s msgs warns =
+  let (s', r) = spending fuel 0 s msgs warns
+   in (s', warnedOf (tookAWord s s') r)
+
+-- | A run's response with more warnings in it.
+--
+-- **'spending' has one return point** — its own @stop@, which builds a 'Ran' —
+-- so this reaches every answer a run gives and the fallthrough is for the
+-- type's sake rather than for a case that arises (@.claude\/HAZARDS.md@ carries
+-- what rests on that one return point).
+warnedOf :: [Warning] -> Response -> Response
+warnedOf [] r = r
+warnedOf ws r = case r of
+  Ran msgs was stop -> Ran msgs (was ++ ws) stop
+  _                 -> r
+
+-- | **The binders this line wrote that took a word already in scope where they
+-- landed** — his ruling of 2026-11-20, /THERE IS ONE NAME/, part three, in two
+-- shapes: plain, and naming the references left pointing at the binder that
+-- went dead.
+--
+-- **Asked at the one door a line goes through, and asked of the binder.** Every
+-- act that can bind — @intro \"x\"@, @assume@, @claim@, @define@, a λ an
+-- elaboration introduces, a method a tactic builds — comes through 'progress',
+-- so the question is asked once here rather than by each op remembering to;
+-- 'shadowings' does the same for a declaration one layer up. **And it is asked
+-- of the binders, not of the focus**: the focus may end anywhere a line likes,
+-- and merely walking into a scope where a word was written twice is not an
+-- event to report.
+--
+-- **\"This line\" is the name counter**, which only 'Thena.Core.Term.fresh'
+-- moves: a variable at or past where the counter stood when the line started
+-- was minted by it. Navigation mints nothing, so navigation warns about
+-- nothing.
+--
+-- **A word the system supplies never gets here**, because it was made free
+-- where the binder landed ('Thena.Core.Context.writableIn'). What reaches this
+-- is a word a user wrote twice, which is theirs to write (MS4 phase 41f).
+--
+-- **The same sentence is said once.** A line that builds several arms re-binds
+-- the author's word in each of them — a split's target and a friendly index are
+-- re-bound under it on purpose (@~8v3pg@, @~pmpqg@) — and the warning names no
+-- position, so a second copy of it carries nothing. Whether a tactic's own
+-- deliberate re-binding should warn at all is on @.claude\/CLOSEOUT.md@.
+tookAWord :: Session -> Session -> [Warning]
+tookAWord before after =
+  nub
+    [ warning x refs anyRef
+    | (Ident x, named, anyRef) <- wordsTaken isNew development'
+    , let refs = [ r | Ident r <- named ]
+    ]
+  where
+    development' = rebuild (cursor (development (sessionMachine after)))
+    isNew v = v >= fst (fresh (Engine.names (sessionMachine before)))
+    warning x refs anyRef
+      | anyRef    = BinderShadowsReferenced x refs
+      | otherwise = BinderShadows x
 
 -- | 'progress' with the fuel it was given and what it has spent so far.
 --

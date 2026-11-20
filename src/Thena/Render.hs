@@ -1690,6 +1690,11 @@ renderFailReason ren r = case r of
   NotAGuessHere       -> "that is not a guess"
   NotReadyToIntroduce -> "intro wants a hole of the form ? x ≐ (? x' : S . x') — attack it first"
   NothingToIntroduce  -> "that hole's type is neither a ∀ nor a let"
+  -- **It says where the word lives**, because walking up to the binder is the
+  -- operation (MS12 phase 330): the focus is somewhere a word belongs to no
+  -- binder, and the user's next move is to get to one.
+  NotABinderHere      -> "rename wants a binder at the focus: walk up to the one"
+                      ++ " whose word you are changing"
   GoalIsNotAUniverse  -> "quantify builds a type, so that hole must be claimed at a universe"
   CannotBuildDatatype why -> case why of
     DeclaredTypeIsNotAUniverse d ->
@@ -2111,6 +2116,15 @@ signatureIn ren@(Rendering _ n0 _ _) ctx0 ps0 ty0 = braced n0 ctx0 [] ps0 ty0
 -- **The word is what tells a reader it is not a failure.** A load that warns
 -- has installed everything it named, and the line says what was not done
 -- rather than what went wrong.
+-- | What a warning about a shadowed binder names: the components that still
+-- refer to it, or the fact that something below does where no component can be
+-- named for it (MS12 phase 330).
+referring :: [String] -> String
+referring refs = case refs of
+  []       -> "the term below still refers"
+  [r]      -> r ++ " still refers"
+  _        -> intercalate ", " refs ++ " still refer"
+
 renderWarning :: Warning -> String
 renderWarning w = "warning: " ++ case w of
   VacuousBinder k g p x -> blockAt k g ++ ", production " ++ p ++ ": " ++ x ++ " binds in nothing"
@@ -2145,6 +2159,20 @@ renderWarning w = "warning: " ++ case w of
   -- **It names the base, because the line to change is the one that names it**
   -- (MS11 phase 298) — and it says what the word would have added, since that
   -- is the thing the author believed they were asking for.
+  -- **It says what was lost and what gets it back** (MS12 phase 330): the word,
+  -- and the one operation that gives the dead binder another one. Nothing is
+  -- broken — no term changed — so the line does not read as a refusal.
+  BinderShadows x ->
+    x ++ " shadows an outer binder of the same word, which no word reaches now"
+      ++ " — walk up to that binder and rename it to give it one"
+  -- **The references are named, because they are what the user cannot see from
+  -- where they are standing** — his second shape. They print marked from here
+  -- on, which is the cost worth stating: the term no longer reads back as
+  -- itself until the outer binder is renamed.
+  BinderShadowsReferenced x refs ->
+    x ++ " shadows an outer binder of the same word, which no word reaches now"
+      ++ ", and " ++ referring refs ++ " to it — a reference to it prints marked"
+      ++ " until you rename that binder"
   PublicConsultIdle b ->
     "public consult " ++ b ++ " acts as a plain consult: a rule file's consult"
       ++ " already hands the base on to whoever consults this one"

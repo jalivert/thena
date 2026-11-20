@@ -1712,6 +1712,7 @@ unaryOps =
   , ("some", Op.Some)
   , ("goto", Goto), ("goto-named", Op.GotoNamed)
   , ("name-text", Op.NameText)
+  , ("prim-rename", Op.Rename)
   , ("case-survived", Op.CaseSurvivedOp)
   , ("level", Op.LevelOf), ("universe-at", Op.UniverseAt)
   , ("push-development", Op.PushDevelopment)
