@@ -28,6 +28,7 @@ module Tui.Render
   , displayText
   , developmentText
   , goalTexts
+  , mark
   ) where
 
 import Data.Char (isSpace)

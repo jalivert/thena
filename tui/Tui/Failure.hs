@@ -57,7 +57,7 @@ import Thena.View.Trust
   , TrustView (..)
   )
 
-import Tui.Render (displayText)
+import Tui.Render (displayText, mark)
 
 -- | One line of the fold, and how deep it sits inside it.
 --
@@ -302,7 +302,7 @@ pieceText pc = case pc of
   ADottedName n -> n
   ANames ns -> intercalate ", " ns
   ATerm d -> displayText d
-  AVariable x -> x
+  AVariable x reach -> x <> mark reach
   ACount n -> show n
   ALine n -> show n
   AWanted w -> wantedText w
@@ -342,6 +342,7 @@ wantedText w = case w of
   AnEquation -> "an equation"
   AConstructorOf -> "a constructor of it"
   AProduction -> "a production"
+  ABinder -> "a binder"
 
 stageText :: Stage -> String
 stageText st = case st of
@@ -484,6 +485,11 @@ warningText w = case w of
   APublicIdlesAtThePrompt m -> "public does nothing at the prompt: " <> m
   AClassCannotBePrimed b lang cls ->
     inBlock b lang "" <> "no character extends " <> cls
+  ABinderShadows x -> x <> " shadows an earlier binder, and nothing below still refers to it"
+  ABinderShadowsReferenced x [] -> x <> " shadows an earlier binder that is still referred to"
+  ABinderShadowsReferenced x cs ->
+    x <> " shadows an earlier binder that " <> intercalate ", " cs
+      <> (if length cs == 1 then " still refers" else " still refer") <> " to"
   where
     inBlock b g prod =
       "in " <> blockText b <> " " <> g
