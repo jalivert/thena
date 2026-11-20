@@ -79,15 +79,15 @@ import qualified Thena.Rules as R
 import qualified Thena.Surface.Concrete as C
 import qualified Thena.Syntax.Lexer as Lx
 
-import Thena.Core.Context (Context, Entry (..))
+import Thena.Core.Context (Context)
 import Thena.Core.Level (levelVarName)
 import Thena.Core.Term (Ident (..), Spelling, Var, nameDotted, spelledIn)
 import Thena.Driver (NotDone)
 import Thena.Instral.Type (renderTy)
 import Thena.Language.Grammar (Grammar)
-import Thena.Syntax.Print (Env, freshen, nameOf, renderLevel)
+import Thena.Syntax.Print (Env, nameOf, reachesIn, renderLevel, scopeOf)
 import Thena.View.Address (Address)
-import Thena.View.Core (Budget, Display, displayCore)
+import Thena.View.Core (Budget, Display, Reachable (..), displayCore)
 import Thena.View.Instral (patternText)
 import Thena.View.Trust (TrustView, displayTrust)
 
@@ -368,8 +368,9 @@ data Piece
     -- by, where the spelled form would be ambiguous.
   | ANames [String]
   | ATerm Display
-  | AVariable String
-    -- ^ a variable, named from the context it is bound in.
+  | AVariable String Reachable
+    -- ^ a variable, named from the context it is bound in, with whether that
+    -- name still reaches it there — his ruling of 2026-11-20.
   | ACount Int
   | ALine Int
     -- ^ a line, counting from 1.
@@ -566,7 +567,9 @@ displayStop sp grammars budget env binders counter here nd = case nd of
     coreIn ctx = ATerm . displayCore sp grammars budget (envOf ctx) binders counter here
     coreHere = ATerm . displayCore sp grammars budget env binders counter here
     name = AName . spelledIn sp
-    varIn ctx x = AVariable (nameOf x (envOf ctx))
+    varIn ctx x =
+      let e = envOf ctx
+       in AVariable (nameOf x e) (if reachesIn x e then Reachable else Unreachable)
     level = ALevel . renderLevel
     ident (Ident i) = i
 
@@ -1147,14 +1150,5 @@ displayStop sp grammars budget env binders counter here nd = case nd of
       E.PublicIdleAtPrompt m -> APublicIdlesAtThePrompt m
       E.UnprimeableClass k g cls -> AClassCannotBePrimed (block k) g cls
 
--- | Display names for a context's variables, the same fold
--- 'Thena.Render.envOf' and 'Thena.View.envAt' use — so a view agrees with them
--- about what a variable is called.
 envOf :: Context -> Env
-envOf = foldl add []
-  where
-    add e entry =
-      let (v, hint) = case entry of
-            Hypothesis x (Ident h) _ -> (x, h)
-            Definition x (Ident h) _ _ -> (x, h)
-       in (v, freshen hint e) : e
+envOf = scopeOf

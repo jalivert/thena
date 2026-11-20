@@ -39,8 +39,13 @@ module Thena.Syntax.Print
   , escapeRaw
     -- * Naming and levels, shared by both printers and by the display builder
   , Env
+  , Naming (..)
+  , naming
+  , scopeOf
   , nameOf
-  , freshen
+  , nameAt
+  , reachesIn
+  , dagger
   , renderLevel
   , renderLevelBody
   , renderLevelAtom
@@ -51,7 +56,9 @@ import Data.List (intercalate)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level, Normal (..), levelVarName, normalise)
-import Thena.Core.Term (GlobalName (..), Literal (..), Var, nameDotted)
+import Thena.Core.Context
+  (Context, entryIdent, entryVar, wordReaches)
+import Thena.Core.Term (GlobalName (..), Ident (..), Literal (..), Var, nameDotted)
 import Thena.Instral.Concrete
   ( RawDecl (..)
   , Reach (..)
@@ -578,26 +585,94 @@ kindWord k = case k of
 -- Keeping one copy is what stops a term displaying under one name in the
 -- terminal and another in the editor.
 
--- | The freshening environment: minted variables paired with their display
--- names. Threaded through both the term and the development printers.
-type Env = [(Var, String)]
+-- | The scope a printer has descended through: every binder in sight, paired
+-- with its naming, __innermost first__. Threaded through both the term and the
+-- development printers.
+--
+-- **It used to be the /freshening/ environment and is not one any more — his
+-- ruling of 2026-11-20**, @.claude\/RULINGS.md@, /THERE IS ONE NAME/. A binder
+-- arrives here under the word it is really stored with, because
+-- 'Thena.Core.Context.writableIn' made that word free where the binder was
+-- built; what this list is asked for is the word and, where a word was written
+-- twice, which of them it still reaches.
+type Env = [(Var, Naming)]
 
+-- | A binder as a printer sees it: the word that __reaches__ it, and the word
+-- it is __shown__ under.
+--
+-- **They are the same for every binder but one, and the exception is his
+-- direction of 2026-10-29**: a definition whose body is just another variable
+-- is shown under that variable's word, so a refusal names a word the reader
+-- can see instead of one the elaborator minted
+-- ('Thena.Render.envOf' is where that happens). **A borrowed word takes
+-- nothing from the binder it was borrowed from**, which is why 'reachesIn'
+-- asks 'namingWord' and never what is on screen — judged on the screen, the
+-- alias would mark its own endpoint dead, which is the opposite of what a
+-- reader's word does there.
+data Naming = Naming
+  { namingWord  :: String
+  , namingShown :: String
+  }
+  deriving (Eq, Show)
+
+-- | A binder shown under its own word, which is all of them but the alias.
+naming :: String -> Naming
+naming w = Naming { namingWord = w, namingShown = w }
+
+-- | The scope a context is, __innermost first__ — the one fold every printer
+-- and every view folds it with, so they cannot disagree about what a variable
+-- is called or about which words are still live.
+--
+-- **"Thena.Render" folds its own on top of this one** and nothing else does:
+-- there, a definition whose body is just another variable borrows that
+-- variable's word to be shown under (his direction of 2026-10-29), which is a
+-- refusal's wording and not a naming rule.
+scopeOf :: Context -> Env
+scopeOf = foldl add []
+  where
+    add e entry =
+      let Ident h = entryIdent entry
+       in (entryVar entry, naming h) : e
+
+-- | The word a variable is shown under, unmarked. A variable in no scope prints
+-- as itself in guillemets, which says what it is without a mark.
 nameOf :: Var -> Env -> String
 nameOf v env = case lookup v env of
-  Just s  -> s
+  Just n  -> namingShown n
   Nothing -> "‹" ++ show v ++ "›"
 
--- | A binder whose identifier is already in scope is renamed, because a term
--- whose body refers to the /outer/ one would otherwise print as one that
--- re-parses to the inner (§2.6). Keywords are avoided for the same reason.
-freshen :: String -> Env -> String
-freshen hint env
-  | ok hint   = hint
-  | otherwise = pick (1 :: Int)
-  where
-    taken = map snd env
-    ok s = s `notElem` taken && s `notElem` ["let", "in", "forall"]
-    pick k = let s = hint ++ show k in if ok s then s else pick (k + 1)
+-- | Whether the word a variable is shown under still reaches it here —
+-- 'Thena.Core.Context.wordReaches' asked of a printer's scope.
+reachesIn :: Var -> Env -> Bool
+reachesIn v env = case [ k | (k, (x, _)) <- zip [0 ..] env, x == v ] of
+  k : _ -> wordReaches (map (namingWord . snd) env) k
+  []    -> True
+
+-- | The word a variable is shown under __as the terminal shows it__: marked
+-- when it reaches nothing.
+--
+-- **The mark is a character here and a flag on the boundary**, and that split
+-- is deliberate — his, 2026-11-20. This module is the terminal's printer, so
+-- the terminal's choice of glyph belongs in it; a view hands a frontend
+-- 'reachesIn'\'s answer instead, because a dagger glued into a view's text
+-- would be unstyleable there and could be read back as part of a name.
+nameAt :: Var -> Env -> String
+nameAt v env
+  | reachesIn v env = nameOf v env
+  | otherwise       = nameOf v env ++ [dagger]
+
+-- | The terminal's mark for a word that reaches nothing — Lean 4's answer to
+-- the same question, and what the write-up is named after.
+--
+-- **Deliberately not a reserved character.** Reserving it would narrow every
+-- name in every modelled language at once, which
+-- "Thena.Syntax.Lexer"\'s own reservation argues against; left ordinary, a
+-- daggered word typed back is simply a name nothing binds, which refuses
+-- loudly. Print-parse is lost for a term that still mentions a dead binder and
+-- only for such a term — an accepted cost of the ruling, repaired by renaming
+-- the binder.
+dagger :: Char
+dagger = '†'
 
 
 -- | Render a universe, **normalising first** (phase 28).

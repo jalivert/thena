@@ -256,9 +256,13 @@ renderTests =
           , ") in"
           , "g"
           ]
-  , testCase "a shadowed chain binder is freshened" $
+    -- **Nothing is renamed and the dead binder's reference says so** — his
+    -- ruling of 2026-11-20. Both links keep the word @x@, which is the word
+    -- each really carries, and the trailing term refers to the OUTER one, which
+    -- @x@ no longer reaches: the mark is what stops it reading as the inner.
+  , testCase "a shadowed chain binder keeps its word, and the reference is marked" $
       renderPartial (rendering [] 500) [] shadowedBinders
-        @?= unlines' [ "λ (x : Type₀) ->", "λ (x1 : Type₀) ->", "x" ]
+        @?= unlines' [ "λ (x : Type₀) ->", "λ (x : Type₀) ->", "x†" ]
   , testCase "a guess body does not see the hole's name, so nothing is freshened" $
       renderPartial (rendering [] 500) [] guessShadowing
         @?= unlines'
@@ -357,13 +361,21 @@ scopeTests =
 
 roundTripTests :: [TestTree]
 roundTripTests =
-  [ testCase (name ++ " survives print then read") $
+    -- **The one development whose print does NOT read back, and it is an
+    -- accepted cost of his ruling of 2026-11-20** — a term still referring to a
+    -- binder whose word was taken prints that reference marked, and a mark is
+    -- not something the reader can type. It is here rather than in the list
+    -- below so that the loss is pinned where it is explained: the repair is the
+    -- rename operation, not a printer that renames behind the user's back.
+    testCase "shadowed binders print a mark, which is deliberately not readable back" (
+      reprint shadowedBinders
+        @?= "PARSE FAILED: ResolveFailed (NotInScope \"x\\8224\")")
+  : [ testCase (name ++ " survives print then read") $
       reprint p @?= renderPartial (rendering [] 500) [] p
   | (name, p) <-
       [ ("the running example", idMidway)
       , ("a constraint", withConstraint)
       , ("one of each", allFour)
-      , ("shadowed binders", shadowedBinders)
       , ("a guess shadowing its hole", guessShadowing)
       , ("a trailing binder", trailingLam)
       , ("a trailing Π", trailingPi)

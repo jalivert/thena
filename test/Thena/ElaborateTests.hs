@@ -1841,7 +1841,7 @@ splittingTree =
         \; pr a b rp -> case e of \
         \{ c1 -> s (wrongArm a b (allQ a) rp c2) ; c2 -> z } }"
       ]
-      "stuck: the split fixed e and this call passes Fixed.C.c2, so it is not the induction hypothesis \8212 a premise the induction varies is bound inside the arm and not before the split: wrongArm a b (Fixed.allQ a) rp Fixed.C.c2"
+      "stuck: the split fixed e† and this call passes Fixed.C.c2, so it is not the induction hypothesis — a premise the induction varies is bound inside the arm and not before the split: wrongArm a b (Fixed.allQ a) rp Fixed.C.c2"
 
     -- __AND PHASE 208'S OWN CASE IS UNTOUCHED__: with no split on @e@ at all,
     -- the premise is in scope and a call naming anything else for it still

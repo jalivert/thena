@@ -34,7 +34,7 @@ import Brick.AttrMap (AttrName, attrName)
 import Brick.Widgets.Core (Padding (Pad))
 
 import Thena.View.Address (Address (..))
-import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Shape (..))
+import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Reachable (..), Shape (..))
 import Thena.View.Development (ConstraintView (..), LinkShape (..), LinkView (..))
 import Thena.View.Instral
   ( OperandView (..)
@@ -86,7 +86,11 @@ renderAt fold prec (Display _at shape) = renderShape fold prec shape
 
 renderShape :: Fold -> Prec -> Shape -> Widget n
 renderShape fold prec shape = case shape of
-  AVariable name _ -> str name
+  -- **A word that reaches nothing is marked, and the mark is ours to pick** --
+  -- his ruling of 2026-11-20. The view hands over a flag precisely so a
+  -- frontend can style this rather than find a character in the text; a
+  -- dagger is the plainest thing a terminal can do with it.
+  AVariable name reach _ -> str (name <> mark reach)
   AGlobal name levels -> str (name <> levelArgs levels)
   AUniverse lvl -> str lvl
   ALiteral text -> str text
@@ -322,7 +326,7 @@ renderValue v = case v of
 -- (see the module header). Always expanded; the machine pane doesn't fold.
 renderPlain :: Display -> String
 renderPlain (Display _ shape) = case shape of
-  AVariable name _ -> name
+  AVariable name reach _ -> name <> mark reach
   AGlobal name _ -> name
   AUniverse lvl -> lvl
   ALiteral text -> text
@@ -341,3 +345,9 @@ renderPlain (Display _ shape) = case shape of
       ObjectChild True d -> "${" <> renderPlain d <> "}"
       ObjectChild False (Display _ (AnObjectTerm _ _ items)) -> concatMap plainItem items
       ObjectChild False d -> renderPlain d
+
+-- | The mark a word that reaches nothing carries here.
+mark :: Reachable -> String
+mark r = case r of
+  Reachable   -> ""
+  Unreachable -> "†"

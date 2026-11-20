@@ -39,8 +39,8 @@ module Thena.View.Trust
   , TrustSite (..)
   ) where
 
-import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (Spelling, spelledIn, Ident (..), Var)
+import Thena.Core.Context (Context)
+import Thena.Core.Term (Spelling, spelledIn, Var)
 import Thena.Core.Trust
   ( TrustClaim (..)
   , TrustClass (..)
@@ -50,7 +50,7 @@ import Thena.Core.Trust
 import Thena.Language.Grammar (Grammar)
 import Thena.View.Address (Address)
 import Thena.View.Core (Budget, Display, displayCore)
-import Thena.Syntax.Print (Env, freshen)
+import Thena.Syntax.Print (Env, scopeOf)
 
 -- | The level a session is at, and every claim the development on it rests on.
 --
@@ -139,14 +139,5 @@ displayTrust sp grammars budget binders counter here lvl claims =
       NoUndischargeableTrust -> k /= Undischargeable
       NoTrust                -> k == Discharged
 
--- | Display names for a context's variables, the same fold
--- 'Thena.Render.envOf' and 'Thena.View.envAt' use — so a view agrees with them
--- about what a variable is called.
 envOf :: Context -> Env
-envOf = foldl add []
-  where
-    add e entry =
-      let (v, hint) = case entry of
-            Hypothesis x (Ident h) _   -> (x, h)
-            Definition x (Ident h) _ _ -> (x, h)
-       in (v, freshen hint e) : e
+envOf = scopeOf

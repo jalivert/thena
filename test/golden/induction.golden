@@ -29,7 +29,7 @@ subgoals: reflMethod
 thena spine> back
 thena spine> :where
 focus
-  let ? reflMethod : ∀ (a1 : Nat) -> Eq {0} Nat (succ a1) (succ a1) in
+  let ? reflMethod : ∀ (a : Nat) -> Eq {0} Nat (succ a) (succ a) in
 path
   root ▸ ≐ congSucc ▸ a ▸ b ▸ e
 context
@@ -37,7 +37,7 @@ context
   b : Nat
   e : Eq {0} Nat a b
 type
-  ∀ (a1 : Nat) -> Eq {0} Nat (succ a1) (succ a1)
+  ∀ (a : Nat) -> Eq {0} Nat (succ a) (succ a)
 thena spine> try-core core`\ (c : Nat) -> refl {0} Nat (succ c)`
 thena spine> solve
 thena spine> along
