@@ -564,6 +564,7 @@ until you do, `:theorem` will tell you there is one in progress.
 | `attack` | turn the focused hole into a guess, ready to be built |
 | `intro` | move one `∀` binder from the goal into the guess body |
 | `intro "a"` | the same, naming the binding `a` rather than letting it be named for you |
+| `rename "a"` | give the binding you are standing on the word `a` |
 | `` try-core core`term` `` | propose a term for the focused hole |
 | `solve` | accept the focused guess — it becomes a definition |
 | `regret` | throw away a guess's body, back to a plain hole |
@@ -798,7 +799,17 @@ thena spine> induction-core core`n`
 subgoals: zeroMethod, succMethod
 subgoals: zeroCase
 subgoals: succCase
+warning: n shadows an outer binder of the same word, which no word reaches now — walk up to that binder and rename it to give it one
 ```
+
+The warning is the split telling you what it just did to your name for the
+argument. Each case re-binds `n` to that case's own shape, so that writing `n`
+inside the step case gets you the refined thing — the context below shows
+`n = succ u`. The argument the theorem quantified is still in the development
+and still needed, but no word reaches it any more, so it prints as `n†`: the
+dagger marks a binding that has lost its word, and it appears wherever that
+binding or a reference to it is printed. `rename` gives it a word back if you
+want to name it.
 
 `zeroCase` and `succCase` are the two to prove. Walk into the step case and
 look at it:
@@ -875,6 +886,7 @@ thena spine> attack
 thena spine> :matches
 intro : ()
 intro ‹n› : Name -> ()
+rename ‹n› : Name -> ()
 solve : ()
 regret : ()
 prove : ()
@@ -1000,6 +1012,7 @@ thena spine> :matches
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
+rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
 eliminate-generalising-core ‹t› : Core -> ()
 prove : ()
@@ -1368,7 +1381,7 @@ already there goes on being searched underneath them.
 ```
 thena spine> :consult examples/ChoicePoints.thena.rules
 loaded demo (3 rules)
-loaded standard (122 rules)
+loaded standard (123 rules)
 ```
 
 **The last thing you consulted is tried first.** The shipped base is consulted for
@@ -2194,6 +2207,7 @@ language and elaborated on load.
 | | |
 |---|---|
 | `attack` `intro` `solve` `regret` `abandon` | the hole operations |
+| `rename "‹a›"` | give the binding you are standing on a word, when it has lost its own |
 | `` try-core core`term` `` | propose a term for the focused hole |
 | `` apply-core core`f` `` / `` unify-refine-core core`t` `` | apply a function / refine by unification |
 | `goto-named "‹name›"` | move to a hole by name |

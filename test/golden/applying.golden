@@ -12,6 +12,7 @@ thena spine> :matches
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
+rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
 eliminate-generalising-core ‹t› : Core -> ()
 prove : ()

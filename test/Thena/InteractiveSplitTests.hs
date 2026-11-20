@@ -39,6 +39,17 @@ import Thena.Render (rendering, renderCore, renderResponse)
 target :: FilePath
 target = "examples/SplitAtAHole.thena.script"
 
+-- | __The arm re-binds the author's word for the scrutinee on purpose__, so
+-- every split through here warns that the outer binder went dead. That is the
+-- re-binding doing its job: a reader standing in the @vcons@ arm writes
+-- @xs@ and gets the refined vector, which costs the ambient @xs@ its word. The
+-- warning is deliberately NOT narrowed to a word the user wrote twice, so it is
+-- part of what a split prints and is asserted here.
+shadowedByTheArm :: String
+shadowedByTheArm =
+  "warning: xs shadows an outer binder of the same word, which no word reaches \
+  \now \8212 walk up to that binder and rename it to give it one"
+
 -- | One command, and what the session said back.
 step :: Session -> String -> (Session, [String])
 step s cmd = let (s', r) = command s cmd in (s', renderResponse s' r)
@@ -103,6 +114,7 @@ tests =
           @?= [ "subgoals: vnilMethod, vconsMethod"
               , "no subgoals"
               , "subgoals: vconsCase"
+              , shadowedByTheArm
               ]
 
       -- The same split by the other word: `induction` hands each method a
@@ -116,5 +128,6 @@ tests =
           @?= [ "subgoals: vnilMethod, vconsMethod"
               , "no subgoals"
               , "subgoals: vconsCase"
+              , shadowedByTheArm
               ]
     ]
