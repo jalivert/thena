@@ -23,18 +23,34 @@ module Tui.Panes
   , stripHintLines
   , hintRegionWidget
   , paneRowWidget
+  , paneWrapped
+  , paneWrapAt
+  , paneWrapFloor
   , BarSpot (..)
   , paneBarWidget
   ) where
 
 import Data.List (intercalate, intersperse, nub, sort)
 
-import Brick (Widget, (<+>), clickable, emptyWidget, hBox, str, strWrapWith, vBox, withAttr)
+import Brick
+  ( Size (Fixed, Greedy)
+  , Widget (Widget, render)
+  , (<+>)
+  , availWidth
+  , clickable
+  , emptyWidget
+  , getContext
+  , hBox
+  , str
+  , strWrapWith
+  , vBox
+  , withAttr
+  )
 import Brick.AttrMap (attrName)
 import Graphics.Text.Width (safeWcwidth)
 import qualified Data.Text as T
 import Text.Wrap
-  ( FillStrategy (FillIndent)
+  ( FillStrategy (FillIndent, NoFill)
   , WrapSettings (..)
   , defaultWrapSettings
   , wrapTextToLines
@@ -603,7 +619,7 @@ paneRowWidget row = case row of
     clickable n (withAttr (attrName "pane.heading") (wrapped (headingText label count)))
   Tap n t -> clickable n (wrapped ("  " <> t))
   where
-    wrapped = strWrapWith paneWrap
+    wrapped = paneWrapped
 
 -- | A heading's text, shared by the two kinds of heading so that a clickable
 -- one cannot drift from a plain one.
@@ -632,6 +648,47 @@ paneWrap =
     , breakLongWords = True
     , fillStrategy = FillIndent 2
     }
+
+-- | **Every wrapped row in this TUI goes through here, and the reason is
+-- `~ncdb2`: 'paneWrap' does not terminate in a pane narrower than the row's
+-- own indent.** @preserveIndentation@ puts the row's leading spaces back on
+-- every continuation line and @FillIndent 2@ adds two more; when the pane has
+-- no columns left over, each continuation carries text of width zero, no
+-- progress is made, and 'wrapTextToLines' returns an **infinite** list of
+-- blank lines. Drawing it ate 68 GB of his machine's memory before he killed
+-- it.
+--
+-- **The width is only knowable here**, inside the render, which is why this is
+-- a 'Widget' and not a 'WrapSettings': a call site knows the string and the
+-- layout knows the pane, and the loop needs both. 'Greedy' and 'Fixed' are
+-- 'Brick.strWrapWith''s own size policy, this standing in for exactly it.
+paneWrapped :: String -> Widget n
+paneWrapped s = Widget Greedy Fixed $ do
+  ctx <- getContext
+  render (strWrapWith (paneWrapAt (availWidth ctx) s) s)
+
+-- | 'paneWrap' when the pane can afford the indent, and a flush wrap when it
+-- cannot — **pure, so the drawing suite can hold the whole rule to its text
+-- without a terminal.**
+--
+-- **The correctness bar is only that it terminate**, which it does from
+-- 'paneWrapFloor' of 1 upward; the floor is set at 'paneWrapFloor' because a
+-- row wrapped to two or three columns is a vertical ribbon of letters and not
+-- something to read. Below it the indentation is dropped and the row wraps
+-- flush against the pane, which is the one layout that always fits.
+paneWrapAt :: Int -> String -> WrapSettings
+paneWrapAt w s
+  | w - indent - 2 >= paneWrapFloor = paneWrap
+  | otherwise = paneWrap { preserveIndentation = False, fillStrategy = NoFill }
+  where
+    indent = length (takeWhile (== ' ') s)
+
+-- | **How many columns a continuation line must have left for text before the
+-- indent is worth keeping.** Eight, which is a short word: the number decides
+-- only how early the flush fallback takes over, never whether wrapping
+-- terminates.
+paneWrapFloor :: Int
+paneWrapFloor = 8
 
 -- | **The bar that lists every pane, which are open, and at which position** —
 -- `~7tfhd`, his instruction of 2026-11-13.

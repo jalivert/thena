@@ -59,8 +59,12 @@ import Tui.Panes
   , outputRows
   , paneBarWidget
   , paneRowWidget
+  , paneWrapAt
+  , paneWrapFloor
   , stripKeyLabel
   )
+import qualified Data.Text as Text
+import Text.Wrap (wrapTextToLines)
 import Tui.Render (Fold (..), foldAttr, renderDisplay, renderGoals, renderMachineView)
 
 
@@ -685,6 +689,30 @@ paneRowCases =
     -- 'wideGlyphs' before it made a vty.
     testCase "every mark is two columns, so no row overruns its pane" $
       assertEqual "" [2, 2, 2] (map markColumns [AllIn, SomeIn, NoneIn])
+  , -- | **`~ncdb2`, and it is the only test here that is about not hanging.**
+    -- 'Tui.Panes.paneWrap' preserves a row's indentation on every continuation
+    -- line and adds two columns of hang; in a pane with nothing left over each
+    -- continuation carries no text, no progress is made, and
+    -- 'wrapTextToLines' returns an **infinite** list. His `:help` has rows
+    -- indented thirty-two columns and drawing one in a narrow pane took 68 GB
+    -- of memory.
+    --
+    -- **@take@ is the whole point of the assertion**: without
+    -- 'Tui.Panes.paneWrapAt' choosing the flush settings, forcing the length
+    -- of this list does not come back, so a cap that is never reached is what
+    -- distinguishes terminating from not. Thirty-two columns of indent is
+    -- 'Tui.App.tuiHelpLines'' own worst row.
+    testCase "wrapping terminates at every pane width there is" $
+      assertEqual "" (replicate 48 True)
+        [ length (take 300 (wrapped w)) < 300 | w <- [1 .. 48] ]
+  , -- | **The rule itself, either side of its one threshold.** The worst row
+    -- is indented 32 and 'paneWrap' hangs its continuations 2 further, so the
+    -- indent is kept while @32 + 2 + 'Tui.Panes.paneWrapFloor'@ columns are
+    -- there and dropped below that. A continuation that keeps the indent
+    -- starts with it; one that does not starts with the text.
+    testCase "the indent is kept while a word fits after it and dropped when it does not" $
+      assertEqual "" [True, False]
+        [ keepsIndent (34 + paneWrapFloor), keepsIndent (33 + paneWrapFloor) ]
   , -- | The engine's ruling of 2026-11-11, /"one failure and forty-seven
     -- pending, not forty-eight warnings"/: the first is the root and carries
     -- its reason, the rest are named and nothing is said about why — because
@@ -1096,6 +1124,22 @@ valueCases =
 envLines :: [(String, ValueView)] -> [String]
 envLines env =
   takeWhile (/= "stack:") (dropWhile (/= "env:") (renderMachineView (MachineView [] env [])))
+
+-- | `~ncdb2`'s row: 'Tui.App.tuiHelpLines'' worst case, a gloss under a
+-- 28-column spelling column, so its own indentation is 32 columns.
+indentedRow :: String
+indentedRow = "  " <> replicate 28 ' ' <> "  " <> "row in modules. Anywhere along the row"
+
+-- | 'indentedRow' wrapped the way a pane of this width would wrap it — the
+-- same settings 'Tui.Panes.paneWrapped' picks from the render context.
+wrapped :: Int -> [Text.Text]
+wrapped w = wrapTextToLines (paneWrapAt w indentedRow) w (Text.pack indentedRow)
+
+-- | Whether a continuation line came out carrying the row's indentation.
+keepsIndent :: Int -> Bool
+keepsIndent w = case drop 1 (wrapped w) of
+  (l : _) -> Text.isPrefixOf (Text.pack " ") l
+  [] -> False
 
 eq :: String -> String -> Shape -> TestTree
 eq name expected shape =

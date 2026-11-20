@@ -199,7 +199,7 @@ import Tui.Panes
   , outputRows
   , paneBarWidget
   , paneRowWidget
-  , paneWrap
+  , paneWrapped
   )
 import Tui.Database
   ( Stored (..)
@@ -1997,7 +1997,7 @@ draw st =
       -- reason and the same settings ('paneWrap'): the engine elides a
       -- value against its own 'Budget', which knows nothing about how
       -- wide a quarter of this screen is.
-      Machine -> pane' (padAll 1 (vBox (map (strWrapWith paneWrap) (renderMachineView machine))))
+      Machine -> pane' (padAll 1 (vBox (map paneWrapped (renderMachineView machine))))
       where
         pane' = pane (paneName p) (PaneVP p)
 
@@ -2187,7 +2187,7 @@ renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
     -- way. A prompt line and a document line are deliberately NOT wrapped:
     -- those are lines you put a caret in, and one that occupied two screen
     -- rows would have the editor's own single-row line jumping under it.
-    outputLine accented l = marker <+> str " " <+> strWrapWith paneWrap l
+    outputLine accented l = marker <+> str " " <+> paneWrapped l
       where
         marker = if accented then withAttr (attrName "accent.output") (str "▏") else str " "
 
@@ -2254,7 +2254,7 @@ renderScript st inputLine =
     refusal sl
       | slOk sl = []
       | otherwise =
-          [ withAttr (attrName "script.refused") (strWrapWith paneWrap ("  " <> l)) | l <- slOutput sl ]
+          [ withAttr (attrName "script.refused") (paneWrapped ("  " <> l)) | l <- slOutput sl ]
     -- | The composing line sits past the end, which is where a document's
     -- cursor is when you have not walked back into it.
     tail' = if isNothing (stScriptPos st) then [str "  " <+> inputLine] else []
