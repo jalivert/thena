@@ -71,6 +71,12 @@ data Config = Config
     -- its own candidates in alphabetical order. Same shape as the three
     -- above; defaults to on, so a dotfile that has never heard of it behaves
     -- as before.
+  , cfgUsage      :: [(String, Int)]
+    -- ^ **how many times each candidate has been taken from the strip by
+    -- its F-key** — his idea, 2026-11-21, feeding the Jev-off fallback's
+    -- ordering. Same shape as 'cfgWidths': a list and not a total map, so a
+    -- candidate never picked simply isn't here, and an old dotfile with no
+    -- @usage=@ line reads as every count being zero.
   , cfgModel      :: String
     -- ^ **which OpenRouter model answers the hint region** — `~w2tk2`
     -- slice 6, set by @:model ‹id›@ or by Enter in the @:models@ picker.
@@ -104,6 +110,7 @@ defaultConfig = Config
   -- on` brings it back, which is the second half of his ruling.
   , cfgDropdownOn = False
   , cfgJevOn      = True
+  , cfgUsage      = []
   , cfgModel      = Text.unpack defaultModelId
   }
 
@@ -154,6 +161,7 @@ applyLine cfg line = case break (== '=') line of
     cfg { cfgStrip = stripSized n (cfgStrip cfg) }
   ("dropdown", '=' : v) | Just b <- parseBool v -> cfg { cfgDropdownOn = b }
   ("jev", '=' : v)      | Just b <- parseBool v -> cfg { cfgJevOn = b }
+  ("usage", '=' : v)    -> cfg { cfgUsage = mapMaybe parseUsage (commas v) }
   -- | **Not validated against anything, and deliberately so** — see
   -- 'cfgModel'. An empty value falls back to the default rather than
   -- storing a model id of @""@, which would come back as a 400 on his
@@ -197,6 +205,15 @@ parseWidth entry = case break (== ':') entry of
   (name, ':' : n) -> (,) <$> paneByName name <*> readInt n
   _               -> Nothing
 
+-- | @abandon:3@ — a candidate's key ('Tui.App.usageKey'), then how many times
+-- it has been taken. Same shape as 'parseWidth'; an entry whose count doesn't
+-- parse is dropped rather than read as zero, same forgiving rule 'commas'
+-- already applies to the line as a whole.
+parseUsage :: String -> Maybe (String, Int)
+parseUsage entry = case break (== ':') entry of
+  (name, ':' : n) | not (null name) -> (,) name <$> readInt n
+  _                                 -> Nothing
+
 -- | **Digits and nothing else.** 'reads' would take @"60 junk"@ and a leading
 -- sign, and neither is a width or a position.
 readInt :: String -> Maybe Int
@@ -233,5 +250,7 @@ writeConfig path cfg = do
     , "suggestion-rows=" <> show (stripRows (cfgStrip cfg))
     , "dropdown=" <> (if cfgDropdownOn cfg then "on" else "off")
     , "jev=" <> (if cfgJevOn cfg then "on" else "off")
+    , "usage=" <> intercalate ","
+        [name <> ":" <> show n | (name, n) <- cfgUsage cfg]
     , "model=" <> cfgModel cfg
     ]

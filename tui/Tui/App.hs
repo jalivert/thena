@@ -64,7 +64,7 @@ import Control.Exception (SomeException, evaluate, try)
 import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
-import Data.List (intercalate, intersperse, isPrefixOf, isSuffixOf, sort, sortOn)
+import Data.List (intercalate, intersperse, isPrefixOf, isSuffixOf, partition, sort, sortOn)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Maybe (isJust, isNothing, listToMaybe)
@@ -824,6 +824,13 @@ data St = St
     -- Jev"/ — is about the pane when Jev is answering; a switch that turned
     -- the pane off along with Jev would have been a different instruction
     -- from the one he gave.
+  , stUsageCounts :: Map.Map String Int
+    -- ^ **how many times each candidate has actually been taken from the
+    -- strip by its F-key** — his idea, 2026-11-21, for the Jev-off fallback:
+    -- /"an 'index' of the most common rules/commands used… stored either in
+    -- the json config… so that this would serve as a sort of a likelihood
+    -- heuristic."/ Keyed by 'usageKey', bumped in the one F-key clause that
+    -- accepts a strip row, persisted the same shape as 'stPaneWidths'.
   , stHint :: Maybe String
     -- ^ **what the suggestion strip's hint region is saying** — `~w2tk2`
     -- slice 4, his /"when it sees that the user is clearly taking the wrong
@@ -1039,6 +1046,7 @@ runTui = do
         , stStripDrag   = Nothing
         , stDropdownOn  = cfgDropdownOn cfg
         , stJevOn       = cfgJevOn cfg
+        , stUsageCounts = Map.fromList (cfgUsage cfg)
         , stPicker      = Nothing
         , stEscRun      = Nothing
         , stInputExtent = Nothing
@@ -2639,11 +2647,53 @@ liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 -- grammar offers for the line, which is the only list whose rows carry an
 -- insertion — and not @matchesView@, which is the rules that apply at the
 -- focus and has no insertion to give a cell.
+--
+-- **RETUNED 2026-11-21, SAME RULING, A FLATTER READING OF IT CORRECTED.**
+-- 'slateRows' already carries tokens before productions, alphabetised
+-- within each — 'buildOfferDropdown''s own order. Re-sorting the whole list
+-- by 'rowLabel' flattened that, so a plain word like @along@ sat next to a
+-- long production spelling like @app-function/1: app-function
+-- Operand:Surface@. 'usageOrdered' keeps the two groups apart and only
+-- reorders within each, by his idea the same day: how often a candidate has
+-- actually been taken from the strip, 'stUsageCounts' — ties still read
+-- alphabetically, since 'sortOn' is stable and every untouched candidate
+-- starts at the same count.
 stripSlateOf :: St -> [OfferRow]
 stripSlateOf st
   | not (stripOpen (stStrip st)) = []
-  | not (stJevOn st) = sortOn rowLabel (slateRows (stSlate st))
+  | not (stJevOn st) = usageOrdered (stUsageCounts st) (slateRows (stSlate st))
   | otherwise = take (slateJevPicked (stSlate st)) (slateRows (stSlate st))
+
+-- | **Tokens before productions, most-used first within each — his idea of
+-- 2026-11-21.** The split is read off the rows themselves ('isTokenRow')
+-- rather than re-derived from the view, so this has no dependency beyond
+-- what 'stripSlateOf' already holds; 'partition' keeps each group's incoming
+-- order, which is already alphabetical, so a count of zero (everyone,
+-- before he has taken anything) reproduces the plain alphabetical order
+-- exactly.
+usageOrdered :: Map.Map String Int -> [OfferRow] -> [OfferRow]
+usageOrdered counts rows = mostUsedFirst toks <> mostUsedFirst prods
+  where
+    (toks, prods) = partition isTokenRow rows
+    mostUsedFirst = sortOn (negate . countOf)
+    countOf r = Map.findWithDefault 0 (usageKey r) counts
+
+-- | **A token row's insert is its own label, verbatim** — 'offerRow''s
+-- @ALiteralSymbol w -> OfferRow w (Just w)@. A production's never is: its
+-- label carries the shape after the name (`productionRow`), so the two
+-- cannot coincide by construction.
+isTokenRow :: OfferRow -> Bool
+isTokenRow r = rowInsert r == Just (rowLabel r)
+
+-- | **The stable key a candidate is counted under.** A token's word, taken
+-- whole — it has nothing else in it. A production's label is
+-- @‹name›: ‹shape›@ ('productionRow'); the name is what repeats across
+-- lines where the shape does not, so it is the part before the first
+-- @": "@ that is worth counting, not the whole rendered row.
+usageKey :: OfferRow -> String
+usageKey r
+  | isTokenRow r = rowLabel r
+  | otherwise    = takeWhile (/= ':') (rowLabel r)
 
 -- | **The grid as the keymap can know it** — `~w2tk2` slice 3a.
 --
@@ -4344,11 +4394,19 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 -- 'stOfferDropdown' here meant every F-key was dead after an Enter and after
 -- Esc's second press, in exactly the frames where the strip was blank for the
 -- same reason.
+-- | **This is also the one place a pick is counted** — his idea of
+-- 2026-11-21, feeding the Jev-off fallback's ordering ('usageOrdered'). A
+-- row taken by its F-key is unambiguous evidence of what he reached for;
+-- the whisper's Tab-accept is not touched, the strip's own numbered pick
+-- being the whole of what the idea was about.
 handleReplEvent (VtyEvent (V.EvKey (V.KFun k) []))
   | k `elem` stripSlotKeys = do
       st <- get
       case nthOf (k - 1) (stripShownOf st) of
-        Just row | Just ins <- rowInsert row -> acceptSlateRow st ins
+        Just row | Just ins <- rowInsert row -> do
+          let st' = st { stUsageCounts = Map.insertWith (+) (usageKey row) 1 (stUsageCounts st) }
+          liftIO (saveConfig (configOf st'))
+          acceptSlateRow st' ins
         _ -> pure ()
 handleReplEvent (VtyEvent (V.EvKey V.KEsc [])) = do
   st <- get
@@ -6273,6 +6331,7 @@ configOf st = Config
   , cfgStrip      = stStrip st
   , cfgDropdownOn = stDropdownOn st
   , cfgJevOn = stJevOn st
+  , cfgUsage = Map.toAscList (stUsageCounts st)
   , cfgModel = Text.unpack (stModel st)
   }
 
