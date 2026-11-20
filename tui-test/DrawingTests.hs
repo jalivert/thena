@@ -1024,7 +1024,7 @@ paneDrawCases =
 arrowCases :: [TestTree]
 arrowCases =
   [ eq "a binder nothing mentions is not drawn" "A -> B" (AFunction (Binding "y" (global "A")) (global "B"))
-  , eq "a binder that is mentioned is drawn" "(y : A) -> y" (AFunction (Binding "y" (global "A")) (bound "y"))
+  , eq "a binder that is mentioned is drawn" "\8704 (y : A) -> y" (AFunction (Binding "y" (global "A")) (bound "y"))
   , -- The domain is drawn at the application rung, exactly as 'Thena.Render'
     -- draws it, so an arrow standing in a domain is bracketed and one standing
     -- in a codomain is not. Getting this wrong reads as a different type.
@@ -1035,14 +1035,26 @@ arrowCases =
   , -- **The binder stays when the subtree was elided**, because the budget
     -- stopped before whatever mentions it: an arrow here would assert the name
     -- is unused, which is the one thing the tree cannot say.
-    eq "an elided body keeps the binder" "(y : A) -> \8230"
+    eq "an elided body keeps the binder" "\8704 (y : A) -> \8230"
       (AFunction (Binding "y" (global "A")) (at AnElision))
   , -- A mention inside a nested binder's *type* counts. @(y : A) -> (p : F y)
     -- -> B@ names @y@ nowhere else, and the arrow form would take away the
     -- word the reader has to write.
-    eq "a mention in a nested binding's type counts" "(y : A) -> F y -> B"
+    eq "a mention in a nested binding's type counts" "\8704 (y : A) -> F y -> B"
       (AFunction (Binding "y" (global "A"))
         (at (AFunction (Binding "p" (at (AnApplication (global "F") (bound "y")))) (global "B"))))
+  , -- **A run of dependent binders is one quantifier, not one apiece**
+    -- (`~fhqj6`) — the whole reason the keyword is chained rather than
+    -- written at each 'AFunction'. Every fixture here binds at the root, so
+    -- one occurrence makes both binders mentioned, which is the run.
+    eq "a run of binders is one quantifier" "\8704 (y : A) (z : B) -> y"
+      (AFunction (Binding "y" (global "A"))
+        (at (AFunction (Binding "z" (global "B")) (bound "y"))))
+  , -- And the arrow that ends a run stays an arrow: the reference's own rule
+    -- is that a non-dependent 'AFunction' closes the quantifier.
+    eq "a non-dependent tail ends the run" "\8704 (y : A) -> y -> B"
+      (AFunction (Binding "y" (global "A"))
+        (at (AFunction (Binding "w" (bound "y")) (global "B"))))
   ]
 
 -- | The argument side is the rung every drawer gets right, so these are the
@@ -1050,7 +1062,7 @@ arrowCases =
 argumentCases :: [TestTree]
 argumentCases =
   [ eq "a lambda" "f (\\x : A . x)" (app (global "f") lam)
-  , eq "a function type" "f ((y : A) -> y)" (app (global "f") pity)
+  , eq "a function type" "f (\8704 (y : A) -> y)" (app (global "f") pity)
   , eq "a let" "f (z = v : A . z)" (app (global "f") lett)
   , eq "a saturated former" "f (cons n a as)" (app (global "f") former)
   , eq "an elimination" "f (elim Nat () P (step) () tgt)" (app (global "f") elimination)
@@ -1068,7 +1080,7 @@ functionCases :: [TestTree]
 functionCases =
   [ eq "an elimination" "(elim Nat () P (step) () tgt) a" (app elimination (var "a"))
   , eq "a lambda" "(\\x : A . x) a" (app lam (var "a"))
-  , eq "a function type" "((y : A) -> y) a" (app pity (var "a"))
+  , eq "a function type" "(\8704 (y : A) -> y) a" (app pity (var "a"))
   , eq "a let" "(z = v : A . z) a" (app lett (var "a"))
   ]
 

@@ -261,11 +261,18 @@ renderShape fold prec at shape = case shape of
   -- @(T : Type\8320) -> (_ : T) -> (_1 : T) -> T@ beside a repl pane reading
   -- @\8704 (T : Type\8320) -> T -> T -> T@ for the same type. 'Thena.Render'
   -- is the reference (`~kq45n`) and it collapses this case.
+  --
+  -- **And a run of them is ONE @\8704@ with a group apiece — his ruling,
+  -- 2026-11-20 (`~fhqj6`):** /"I like the @\8704@ so let's print it in other
+  -- panes too."/ Until then the panes wrote the binder groups with no keyword
+  -- at all, so the same type read @(T : Type\8320) -> T -> T@ in the goals
+  -- pane and @\8704 (T : Type\8320) -> T -> T@ at the prompt. 'chainBinders'
+  -- is the run; 'Thena.Render.chainPi' is the reference it mirrors, including
+  -- that a non-dependent 'AFunction' **ends** the run rather than joining it.
   AFunction b body
     | mayMention at body ->
         parensIf (prec > AtTop) $
-          plain ("(" <> bindingName b <> " : ") <> renderAt fold AtTop (bindingType b)
-            <> plain ") -> " <> renderAt fold AtTop body
+          plain "\8704 " <> chainBinders fold [binderGroup fold b] body
     | otherwise ->
         parensIf (prec > AtTop) $
           renderAt fold AtApp (bindingType b) <> plain " -> " <> renderAt fold AtTop body
@@ -342,6 +349,26 @@ parensIf True ps = plain "(" <> ps <> plain ")"
 levelArgs :: [String] -> String
 levelArgs [] = ""
 levelArgs ls = " {" <> unwords ls <> "}"
+
+-- | **One @\8704@'s binder groups, and everything after them** — `~fhqj6`.
+--
+-- The accumulator is built in reverse, the way 'Thena.Render.chainPi' builds
+-- its own: each dependent 'AFunction' in the run contributes @(x : T)@ and
+-- hands on its body, and the first thing that is not one closes the run with
+-- @->@ and is drawn at 'AtTop'. **A non-dependent 'AFunction' is such a
+-- thing**, so @\8704 (T : Type\8320) -> T -> T@ keeps one quantifier and the
+-- arrows after it, rather than printing a quantifier per binder.
+chainBinders :: Fold -> [[Piece]] -> Display -> [Piece]
+chainBinders fold acc d@(Display at shape) = case shape of
+  AFunction b body
+    | mayMention at body -> chainBinders fold (binderGroup fold b : acc) body
+  _ -> concat (intersperse (plain " ") (reverse acc)) <> plain " -> " <> renderAt fold AtTop d
+
+-- | One binder group, @(x : T)@ — the shape 'Thena.Render' writes, and the
+-- only place a bound name and its type are drawn together.
+binderGroup :: Fold -> Binding -> [Piece]
+binderGroup fold b =
+  plain ("(" <> bindingName b <> " : ") <> renderAt fold AtTop (bindingType b) <> plain ")"
 
 -- | May the binder standing at this address be mentioned anywhere in this
 -- subtree?
