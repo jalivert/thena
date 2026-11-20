@@ -529,9 +529,9 @@ intro
 intro
 intro
 goto-named "E-app1Method1"
-eliminate-core core`invApp-tactics empty M N U d`
+eliminate-core core`invApp-tactics empty M2 N U d`
 goto-named "pairMethod"
-elaborate surface`\ S p -> T-app (ih (arrow S U) (andLeft (typing empty M (arrow S U)) (typing empty N S) p)) (andRight (typing empty M (arrow S U)) (typing empty N S) p)`
+elaborate surface`\ S p -> T-app (ih (arrow S U) (andLeft (typing empty M2 (arrow S U)) (typing empty N S) p)) (andRight (typing empty M2 (arrow S U)) (typing empty N S) p)`
 goto-named "E-app1Method1"
 solve
 goto-named "E-app1Method"
@@ -547,9 +547,9 @@ intro
 intro
 intro
 goto-named "E-app2Method1"
-eliminate-core core`invApp-tactics empty M N U d`
+eliminate-core core`invApp-tactics empty M2 N U d`
 goto-named "pairMethod"
-elaborate surface`\ S p -> T-app (andLeft (typing empty M (arrow S U)) (typing empty N S) p) (ih S (andRight (typing empty M (arrow S U)) (typing empty N S) p))`
+elaborate surface`\ S p -> T-app (andLeft (typing empty M2 (arrow S U)) (typing empty N S) p) (ih S (andRight (typing empty M2 (arrow S U)) (typing empty N S) p))`
 goto-named "E-app2Method1"
 solve
 goto-named "E-app2Method"

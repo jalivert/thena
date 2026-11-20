@@ -9,7 +9,7 @@ module Thena.Syntax.Resolve
   , resolveData
   ) where
 
-import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
+import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar, freshIdent)
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat)
 import Thena.Core.Term
   ( Core (..)
@@ -684,24 +684,39 @@ telescope gr env gs ctx local n (RawBinder i ty : rest) = do
 prefix
   :: [Grammar] -> GlobalEnv -> Globals -> Local -> Int -> Raw
   -> Either ResolveError (Context, Local, Raw, Int)
-prefix gr env gs local n raw = case raw of
-  RawPi bs b -> do
-    (tel, local1, n1)        <- telescope gr env gs [] local n bs
-    (tel', local2, rest, n2) <- prefix gr env gs local1 n1 b
-    Right (tel ++ tel', local2, rest, n2)
+prefix gr env gs local n raw = walk [ Ident w | (w, _) <- local ] local n raw
+  where
+    walk taken lcl k r = case r of
+      RawPi bs b -> do
+        (tel, local1, n1)        <- telescope gr env gs [] lcl k bs
+        (tel', local2, rest, n2) <- walk (taken ++ map entryIdent tel) local1 n1 b
+        Right (tel ++ tel', local2, rest, n2)
 
-  -- An arrow's argument has no written name, and unlike the @Ident "_"@ that
-  -- 'core' puts on a non-dependent 'Pi' this one is visible: the generated
-  -- wrapper abstracts it, and @λ (_ : Nat) -> ‹succ _›@ is not something to
-  -- hand a student (§3.7 — the point of generating into the environment is that
-  -- it can be read). The printer freshens a repeat to @x1@.
-  RawArrow s b -> do
-    (s', n1) <- core gr env gs [] [] local n s
-    let (v, n2) = fresh n1
-    (tel, local', rest, n3) <- prefix gr env gs local n2 b
-    Right (Hypothesis v (Ident "x") s' : tel, local', rest, n3)
+      -- An arrow's argument has no written name, and unlike the @Ident "_"@
+      -- that 'core' puts on a non-dependent 'Pi' this one is visible: the
+      -- generated wrapper abstracts it, and @λ (_ : Nat) -> ‹succ _›@ is not
+      -- something to hand a student (§3.7 — the point of generating into the
+      -- environment is that it can be read).
+      --
+      -- **The word is minted FREE, and the printer no longer numbers a repeat
+      -- — his ruling of 2026-11-20**, /THERE IS ONE NAME/, part one, @~n4jhj@
+      -- phase one. @mk : Nat -> Nat -> Nat@ gave two arguments both called @x@
+      -- and the screen said @x@ and @x1@; here they /are/ @x@ and @x1@. The
+      -- words of this telescope reach a user through the method types of a
+      -- split, so a word nothing answers to is the same defect one remove away.
+      --
+      -- Against the written names in scope as well as the minted ones, which
+      -- is what @taken@ carries: a parameter the author called @x@ is a word a
+      -- constructor's nameless argument must not take.
+      RawArrow s b -> do
+        (s', n1) <- core gr env gs [] [] lcl k s
+        let (v, n2) = fresh n1
+            i       = freshIdent taken (Ident "x")
+            e       = Hypothesis v i s'
+        (tel, local', rest, n3) <- walk (taken ++ [i]) lcl n2 b
+        Right (e : tel, local', rest, n3)
 
-  _ -> Right ([], local, raw, n)
+      _ -> Right ([], lcl, r, k)
 
 -- --------------------------------------------------------------------------
 -- Odds and ends

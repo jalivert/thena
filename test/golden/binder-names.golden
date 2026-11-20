@@ -91,4 +91,26 @@ thena spine> :show
     named1
   ) in
   named
+thena spine> :abandon
+abandoned named
+thena spine> :theorem twice : ∀ (x : Type₀) -> ∀ (x : Type₀) -> x
+proving twice : Type₀ -> ∀ (x : Type₀) -> x
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> goto twice1
+thena spine> :where
+focus
+  let ? twice1 : x1 in
+path
+  root ▸ ≐ twice ▸ x ▸ x1
+context
+  x : Type₀
+  x1 : Type₀
+type
+  x1
+thena spine> :infer x1
+x1 : Type₀
+thena spine> :infer x
+x : Type₀
 thena spine> :quit

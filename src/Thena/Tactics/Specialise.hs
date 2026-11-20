@@ -73,7 +73,8 @@ module Thena.Tactics.Specialise
   , survivingEquations
   ) where
 
-import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver, piOver)
+import Thena.Core.Context
+  (Context, Entry (..), entryIdent, entryType, entryVar, freeIn, lamOver, piOver)
 import Thena.Core.Level (Level, instantiateLevels, substLevel)
 import Thena.Core.Reduce (atLevels, whnf)
 import Thena.Core.Term
@@ -446,17 +447,40 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- is an ordinary 'Context' entry. The binder's 'Ident' is kept, which is
     -- what makes the simplified goal read like the method it came from.
     --
+    -- **AND MADE FREE WHERE IT LANDS — his ruling of 2026-11-20**,
+    -- /THERE IS ONE NAME/, part one, @~n4jhj@ phase one. The word on a method's
+    -- binder was written in the /data block/, and this is where it becomes a
+    -- word in the context the split's arm stands in: @report@ hands it to the
+    -- caller, which binds the arm's binder by it. Carried over unchanged it was
+    -- the one place a printed word was not the word that answers —
+    -- @test\/golden\/elimination.golden@'s @tied@ binds @bz@'s own @m@ inside a
+    -- theorem that has an @m@, and the screen said @m1@ because the printer
+    -- renamed it on the way out while nothing read that back. Numbered here, the
+    -- stored word /is/ @m1@ and @fill core`m1`@ reaches it.
+    --
+    -- **Against the ambient context and the binders peeled before it**, which
+    -- is what @here@ grows: a method's own two arguments can collide with each
+    -- other as easily as with something outside.
+    --
+    -- **A binder the declaration left nameless is carried past untouched**, and
+    -- 'freeIn' says why: the rule base mints the word where it binds the arm —
+    -- @u@ for an argument, @ih@ for the hypothesis about it — and a word minted
+    -- here would take the place of a better one.
+    --
     -- Reduced at the ambient context, as "Thena.Tactics.Eliminate"\'s own @peel@
     -- is: what comes in is a method type whose binders are already exposed, so
     -- this is a guard rather than a walk.
-    peel j ty n
-      | j <= (0 :: Int) = Just ([], ty, n)
-      | otherwise = case whnf env ctx ty of
+    peel = walk ctx
+      where
+        walk _ j ty n
+          | j <= (0 :: Int) = Just ([], ty, n)
+        walk here j ty n = case whnf env ctx ty of
           Pi i dom sc ->
             let (v, n1) = fresh n
-             in case peel (j - 1) (open v sc) n1 of
+                e       = Hypothesis v (freeIn here i) dom
+             in case walk (here ++ [e]) (j - 1) (open v sc) n1 of
                   Nothing          -> Nothing
-                  Just (es, b, n2) -> Just (Hypothesis v i dom : es, b, n2)
+                  Just (es, b, n2) -> Just (e : es, b, n2)
           _ -> Nothing
 
     -- An entry whose type is @Eq {l} I u v@, read apart. The binder is kept: a

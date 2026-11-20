@@ -3367,9 +3367,17 @@ introducing rule env ctx n nm p = case p of
               _            -> Left NothingToIntroduce
           | otherwise -> Left NothingToIntroduce
       where
-        -- The caller's name if there is one, the type's otherwise — and a real,
-        -- writable one where the type has none. **His ruling of 2026-11-20**:
-        -- 'writableIn' is the whole of it and says why.
+        -- The caller's name if there is one, the type's otherwise — and in
+        -- that second case made **free in the context the binder lands in**,
+        -- which is the word being minted where the type has none and numbered
+        -- where the type's own word is already taken here. **His ruling of
+        -- 2026-11-20**, /THERE IS ONE NAME/, part one; 'writableIn' is the
+        -- whole of it and says why.
+        --
+        -- **The op can tell the two apart and that is why this is the place.**
+        -- @nm@ is 'Nothing' exactly when the user typed a bare @intro@, so the
+        -- word is a hint copied out of a closed term and not something they
+        -- wrote; a word they wrote is theirs, taken or not (MS4 phase 41f).
         named j = maybe (writableIn ctx j) id nm
         (y, n1) = fresh n
         (h, n2) = fresh n1

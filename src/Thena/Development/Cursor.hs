@@ -70,7 +70,7 @@ import Data.List ((\\))
 import Data.Maybe (mapMaybe)
 
 import Thena.Core.Level (Level, LevelVar, substLevel)
-import Thena.Core.Context (Context, Entry (..), substLevelsInEntry)
+import Thena.Core.Context (Context, Entry (..), freshIdent, substLevelsInEntry)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
@@ -474,26 +474,15 @@ goalsIn = goals . rebuild
       Guess  x i _ _ -> [(i, x)]
       _              -> []
 
--- | An identifier not already taken: the hint, or the hint with the first
--- number that frees it.
+-- 'freshIdent' is re-exported from "Thena.Core.Context" and not defined here.
+-- **One numbering rule for a word the system supplies**, his ruling of
+-- 2026-11-20: it is asked of a development\'s identifiers through this module
+-- and of a context\'s words through @writableIn@, and the two disagreeing about
+-- what a free word is would put a name on screen that nothing answers to.
 --
--- **Freshening happens when a component is built, not when it is printed —
--- DECIDED by the user 2026-08-25.** Before this, two components could carry the
--- same 'Ident' and the printer told them apart for the screen only, so the name
--- you saw was not the name that was stored and @goto ‹name›@ could not find it.
--- Now what is printed is what is there.
---
--- "Thena.Repl"\'s own @freshen@ stays: core terms bind with de Bruijn indices,
--- so opening a binder for display still has to avoid shadowing. That is a
--- different problem in a different fragment.
-freshIdent :: [Ident] -> Ident -> Ident
-freshIdent taken i@(Ident hint)
-  | free i    = i
-  | otherwise = numbered (1 :: Int)
-  where
-    free j = j `notElem` taken
-    numbered k =
-      let j = Ident (hint ++ show k) in if free j then j else numbered (k + 1)
+-- "Thena.Syntax.Print"\'s own @freshen@ stays for now: core terms bind with de
+-- Bruijn indices, so opening a binder for display still has to avoid shadowing.
+-- @~n4jhj@\'s second phase is what deletes it.
 
 -- | Enter a guess's body, which stays inside the partial fragment (§4.2).
 --
