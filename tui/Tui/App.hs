@@ -2702,10 +2702,33 @@ liveOffers st = if stDropdownOn st then stOfferDropdown st else Nothing
 -- actually been taken from the strip, 'stUsageCounts' — ties still read
 -- alphabetically, since 'sortOn' is stable and every untouched candidate
 -- starts at the same count.
+-- **A SOLE CANDIDATE IS SHOWN WITHOUT ASKING JEV, AND THAT IS HIS REPORT OF
+-- 2026-11-21**: /"I run fresh session, I type @a@ I get the spinner and shortly
+-- a suggestion, I type @t@ and get the spinner for moment but it stops soon and
+-- suggestions are empty."/ Typing @at@ leaves the grammar offering exactly one
+-- continuation, @attack@ — and 'fireJevForCurrentOffers' sends nothing when
+-- fewer than two candidates are offered, so 'slateJevPicked' stayed at zero and
+-- the one thing he could possibly type next was the one thing the pane would not
+-- show him. Under a pty the log read @skip: only 1 candidate(s) offered@ while
+-- the cells were blank.
+--
+-- **Why showing it is not a loophole in /nothing but Jev's/.** That rule is
+-- about a *choice*: it stops the grid from filling with the engine's own list in
+-- Jev's order, cells at the bottom holding rows Jev gave two percent to. With one
+-- candidate there is no choice to make and no order to put it in — the grammar is
+-- saying that this is the only word that can continue the line. **Asking Jev to
+-- choose from a set of one would cost a request and a round trip to be told what
+-- was already certain**, and the API's own limit says a @choice@ is a question
+-- about options in the plural.
+--
+-- **It is the one row that reaches a cell unasked while Jev is on, so it is on
+-- the record in `.claude/CLOSEOUT.md`** rather than only here, and his word
+-- reverses it in one line.
 stripSlateOf :: St -> [OfferRow]
 stripSlateOf st
   | not (stripOpen (stStrip st)) = []
   | not (stJevOn st) = usageOrdered (stUsageCounts st) (slateRows (stSlate st))
+  | [sole] <- slateRows (stSlate st) = [sole]
   | otherwise = take (slateJevPicked (stSlate st)) (slateRows (stSlate st))
 
 -- | **Tokens before productions, most-used first within each — his idea of
