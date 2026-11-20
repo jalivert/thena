@@ -56,7 +56,8 @@ import Data.Maybe (fromMaybe, isJust)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
-import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar)
+import Thena.Core.Context
+  (Context, Entry (..), entryIdent, entryType, entryVar, writableIn)
 import Thena.Core.Term
   ( Core (..)
   , close
@@ -69,6 +70,7 @@ import Thena.Core.Term
   , rootName
   , Ident (..)
   , Var
+  , anonymousIdent
   , fresh
   , instantiate
   , innermostOf
@@ -2050,7 +2052,7 @@ perform instr rest m = case operation instr of
     Left r          -> failure r m
     Right (dom, cod) ->
       let (v, n1) = fresh (names m)
-       in produce (VTerm (Pi (Ident "_") dom (close v cod)))
+       in produce (VTerm (Pi anonymousIdent dom (close v cod)))
                   m { names = n1 }
 
   ApplyTo f x -> case (,) <$> term f <*> term x of
@@ -3365,8 +3367,10 @@ introducing rule env ctx n nm p = case p of
               _            -> Left NothingToIntroduce
           | otherwise -> Left NothingToIntroduce
       where
-        -- The caller's name if there is one, the type's otherwise.
-        named j = maybe j id nm
+        -- The caller's name if there is one, the type's otherwise — and a real,
+        -- writable one where the type has none. **His ruling of 2026-11-20**:
+        -- 'writableIn' is the whole of it and says why.
+        named j = maybe (writableIn ctx j) id nm
         (y, n1) = fresh n
         (h, n2) = fresh n1
         opened binder rest =

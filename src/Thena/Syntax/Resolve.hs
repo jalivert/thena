@@ -21,6 +21,7 @@ import Thena.Core.Term
   , rootName
   , Ident (..)
   , InScope
+  , anonymousIdent
   , Scope
   , Var
   , close
@@ -351,7 +352,7 @@ core gr env gs sp ctx local n raw = case raw of
     (s', n1) <- core gr env gs sp ctx local n s
     (b', n2) <- core gr env gs sp ctx local n1 b
     let (v, n3) = fresh n2
-    Right (Pi (Ident "_") s' (close v b'), n3)
+    Right (Pi anonymousIdent s' (close v b'), n3)
 
   RawLam bs b -> binders gr env gs sp Lam ctx local n bs b
   RawPi bs b  -> binders gr env gs sp Pi ctx local n bs b

@@ -415,6 +415,12 @@ A proof starts as a single **hole**: a name, a type, and nothing else.
 `attack` turns the hole into a *guess* — a hole with a proposed body you are
 about to build. `intro` moves a `∀` binder out of the goal and into the body.
 
+**A binder the statement did not name gets one anyway.** `∀ (A : Type₀) -> A -> A`
+names `A` and says nothing about the argument, so `intro` calls it `x` — and `x1`,
+`x2` for further ones, skipping any word already in scope. The name is real: it is
+what the development shows and what you write to refer to the argument. Say
+`intro "a"` to choose the name yourself.
+
 ```
 thena spine> attack
 thena spine> intro
@@ -422,7 +428,7 @@ thena spine> intro
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A ≐ (
     λ (A : Type₀) ->
-    λ (_ : A) ->
+    λ (x : A) ->
     let ? id1 : A in
     id1
   ) in
@@ -469,10 +475,10 @@ thena spine> :where
 focus
   let ? id1 : A in
 path
-  root ▸ ≐ id ▸ A ▸ _
+  root ▸ ≐ id ▸ A ▸ x
 context
   A : Type₀
-  _ : A
+  x : A
 type
   A
 ```
@@ -481,7 +487,7 @@ type
 `solve`-ing each guess as you go, and finish:
 
 ```
-thena spine> try-core core`_`
+thena spine> try-core core`x`
 thena spine> solve
 thena spine> back
 thena spine> back
@@ -491,7 +497,7 @@ thena spine> qed
 id : ∀ (A : Type₀) -> A -> A   ∎
 thena spine> :show id
 id : ∀ (A : Type₀) -> A -> A
-id = let id = λ (A : Type₀) (_ : A) -> let id1 = _ : A in id1 : ∀ (A : Type₀) -> A -> A in id
+id = let id = λ (A : Type₀) (x : A) -> let id1 = x : A in id1 : ∀ (A : Type₀) -> A -> A in id
 ```
 
 `qed` re-checks the finished term with the kernel before admitting it. If it
@@ -557,6 +563,7 @@ until you do, `:theorem` will tell you there is one in progress.
 |---|---|
 | `attack` | turn the focused hole into a guess, ready to be built |
 | `intro` | move one `∀` binder from the goal into the guess body |
+| `intro "a"` | the same, naming the binding `a` rather than letting it be named for you |
 | `` try-core core`term` `` | propose a term for the focused hole |
 | `solve` | accept the focused guess — it becomes a definition |
 | `regret` | throw away a guess's body, back to a plain hole |
@@ -867,6 +874,7 @@ proving id : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> :matches
 intro : ()
+intro ‹n› : Name -> ()
 solve : ()
 regret : ()
 prove : ()
@@ -1360,7 +1368,7 @@ already there goes on being searched underneath them.
 ```
 thena spine> :consult examples/ChoicePoints.thena.rules
 loaded demo (3 rules)
-loaded standard (120 rules)
+loaded standard (122 rules)
 ```
 
 **The last thing you consulted is tried first.** The shipped base is consulted for

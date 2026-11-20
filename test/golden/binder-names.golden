@@ -1,0 +1,94 @@
+thena spine> :theorem projection : ∀ (T : Type₀) -> T -> T -> T
+proving projection : ∀ (T : Type₀) -> T -> T -> T
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> intro
+thena spine> :show
+▶ let ? projection : ∀ (T : Type₀) -> T -> T -> T ≐ (
+    λ (T : Type₀) ->
+    λ (x : T) ->
+    λ (x1 : T) ->
+    let ? projection1 : T in
+    projection1
+  ) in
+  projection
+thena spine> goto projection1
+thena spine> :where
+focus
+  let ? projection1 : T in
+path
+  root ▸ ≐ projection ▸ T ▸ x ▸ x1
+context
+  T : Type₀
+  x : T
+  x1 : T
+type
+  T
+thena spine> fill core`x`
+already equal
+thena spine> :show
+  let ? projection : ∀ (T : Type₀) -> T -> T -> T ≐ (
+    λ (T : Type₀) ->
+    λ (x : T) ->
+    λ (x1 : T) ->
+    let refined = x : T in
+▶   let ? projection1 : T ≐ (
+      refined
+    ) in
+    projection1
+  ) in
+  projection
+thena spine> :abandon
+abandoned projection
+thena spine> :theorem shadowed : ∀ (x : Type₀) -> x -> x
+proving shadowed : ∀ (x : Type₀) -> x -> x
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> goto shadowed1
+thena spine> :where
+focus
+  let ? shadowed1 : x in
+path
+  root ▸ ≐ shadowed ▸ x ▸ x1
+context
+  x : Type₀
+  x1 : x
+type
+  x
+thena spine> :abandon
+abandoned shadowed
+thena spine> :theorem named : ∀ (T : Type₀) -> T -> T -> T
+proving named : ∀ (T : Type₀) -> T -> T -> T
+thena spine> attack
+thena spine> intro
+thena spine> intro "a"
+thena spine> intro "b"
+thena spine> goto named1
+thena spine> :where
+focus
+  let ? named1 : T in
+path
+  root ▸ ≐ named ▸ T ▸ a ▸ b
+context
+  T : Type₀
+  a : T
+  b : T
+type
+  T
+thena spine> fill core`a`
+already equal
+thena spine> :show
+  let ? named : ∀ (T : Type₀) -> T -> T -> T ≐ (
+    λ (T : Type₀) ->
+    λ (a : T) ->
+    λ (b : T) ->
+    let refined = a : T in
+▶   let ? named1 : T ≐ (
+      refined
+    ) in
+    named1
+  ) in
+  named
+thena spine> :quit

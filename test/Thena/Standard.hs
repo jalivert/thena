@@ -81,6 +81,16 @@ expectedStandard =
     -- the REPL reaches whichever one applies.
   , Rule (rootName "intro")      []    [FocusIsGuess, GoalTypeIsPi]  [Do (IntroPi Nothing)]
   , Rule (rootName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do (IntroLet Nothing)]
+    -- **And the same two at arity one** (MS12 phase 326, his ask of
+    -- 2026-11-20): @intro "a"@ says what the binding is called, which is the
+    -- way past an argument the statement never named. @prim-lambda@ and
+    -- @prim-let@ have taken an optional name since MS4 phase 41f; nothing in
+    -- the base passed one. A call is matched by name /and/ arity, so these are
+    -- two further rules and neither shadows the nullary pair.
+  , Rule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsPi]
+      [Do (IntroPi (Just (Ref "n")))]
+  , Rule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsLet]
+      [Do (IntroLet (Just (Ref "n")))]
   , Rule (rootName "solve")      []    [FocusIsGuess]                [Do Solve]
   , Rule (rootName "regret")     []    [FocusIsGuess]                [Do Regret]
     -- **Two rules, two constructions** (MS9 phase 211, `~84x46`):

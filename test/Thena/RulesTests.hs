@@ -160,16 +160,19 @@ matchTests =
         matching emptyGlobals (guessAt type0)
           @?= ["solve", "regret", "prove"] ++ walkers
 
+      -- **Two @intro@ rows, not one** (MS12 phase 326): the nullary pair and the
+      -- @intro "a"@ pair his ask of 2026-11-20 added. A row per name and arity,
+      -- and every matching rule is always offered.
     , testCase "a guess at a Π offers intro as well" $
         matching emptyGlobals (guessAt (arrow type0 type0))
-          @?= ["intro", "solve", "regret", "prove"] ++ walkers
+          @?= ["intro", "intro", "solve", "regret", "prove"] ++ walkers
 
       -- §8: "Head matching runs whnf. A goal typed @id Type (Nat → Nat)@ is a Π
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
     , testCase "a goal type that only reduces to a Π still matches" $
         matching withArrow (guessAt (Global (rootName "Arrow") []))
-          @?= ["intro", "solve", "regret", "prove"] ++ walkers
+          @?= ["intro", "intro", "solve", "regret", "prove"] ++ walkers
 
     , testCase "and does not, in an environment where it does not unfold" $
         matching emptyGlobals (guessAt (Global (rootName "Arrow") []))
@@ -181,7 +184,7 @@ matchTests =
       -- 'Thena.Engine.introduce'.
     , testCase "a goal type written as a let offers intro" $
         matching emptyGlobals (guessAt (Let (Ident "x") type0 type1 (close var type0)))
-          @?= ["intro", "solve", "regret", "prove"] ++ walkers
+          @?= ["intro", "intro", "solve", "regret", "prove"] ++ walkers
 
       -- The invariant checked by different code from the code that maintains
       -- it: the head says @intro@ applies, so @intro@ must actually apply. It
@@ -191,7 +194,7 @@ matchTests =
         let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
          in do
               nameOf `map` drain (matches expectedBase emptyGlobals cur)
-                @?= ["intro", "solve", "regret", "prove"] ++ walkers
+                @?= ["intro", "intro", "solve", "regret", "prove"] ++ walkers
               ranOk (machineAt cur [Do (Ops.IntroLet Nothing)])
 
     , testCase "where the Π clause is offered, intro succeeds" $

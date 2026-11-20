@@ -163,7 +163,9 @@ tests =
         , "along"
         , "along"
         , ":where"
-        , "try-core core`_`"
+          -- @x@, not @_@: his ruling of 2026-11-20 gives an argument the
+          -- statement did not name a real, writable one.
+        , "try-core core`x`"
         , "solve"
         , "back"
         , "back"
@@ -173,6 +175,45 @@ tests =
         , "qed"
         , ":show id"
         , ":proofs"
+        , ":quit"
+        ]
+      -- HIS RULING OF 2026-11-20, and his ask of the same day: an argument the
+      -- statement did not name gets a real, writable name, and @intro@ can say
+      -- what that name is. Three things are on this screen and all three are the
+      -- point — two unnamed arguments come out @x@ and @x1@ rather than @_@
+      -- twice; @fill core`x`@ reaches the one the display calls @x@, where @_@
+      -- used to reach the innermost; and @intro "a"@ names a binder outright.
+      -- The middle theorem is the collision: the statement writes @x@ itself, so
+      -- the argument with no name takes @x1@ and shadows nothing.
+    , script
+        "binder-names"
+        [ ":theorem projection : \8704 (T : Type\8320) -> T -> T -> T"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "intro"
+        , ":show"
+        , "goto projection1"
+        , ":where"
+        , "fill core`x`"
+        , ":show"
+        , ":abandon"
+        , ":theorem shadowed : \8704 (x : Type\8320) -> x -> x"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "goto shadowed1"
+        , ":where"
+        , ":abandon"
+        , ":theorem named : \8704 (T : Type\8320) -> T -> T -> T"
+        , "attack"
+        , "intro"
+        , "intro \"a\""
+        , "intro \"b\""
+        , "goto named1"
+        , ":where"
+        , "fill core`a`"
+        , ":show"
         , ":quit"
         ]
       -- Phase 15's deliverable: what could be done next, at each shape of

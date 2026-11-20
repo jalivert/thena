@@ -36,6 +36,22 @@ rule intro :- when focus-is-guess goal-type-is-pi do prim-lambda
 
 rule intro :- when focus-is-guess goal-type-is-let do prim-let
 
+-- `intro` SAYING WHAT THE BINDING IS CALLED — 2026-11-20. Without it the only
+-- names a proof's own arguments could have were the ones the statement wrote,
+-- and a statement like `T -> T -> T` writes none, so they had to be named for
+-- the author. `DECISIONS.md`, *An argument the statement did not name gets a
+-- real name, and `intro` can say what it is*, is the whole decision.
+-- `prim-lambda` and `prim-let` have taken an optional name since MS4 phase 41f;
+-- nothing in the base passed one.
+--
+-- One name at two arities, which is the ordinary shape here: a call is matched
+-- by name AND arity, so `intro` and `intro "a"` are two rules and neither
+-- shadows the other.
+intro : Name -> ()
+rule intro n :- when focus-is-guess goal-type-is-pi do prim-lambda n
+
+rule intro n :- when focus-is-guess goal-type-is-let do prim-let n
+
 solve : ()
 rule solve :- when focus-is-guess do prim-solve
 
