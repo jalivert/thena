@@ -214,6 +214,24 @@ tests =
         , ":where"
         , "fill core`a`"
         , ":show"
+        , ":abandon"
+          -- HIS RULING OF 2026-11-20, /THERE IS ONE NAME/, part one, @~n4jhj@
+          -- phase one: **a word the system takes off the goal's type is made
+          -- free where the binder lands.** The statement writes @x@ twice, a
+          -- bare @intro@ copies that word out of a closed type, and the second
+          -- binder is STORED as @x1@ — where until this phase it was stored as
+          -- @x@ and only the printer said @x1@, so @:infer x1@ answered /not in
+          -- scope/ while @:infer x@ gave the inner binder the screen called
+          -- @x1@. Both lines below are the test: each word on the screen is
+          -- answered by the thing printed under it.
+        , ":theorem twice : \8704 (x : Type\8320) -> \8704 (x : Type\8320) -> x"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "goto twice1"
+        , ":where"
+        , ":infer x1"
+        , ":infer x"
         , ":quit"
         ]
       -- Phase 15's deliverable: what could be done next, at each shape of

@@ -8,6 +8,8 @@ module Thena.Core.Context
   , entryIdent
   , entryType
   , writableIn
+  , freeIn
+  , freshIdent
   , substLevelsInEntry
   , piOver
   , lamOver
@@ -54,39 +56,88 @@ entryIdent e = case e of
   Hypothesis _ i _   -> i
   Definition _ i _ _ -> i
 
--- | The name a binder should carry as it enters this context: its own, unless
--- it has none.
+-- | The word a binder carries as it enters this context: its own where that
+-- word is free here, and otherwise a free one.
 --
--- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /An unnamed argument gets a
--- real, writable name/, and @DECISIONS.md@ carries the public half. A binder with no written name carries
--- 'Thena.Core.Term.anonymousIdent', and two of them in one context are two
--- entries sharing the word @_@: the development printed @_@ and @_1@, the user
--- wrote @_@ meaning the first, and "Thena.Syntax.Resolve"'s innermost-wins
--- lookup gave the second — silently, where both have the same type, with @qed@
--- admitting the wrong term. So the name is minted here, once, where the context
--- is known, rather than freshened on the way out by the printer.
+-- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /THERE IS ONE NAME/, part
+-- one: **every name the system puts into a scope is free in that scope**, and
+-- the copies count as inventing. The write-up is
+-- @.jalivert\/discussion\/binder-names-and-the-dagger.md@. So this is asked
+-- wherever the system supplies a word rather than the user writing one —
+-- "Thena.Engine"\'s @intro@ taking the word off the goal\'s Π binder,
+-- "Thena.Tactics.Specialise" peeling a method\'s telescope, and
+-- "Thena.Syntax.Resolve" minting one for an arrow\'s nameless argument.
 --
--- **A written name is returned untouched, taken or not.** Shadowing a name the
--- user wrote themself is theirs to write (MS4 phase 41f, /"the name is used as
--- given, taken or not"/), and the lookup's innermost-wins rule is exactly right
--- for it. This function only supplies what was never written.
+-- Two things it does, and they were one ruling each:
 --
--- The stem is @x@, which is what "Thena.Syntax.Resolve"'s @prefix@ already mints
--- for a generated wrapper's argument, and the suffix is the one the printer's
--- @freshen@ uses — so a context of three unnamed arguments reads @x@, @x1@,
--- @x2@ whichever side of the boundary produced it.
+--   * **a binder with no written name gets a real, writable one** — his ruling
+--     of the same day, /An unnamed argument gets a real name/. A binder with
+--     none carries 'Thena.Core.Term.anonymousIdent', and two of them in one
+--     context are two entries sharing the word @_@: the development printed @_@
+--     and @_1@, the user wrote @_@ meaning the first, and
+--     "Thena.Syntax.Resolve"\'s innermost-wins lookup gave the second —
+--     silently, where both have the same type, with @qed@ admitting the wrong
+--     term. The stem is @x@, which is what that module\'s @prefix@ mints for a
+--     generated wrapper\'s argument.
+--   * **a word already taken here is numbered** until it is free. That is the
+--     part the printer used to do on the way out, where nothing read it back:
+--     @tied@\'s method binds the @m@ its /data block/ wrote inside a theorem
+--     that has its own @m@, and @fill core`m`@ reached the inner binder while
+--     the screen said @m@ on the outer.
+--
+-- **A word the USER wrote is never touched, taken or not** — that is theirs to
+-- write (MS4 phase 41f, /"the name is used as given, taken or not"/), the
+-- shadowing it causes is allowed, and what it costs the outer binder is said
+-- where the outer binder is printed. This function is only ever asked about a
+-- word the system supplied, and a caller that cannot tell the two apart must
+-- not ask it.
 writableIn :: Context -> Ident -> Ident
 writableIn ctx i
-  | i /= anonymousIdent = i
-  | otherwise           = pick Nothing
+  | i == anonymousIdent = freshIdent (map entryIdent ctx) (Ident "x")
+  | otherwise           = freeIn ctx i
+
+-- | The word a binder already carries, made free in this context — and
+-- **nothing invented where there is no word.**
+--
+-- 'writableIn' plus the one thing it does that this does not, and the split is
+-- the one place a caller has to choose: a binder that enters the context
+-- /here/ needs a word and so is asked the other question, while a binder whose
+-- word is only being carried past — a method's telescope on its way to the
+-- report an arm binds from — may still be nameless when it arrives, and
+-- whoever finally binds it mints the word. Minting here as well would mean two
+-- stems for one binder, and the rule base's are the better words: an induction
+-- hypothesis is called @ih@ and not @x1@.
+--
+-- So an anonymous binder is passed through unchanged — @_@ numbered to @_1@ is
+-- the defect @~5g3tv@ named, not a repair of it — and a written word that is
+-- taken is numbered until it is free.
+freeIn :: Context -> Ident -> Ident
+freeIn ctx i
+  | i == anonymousIdent = i
+  | otherwise           = freshIdent (map entryIdent ctx) i
+
+-- | An identifier not already taken: the hint, or the hint with the first
+-- number that frees it.
+--
+-- **Freshening happens when a binder is built, not when it is printed —
+-- DECIDED by the user 2026-08-25 for a development\'s components, and
+-- 2026-11-20 for a context\'s words.** Before this, two things could carry the
+-- same 'Ident' and the printer told them apart for the screen only, so the name
+-- you saw was not the name that was stored and @goto ‹name›@ could not find it.
+--
+-- **One numbering rule for both**, which is why it lives here rather than in
+-- "Thena.Development.Cursor", which re-exports it: a word is freshened against
+-- a development\'s identifiers there and against a context\'s words in
+-- 'writableIn', and two spellings of the suffix would mean the two disagreed
+-- about what a free word is.
+freshIdent :: [Ident] -> Ident -> Ident
+freshIdent taken i@(Ident hint)
+  | free i    = i
+  | otherwise = numbered (1 :: Int)
   where
-    taken = map entryIdent ctx
-    stem  = "x"
-    pick k =
-      let candidate = Ident (stem ++ maybe "" show k)
-       in if candidate `elem` taken
-            then pick (Just (maybe 1 (+ 1) k :: Int))
-            else candidate
+    free j = j `notElem` taken
+    numbered k =
+      let j = Ident (hint ++ show k) in if free j then j else numbered (k + 1)
 
 -- | The type of an entry, whichever kind it is. Both constructors have one, in
 -- the same last position, which is why this accessor is total.

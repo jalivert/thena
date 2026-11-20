@@ -6989,6 +6989,39 @@ It is a second arity of the same rule, so `intro` with no argument is unchanged.
 shadowing, the inner binding wins, and that is what shadowing means everywhere
 else; this decision only supplies a name where none was written.
 
+### A word the system takes off a type is made free where the binder lands
+
+*Decided 2026-11-20.*
+
+`intro` with no argument takes the binder's word from the type it is introducing.
+That word was written in a statement or a declaration, and it is a **hint copied
+out of a closed term** rather than a name you asked for here — so where it is
+already taken, it is numbered until it is free.
+
+```
+:theorem twice : ∀ (x : Type₀) -> ∀ (x : Type₀) -> x
+attack ; intro ; intro
+  context
+    x : Type₀
+    x1 : Type₀
+:infer x1     -- the second binder, as shown
+:infer x      -- the first, also as shown
+```
+
+**Both words answer, which they did not before.** The second binding was stored
+under the word `x` and *displayed* as `x1`, the printer numbering a repeat on the
+way out: `x1` was in no scope, and `x` reached the inner binding while the screen
+said `x` on the outer one.
+
+**The binders of a split's method are the same case.** They carry the words the
+datatype's own declaration wrote, so a method of `Below` eliminated inside a
+theorem that has an `m` of its own binds `m1`, and `fill core`m1`` reaches it.
+
+**A word you type is still yours, taken or not.** `intro "a"` twice is shadowing
+and the inner binding wins, as in any other language; so is a surface `\ x -> \ x
+-> x`, where the words are the ones you wrote. This decision reaches only the
+words the system supplies for you.
+
 ## Building a frontend
 
 *Added 2026-09-24, MS7; rewritten 2026-09-27, when the decision below replaced a
