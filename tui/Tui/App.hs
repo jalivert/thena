@@ -918,24 +918,6 @@ data St = St
     -- see 'Picker' and 'handlePickerEvent'. It is the one widget in the TUI
     -- that is modal, and it is modal because Up, Down and Enter already mean
     -- three other things in each of the keyboards underneath it.
-  , stEscRun :: Maybe String
-    -- ^ **The only thing standing between a Shift+Enter and a corrupted
-    -- proof line.** vty decodes neither of the two standard encodings and
-    -- hands the bytes over as a 'V.KEsc' followed by the rest as literal
-    -- characters — measured, not assumed, with a vty event dump under the
-    -- pty: @ESC [ 13;2u@ (kitty) and @ESC [ 27;2;13~@ (xterm
-    -- @modifyOtherKeys@, his own terminal) both arrive that way.
-    --
-    -- @'Just' p@ means an Esc was just handled and @p@ is the literal text
-    -- seen since, still a prefix of one of those two sequences, held back
-    -- rather than typed. A prefix that completes is swallowed whole; one
-    -- that diverges is typed, in order, as though it had never been held.
-    -- 'Nothing' is the ordinary state, where every character goes straight
-    -- through.
-    --
-    -- **Anchored on the Esc, which is what makes it exact**: ordinary typing
-    -- never follows an Esc with @[13;2u@, so nothing a user means to type is
-    -- ever delayed by more than the one keystroke that diverges.
   , stHistoryDraft :: String
     -- ^ the live line 'historyBack' interrupted, restored by
     -- 'historyForward' on the way back past the newest entry — the same
@@ -1109,7 +1091,6 @@ runTui = do
         , stJevOn       = cfgJevOn cfg
         , stUsageCounts = Map.fromList (cfgUsage cfg)
         , stPicker      = Nothing
-        , stEscRun      = Nothing
         , stInputExtent = Nothing
         , stStripWidth  = Nothing
         , stHint        = Nothing
@@ -1145,9 +1126,53 @@ runTui = do
   -- blocked on its mailbox until a keystroke puts something in it.
   _ <- forkIO (offerWorker chan offerBox)
   declareWideGlyphs
-  vty <- mkVty V.defaultConfig
-  _ <- customMain vty (mkVty V.defaultConfig) (Just chan) app st0
+  vty <- mkVty vtyConfig
+  _ <- customMain vty (mkVty vtyConfig) (Just chan) app st0
   resetCursorStyle
+
+-- | **Tell vty how the two Enter modifiers are spelled on the wire, because
+-- its built-in table does not know and it has a hook that takes the answer**
+-- — `~kmprv`, and it is what replaced a hand-rolled recogniser that held
+-- characters back after every Esc.
+--
+-- **What vty does and does not know.** vty decodes neither the kitty keyboard
+-- protocol's @CSI ‹key›;‹mods› u@ nor xterm @modifyOtherKeys@' @CSI
+-- 27;‹mods›;‹key› ~@, so with 'V.defaultConfig' a Shift+Enter arrives as a
+-- 'V.KEsc' followed by one 'V.KChar' per remaining byte. **That is a gap in
+-- the table and not in vty**: 'V.configInputMap' is a list of
+-- @(terminal, byte string, event)@ that the Unix input layer appends to its
+-- terminfo-derived classify map, and it is the same field a user's own
+-- @.vty/config@ fills with its @map@ directive.
+--
+-- **Measured, 2026-11-20**, with a standalone program on this same
+-- @vty-6.6@/@vty-unix-0.4.0.0@, run twice under a pty with the same bytes
+-- written into it: every one of the four runs below arrived as @KEsc@ plus
+-- its characters under 'V.defaultConfig' and as the key itself with this map
+-- set. **So there is no library to replace** — the question his report of
+-- 2026-11-20 asked — and nothing here depends on vty gaining the kitty
+-- protocol.
+--
+-- **Two gestures, four spellings.** Shift+Enter and Ctrl+Enter are each sent
+-- one way by a kitty-protocol terminal and another by @modifyOtherKeys@ (his
+-- own terminal's way); both reach the one binding, in
+-- 'dispatchScriptEvent'.
+--
+-- **DO NOT ADD CMD+ANYTHING HERE. IT WAS TRIED AND IT DOES NOT ARRIVE.**
+-- `~p6g53`: @[108;9u@ and @[27;9;108~@ for Cmd+L were both verified against a
+-- pty and neither reaches the program on his terminal, because macOS terminals
+-- bind Cmd themselves. **HIS instruction** was /"unbind cmd so that it
+-- doesn't confuse us in the future"/: a recogniser for a key that cannot be
+-- pressed is a thing a later reader has to disprove.
+vtyConfig :: V.VtyUserConfig
+vtyConfig = V.defaultConfig { V.configInputMap = everyTerminal enterRuns }
+  where
+    everyTerminal = map (\(bytes, ev) -> (Nothing, bytes, ev))
+    enterRuns =
+      [ ("\ESC[13;2u",    V.EvKey V.KEnter [V.MShift])
+      , ("\ESC[27;2;13~", V.EvKey V.KEnter [V.MShift])
+      , ("\ESC[13;5u",    V.EvKey V.KEnter [V.MCtrl])
+      , ("\ESC[27;5;13~", V.EvKey V.KEnter [V.MCtrl])
+      ]
 
 -- | **Tell vty that the mark glyphs are two columns wide, because it thinks
 -- they are one and the terminal does not** — `~8ztt3`, from his report of
@@ -3412,13 +3437,7 @@ handleEvent ev = do
 -- open, live-script mode's own keys while the mode is on, and otherwise the
 -- ordinary REPL exactly as it always was.
 handleEventInner :: BrickEvent Name AppEvent -> EventM Name St ()
-handleEventInner ev = do
-  held <- stEscRun <$> get
-  case held of
-    Nothing -> do
-      handleEventFor ev
-      armEscRun ev
-    Just p -> continueEscRun p ev
+handleEventInner = handleEventFor
 
 handleEventFor :: BrickEvent Name AppEvent -> EventM Name St ()
 handleEventFor ev = do
@@ -3786,107 +3805,6 @@ handleAppEvent (ModelsListed filt result) = do
       showModels st' filt ms
 handleAppEvent (RerunStep gen soFar shown finished) =
   handleRerunStep gen soFar shown finished
-
--- | **The byte runs vty hands over as literal text, and what each one means.**
--- vty decodes neither the kitty keyboard protocol's @CSI ‹key›;‹mods› u@ nor
--- xterm's @modifyOtherKeys@ @CSI 27;‹mods›;‹key› ~@, so a key spelled either
--- way arrives as an 'V.KEsc' followed by one 'V.KChar' per byte of the rest
--- — measured with a vty event dump under the pty, 2026-11-11. Recognising
--- them here is the only route such a key has into this frontend.
---
--- **Two gestures, four encodings, one table.** Shift+Enter and Ctrl+Enter
--- are each the same key under the kitty and @modifyOtherKeys@ spellings; the
--- @(run, action)@ shape was kept past the point where one gesture needed it
--- for exactly this — `~xmd5b`, his instruction of 2026-11-20: bind the key
--- rather than let a run nothing names fall through and type itself into the
--- line. **A run still not in this table is typed as before** — the fix is
--- only as wide as the table.
---
--- **DO NOT PUT CMD+L BACK. IT WAS TRIED AND IT DOES NOT ARRIVE.** `~p6g53`:
--- @[108;9u@ (kitty protocol — @l@ is 108, modifier @1 + 8@ for super) and
--- @[27;9;108~@ (@modifyOtherKeys@) were both added and both verified to clear
--- a turn when fed to a pty. **On his own terminal nothing comes through at
--- all** — HIS, 2026-11-13: /"ctrl works, cmd doesn't"/ — because macOS
--- terminals bind Cmd themselves and never forward it to the program. The
--- entries were removed on his instruction, /"unbind cmd so that it doesn't
--- confuse us in the future"/: two recognisers for a key that cannot be
--- pressed are two things a later reader has to disprove.
-escRuns :: [(String, EventM Name St ())]
-escRuns =
-  [ ("[13;2u",    shiftEnter)
-  , ("[27;2;13~", shiftEnter)
-  , ("[13;5u",    ctrlEnter)
-  , ("[27;5;13~", ctrlEnter)
-  ]
-
--- | Esc has just been handled, so the characters that follow it /may/ be the
--- tail of a Shift+Enter. Start holding them back ('stEscRun').
---
--- **Esc's own meaning is untouched and the dismissal has already happened by
--- the time this runs.** Nothing can be known about what follows an Esc at the
--- moment the Esc arrives, so a Shift+Enter does dismiss an open dropdown as a
--- side effect. That is the whole of the cost, and it is the right trade: the
--- alternative is delaying every Esc by a keystroke, which would break the one
--- key the mode uses to get out of things.
-armEscRun :: BrickEvent Name e -> EventM Name St ()
-armEscRun (VtyEvent (V.EvKey V.KEsc [])) = do
-  st <- get
-  put st { stEscRun = Just "" }
-armEscRun _ = pure ()
-
--- | A character arriving while a sequence is being held: extend it, and
---
---   * a complete sequence **IS the Shift+Enter, and it is now dispatched
---     rather than only swallowed** — `~bmk98`, his instruction of 2026-11-13.
---     vty cannot decode these two sequences, but this function already
---     recognises them exactly, so the gesture was always available here and
---     was being thrown away. The line is still left as it was: inserting a
---     line does not touch the caret's own text;
---   * a still-possible prefix keeps being held, invisibly, for one more key;
---   * anything else is **typed, in order** — the held characters and then
---     this one — so a user who presses Esc and then genuinely types @[1@ has
---     lost nothing but the frame it took to know that.
---
--- A non-character event (an arrow, Enter, a resize) also ends the run: the
--- held text is typed first, then the event is handled, because the text was
--- typed before the key was pressed.
-continueEscRun :: String -> BrickEvent Name AppEvent -> EventM Name St ()
-continueEscRun p ev = do
-  st <- get
-  case ev of
-    VtyEvent (V.EvKey (V.KChar c) []) | p' <- p ++ [c], any ((p' `isPrefixOf`) . fst) escRuns ->
-      case lookup p' escRuns of
-        Just act -> put st { stEscRun = Nothing } >> act
-        Nothing  -> put st { stEscRun = Just p' }
-    _ -> do
-      put st { stEscRun = Nothing }
-      mapM_ (\c -> handleEventFor (VtyEvent (V.EvKey (V.KChar c) []))) p
-      handleEventFor ev
-
--- | **What Shift+Enter does** — `~bmk98`, his instruction of 2026-11-13:
--- /"It should serve as a way to insert a line in between two already existing
--- lines in script mode. That way I can actually edit something that I might
--- have done wrong."/
---
--- **Script mode only.** In the ordinary REPL there is no document to insert
--- into, so the sequence is swallowed exactly as it was before.
-shiftEnter :: EventM Name St ()
-shiftEnter = do
-  st <- get
-  if stScriptMode st then scriptOpenLine else pure ()
-
--- | **Ctrl+Enter's binding — his instruction of 2026-11-20.** `~xmd5b` found
--- it typing punctuation into the line for want of anywhere to go; rather
--- than only swallow the run, it is given a job: the mirror of Shift+Enter,
--- opening the blank line *above* the caret instead of below it.
---
--- **Script mode only**, same as Shift+Enter — there is no document to
--- insert into at the ordinary REPL, so the sequence is swallowed exactly as
--- it always was there.
-ctrlEnter :: EventM Name St ()
-ctrlEnter = do
-  st <- get
-  if stScriptMode st then scriptOpenLineAbove else pure ()
 
 -- | **An empty line beside the caret, with the caret seated on it** — the
 -- other half of `~bmk98`, and shared with its mirror below. @place@ is the
@@ -4333,16 +4251,12 @@ dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 -- terminals do not transmit Cmd to the program — it is a terminal-level
 -- modifier — so vty never receives it and no binding could fire.
 --
--- **Shift+Enter does not reach this vty either, and that is measured, not
--- assumed.** Both standard encodings were fed through the pty and neither
--- decodes: kitty's @ESC [ 13;2u@ and xterm @modifyOtherKeys@' @ESC [
--- 27;2;13~@ both arrive as *literal text* and get typed into the line —
--- the caret's line read @bbb[13;2u@ afterwards. So the 'V.MShift' clause
--- below is unreachable on this vty today; it is kept because it costs
--- nothing and is already correct if vty gains the kitty protocol.
--- **The bytes no longer reach the line**: they are swallowed by
--- 'stEscRun', which is not a workaround for the missing binding but a
--- refusal to let a keypress write punctuation into a proof.
+-- **Shift+Enter does reach this vty, because 'vtyConfig' tells it how the key
+-- is spelled.** vty's built-in table decodes neither kitty's @ESC [ 13;2u@
+-- nor xterm @modifyOtherKeys@' @ESC [ 27;2;13~@, and both once arrived as
+-- literal text and typed themselves into the line; 'V.configInputMap' is the
+-- hook that fixes that, and the 'V.MShift' clause below is the binding that
+-- fires — measured under a pty, 2026-11-20. `~kmprv` has the before and after.
 --
 -- **Option+Enter is the one that works** — it arrives as @ESC CR@ and
 -- decodes to 'V.KEnter' with 'V.MMeta', verified under the pty. **And
@@ -4398,13 +4312,19 @@ dispatchScriptEvent ev@(VtyEvent (V.EvKey V.KBS [])) = do
 -- one that arrives**, so nothing of his 2026-10-20 gesture is lost: the two
 -- were one gesture under two spellings and this is the spare one.
 --
--- **This clause is still the unreachable one** — vty decodes neither encoding
--- — and it is kept correct for the day vty gains the kitty protocol. **The
--- binding that actually fires is 'continueEscRun''s**, which recognises the
--- bytes itself.
+-- **This is the clause that fires, both spellings of the key** — `~kmprv`,
+-- 2026-11-20. 'vtyConfig' hands vty the four byte runs, so the gesture arrives
+-- as a key here rather than as an Esc and six characters somewhere else, and
+-- there is no second place that knows what Shift+Enter looks like.
+--
+-- **Script mode only, and the fall-through is the whole of it**: at the
+-- ordinary REPL there is no document to insert into, and no clause there
+-- matches 'V.KEnter' with a modifier, so the key does nothing — exactly what
+-- the old recogniser arranged by swallowing it.
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptOpenLine
--- | **Ctrl+Enter's mirror, same reason it is unreachable.** Kept beside the
--- Shift clause so the two cannot drift when vty does learn to decode either.
+-- | **Ctrl+Enter's mirror** — `~xmd5b`, his instruction of 2026-11-20: a blank
+-- line *above* the caret rather than below it. Same four-run table, same
+-- reason it arrives.
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MCtrl]))  = scriptOpenLineAbove
 dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
 -- | **F12 or Ctrl+X summons the command bar. It used to be F2, and F2 is now
@@ -4771,7 +4691,7 @@ handleReplEvent (VtyEvent (V.EvKey (V.KChar c) [])) = do
 -- spoken-for as a character gets.
 --
 -- **Cmd+L: withdrawn, it does not arrive.** /"ctrl works, cmd doesn't"/ —
--- macOS terminals bind Cmd themselves. See 'escRuns' for the two encodings
+-- macOS terminals bind Cmd themselves. See 'vtyConfig' for the two encodings
 -- that were tried and why they are gone.
 --
 -- **Ctrl+L means \"clear the screen\" in every terminal and here it means
