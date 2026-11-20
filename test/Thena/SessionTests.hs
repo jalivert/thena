@@ -342,9 +342,13 @@ identityProof =
   , "into"
   , "along"
   , "along"
-  -- The second binder of @A -> A@ is written @_@, because a non-dependent Π
-  -- carries that identifier (§2.6). It is an ordinary name and is typed as one.
-  , "try-core core`_`"
+  -- **The second binder of @A -> A@ is called @x@ — his ruling of 2026-11-20.**
+  -- A non-dependent Π carries 'Thena.Core.Term.anonymousIdent' (§2.6), which is
+  -- not a name; 'Thena.Core.Context.writableIn' mints a real one as the binder
+  -- enters the context, so the word the development shows is the word that
+  -- resolves. It used to be @_@, and @_@ reached the innermost of however many
+  -- binders had no name — silently, which is what the ruling is about.
+  , "try-core core`x`"
   , "solve"
   , "back"
   , "back"
@@ -385,9 +389,9 @@ holeTests =
   , halts "and refuses a focus that is not a hole at all"
       (goal ++ ["along", "attack"]) (NoClauseMatched "attack" 0 [0])
   , halts "intro refuses a hole that has not been attacked"
-      (goal ++ ["intro"]) (NoClauseMatched "intro" 0 [0, 0])
+      (goal ++ ["intro"]) (NoClauseMatched "intro" 0 [0, 0, 1, 1])
   , halts "and a guess whose type is neither a ∀ nor a let"
-      (natGoal ++ ["attack", "intro"]) (NoClauseMatched "intro" 0 [0, 0])
+      (natGoal ++ ["attack", "intro"]) (NoClauseMatched "intro" 0 [0, 0, 1, 1])
   , ok "intro walks a Π"        (arrowGoal ++ ["attack", "intro"])
   , ok "and then the next one"  (arrowGoal ++ ["attack", "intro", "intro"])
 

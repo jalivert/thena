@@ -6945,6 +6945,50 @@ alternative is a message that names neither.
 **It never prints a definition's body.** The collapse fires only where the
 definiens is a bare variable, so it replaces one name with another name.
 
+### An argument the statement did not name gets a real name, and `intro` can say what it is
+
+*Decided 2026-11-20.*
+
+A statement may name none of its arguments. `proj₁ : ∀ (T : Type) -> T -> T -> T`
+names `T` and nothing else, so `intro` used to introduce two bindings with no name
+to give them. They were shown as `_` and `_1`, and the digit was added by the
+printer so that two of them could be told apart on screen.
+
+**That display could not be written back.** Only `_` resolved, and because a name
+lookup takes the innermost binding it reached the *second* argument — so a `fill`
+of `_`, meaning the first, silently built the second projection, and with both
+arguments at one type nothing refused it.
+
+**An argument with no written name is now given one where it enters the context**:
+`x`, then `x1`, `x2` for each further one, skipping any word already in scope. The
+word the development shows is the word that resolves, and a context never holds two
+bindings sharing a word the author did not write.
+
+```
+:theorem proj₁ : ∀ (T : Type) -> T -> T -> T
+attack ; intro ; intro ; intro
+goto proj₁1
+:where
+  context
+    T : Type₀
+    x : T
+    x1 : T
+fill core`x`     -- the first argument, as shown
+```
+
+**`intro` also takes the name outright**, which is how to avoid the invented one:
+
+```
+intro "a"
+intro "b"
+```
+
+It is a second arity of the same rule, so `intro` with no argument is unchanged.
+
+**A name you wrote twice yourself is untouched.** Writing `intro "a"` twice is
+shadowing, the inner binding wins, and that is what shadowing means everywhere
+else; this decision only supplies a name where none was written.
+
 ## Building a frontend
 
 *Added 2026-09-24, MS7; rewritten 2026-09-27, when the decision below replaced a

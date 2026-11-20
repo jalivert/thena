@@ -3,6 +3,7 @@ proving id : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> :matches
 intro : ()
+intro ‹n› : Name -> ()
 solve : ()
 regret : ()
 prove : ()

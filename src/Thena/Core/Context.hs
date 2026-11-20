@@ -7,13 +7,15 @@ module Thena.Core.Context
   , entryVar
   , entryIdent
   , entryType
+  , writableIn
   , substLevelsInEntry
   , piOver
   , lamOver
   ) where
 
 import Thena.Core.Level (Level, LevelVar)
-import Thena.Core.Term (Core (..), Ident, Scope, Var, close, substLevelsIn)
+import Thena.Core.Term
+  (Core (..), Ident (..), Scope, Var, anonymousIdent, close, substLevelsIn)
 
 -- | An entry in a working context: a name with a type, or a name with a type
 -- and a value.
@@ -51,6 +53,40 @@ entryIdent :: Entry -> Ident
 entryIdent e = case e of
   Hypothesis _ i _   -> i
   Definition _ i _ _ -> i
+
+-- | The name a binder should carry as it enters this context: its own, unless
+-- it has none.
+--
+-- **HIS RULING, 2026-11-20** — @.claude\/RULINGS.md@, /An unnamed argument gets a
+-- real, writable name/, and @DECISIONS.md@ carries the public half. A binder with no written name carries
+-- 'Thena.Core.Term.anonymousIdent', and two of them in one context are two
+-- entries sharing the word @_@: the development printed @_@ and @_1@, the user
+-- wrote @_@ meaning the first, and "Thena.Syntax.Resolve"'s innermost-wins
+-- lookup gave the second — silently, where both have the same type, with @qed@
+-- admitting the wrong term. So the name is minted here, once, where the context
+-- is known, rather than freshened on the way out by the printer.
+--
+-- **A written name is returned untouched, taken or not.** Shadowing a name the
+-- user wrote themself is theirs to write (MS4 phase 41f, /"the name is used as
+-- given, taken or not"/), and the lookup's innermost-wins rule is exactly right
+-- for it. This function only supplies what was never written.
+--
+-- The stem is @x@, which is what "Thena.Syntax.Resolve"'s @prefix@ already mints
+-- for a generated wrapper's argument, and the suffix is the one the printer's
+-- @freshen@ uses — so a context of three unnamed arguments reads @x@, @x1@,
+-- @x2@ whichever side of the boundary produced it.
+writableIn :: Context -> Ident -> Ident
+writableIn ctx i
+  | i /= anonymousIdent = i
+  | otherwise           = pick Nothing
+  where
+    taken = map entryIdent ctx
+    stem  = "x"
+    pick k =
+      let candidate = Ident (stem ++ maybe "" show k)
+       in if candidate `elem` taken
+            then pick (Just (maybe 1 (+ 1) k :: Int))
+            else candidate
 
 -- | The type of an entry, whichever kind it is. Both constructors have one, in
 -- the same last position, which is why this accessor is total.

@@ -17,6 +17,7 @@ module Thena.Core.Term
     Var
   , fresh
   , Ident (..)
+  , anonymousIdent
   , GlobalName (..)
   , rootName
   , nameDotted
@@ -92,6 +93,22 @@ fresh n = (Var n, n + 1)
 -- name up in the context by comparing identifiers.
 newtype Ident = Ident String
   deriving (Eq, Ord, Show)
+
+-- | The identifier a binder with no written name carries.
+--
+-- A non-dependent arrow @S -> T@ is a 'Pi' whose variable does not occur, so
+-- there is no name to carry and resolution puts this marker there instead. It is
+-- the surface wildcard, which is what makes it the honest choice /inside a core
+-- term/, where 'Eq' ignores the field.
+--
+-- **It stops being honest where a binder enters the context**, which is named
+-- (§3.5) and is what a user points at by word: two binders carrying this one are
+-- two entries sharing a word the user never wrote, and the lookup in
+-- "Thena.Syntax.Resolve" takes the innermost. His ruling of 2026-11-20 is that
+-- such a binder is given a real, writable name instead —
+-- 'Thena.Core.Context.writableIn' is where that happens.
+anonymousIdent :: Ident
+anonymousIdent = Ident "_"
 
 -- | A name in the global environment (§3.6, decided 2026-08-11; given a path
 -- 2026-10-30, MS10's module system).
