@@ -122,6 +122,7 @@ import Thena.View
   , statementOfferView
   )
 import Thena.View.Choices (ChoiceView (..))
+import Thena.View.Development (LinkView)
 import Thena.View.Goals (goalsOf)
 import Thena.View.Matches (MatchView (..))
 import Thena.View.Type (SignatureView (..), TypeView (..))
@@ -853,6 +854,32 @@ data St = St
     -- mode switch. That is `~3gn2r`'s rule applied to the other half of the
     -- strip: a region that blanked itself whenever the dropdown would have
     -- closed would be empty in exactly the frames he is reading it.
+  , stHintAbout :: Maybe (String, String)
+    -- ^ **the goals and the proof term the hint was asked about** —
+    -- `~vwhf4`, his ruling of 2026-11-20: /"We could \"dim\" the answer once
+    -- the user makes a change large enough that it could no longer be
+    -- relevant. Like changing the state."/ 'hintStale' compares this with
+    -- what the panes are drawing and the region dims when they differ.
+    --
+    -- **The state, and not the transcript that reached it.** These are two
+    -- of the six fields 'hintFields' sends, so the test is literally /is
+    -- what the model was told about the proof still true/. Comparing
+    -- 'submittedLines' instead was tried and is strictly worse: an @:undo@
+    -- leaves its own entry in the record, so stepping back to the very state
+    -- the answer was about would have left it dim — measured under a pty,
+    -- @attack@ then @:undo@.
+    --
+    -- **It costs nothing per frame.** 'draw' already pulls
+    -- @developmentView@ for the proof-term and goals panes, so the
+    -- comparison reads a view that is in the frame either way.
+    --
+    -- **Stamped at the ask and carried through the answer**
+    -- ('HintAnswered'), not written when the answer lands: he may run a line
+    -- while the model is thinking, and an answer about the state before it is
+    -- stale the moment it arrives.
+    --
+    -- **@:hint \8249text\8250@ stamps the current session**, since he typed that
+    -- sentence about what is on screen now.
   , stStripReply :: Maybe (Editor Text Name)
     -- ^ **the reply row's own editor, and the strip owns every key while it
     -- holds one** — `~w2tk2` slice 5, his instruction on who owns the
@@ -1071,6 +1098,7 @@ runTui = do
         , stInputExtent = Nothing
         , stStripWidth  = Nothing
         , stHint        = Nothing
+        , stHintAbout   = Nothing
         , stStripReply  = Nothing
         , stPaneExtent  = Nothing
         , stArrowsReleased = False
@@ -1163,7 +1191,10 @@ data AppEvent
   -- and has to be dropped. A hint is fired by Enter and only ever by Enter
   -- ('stHintAsking' refuses a second while one is out), so there is never
   -- more than one in flight and nothing to put in order.
-  | HintAnswered (Either String Text)
+  | HintAnswered (String, String) (Either String Text)
+    -- ^ the answer, and **the transcript it was asked about** — `~vwhf4`.
+    -- Carried rather than read off 'St' when it lands, so a line he ran while
+    -- the model was thinking leaves the answer stale on arrival.
   -- | OpenRouter's catalogue, with the filter the `:models` that asked for
   -- it carried — so the picker opens on the rows he asked for rather than
   -- on all 479 and a second command.
@@ -1495,6 +1526,12 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- unpaired one would have punched a three-row hole in the panel whenever
   -- the hint was short.
   , (attrName "strip.hint",     surface (themePanel th) (themeInk th))
+  -- | **The same region when what it says is no longer about the proof on
+  -- screen** — `~vwhf4`, his ruling of 2026-11-20: /"We could \"dim\" the
+  -- answer once the user makes a change large enough that it could no longer
+  -- be relevant."/ 'themeDim' rather than a colour of its own, because this
+  -- is the same /not the live thing/ the panes' small print already means.
+  , (attrName "strip.hint.stale", surface (themePanel th) (themeDim th))
   -- | **`strip.jev` IS GONE WITH THE MARK IT PAINTED — HIS WORD,
   -- 2026-11-19**: /"turn off the green color under Jev's suggestions."/ See
   -- 'Tui.Panes.offerGridWidget' for why his two instructions about it do not
@@ -1807,7 +1844,9 @@ draw st =
           -- nothing until something is in them.
           llm =
             concat
-              [ [hintRegionWidget width hintRows (stHint st) | isJust (stHint st)]
+              [ [ hintRegionWidget width hintRows (hintStale st links) (stHint st)
+                | isJust (stHint st)
+                ]
               -- | **The line he asked for, and it stays empty** — HIS,
               -- 2026-11-19: /"Give me one empty line between the AI reply and
               -- my AI prompt. That one will stay empty."/ Drawn in the hint's
@@ -3713,7 +3752,7 @@ handleAppEvent (JevDue gen) = handleJevDue gen
 handleAppEvent (JevRanked gen result) = applyJevRanking gen result
 handleAppEvent JevSpin = handleJevSpin
 handleAppEvent (OffersComputed gen result) = applyOffers gen result
-handleAppEvent (HintAnswered result) = applyHintAnswer result
+handleAppEvent (HintAnswered about result) = applyHintAnswer about result
 handleAppEvent (ModelsListed filt result) = do
   st <- get
   case result of
@@ -4428,7 +4467,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- hint are the same state and spelling them differently would have
         -- invented a third.
         (":hint" : rest) -> do
-          let st' = st0 { stHint = hintFrom rest }
+          let st' = st0 { stHint = hintFrom rest, stHintAbout = hintAboutNow st0 rest }
           appendTurn st' Nothing [hintSaid (hintFrom rest)]
         -- | **`:model` and `:model ‹id›`** — `~w2tk2` slice 6.
         [":model"] -> appendTurn st0 Nothing ["model: " <> Text.unpack (stModel st0)]
@@ -5032,7 +5071,7 @@ scriptLocal st text = case words text of
   -- TUI-local word is a TUI-local word wherever it is typed. **No
   -- 'saveConfig'**: 'stHint' is content and is not in the dotfile.
   (":hint" : rest) -> Just $ do
-    put st { stHint = hintFrom rest }
+    put st { stHint = hintFrom rest, stHintAbout = hintAboutNow st rest }
     pure (hintSaid (hintFrom rest))
   -- | `:model` and `:models` run from a script line and from the bar too,
   -- his ruling `~g5wjz` — a TUI-local word is a TUI-local word wherever it
@@ -7308,6 +7347,11 @@ askHintNow = do
           let fields = hintFields st
               chan = stJevChan st
               cfg' = cfg { hintModel = stModel st }
+              -- **The state as it stands at the ask** — `~vwhf4`. Taken here
+              -- and not in the handler that receives the answer, so a line
+              -- run while the model is thinking makes the answer stale
+              -- rather than fresh.
+              about = hintAbout st
           put
             st
               { stHintAsking = True
@@ -7321,19 +7365,58 @@ askHintNow = do
           liftIO . void . forkIO $ do
             prompt <- loadHintPrompt
             answer <- askHint cfg' prompt fields asked
-            writeBChan chan (HintAnswered answer)
+            writeBChan chan (HintAnswered about answer)
 
 -- | The answer coming back. **A failure is shown in the hint region rather
 -- than only logged**: he pressed a key and is owed a reply, and a region
 -- that stays empty after an ask reads as a feature that does not work.
-applyHintAnswer :: Either String Text -> EventM Name St ()
-applyHintAnswer result = do
+applyHintAnswer :: (String, String) -> Either String Text -> EventM Name St ()
+applyHintAnswer about result = do
   st <- get
   put
     st
       { stHintAsking = False
       , stHint = Just (either ("the model could not be reached — " <>) Text.unpack result)
+      , stHintAbout = Just about
       }
+
+-- | **Is what the hint region says still about the proof on screen?** —
+-- `~vwhf4`, his ruling of 2026-11-20.
+--
+-- **The comparison is the transcript, 'submittedLines' of the session the
+-- panes are drawing.** A line executed, an @:undo@, an edit that re-ran the
+-- tail, a caret moved to a committed line whose session is an earlier one —
+-- every one of those changes the list, and none of them is a keystroke on the
+-- line he is typing. That is the line his ruling draws: /"I change a line and
+-- re-run it, changing the sequence of snapshots, changing the proof-state"/,
+-- and not every character he types.
+--
+-- **'False' while there is no hint and while none was stamped**, so a hint
+-- typed before this existed never reads as stale.
+hintStale :: St -> [LinkView] -> Bool
+hintStale st links = case stHintAbout st of
+  Nothing -> False
+  Just about -> about /= aboutOf links
+
+-- | **The two fields that say which proof an answer is about** — the same
+-- two 'hintFields' sends, built the same way, so what is compared is what
+-- the model was told.
+aboutOf :: [LinkView] -> (String, String)
+aboutOf links =
+  ( intercalate "\n" (goalTexts (goalsOf links))
+  , intercalate "\n" (developmentText links)
+  )
+
+-- | The state on screen now, for an ask and for @:hint ‹text›@.
+hintAbout :: St -> (String, String)
+hintAbout st = aboutOf (developmentView paneBudget (activeSession st))
+
+-- | What @:hint@ stamps: the state on screen when he typed the sentence, and
+-- 'Nothing' for the spelling that clears the region.
+hintAboutNow :: St -> [String] -> Maybe (String, String)
+hintAboutNow st rest
+  | isJust (hintFrom rest) = Just (hintAbout st)
+  | otherwise = Nothing
 
 -- | **`:model ‹id›`, and the picker's Enter goes through here too.** The id
 -- is not checked against the catalogue: see 'Tui.Config.cfgModel' for why a

@@ -583,12 +583,24 @@ stripHintLines width hint
 -- **Drawn in @strip.hint@ even where it is blank**, so the pane's own fill
 -- shows through every row of the region alike — `~bv2wj`, where an attr
 -- whose background was left to the terminal punched a hole in the panel.
-hintRegionWidget :: Ord n => Int -> Int -> Maybe String -> Widget n
-hintRegionWidget width rows hint = vBox (map line (take rows (blanks <> shown)))
+--
+-- **@stale@ draws the whole region in @strip.hint.stale@ instead — HIS
+-- RULING, 2026-11-20 (`~vwhf4`):** /"We could \"dim\" the answer once the
+-- user makes a change large enough that it could no longer be relevant. Like
+-- changing the state."/ The sentence stays on screen and stops claiming to be
+-- about the proof in front of him; who decides that is 'Tui.App.hintStale',
+-- since it is a question about the session and not about drawing.
+--
+-- **Dim, not a mark beside it**: dimming is the vocabulary this TUI already
+-- uses for /this is not the live thing/ — the script document's unrun tail,
+-- a pane's small print — and a glyph would need a legend.
+hintRegionWidget :: Ord n => Int -> Int -> Bool -> Maybe String -> Widget n
+hintRegionWidget width rows stale hint = vBox (map line (take rows (blanks <> shown)))
   where
     shown = maybe [] (stripHintLines width) hint
     blanks = replicate (max 0 (rows - length shown)) ""
-    line t = withAttr (attrName "strip.hint") (str (if null t then " " else t))
+    ink = attrName (if stale then "strip.hint.stale" else "strip.hint")
+    line t = withAttr ink (str (if null t then " " else t))
 
 -- | One row of a list pane, with its attribute and its indent — the whole of
 -- the second column's drawing, since 'Tui.Panes' decided the text.

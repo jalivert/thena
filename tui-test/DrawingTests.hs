@@ -15,7 +15,7 @@ import Data.Char (isSpace)
 import qualified Data.Vector as V
 
 import Brick (Widget)
-import Brick.AttrMap (AttrMap, attrMap)
+import Brick.AttrMap (AttrMap, attrMap, attrName)
 import Brick.Main (renderWidget)
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.PictureToSpans (displayOpsForPic)
@@ -386,14 +386,14 @@ hintRegionCases =
     -- key he had learned the moment the model spoke.
     testCase "no hint is the floor, in blank rows" $
       assertEqual "" ["", "", ""]
-        (drawToLinesIn (60, 3) (hintRegionWidget 60 3 Nothing))
+        (drawToLinesIn (60, 3) (hintRegionWidget 60 3 False Nothing))
   , -- | **The text sits at the BOTTOM and the blanks go above it.** That is
     -- what separates the hint from the grid without spending one of the
     -- three rows on a separator, and it puts the sentence next to the row
     -- slice 5 will answer it in.
     testCase "a short hint sits at the bottom of its region" $
       assertEqual "" ["", "", "induction-on \"v\" splits a value."]
-        (drawToLinesIn (60, 3) (hintRegionWidget 60 3 (Just "induction-on \"v\" splits a value.")))
+        (drawToLinesIn (60, 3) (hintRegionWidget 60 3 False (Just "induction-on \"v\" splits a value.")))
   , -- | **A hint wraps to the strip's width, and these are the lines whose
     -- count the grid shrank by** — 'Tui.Panes.stripHintLines' is the one
     -- function both the drawing and the arithmetic read.
@@ -408,19 +408,46 @@ hintRegionCases =
         [ "Are you trying to prove this by cases? The"
         , "rule that splits a value is induction-on."
         ]
-        (drawToLinesIn (42, 2) (hintRegionWidget 42 2 (Just "Are you trying to prove this by cases? The rule that splits a value is induction-on.")))
+        (drawToLinesIn (42, 2) (hintRegionWidget 42 2 False (Just "Are you trying to prove this by cases? The rule that splits a value is induction-on.")))
   , -- | **A hint longer than its region keeps its head, not its tail.** By
     -- the time this clips, the region has already grown as far as
     -- 'Tui.Layout.stripHintBudget' allows, and the first words are the ones
     -- that say whether pulling the strip taller is worth it.
     testCase "a hint past the region's height keeps its first rows" $
       assertEqual "" ["one two three", "four five six"]
-        (drawToLinesIn (14, 2) (hintRegionWidget 14 2 (Just "one two three four five six seven eight")))
+        (drawToLinesIn (14, 2) (hintRegionWidget 14 2 False (Just "one two three four five six seven eight")))
   , -- | A sliver of a pane has nothing to say in it, rather than a row of
     -- nothing — see 'Tui.Panes.stripHintLines'.
     testCase "no width is no lines" $
       assertEqual "" [] (stripHintLines 0 "anything at all")
+  , -- | **A stale answer is the same text in another attribute** — `~vwhf4`,
+    -- his ruling of 2026-11-20 that it is dimmed rather than cleared. The
+    -- words have to be identical, since the whole point is that he can still
+    -- read advice he may want after a re-run.
+    testCase "a stale hint says the same thing" $
+      assertEqual ""
+        (drawToLinesIn (60, 3) (hintRegionWidget 60 3 False (Just "try intro x first")))
+        (drawToLinesIn (60, 3) (hintRegionWidget 60 3 True (Just "try intro x first")))
+  , -- | And it is drawn in the stale attribute, which is what carries the
+    -- dim. **Red in this map for the reason 'foldedSpanPerLine' is red**: an
+    -- unmapped name is the default attr, so a test over an empty map would
+    -- pass without proving the attribute changed.
+    testCase "a stale hint is drawn in strip.hint.stale" $
+      assertEqual "" (True, False)
+        ( marked True "try intro x first"
+        , marked False "try intro x first"
+        )
   ]
+  where
+    -- | Does any span of the region carry the stale attribute's background?
+    marked stale hint =
+      any
+        (any ((== Vty.SetTo Vty.red) . Vty.attrBackColor . snd))
+        (drawToSpansIn staleMap (60, 3) (hintRegionWidget 60 3 stale (Just hint)))
+    staleMap =
+      attrMap
+        Vty.defAttr
+        [(attrName "strip.hint.stale", Vty.withBackColor Vty.defAttr Vty.red)]
 
 -- | **HIS REPORT, 2026-11-12, and the suite could not have caught it** —
 -- `~mxhfj`: /"The TUI renders the tagget term literals weird. There are no
