@@ -32,10 +32,13 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import Thena.Driver
   ( Leniency (..)
   , Partly (..)
+  , Pos (..)
   , Response (..)
   , Session
   , Unfinished (..)
   , declaredByModule
+  , loadProofItems
+  , loadProofSource
   , moduleImportsOf
   , moduleLoaded
   , moduleName
@@ -43,6 +46,7 @@ import Thena.Driver
   , modulePartly
   , moduleWhole
   , modulesPartly
+  , parseSurfaceModule
   )
 import Thena.Core.Term (nameDotted)
 import Thena.Files (importModule, startingSession)
@@ -100,7 +104,7 @@ about what out = case [ r | r <- out, names r == Just what ] of
 viewOf :: Session -> Response -> IO StopView
 viewOf s r = case r of
   ProofLoadedPartly _ _ _ _ (root : _) ->
-    pure (failureView (Budget 200) s (unfinishedWhy root))
+    pure (failureView (Budget 200) s root)
   other -> assertFailure ("expected a partial load with an unfinished item, got " ++ show other)
 
 -- | The one fault a 'Broken' item carries.
@@ -338,4 +342,97 @@ tests = testGroup "a module that loads as far as it can (MS12 phase 315)"
       map moduleText (moduleImportsOf m s) @?= ["test.modules.Bit"]
 
   , viewTests
+  , positionTests
+  ]
+
+-- | __Where a declaration that did not go in was written__ (MS12 phase 334,
+-- @~hcr2d@).
+--
+-- **His ask of 2026-11-20 was a line and a column**, so that a row in a pane's
+-- fold under a module is a place to go rather than a sentence. Nothing in the
+-- engine knew one before this phase: the lexer had a position on every token
+-- and the parser dropped it.
+--
+-- **The fixture's line numbers are the assertion.** @PartlyGood.thena@ writes
+-- @broken : Flag.Flag@ on line 12 at column 1 and @PartlyWorse.thena@ writes
+-- @broken@ on line 12 and @alsoBroken@ on line 15; a signature and its equation
+-- are one item, so the line is the signature's.
+positionTests :: TestTree
+positionTests = testGroup "where an unfinished declaration was written (MS12 phase 334)"
+  [ testCase "the line and column reach the unfinished item" $ do
+      (_, out) <- importing Lenient "test.modules.PartlyGood"
+      r <- about "test.modules.PartlyGood" out
+      case r of
+        ProofLoadedPartly _ _ _ _ [u] -> do
+          unfinishedDeclares u @?= ["broken"]
+          unfinishedAt u @?= Just (Pos 12 1)
+        other -> assertFailure ("expected one unfinished item, got " ++ show other)
+
+  , testCase "and reach the view a pane draws" $ do
+      -- **The one that matters**: a pane never sees an 'Unfinished', it sees
+      -- this view, so a position that stopped here would have gone nowhere.
+      (s, out) <- importing Lenient "test.modules.PartlyGood"
+      r  <- about "test.modules.PartlyGood" out
+      sv <- viewOf s r
+      stopViewAt sv @?= Just (Pos 12 1)
+
+  , testCase "each unfinished item carries its own line" $ do
+      -- Two failures in one file, in file order — so the positions are not one
+      -- position repeated, and not the module's.
+      (_, out) <- importing Lenient "test.modules.PartlyWorse"
+      r <- about "test.modules.PartlyWorse" out
+      case r of
+        ProofLoadedPartly _ _ _ _ us ->
+          map unfinishedAt us @?= [Just (Pos 12 1), Just (Pos 15 1)]
+        other -> assertFailure ("expected a partial load, got " ++ show other)
+
+  , testCase "the column is the declaration's own, not column 1" $ do
+      -- **What makes the column a measurement rather than a constant.** The
+      -- layout pass opens the module's block at the column of its first
+      -- declaration, so a file written indented reports that column.
+      s <- fresh
+      let src = unlines
+            [ "module test.Indented where"
+            , ""
+            , "  broken : Flag.Flag"
+            , "  broken = nonesuch"
+            ]
+      case snd (loadProofSource Lenient s src) of
+        ProofLoadedPartly _ _ _ _ [u] -> unfinishedAt u @?= Just (Pos 3 3)
+        other -> assertFailure ("expected one unfinished item, got " ++ show other)
+
+  , testCase "a group's position is the block's, because a group is one item" $ do
+      -- **@~6g27s@ is the open item here** — a @namespace@ block is one item to
+      -- the loader, so one unfinished proof inside it throws the group away and
+      -- the position a row can point at is the @namespace@ line. Pinned so that
+      -- whichever way he rules, the change is visible.
+      s <- fresh
+      let src = unlines
+            [ "module test.Grouped where"
+            , ""
+            , "namespace lemmata where"
+            , "  broken : Flag.Flag"
+            , "  broken = nonesuch"
+            ]
+      case snd (loadProofSource Lenient s src) of
+        ProofLoadedPartly _ _ _ _ [u] -> unfinishedAt u @?= Just (Pos 3 1)
+        other -> assertFailure ("expected one unfinished item, got " ++ show other)
+
+  , testCase "an item a caller handed over has no position" $ do
+      -- **'Nothing' is honest and is not a missing feature**: there is no file,
+      -- so there is nowhere for a row to go. 'Thena.Driver.loadProofItems' is
+      -- the door a caller that built the items itself takes.
+      s <- fresh
+      Just m <- pure (moduleName "test.ByHand")
+      let src = unlines
+            [ "module test.ByHand where"
+            , ""
+            , "broken : Flag.Flag"
+            , "broken = nonesuch"
+            ]
+      case parseSurfaceModule src of
+        Left e -> assertFailure ("the fixture should parse: " ++ show e)
+        Right (_, items) -> case snd (loadProofItems Lenient s m items) of
+          ProofLoadedPartly _ _ _ _ [u] -> unfinishedAt u @?= Nothing
+          other -> assertFailure ("expected one unfinished item, got " ++ show other)
   ]

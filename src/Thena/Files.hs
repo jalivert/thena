@@ -41,7 +41,6 @@ import Thena.Driver
   , HeldGroup (..)
   , ruleBaseFileConsults
   , ruleBaseScopedConsults
-  , Item
   , Digest
   , digestOf
   , noteRead
@@ -71,7 +70,9 @@ import Thena.Driver
   , interfaceOf
   , preludeModule
   , LoadKind (..)
-  , parseSurfaceModule
+  , parseSurfaceModuleAt
+  , Placed
+  , placedItem
   , loadRuleBases
   , consultRuleBases
   , loadFinished
@@ -474,7 +475,7 @@ loadProofFile leniency s path = do
   contents <- try (readFile path)
   case contents of
     Left e  -> pure (s, [], [Unreadable path e])
-    Right c -> case parseSurfaceModule c of
+    Right c -> case parseSurfaceModuleAt c of
       -- **The file the user named answers with a response, as it always has.**
       -- The line they typed is what failed and the path is in front of them; an
       -- imported file is the case that needs its path said, and 'gather' says it.
@@ -517,7 +518,7 @@ gather s stack done m = do
   contents <- try (readFile path)
   case contents of
     Left e  -> pure (Left (Unreadable path e))
-    Right c -> case parseSurfaceModule c of
+    Right c -> case parseSurfaceModuleAt c of
       Left e -> pure (Left (Unloadable path (Failed e)))
       -- **THE HEADER IS CHECKED HERE AND NOWHERE ELSE** — his ruling of
       -- 2026-11-05, @~r58qh@: the match is asked only when the file is reached
@@ -542,8 +543,8 @@ gather s stack done m = do
 -- what has been gathered so far.
 assemble
   :: Session -> [ModuleName] -> [ReadModule] -> Maybe ModuleName -> FilePath
-  -> Digest -> ModuleName -> [Item] -> IO (Either Trouble [ReadModule])
-assemble s stack done as path d nm items = do
+  -> Digest -> ModuleName -> [Placed] -> IO (Either Trouble [ReadModule])
+assemble s stack done as path d nm placed = do
   walked <- imports s inner done (moduleImports items)
   case walked of
     Left t      -> pure (Left t)
@@ -570,8 +571,11 @@ assemble s stack done as path d nm items = do
                        (concatMap stated
                           (concat [ spreadPool sp ++ concatMap heldTexts (spreadHeld sp)
                                   | sp <- maybe [] id srcs ]))
-          pure (fmap (\gs -> gs ++ [ReadModule path d as nm srcs items]) walked')
+          pure (fmap (\gs -> gs ++ [ReadModule path d as nm srcs placed]) walked')
   where
+    -- Every question asked of the items here is about what they say; where
+    -- each was written travels on into 'ReadModule' untouched (MS12 phase 334).
+    items = map placedItem placed
     inner = maybe stack (: stack) as
     -- It did not parse. **Said by the read and not here**, so the position is
     -- in the message: 'Thena.Driver.consultRuleBases' refuses it when the pool

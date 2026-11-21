@@ -459,7 +459,7 @@ parking = testGroup "parking it, so that a lemma can be proved"
           [ (stopViewNature v, stopViewWhy v)
             | ProofLoadedPartly _ _ _ _ unfin <- out
             , u <- unfin, unfinishedDeclares u == ["picked"]
-            , let v = failureView (Budget 200) s1 (unfinishedWhy u) ]
+            , let v = failureView (Budget 200) s1 u ]
             @?= [(GivenUp, WasGivenUp)]
 
       , testCase "the module is recorded partly, not loaded whole" $ do

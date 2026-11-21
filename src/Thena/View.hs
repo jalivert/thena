@@ -92,8 +92,8 @@ import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefix, rebuild)
 import Thena.Development.Partial (Partial (..))
 import Thena.Driver
-  ( NotDone
-  , Session
+  ( Session
+  , Unfinished
   , currentQuest
   , fuelOf
   , machineOf
@@ -394,13 +394,18 @@ trustView budget s =
 
 -- | __Why an item in a partly-loaded module did not finish__ (MS12 phase 325).
 --
--- **The 'NotDone' comes from the response that reported the module** —
--- 'Thena.Driver.unfinishedWhy' of one of 'Thena.Driver.ProofLoadedPartly'\'s
--- unfinished items — and not from the session, because a load's answer is said
--- once and this view is of what it said. Everything a pane needs to lay it out
--- is in 'Thena.View.Failure.StopView'; the session is here for the spelling,
--- the grammars and the display names, as it is for every other view.
-failureView :: Budget -> Session -> NotDone -> StopView
+-- **The 'Thena.Driver.Unfinished' comes from the response that reported the
+-- module** — one of 'Thena.Driver.ProofLoadedPartly'\'s unfinished items — and
+-- not from the session, because a load's answer is said once and this view is
+-- of what it said. Everything a pane needs to lay it out is in
+-- 'Thena.View.Failure.StopView'; the session is here for the spelling, the
+-- grammars and the display names, as it is for every other view.
+--
+-- **IT TOOK THE 'NotDone' ALONE UNTIL MS12 PHASE 334** (@~hcr2d@). The item now
+-- also carries the line and column it was written at, and that is what makes a
+-- pane's row a place to go rather than a sentence — so the whole unfinished item
+-- comes in and 'Thena.View.Failure.stopViewAt' is where the position comes out.
+failureView :: Budget -> Session -> Unfinished -> StopView
 failureView budget s =
   displayStop
     (spellingOf s)

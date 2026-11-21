@@ -37,7 +37,6 @@ import Thena.Driver
   , digestText
   , filesRead
   , moduleName
-  , unfinishedWhy
   , fuelOf
   , oneLine
   , oneProgram
@@ -76,6 +75,7 @@ import Thena.View.Failure
   , Nature (..)
   , PartView (..)
   , Piece (..)
+  , Pos (..)
   , Role (..)
   , StopView (..)
   , Why (..)
@@ -315,6 +315,11 @@ job s = slice False (200 :: Int) (oneLine (fst (oneLine s ":step on")) claim)
 -- **The parts are checked and not just the arrival.** A 'StopView' whose kind
 -- came through and whose name did not would pass a non-empty check and be
 -- useless: the name is the part the tui track asked for by name.
+--
+-- **AND THE POSITION, SINCE MS12 PHASE 334** (@~hcr2d@): the line and column
+-- are what make the row a place to go, and a frontend has to be able to name
+-- 'Thena.View.Failure.Pos' to use them — which is the half of this phase that
+-- only the boundary can prove.
 partial :: IO [String]
 partial = do
   (s0, _) <- startingSession
@@ -322,9 +327,10 @@ partial = do
     Nothing -> pure ["FAILED: the fixture's name does not read"]
     Just m -> do
       (s, out, _) <- importModule Lenient s0 m
-      pure $ case [ failureView (Budget 200) s (unfinishedWhy u)
+      pure $ case [ failureView (Budget 200) s u
                   | ProofLoadedPartly _ _ _ _ unfin <- out, u <- unfin ] of
         [v] | Broken <- stopViewNature v
+            , Just (Pos 12 1) <- stopViewAt v
             , Faulty [f] <- stopViewWhy v
             , NotInScope <- faultViewKind f
             , [AName "nonesuch"] <-

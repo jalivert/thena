@@ -300,6 +300,14 @@ absent — `modulesPartly` lists the partial ones with their unfinished
 declarations in file order, and `moduleImportsOf` gives the edges of the import
 tree, which nothing kept before.
 
+**Each unfinished declaration says where it was written.** A line and a column,
+on `unfinishedAt`, so a frontend's row for it can be a place to go and not just
+a sentence — with the module's own file path, that is a destination. **Only
+top-level declarations have one**: a `namespace`, `import … where` or `consult …
+where` block is one item to the loader, so a declaration inside one reports the
+block's opening line. A declaration that reached the system as a tree rather
+than as text has no position, and says so.
+
 **Not yet**: a declaration that was left behind is reported, not resumable. It
 cannot be picked up at the prompt and finished.
 
