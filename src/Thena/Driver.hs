@@ -69,7 +69,9 @@ module Thena.Driver
   , unrecorded
   , loadProofSource
   , loadProofItems
+  , loadProofItemsAt
   , loadProofItemsConsulting
+  , loadProofItemsConsultingAt
     -- * What a load came to, and what a frontend draws from it (MS12 phase 315)
   , Leniency (..)
   , Unfinished (..)
@@ -148,7 +150,12 @@ module Thena.Driver
   , parseDeclaration
   , parseSurfaceTerm
   , parseSurfaceModule
+  , parseSurfaceModuleAt
   , Item (..)
+    -- * An item, and where it was written (MS12 phase 334, @~hcr2d@)
+  , Placed (..)
+  , unplaced
+  , Pos (..)
   , rawRuleDecls
   , LoadKind (..)
   , kindOf
@@ -328,7 +335,7 @@ import Thena.Instral.Concrete
   , RawOperand (..)
   , RawPattern (..)
   )
-import Thena.Syntax.Lexer (BlockKind (..), Located (..), Token (..), lexModule, lexTokens, rawEscapes)
+import Thena.Syntax.Lexer (BlockKind (..), Located (..), Pos (..), Token (..), lexModule, lexTokens, rawEscapes)
 import Thena.Language.Reader (Block (..), readBlock)
 import Thena.Language.Grammar
   ( Argument (..)
@@ -695,7 +702,7 @@ data Importing = Importing
     -- amounts and this says which.
   , importingText   :: String
     -- ^ the header's text, for the 'ProofLoaded' the completion answers with
-  , importingItems  :: [Item]
+  , importingItems  :: [Placed]
     -- ^ the suspended module's items — what its interface and its declared
     -- names are read off when it completes
   , importingRest   :: [ReadModule]
@@ -714,7 +721,7 @@ data Importing = Importing
     -- rest of its items are compiled when the wheel comes back, and what an
     -- import or a consult of this module brings is read off this — so the walk
     -- that resumes it builds the same 'Brought' the walk that started it did.
-  , importingDone   :: [Item]
+  , importingDone   :: [Placed]
     -- ^ __the items that had gone in before the yield__ (MS12 phase 315), which
     -- is what the finished load names as declared. It was every item of the
     -- module until this phase, and a lenient load makes that a claim rather
@@ -726,7 +733,7 @@ data Importing = Importing
     -- that never declared anything would have been counted as declared.
     -- 'importingOn' carries it instead, and it joins this list in
     -- 'finishingImport' at the moment it really has gone in.
-  , importingOn     :: Item
+  , importingOn     :: Placed
     -- ^ __the item the yield is inside__ (MS12 phase 317). It lands when the
     -- wheel comes back and the program runs out; it is given up when
     -- @:abandon@ says so, and then it is this that is written down as
@@ -737,7 +744,7 @@ data Importing = Importing
     -- goes back to in 'walkItems'. **So abandoning takes what the user did
     -- during the suspension**, which is his ruling of 2026-11-11 unchanged; what
     -- phase 317 narrows is the SCOPE, from the closure to the item.
-  , importingLeft   :: [Item]
+  , importingLeft   :: [Placed]
     -- ^ __this module's items the loader had not reached__ (MS12 phase 315).
     -- **They are carried rather than spliced onto the tape**: a yielding rule's
     -- @pc@ is the rule body's own program, so anything appended there runs
@@ -2254,12 +2261,15 @@ tokensOf = mapLeft LexFailed . lexTokens
 -- **The split happens here rather than in 'paired'**, which is about theorems:
 -- a signature and its equation are adjacent and a datatype is not part of that
 -- pairing at all.
+-- **It stays a @[Item]@** (MS12 phase 334): a @declare@ line is not in a file,
+-- so every position it could carry is 'Nothing' and the list would say nothing
+-- by being placed.
 parseSurfaceItems :: String -> Either SyntaxError [Item]
 parseSurfaceItems src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
   ds  <- mapLeft SurfaceParseFailed (Surface.parseSurfaceDecls ts')
-  regroup (reverse ds)
+  map placedItem <$> regroup (reverse ds)
 
 -- | A whole **proof module** (MS4 phase 43): its name, and its items.
 --
@@ -2269,8 +2279,24 @@ parseSurfaceItems src = do
 -- The same three passes 'parseSurfaceItems' makes, through the module start
 -- symbol instead — so a module's declaration block and a @declare@ line are the
 -- same grammar, and layout does the same work in both.
+--
+-- **It answers without the positions, and 'parseSurfaceModuleAt' is the door
+-- that keeps them** (MS12 phase 334, @~hcr2d@) — this one is defined in terms
+-- of that one, so there is one parse and no second place for the two answers to
+-- drift apart. Everything that asks a question /about/ a module rather than
+-- loading it — its imports, its interface, what it withholds, printing it back
+-- — takes this one.
 parseSurfaceModule :: String -> Either SyntaxError (ModuleName, [Item])
-parseSurfaceModule src = do
+parseSurfaceModule = fmap (fmap (map placedItem)) . parseSurfaceModuleAt
+
+-- | __The same, with the line and column each item was written at__ (MS12 phase
+-- 334, @~hcr2d@).
+--
+-- **The load path takes this one**, because a declaration that does not go in
+-- is written down as an 'Unfinished' and his ask of 2026-11-20 is that the row
+-- a pane draws for it be a place to go.
+parseSurfaceModuleAt :: String -> Either SyntaxError (ModuleName, [Placed])
+parseSurfaceModuleAt src = do
   -- 'lexModule', not 'lexTokens': only a module's lexing takes an
   -- object-language block whole (MS6 phase 101).
   ts  <- mapLeft LexFailed (lexModule src)
@@ -2282,10 +2308,12 @@ parseSurfaceModule src = do
   -- this is where it can be read without changing either signature.
   -- **And a @hiding ( … )@ clause the same way** (MS11 phase 290): one slot on
   -- the header, two words, so exactly one of these items can arise.
+  -- **The header's item is unplaced** (phase 334): it is not a declaration and
+  -- there is no row for it to be a destination for.
   let hdr = case surfaceModuleExports m of
         SelectWide       -> []
-        SelectOnly   es  -> [ItemExporting (map resolvedName es)]
-        SelectHiding es  -> [ItemHiding (map resolvedName es)]
+        SelectOnly   es  -> [unplaced (ItemExporting (map resolvedName es))]
+        SelectHiding es  -> [unplaced (ItemHiding (map resolvedName es))]
       resolvedName (ps, x) = GlobalName ps x
   Right (moduleFromSteps (surfaceModuleSteps m) (surfaceModuleWord m), hdr ++ is)
 
@@ -2409,12 +2437,52 @@ data Item
     -- a syntax error at the right place rather than a failure at run time.
   deriving (Eq, Show)
 
+-- | __An item, and where it was written__ (MS12 phase 334, @~hcr2d@).
+--
+-- **His ask of 2026-11-20 was a line and a column on a declaration that did not
+-- go in**, so that a pane's fold under a module ends somewhere the author can
+-- go instead of in a sentence. Nothing in the engine knew one: the lexer has
+-- 'Thena.Syntax.Lexer.Pos' on every token, @Parser.y@ reads it for the parse
+-- error alone, and 'Thena.Surface.Concrete' carries none — so a position had to
+-- be carried from the token stream to the loader, and this is what carries it.
+--
+-- **Beside the item and not inside it**, which is the one judgement in this
+-- phase. An 'Item' is /what a module or a @declare@ line asks for/ and that is
+-- true of an item nobody wrote: 'substitutionDefinitions' emits
+-- 'ItemTheorem's, the header's own @exporting@ clause arrives as an item, and a
+-- caller may hand 'loadProofItems' a list it built itself. Where a thing was
+-- written is a fact about how it reached us, not about what it asks for, so it
+-- is 'Nothing' for all three of those and a field on twelve constructors would
+-- have said otherwise twelve times.
+--
+-- **Only the top level of a file has one.** A @namespace@, @import … where@ or
+-- @consult … where@ block is one item to the loader, so the declarations inside
+-- it are not things a row can point at — @~6g27s@ is the item that would change
+-- that and it is his.
+data Placed = Placed
+  { placedAt   :: Maybe Pos
+    -- ^ the line and column the item starts at, where it was read from a file
+  , placedItem :: Item
+  }
+  deriving (Eq, Show)
+
+-- | An item that came from nowhere a position can point into.
+--
+-- A generated definition, a header clause, a @declare@ line, or a list a caller
+-- assembled: there is no file and no line, and saying so is the point.
+unplaced :: Item -> Placed
+unplaced = Placed Nothing
+
 -- | Pair each signature with the equation after it, and pass datatypes through.
 --
 -- Shared by the two above since phase 43. 'Thena.Surface.Concrete.paired' is
 -- the same idea for theorems alone; this one also admits a @data@ item, which
 -- is why it is here and not there.
-regroup :: [SurfaceDecl] -> Either SyntaxError [Item]
+-- **AND IT IS WHERE A POSITION BECOMES AN ITEM'S** (MS12 phase 334, @~hcr2d@):
+-- the position in front of the first declaration this step consumes is the
+-- position of everything it produces, which is what makes a signature and its
+-- equation one item written at the signature's line.
+regroup :: [(Maybe Pos, SurfaceDecl)] -> Either SyntaxError [Placed]
 regroup = go
   where
     -- **What the line said, as one namespace's 'Opened'** (MS10 phase 254).
@@ -2425,9 +2493,16 @@ regroup = go
       OpenRenaming rs  -> (openedWhole p) { openedRenaming = rs }
 
     go [] = Right []
-    go ds = do
+    go ds@((at, _) : _) = do
       (is, rest) <- one ds
-      (is ++) <$> go rest
+      (map (Placed at) is ++) <$> go rest
+
+    -- | **A nested block's declarations, without positions** (MS12 phase 334,
+    -- @~hcr2d@). 'ItemNamespace' and the two acts that state a block hold
+    -- @[Item]@ because a composite item is ONE item to the loader, so a
+    -- position inside one has nowhere to arrive — @~6g27s@ is the item that
+    -- would change that and it is his to rule on.
+    inner ds = map placedItem <$> go [ (Nothing, d) | d <- ds ]
 
     -- | **One declaration, and what is left** (MS10 phase 254). It was a
     -- straight list walk until @open X in ‹declaration›@ needed to know where
@@ -2435,19 +2510,19 @@ regroup = go
     -- one declaration, so the open has to cover both, and only the pass that
     -- pairs them can say so.
     one [] = Right ([], [])
-    one (SurfaceDatatype d : rest) = Right ([ItemData d], rest)
-    one (SurfaceOpen ns spec : rest) =
+    one ((_, SurfaceDatatype d) : rest) = Right ([ItemData d], rest)
+    one ((_, SurfaceOpen ns spec) : rest) =
       Right ([ ItemOpen (opened spec (ps ++ [x])) | (ps, x) <- ns ], rest)
     -- **The declaration it reaches is taken by this same function**, so
     -- @open X in@ before a signature covers the equation under it too.
-    one (SurfaceOpenIn ns spec d : rest) = do
-      (is, rest') <- one (d : rest)
+    one ((at, SurfaceOpenIn ns spec d) : rest) = do
+      (is, rest') <- one ((at, d) : rest)
       Right ([ItemOpenIn [ opened spec (ps ++ [x]) | (ps, x) <- ns ] is], rest')
     -- **The same walk, for the same reason** (MS11 phase 286): @private@ before
     -- a signature covers the equation under it, because this is the pass that
     -- knows where one declaration ends.
-    one (SurfacePrivate d : rest) = do
-      (is, rest') <- one (d : rest)
+    one ((at, SurfacePrivate d) : rest) = do
+      (is, rest') <- one ((at, d) : rest)
       Right ([ItemPrivate is], rest')
     -- **The declarations inside are regrouped by the same pass** (MS10 phase
     -- 254), so a signature and its equation pair inside a namespace exactly as
@@ -2458,35 +2533,35 @@ regroup = go
     -- 291 and 292), as a @namespace@ block's declarations are: a signature and
     -- its equation pair inside an @import … where@ exactly as they do outside
     -- one, and nesting needs nothing of its own.
-    one (SurfaceConsult r ps x ds : rest) = do
-      inner <- traverse go ds
-      Right ([ItemConsult r (moduleFromSteps ps x) inner], rest)
+    one ((_, SurfaceConsult r ps x ds) : rest) = do
+      is <- traverse inner ds
+      Right ([ItemConsult r (moduleFromSteps ps x) is], rest)
     -- A file's name again, and the steps are directories again (MS11 phase 274).
-    one (SurfaceImport r ps x sel ds : rest) = do
-      inner <- traverse go ds
-      Right ([ItemImport r (moduleFromSteps ps x) sel inner], rest)
-    one (SurfaceNamespace ps x ds : rest) = do
-      inner <- go ds
-      Right ([ItemNamespace (GlobalName ps x) inner], rest)
+    one ((_, SurfaceImport r ps x sel ds) : rest) = do
+      is <- traverse inner ds
+      Right ([ItemImport r (moduleFromSteps ps x) sel is], rest)
+    one ((_, SurfaceNamespace ps x ds) : rest) = do
+      is <- inner ds
+      Right ([ItemNamespace (GlobalName ps x) is], rest)
     -- **Read here, so an unreadable block is a syntax error** and the module
     -- stops before anything in it elaborates (MS6 phase 101). What its names
     -- mean is asked later, at its place in the load ('DeclaringGrammar').
-    one (SurfaceGrammar k l txt : rest) = case readBlock k l txt of
+    one ((_, SurfaceGrammar k l txt) : rest) = case readBlock k l txt of
       Right b -> Right ([ItemGrammar b], rest)
       Left e  -> Left (BlockUnreadable e)
     -- **Carried as it was written** (MS6 phase 104b). Resolving it here would
     -- ask what its words mean before the declarations above it have run — and
     -- a @language@ block above it is exactly such a declaration. It is
     -- resolved, checked and played where it stands, by @run-block@.
-    one (SurfaceBlock b : rest) = Right ([ItemBlock b], rest)
+    one ((_, SurfaceBlock b) : rest) = Right ([ItemBlock b], rest)
     -- **Paired on the whole name, path included** (MS10 phase 243): @Ty.fv.X@
     -- and @fv-X@ are two names, so a signature written with a path wants its
     -- equation written with the same one.
-    one (SurfaceSignature ps x ty : SurfaceEquation qs y body : rest)
+    one ((_, SurfaceSignature ps x ty) : (_, SurfaceEquation qs y body) : rest)
       | (ps, x) == (qs, y) = Right ([ItemTheorem (GlobalName ps x) ty body], rest)
-    one (SurfaceSignature ps x _ : _) =
+    one ((_, SurfaceSignature ps x _) : _) =
       Left (DeclarationsUnpaired (SignatureWithNoEquation (nameDotted (GlobalName ps x))))
-    one (SurfaceEquation ps x _ : _) =
+    one ((_, SurfaceEquation ps x _) : _) =
       Left (DeclarationsUnpaired (EquationWithNoSignature (nameDotted (GlobalName ps x))))
 
 -- --------------------------------------------------------------------------
@@ -2920,9 +2995,9 @@ paramsAround ps t =
 
 
 loadProofSource :: Leniency -> Session -> String -> (Session, Response)
-loadProofSource leniency s src = case parseSurfaceModule src of
+loadProofSource leniency s src = case parseSurfaceModuleAt src of
   Left e            -> (s, Failed e)
-  Right (nm, items) -> loadProofItems leniency s nm items
+  Right (nm, items) -> loadProofItemsAt leniency s nm items
 
 -- | Load a module that has already been read.
 --
@@ -2938,8 +3013,18 @@ loadProofSource leniency s src = case parseSurfaceModule src of
 -- **The second door used to be a JSON spelling of the tree. It is not** — text is
 -- the only stored form (his ruling, 2026-09-27), and the JSON went with the
 -- project manifest; see "Thena.View.Source".
+--
+-- **It is the door for a caller that built the items itself** (MS12 phase 334):
+-- there is no file, so nothing it loads can carry a line and a column, and an
+-- item of its that does not go in is written down without one.
+-- 'loadProofItemsAt' is the door the text takes.
 loadProofItems :: Leniency -> Session -> ModuleName -> [Item] -> (Session, Response)
-loadProofItems leniency s nm items = case (moduleImports items, moduleConsults items) of
+loadProofItems leniency s nm = loadProofItemsAt leniency s nm . map unplaced
+
+-- | __The same, for items read from a file__ (MS12 phase 334, @~hcr2d@), which
+-- carry the line and column they were written at.
+loadProofItemsAt :: Leniency -> Session -> ModuleName -> [Placed] -> (Session, Response)
+loadProofItemsAt leniency s nm placed = case (moduleImports items, moduleConsults items) of
   -- **AND IT RECORDS THE MODULE, AS THE OTHER DOOR'S WALK DOES — MS12 phase
   -- 313.** It did not have to while every file declared at the root: the
   -- declarations were reachable from the prompt whether or not anything knew
@@ -2948,8 +3033,8 @@ loadProofItems leniency s nm items = case (moduleImports items, moduleConsults i
   -- names of — and left it out of 'sessionDeclaredBy', so nothing could import
   -- it either. 'Thena.Driver.walkProofModules'\' @marked@ is the same call.
   ([], []) ->
-    case loadProofItemsConsulting leniency
-           (Pool (rules (sessionMachine s)) [] [] []) s nm items of
+    case loadProofItemsConsultingAt leniency
+           (Pool (rules (sessionMachine s)) [] [] []) s nm placed of
       (s', r@(ProofLoaded {})) ->
         (moduleDeclared nm (interfaceOf items) [] s s', r)
       -- **A partly-loaded module is still IN** (MS12 phase 315): what went
@@ -2972,6 +3057,10 @@ loadProofItems leniency s nm items = case (moduleImports items, moduleConsults i
   -- pool, an unread import would not elaborate at all.
   (is@(_ : _), _) -> (s, ImportsUnread is)
   ([], ms)        -> (s, ConsultsUnread ms)
+  where
+  -- Every question this door asks is about what the items /say/, and none of
+  -- them is about where they were written.
+  items = map placedItem placed
 
 -- | __What a module is searched against, and what those bases hand it__ (MS11
 -- phase 289, @~jmw4k@).
@@ -3155,12 +3244,14 @@ isCompleted r = case r of
 data Stopped = Stopped
   { stoppedBy     :: Response
     -- ^ the run that stopped the walk — a @yield@, or a refusal under 'Strict'
-  , stoppedOn     :: Item
-    -- ^ the item it was running
+  , stoppedOn     :: Placed
+    -- ^ the item it was running, **and where it was written** (MS12 phase 334):
+    -- @:abandon@ turns this very item into an 'Unfinished', so the position has
+    -- to survive the suspension with it
   , stoppedBefore :: Session
     -- ^ the session as that item found it, which is what giving the item up
     -- goes back to
-  , stoppedLeft   :: [Item]
+  , stoppedLeft   :: [Placed]
     -- ^ the items it never reached. **Carried, never spliced onto the tape** —
     -- 'importingLeft' says why.
   }
@@ -3171,19 +3262,20 @@ walkItems
   -> [String]      -- ^ the namespace the items are written in
   -> Session
   -> [Warning]     -- ^ what this load has warned about so far
-  -> [Item]        -- ^ what has gone in so far, newest first
+  -> [Placed]      -- ^ what has gone in so far, newest first
   -> [Unfinished]  -- ^ what has not, newest first
-  -> [Item]        -- ^ still to run
-  -> (Session, [Warning], [Item], [Unfinished], Maybe Stopped)
+  -> [Placed]      -- ^ still to run
+  -> (Session, [Warning], [Placed], [Unfinished], Maybe Stopped)
 walkItems leniency brought ns = go
   where
   go st ws done unfin [] = (st, ws, reverse done, reverse unfin, Nothing)
-  go st ws done unfin (it : rest) =
-    let m0       = sessionMachine st
+  go st ws done unfin (p : rest) =
+    let it       = placedItem p
+        m0       = sessionMachine st
         (is, n1) = surfaceProgramIn ns brought (names m0) [it]
      in case progress Nothing st { sessionMachine = load is m0 { names = n1 } } [] [] of
           (st', Ran _ ws' Completed) ->
-            go st' (ws ++ ws') (it : done) unfin rest
+            go st' (ws ++ ws') (p : done) unfin rest
           -- **A YIELD STILL STOPS THE WHOLE LOAD** (MS12 phase 309, his
           -- ruling of 2026-11-11) — /"it suspends the elaboration then
           -- and there and hands control to the prompt"/. A hole is the
@@ -3210,16 +3302,16 @@ walkItems leniency brought ns = go
           -- module goes on — so the item travels in 'Stopped' and is put in one
           -- of the two lists by whoever finishes the import.
           (st', r@(Ran _ ws' (Yielded _))) ->
-            (st', ws ++ ws', reverse done, reverse unfin, Just (Stopped r it st rest))
+            (st', ws ++ ws', reverse done, reverse unfin, Just (Stopped r p st rest))
           (st', other) -> case leniency of
             -- **Strict is what it always was**: the item's refusal is the
             -- module's, and the caller puts the session back.
-            Strict  -> (st', ws, reverse done, reverse unfin, Just (Stopped other it st rest))
+            Strict  -> (st', ws, reverse done, reverse unfin, Just (Stopped other p st rest))
             -- **Lenient carries on.** The item is put back and written
             -- down, and the loader goes to the next one.
             Lenient ->
               go (rolledBack st st') ws done
-                 (Unfinished (declaredNames it) (stoppedAs other) : unfin) rest
+                 (Unfinished (declaredNames it) (placedAt p) (stoppedAs other) : unfin) rest
 
 -- **AND THE @open@S IT STARTS WITH ARE THE PRELUDE'S ALONE** (MS11 phase 283,
 -- @~w46f8@, narrowed at phase 293 by his ruling of 2026-11-06) — the third
@@ -3246,7 +3338,15 @@ walkItems leniency brought ns = go
 -- two halves together because they come out of the same texts.
 loadProofItemsConsulting
   :: Leniency -> Pool -> Session -> ModuleName -> [Item] -> (Session, Response)
-loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s modName items
+loadProofItemsConsulting leniency pool s modName =
+  loadProofItemsConsultingAt leniency pool s modName . map unplaced
+
+-- | __The same, for items read from a file__ (MS12 phase 334, @~hcr2d@): the
+-- walk writes an item that did not go in down as an 'Unfinished', and
+-- 'unfinishedAt' is where its line and column arrive.
+loadProofItemsConsultingAt
+  :: Leniency -> Pool -> Session -> ModuleName -> [Placed] -> (Session, Response)
+loadProofItemsConsultingAt leniency (Pool poolOf published heldBases pushable) s modName placed
     -- **A clause that asked for something the module does not offer stops the
     -- load before anything runs** (MS11 phase 306, @~htngj@), which is where
     -- @~r58qh@'s header check sits for the same reason: the imported modules are
@@ -3343,7 +3443,7 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
           (s', bad) | not (isCompleted bad) -> (rolledBack s s', bad)
           (opened, _) ->
             case walkItems leniency brought (moduleNamespace modName)
-                           opened [] [] [] items of
+                           opened [] [] [] placed of
             -- **A YIELD, and the rest of the module is standing on the tape**
             -- (MS12 phase 309, his ruling of 2026-11-11). The arm below rolls
             -- back everything that did not finish, and until phase 309 that
@@ -3375,7 +3475,7 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
                        , importingName   = Nothing
                        , importingHeader = modName
                        , importingText   = nm
-                       , importingItems  = items
+                       , importingItems  = placed
                        , importingPool   = Pool poolOf published heldBases pushable
                        , importingDone   = done
                        , importingOn     = stoppedOn stop
@@ -3423,8 +3523,8 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
               case progress Nothing s' { sessionMachine = load leaving (sessionMachine s') } [] [] of
                 (s'', bad) | not (isCompleted bad) -> (rolledBack s s'', bad)
                 (closed, _) ->
-                  let declared = concatMap declaredNames done
-                      blocks   = sum (map blocksIn done)
+                  let declared = concatMap (declaredNames . placedItem) done
+                      blocks   = sum (map (blocksIn . placedItem) done)
                       -- **AND WHAT TRAVELS THAT THE HEADER DOES NOT LIST**
                       -- (MS11 phase 307, @~f8x53@), appended after the run's
                       -- own: a warning is a footnote to what went in, which is
@@ -3434,7 +3534,7 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
                       -- them: an import inside an item that did not go through
                       -- brought nothing, so warning about what it would have
                       -- carried would name a dependency the session has not got.
-                      warns    = ws ++ unlistedTravelling closed done
+                      warns    = ws ++ unlistedTravelling closed (map placedItem done)
                    in if null unfin
                         then ( poolBack closed, ProofLoaded nm declared blocks warns )
                         -- **The 'Partly' record is the CALLER's to write**,
@@ -3444,6 +3544,10 @@ loadProofItemsConsulting leniency (Pool poolOf published heldBases pushable) s m
                         -- that reason. What travels in the response is the list.
                         else ( poolBack closed
                              , ProofLoadedPartly nm declared blocks warns unfin )
+  where
+  -- Everything this door asks of the items is about what they say; the walk is
+  -- the only thing here that wants to know where one was written.
+  items = map placedItem placed
 
 -- | **A module and everything it imports, as one load** (MS11 phase 274).
 --
@@ -3509,7 +3613,7 @@ walkProofModules leniency s0 = go
       -- through an @import@ fails against the module that published it, and
       -- "Thena.Files" already splits the one the user named from the rest.
       Left bad   -> (rolledBack s0 s, WalkedStopped m bad)
-      Right pool -> case loadProofItemsConsulting leniency pool s
+      Right pool -> case loadProofItemsConsultingAt leniency pool s
                                         (readModuleHeader m)
                                         (readModuleItems m) of
         (s', r@(ProofLoaded {})) -> go (marked m s (readModuleName m) s') (r : acc) rest
@@ -3587,7 +3691,7 @@ walkProofModules leniency s0 = go
         -- they are read back off it here and travel in the 'Pool' with the
         -- rest of what the load is searched against.
         (s1, BasesLoaded pool _) ->
-          let scoped          = scopedConsults (readModuleItems m)
+          let scoped          = scopedConsults (map placedItem (readModuleItems m))
               (wide, blocks)  = splitAt (length groups - length scoped) groups
               runs            = map spreadPool groups
               bases           = take (length (concat runs)) pool
@@ -3626,7 +3730,7 @@ walkProofModules leniency s0 = go
     -- 'moduleDeclared' that is about the prompt rather than about the module.
     marked m _      Nothing  s = openingModule (readModuleHeader m) s
     marked m before (Just n) s =
-      moduleDeclared n (interfaceOf (readModuleItems m)) [] before s
+      moduleDeclared n (interfaceOf (map placedItem (readModuleItems m))) [] before s
 
 -- | __How a walk over a closure came out__ (MS12 phase 309).
 --
@@ -3717,7 +3821,8 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
           Nothing  -> ( importingOn imp : reverse (importingDone imp)
                       , reverse (importingUnfinished imp) )
           Just _   -> ( reverse (importingDone imp)
-                      , Unfinished (declaredNames (importingOn imp)) ItWasAbandoned
+                      , Unfinished (declaredNames (placedItem (importingOn imp)))
+                          (placedAt (importingOn imp)) ItWasAbandoned
                           : reverse (importingUnfinished imp) )
         -- What the abandon is told to say, in front of the module's own answer:
         -- 'ProofLoadedPartly' names the item but cannot know that a lemma of
@@ -3726,12 +3831,12 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
           Nothing -> []
           Just _  ->
             [ ImportAbandonedItem (importingText imp)
-                                  (declaredNames (importingOn imp))
+                                  (declaredNames (placedItem (importingOn imp)))
                                   [ g | g <- declaredSince (importingOnAt imp) s0
                                       , g `notElem` importingTheirs imp ]
             ]
         at    = importingAt imp
-        items = importingItems imp
+        items = map placedItem (importingItems imp)
         hdr   = importingHeader imp
         Pool _ _ heldBases _ = importingPool imp
         -- **The same 'Brought' the walk that started this module built**
@@ -3816,14 +3921,16 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
                     landed
                       | null unfin =
                           ProofLoaded (importingText imp)
-                                      (concatMap declaredNames done)
-                                      (sum (map blocksIn done))
-                                      (ws ++ unlistedTravelling restored done)
+                                      (concatMap (declaredNames . placedItem) done)
+                                      (sum (map (blocksIn . placedItem) done))
+                                      (ws ++ unlistedTravelling restored
+                                               (map placedItem done))
                       | otherwise =
                           ProofLoadedPartly (importingText imp)
-                                            (concatMap declaredNames done)
-                                            (sum (map blocksIn done))
-                                            (ws ++ unlistedTravelling restored done)
+                                            (concatMap (declaredNames . placedItem) done)
+                                            (sum (map (blocksIn . placedItem) done))
+                                            (ws ++ unlistedTravelling restored
+                                                     (map placedItem done))
                                             unfin
                     s' = markedPartly (importingName imp) (importingText imp) unfin
                        $ case importingName imp of
@@ -4379,7 +4486,10 @@ data ReadModule = ReadModule
     -- grouping is what 'loadProofModules' splits the file-wide lines from the
     -- block-scoped ones by, and it replaces an arithmetic that was already
     -- wrong where a base published one.
-  , readModuleItems  :: [Item]
+  , readModuleItems  :: [Placed]
+    -- ^ the module's items, **each with where it was written** (MS12 phase
+    -- 334, @~hcr2d@) — 'Placed' says why the position travels beside an item
+    -- and not inside it, and 'Unfinished' is where it arrives.
   }
   deriving (Eq, Show)
 
@@ -4427,7 +4537,21 @@ data Leniency
 data Unfinished = Unfinished
   { unfinishedDeclares :: [String]
     -- ^ what the item would have declared, as 'ProofLoaded' names what did —
-    -- the namespace included, so these are keys and not bare words
+    -- **the words the file wrote**, so @broken@ and not
+    -- @test.modules.PartlyGood.broken@: a declaration takes its namespace from
+    -- the machine and the item's own name carries only what the author typed
+    -- in front of the colon ('declaredNames' is the whole of it)
+  , unfinishedAt       :: Maybe Pos
+    -- ^ __the line and column it was written at__ (MS12 phase 334, @~hcr2d@),
+    -- which is what makes a pane's row a destination rather than a sentence —
+    -- his ask of 2026-11-20, /"line number and column would be really nice"/.
+    -- The module's own file path is beside it already, so these two are the
+    -- whole of a place to go.
+    --
+    -- **'Nothing' is an item that is in no file**: a generated definition, or a
+    -- list of items a caller assembled and handed to 'loadProofItems'.
+    -- 'Placed' says why the position is carried beside an item rather than in
+    -- it.
   , unfinishedWhy      :: NotDone
     -- ^ why it did not finish.
     --
@@ -4984,7 +5108,7 @@ consultedPool s done = reverse . concatMap go
       _                  -> []
 
     published m = case [ rm | rm <- done, readModuleName rm == Just m ] of
-      rm : _ -> concatMap brought (publicPushes (readModuleItems rm))
+      rm : _ -> concatMap brought (publicPushes (map placedItem (readModuleItems rm)))
       []     -> publishedBy m s
 
     brought (PublishedBase b) = [b]

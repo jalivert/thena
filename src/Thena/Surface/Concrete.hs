@@ -48,7 +48,7 @@ import Thena.Core.Term (GlobalName (..), Literal (..))
 -- and a @do@ block in a surface program is `instral` written in place
 -- (@discussion\/the-five-languages.md@ §0b, table F).
 import Thena.Instral.Concrete (RawInstr (..), Reach (..), Selection (..))
-import Thena.Syntax.Lexer (BlockKind)
+import Thena.Syntax.Lexer (BlockKind, Pos)
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
 -- 2026-09-01: /"I am convinced that the DC does not need implicits. I think
@@ -322,7 +322,24 @@ data SurfaceModule = SurfaceModule
   , surfaceModuleExports :: Selection
     -- ^ what the header says about its interface, as written (MS11 phase 285
     -- for @exporting@, 290 for @hiding@, @~jmw4k@).
-  , surfaceModuleDecls :: [SurfaceDecl]
+  , surfaceModuleDecls :: [(Maybe Pos, SurfaceDecl)]
+    -- ^ the declarations, **each with the position it was written at** (MS12
+    -- phase 334, @~hcr2d@): his ask of 2026-11-20 was a line and a column on a
+    -- declaration that did not go in, and the lexer is the only thing that ever
+    -- knew one.
+    --
+    -- **The position is the delimiter's, which under layout /is/ the
+    -- declaration's first token.** The pass that inserts @;@ and @{@ gives each
+    -- the position of the token that opened the line
+    -- ("Thena.Surface.Layout"'s @Line@ and @Open@ markers), so there is nothing
+    -- to carry through the productions: the grammar reads it off the separator
+    -- in front of the declaration. A module written with explicit braces gets
+    -- the brace's or the semicolon's own position instead, which is the same
+    -- line and the column the author put the separator at.
+    --
+    -- **'Nothing' is a declaration that is in no file** — a @declare@ line at
+    -- the prompt reaches 'Thena.Surface.Parser.parseSurfaceDecls', where there
+    -- is no block and no separator before the first declaration.
   }
   deriving (Eq, Show)
 

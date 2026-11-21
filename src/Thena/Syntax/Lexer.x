@@ -305,7 +305,15 @@ tokens :-
 {
 
 -- | A source position: line and column, both counting from 1.
-data Pos = Pos !Int !Int
+--
+-- **The fields are named since MS12 phase 334** (@~hcr2d@), where a position
+-- first had to leave the parser: it rides on 'Thena.Driver.Unfinished' and out
+-- to a pane, and a frontend asking which @Int@ is the line by counting
+-- constructor arguments is how a row ends up pointing at a column.
+data Pos = Pos
+  { posLine   :: !Int
+  , posColumn :: !Int
+  }
   deriving (Eq, Show)
 
 -- | A token and where it was written.

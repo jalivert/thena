@@ -65,6 +65,7 @@ module Thena.View.Failure
     -- gives the reason in full.
   , Display
   , TrustView
+  , Pos (..)
   ) where
 
 import qualified Thena.Core.Level as L
@@ -82,7 +83,7 @@ import qualified Thena.Syntax.Lexer as Lx
 import Thena.Core.Context (Context)
 import Thena.Core.Level (levelVarName)
 import Thena.Core.Term (Ident (..), Spelling, Var, nameDotted, spelledIn)
-import Thena.Driver (NotDone)
+import Thena.Syntax.Lexer (Pos (..))
 import Thena.Instral.Type (renderTy)
 import Thena.Language.Grammar (Grammar)
 import Thena.Syntax.Print (Env, nameOf, reachesIn, renderLevel, scopeOf)
@@ -101,6 +102,20 @@ import Thena.View.Trust (TrustView, displayTrust)
 -- is this track's rule, and a second copy of it in a frontend would drift.
 data StopView = StopView
   { stopViewNature :: Nature
+  , stopViewAt :: Maybe Pos
+    -- ^ __the line and column the declaration was written at__ (MS12 phase 334,
+    -- @~hcr2d@) — his ask of 2026-11-20, which is what turns a row in a pane's
+    -- fold from a sentence into a place to go. The module's own file path is
+    -- already beside the row, so these two complete a destination.
+    --
+    -- **It is on this view and not on a part of the failure.** Where the
+    -- declaration was written is a fact about the declaration, not about what
+    -- went wrong with it — a 'FaultView' says the second — and a pane that
+    -- wants to make the row clickable has it without walking anything.
+    --
+    -- **'Nothing' is a declaration that is in no file**: one a caller handed
+    -- over as items, or one a grammar generated. 'Thena.Driver.Placed' says why
+    -- the engine carries the position beside an item rather than inside it.
   , stopViewSaid :: [String]
     -- ^ what the run printed before it stopped, in order. Already text when the
     -- engine makes it: a rule's @say@ takes a string.
@@ -528,12 +543,13 @@ displayStop
   -> [(Var, Address)]
   -> Int
   -> Address
-  -> NotDone
+  -> Dr.Unfinished
   -> StopView
-displayStop sp grammars budget env binders counter here nd = case nd of
+displayStop sp grammars budget env binders counter here u = case Dr.unfinishedWhy u of
   Dr.ItWasAbandoned ->
     StopView
       { stopViewNature = GivenUp
+      , stopViewAt = Dr.unfinishedAt u
       , stopViewSaid = []
       , stopViewWarned = []
       , stopViewWhy = WasGivenUp
@@ -542,6 +558,7 @@ displayStop sp grammars budget env binders counter here nd = case nd of
     let w = whyOf stop
      in StopView
           { stopViewNature = natureOf w
+          , stopViewAt = Dr.unfinishedAt u
           , stopViewSaid = msgs
           , stopViewWarned = map warningView ws
           , stopViewWhy = w
