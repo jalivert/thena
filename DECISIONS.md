@@ -41,7 +41,6 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` `.` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` |
 | a tagged literal's fence | `` ` `` |
-| spell nothing, and stay reserved | `⌜` `⌝` |
 | whitespace | |
 | keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `private` `public` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
 
@@ -56,11 +55,13 @@ because the gain is five names nobody has asked for and the price is a special c
 word in the grammar. **The module system's five — `consult`, `import`, `exporting`,
 `private`, `public` — were taken on that basis**, and the row above is the whole list.
 
-**The corners are reserved and spell nothing**, which is the one oddity in the
-table: they were the old notation for an embedded core term, removed on
-2026-11-04, and they stay out of names because the system hoists a written term
-into a binding it calls `⌜1⌝` — a name you cannot write and so cannot collide
-with.
+**The table has no oddity left in it — decided 2026-11-21.** `⌜` and `⌝` were the old
+notation for an embedded core term, removed on 2026-11-04, and they stayed reserved for
+three weeks after they spelled nothing: the system hoists a written term into a binding of
+its own, and that binding's name has to be one you cannot write. **It is called `'1` now.**
+A single quote may continue a name — `x'` is an ordinary identifier — but it may not *start*
+one, so `'1` is a name no source of yours can produce. The corners are ordinary characters
+again, which means `foo⌜bar` is a legal name in any language you model.
 
 **The dot is the one character reserved for a structural reason**, and it is the
 namespace separator: `List.map` is the name `map` in `List`, and a name may not
@@ -150,10 +151,11 @@ core`t`                is: the same thing, and the only spelling
 surface`e`             is: the same thing, and the only spelling
 ```
 
-**Writing one now is a syntax error.** `⌜` and `⌝` are still reserved characters, so
-a corner is refused by the lexer; `⟨` and `⟩` are ordinary name characters again, so
-`⟨ e ⟩` is read as names and refused for not being in scope. There is nothing to
-migrate — a term of any language, Thena's own two included, is written `tag`text``.
+**Writing one now is a name that is not in scope.** All four characters are ordinary
+name characters again — `⟨` and `⟩` since the removal, `⌜` and `⌝` since 2026-11-21 — so
+`⌜ t ⌝` and `⟨ e ⟩` are read as names and refused for not being declared. There is
+nothing to migrate — a term of any language, Thena's own two included, is written
+`tag`text``.
 
 **The replacement became one-for-one on 2026-11-03, which is what made the removal
 possible.** It was not before: `` core`t` `` was refused inside a
@@ -2489,7 +2491,7 @@ the check protects is the grammar that reads the class. It refuses:
 *Decided 2026-09-19.*
 
 A `language` or `context` block at the margin of a module is read by its own
-reader, not by Thena's lexer, so its notation can use `[`, `λ`, `⌜` or `/`:
+reader, not by Thena's lexer, so its notation can use `[`, `λ`, `▸` or `/`:
 
 ```
 x : Token String

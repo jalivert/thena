@@ -36,15 +36,24 @@ $upper  = [A-Z]
 -- stay reserved — @.claude\/spec\/interface.md@ said this set would have to
 -- shrink when the alias went, and this is it shrinking.
 --
--- **@⌜ ⌝@ spell nothing either and DO stay**, which is the one exception and it
--- is load-bearing: @Thena.Driver.resolving@ hoists a written core term into a
--- binding it names @⌜1⌝@, and that name is safe only because no identifier may
--- hold a corner. The notation they used to spell is gone with the alias.
-$reserved = [\( \) \{ \} \[ \] \; \, \" \` \. λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
+-- **@⌜ ⌝@ LEFT IT TOO, AT MS12 PHASE 335** (`~6rfwp`, his ruling of 2026-11-21),
+-- which is the same rule reaching the last two characters it had not. They had
+-- outlived the @⌜ t ⌝@ spelling by one phase for one reason:
+-- @Thena.Driver.resolving@ hoists a written core term into a binding of its own
+-- and that binding's name has to be one no rule body can write. **It is spelled
+-- @\'1@ now, and a quote is an @$idchar@ and not an @$idstart@** — so no written
+-- word can begin with one, which is all the hoist ever needed. The guarantee
+-- changed shape rather than weakening: it was /this character is unusable
+-- anywhere/ and it is /a word cannot begin with this character/.
+$reserved = [\( \) \{ \} \[ \] \; \, \" \` \. λ ∀ ⊢ ≟ ≐ ≈ ▸]
 
 -- A name starts with a letter — ASCII, or any non-reserved character above the
 -- ASCII range — and continues with anything that is neither reserved nor
 -- whitespace.
+--
+-- **@\'@ is in @$idchar@ and not in @$idstart@**, so @t\'@ and @t\'\'@ are
+-- ordinary names and @\'1@ is not a word at all. That asymmetry is what
+-- @Thena.Driver.resolving@'s hoisted binding stands on since phase 335.
 $idstart = [$lower $upper \_ \x80-\x10ffff] # $reserved
 $idchar  = [\x21-\x10ffff] # $reserved
 
