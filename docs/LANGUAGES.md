@@ -53,10 +53,11 @@ id : ∀ (A : Type₀) -> A -> A   ∎
 ```
 
 **A written core term is resolved by a visible step.** `` try-core core`x` `` compiles
-to `` ⌜1⌝ = resolve-core core`x` ; try-core ⌜1⌝ ``, because the same term written in
+to `` '1 = resolve-core core`x` ; try-core '1 ``, because the same term written in
 two places may resolve to two different things and you should be able to see
-which one you got. The name on the left is one you cannot write yourself, which
-is what keeps it from colliding with a binding of your own.
+which one you got. The name on the left is one you cannot write yourself — a
+single quote may continue a name but not start one — which is what keeps it from
+colliding with a binding of your own.
 
 ## 3. `instral`: declarations
 

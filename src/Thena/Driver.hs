@@ -2123,7 +2123,7 @@ instralEntry gs sc bases bound src = do
     Nothing                 -> Right prog
   where
     -- Written core terms are hoisted per instruction — @try core\`x\`@ is
-    -- @⌜1⌝ = resolve-core core\`x\` ; try ⌜1⌝@, which is what a rule body writes by
+    -- @\'1 = resolve-core core\`x\` ; try \'1@, which is what a rule body writes by
     -- hand (MS5 phase 61b).
     hoist i = case i of
       RawDo (RawOp w os)   -> let (bs, os') = resolving w os
@@ -2157,7 +2157,7 @@ entryBindings gs sc bases bound src = case instralEntry gs sc bases bound src of
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
--- @try core\`x\`@ is compiled to @⌜1⌝ = resolve-core core\`x\` ; try ⌜1⌝@, which
+-- @try core\`x\`@ is compiled to @\'1 = resolve-core core\`x\` ; try \'1@, which
 -- is what a rule body writes by hand. The op needs a term and a @core@ region
 -- is a 'VRaw' — a
 -- tree that has been parsed and not resolved — so something has to resolve it,
@@ -2171,10 +2171,13 @@ entryBindings gs sc bases bound src = case instralEntry gs sc bases bound src of
 -- names. @parseEquated@\'s comment about resolving two terms /in one continuous
 -- supply/ is satisfied by the sequence rather than by an argument.
 --
--- **The binding names cannot collide with a rule's own**, because @⌜@ is a
--- reserved character and no identifier may contain one. **It stopped being a
--- token at MS10 phase 269** and stayed reserved for exactly this, so a name
--- written here is still one a user cannot write.
+-- **The binding names cannot collide with a rule's own**, because a word in a
+-- rule body is lexed by @\@ident@ and must begin with an @$idstart@, and @\'@ is
+-- an @$idchar@ only — so @\'1@ is not a word any body can write.
+-- **It was spelled @⌜1⌝@ until MS12 phase 335** (`~6rfwp`, his ruling of
+-- 2026-11-21), when the corners it stood on left the reserved set: the argument
+-- is about the start class now rather than about a reserved character, which
+-- costs every modelled language nothing.
 -- That matters while the machine is yielding:
 -- @env@ is the suspended rule's and a name it chose must not be shadowed.
 --
@@ -2189,7 +2192,7 @@ resolving w os
     go _ [] = ([], [])
     go k (o : rest)
       | written o =
-          let n          = "\8988" ++ show k ++ "\8989"
+          let n          = "'" ++ show k
               (bs, rest') = go (k + 1) rest
            in (RawBind (RawPWord n) (RhsOp (RawOp "resolve-core" [o])) : bs, RawRef n : rest')
       | otherwise =

@@ -1062,7 +1062,8 @@ initiallyBound = concatMap patternBinds . ruleParams
 -- **Resolution expands a statement into several instructions** and the checks
 -- after it see only the expansion: a nested call is lifted into a binding in
 -- front of the statement (@(i:k)@, phase 63), a written core term at the prompt
--- likewise (@⌜1⌝@, 61b), a short function body is parked and returned
+-- likewise (@'1@, 61b; it was @⌜1⌝@ until MS12 phase 335), a short function
+-- body is parked and returned
 -- (@(=)@, 68a), and an annotation is folded into the binding after it (77). So
 -- counting instructions told the author about a line they never wrote.
 --

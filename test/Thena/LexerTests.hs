@@ -144,11 +144,16 @@ tests =
         -- property of a region and is tested above, of a region**, which is the
         -- whole argument for deleting the spelling.
         "the characters the two deleted notations used"
-        [ -- **A corner is still reserved**, so it is no token and no name
-          -- character either: a user who writes one is told at the lexer.
-          -- 'Thena.Driver.resolving' relies on that, naming its hoisted
-          -- bindings @⌜1⌝@ where nothing a user writes can reach.
-          fails "a corner is reserved and spells nothing" "\8988 x \8989"
+        [ -- **A corner is an ordinary character again** (MS12 phase 335,
+          -- `~6rfwp`, his ruling of 2026-11-21). It stayed reserved one phase
+          -- longer than the notation it spelled, because
+          -- 'Thena.Driver.resolving' named its hoisted bindings @⌜1⌝@ and leant
+          -- on no identifier being able to hold a corner. That binding is @'1@
+          -- now and leans on the start class instead — pinned just below, at
+          -- @the hoisted binding is not a word@ — so the corners went back the
+          -- way the angle brackets did.
+          lexes "a corner is a name character now" "\8988x\8989"
+            [TIdent "\8988x\8989"]
           -- **An angle bracket is an ordinary character again.** It was
           -- reserved for the alias alone, and reserving one narrows every name
           -- in every language, so it went back when the alias did.
@@ -181,6 +186,14 @@ tests =
           lexes "a literal and a name after it" "'a' b" [TChar 'a', TIdent "b"]
         , fails "an empty literal" "''"
         , fails "one that is never closed" "'a"
+        , -- **WHAT 'Thena.Driver.resolving' STANDS ON SINCE MS12 PHASE 335**
+          -- (`~6rfwp`): it hoists a written core term into a binding it names
+          -- @'1@, and that name must be one no rule body can write. A quote is
+          -- an @$idchar@ and not an @$idstart@, so @'1@ begins no word; the
+          -- only rule a leading quote can start is the character literal, and
+          -- @'1@ does not close one. Until this phase the binding was @⌜1⌝@ and
+          -- the guarantee was a reserved character instead.
+          fails "the hoisted binding is not a word" "'1"
         ]
     , testGroup
         -- Reserved characters with no token rule until MS5 phase 65: they
