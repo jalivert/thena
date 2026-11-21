@@ -628,7 +628,7 @@ partial n = ModuleEntry n Nothing SomeIn False [] 0
 -- 'stopViewNature' is derived in the engine and a test that spelled its own
 -- would be checking a value this pane never sees.
 stopOf :: Why -> StopView
-stopOf w = StopView (natureOf w) [] [] w
+stopOf w = StopView (natureOf w) Nothing [] [] w
 
 -- | The commonest one: a declaration that names something not in scope.
 notInScope :: String -> StopView

@@ -2612,11 +2612,17 @@ moduleEntries st = concat [walk 0 m | m <- modulesLoaded s, m `notElem` imported
     -- **Nothing is flattened to text here any more.** The view goes to
     -- 'Tui.Panes.ModuleEntry' as it is, so the pane decides what the fold says
     -- and the drawing suite can hold it to that.
+    --
+    -- **MS12 phase 334, `~hcr2d`: `failureView` now takes the whole
+    -- `Unfinished`, not just `unfinishedWhy u`** — it reads the position off
+    -- it for `StopView`'s new `stopViewAt`. Passing `u` itself is the whole
+    -- of what changed here; nothing downstream has been taught to draw the
+    -- position yet.
     stopOf u =
       ( case unfinishedDeclares u of
           [] -> "an item"
           xs -> intercalate ", " xs
-      , failureView paneBudget s (unfinishedWhy u)
+      , failureView paneBudget s u
       )
 
 -- | **Every file the session read, sorted into what it is** — the other half
