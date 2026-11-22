@@ -70,13 +70,15 @@ import Thena.View
 import Thena.View (failureView)
 import Thena.View.Chart (BoundView (..), OfferView (..), Written (..))
 import Thena.View.Failure
-  ( FaultKind (..)
+  ( Block (..)
+  , FaultKind (..)
   , FaultView (..)
   , Nature (..)
   , PartView (..)
   , Piece (..)
   , Pos (..)
   , Role (..)
+  , Side (..)
   , StopView (..)
   , Why (..)
   )
@@ -110,10 +112,11 @@ main = do
   -- 325), so it needs a module that did not all go in and cannot be reached
   -- from the shared session above.
   unfinished <- partial
-  failures <- pure (booted <> unfinished <> concatMap ($ s) checks)
+  refused <- grammar
+  failures <- pure (booted <> unfinished <> refused <> concatMap ($ s) checks)
   mapM_ putStrLn failures
   unless (null failures) exitFailure
-  putStrLn ("the boundary holds: " <> show (length checks + 1) <> " views reached")
+  putStrLn ("the boundary holds: " <> show (length checks + 2) <> " views reached")
   where
     step acc l = fst (oneLine acc l)
 
@@ -336,3 +339,34 @@ partial = do
             , [AName "nonesuch"] <-
                 [ pc | PartView TheWord pc <- faultViewParts f ] -> []
         other -> ["FAILED: failureView: " <> show other]
+
+-- | **A refused grammar block, walked** (MS12 phase 338, @~csndm@).
+--
+-- Its own check for the same reason 'partial' is: this failure is reached
+-- through the response that reported the module. What only the boundary can
+-- prove is that a frontend can name the vocabulary the walk is written in —
+-- 'Side' is new this phase, and a pane that cannot name it cannot tell a rule's
+-- premises from its conclusion.
+--
+-- **The location and the problem are asserted together**, because the split is
+-- the contract: 'TheProduction' on the fault that wraps, and what is wrong with
+-- it in 'faultViewInside'.
+grammar :: IO [String]
+grammar = do
+  (s0, _) <- startingSession
+  case moduleName "test.modules.GrammarRule" of
+    Nothing -> pure ["FAILED: the grammar fixture's name does not read"]
+    Just m -> do
+      (s, out, _) <- importModule Lenient s0 m
+      pure $ case [ failureView (Budget 200) s u
+                  | ProofLoadedPartly _ _ _ _ unfin <- out, u <- unfin ] of
+        [v] | Broken <- stopViewNature v
+            , Faulty [f] <- stopViewWhy v
+            , GrammarRefused <- faultViewKind f
+            , [ABlock AJudgment] <- [ pc | PartView TheBlock pc <- faultViewParts f ]
+            , [AName "T-true"] <- [ pc | PartView TheRule pc <- faultViewParts f ]
+            , Just inner <- faultViewInside f
+            , CouldNotRead <- faultViewKind inner
+            , [ASide TheConclusion] <-
+                [ pc | PartView TheSide pc <- faultViewParts inner ] -> []
+        other -> ["FAILED: failureView of a refused grammar: " <> show other]

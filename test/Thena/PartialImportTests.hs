@@ -53,12 +53,15 @@ import Thena.Files (importModule, startingSession)
 import Thena.Render (renderResponse)
 import Thena.View (Budget (..), failureView)
 import Thena.View.Failure
-  ( FaultKind (..)
+  ( Block (..)
+  , FaultKind (..)
   , FaultView (..)
   , Nature (..)
   , PartView (..)
   , Piece (..)
   , Role (..)
+  , Side (..)
+  , Stage (..)
   , StopView (..)
   , Why (..)
   )
@@ -203,6 +206,112 @@ viewTests = testGroup "the view of an unfinished item (MS12 phase 325)"
       AText _ -> True
       _       -> False
 
+-- | **A refused grammar block says what is wrong with it** (MS12 phase 338,
+-- @~csndm@).
+--
+-- Phase 325 walked every other failure into a kind and typed parts and left
+-- this one carrying only its location, so a pane could draw /the language block
+-- LC was refused, in production app/ and not the half of the sentence that says
+-- what to change. The four fixtures are one problem from each level of the
+-- grammar's own failures — the top of the tree, a production, a context block's
+-- shape, and a judgment's rule.
+--
+-- **What is asserted is the split**: the location is on the outer fault and
+-- what is wrong is the fault inside it. That is the thing a pane is written
+-- against, and it is why two problems that are the same kind — a context whose
+-- production shapes are wrong and a production with no items are both
+-- 'BlockShapeWrong' — are still told apart.
+grammarTests :: TestTree
+grammarTests = testGroup "a refused grammar block, walked (MS12 phase 338)"
+  [ testCase "a production problem is the fault inside, and the production is outside" $ do
+      (s, out) <- importing Lenient "test.modules.GrammarScopes"
+      r <- about "test.modules.GrammarScopes" out
+      sv <- viewOf s r
+      stopViewNature sv @?= Broken
+      f <- faultOf sv
+      faultViewKind f @?= GrammarRefused
+      playing TheBlock f @?= [ABlock ALanguage]
+      playing TheName f @?= [AName "LC"]
+      playing TheProduction f @?= [AName "app"]
+      -- **The half that did not exist before this phase.**
+      inner <- insideOf f
+      faultViewKind inner @?= ScopesDiffer
+      playing TheName inner @?= [AName "M"]
+
+  , -- **The crossing against the text door**, the convention for every view:
+    -- the pane and the prompt must not disagree about what the failure is
+    -- about.
+    testCase "the name in the inner part is the name the prompt prints" $ do
+      (s, out) <- importing Lenient "test.modules.GrammarScopes"
+      r <- about "test.modules.GrammarScopes" out
+      sv <- viewOf s r
+      f <- faultOf sv
+      inner <- insideOf f
+      let text = unlines (renderResponse s r)
+      case playing TheName inner of
+        [AName n] ->
+          assertBool ("the prompt says " ++ n ++ ": " ++ text)
+                     ((n ++ " is written with different binders") `isInfixOf` text)
+        other -> assertFailure ("expected one name, got " ++ show other)
+
+  , -- **A problem at the top of the tree has no production**, and the inner
+    -- fault has no parts of its own: the name it is about is the block's, which
+    -- is already outside. A pane reading the inner fault alone would draw
+    -- nothing, which is why the split is the thing asserted.
+    testCase "a problem about the block itself names nothing inside it" $ do
+      (s, out) <- importing Lenient "test.modules.GrammarTaken"
+      r <- about "test.modules.GrammarTaken" out
+      sv <- viewOf s r
+      f <- faultOf sv
+      faultViewKind f @?= GrammarRefused
+      playing TheName f @?= [AName "LC"]
+      playing TheProduction f @?= []
+      inner <- insideOf f
+      faultViewKind inner @?= NameAlreadyDeclared
+      faultViewParts inner @?= []
+
+  , -- **The kind is shared with a production that has no items**, and only the
+    -- absence of 'TheProduction' outside says which of the two this is.
+    testCase "a context's shape is the block's shape, so no production is named" $ do
+      (s, out) <- importing Lenient "test.modules.GrammarContext"
+      r <- about "test.modules.GrammarContext" out
+      sv <- viewOf s r
+      f <- faultOf sv
+      playing TheBlock f @?= [ABlock AContext]
+      playing TheName f @?= [AName "Ctx"]
+      playing TheProduction f @?= []
+      inner <- insideOf f
+      faultViewKind inner @?= BlockShapeWrong
+
+  , -- **A rule, and the side of it.** 'Side' is the one part this phase added
+    -- to the vocabulary: the author wrote premises above the line and a
+    -- conclusion below it, and a pane that draws a rule draws them apart.
+    testCase "a rule that does not read says which side of the line it is" $ do
+      (s, out) <- importing Lenient "test.modules.GrammarRule"
+      r <- about "test.modules.GrammarRule" out
+      sv <- viewOf s r
+      f <- faultOf sv
+      playing TheBlock f @?= [ABlock AJudgment]
+      playing TheName f @?= [AName "typing"]
+      playing TheRule f @?= [AName "T-true"]
+      inner <- insideOf f
+      faultViewKind inner @?= CouldNotRead
+      playing TheSide inner @?= [ASide TheConclusion]
+      playing TheStage inner @?= [AStage Parsing]
+      -- **The author's own text**, which is what 'AText' is for and the one
+      -- place a sentence would be wrong.
+      case playing TheText inner of
+        [AText t] -> assertBool ("the conclusion as written: " ++ show t)
+                                ("true" `isInfixOf` t)
+        other -> assertFailure ("expected the text, got " ++ show other)
+  ]
+
+-- | The fault indented under this one, which every refused block now has.
+insideOf :: FaultView -> IO FaultView
+insideOf f = case faultViewInside f of
+  Just inner -> pure inner
+  Nothing -> assertFailure ("expected a fault inside: " ++ show f)
+
 tests :: TestTree
 tests = testGroup "a module that loads as far as it can (MS12 phase 315)"
   [ testCase "what elaborates lands, and what does not is left out" $ do
@@ -342,6 +451,7 @@ tests = testGroup "a module that loads as far as it can (MS12 phase 315)"
       map moduleText (moduleImportsOf m s) @?= ["test.modules.Bit"]
 
   , viewTests
+  , grammarTests
   , positionTests
   , blockTests
   ]

@@ -54,6 +54,7 @@ module Thena.View.Failure
   , Spot (..)
   , Form (..)
   , Block (..)
+  , Side (..)
   , Blocked (..)
 
     -- * What a run said on the way
@@ -301,9 +302,66 @@ data FaultKind
   | NoClauseMatched
   | GrammarRefused
     -- ^ a @language@, @context@, @judgment@ or @notation@ block was not
-    -- admitted. **'TheBlock' and 'TheName' say which, and where inside it, and
-    -- no part says what is wrong with it yet** — the grammar failures are their
-    -- own tree and are not walked as of this phase.
+    -- admitted. **'TheBlock' and 'TheName' say which block, and
+    -- 'TheProduction' or 'TheRule' where inside it; 'faultViewInside' is what
+    -- is actually wrong with it** (MS12 phase 338).
+    --
+    -- **The location stays out here deliberately.** Two problems inside the
+    -- tree are the same kind and are told apart only by whether a production
+    -- was named — a @context@ whose production shapes are wrong and a
+    -- production with no items are both 'BlockShapeWrong' — so a pane reads the
+    -- outer fault for /where/ and the inner one for /what/.
+    -- * A refused grammar block
+  | VariableProductionAmbiguous
+    -- ^ more than one production of one language declares an occurrence at a
+    -- token class, so a renamed name of that class has no one term to become.
+    -- 'TheType' is the class and 'TheCandidates' are the productions.
+  | ClassOwnedTwice
+    -- ^ two languages this grammar reaches each read an occurrence at one token
+    -- class, so substituting for that class has no one language to replace a
+    -- name with. 'TheType' is the class and 'TheCandidates' are the languages.
+  | ConstructorUnspelled
+    -- ^ a @notation@ block installing a grammar for a hand-written datatype
+    -- declares a role and leaves a constructor with no production, so the
+    -- generated substitution would be short a method. 'TheCandidates' are the
+    -- constructors nothing spells.
+  | MetavariableNotAllowed
+    -- ^ a @notation@ block's header names a metavariable of its own. Its
+    -- productions are written in the grammar's metavariables, so declaring one
+    -- would change what every other block's productions may say.
+    -- 'TheCandidates' are the names.
+  | ParameterUnspelled
+    -- ^ a parameter the notation never writes, so the argument it names has
+    -- nowhere to go. 'TheParameter' is the name.
+  | BindsNothing
+    -- ^ something written as a binding form that binds nothing: an occurrence,
+    -- a judgment's notation, or an application. 'TheName' is what was written
+    -- that way.
+  | ScopesDiffer
+    -- ^ one name written with different binders free in it, so there is no one
+    -- scope for the argument it stands for. 'TheName' is the name.
+  | OccurrenceNotAlone
+    -- ^ an occurrence that is not its production's only argument. Substitution
+    -- replaces the whole of an occurrence, so there is nothing for the rest to
+    -- be. 'TheName' is the occurrence.
+  | NothingToRename
+    -- ^ a binder is free in a slot, and nothing the slot's language reaches
+    -- occurs at the binder's class, so renaming it would have nothing to
+    -- rewrite. 'TheName' is the slot, 'TheLanguage' its language, 'TheType' the
+    -- class.
+  | SlotAtAUniverse
+    -- ^ a slot at a universe in a block that generates its arguments' types
+    -- from its slots. 'TheParameter' is the slot and 'TheLevel' the universe.
+  | NoConstructorForMetadata
+    -- ^ a function production carrying metadata, which is about a constructor
+    -- and a function has none.
+  | RoleAfterTheGrammar
+    -- ^ a role in a block that does not install the grammar; the installing
+    -- block's roles are the ones its substitution was generated from.
+    -- 'TheLanguage' is the grammar.
+  | NotQuantified
+    -- ^ a metavariable used in a rule that the annotated tier's @∀@ does not
+    -- bind. 'TheName' is the metavariable.
   | TokenClassRefused
   | NotATokenType
     -- ^ a token class is declared at a type it cannot read, or its regular
@@ -368,6 +426,8 @@ data Role
   | TheObligations
   | TheClaimed
   | TheActual
+  | TheSide
+    -- ^ which side of a judgment's rule a reading was of (MS12 phase 338).
   deriving (Eq, Show, Enum, Bounded)
 
 -- | What a part is.
@@ -408,6 +468,7 @@ data Piece
     -- ^ the level obligations that cannot be met, each as written.
   | AText String
     -- ^ a region of the user's own text that something was tried on.
+  | ASide Side
   deriving (Eq, Show)
 
 -- | Which kind of thing was wanted where another was found.
@@ -439,6 +500,10 @@ data Wanted
   | AnEquation
   | AConstructorOf
   | AProduction
+  | AFunction
+    -- ^ a declared function, which a @notation@ production may claim to be the
+    -- notation of (MS12 phase 338).
+  | ATokenClass
   deriving (Eq, Show, Enum, Bounded)
 
 -- | How far reading got before it stopped.
@@ -487,6 +552,13 @@ data Form = AsAHole | AsAGuess | AsAConstraint
 
 -- | Which kind of block a grammar failure is in.
 data Block = ALanguage | AContext | AJudgment | ANotation
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | Which side of a judgment's rule something is written on (MS12 phase 338).
+--
+-- Above the line and below it, which is how the author wrote them and how a
+-- pane would draw them.
+data Side = ThePremises | TheConclusion
   deriving (Eq, Show, Enum, Bounded)
 
 -- | Why a chain could not be transported.
@@ -1032,11 +1104,12 @@ displayStop sp grammars budget env binders counter here u = case Dr.unfinishedWh
         around NotAType [is TheDatatype (name g)] (typeError te)
       D.TokenClassRefused g why -> around TokenClassRefused [is TheName (name g)] (tokenError why)
       D.GrammarRefused (G.GrammarError k g problem) ->
-        fault GrammarRefused
+        around GrammarRefused
           ( is TheBlock (ABlock (block k))
               : is TheName (AName g)
               : whereInGrammar problem
           )
+          (grammarProblem problem)
 
     tokenError t = case t of
       D.TokenTypeUnsupported ty -> fault NotATokenType [is TheType (coreHere ty)]
@@ -1063,6 +1136,153 @@ displayStop sp grammars budget env binders counter here u = case Dr.unfinishedWh
       G.InProduction prod _ -> [is TheProduction (AName prod)]
       G.InRule rl _ -> [is TheRule (AName rl)]
       _ -> []
+
+    -- | What is wrong with the block (MS12 phase 338).
+    --
+    -- **Most of the tree is kinds that were already here**, which is what his
+    -- ruling of 2026-11-19 buys: a kind says what went wrong and never what it
+    -- went wrong about, so every /already declared/, /repeated/, /reserved/,
+    -- /ambiguous/, /not declared as/, /wrong kind of thing/, /wrong count/ and
+    -- /could not read/ in the grammar's own error language is the kind of that
+    -- name with its own parts. What is new is the dozen above that say
+    -- something only a grammar can say.
+    --
+    -- **The block's name and the production or rule are not repeated here** —
+    -- they are 'whereInGrammar''s, on the fault that wraps this one.
+    grammarProblem problem = case problem of
+      G.MetavariableRepeated x -> fault NameRepeated [is TheName (AName x)]
+      G.MetavariableTaken x -> fault NameAlreadyDeclared [is TheName (AName x)]
+      -- **Latest first**, as 'Thena.Render' has it: that is the order they were
+      -- opened in, and the renaming goes on one of them.
+      G.MetavariableAmbiguous x ls ->
+        fault NameAmbiguous [is TheWord (AName x), is TheCandidates (ANames ls)]
+      G.NameTaken -> bare NameAlreadyDeclared
+      G.ConstructorTaken p -> fault NameAlreadyDeclared [is TheConstructor (AName p)]
+      G.ContextShape -> bare BlockShapeWrong
+      G.BuiltInTag -> bare NameReserved
+      G.ContextKey p xs ->
+        fault WrongCount
+          [ is TheProduction (AName p)
+          , is TheWanted (AWanted AnIdentifier)
+          , is TheExpected (ACount 1)
+          , is TheFound (ACount (length xs))
+          , is TheCandidates (ANames xs)
+          ]
+      G.LookupTaken f -> fault NameAlreadyDeclared [is TheName (AName f)]
+      G.FunctionTaken f -> fault NameAlreadyDeclared [is TheName (AName f)]
+      G.VariableProductions cls ps ->
+        fault VariableProductionAmbiguous
+          [is TheType (name cls), is TheCandidates (ANames ps)]
+      G.ClassOwnedTwice cls ls ->
+        fault ClassOwnedTwice
+          [is TheType (name cls), is TheCandidates (ANames (map (spelledIn sp) ls))]
+      G.NoSuchGrammar -> bare NoSuchLanguage
+      G.ConstructorsUnspelled cs ->
+        fault ConstructorUnspelled [is TheCandidates (ANames cs)]
+      G.NotationMetavars ms ->
+        fault MetavariableNotAllowed [is TheCandidates (ANames ms)]
+      G.InProduction _ why -> productionProblem why
+      G.InRule _ why -> ruleProblem why
+
+    -- | What is wrong with one production.
+    productionProblem why = case why of
+      G.NoItems -> bare BlockShapeWrong
+      G.ParamRepeated x -> fault NameRepeated [is TheParameter (AName x)]
+      G.ParamUnspelled x -> fault ParameterUnspelled [is TheParameter (AName x)]
+      G.ParamNotReadable x t ->
+        fault WrongKindOfThing [is TheParameter (AName x), is TheType (coreHere t)]
+      G.NoSuchTokenClass x ->
+        fault NotDeclaredAs [is TheWord (AName x), is TheWanted (AWanted ATokenClass)]
+      G.NotAMetavariable x ->
+        fault WrongKindOfThing [is TheWord (AName x), is TheWanted (AWanted AMetavariable)]
+      G.NotAnArgument x ->
+        fault NotDeclaredAs [is TheWord (AName x), is TheWanted (AWanted AnArgument)]
+      G.OccurrenceBinds x -> fault BindsNothing [is TheName (AName x)]
+      G.NotADeclaredBinder x ->
+        fault NotDeclaredAs [is TheWord (AName x), is TheWanted (AWanted ABinder)]
+      G.BinderNotString x s ->
+        fault WrongKindOfThing
+          [ is TheBinder (AName x)
+          , is TheWanted (AWanted SomeText)
+          , is TheFound (sortPiece s)
+          ]
+      G.OccurrenceNotString x s ->
+        fault WrongKindOfThing
+          [ is TheName (AName x)
+          , is TheWanted (AWanted SomeText)
+          , is TheFound (sortPiece s)
+          ]
+      G.ScopesDiffer x -> fault ScopesDiffer [is TheName (AName x)]
+      G.OccurrenceNotAlone x -> fault OccurrenceNotAlone [is TheName (AName x)]
+      G.ScopeElsewhere x l cls ->
+        fault NothingToRename
+          [is TheName (AName x), is TheLanguage (name l), is TheType (name cls)]
+      G.NotationBinds x -> fault BindsNothing [is TheName (AName x)]
+      -- **The glyph itself, as 'Thena.Render' does it** (MS7 phase 127): the
+      -- author has to find it in their own source, so it travels as their text.
+      G.ReservedTerminal w -> fault NameReserved [is TheText (AText w)]
+      G.ReservedClass x -> fault NameReserved [is TheName (AName x)]
+      G.NotADeclaredFunction ->
+        fault NotDeclaredAs [is TheWanted (AWanted AFunction)]
+      G.FunctionHasNotation -> bare NameAlreadyDeclared
+      G.FunctionArity takes slots ->
+        fault WrongCount
+          [ is TheWanted (AWanted AnArgument)
+          , is TheExpected (ACount takes)
+          , is TheFound (ACount slots)
+          ]
+      G.FunctionSlot x takes isName ->
+        fault WrongKindOfThing
+          [ is TheParameter (AName x)
+          , is TheType (coreHere takes)
+          , is TheFound (name isName)
+          ]
+      G.FunctionResult r ->
+        fault WrongKindOfThing [is TheActual (coreHere r)]
+      G.FunctionBinds x -> fault BindsNothing [is TheName (AName x)]
+      G.FunctionMetadata -> bare NoConstructorForMetadata
+      G.UniverseSlot x lvl ->
+        fault SlotAtAUniverse
+          [is TheParameter (AName x), is TheLevel (ALevel (G.universeSpelling lvl))]
+      G.RolesAfterTheGrammar gr ->
+        fault RoleAfterTheGrammar [is TheLanguage (name gr)]
+
+    -- | What is wrong with one of a judgment's rules.
+    --
+    -- **'G.RuleUnparsed'\'s third field is not a part.** It is the word the text
+    -- door writes — the judgment's name, or the literal @premises@ — and both of
+    -- those are already here: the judgment is the wrapping fault's 'TheName' and
+    -- the side is 'TheSide'.
+    ruleProblem why = case why of
+      G.RuleUnparsed part _ txt _ ->
+        fault CouldNotRead
+          [ is TheSide (ASide (side part))
+          , is TheStage (AStage Parsing)
+          , is TheText (AText txt)
+          ]
+      G.RuleNotAMetavariable x ->
+        fault WrongKindOfThing [is TheWord (AName x), is TheWanted (AWanted AMetavariable)]
+      G.PremiseNameIsMetavariable x ->
+        fault NameAlreadyDeclared
+          [is TheName (AName x), is TheFound (AWanted AMetavariable)]
+      G.PremiseNameTaken x -> fault NameAlreadyDeclared [is TheName (AName x)]
+      G.QuantifierUnreadable se -> syntaxError se
+      G.NotQuantified x -> fault NotQuantified [is TheName (AName x)]
+      G.QuantifiedTwice x -> fault NameRepeated [is TheName (AName x)]
+      G.RuleUnbuilt be -> fault (buildKind be) (buildParts be)
+
+    side p = case p of
+      G.Premises -> ThePremises
+      G.Conclusion -> TheConclusion
+
+    -- | A metavariable's or a slot's sort, as the part a pane can use.
+    --
+    -- **A universe is spelled and not named** — 'G.universeSpelling' is the one
+    -- spelling and 'Thena.Render.sortPhrase' asks it too.
+    sortPiece s = case s of
+      G.OfLanguage g -> name g
+      G.OfClass _ t _ -> name t
+      G.OfUniverse k -> ALevel (G.universeSpelling k)
 
     -- ** Why a line of instructions did not validate
 

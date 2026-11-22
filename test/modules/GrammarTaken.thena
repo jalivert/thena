@@ -1,0 +1,9 @@
+module test.modules.GrammarTaken where
+
+-- The datatype's name is declared already: `NameTaken`, which is at the top of
+-- the grammar's own failures and names nothing a production could be.
+LC : Type₁
+LC = Type₀
+
+language LC, M, N where
+  only -> ι
