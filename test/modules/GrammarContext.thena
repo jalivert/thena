@@ -1,0 +1,11 @@
+module test.modules.GrammarContext where
+
+-- A context with nothing that extends it: `ContextShape`, which is about the
+-- block and not about any one production.
+language Ty, T, S where
+  base -> ι
+
+open Ty
+
+context Ctx, Γ where
+  empty -> ·
