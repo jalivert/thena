@@ -13,6 +13,7 @@ instruction 1: wanted Core, got Int
 thena spine> say 42
 instruction 1: wanted String, got Int
 thena spine> :produces Core
+  any-of/1 : List a -> a   (rule)
   apply-all/2 : Core -> List Core -> Core   (rule)
   instantiate-with/2 : Core -> List Core -> Core   (rule)
   intro-arm-binders/6 : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core   (rule)

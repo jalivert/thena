@@ -73,6 +73,14 @@ expectedStandard :: [Rule]
 expectedStandard =
   [ Rule (rootName "attack")     []    [FocusIsHole]                 [Do Attack]
   , Rule (rootName "try-core") [PVar "t"] [FocusIsHole] [Do (Try (Ref "t"))]
+    -- **@try-core@ without being told which term** (MS12) — the first rule in
+    -- the base that can close a goal with no argument, so the first nullary
+    -- candidate a bare @prove@ has that is not a hole-life operation.
+  , Rule (rootName "try-in-scope") [] [FocusIsHole]
+      [ Bind (Op.PVar "hs") Nothing Op.InScopeAt
+      , Bind (Op.PVar "h") Nothing (Op.Call "any-of" [Ref "hs"])
+      , Do (Try (Ref "h"))
+      ]
   , Rule (rootName "abandon")    []    [FocusIsHole]                 [Do Abandon]
     -- **Two clauses of one name** (phase 23b): table 2.8 has two intro rules and
     -- they differ only in their head, which is exactly what a second clause is
@@ -862,6 +870,16 @@ splitClauses =
       [PList [PVar "x"] (Just (PVar "xs")), PVar "acc"] []
       [ Bind (Op.PVar "acc2") Nothing (Op.Prepend (Ref "x") (Ref "acc"))
       , Bind (Op.PVar "r") Nothing (Op.Call "reverse-onto" [Ref "xs", Ref "acc2"])
+      , Do (Op.Return (Ref "r"))
+      ]
+    -- **Prolog's @member@** (MS12): two clauses, both matching, so the call
+    -- builds a choice point and a later failure comes back for the tail. It is
+    -- what turns a list an op reports into a search the machine runs, and it is
+    -- a rule and not a function for exactly that reason.
+  , Rule (rootName "any-of") [PList [PVar "x"] (Just PWild)] []
+      [Do (Op.Return (Ref "x"))]
+  , Rule (rootName "any-of") [PList [PWild] (Just (PVar "xs"))] []
+      [ Bind (Op.PVar "r") Nothing (Op.Call "any-of" [Ref "xs"])
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (rootName "apply-all") [PVar "f", PList [] Nothing] []

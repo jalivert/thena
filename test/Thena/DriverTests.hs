@@ -441,8 +441,11 @@ tests =
                 -- binder's term to the binders it is a function of (MS9 phase
                 -- 195).
                 [ nameDotted g | (g, _, _, _) <- rows ]
-                  @?= [ "apply-all", "instantiate-with", "intro-arm-binders"
-                      , "intro-binders", "fresh-universe"
+                -- @any-of@ answers an element of the list it is given
+                -- (MS12), so at @List Core@ it gives a @Core@ — a polymorphic
+                -- answer is listed here because it /can/ be one.
+                  @?= [ "any-of", "apply-all", "instantiate-with"
+                      , "intro-arm-binders", "intro-binders", "fresh-universe"
                       ]
               other -> assertFailure ("expected a listing, got " ++ show other)
           -- **It lists rules and functions both** (his ruling), and the two are

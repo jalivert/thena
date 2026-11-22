@@ -708,6 +708,33 @@ data Op
     --
     -- It yields the variable as a term, @Free x@, which is the shape @goto@
     -- already reads.
+  | InScopeAt
+    -- ^ **what is in scope at the focus, as terms** (MS12) — the second
+    -- companion to 'Here', which gives the one variable the focus /is/ standing
+    -- on, and to 'Goal', which gives the type it is claimed at.
+    --
+    -- **Nothing could list the context before this.** A rule could use a
+    -- hypothesis only if its caller had named one: @try-core@ wants an explicit
+    -- term, and a @use@-shaped rule still needs @resolve-core core\`v\`@ run
+    -- for it first. So no search could discover its own candidates and every
+    -- automated proof bottomed out at a name the author wrote down.
+    --
+    -- **It yields each entry as @Free x@**, which is 'Here'\'s shape and the one
+    -- @goto@, @prim-try@ and @typeof@ already read — so there is nothing to
+    -- resolve. That is not only shorter: a name is resolved through
+    -- 'Thena.Engine.localNamed', which can only find an entry whose /word/ a
+    -- user could have written, and a generalised copy a split made has no such
+    -- word. Handing the variable over skips the question.
+    --
+    -- **Innermost first**, which is 'Thena.Core.Term.InScope'\'s @scopeWithin@
+    -- order and the preference 'Thena.Engine.localNamed' already makes when two
+    -- entries carry one word. A strategy that wants the other order has
+    -- @reverse-onto@ in the standard base.
+    --
+    -- **Every entry, not the hypotheses alone.** A local definition is as
+    -- usable a term as a hypothesis, and which of them a strategy is interested
+    -- in is the strategy's business: the op reports what is there, and
+    -- @typeof@ is how a rule asks about one.
   | FreshLevel
     -- ^ a **freshly minted level meta** (MS5 phase 89) — the level a bare
     -- @Type@ means, on its own.
@@ -1724,6 +1751,7 @@ resultOf o = case o of
   BinderName _ -> Just TName
   MakeTrusted {} -> Just TCore
   Goal         -> Just TCore
+  InScopeAt    -> Just (TList TCore)
   Typing _     -> Just TCore
   Define _ _   -> Just TCore   -- the variable it bound, as 'Assume' and 'Claim' do
   Unify _ _    -> Nothing
@@ -1965,6 +1993,7 @@ operandTypes o = case o of
   BinderName x -> [(x, TBinder)]
   MakeTrusted a b c -> [(a, TCore), (b, TCore), (c, TCore)]
   Goal         -> []
+  InScopeAt    -> []
   Typing a     -> [(a, TCore)]
   Define a b   -> [(a, TName), (b, TCore)]
   Eliminate a  -> [(a, TCore)]
@@ -2505,6 +2534,7 @@ opKeyword o = case o of
   MakeTrusted {} -> "make-trusted"
   AscriptionTerm _ -> "ascription-term"
   Goal         -> "goal"
+  InScopeAt    -> "in-scope"
   Typing _     -> "typeof"
   Define _ _   -> "define"
   Certify _    -> "certify"

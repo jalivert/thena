@@ -5922,6 +5922,72 @@ elimination that stated them is the only thing that knows.
 
 ---
 
+### A rule can read the context, so a search can find its own hypotheses
+
+*Decided 2026-11-22.*
+
+Until now a rule could only use a hypothesis that somebody had named for it.
+`try-core` wants an explicit term, `induction-core` and `case-core` take their
+target as an operand, and a `use`-shaped rule still needed its caller to resolve
+the hypothesis first. Nothing listed what was in scope, so no automated proof
+could discover its own candidates: every one of them bottomed out at a name the
+author had written down.
+
+**`in-scope` is the read.** It takes no operands, answers the entries at the
+focus as a list of terms, and is total — an empty context answers the empty
+list.
+
+```
+thena spine> try-in-scope
+```
+
+**The search is not a second mechanism, and that is the point.** A choice
+point's untried alternatives are rules, and backtracking enters a rule body, so
+an operation cannot offer alternatives. A *rule* with two clauses can, and that
+is enough:
+
+```
+any-of : List a -> a
+rule any-of [x, ..._] :- do return x
+rule any-of [_, ...xs] :- do r = any-of xs ; return r
+```
+
+Both clauses match, so the call builds a choice point: the first answers the head
+of the list, and a failure anywhere after the call comes back for the tail. This
+is Prolog's `member`, written in the rule language with nothing added to the
+engine. **It is a rule and not a function for exactly that reason** — a
+function's matching clauses are cut to the first, so written as one it would
+answer the head of the list and never the rest.
+
+`try-in-scope` is the two put together, and it is the first rule in the shipped
+base that can close a goal without being handed the answer:
+
+```
+try-in-scope : ()
+rule try-in-scope :- when focus-is-hole
+  do hs = in-scope
+     ; h = any-of hs
+     ; prim-try h
+```
+
+**Each entry arrives as a variable, not as a name.** That is shorter — there is
+nothing to resolve — and it reaches more: a name is resolved by looking for an
+entry whose written word you could have typed, and a generalised copy that a
+`case` or `induction` split introduced has no such word. Handing the variable
+over does not have to ask.
+
+**Innermost first.** At `∀ (A : Type₀) (B : Type₀) -> A -> B -> B` the goal `B`
+sees `A`, `B`, `x : A` and `x1 : B`, and the first candidate offered is `x1`,
+which fits — so the proof closes with no backtracking at all. Outermost first
+would have failed three times to reach the same term. A strategy that wants the
+other order reverses the list with `reverse-onto`.
+
+**A bare `prove` can reach it, and still takes `attack` first.** `try-in-scope`
+is nullary, so dispatch offers it; `attack` is above it in the base and succeeds
+at every hole, so it is `attack` that a first `prove` takes and `try-in-scope`
+that a `retry` reaches. Rule order is how that is arranged, as it is for
+everything else.
+
 ---
 
 ## The REPL and the session

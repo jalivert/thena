@@ -2060,6 +2060,27 @@ perform instr rest m = case operation instr of
     OnComponent c -> produce (VTerm (Free (variableOf c))) m
     _             -> failure (CannotMove NotOnTheSpine) m
 
+  -- **The context, as a list of terms** (MS12) — the read a search needs to
+  -- find its own hypotheses. 'Here' answers the one variable the focus is
+  -- standing on; this answers the ones it can see.
+  --
+  -- **Total, and it cannot fail**: an empty context answers the empty list. So
+  -- the op wants no head test of its own and no paired @focus-is-@ condition —
+  -- unlike 'Here', which is about the component and has nothing to say off the
+  -- spine.
+  --
+  -- **What a rule does with the empty list is the rule's business, and
+  -- @any-of@ fails on it** — it has no clause for @[]@, because there is no
+  -- element to answer with. So @try-in-scope@ at a goal with nothing in scope
+  -- says /no clause of any-of applies here/, naming the helper rather than the
+  -- rule the user typed. The failure is the right one and the wording is not;
+  -- @test/golden/in-scope.golden@ pins it as it stands.
+  --
+  -- Reversed, because 'focusContext' is outermost first and the op is innermost
+  -- first ('Thena.Instral.Ops.InScopeAt' says why).
+  InScopeAt ->
+    produce (VList [ VTerm (Free (entryVar e)) | e <- reverse contextAt ]) m
+
   -- **The two term-construction ops** (MS4 phase 41d) — the first ops that
   -- build a term rather than reading, moving or installing one.
   --
