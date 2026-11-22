@@ -47,7 +47,8 @@ import Thena.Driver
   , parkedWord
   , refuseSuspension
   )
-import Thena.Files (consultRuleFiles, following, importModule, startingSession)
+import Thena.Files
+  (consultRuleFiles, following, importModule, loadProofFile, startingSession)
 import Thena.View (Budget (..), failureView, proofsView)
 import Thena.View.Failure (Nature (..), StopView (..), Why (..))
 import Thena.View.Proofs (ProofsView (..), QuestClaim (..), QuestView (..))
@@ -107,6 +108,21 @@ suspendedInBlock = do
   (s', out, trouble) <- importModule Lenient s m
   assertBool ("nothing should be trouble here: " ++ show trouble) (null trouble)
   pure (s', out)
+
+-- | __Load a file whose path is no module name, and stop in its placeholder__
+-- (MS12 phase 337, @~hdzp7@).
+--
+-- **The path door and not the import door**, because there is no name to import
+-- it by: @0pauses.thena@ begins with a digit, which is no step of a module name.
+-- It consults the pausing base in its own header, so the placeholder yields
+-- whatever the session's pool holds and this needs no 'pausing'.
+suspendedByPath :: IO (Session, [Response])
+suspendedByPath = do
+  (s0, trouble) <- startingSession
+  assertBool ("the shipped files would not load: " ++ show trouble) (null trouble)
+  (s1, out, t1) <- loadProofFile Lenient s0 "test/modules/0pauses.thena"
+  assertBool ("nothing should be trouble here: " ++ show t1) (null t1)
+  pure (s1, out)
 
 -- | 'line', lenient — the door 'suspendedMore' opened.
 lenientLine :: Session -> String -> IO (Session, [Response])
@@ -275,6 +291,194 @@ tests = testGroup "a yield out of an imported module"
       assertBool ("the module's own names should be reachable: " ++ show out)
                  (null (rejected out))
   , parking
+
+  -- ---------------------------------------------------------------------
+  -- Giving the DECLARATION up instead of the module — MS12 phase 317
+  --
+  -- **His ruling of 2026-11-14:** /"would it make sense that it is treated as
+  -- failure the same way as when partial import ignores this one and tries to
+  -- bring into scope the rest? … That way I would lose that one theorem and
+  -- every one that depends on it, but I wouldn't lose the entire module."/
+  --
+  -- **It is the lenient door only**, which is why these go through
+  -- 'suspendedMore' and 'lenientLine' rather than the harness above.
+  , testGroup "an abandon is the declaration's own failure (phase 317)"
+      [ testCase "the declaration goes and the module carries on" $ do
+          (s, _) <- suspendedMore
+          (s1, out) <- lenientLine s ":abandon"
+          -- **`stands` names nothing above the yield, so it lands.** That is
+          -- the sentence his ruling is: the module is not lost.
+          [ ds | ProofLoadedPartly _ ds _ _ _ <- out ] @?= [["Two", "stands"]]
+          assertBool "nothing should be suspended after an abandon"
+                     (isNothing (importSuspended s1))
+
+      , testCase "and so does every declaration that named it" $ do
+          (s, _) <- suspendedMore
+          (_, out) <- lenientLine s ":abandon"
+          -- **`picked` was given up and `leans` names it**, so `leans` fails on
+          -- a name that is not there — **nothing works out why anything
+          -- failed, the loader tries it** (phase 315's rule, unchanged).
+          [ map unfinishedDeclares unfin
+            | ProofLoadedPartly _ _ _ _ unfin <- out ]
+            @?= [[["picked"], ["leans"]]]
+
+      , testCase "the given-up one says the user gave it up, not that it failed" $ do
+          (s, _) <- suspendedMore
+          (_, out) <- lenientLine s ":abandon"
+          [ unfinishedWhy u
+            | ProofLoadedPartly _ _ _ _ unfin <- out
+            , u <- unfin, unfinishedDeclares u == ["picked"] ]
+            @?= [ItWasAbandoned]
+
+      , -- **And a pane does not draw it as an error either** (MS12 phase 325).
+        -- The note this track sent that track at phase 317 asked them to
+        -- special-case the constructor and render it as a statement; the nature
+        -- is that note, in the type, so no pane has to be told.
+        testCase "its view is given up, with nothing wrong and no fault" $ do
+          (s, _) <- suspendedMore
+          (s1, out) <- lenientLine s ":abandon"
+          [ (stopViewNature v, stopViewWhy v)
+            | ProofLoadedPartly _ _ _ _ unfin <- out
+            , u <- unfin, unfinishedDeclares u == ["picked"]
+            , let v = failureView (Budget 200) s1 u ]
+            @?= [(GivenUp, WasGivenUp)]
+
+      , testCase "the module is recorded partly, not loaded whole" $ do
+          (s, _) <- suspendedMore
+          (s1, _) <- lenientLine s ":abandon"
+          Just m <- pure (moduleName "test.modules.PausesThenMore")
+          -- **A partly-loaded module IS loaded** (phase 315): it is in the
+          -- list, and 'moduleWhole' is the question that tells the two apart.
+          -- The abandon reaches the same record an ordinary lenient failure
+          -- does, which is the whole of what being the item's own failure
+          -- means.
+          assertBool "it must be recorded partly"
+                     (isJust (modulePartly m s1))
+          moduleWhole m s1 @?= False
+
+      , testCase "it still takes what the user declared during the suspension" $ do
+          -- **His ruling of 2026-11-11 is untouched at the new scope**: those
+          -- declarations stand under the elaboration that is going, so they go
+          -- with it. What phase 317 narrowed is the SCOPE, from the closure to
+          -- the item.
+          (s, _) <- suspendedMore
+          (s1, _) <- lenientLine s "declare mine : Two ; mine = this"
+          (s2, out) <- lenientLine s1 ":abandon"
+          [ map nameDotted mine | ImportAbandonedItem _ _ mine <- out ]
+            @?= [["test.modules.PausesThenMore.mine"]]
+          (_, back) <- lenientLine s2 ":show mine"
+          assertBool ("mine should be gone: " ++ show back)
+                     (not (null (rejected back)))
+
+      , testCase "and it names the declaration it gave up" $ do
+          (s, _) <- suspendedMore
+          (_, out) <- lenientLine s ":abandon"
+          [ (nm, ds) | ImportAbandonedItem nm ds _ <- out ]
+            @?= [("test.modules.PausesThenMore", ["picked"])]
+      ]
+
+  , testGroup "a yield inside a namespace block (MS12 phase 336, ~6g27s)"
+      [ testCase "the suspension is inside the block, and resuming leaves it once" $ do
+          -- **What the work list is for.** The loader walks into a block, so
+          -- what is left of the module across the suspension has the end of the
+          -- block in it: @stands@ is written after the yield and inside the
+          -- block, @after@ outside it, and the prefix each lands under is what
+          -- says the namespace was left exactly once and in the right place.
+          (s, _) <- suspendedInBlock
+          assertBool "the import should be standing" (isJust (importSuspended s))
+          (s1, _)   <- lenientLine s "try-core core`this`"
+          (s2, _)   <- lenientLine s1 "solve"
+          (s3, out) <- lenientLine s2 "yield"
+          assertBool "nothing should be suspended once it finished"
+                     (isNothing (importSuspended s3))
+          [ ds | ProofLoaded _ ds _ _ <- out ]
+            @?= [["Two", "inner.picked", "inner.stands", "after"]]
+
+      , testCase "and the ENVIRONMENT has them at those names, not the summary" $ do
+          -- **The summary is derived from the walk's own prefix**, so a walk
+          -- that left the namespace in the wrong place could still print the
+          -- right lines. This asks the environment instead: the key under the
+          -- block's prefix is there, the one that would mean the namespace was
+          -- never left is not.
+          (s, _)  <- suspendedInBlock
+          (s1, _) <- lenientLine s "try-core core`this`"
+          (s2, _) <- lenientLine s1 "solve"
+          (s3, _) <- lenientLine s2 "yield"
+          let env = globals (machineOf s3)
+          assertBool "inner.stands should be in the environment"
+                     (isDeclared (named "test.modules.PausesInBlock.inner.stands") env)
+          assertBool "after should be at the module's own level"
+                     (isDeclared (named "test.modules.PausesInBlock.after") env)
+          assertBool "and not inside the block"
+                     (not (isDeclared (named "test.modules.PausesInBlock.inner.after") env))
+      ]
+  , testGroup "what a resumed load leaves behind (MS12 phase 337)"
+      [ testCase "a declaration written after the yield is the MODULE'S" $ do
+          -- @~9qrnz@. 'importingTheirs' is seeded with the load's own first run
+          -- and extended by each @yield@ that hands control back, and the run
+          -- that FINISHES the module is not a yield — so what that run declared
+          -- was extended into nothing and came out as the user's. **A module
+          -- with no @exporting@ clause publishes what it declared**, so the same
+          -- file offered different names depending on whether it happened to
+          -- stop.
+          (s, _)  <- suspendedMore
+          (s1, _) <- lenientLine s "try-core core`this`"
+          (s2, _) <- lenientLine s1 "solve"
+          (s3, _) <- lenientLine s2 "yield"
+          Just m <- pure (moduleName "test.modules.PausesThenMore")
+          let theirs = map nameDotted (declaredByModule m s3)
+          assertBool ("stands is written after the yield and is the module's: "
+                        ++ show theirs)
+                     ("test.modules.PausesThenMore.stands" `elem` theirs)
+
+      , testCase "and a lemma typed during the suspension is still not" $ do
+          -- The other half of @~3c2db@, which the fix must not trade away: the
+          -- run that finishes the module declares the module's names, and what
+          -- the user typed while it stood is still the user's.
+          (s, _)  <- suspendedMore
+          (s1, _) <- lenientLine s "declare mine : Two ; mine = this"
+          (s2, _) <- lenientLine s1 "try-core core`this`"
+          (s3, _) <- lenientLine s2 "solve"
+          (s4, _) <- lenientLine s3 "yield"
+          Just m <- pure (moduleName "test.modules.PausesThenMore")
+          let theirs = map nameDotted (declaredByModule m s4)
+          assertBool ("a name typed at the prompt is not the module's: "
+                        ++ show theirs)
+                     ("test.modules.PausesThenMore.mine" `notElem` theirs)
+
+      , testCase "a module reached by a name is writable at the prompt" $ do
+          -- The half that was already right, kept because the defect below is
+          -- the asymmetry between the two and a test of one of them is no test
+          -- of that.
+          (s, _)  <- suspendedMore
+          (s1, _) <- lenientLine s "try-core core`this`"
+          (s2, _) <- lenientLine s1 "solve"
+          (s3, _) <- lenientLine s2 "yield"
+          (_, out) <- lenientLine s3 ":show stands"
+          assertBool ("stands should be writable at the prompt: " ++ show out)
+                     (null (rejected out))
+
+      , testCase "and so is a file no module name reaches" $ do
+          -- @~hdzp7@. **The one branch with nothing to open.** A file loaded by
+          -- a path that is no module name is recorded nowhere and nothing may
+          -- import it, so 'finishingImport' had nothing to file — and it
+          -- therefore also did not open the header's namespace for the prompt,
+          -- which 'loadProofItemsConsultingAt''s @marked@ does for the very same
+          -- file when it goes in in one go. **Measured 2026-11-22**: @:show
+          -- stands@ answered /nothing named stands has been declared/ one line
+          -- after the load's own summary said @declared stands@.
+          (s, _)  <- suspendedByPath
+          assertBool "the load should be standing in the yield"
+                     (isJust (importSuspended s))
+          (s1, _) <- lenientLine s "try-core core`this`"
+          (s2, _) <- lenientLine s1 "solve"
+          (s3, _) <- lenientLine s2 "yield"
+          assertBool "nothing should be suspended once it finished"
+                     (isNothing (importSuspended s3))
+          (_, out) <- lenientLine s3 ":show stands"
+          assertBool ("stands should be writable at the prompt: " ++ show out)
+                     (null (rejected out))
+      ]
   ]
 
 -- | __Parking the import so that a lemma can be proved__ (MS12 phase 310, his
@@ -429,124 +633,4 @@ parking = testGroup "parking it, so that a lemma can be proved"
       (_, out) <- line s1 "yield"
       rejected out @?= [NotYielding]
 
-  -- ---------------------------------------------------------------------
-  -- Giving the DECLARATION up instead of the module — MS12 phase 317
-  --
-  -- **His ruling of 2026-11-14:** /"would it make sense that it is treated as
-  -- failure the same way as when partial import ignores this one and tries to
-  -- bring into scope the rest? … That way I would lose that one theorem and
-  -- every one that depends on it, but I wouldn't lose the entire module."/
-  --
-  -- **It is the lenient door only**, which is why these go through
-  -- 'suspendedMore' and 'lenientLine' rather than the harness above.
-  , testGroup "an abandon is the declaration's own failure (phase 317)"
-      [ testCase "the declaration goes and the module carries on" $ do
-          (s, _) <- suspendedMore
-          (s1, out) <- lenientLine s ":abandon"
-          -- **`stands` names nothing above the yield, so it lands.** That is
-          -- the sentence his ruling is: the module is not lost.
-          [ ds | ProofLoadedPartly _ ds _ _ _ <- out ] @?= [["Two", "stands"]]
-          assertBool "nothing should be suspended after an abandon"
-                     (isNothing (importSuspended s1))
-
-      , testCase "and so does every declaration that named it" $ do
-          (s, _) <- suspendedMore
-          (_, out) <- lenientLine s ":abandon"
-          -- **`picked` was given up and `leans` names it**, so `leans` fails on
-          -- a name that is not there — **nothing works out why anything
-          -- failed, the loader tries it** (phase 315's rule, unchanged).
-          [ map unfinishedDeclares unfin
-            | ProofLoadedPartly _ _ _ _ unfin <- out ]
-            @?= [[["picked"], ["leans"]]]
-
-      , testCase "the given-up one says the user gave it up, not that it failed" $ do
-          (s, _) <- suspendedMore
-          (_, out) <- lenientLine s ":abandon"
-          [ unfinishedWhy u
-            | ProofLoadedPartly _ _ _ _ unfin <- out
-            , u <- unfin, unfinishedDeclares u == ["picked"] ]
-            @?= [ItWasAbandoned]
-
-      , -- **And a pane does not draw it as an error either** (MS12 phase 325).
-        -- The note this track sent that track at phase 317 asked them to
-        -- special-case the constructor and render it as a statement; the nature
-        -- is that note, in the type, so no pane has to be told.
-        testCase "its view is given up, with nothing wrong and no fault" $ do
-          (s, _) <- suspendedMore
-          (s1, out) <- lenientLine s ":abandon"
-          [ (stopViewNature v, stopViewWhy v)
-            | ProofLoadedPartly _ _ _ _ unfin <- out
-            , u <- unfin, unfinishedDeclares u == ["picked"]
-            , let v = failureView (Budget 200) s1 u ]
-            @?= [(GivenUp, WasGivenUp)]
-
-      , testCase "the module is recorded partly, not loaded whole" $ do
-          (s, _) <- suspendedMore
-          (s1, _) <- lenientLine s ":abandon"
-          Just m <- pure (moduleName "test.modules.PausesThenMore")
-          -- **A partly-loaded module IS loaded** (phase 315): it is in the
-          -- list, and 'moduleWhole' is the question that tells the two apart.
-          -- The abandon reaches the same record an ordinary lenient failure
-          -- does, which is the whole of what being the item's own failure
-          -- means.
-          assertBool "it must be recorded partly"
-                     (isJust (modulePartly m s1))
-          moduleWhole m s1 @?= False
-
-      , testCase "it still takes what the user declared during the suspension" $ do
-          -- **His ruling of 2026-11-11 is untouched at the new scope**: those
-          -- declarations stand under the elaboration that is going, so they go
-          -- with it. What phase 317 narrowed is the SCOPE, from the closure to
-          -- the item.
-          (s, _) <- suspendedMore
-          (s1, _) <- lenientLine s "declare mine : Two ; mine = this"
-          (s2, out) <- lenientLine s1 ":abandon"
-          [ map nameDotted mine | ImportAbandonedItem _ _ mine <- out ]
-            @?= [["test.modules.PausesThenMore.mine"]]
-          (_, back) <- lenientLine s2 ":show mine"
-          assertBool ("mine should be gone: " ++ show back)
-                     (not (null (rejected back)))
-
-      , testCase "and it names the declaration it gave up" $ do
-          (s, _) <- suspendedMore
-          (_, out) <- lenientLine s ":abandon"
-          [ (nm, ds) | ImportAbandonedItem nm ds _ <- out ]
-            @?= [("test.modules.PausesThenMore", ["picked"])]
-      ]
-
-  , testGroup "a yield inside a namespace block (MS12 phase 336, ~6g27s)"
-      [ testCase "the suspension is inside the block, and resuming leaves it once" $ do
-          -- **What the work list is for.** The loader walks into a block, so
-          -- what is left of the module across the suspension has the end of the
-          -- block in it: @stands@ is written after the yield and inside the
-          -- block, @after@ outside it, and the prefix each lands under is what
-          -- says the namespace was left exactly once and in the right place.
-          (s, _) <- suspendedInBlock
-          assertBool "the import should be standing" (isJust (importSuspended s))
-          (s1, _)   <- lenientLine s "try-core core`this`"
-          (s2, _)   <- lenientLine s1 "solve"
-          (s3, out) <- lenientLine s2 "yield"
-          assertBool "nothing should be suspended once it finished"
-                     (isNothing (importSuspended s3))
-          [ ds | ProofLoaded _ ds _ _ <- out ]
-            @?= [["Two", "inner.picked", "inner.stands", "after"]]
-
-      , testCase "and the ENVIRONMENT has them at those names, not the summary" $ do
-          -- **The summary is derived from the walk's own prefix**, so a walk
-          -- that left the namespace in the wrong place could still print the
-          -- right lines. This asks the environment instead: the key under the
-          -- block's prefix is there, the one that would mean the namespace was
-          -- never left is not.
-          (s, _)  <- suspendedInBlock
-          (s1, _) <- lenientLine s "try-core core`this`"
-          (s2, _) <- lenientLine s1 "solve"
-          (s3, _) <- lenientLine s2 "yield"
-          let env = globals (machineOf s3)
-          assertBool "inner.stands should be in the environment"
-                     (isDeclared (named "test.modules.PausesInBlock.inner.stands") env)
-          assertBool "after should be at the module's own level"
-                     (isDeclared (named "test.modules.PausesInBlock.after") env)
-          assertBool "and not inside the block"
-                     (not (isDeclared (named "test.modules.PausesInBlock.inner.after") env))
-      ]
   ]
