@@ -251,6 +251,7 @@ everyOp =
   , ("prim-apply x",  Op.Apply (Ref "x"))
   , ("goal",          Goal)
   , ("here",          Here)
+  , ("in-scope",      InScopeAt)
   , ("arrow x y",     Arrow (Ref "x") (Ref "y"))
   , ("apply-to x y",  ApplyTo (Ref "x") (Ref "y"))
   , ("prepend x y",   Op.Prepend (Ref "x") (Ref "y"))

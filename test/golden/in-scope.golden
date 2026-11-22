@@ -1,0 +1,71 @@
+thena spine> :theorem second : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> B -> B
+proving second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> intro
+thena spine> intro
+thena spine> goto second1
+thena spine> :where
+focus
+  let ? second1 : B in
+path
+  root ▸ ≐ second ▸ A ▸ B ▸ x ▸ x1
+context
+  A : Type₀
+  B : Type₀
+  x : A
+  x1 : B
+type
+  B
+thena spine> try-in-scope
+chose 19: any-of
+thena spine> :show
+  let ? second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B ≐ (
+    λ (A : Type₀) ->
+    λ (B : Type₀) ->
+    λ (x : A) ->
+    λ (x1 : B) ->
+▶   let ? second1 : B ≐ (
+      x1
+    ) in
+    second1
+  ) in
+  second
+thena spine> :choices
+19  any-of   untried: any-of
+thena spine> :abandon
+abandoned second
+thena spine> :theorem first : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> B -> A
+proving first : ∀ (A : Type₀) (B : Type₀) -> A -> B -> A
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> intro
+thena spine> intro
+thena spine> goto first1
+thena spine> try-in-scope
+chose 39: any-of
+backtracking to 39: any-of
+chose 40: any-of
+thena spine> :show
+  let ? first : ∀ (A : Type₀) (B : Type₀) -> A -> B -> A ≐ (
+    λ (A : Type₀) ->
+    λ (B : Type₀) ->
+    λ (x : A) ->
+    λ (x1 : B) ->
+▶   let ? first1 : A ≐ (
+      x
+    ) in
+    first1
+  ) in
+  first
+thena spine> :abandon
+abandoned first
+thena spine> :theorem alone : Type₁
+proving alone : Type₁
+thena spine> try-in-scope
+stuck: no clause of any-of applies here
+thena spine> :abandon
+abandoned alone
+thena spine> :quit

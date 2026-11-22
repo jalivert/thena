@@ -486,6 +486,13 @@ type
 `try-core` proposes a term for the hole; `solve` accepts it. Then walk back out,
 `solve`-ing each guess as you go, and finish:
 
+`try-in-scope` is `try-core` with the term left to the machine: it reads the
+context at the focus, offers each entry in turn starting with the innermost, and
+a candidate whose type does not fit the goal is refused and the next one taken.
+Here that would be `x` on the first try. It is the one tactic in the shipped base
+that closes a goal without being told what to close it with, so a bare `prove`
+can reach it too.
+
 ```
 thena spine> try-core core`x`
 thena spine> solve
@@ -566,6 +573,7 @@ until you do, `:theorem` will tell you there is one in progress.
 | `intro "a"` | the same, naming the binding `a` rather than letting it be named for you |
 | `rename "a"` | give the binding you are standing on the word `a` |
 | `` try-core core`term` `` | propose a term for the focused hole |
+| `try-in-scope` | the same, with the term found for you from what is in scope |
 | `solve` | accept the focused guess — it becomes a definition |
 | `regret` | throw away a guess's body, back to a plain hole |
 | `abandon` | remove the focused hole entirely |
@@ -896,6 +904,7 @@ quantify ‹ty› : Core -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
 apply-all ‹f› ‹list› : Core -> List Core -> Core
 instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
 name-or-stem ‹n› ‹stem› : Name -> Name -> Name
@@ -1011,6 +1020,7 @@ list like everything else, because elaboration is search:
 thena spine> :matches
 attack : ()
 try-core ‹t› : Core -> ()
+try-in-scope : ()
 abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
@@ -1381,7 +1391,7 @@ already there goes on being searched underneath them.
 ```
 thena spine> :consult examples/ChoicePoints.thena.rules
 loaded demo (3 rules)
-loaded standard (123 rules)
+loaded standard (126 rules)
 ```
 
 **The last thing you consulted is tried first.** The shipped base is consulted for
@@ -2209,6 +2219,7 @@ language and elaborated on load.
 | `attack` `intro` `solve` `regret` `abandon` | the hole operations |
 | `rename "‹a›"` | give the binding you are standing on a word, when it has lost its own |
 | `` try-core core`term` `` | propose a term for the focused hole |
+| `try-in-scope` | the same, with the term found for you from what is in scope |
 | `` apply-core core`f` `` / `` unify-refine-core core`t` `` | apply a function / refine by unification |
 | `goto-named "‹name›"` | move to a hole by name |
 | `goto-root` | move to the root of the development |

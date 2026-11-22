@@ -820,7 +820,10 @@ ranOk m = case runOut m of
 -- point between them is what makes it a search rather than a loop.
 everyHoleRule :: [String]
 everyHoleRule =
-  [ "attack", "try-core", "abandon"
+  [ "attack", "try-core"
+    -- **@try-in-scope@ asks @focus-is-hole@ and nothing else** (MS12), so it is
+    -- offered at every hole and at no guess.
+  , "try-in-scope", "abandon"
     -- **@rename@ is offered at every component** (MS12 phase 330): its head is
     -- @focus-is-component@, because a word belongs to a binder and all five
     -- components are one. It is therefore in this list and in every guess
@@ -877,7 +880,11 @@ splitHelpers :: [String]
 splitHelpers =
   [ "no-nesting"
   , "ihs-for", "ihs-for"
-  , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
+  , "reverse-onto", "reverse-onto"
+    -- **@any-of@ is headless like the list helpers either side of it** (MS12),
+    -- so it is offered wherever they are — the core fragment included.
+  , "any-of", "any-of"
+  , "apply-all", "apply-all"
   , "instantiate-with"
   , "name-or-stem", "name-or-stem"
   ]

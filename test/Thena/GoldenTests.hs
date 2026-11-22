@@ -1678,6 +1678,47 @@ tests =
         , "qed"
         , ":quit"
         ]
+      -- **A rule that finds its own hypothesis** (MS12): @in-scope@ answers the
+      -- context as terms, @any-of@ offers them as alternatives, and the guess
+      -- that does not type check is what drives the search on. The three cases
+      -- that matter are the three blocks below.
+    , script
+        "in-scope"
+        [ -- Innermost first, so the hypothesis that fits is the FIRST candidate
+          -- and there is no backtracking line at all.
+          ":theorem second : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> B -> B"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "goto second1"
+        , ":where"
+        , "try-in-scope"
+        , ":show"
+        , ":choices"
+        , ":abandon"
+          -- And the same statement with the answer at the OUTER binder: the
+          -- innermost candidate is tried, the guess is refused, and the machine
+          -- comes back for the next one.
+        , ":theorem first : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> B -> A"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "goto first1"
+        , "try-in-scope"
+        , ":show"
+        , ":abandon"
+          -- **Nothing in scope is a failure and not a crash**, and the message
+          -- names the helper that ran out of list rather than the rule the user
+          -- typed. That wording is a known rough edge.
+        , ":theorem alone : Type\8321"
+        , "try-in-scope"
+        , ":abandon"
+        , ":quit"
+        ]
     , script
         "help"
         [ ":help"

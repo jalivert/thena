@@ -1699,6 +1699,7 @@ nullaryOps =
   [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
   , ("prim-attack", Attack), ("prim-regret", Regret)
   , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
+  , ("in-scope", Op.InScopeAt)
   , ("fresh-level", Op.FreshLevel)
   , ("here", Here)
   , ("goto-root", Op.GotoRoot)

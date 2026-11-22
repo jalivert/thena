@@ -28,6 +28,21 @@ rule attack :- when focus-is-hole do prim-attack
 try-core : Core -> ()
 rule try-core t :- when focus-is-hole do prim-try t
 
+-- `try-core` WITHOUT BEING TOLD WHICH TERM, and it is the first rule in this
+-- base that can close a goal without being handed the answer. `in-scope`
+-- reports the entries at the focus as terms, `any-of` offers them one at a time,
+-- and a candidate whose type does not fit fails the guess and brings the search
+-- back for the next one.
+--
+-- **Nullary, so `prove` offers it.** Until this rule every nullary rule here was
+-- a hole-life operation — attack, abandon, intro, solve, regret — so a bare
+-- `prove` could move a proof around and never finish one.
+try-in-scope : ()
+rule try-in-scope :- when focus-is-hole
+  do hs = in-scope
+     ; h = any-of hs
+     ; prim-try h
+
 abandon : ()
 rule abandon :- when focus-is-hole do prim-abandon
 
@@ -394,6 +409,24 @@ rule reverse-onto [] acc :- do return acc
 rule reverse-onto [x, ...xs] acc :-
   do acc2 = prepend x acc
      ; r = reverse-onto xs acc2
+     ; return r
+
+-- EVERY ELEMENT OF A LIST, ONE AT A TIME, AS ALTERNATIVES.
+-- Each clause matches, so the call builds a choice point: the first answers the
+-- head, and a failure anywhere after the call comes back and takes the tail.
+-- This is Prolog's `member`, and it is what turns a list that an op /reports/
+-- into a search the machine runs.
+--
+-- **A rule and not a function, and that is the whole mechanism**: a function's
+-- matching clauses are cut to the first (`Thena.Rules.clauses`), so written as
+-- one it would answer the head of the list and never the rest.
+--
+-- It has no head because it reads nothing about the development — the same
+-- reason `reverse-onto` above has none.
+any-of : List a -> a
+rule any-of [x, ..._] :- do return x
+rule any-of [_, ...xs] :-
+  do r = any-of xs
      ; return r
 
 -- A term applied to each of a list of terms, left to right — which is what a

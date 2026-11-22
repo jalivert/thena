@@ -2,6 +2,7 @@ thena spine> :rules
 standard
   attack
   try-core ‹t›
+  try-in-scope
   abandon
   intro
   intro
@@ -34,6 +35,8 @@ standard
   ihs-for ‹t› ‹c›
   reverse-onto [] ‹acc›
   reverse-onto [x, ...xs] ‹acc›
+  any-of [x, ..._]
+  any-of [_, ...xs]
   apply-all ‹f› []
   apply-all ‹f› [x, ...xs]
   instantiate-with ‹f› ‹vs›
@@ -126,6 +129,7 @@ standard
 thena spine> :matches
 attack : ()
 try-core ‹t› : Core -> ()
+try-in-scope : ()
 abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
@@ -142,6 +146,7 @@ elaborate ‹t› : Surface -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
 apply-all ‹f› ‹list› : Core -> List Core -> Core
 instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
 name-or-stem ‹n› ‹stem› : Name -> Name -> Name
@@ -190,6 +195,7 @@ quantify ‹ty› : Core -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
 apply-all ‹f› ‹list› : Core -> List Core -> Core
 instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
 name-or-stem ‹n› ‹stem› : Name -> Name -> Name
@@ -233,6 +239,7 @@ quantify ‹ty› : Core -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
 apply-all ‹f› ‹list› : Core -> List Core -> Core
 instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
 name-or-stem ‹n› ‹stem› : Name -> Name -> Name
@@ -272,6 +279,7 @@ proving id : ∀ (A : Type₀) -> A -> A
 thena spine> :matches
 attack : ()
 try-core ‹t› : Core -> ()
+try-in-scope : ()
 abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
@@ -288,6 +296,7 @@ elaborate ‹t› : Surface -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
 apply-all ‹f› ‹list› : Core -> List Core -> Core
 instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
 name-or-stem ‹n› ‹stem› : Name -> Name -> Name
@@ -338,6 +347,7 @@ quantify ‹ty› : Core -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
 apply-all ‹f› ‹list› : Core -> List Core -> Core
 instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
 name-or-stem ‹n› ‹stem› : Name -> Name -> Name
@@ -388,6 +398,7 @@ type
 thena spine> :matches
 attack : ()
 try-core ‹t› : Core -> ()
+try-in-scope : ()
 abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
@@ -404,6 +415,7 @@ elaborate ‹t› : Surface -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
 apply-all ‹f› ‹list› : Core -> List Core -> Core
 instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
 name-or-stem ‹n› ‹stem› : Name -> Name -> Name
@@ -459,6 +471,7 @@ quantify ‹ty› : Core -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
 apply-all ‹f› ‹list› : Core -> List Core -> Core
 instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
 name-or-stem ‹n› ‹stem› : Name -> Name -> Name
@@ -514,6 +527,7 @@ quantify ‹ty› : Core -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
 apply-all ‹f› ‹list› : Core -> List Core -> Core
 instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
 name-or-stem ‹n› ‹stem› : Name -> Name -> Name

@@ -802,7 +802,11 @@ baseTests =
       -- of it: the choice point between them is the search.
       testCase "every rule whose head passes is a candidate" $
         [ nameDotted g | Rule g _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
-          @?= [ "attack", "try-core", "abandon"
+          @?= [ "attack", "try-core"
+                -- **The first nullary candidate that can close a goal** (MS12):
+                -- it reads the context itself, so it needs no argument and a
+                -- bare @prove@ therefore has it.
+              , "try-in-scope", "abandon"
                 -- **@rename@ is offered at every component** (MS12 phase 330),
                 -- a hole among them, so it is a candidate here.
               , "rename", "eliminate-core"
@@ -813,7 +817,10 @@ baseTests =
               ]
               ++ replicate 7 "elaborate"
               ++ [ "no-nesting", "ihs-for", "ihs-for"
-                 , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
+                 , "reverse-onto", "reverse-onto"
+                -- **Prolog's @member@** (MS12), headless like the list helpers
+                -- around it, so it is offered wherever they are.
+              , "any-of", "any-of", "apply-all", "apply-all"
                  , "instantiate-with"
                  , "name-or-stem", "name-or-stem" ]
               ++ replicate 6 "intro-arm-binders"

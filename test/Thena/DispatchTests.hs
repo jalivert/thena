@@ -413,7 +413,12 @@ dispatchableTests =
     [ testCase "matches shows try, dispatch does not" $ do
         let std = expectedBase
         names' (matches std emptyGlobals hole)
-          @?= ["attack", "try-core", "abandon"
+          @?= ["attack", "try-core"
+               -- **@try-in-scope@ is nullary and dispatch DOES run it** (MS12):
+               -- it finds its own term, so it is the one candidate in this list
+               -- that can close the goal. It is below @attack@ in the base, so
+               -- @attack@ is still what a bare @prove@ takes first.
+             , "try-in-scope", "abandon"
                -- **@rename@ is offered here too** (MS12 phase 330): its head is
                -- @focus-is-component@, and dispatch runs it no more than it runs
                -- @try-core@ — it takes a parameter.
@@ -427,7 +432,8 @@ dispatchableTests =
              , "claim", "assume", "quantify"]
                ++ replicate 7 "elaborate"
                ++ [ "no-nesting", "ihs-for", "ihs-for"
-                  , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
+                  , "reverse-onto", "reverse-onto", "any-of", "any-of"
+               , "apply-all", "apply-all"
                   , "instantiate-with"
                   , "name-or-stem", "name-or-stem" ]
                ++ replicate 6 "intro-arm-binders"
@@ -464,14 +470,14 @@ dispatchableTests =
                ++ ["run-block"]
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals hole)
-          @?= ["attack", "abandon", "prove"]
+          @?= ["attack", "try-in-scope", "abandon", "prove"]
 
       -- And that is what the engine actually runs: @try@ would have been first
       -- past @attack@, so a dispatch that did not skip it would fail on an
       -- unbound @Ref@ rather than offering @abandon@.
     , testCase "so the alternative after attack is abandon" $
         map pointAlts (choicePoints (ranTo (machine expectedBase hole [Do Ops.Prove])))
-          @?= [[rootName "abandon", rootName "prove"]]
+          @?= [[rootName "try-in-scope", rootName "abandon", rootName "prove"]]
     ]
   where
     names' it = [ nameDotted (ruleName r) | r <- drainIt it ]
