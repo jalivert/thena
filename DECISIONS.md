@@ -304,11 +304,21 @@ tree, which nothing kept before.
 
 **Each unfinished declaration says where it was written.** A line and a column,
 on `unfinishedAt`, so a frontend's row for it can be a place to go and not just
-a sentence — with the module's own file path, that is a destination. **Only
-top-level declarations have one**: a `namespace`, `import … where` or `consult …
-where` block is one item to the loader, so a declaration inside one reports the
-block's opening line. A declaration that reached the system as a tree rather
-than as text has no position, and says so.
+a sentence — with the module's own file path, that is a destination. A
+declaration that reached the system as a tree rather than as text has no
+position, and says so.
+
+**A block is not a unit of atomicity either.** *Decided 2026-11-22.* The loader
+walks into a `namespace`, `import … where`, `consult … where`, `private` or
+`open … in` block: the ops that open it run, its declarations are elaborated one
+at a time, and it is closed at the end. So one unfinished proof inside
+`namespace lemmata where { … }` leaves the rest of the group in, and what is
+written down as unfinished is the inner declaration — named under the block's
+prefix, at its own line and column. A block's own *entry* is still
+all-or-nothing, since there is nowhere to put what it holds if its namespace
+cannot be entered or its base cannot be pushed; and a block still ends where it
+ended, so its `open`s come off with it and the names an `import … where` reveals
+are writable in it and not after it.
 
 **Not yet**: a declaration that was left behind is reported, not resumable. It
 cannot be picked up at the prompt and finished.

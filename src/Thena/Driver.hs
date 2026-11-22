@@ -86,6 +86,12 @@ module Thena.Driver
   , Walked (..)
     -- * A suspended import (MS12 phase 309)
   , Importing (..)
+    -- **The walk's own work list and what it has run** (MS12 phase 336,
+    -- @~6g27s@), named here because 'Importing' carries both.
+  , Step (..)
+  , Close (..)
+  , Landed (..)
+  , landedNames
   , importSuspended
   , finishImport
   , abandonItem
@@ -155,6 +161,7 @@ module Thena.Driver
     -- * An item, and where it was written (MS12 phase 334, @~hcr2d@)
   , Placed (..)
   , unplaced
+  , itemsIn
   , Pos (..)
   , rawRuleDecls
   , LoadKind (..)
@@ -721,7 +728,7 @@ data Importing = Importing
     -- rest of its items are compiled when the wheel comes back, and what an
     -- import or a consult of this module brings is read off this — so the walk
     -- that resumes it builds the same 'Brought' the walk that started it did.
-  , importingDone   :: [Placed]
+  , importingDone   :: [Landed]
     -- ^ __the items that had gone in before the yield__ (MS12 phase 315), which
     -- is what the finished load names as declared. It was every item of the
     -- module until this phase, and a lenient load makes that a claim rather
@@ -733,7 +740,7 @@ data Importing = Importing
     -- that never declared anything would have been counted as declared.
     -- 'importingOn' carries it instead, and it joins this list in
     -- 'finishingImport' at the moment it really has gone in.
-  , importingOn     :: Placed
+  , importingOn     :: Landed
     -- ^ __the item the yield is inside__ (MS12 phase 317). It lands when the
     -- wheel comes back and the program runs out; it is given up when
     -- @:abandon@ says so, and then it is this that is written down as
@@ -744,8 +751,10 @@ data Importing = Importing
     -- goes back to in 'walkItems'. **So abandoning takes what the user did
     -- during the suspension**, which is his ruling of 2026-11-11 unchanged; what
     -- phase 317 narrows is the SCOPE, from the closure to the item.
-  , importingLeft   :: [Placed]
-    -- ^ __this module's items the loader had not reached__ (MS12 phase 315).
+  , importingLeft   :: [Step]
+    -- ^ __this module's steps the loader had not reached__ (MS12 phase 315),
+    -- **a 'Step' and not a 'Placed' since phase 336** (@~6g27s@): the end of a
+    -- block the suspension is standing inside is one of them.
     -- **They are carried rather than spliced onto the tape**: a yielding rule's
     -- @pc@ is the rule body's own program, so anything appended there runs
     -- inside the rule and not after the declaration.
@@ -2349,7 +2358,7 @@ data Item
     --
     -- **One per namespace**, so @open X Y Z@ regroups into three of these: the
     -- plural is the line's, not the item's.
-  | ItemNamespace GlobalName [Item]
+  | ItemNamespace GlobalName [Placed]
     -- ^ @namespace ‹name› where { … }@ (MS10 phase 254) — the namespace, and
     -- the items inside it.
     --
@@ -2357,14 +2366,20 @@ data Item
     -- printed back from these items and the nesting is what it is written
     -- with. The program 'surfaceProgram' builds /is/ flat: two ops around the
     -- inner instructions, which is where the prefix comes from.
-  | ItemOpenIn [Opened] [Item]
+    --
+    -- **AND THE ITEMS INSIDE ARE PLACED** (MS12 phase 336, @~6g27s@, his ruling
+    -- of 2026-11-22 that a composite item is walked into): 'walkItems' runs them
+    -- one at a time, so a declaration inside a block is a thing that can fail on
+    -- its own and a row that names it has a line to point at. The flattening is
+    -- the /walk's/, not the tree's — 'Step' is where the markers live.
+  | ItemOpenIn [Opened] [Placed]
     -- ^ @open X in ‹one declaration›@ (MS10 phase 254) — the opens, and the
     -- declaration they reach.
     --
     -- **A list of items because a declaration is one item here**, and the list
     -- is what makes the shape the same as 'ItemNamespace'\'s: both are a scope
     -- with contents, and 'surfaceProgram' treats them the same way.
-  | ItemConsult Reach ModuleName (Maybe [Item])
+  | ItemConsult Reach ModuleName (Maybe [Placed])
     -- ^ @consult ‹module›@ (MS11 phase 273) — **a rule base this module's
     -- proofs are searched against**, named as a file and not as a namespace,
     -- and under @public@ one that travels to this module's importers (phase
@@ -2382,7 +2397,7 @@ data Item
     -- file is searched against is 'consultPushes', and whether a base travels
     -- is 'publicPushes'. 'moduleConsults' — the list the door with no IO
     -- refuses on — ignores it, because an unread base is unread either way.
-  | ItemImport Reach ModuleName Selection (Maybe [Item])
+  | ItemImport Reach ModuleName Selection (Maybe [Placed])
     -- ^ @import ‹module›@ (MS11 phase 274) — **a surface module this one depends
     -- on**, named as a file and not as a namespace — **and how far it reaches**
     -- (phase 291).
@@ -2397,7 +2412,7 @@ data Item
     -- 'LeaveReveal' around the inner program. **So 'fileImports' and
     -- 'moduleImports' are two different questions** — what this module may name
     -- throughout, and what has to be loaded first.
-  | ItemPrivate [Item]
+  | ItemPrivate [Placed]
     -- ^ @private ‹declaration›@ (MS11 phase 286, @~jmw4k@) — **the declaration
     -- is the file's own**, and no module that imports this one may name what it
     -- declares.
@@ -2458,10 +2473,14 @@ data Item
 -- is 'Nothing' for all three of those and a field on twelve constructors would
 -- have said otherwise twelve times.
 --
--- **Only the top level of a file has one.** A @namespace@, @import … where@ or
--- @consult … where@ block is one item to the loader, so the declarations inside
--- it are not things a row can point at — @~6g27s@ is the item that would change
--- that and it is his.
+-- **EVERY DECLARATION A FILE WRITES HAS ONE, INSIDE A BLOCK OR NOT** (MS12
+-- phase 336, @~6g27s@, his ruling of 2026-11-22). It was the top level alone
+-- until then, because a block was one item to the loader and a position inside
+-- one had nowhere to arrive; the loader walks into a block now, so the
+-- declaration that did not go in is the inner one and its own line is what a
+-- row points at. A block's first declaration takes the position of the brace
+-- that opened it ('Thena.Surface.Parser.openingAt'), every other one the @;@ in
+-- front of it.
 data Placed = Placed
   { placedAt   :: Maybe Pos
     -- ^ the line and column the item starts at, where it was read from a file
@@ -2475,6 +2494,16 @@ data Placed = Placed
 -- assembled: there is no file and no line, and saying so is the point.
 unplaced :: Item -> Placed
 unplaced = Placed Nothing
+
+-- | __The items inside a block, without their places__ (MS12 phase 336,
+-- @~6g27s@).
+--
+-- Every question /about/ a module — what it declares, what it imports, what it
+-- consults, what it withholds — walks into a block and none of them cares where
+-- a declaration was written. **Only the loader does**, which is why the places
+-- are on the list and this is how everything else gets past them.
+itemsIn :: [Placed] -> [Item]
+itemsIn = map placedItem
 
 -- | Pair each signature with the equation after it, and pass datatypes through.
 --
@@ -2500,13 +2529,6 @@ regroup = go
       (is, rest) <- one ds
       (map (Placed at) is ++) <$> go rest
 
-    -- | **A nested block's declarations, without positions** (MS12 phase 334,
-    -- @~hcr2d@). 'ItemNamespace' and the two acts that state a block hold
-    -- @[Item]@ because a composite item is ONE item to the loader, so a
-    -- position inside one has nowhere to arrive — @~6g27s@ is the item that
-    -- would change that and it is his to rule on.
-    inner ds = map placedItem <$> go [ (Nothing, d) | d <- ds ]
-
     -- | **One declaration, and what is left** (MS10 phase 254). It was a
     -- straight list walk until @open X in ‹declaration›@ needed to know where
     -- one declaration ends: a signature and its equation are two of these and
@@ -2520,13 +2542,15 @@ regroup = go
     -- @open X in@ before a signature covers the equation under it too.
     one ((at, SurfaceOpenIn ns spec d) : rest) = do
       (is, rest') <- one ((at, d) : rest)
-      Right ([ItemOpenIn [ opened spec (ps ++ [x]) | (ps, x) <- ns ] is], rest')
+      Right ( [ItemOpenIn [ opened spec (ps ++ [x]) | (ps, x) <- ns ]
+                          (map (Placed at) is)]
+            , rest' )
     -- **The same walk, for the same reason** (MS11 phase 286): @private@ before
     -- a signature covers the equation under it, because this is the pass that
     -- knows where one declaration ends.
     one ((at, SurfacePrivate d) : rest) = do
       (is, rest') <- one ((at, d) : rest)
-      Right ([ItemPrivate is], rest')
+      Right ([ItemPrivate (map (Placed at) is)], rest')
     -- **The declarations inside are regrouped by the same pass** (MS10 phase
     -- 254), so a signature and its equation pair inside a namespace exactly as
     -- they do outside one, and nesting needs nothing of its own.
@@ -2537,14 +2561,14 @@ regroup = go
     -- its equation pair inside an @import … where@ exactly as they do outside
     -- one, and nesting needs nothing of its own.
     one ((_, SurfaceConsult r ps x ds) : rest) = do
-      is <- traverse inner ds
+      is <- traverse go ds
       Right ([ItemConsult r (moduleFromSteps ps x) is], rest)
     -- A file's name again, and the steps are directories again (MS11 phase 274).
     one ((_, SurfaceImport r ps x sel ds) : rest) = do
-      is <- traverse inner ds
+      is <- traverse go ds
       Right ([ItemImport r (moduleFromSteps ps x) sel is], rest)
     one ((_, SurfaceNamespace ps x ds) : rest) = do
-      is <- inner ds
+      is <- go ds
       Right ([ItemNamespace (GlobalName ps x) is], rest)
     -- **Read here, so an unreadable block is a syntax error** and the module
     -- stops before anything in it elaborates (MS6 phase 101). What its names
@@ -2680,7 +2704,7 @@ surfaceProgramIn ns0 brought n0 items = foldl (item ns0) ([], n0) items
   -- block named ends up first and its dependencies sit under it — the file-wide
   -- order, one gate in.
   item ns (acc, n) (ItemConsult _ m (Just is)) =
-    let (inner, n1) = foldl (item ns) ([], n) is
+    let (inner, n1) = foldl (item ns) ([], n) (map placedItem is)
         (bs, gs) = broughtConsult brought m
      in ( acc ++ [ Do (PushBase (basePath b)) | b <- reverse bs ]
               ++ [Do (Reveal gs)]
@@ -2712,7 +2736,7 @@ surfaceProgramIn ns0 brought n0 items = foldl (item ns0) ([], n0) items
   -- lifts the concealment and the pair that opens the namespace are the same
   -- two gates, and a file-wide import gets both from 'opensFor'.
   item ns (acc, n) (ItemImport _ m sel (Just is)) =
-    let (inner, n1) = foldl (item ns) ([], n) is
+    let (inner, n1) = foldl (item ns) ([], n) (map placedItem is)
         gs = broughtImport brought m sel
      in ( acc ++ [Do (Reveal gs)] ++ [ Do (Open o) | o <- openedWide m ]
               ++ inner
@@ -2751,9 +2775,9 @@ surfaceProgramIn ns0 brought n0 items = foldl (item ns0) ([], n0) items
   -- **The inner program and nothing around it** (MS11 phase 286). @private@ is
   -- a mark on a declaration, not a scope: it changes who may name the result and
   -- not how the result is built, so there is no op to emit.
-  item ns (acc, n) (ItemPrivate is) = foldl (item ns) (acc, n) is
+  item ns (acc, n) (ItemPrivate is) = foldl (item ns) (acc, n) (map placedItem is)
   item ns (acc, n) (ItemOpenIn os is) =
-    let (inner, n1) = foldl (item ns) ([], n) is
+    let (inner, n1) = foldl (item ns) ([], n) (map placedItem is)
      in ( acc ++ [ Do (Open o) | o <- os ] ++ inner
               ++ [ Do LeaveOpen | _ <- os ]
         , n1 )
@@ -2780,7 +2804,7 @@ surfaceProgramIn ns0 brought n0 items = foldl (item ns0) ([], n0) items
   -- opens, so the difference is exactly what this block left pushed.
   item ns (acc, n) (ItemNamespace g is) =
     let inner' = ns ++ nameSteps g ++ [nameWord g]
-        (inner, n1) = foldl (item inner') ([], n) is
+        (inner, n1) = foldl (item inner') ([], n) (map placedItem is)
         pushed = length [ () | Do (Open _) <- inner ]
                    - length [ () | Do LeaveOpen <- inner ]
      in ( acc ++ [Do (EnterNamespace (Lit (VName g)))] ++ inner
@@ -3247,38 +3271,157 @@ isCompleted r = case r of
 data Stopped = Stopped
   { stoppedBy     :: Response
     -- ^ the run that stopped the walk — a @yield@, or a refusal under 'Strict'
-  , stoppedOn     :: Placed
-    -- ^ the item it was running, **and where it was written** (MS12 phase 334):
+  , stoppedOn     :: Landed
+    -- ^ the item it was running, **where it was written, and the namespace it is
+    -- written in** (MS12 phases 334 and 336):
     -- @:abandon@ turns this very item into an 'Unfinished', so the position has
     -- to survive the suspension with it
   , stoppedBefore :: Session
     -- ^ the session as that item found it, which is what giving the item up
     -- goes back to
-  , stoppedLeft   :: [Placed]
-    -- ^ the items it never reached. **Carried, never spliced onto the tape** —
+  , stoppedLeft   :: [Step]
+    -- ^ the steps it never reached. **Carried, never spliced onto the tape** —
     -- 'importingLeft' says why.
+    --
+    -- **A 'Step' and not a 'Placed' since MS12 phase 336** (@~6g27s@): the walk
+    -- goes into a block now, so what is left of a suspended module may include
+    -- the end of a block it is standing inside, and that is a step like any
+    -- other. It is what makes a @yield@ inside a @namespace@ resume into the
+    -- namespace and leave it once.
   }
+
+-- | __One thing the walk has left to do__ (MS12 phase 336, @~6g27s@, his ruling
+-- of 2026-11-22 that a composite item is walked into).
+--
+-- **The tree is flattened by the WALK and not by the item list.** A module is
+-- printed back from its items and the nesting is what it is written with, so
+-- 'ItemNamespace' stays a tree; what the loader needs is a work list it can stop
+-- in the middle of, and a block's end has to be on that list or a suspension
+-- inside the block could not be resumed.
+data Step
+  = Walking [String] Placed
+    -- ^ an item to elaborate, **and the blocks it is written inside** — the
+    -- prefix a @namespace@ block puts on what it holds, empty for a top-level
+    -- item. **Inside the module and not from the root**: every item of a module
+    -- shares the module's own namespace, which is the walk's argument, and a
+    -- summary of what landed names it the way the file writes it.
+  | Closing Close
+    -- ^ the end of a block the walk entered
+  deriving (Eq, Show)
+
+-- | __An item that ran, and the namespace it was written in__ (MS12 phase 336,
+-- @~6g27s@).
+--
+-- **A pair because a declaration inside a block declares a prefixed name.**
+-- @namespace lemmata where { good : … }@ declares @lemmata.good@, and once the
+-- loader runs that declaration on its own the item no longer says so — the
+-- block it came out of is somewhere else in the tree. So the walk carries the
+-- prefix beside the item, and every summary of what landed or did not asks
+-- 'landedNames' rather than the item alone.
+data Landed = Landed
+  { landedIn   :: [String]
+    -- ^ the namespace the item is written in — the module's own for a top-level
+    -- item, the block's prefix for one inside a @namespace@ block
+  , landedItem :: Placed
+  }
+  deriving (Eq, Show)
+
+-- | __What a landed item declared, under the prefix it landed at__ (MS12 phase
+-- 336, @~6g27s@).
+landedNames :: Landed -> [String]
+landedNames l = declaredNames (landedIn l) (placedItem (landedItem l))
+
+-- | __The end of a block, as data__ (MS12 phase 336, @~6g27s@).
+--
+-- **It carries what to run and not what was entered**, so that nothing has to
+-- be recomputed when a suspension is resumed hours later: the instructions are
+-- the ones 'surfaceProgramIn' would have put after the block's inner program,
+-- and they were worked out when the block was entered.
+data Close = Close
+  { closeOn      :: Landed
+    -- ^ the composite item being closed, for the refusal if the close itself
+    -- cannot run
+  , closeDepth   :: Maybe Int
+    -- ^ __how many @open@s to take off, said as a depth to come back to__ — the
+    -- length 'Thena.Core.Term.scopeOpens' had when the block was entered.
+    --
+    -- **It is a depth and not a count because the count is not known in
+    -- advance**: a @namespace@ block's items may write a bare @open@, and until
+    -- this phase the pops were counted off the one compiled program the whole
+    -- block became. **'Nothing' is a block that pops exactly its own**, which is
+    -- what @open … in@ and @import … where@ do, and leaving an inner @open@
+    -- standing is their behaviour from MS11 and not this phase's business.
+  , closeOps     :: [Instr]
+    -- ^ what to run once the @open@s are off
+  }
+  deriving (Eq, Show)
 
 walkItems
   :: Leniency
   -> Brought
-  -> [String]      -- ^ the namespace the items are written in
+  -> [String]      -- ^ the namespace the module's items are written in
   -> Session
   -> [Warning]     -- ^ what this load has warned about so far
-  -> [Placed]      -- ^ what has gone in so far, newest first
+  -> [Landed]      -- ^ what has gone in so far, newest first
   -> [Unfinished]  -- ^ what has not, newest first
-  -> [Placed]      -- ^ still to run
-  -> (Session, [Warning], [Placed], [Unfinished], Maybe Stopped)
-walkItems leniency brought ns = go
+  -> [Step]        -- ^ still to do
+  -> (Session, [Warning], [Landed], [Unfinished], Maybe Stopped)
+walkItems leniency brought base = go
   where
   go st ws done unfin [] = (st, ws, reverse done, reverse unfin, Nothing)
-  go st ws done unfin (p : rest) =
+  -- **THE END OF A BLOCK** (MS12 phase 336, @~6g27s@). The @open@s the block
+  -- left pushed come off, then its own closing ops, as one program — the same
+  -- shape entering it was. **It declares nothing, so it joins neither list**:
+  -- a close is bookkeeping and not an item, and a user has nothing to fix if
+  -- one fails.
+  go st ws done unfin (Closing c : rest) =
+    let m0   = sessionMachine st
+        pops = case closeDepth c of
+                 Nothing -> []
+                 Just d  -> [ Do LeaveOpen
+                            | _ <- [ 1 .. length (scopeOpens (scope m0)) - d ] ]
+     in case progress Nothing st { sessionMachine = load (pops ++ closeOps c) m0 } [] [] of
+          (st', r)
+            | isCompleted r -> go st' ws done unfin rest
+            | otherwise     ->
+                ( st', ws, reverse done, reverse unfin
+                , Just (Stopped r (closeOn c) st rest) )
+  -- **A COMPOSITE ITEM IS ENTERED AND WALKED INTO** (MS12 phase 336, @~6g27s@,
+  -- his ruling of 2026-11-22). It is the three moves
+  -- 'loadProofItemsConsultingAt' already makes for a module body, one level
+  -- down: the ops that open the block are run as their own program, its
+  -- declarations are spliced onto the work list in front of the block's end,
+  -- and the machine carries the scope from one to the next the way it carries
+  -- @globals@.
+  --
+  -- **The block's ENTRY is still all-or-nothing.** There is nowhere to put the
+  -- declarations if the namespace cannot be entered or the base cannot be
+  -- pushed, so the composite item fails as one item — which is what the whole
+  -- block did before this phase, and the only thing left of that bargain.
+  go st ws done unfin (Walking ns p : rest)
+    | Just (pre, inner, closer) <- opening ns p =
+        let m0    = sessionMachine st
+            depth = length (scopeOpens (scope m0))
+            after = inner ++ [ Closing (c depth) | Just c <- [closer] ] ++ rest
+            here  = Landed ns p
+         in if null pre
+              then go st ws done unfin after
+              else case progress Nothing st { sessionMachine = load pre m0 } [] [] of
+                (st', r) | isCompleted r -> go st' ws done unfin after
+                (st', r) -> case leniency of
+                  Strict  ->
+                    (st', ws, reverse done, reverse unfin, Just (Stopped r here st rest))
+                  Lenient ->
+                    go (rolledBack st st') ws done
+                       (Unfinished (landedNames here) (placedAt p)
+                                   (stoppedAs r) : unfin) rest
+  go st ws done unfin (Walking ns p : rest) =
     let it       = placedItem p
         m0       = sessionMachine st
-        (is, n1) = surfaceProgramIn ns brought (names m0) [it]
+        (is, n1) = surfaceProgramIn (base ++ ns) brought (names m0) [it]
      in case progress Nothing st { sessionMachine = load is m0 { names = n1 } } [] [] of
           (st', Ran _ ws' Completed) ->
-            go st' (ws ++ ws') (p : done) unfin rest
+            go st' (ws ++ ws') (Landed ns p : done) unfin rest
           -- **A YIELD STILL STOPS THE WHOLE LOAD** (MS12 phase 309, his
           -- ruling of 2026-11-11) — /"it suspends the elaboration then
           -- and there and hands control to the prompt"/. A hole is the
@@ -3305,16 +3448,64 @@ walkItems leniency brought ns = go
           -- module goes on — so the item travels in 'Stopped' and is put in one
           -- of the two lists by whoever finishes the import.
           (st', r@(Ran _ ws' (Yielded _))) ->
-            (st', ws ++ ws', reverse done, reverse unfin, Just (Stopped r p st rest))
+            ( st', ws ++ ws', reverse done, reverse unfin
+            , Just (Stopped r (Landed ns p) st rest) )
           (st', other) -> case leniency of
             -- **Strict is what it always was**: the item's refusal is the
             -- module's, and the caller puts the session back.
-            Strict  -> (st', ws, reverse done, reverse unfin, Just (Stopped other p st rest))
+            Strict  ->
+              ( st', ws, reverse done, reverse unfin
+              , Just (Stopped other (Landed ns p) st rest) )
             -- **Lenient carries on.** The item is put back and written
             -- down, and the loader goes to the next one.
             Lenient ->
               go (rolledBack st st') ws done
-                 (Unfinished (declaredNames it) (placedAt p) (stoppedAs other) : unfin) rest
+                 (Unfinished (declaredNames ns it) (placedAt p)
+                             (stoppedAs other) : unfin) rest
+
+  -- | __A composite item, pulled apart into enter, inside and close__ (MS12
+  -- phase 336, @~6g27s@).
+  --
+  -- **The ops are exactly the ones 'surfaceProgramIn' puts around the inner
+  -- program**, which is what keeps the two readings of a block the same thing:
+  -- a @declare@ line compiles the whole block as one program and the loader
+  -- walks it, and neither may mean something the other does not.
+  --
+  -- @Nothing@ is everything else — a theorem, a datatype, a @do@ block, an
+  -- @open@ line, an act with no block — and those are run as they always were.
+  opening ns p = case placedItem p of
+    -- Two ops around the items inside, and **the @open@s the block added come
+    -- off with it** — his ruling @~ckmsk@, which is why this one closes to a
+    -- depth and the others do not.
+    ItemNamespace g is ->
+      Just ( [Do (EnterNamespace (Lit (VName g)))]
+           , map (Walking (ns ++ nameSteps g ++ [nameWord g])) is
+           , Just (\d -> Close (Landed ns p) (Just d) [Do LeaveNamespace]) )
+    -- The opens go on, the declaration runs, the opens come off.
+    ItemOpenIn os is ->
+      Just ( [ Do (Open o) | o <- os ]
+           , map (Walking ns) is
+           , Just (\_ -> Close (Landed ns p) Nothing [ Do LeaveOpen | _ <- os ]) )
+    -- **A mark and not a scope**, so there is nothing to enter and nothing to
+    -- close: the declarations inside are spliced onto the work list as they
+    -- stand, and 'privateIn' reads the tree for who may name them.
+    ItemPrivate is -> Just ([], map (Walking ns) is, Nothing)
+    -- The base goes on, the proofs run against it, the base comes off — and its
+    -- publications are revealed with it.
+    ItemConsult _ m (Just is) ->
+      let (bs, gs) = broughtConsult brought m
+       in Just ( [ Do (PushBase (basePath b)) | b <- reverse bs ] ++ [Do (Reveal gs)]
+               , map (Walking ns) is
+               , Just (\_ -> Close (Landed ns p) Nothing
+                             ([Do LeaveReveal] ++ [ Do PopBase | _ <- bs ])) )
+    -- The frame goes on, the declarations run, the frame comes off.
+    ItemImport _ m sel (Just is) ->
+      let gs = broughtImport brought m sel
+       in Just ( [Do (Reveal gs)] ++ [ Do (Open o) | o <- openedWide m ]
+               , map (Walking ns) is
+               , Just (\_ -> Close (Landed ns p) Nothing
+                             ([ Do LeaveOpen | _ <- openedWide m ] ++ [Do LeaveReveal])) )
+    _ -> Nothing
 
 -- **AND THE @open@S IT STARTS WITH ARE THE PRELUDE'S ALONE** (MS11 phase 283,
 -- @~w46f8@, narrowed at phase 293 by his ruling of 2026-11-06) — the third
@@ -3446,7 +3637,7 @@ loadProofItemsConsultingAt leniency (Pool poolOf published heldBases pushable) s
           (s', bad) | not (isCompleted bad) -> (rolledBack s s', bad)
           (opened, _) ->
             case walkItems leniency brought (moduleNamespace modName)
-                           opened [] [] [] placed of
+                           opened [] [] [] (map (Walking []) placed) of
             -- **A YIELD, and the rest of the module is standing on the tape**
             -- (MS12 phase 309, his ruling of 2026-11-11). The arm below rolls
             -- back everything that did not finish, and until phase 309 that
@@ -3526,8 +3717,8 @@ loadProofItemsConsultingAt leniency (Pool poolOf published heldBases pushable) s
               case progress Nothing s' { sessionMachine = load leaving (sessionMachine s') } [] [] of
                 (s'', bad) | not (isCompleted bad) -> (rolledBack s s'', bad)
                 (closed, _) ->
-                  let declared = concatMap (declaredNames . placedItem) done
-                      blocks   = sum (map (blocksIn . placedItem) done)
+                  let declared = concatMap landedNames done
+                      blocks   = sum (map (blocksIn . placedItem . landedItem) done)
                       -- **AND WHAT TRAVELS THAT THE HEADER DOES NOT LIST**
                       -- (MS11 phase 307, @~f8x53@), appended after the run's
                       -- own: a warning is a footnote to what went in, which is
@@ -3537,7 +3728,7 @@ loadProofItemsConsultingAt leniency (Pool poolOf published heldBases pushable) s
                       -- them: an import inside an item that did not go through
                       -- brought nothing, so warning about what it would have
                       -- carried would name a dependency the session has not got.
-                      warns    = ws ++ unlistedTravelling closed (map placedItem done)
+                      warns    = ws ++ unlistedTravelling closed (map (placedItem . landedItem) done)
                    in if null unfin
                         then ( poolBack closed, ProofLoaded nm declared blocks warns )
                         -- **The 'Partly' record is the CALLER's to write**,
@@ -3824,8 +4015,8 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
           Nothing  -> ( importingOn imp : reverse (importingDone imp)
                       , reverse (importingUnfinished imp) )
           Just _   -> ( reverse (importingDone imp)
-                      , Unfinished (declaredNames (placedItem (importingOn imp)))
-                          (placedAt (importingOn imp)) ItWasAbandoned
+                      , Unfinished (landedNames (importingOn imp))
+                          (placedAt (landedItem (importingOn imp))) ItWasAbandoned
                           : reverse (importingUnfinished imp) )
         -- What the abandon is told to say, in front of the module's own answer:
         -- 'ProofLoadedPartly' names the item but cannot know that a lemma of
@@ -3834,7 +4025,7 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
           Nothing -> []
           Just _  ->
             [ ImportAbandonedItem (importingText imp)
-                                  (declaredNames (placedItem (importingOn imp)))
+                                  (landedNames (importingOn imp))
                                   [ g | g <- declaredSince (importingOnAt imp) s0
                                       , g `notElem` importingTheirs imp ]
             ]
@@ -3924,16 +4115,16 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
                     landed
                       | null unfin =
                           ProofLoaded (importingText imp)
-                                      (concatMap (declaredNames . placedItem) done)
-                                      (sum (map (blocksIn . placedItem) done))
+                                      (concatMap landedNames done)
+                                      (sum (map (blocksIn . placedItem . landedItem) done))
                                       (ws ++ unlistedTravelling restored
-                                               (map placedItem done))
+                                               (map (placedItem . landedItem) done))
                       | otherwise =
                           ProofLoadedPartly (importingText imp)
-                                            (concatMap (declaredNames . placedItem) done)
-                                            (sum (map (blocksIn . placedItem) done))
+                                            (concatMap landedNames done)
+                                            (sum (map (blocksIn . placedItem . landedItem) done))
                                             (ws ++ unlistedTravelling restored
-                                                     (map placedItem done))
+                                                     (map (placedItem . landedItem) done))
                                             unfin
                     s' = markedPartly (importingName imp) (importingText imp) unfin
                        $ case importingName imp of
@@ -4779,34 +4970,39 @@ rolledBack before after =
 -- **A list and not a @Maybe@ since MS10 phase 254**, because a @namespace@
 -- block holds items of its own and the summary names what landed, wherever it
 -- was written.
-declaredNames :: Item -> [String]
-declaredNames = go []
+--
+-- **AND THE PREFIX IS AN ARGUMENT SINCE MS12 PHASE 336** (@~6g27s@): the loader
+-- walks into a block, so it asks this of a declaration written inside one, and
+-- the namespace that declaration landed in is the walk's to say. 'Landed' is
+-- the pair and 'landedNames' is what every summary calls.
+declaredNames :: [String] -> Item -> [String]
+declaredNames = go
   where
     -- **The namespace it was written in comes with it**, because @declared A.one@
     -- is what landed and @declared one@ would name a key the environment has
     -- not got.
     go ns (ItemNamespace g is) =
-      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) is
-    go ns (ItemOpenIn _ is) = concatMap (go ns) is
+      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) (itemsIn is)
+    go ns (ItemOpenIn _ is) = concatMap (go ns) (itemsIn is)
     -- **A private declaration is still declared**, and the summary says so: the
     -- file declared it and this module may use it (MS11 phase 286).
-    go ns (ItemPrivate is)  = concatMap (go ns) is
+    go ns (ItemPrivate is)  = concatMap (go ns) (itemsIn is)
     -- **And a declaration inside a block an act states is the module's** (MS11
     -- phases 291 and 292): where its names could be written is the act's
     -- business, and what the file declared is this list's.
-    go ns (ItemImport _ _ _ ds)  = concatMap (go ns) (concat ds)
-    go ns (ItemConsult _ _ ds) = concatMap (go ns) (concat ds)
+    go ns (ItemImport _ _ _ ds)  = concatMap (go ns) (itemsIn (concat ds))
+    go ns (ItemConsult _ _ ds) = concatMap (go ns) (itemsIn (concat ds))
     go ns i = [ intercalate "." (ns ++ [n]) | Just n <- [declaredName i] ]
 
 -- | How many top-level blocks an item holds, for the summary's count.
 blocksIn :: Item -> Int
 blocksIn i = case i of
   ItemBlock _        -> 1
-  ItemNamespace _ is -> sum (map blocksIn is)
-  ItemOpenIn _ is    -> sum (map blocksIn is)
-  ItemPrivate is     -> sum (map blocksIn is)
-  ItemImport _ _ _ ds  -> sum (map blocksIn (concat ds))
-  ItemConsult _ _ ds -> sum (map blocksIn (concat ds))
+  ItemNamespace _ is -> sum (map blocksIn (itemsIn is))
+  ItemOpenIn _ is    -> sum (map blocksIn (itemsIn is))
+  ItemPrivate is     -> sum (map blocksIn (itemsIn is))
+  ItemImport _ _ _ ds  -> sum (map blocksIn (itemsIn (concat ds)))
+  ItemConsult _ _ ds -> sum (map blocksIn (itemsIn (concat ds)))
   _                  -> 0
 
 -- | Every rule base this module consults, in written order (MS11 phase 273).
@@ -4822,14 +5018,14 @@ moduleConsults = concatMap go
     go i = case i of
       ItemConsult _ m ds -> m : inside ds
       ItemImport _ _ _ ds  -> inside ds
-      ItemNamespace _ is -> moduleConsults is
-      ItemOpenIn _ is    -> moduleConsults is
-      ItemPrivate is     -> moduleConsults is
+      ItemNamespace _ is -> moduleConsults (itemsIn is)
+      ItemOpenIn _ is    -> moduleConsults (itemsIn is)
+      ItemPrivate is     -> moduleConsults (itemsIn is)
       _                  -> []
     -- **A consult inside a block is still a file the load must read** (MS11
     -- phase 292): where it is in force is the block's business and whether the
     -- disc can be reached is this list's.
-    inside = maybe [] moduleConsults
+    inside = maybe [] (moduleConsults . itemsIn)
 
 -- | __Which bases a block of this file is searched against__, in written order
 -- (MS11 phase 292).
@@ -4845,12 +5041,12 @@ scopedConsults :: [Item] -> [ModuleName]
 scopedConsults = concatMap go
   where
     go i = case i of
-      ItemConsult _ m (Just is) -> m : scopedConsults is
+      ItemConsult _ m (Just is) -> m : scopedConsults (itemsIn is)
       ItemConsult _ _ Nothing   -> []
-      ItemImport _ _ _ ds         -> maybe [] scopedConsults ds
-      ItemNamespace _ is        -> scopedConsults is
-      ItemOpenIn _ is           -> scopedConsults is
-      ItemPrivate is            -> scopedConsults is
+      ItemImport _ _ _ ds         -> maybe [] (scopedConsults . itemsIn) ds
+      ItemNamespace _ is        -> scopedConsults (itemsIn is)
+      ItemOpenIn _ is           -> scopedConsults (itemsIn is)
+      ItemPrivate is            -> scopedConsults (itemsIn is)
       _                         -> []
 
 -- | __Which modules this file may name throughout__ (MS11 phase 291).
@@ -4877,11 +5073,11 @@ fileImports = concatMap go
   where
     go i = case i of
       ItemImport _ m sel Nothing  -> [(m, sel)]
-      ItemImport _ _ _ (Just is) -> fileImports is
-      ItemConsult _ _ ds      -> maybe [] fileImports ds
-      ItemNamespace _ is      -> fileImports is
-      ItemOpenIn _ is         -> fileImports is
-      ItemPrivate is          -> fileImports is
+      ItemImport _ _ _ (Just is) -> fileImports (itemsIn is)
+      ItemConsult _ _ ds      -> maybe [] (fileImports . itemsIn) ds
+      ItemNamespace _ is      -> fileImports (itemsIn is)
+      ItemOpenIn _ is         -> fileImports (itemsIn is)
+      ItemPrivate is          -> fileImports (itemsIn is)
       _                       -> []
 
 -- | __Every import in the file with the clause it wrote__, blocks included
@@ -4895,11 +5091,11 @@ importClauses :: [Item] -> [(ModuleName, Selection)]
 importClauses = concatMap go
   where
     go i = case i of
-      ItemImport _ m sel ds -> (m, sel) : maybe [] importClauses ds
-      ItemConsult _ _ ds    -> maybe [] importClauses ds
-      ItemNamespace _ is    -> importClauses is
-      ItemOpenIn _ is       -> importClauses is
-      ItemPrivate is        -> importClauses is
+      ItemImport _ m sel ds -> (m, sel) : maybe [] (importClauses . itemsIn) ds
+      ItemConsult _ _ ds    -> maybe [] (importClauses . itemsIn) ds
+      ItemNamespace _ is    -> importClauses (itemsIn is)
+      ItemOpenIn _ is       -> importClauses (itemsIn is)
+      ItemPrivate is        -> importClauses (itemsIn is)
       _                     -> []
 
 -- | __A @public import@ whose names this file's @exporting@ clause does not
@@ -4987,11 +5183,11 @@ moduleImports :: [Item] -> [ModuleName]
 moduleImports = concatMap go
   where
     go i = case i of
-      ItemImport _ m _ ds   -> m : maybe [] moduleImports ds
-      ItemConsult _ _ ds  -> maybe [] moduleImports ds
-      ItemNamespace _ is -> moduleImports is
-      ItemOpenIn _ is    -> moduleImports is
-      ItemPrivate is     -> moduleImports is
+      ItemImport _ m _ ds   -> m : maybe [] (moduleImports . itemsIn) ds
+      ItemConsult _ _ ds  -> maybe [] (moduleImports . itemsIn) ds
+      ItemNamespace _ is -> moduleImports (itemsIn is)
+      ItemOpenIn _ is    -> moduleImports (itemsIn is)
+      ItemPrivate is     -> moduleImports (itemsIn is)
       _                  -> []
 
 -- | __Which of this module's imports travel on to its own importers__ (MS11
@@ -5004,12 +5200,12 @@ publicImports :: [Item] -> [(ModuleName, Selection)]
 publicImports = concatMap go
   where
     go i = case i of
-      ItemImport Public m sel ds -> (m, sel) : maybe [] publicImports ds
-      ItemImport Own _ _ ds    -> maybe [] publicImports ds
-      ItemConsult _ _ ds     -> maybe [] publicImports ds
-      ItemNamespace _ is  -> publicImports is
-      ItemOpenIn _ is     -> publicImports is
-      ItemPrivate is      -> publicImports is
+      ItemImport Public m sel ds -> (m, sel) : maybe [] (publicImports . itemsIn) ds
+      ItemImport Own _ _ ds    -> maybe [] (publicImports . itemsIn) ds
+      ItemConsult _ _ ds     -> maybe [] (publicImports . itemsIn) ds
+      ItemNamespace _ is  -> publicImports (itemsIn is)
+      ItemOpenIn _ is     -> publicImports (itemsIn is)
+      ItemPrivate is      -> publicImports (itemsIn is)
       _                   -> []
 
 -- | __One thing a module hands on to whoever imports it__ (MS11 phase 288,
@@ -5041,11 +5237,11 @@ publicPushes = concatMap go
       ItemConsult Own _ ds    -> inside ds
       ItemImport Public m _ ds  -> PublishedFrom m : inside ds
       ItemImport Own _ _ ds     -> inside ds
-      ItemNamespace _ is   -> publicPushes is
-      ItemOpenIn _ is      -> publicPushes is
-      ItemPrivate is       -> publicPushes is
+      ItemNamespace _ is   -> publicPushes (itemsIn is)
+      ItemOpenIn _ is      -> publicPushes (itemsIn is)
+      ItemPrivate is       -> publicPushes (itemsIn is)
       _                    -> []
-    inside = maybe [] publicPushes
+    inside = maybe [] (publicPushes . itemsIn)
 
 -- | __Which bases a module that is in hands on, in order__ (MS11 phase 288,
 -- @~jmw4k@).
@@ -5104,10 +5300,11 @@ consultedPool s done = reverse . concatMap go
       -- once. 'moduleConsults' is still the list of files to read.
       ItemConsult _ m Nothing  -> [m]
       ItemConsult _ _ (Just _) -> []
-      ItemImport _ m _ ds        -> published m ++ maybe [] (concatMap go) ds
-      ItemNamespace _ is -> concatMap go is
-      ItemOpenIn _ is    -> concatMap go is
-      ItemPrivate is     -> concatMap go is
+      ItemImport _ m _ ds        ->
+        published m ++ maybe [] (concatMap go . itemsIn) ds
+      ItemNamespace _ is -> concatMap go (itemsIn is)
+      ItemOpenIn _ is    -> concatMap go (itemsIn is)
+      ItemPrivate is     -> concatMap go (itemsIn is)
       _                  -> []
 
     published m = case [ rm | rm <- done, readModuleName rm == Just m ] of
@@ -5162,18 +5359,19 @@ privateIn :: [Item] -> [GlobalName]
 privateIn = concatMap (go [])
   where
     go ns (ItemNamespace g is) =
-      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) is
-    go ns (ItemOpenIn _ is) = concatMap (go ns) is
+      concatMap (go (ns ++ nameSteps g ++ [nameWord g])) (itemsIn is)
+    go ns (ItemOpenIn _ is) = concatMap (go ns) (itemsIn is)
     -- **Everything inside, and a nested @private@ adds nothing**: the mark is
     -- already on, and the inner walk names the same declaration.
-    go ns (ItemPrivate is)  = concatMap (named ns) is
+    go ns (ItemPrivate is)  = concatMap (named ns) (itemsIn is)
     go _  _                 = []
 
     -- The names the declarations under a @private@ declare, at this prefix.
     named ns i = case i of
-      ItemNamespace g is -> concatMap (named (ns ++ nameSteps g ++ [nameWord g])) is
-      ItemOpenIn _ is    -> concatMap (named ns) is
-      ItemPrivate is     -> concatMap (named ns) is
+      ItemNamespace g is ->
+        concatMap (named (ns ++ nameSteps g ++ [nameWord g])) (itemsIn is)
+      ItemOpenIn _ is    -> concatMap (named ns) (itemsIn is)
+      ItemPrivate is     -> concatMap (named ns) (itemsIn is)
       _ -> [ GlobalName ns n | Just n <- [declaredName i] ]
 
 -- | __Whether an export list reaches this name__ (MS11 phase 285, @~jmw4k@).

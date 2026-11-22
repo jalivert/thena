@@ -48,6 +48,11 @@ import Thena.Core.Term (GlobalName (..), Literal (..))
 -- and a @do@ block in a surface program is `instral` written in place
 -- (@discussion\/the-five-languages.md@ §0b, table F).
 import Thena.Instral.Concrete (RawInstr (..), Reach (..), Selection (..))
+-- **And 'Pos' is a block's declarations' too since MS12 phase 336** (@~6g27s@,
+-- his ruling of 2026-11-22 that a composite item is walked into): the loader
+-- walks into a @namespace@, @import … where@ or @consult … where@ block one
+-- declaration at a time, so a declaration inside one is something a pane's row
+-- can point at and its line has to reach 'Thena.Driver.regroup'.
 import Thena.Syntax.Lexer (BlockKind, Pos)
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
@@ -443,7 +448,7 @@ data SurfaceDecl
     -- > two = succ zero
     --
     -- is one declaration under one @open@, and @succ@ resolves in both lines.
-  | SurfaceConsult Reach [String] String (Maybe [SurfaceDecl])
+  | SurfaceConsult Reach [String] String (Maybe [(Maybe Pos, SurfaceDecl)])
     -- ^ @consult ‹module›@, or @public consult ‹module›@ — **what this file's
     -- proofs are searched against** (MS11 phase 273, his ruling of
     -- 2026-11-03), and whether that base travels to whoever imports this file
@@ -472,7 +477,7 @@ data SurfaceDecl
     -- this file is searched against a @public consult@\'s base too, at the
     -- position of the @import@ line that brought it in. A surface file still
     -- has no rules of its own — it hands on a base and never contains one.
-  | SurfaceImport Reach [String] String Selection (Maybe [SurfaceDecl])
+  | SurfaceImport Reach [String] String Selection (Maybe [(Maybe Pos, SurfaceDecl)])
     -- ^ @import ‹module›@, or @public import ‹module›@ — **which surface
     -- modules this file depends on** (MS11 phase 274, his ruling of
     -- 2026-11-03), and whether what they gave it travels on (phase 287).
@@ -501,7 +506,7 @@ data SurfaceDecl
     -- module's names the importer may then write is not settled** — that is
     -- @exporting ( … )@ and @public import@, and until they are built
     -- everything the imported module declared is reachable.
-  | SurfaceNamespace [String] String [SurfaceDecl]
+  | SurfaceNamespace [String] String [(Maybe Pos, SurfaceDecl)]
     -- ^ @namespace ‹name› where { … }@ — **declare a namespace and put these
     -- declarations in it** (MS10 phase 254).
     --

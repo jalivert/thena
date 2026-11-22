@@ -25,7 +25,7 @@ module Thena.View.Source
 import Data.List (intercalate)
 
 import Thena.Core.Term (GlobalName (..), Opened (..), nameDotted)
-import Thena.Driver (Item (..), moduleHiding, moduleText)
+import Thena.Driver (Item (..), Placed, itemsIn, moduleHiding, moduleText)
 import Thena.Surface.Concrete
   ( Surface (..)
   , Reach (..)
@@ -86,15 +86,15 @@ printItem i = case i of
   -- **The word, then the declaration it marks, on one line** (MS11 phase 286) —
   -- which is how it was written, and what reads back: @private@ takes a
   -- declaration, so a newline after it would start a new one.
-  ItemPrivate is -> case concatMap printItem is of
+  ItemPrivate is -> case concatMap printItem (itemsIn is) of
     first : rest -> ("private " ++ first) : rest
     []           -> ["private"]
-  ItemOpenIn os is -> case concatMap printItem is of
+  ItemOpenIn os is -> case concatMap printItem (itemsIn is) of
     first : rest -> (opens os ++ " in " ++ first) : rest
     []           -> [opens os ++ " in"]
   ItemNamespace g is ->
     ("namespace " ++ nameDotted g ++ " where")
-      : map ("  " ++) (intercalate [""] (map printItem is))
+      : map ("  " ++) (intercalate [""] (map printItem (itemsIn is)))
 
 -- | An @import@ or @consult@ line, with the block it reaches under it (MS11
 -- phases 291 and 292).
@@ -113,10 +113,10 @@ importClause sel = case sel of
   where
     named (ps, x) = nameDotted (GlobalName ps x)
 
-reaches :: String -> Maybe [Item] -> [String]
+reaches :: String -> Maybe [Placed] -> [String]
 reaches line Nothing   = [line]
 reaches line (Just is) =
-  (line ++ " where") : map ("  " ++) (intercalate [""] (map printItem is))
+  (line ++ " where") : map ("  " ++) (intercalate [""] (map printItem (itemsIn is)))
 
 -- | The word in front of an @import@ or a @consult@ that travels (MS11 phase
 -- 288).

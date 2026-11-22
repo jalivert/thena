@@ -1,0 +1,25 @@
+module test.modules.PausesInBlock where
+
+-- A `yield` reached INSIDE a `namespace` block (MS12 phase 336, ~6g27s).
+--
+-- The loader walks into a block now, so a suspension can land in the middle of
+-- one: what is left of the module when the wheel comes back includes the end of
+-- the block it is standing inside. `stands` is written after the yield and
+-- inside the block, `after` is written outside it, and which prefix each lands
+-- under is what says the block was left exactly once.
+
+data Two : Type₀ where
+  this : Two
+  that : Two
+
+open Two
+
+namespace inner where
+  picked : Two
+  picked = _
+
+  stands : Two
+  stands = that
+
+after : Two
+after = this

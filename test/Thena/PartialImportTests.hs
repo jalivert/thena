@@ -343,7 +343,127 @@ tests = testGroup "a module that loads as far as it can (MS12 phase 315)"
 
   , viewTests
   , positionTests
+  , blockTests
   ]
+
+-- | __One unfinished proof inside a group no longer throws the group away__
+-- (MS12 phase 336, @~6g27s@, his ruling of 2026-11-22).
+--
+-- **A @namespace@, @import … where@, @consult … where@, @private@ or
+-- @open … in@ block was ONE item to the loader** until this phase, so
+-- @namespace lemmata where { a ; b ; c }@ whose @b@ did not elaborate threw @a@
+-- and @c@ away with it and reported one unfinished item naming all three. The
+-- loader walks into a block now: the ops that open it run as their own program,
+-- its declarations are walked one at a time, and the block is closed at the end
+-- — the three moves 'Thena.Driver.loadProofItemsConsultingAt' already made for
+-- a module body.
+--
+-- **What is pinned here is both halves**: that a sibling lands, and that the
+-- block still ends where it ended — his ruling @~ckmsk@, that an @open@ reaches
+-- to the end of the block it is written in, is the one that a walk closing a
+-- block by hand could silently lose.
+blockTests :: TestTree
+blockTests = testGroup "the loader walks into a block (MS12 phase 336)"
+  [ testCase "a sibling of an unfinished declaration inside a namespace lands" $ do
+      s <- fresh
+      case snd (loadProofSource Lenient s grouped) of
+        ProofLoadedPartly _ ds _ _ unfin -> do
+          -- **The whole of the ruling**: two of the three go in, under the
+          -- block's prefix, and the one that did not is named on its own.
+          assertBool ("what went in: " ++ show ds) ("lemmata.good" `elem` ds)
+          assertBool ("what went in: " ++ show ds) ("lemmata.alsogood" `elem` ds)
+          assertBool ("what went in: " ++ show ds) ("lemmata.broken" `notElem` ds)
+          map unfinishedDeclares unfin @?= [["lemmata.broken"]]
+        other -> assertFailure ("expected a partial load, got " ++ show other)
+
+  , testCase "and the block is left, so what follows it is not inside it" $ do
+      -- The namespace is closed once, at the end: a declaration written under
+      -- the block lands at the module's own level and not under the prefix.
+      s <- fresh
+      case snd (loadProofSource Lenient s grouped) of
+        ProofLoadedPartly _ ds _ _ _ -> do
+          assertBool ("what went in: " ++ show ds) ("after" `elem` ds)
+          assertBool ("what went in: " ++ show ds) ("lemmata.after" `notElem` ds)
+        other -> assertFailure ("expected a partial load, got " ++ show other)
+
+  , testCase "an open written inside a block still comes off with it" $ do
+      -- **@~ckmsk@, and it is what the close has to get right.** The pops were
+      -- counted off the one program the whole block compiled to; the walk
+      -- cannot count ahead, so it closes to the depth the block was entered at.
+      -- @inside@ writes the constructor bare and lands; @outside@ writes it
+      -- bare after the block and is refused.
+      s <- fresh
+      case snd (loadProofSource Lenient s opened) of
+        ProofLoadedPartly _ ds _ _ unfin -> do
+          assertBool ("what went in: " ++ show ds) ("A.inside" `elem` ds)
+          map unfinishedDeclares unfin @?= [["outside"]]
+        other -> assertFailure ("expected a partial load, got " ++ show other)
+
+  , testCase "a declaration inside a nested block lands under both prefixes" $ do
+      -- Nesting is a longer prefix and costs no mechanism, which is as true of
+      -- the walk as it was of the one compiled program.
+      s <- fresh
+      case snd (loadProofSource Lenient s nested) of
+        ProofLoadedPartly _ ds _ _ unfin -> do
+          assertBool ("what went in: " ++ show ds) ("A.B.good" `elem` ds)
+          map unfinishedDeclares unfin @?= [["A.B.broken"]]
+        other -> assertFailure ("expected a partial load, got " ++ show other)
+
+  , testCase "a declaration inside an import's block lands, and the names still come off" $ do
+      -- The other close: a 'Reveal' and its 'LeaveReveal'. @good@ writes a name
+      -- the block reveals and lands; @outside@ writes it after the block and is
+      -- refused, which is what @import … where@ means. **Through the IO door**,
+      -- because the block names a module that has to be read off the disc.
+      (_, out) <- importing Lenient "test.modules.PartlyInBlock"
+      r <- about "test.modules.PartlyInBlock" out
+      case r of
+        ProofLoadedPartly _ ds _ _ unfin -> do
+          assertBool ("what went in: " ++ show ds) ("good" `elem` ds)
+          map unfinishedDeclares unfin @?= [["broken"], ["outside"]]
+        other -> assertFailure ("expected a partial load, got " ++ show other)
+  ]
+  where
+    grouped = unlines
+      [ "module test.Grouped where"
+      , ""
+      , "namespace lemmata where"
+      , "  good : Type\8321"
+      , "  good = Type\8320"
+      , ""
+      , "  broken : Flag.Flag"
+      , "  broken = nonesuch"
+      , ""
+      , "  alsogood : Type\8321"
+      , "  alsogood = Type\8320"
+      , ""
+      , "after : Type\8321"
+      , "after = Type\8320"
+      ]
+    opened = unlines
+      [ "module test.Opened where"
+      , ""
+      , "data Pair : Type\8320 where"
+      , "  only : Pair"
+      , ""
+      , "namespace A where"
+      , "  open Pair"
+      , "  inside : Pair"
+      , "  inside = only"
+      , ""
+      , "outside : Pair"
+      , "outside = only"
+      ]
+    nested = unlines
+      [ "module test.Nested where"
+      , ""
+      , "namespace A where"
+      , "  namespace B where"
+      , "    good : Type\8321"
+      , "    good = Type\8320"
+      , ""
+      , "    broken : Flag.Flag"
+      , "    broken = nonesuch"
+      ]
 
 -- | __Where a declaration that did not go in was written__ (MS12 phase 334,
 -- @~hcr2d@).
@@ -401,11 +521,13 @@ positionTests = testGroup "where an unfinished declaration was written (MS12 pha
         ProofLoadedPartly _ _ _ _ [u] -> unfinishedAt u @?= Just (Pos 3 3)
         other -> assertFailure ("expected one unfinished item, got " ++ show other)
 
-  , testCase "a group's position is the block's, because a group is one item" $ do
-      -- **@~6g27s@ is the open item here** — a @namespace@ block is one item to
-      -- the loader, so one unfinished proof inside it throws the group away and
-      -- the position a row can point at is the @namespace@ line. Pinned so that
-      -- whichever way he rules, the change is visible.
+  , testCase "a declaration inside a group carries its own line, and its prefix" $ do
+      -- **This was the other way round until MS12 phase 336** (@~6g27s@, his
+      -- ruling of 2026-11-22): a @namespace@ block was one item to the loader,
+      -- so the position a row could point at was the @namespace@ line and the
+      -- whole group was thrown away. The loader walks into a block now, so the
+      -- declaration that did not go in is the inner one, at the inner line, and
+      -- it is named under the block's prefix.
       s <- fresh
       let src = unlines
             [ "module test.Grouped where"
@@ -415,7 +537,25 @@ positionTests = testGroup "where an unfinished declaration was written (MS12 pha
             , "  broken = nonesuch"
             ]
       case snd (loadProofSource Lenient s src) of
-        ProofLoadedPartly _ _ _ _ [u] -> unfinishedAt u @?= Just (Pos 3 1)
+        ProofLoadedPartly _ _ _ _ [u] -> do
+          unfinishedDeclares u @?= ["lemmata.broken"]
+          unfinishedAt u @?= Just (Pos 4 3)
+        other -> assertFailure ("expected one unfinished item, got " ++ show other)
+
+  , testCase "the first declaration of a block takes the opening brace's column" $ do
+      -- **A block's first declaration has no @;@ in front of it**, so the brace
+      -- that opened the block is what stands there — 'openingAt'. Written out
+      -- with an explicit brace, which is the case where the two differ: under
+      -- layout the brace is inserted at the first declaration's own column, as
+      -- the test above shows, and written by hand it is wherever it is written.
+      s <- fresh
+      let src = unlines
+            [ "module test.Oneline where"
+            , ""
+            , "namespace lemmata where { broken : Flag.Flag ; broken = nonesuch }"
+            ]
+      case snd (loadProofSource Lenient s src) of
+        ProofLoadedPartly _ _ _ _ [u] -> unfinishedAt u @?= Just (Pos 3 25)
         other -> assertFailure ("expected one unfinished item, got " ++ show other)
 
   , testCase "an item a caller handed over has no position" $ do
