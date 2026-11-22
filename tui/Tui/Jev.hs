@@ -212,9 +212,16 @@ requestPayload cfg (JevState fields) candidates =
                          \the theorem under proof, the proof term as it stands, \
                          \the goals still open, and `applies_here` — the tactics \
                          \and rules that actually apply at the current focus, \
-                         \nearest first. `applies_here` is evidence and not a \
-                         \shortlist: a candidate outside it may still be the \
-                         \right answer. Which candidate is the user most likely \
+                         \nearest first. In `proof_term` and `open_goals`, a line \
+                         \starting with `>` is where the cursor stands right now \
+                         \— a candidate has to apply there to be something the \
+                         \user could actually type next. Any other line is a goal \
+                         \open elsewhere in the proof: context for what the proof \
+                         \needs eventually, not what the next word should do. \
+                         \`applies_here` is evidence and not a shortlist: a \
+                         \candidate outside it may still be the right answer, but \
+                         \it is still an answer for the `>` position, never for a \
+                         \goal elsewhere. Which candidate is the user most likely \
                          \about to write next?" ::
                            Text
                        )
