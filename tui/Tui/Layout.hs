@@ -108,6 +108,20 @@ data Pane
     -- **Since MS12 phase 323 the signature is
     -- @Budget -> Session -> [MatchView]@, one row per rule-arity rather
     -- than per clause** — pulled in 2026-11-19, see `~w2tk2`'s board.
+  | Jobs
+    -- ^ **what is running right now** — `~fp5nf`, his request of 2026-11-19:
+    -- /"there is also supposed to be another pane — background jobs … just so
+    -- that we can pause and interrupt search\/elaboration or stuff like
+    -- that"/. One row per piece of work in flight, so a long job is visible
+    -- rather than inferred from a frozen frame.
+    --
+    -- **Last in the enumeration on purpose.** 'allPanes' order is what the bar
+    -- lists the /closed/ panes in, so a new pane added anywhere else would
+    -- shuffle the chips he has learnt the order of.
+    --
+    -- **It draws nothing when nothing is running, and that is not an empty
+    -- pane to guard against** — it is the ordinary case, the same way the
+    -- choices pane is empty with no live choice point.
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Every pane there is, placed or not. **The width map is built over this and
@@ -129,6 +143,7 @@ paneName p = case p of
   Quests -> "proofs"
   ChoicePoints -> "choices"
   Matches -> "matches"
+  Jobs -> "jobs"
 
 paneByName :: String -> Maybe Pane
 paneByName w = lookup w [(paneName p, p) | p <- allPanes]

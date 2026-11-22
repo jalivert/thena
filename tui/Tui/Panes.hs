@@ -18,6 +18,8 @@ module Tui.Panes
   , moduleRows
   , FileKind (..)
   , outputRows
+  , Job (..)
+  , jobRows
   , offerGridWidget
   , stripKeyLabel
   , stripHintLines
@@ -449,6 +451,43 @@ data ModuleEntry = ModuleEntry
 outputRows :: Maybe String -> [String] -> [PaneRow n]
 outputRows Nothing _ = []
 outputRows (Just line) out = Heading line Nothing : map Entry out
+
+-- | **One piece of work in flight** — `~fp5nf`, the jobs pane's row.
+--
+-- Plain data, like every other row builder's input here: "Tui.App" reads the
+-- in-flight state and hands these over, so what the pane says is decided
+-- without a terminal and the drawing suite can hold it to its text.
+--
+-- **No start time and no elapsed yet.** Nothing in the TUI records when a job
+-- began — the re-run's thread keeps its own @start@ and posts only a
+-- past-half-a-second flag — so an elapsed column would be an invention. It is
+-- the next piece of work on the pane and not a gap in this type.
+data Job = Job
+  { jobLabel  :: String
+    -- ^ what is running, in the words the pane says it in: @re-running the
+    -- transcript@, not a constructor name.
+  , jobDetail :: Maybe String
+    -- ^ how far along, where the job can honestly say. **Only the transcript
+    -- re-run can**: it is a batch of lines and knows how many it has done. A
+    -- model request is one round trip with no interior, so it has 'Nothing'
+    -- rather than a fabricated bar — his ruling that a wait is shown as a
+    -- wait (`~swxcf`) is the spinner, and it does not become a percentage
+    -- here.
+  }
+  deriving (Eq, Show)
+
+-- | **The jobs pane** — `~fp5nf`, his request of 2026-11-19 for a pane showing
+-- /"background working AI agents but also any time our engine just \'goes and
+-- runs\' our program"/.
+--
+-- One 'Entry' per job, with its detail under it as a 'Detail' where it has
+-- one. **Nothing at all when nothing is running**, which is the ordinary case
+-- and not a state to put a message in: the choices pane is empty with no live
+-- choice point and says nothing about it either.
+jobRows :: [Job] -> [PaneRow n]
+jobRows js = concatMap row js
+  where
+    row j = Entry (jobLabel j) : maybe [] (pure . Detail) (jobDetail j)
 
 -- | **How a slot's key is written in its cell** — `~w2tk2` slice 2.
 --

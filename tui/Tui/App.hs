@@ -190,11 +190,13 @@ import Tui.Layout
 import Tui.Panes
   ( BarSpot (..)
   , FileKind (..)
+  , Job (..)
   , ModuleEntry (..)
   , ModuleMark (..)
   , PaneRow (..)
   , globalRows
   , hintRegionWidget
+  , jobRows
   , wideGlyphs
   , moduleRows
   , offerGridWidget
@@ -1520,6 +1522,11 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "edge.output",    surface (themePanel th) (themeOutput th))
   , (attrName "edge.choices",   surface (themePanel th) (themeChoices th))
   , (attrName "edge.matches",   surface (themePanel th) (themeMatches th))
+  -- | **The jobs pane** — `~fp5nf`. Entered with the pane rather than after
+  -- it, which is `~b2pq5`'s lesson: that pane went in with no entry here and
+  -- drew a colourless '▎' for nine days, and nothing but a pty screenshot
+  -- would ever have said so.
+  , (attrName "edge.jobs",      surface (themePanel th) (themeJobs th))
   -- | **The proofs pane, which had no accent of its own at all** — `~b2pq5`,
   -- noticed while the choices and matches panes were being given theirs. Its
   -- key is @proofs@ ('Tui.Layout.paneName' of 'Tui.Layout.Quests'), and with
@@ -1532,6 +1539,7 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "title.output",   surface (themePanel th) (themeOutput th))
   , (attrName "title.choices",  surface (themePanel th) (themeChoices th))
   , (attrName "title.matches",  surface (themePanel th) (themeMatches th))
+  , (attrName "title.jobs",     surface (themePanel th) (themeJobs th))
   , (attrName "title.proofs",   surface (themePanel th) (themeQuests th))
   -- | **The suggestion strip** — `~w2tk2` slice 1. Same scheme as every
   -- other pane and no special case: the edge and the title carry the accent,
@@ -2175,6 +2183,12 @@ draw st =
       -- already prints, through 'matchesView' rather than through
       -- 'Thena.Render': never blocked, simply never drawn until now.
       Matches -> pane' (paneBody (matchRows (matchesView budget s)))
+      -- | **What is running right now** — `~fp5nf`, his request of
+      -- 2026-11-19. **The one pane that reads no 'Session' at all**: a job is
+      -- the TUI's own in-flight work, so 'jobsNow' reads 'St' and nothing
+      -- else, and this is the only pane whose content a 'Budget' has no
+      -- bearing on.
+      Jobs -> pane' (paneBody (jobRows (jobsNow st)))
       -- | **The machine's lines wrap like a list pane's row**, same
       -- reason and the same settings ('paneWrap'): the engine elides a
       -- value against its own 'Budget', which knows nothing about how
@@ -2503,10 +2517,66 @@ scriptFoot st = case stScriptBar st of
 -- always drawn.
 rerunNote :: St -> Maybe String
 rerunNote st = case stRerun st of
-  Just rs | rrShow rs ->
+  Just rs | rrShow rs -> rerunCount st
+  _ -> Nothing
+
+-- | **How far a transcript re-run has got, as the one sentence two surfaces
+-- read** — the foot note above and the jobs pane's row (`~fp5nf`).
+--
+-- **It is not gated on 'rrShow' and the note is.** The half-second gate is
+-- the document's: his requirement of 2026-11-18 was that a re-run of fifty
+-- lines taking 20ms must not flash a note under the caret. A pane he opened
+-- on purpose to watch what is running is the opposite case — a job that
+-- disappeared from it because it was quick would make the pane lie about what
+-- it lists. **So one count, two policies, and the gate stays at the caller
+-- that needs it.**
+rerunCount :: St -> Maybe String
+rerunCount st = case stRerun st of
+  -- | **AN EMPTY BATCH IS NOT A JOB, AND IT IS A STATE THE TUI REALLY
+  -- REACHES** — measured under a pty, 2026-11-22. @:script ‹path›@ opens a
+  -- file with nothing run (@upto@ is 0, every line is text), and
+  -- 'openDocument' still goes through 'rerunTail' with @[]@ because `~5fs42`
+  -- requires it to: every batch handed to 'forkIO' has to post its finished
+  -- step or 'stRerun' is stranded and the keyboard dies. So 'stRerun' is
+  -- briefly 'Just' with no lines in it, and the jobs pane drew
+  -- @re-running line 1 of 0@ for a job that was not running anything.
+  --
+  -- **The note above was only ever safe by accident**: 'rrShow' is false for
+  -- the whole of that moment, so the half-second gate hid it. The guard
+  -- belongs here, where both surfaces read it.
+  Just rs | not (null (rrPending rs)) ->
     let done = scriptFrontier st - rrAt rs
      in Just ("re-running line " <> show (done + 1) <> " of " <> show (length (rrPending rs)))
   _ -> Nothing
+
+-- | **What is running right now** — `~fp5nf`'s content, derived and not
+-- stored.
+--
+-- **There is no job registry and this is why**: every one of these is already
+-- a field that something else keeps true, and a second list beside them would
+-- be a thing to forget to clear. The same argument 'stripCellsNow' makes for
+-- the suggestion pane — one count, read by whoever needs it.
+--
+-- **Three jobs, and the fourth is missing for a stated reason.** The offer
+-- list every keystroke needs runs on a worker thread too (`~wvtz2`), but
+-- nothing in 'St' says whether one is outstanding: 'stOfferGen' is a counter
+-- 'askOffers' bumps, and 'applyOffers' compares against it, so \"a request is
+-- in flight\" is not a question the state can answer. It needs a field of its
+-- own, which is the next piece of work on this pane and not an oversight
+-- here.
+--
+-- **In the order they were built, which is also slowest first.** A re-run is
+-- seconds and has a count; the two model requests are a network round trip
+-- each and have nothing to report but that they are out.
+jobsNow :: St -> [Job]
+jobsNow st = concat
+  [ -- **The count is what says there is a job**, rather than a second test of
+    -- 'stRerun' beside it: both read the same field, and 'RerunState' carries
+    -- 'rrFinish' so it has no 'Eq' to compare against 'Nothing' anyway.
+    maybe [] (\n -> [Job "re-running the transcript" (Just n)]) (rerunCount st)
+  , [ Job "jev is ranking the offers" Nothing | stJevWaiting st ]
+  , [ Job "asking the model for a hint" Nothing | stHintAsking st ]
+  ]
 
 -- | **What is in scope, grouped by where it came from** — `~5d35q`, and the
 -- session it reads is 'activeSession', which is his ruling of 2026-11-12:

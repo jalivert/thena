@@ -163,6 +163,7 @@ layoutTests =
           , (Quests, Nothing)
           , (ChoicePoints, Nothing)
           , (Matches, Nothing)
+          , (Jobs, Nothing)
           ]
     , -- | **A closed pane has no position and none is remembered** — unlike a
       -- width (`~vqsd8`), because a position is what @:pane@ states every time.
@@ -178,14 +179,15 @@ layoutTests =
           , (Quests, Nothing)
           , (ChoicePoints, Nothing)
           , (Matches, Nothing)
+          , (Jobs, Nothing)
           ]
     , -- | **Every pane closed still lists every pane** — which is the case his
       -- ruling of the same day made reachable and the reason this bar exists:
       -- /"the user closed them, the user wants them closed."/
-      testCase "a screen with no panes still names all nine" $ do
+      testCase "a screen with no panes still names all ten" $ do
         let shut = foldr closePane defaultLayout allPanes
         paneBarEntries shut @?= [(p, Nothing) | p <- allPanes]
-        length (paneBarEntries shut) @?= 9
+        length (paneBarEntries shut) @?= 10
     , -- | **The suggestion strip is not in the layout at all** — `~w2tk2`
       -- slice 1, and this is the test that keeps it that way. It has no
       -- position, so it is in neither column, in neither 'paneBarEntries'
@@ -193,7 +195,7 @@ layoutTests =
       -- the bar itself. If it ever acquires a 'Pane' constructor this fails,
       -- which is the point.
       testCase "the strip is in no position and in neither column" $ do
-        length allPanes @?= 9
+        length allPanes @?= 10
         paneByName stripName @?= Nothing
         assertBool "named unlike every pane" (stripName `notElem` map paneName allPanes)
     , -- | **The spinner beside the title, and only while a ranking is out** —

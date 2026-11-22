@@ -43,6 +43,14 @@ data Theme = Theme
                              -- accent here.
   , themeMatches :: V.Color -- ^ the matches pane's accent. Same provisional
                              -- status as 'themeChoices'.
+  , themeJobs    :: V.Color -- ^ **the jobs pane's accent** — `~fp5nf`.
+                             -- Provisional, like 'themeChoices' and
+                             -- 'themeMatches', and his to retune. It exists
+                             -- from the pane's first commit on purpose:
+                             -- `~b2pq5` was a pane that shipped with no
+                             -- @edge.@\/@title.@ entry and fell through to the
+                             -- bare panel surface, which nothing but a pty
+                             -- screenshot would have caught.
   , themeQuests  :: V.Color -- ^ **the proofs pane's accent** — `~b2pq5`. It
                              -- had none at all until 2026-11-20: the pane is
                              -- 'Tui.Layout.Quests' and the only one whose
@@ -173,6 +181,10 @@ neonPinkDark = Theme
   , themeOutput  = rgb 255 115 215
   , themeChoices = rgb 255 70 150
   , themeMatches = rgb 230 130 200
+  -- The only accent in this theme whose green beats its blue: everything
+  -- else here is magenta-ward, so coral is the free direction and the one
+  -- place a tenth accent does not crowd a ninth. 8.65:1 against the panel.
+  , themeJobs    = rgb 255 140 120
   -- The one accent here that leans violet rather than pink: every other is
   -- red-dominant (R at 230 or above), so a lower red with a raised blue is
   -- the only free direction left in this family. 5.6:1 against the panel,
@@ -224,6 +236,9 @@ gruyere = Theme
   , themeOutput  = rgb 255 110 150
   , themeChoices = rgb 140 180 255
   , themeMatches = rgb 255 220 140
+  -- Cyan-ward of this theme's periwinkle choices accent and lighter than
+  -- it, which is what keeps the two apart. 11.1:1 against the panel.
+  , themeJobs    = rgb 150 225 255
   -- A lavender, lighter and far less saturated than its deep violet goals
   -- accent. 7.1:1 against the panel.
   , themeQuests  = rgb 198 150 255
@@ -258,6 +273,10 @@ synthwave84 = Theme
   , themeOutput  = rgb 255 152 102
   , themeChoices = rgb 255 90 140
   , themeMatches = rgb 180 255 210
+  -- A warm sand: the same direction as this theme's orange output accent
+  -- but paler and far less saturated, so the two read as a family rather
+  -- than as each other. 8.43:1 against the panel.
+  , themeJobs    = rgb 255 196 170
   -- A saturated violet, which is what separates it from the soft purple of
   -- this theme's globals and suggestion accents. 4.3:1 against the panel,
   -- in line with its other accents on the same surface.

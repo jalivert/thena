@@ -57,6 +57,8 @@ import Tui.Panes
   , offerGridWidget
   , stripHintLines
   , outputRows
+  , Job (..)
+  , jobRows
   , paneBarWidget
   , paneRowWidget
   , paneWrapAt
@@ -1022,6 +1024,38 @@ paneRowCases =
   , testCase "and nothing is capped, which is the point of the move off the foot" $
       assertEqual "" 21
         (length (outputRows (Just ":show subst") [show n | n <- [1 .. 20 :: Int]]))
+  -- | **The jobs pane** — `~fp5nf`. Nothing running is no rows, not a row
+  -- saying nothing is running: the pane is then visibly empty, which is what
+  -- an idle TUI looks like.
+  , testCase "nothing running is an empty pane and not a message" $
+      assertEqual "" (asRows []) (jobRows [])
+  , -- | **A job with no interior reports no interior.** A model request is one
+    -- round trip, so it is an entry and nothing under it — the alternative is
+    -- a fabricated bar, and his ruling on `~swxcf` was that a wait is shown as
+    -- a wait.
+    testCase "a job that cannot say how far along it is draws one row" $
+      assertEqual ""
+        (asRows [Entry "asking the model for a hint"])
+        (jobRows [Job "asking the model for a hint" Nothing])
+  , -- | **And one that can says it underneath**, as a 'Detail' — the indent is
+    -- the structure, the same reason 'paneDrawCases' exists.
+    testCase "a job with a count draws the count under it" $
+      assertEqual ""
+        (asRows [ Entry "re-running the transcript"
+                , Detail "re-running line 21 of 481"
+                ])
+        (jobRows [Job "re-running the transcript" (Just "re-running line 21 of 481")])
+  , -- | **Two jobs are two rows and their details stay with them**, which is
+    -- the whole of what 'jobRows' decides.
+    testCase "several jobs keep each detail under its own job" $
+      assertEqual ""
+        (asRows [ Entry "re-running the transcript"
+                , Detail "re-running line 3 of 9"
+                , Entry "jev is ranking the offers"
+                ])
+        (jobRows [ Job "re-running the transcript" (Just "re-running line 3 of 9")
+                 , Job "jev is ranking the offers" Nothing
+                 ])
   ]
 
 -- | The three row kinds, drawn. **The indents are the structure**, so they
