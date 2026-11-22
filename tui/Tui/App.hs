@@ -994,6 +994,22 @@ data St = St
     -- generation is not the latest — the same role 'stJevGen' plays for a
     -- ranking, and for the same reason: the line it describes is not the one
     -- on screen any more.
+  , stOfferDone :: Int
+    -- ^ **the highest generation whose answer has come back**, so that
+    -- /is one outstanding/ is a question the state can answer — `~fp5nf`'s
+    -- second step, and the field the jobs pane needed.
+    --
+    -- **Outstanding is @'stOfferGen' > 'stOfferDone'@, and that is exact
+    -- rather than nearly right.** A generation the mailbox overwrote is never
+    -- computed and its answer never arrives, so counting asks against answers
+    -- would drift upwards for ever; this takes the maximum instead, and the
+    -- latest ask is the one generation that is always either in the box or in
+    -- the worker's hands. So the test goes false exactly when the newest ask
+    -- has been answered, however many older ones were dropped on the way.
+    --
+    -- **It is bumped for a 'Left' too.** A failed computation is a job that
+    -- has stopped running, and a pane that kept listing it would be the one
+    -- surface still claiming the work is in flight.
   }
 
 -- | **One request for the offers a line stands in** — `~wvtz2`. Everything
@@ -1109,6 +1125,7 @@ runTui = do
         , stSpinLive    = False
         , stOfferBox    = offerBox
         , stOfferGen    = 0
+        , stOfferDone   = 0
         , stModel       = Text.pack (cfgModel cfg)
         , stHintConfig  = hintCfg
         , stModels      = Nothing
@@ -2557,17 +2574,20 @@ rerunCount st = case stRerun st of
 -- be a thing to forget to clear. The same argument 'stripCellsNow' makes for
 -- the suggestion pane — one count, read by whoever needs it.
 --
--- **Three jobs, and the fourth is missing for a stated reason.** The offer
--- list every keystroke needs runs on a worker thread too (`~wvtz2`), but
--- nothing in 'St' says whether one is outstanding: 'stOfferGen' is a counter
--- 'askOffers' bumps, and 'applyOffers' compares against it, so \"a request is
--- in flight\" is not a question the state can answer. It needs a field of its
--- own, which is the next piece of work on this pane and not an oversight
--- here.
+-- **All four of them now.** The offer list every keystroke needs runs on a
+-- worker thread too (`~wvtz2`) and was the one in-flight thing this pane
+-- could not list: 'stOfferGen' alone is a counter, so /a request is
+-- outstanding/ was not a question the state could answer. 'stOfferDone'
+-- answers it, and 'offersOutstanding' is the test.
 --
--- **In the order they were built, which is also slowest first.** A re-run is
+-- **Slowest first, which is also the order they were built in.** A re-run is
 -- seconds and has a count; the two model requests are a network round trip
--- each and have nothing to report but that they are out.
+-- each and have nothing to report but that they are out; the offer list is
+-- local work of tens of milliseconds, so it is last and it is the one row
+-- here that he will usually see appear and vanish between two keystrokes.
+-- **That flicker is the pane being honest** — the job really is that short,
+-- and the alternative is a pane that lists what is running except when it is
+-- quick.
 jobsNow :: St -> [Job]
 jobsNow st = concat
   [ -- **The count is what says there is a job**, rather than a second test of
@@ -2576,7 +2596,21 @@ jobsNow st = concat
     maybe [] (\n -> [Job "re-running the transcript" (Just n)]) (rerunCount st)
   , [ Job "jev is ranking the offers" Nothing | stJevWaiting st ]
   , [ Job "asking the model for a hint" Nothing | stHintAsking st ]
+  , -- **No detail, and it could not have one.** The worker answers a position
+    -- with the whole list at once; there is no interior to be a third of the
+    -- way through, the same reason a model request has 'Nothing' here.
+    [ Job "finding the offers" Nothing | offersOutstanding st ]
   ]
+
+-- | **Whether the offer worker owes us an answer** — `~fp5nf`, and the one
+-- test the jobs pane reads for it.
+--
+-- A function rather than a comparison written at the use site, because the
+-- two fields it reads are meaningless apart: 'stOfferGen' counts asks and
+-- 'stOfferDone' remembers the newest answer, and every drift this could have
+-- had is argued at 'stOfferDone' itself.
+offersOutstanding :: St -> Bool
+offersOutstanding st = stOfferGen st > stOfferDone st
 
 -- | **What is in scope, grouped by where it came from** — `~5d35q`, and the
 -- session it reads is 'activeSession', which is his ruling of 2026-11-12:
@@ -6907,6 +6941,12 @@ askOffers = do
 -- leave the strip silently frozen, which is the worse of the two.
 applyOffers :: Int -> Either String Offers -> EventM Name St ()
 applyOffers gen answer = do
+  -- **Recorded before the staleness test, because an answer that is thrown
+  -- away is still an answer that arrived** — `~fp5nf`. The jobs pane asks
+  -- whether a request is out, not whether its answer was wanted, and the
+  -- worker takes the next ask from the box the instant it has posted this
+  -- one.
+  modify (\s -> s { stOfferDone = max gen (stOfferDone s) })
   st <- get
   when (gen == stOfferGen st) $ case answer of
     Left err -> sayEither st ("offers: " <> err)
