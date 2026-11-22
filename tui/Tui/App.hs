@@ -194,6 +194,7 @@ import Tui.Panes
   , ModuleEntry (..)
   , ModuleMark (..)
   , PaneRow (..)
+  , elapsedLabel
   , globalRows
   , hintRegionWidget
   , jobRows
@@ -359,6 +360,12 @@ data RerunState = RerunState
     -- — his requirement of 2026-11-18. 'False' throughout a re-run that
     -- finishes quickly, which never draws the foot note or the '>' marker
     -- at all.
+  , rrStart   :: UTCTime
+    -- ^ **when the re-run started**, for the jobs pane's elapsed — `~fp5nf`
+    -- step three. The background thread has had a @start@ of its own since
+    -- `~twdbp` and keeps it in its own loop; this is the same instant held
+    -- where a frame can read it, because the elapsed is drawn between posted
+    -- steps and not only when one arrives.
   }
 
 -- | A fresh line nothing has run yet, for text with no existing 'ScriptLine'
@@ -1010,6 +1017,25 @@ data St = St
     -- **It is bumped for a 'Left' too.** A failed computation is a job that
     -- has stopped running, and a pane that kept listing it would be the one
     -- surface still claiming the work is in flight.
+  , stNow :: UTCTime
+    -- ^ **the clock the jobs pane's elapsed is read against** — `~fp5nf`
+    -- step three, and the reason it is a field rather than a call is that
+    -- 'draw' is pure. Set at launch, then by every 'JobTick' and by every
+    -- job that starts, so what a row says is at most a second behind the
+    -- wall clock — which is the resolution the rows are written to anyway.
+  , stJobClock :: Bool
+    -- ^ **whether a 'JobTick' chain is already running**, so that two jobs
+    -- starting in the same second cannot leave two timers redrawing the same
+    -- frame. Exactly 'stSpinLive''s role, and the chain stops itself the
+    -- first time it wakes with no timed job left — an idle TUI has no clock
+    -- running at all.
+  , stJevSince :: Maybe UTCTime
+    -- ^ when the ranking now out was asked for — 'Nothing' when none is.
+    -- **It starts at the debounce and not at the request**, the same instant
+    -- the spinner starts, because `~swxcf` made the gap before the request
+    -- part of the wait being shown.
+  , stHintSince :: Maybe UTCTime
+    -- ^ when the hint now out was asked for — 'Nothing' when none is.
   }
 
 -- | **One request for the offers a line stands in** — `~wvtz2`. Everything
@@ -1047,6 +1073,10 @@ runTui = do
   shipped <- shippedPaths
   chan <- newBChan 16
   offerBox <- newEmptyMVar
+  -- **One reading of the clock at launch**, so 'stNow' is a real instant from
+  -- the first frame — `~fp5nf` step three. Nothing is running yet, so nothing
+  -- reads it until a job starts and sets it again.
+  now0 <- getCurrentTime
   let theme0 = maybe neonPinkDark id (themeByName (cfgTheme cfg))
       autoSelect0 = cfgAutoSelect cfg
       -- | **The launch offers, computed once and read twice** — `~wvtz2`.
@@ -1126,6 +1156,10 @@ runTui = do
         , stOfferBox    = offerBox
         , stOfferGen    = 0
         , stOfferDone   = 0
+        , stNow         = now0
+        , stJobClock    = False
+        , stJevSince    = Nothing
+        , stHintSince   = Nothing
         , stModel       = Text.pack (cfgModel cfg)
         , stHintConfig  = hintCfg
         , stModels      = Nothing
@@ -1243,6 +1277,12 @@ data AppEvent
   -- for as long as 'stJevWaiting' holds, so an idle TUI wakes for nothing:
   -- there is no clock running when no ranking is out.
   | JevSpin
+  -- | **One second of a job's elapsed** — `~fp5nf` step three. Same shape as
+  -- 'JevSpin' and for the same reason: a thread that reschedules itself for
+  -- as long as a timed job is live, so a TUI with nothing running has no
+  -- clock ticking in it. It carries nothing — the handler reads the time
+  -- itself, since what is wanted is the instant the frame is drawn at.
+  | JobTick
   | RerunStep Int [ScriptLine] Bool Bool
   -- | **The model's answer to one ask** — `~w2tk2` slice 6. **No
   -- generation tag, unlike 'JevRanked'**, and that is not an oversight: Jev
@@ -2588,19 +2628,78 @@ rerunCount st = case stRerun st of
 -- **That flicker is the pane being honest** — the job really is that short,
 -- and the alternative is a pane that lists what is running except when it is
 -- quick.
+--
+-- **Three of the four are timed and the fourth cannot be** — `~fp5nf` step
+-- three. The offer worker answers inside the second 'elapsedLabel' needs
+-- before it will say anything, so its row draws its label and nothing else;
+-- the elapsed on the other three is read against 'stNow', which 'JobTick'
+-- moves once a second for as long as one of them is live.
 jobsNow :: St -> [Job]
 jobsNow st = concat
   [ -- **The count is what says there is a job**, rather than a second test of
     -- 'stRerun' beside it: both read the same field, and 'RerunState' carries
     -- 'rrFinish' so it has no 'Eq' to compare against 'Nothing' anyway.
-    maybe [] (\n -> [Job "re-running the transcript" (Just n)]) (rerunCount st)
-  , [ Job "jev is ranking the offers" Nothing | stJevWaiting st ]
-  , [ Job "asking the model for a hint" Nothing | stHintAsking st ]
-  , -- **No detail, and it could not have one.** The worker answers a position
-    -- with the whole list at once; there is no interior to be a third of the
-    -- way through, the same reason a model request has 'Nothing' here.
-    [ Job "finding the offers" Nothing | offersOutstanding st ]
+    maybe [] (\n -> [Job "re-running the transcript" rerunAge (Just n)]) (rerunCount st)
+  , [ Job "jev is ranking the offers" (age (stJevSince st)) Nothing | stJevWaiting st ]
+  , [ Job "asking the model for a hint" (age (stHintSince st)) Nothing | stHintAsking st ]
+  , -- **No elapsed and no detail, and it could have neither.** The worker
+    -- answers a position with the whole list at once, so there is no interior
+    -- to be a third of the way through — and it answers inside a second, so
+    -- 'elapsedLabel' has nothing to say about its age either.
+    [ Job "finding the offers" Nothing Nothing | offersOutstanding st ]
   ]
+  where
+    age = (>>= elapsedLabel . diffUTCTime (stNow st))
+    rerunAge = age (rrStart <$> stRerun st)
+
+-- | **Is anything running that has an elapsed to tick?** — `~fp5nf` step
+-- three, and the whole of what keeps the clock chain honest: it is the same
+-- three tests 'jobsNow' makes for its timed rows, so the clock runs exactly
+-- while there is a number on screen that would otherwise go stale.
+--
+-- **The offer worker is deliberately not in it.** A row that never shows an
+-- elapsed does not need a clock, and one that did would have a timer waking
+-- the TUI on every keystroke for a job already gone by the time it fired.
+timedJobLive :: St -> Bool
+timedJobLive st = isJust (stRerun st) || stJevWaiting st || stHintAsking st
+
+-- | **A job has started: read the clock, and start the chain unless one is
+-- already running** — `~fp5nf` step three. Exactly 'beginJevWait''s shape,
+-- including the trick of testing the state as it stood before the 'put'.
+--
+-- **The clock is read here and not only in the handler** so that a row's
+-- first frame is measured from the real start: 'stNow' may be a second old
+-- from a job that has just finished, and an elapsed computed against it would
+-- open at @1s@ for work that began this instant.
+beginJobClock :: EventM Name St ()
+beginJobClock = do
+  now <- liftIO getCurrentTime
+  st <- get
+  put st { stNow = now, stJobClock = True }
+  unless (stJobClock st) (scheduleJobTick (stJevChan st))
+
+-- | One second gone. Moves the clock and books the next tick while a timed
+-- job holds; otherwise the chain ends and 'stJobClock' says so, which is what
+-- lets the next 'beginJobClock' start a fresh one. **The last tick still
+-- moves 'stNow'**, so the frame that ends a job is drawn against the right
+-- instant rather than the one before it.
+handleJobTick :: EventM Name St ()
+handleJobTick = do
+  now <- liftIO getCurrentTime
+  st <- get
+  if timedJobLive st
+    then do
+      put st { stNow = now }
+      scheduleJobTick (stJevChan st)
+    else put st { stNow = now, stJobClock = False }
+
+-- | **A second, which is the resolution the rows are written to.** Nothing
+-- here needs to be smoother: 'elapsedLabel' says whole seconds, so a faster
+-- tick would redraw the same text, and a slower one would show an age that is
+-- visibly behind the spinner turning beside it.
+scheduleJobTick :: BChan AppEvent -> EventM Name St ()
+scheduleJobTick chan =
+  liftIO (void (forkIO (threadDelay 1000000 >> writeBChan chan JobTick)))
 
 -- | **Whether the offer worker owes us an answer** — `~fp5nf`, and the one
 -- test the jobs pane reads for it.
@@ -3903,6 +4002,7 @@ handleAppEvent Tick = fireJevForCurrentOffers
 handleAppEvent (JevDue gen) = handleJevDue gen
 handleAppEvent (JevRanked gen result) = applyJevRanking gen result
 handleAppEvent JevSpin = handleJevSpin
+handleAppEvent JobTick = handleJobTick
 handleAppEvent (OffersComputed gen result) = applyOffers gen result
 handleAppEvent (HintAnswered about result) = applyHintAnswer about result
 handleAppEvent (ModelsListed filt result) = do
@@ -6103,6 +6203,9 @@ rerunTail
   -> EventM Name St ()
 rerunTail at session texts unrun finish = do
   closeDropdowns
+  -- **The clock first**, so 'stNow' is this instant and 'rrStart' is measured
+  -- against a reading no older than the re-run itself — `~fp5nf` step three.
+  beginJobClock
   st <- get
   let gen = stRerunGen st + 1
       pending = map freshPending texts
@@ -6111,7 +6214,7 @@ rerunTail at session texts unrun finish = do
     { stRerunGen = gen
     , stRerun = Just RerunState
         { rrGen = gen, rrAt = at, rrPending = pending, rrUnrun = unrun
-        , rrFinish = finish, rrShow = False
+        , rrFinish = finish, rrShow = False, rrStart = stNow st
         }
     , stScript = take at (stScript st) ++ pending ++ unrun
     }
@@ -7087,15 +7190,19 @@ scheduleJevRanking = do
 -- turning, start the chain that turns it** — `~swxcf`.
 beginJevWait :: EventM Name St ()
 beginJevWait = do
+  -- **And the jobs pane's clock with it** — `~fp5nf` step three. 'stNow' is
+  -- the instant 'beginJobClock' has just read, so the row's age starts here
+  -- rather than at a reading left over from the last job.
+  beginJobClock
   st <- get
-  put st { stJevWaiting = True, stSpinLive = True }
+  put st { stJevWaiting = True, stSpinLive = True, stJevSince = Just (stNow st) }
   unless (stSpinLive st) (scheduleSpin (stJevChan st))
 
 -- | **Nothing is on its way any more, so the spinner goes out.** The chain
 -- is not killed here — it stops itself at its next wake, which is at most
 -- 'spinMicros' away and costs one redraw.
 endJevWait :: EventM Name St ()
-endJevWait = modify (\st -> st { stJevWaiting = False })
+endJevWait = modify (\st -> st { stJevWaiting = False, stJevSince = Nothing })
 
 -- | One frame due. Advances the dot and books the next frame while the wait
 -- holds; otherwise the chain ends and 'stSpinLive' says so, which is what
@@ -7510,11 +7617,16 @@ askHintNow = do
               -- run while the model is thinking makes the answer stale
               -- rather than fresh.
               about = hintAbout st
+          -- **The clock, before the state the ask puts** — `~fp5nf` step
+          -- three, so the row's age is measured from this Enter.
+          beginJobClock
+          st' <- get
           put
-            st
+            st'
               { stHintAsking = True
               , stHintAsked = stHintAsked st + 1
               , stStripReply = Nothing
+              , stHintSince = Just (stNow st')
               }
           -- **The prompt file is read inside the fork and not here**, so a
           -- slow disc cannot sit between his Enter and the next frame; the
@@ -7534,6 +7646,7 @@ applyHintAnswer about result = do
   put
     st
       { stHintAsking = False
+      , stHintSince = Nothing
       , stHint = Just (either ("the model could not be reached — " <>) Text.unpack result)
       , stHintAbout = Just about
       }

@@ -59,6 +59,7 @@ import Tui.Panes
   , outputRows
   , Job (..)
   , jobRows
+  , elapsedLabel
   , paneBarWidget
   , paneRowWidget
   , paneWrapAt
@@ -1029,33 +1030,70 @@ paneRowCases =
   -- an idle TUI looks like.
   , testCase "nothing running is an empty pane and not a message" $
       assertEqual "" (asRows []) (jobRows [])
-  , -- | **A job with no interior reports no interior.** A model request is one
-    -- round trip, so it is an entry and nothing under it — the alternative is
-    -- a fabricated bar, and his ruling on `~swxcf` was that a wait is shown as
-    -- a wait.
-    testCase "a job that cannot say how far along it is draws one row" $
+  , -- | **A job with nothing to say about itself is a label alone.** The offer
+    -- worker answers in tens of milliseconds, so it has no age worth printing
+    -- and no interior to be part of the way through.
+    testCase "a job with neither an age nor a count draws one row" $
       assertEqual ""
-        (asRows [Entry "asking the model for a hint"])
-        (jobRows [Job "asking the model for a hint" Nothing])
-  , -- | **And one that can says it underneath**, as a 'Detail' — the indent is
+        (asRows [Entry "finding the offers"])
+        (jobRows [Job "finding the offers" Nothing Nothing])
+  , -- | **An age alone goes under it**, which is every model request's row for
+    -- its first seconds — one round trip, so there is never a count. The
+    -- alternative is a fabricated bar, and his ruling on `~swxcf` was that a
+    -- wait is shown as a wait.
+    testCase "a job that can only say its age draws the age under it" $
+      assertEqual ""
+        (asRows [ Entry "asking the model for a hint"
+                , Detail "3s"
+                ])
+        (jobRows [Job "asking the model for a hint" (Just "3s") Nothing])
+  , -- | **And the age and the count share one row**, age first — the indent is
     -- the structure, the same reason 'paneDrawCases' exists.
-    testCase "a job with a count draws the count under it" $
+    testCase "a job with both draws them on one detail row, age first" $
       assertEqual ""
         (asRows [ Entry "re-running the transcript"
-                , Detail "re-running line 21 of 481"
+                , Detail "4s · re-running line 21 of 481"
                 ])
-        (jobRows [Job "re-running the transcript" (Just "re-running line 21 of 481")])
+        (jobRows [ Job "re-running the transcript" (Just "4s")
+                     (Just "re-running line 21 of 481")
+                 ])
+  , -- | **A count with no age** is the first second of a re-run, before
+    -- 'elapsedLabel' will say anything: no leading dot, no empty part.
+    testCase "a count with no age yet is the count alone" $
+      assertEqual ""
+        (asRows [ Entry "re-running the transcript"
+                , Detail "re-running line 2 of 9"
+                ])
+        (jobRows [Job "re-running the transcript" Nothing (Just "re-running line 2 of 9")])
   , -- | **Two jobs are two rows and their details stay with them**, which is
     -- the whole of what 'jobRows' decides.
     testCase "several jobs keep each detail under its own job" $
       assertEqual ""
         (asRows [ Entry "re-running the transcript"
-                , Detail "re-running line 3 of 9"
+                , Detail "9s · re-running line 3 of 9"
                 , Entry "jev is ranking the offers"
+                , Detail "1s"
                 ])
-        (jobRows [ Job "re-running the transcript" (Just "re-running line 3 of 9")
-                 , Job "jev is ranking the offers" Nothing
+        (jobRows [ Job "re-running the transcript" (Just "9s") (Just "re-running line 3 of 9")
+                 , Job "jev is ranking the offers" (Just "1s") Nothing
                  ])
+  -- | **The elapsed's own wording** — `~fp5nf` step three. Whole seconds and
+  -- never a zero: a job in its first second says nothing rather than @0s@,
+  -- which would read as a stuck clock for the whole life of a short job.
+  , testCase "under a second says nothing at all" $
+      assertEqual "" Nothing (elapsedLabel 0.9)
+  , testCase "a whole second is the first thing it says" $
+      assertEqual "" (Just "1s") (elapsedLabel 1.0)
+  , testCase "it floors rather than rounds, so it never runs ahead" $
+      assertEqual "" (Just "4s") (elapsedLabel 4.99)
+  , testCase "the last second before a minute is still seconds" $
+      assertEqual "" (Just "59s") (elapsedLabel 59.5)
+  , -- | **Minutes once there are minutes**, because @150s@ is a number to
+    -- divide and @2m 30s@ is one to read.
+    testCase "a minute is a minute and no seconds" $
+      assertEqual "" (Just "1m 0s") (elapsedLabel 60)
+  , testCase "past a minute both parts show" $
+      assertEqual "" (Just "2m 30s") (elapsedLabel 150)
   ]
 
 -- | The three row kinds, drawn. **The indents are the structure**, so they

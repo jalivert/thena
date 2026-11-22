@@ -20,6 +20,7 @@ module Tui.Panes
   , outputRows
   , Job (..)
   , jobRows
+  , elapsedLabel
   , offerGridWidget
   , stripKeyLabel
   , stripHintLines
@@ -33,6 +34,8 @@ module Tui.Panes
   ) where
 
 import Data.List (intercalate, intersperse, nub, sort)
+import Data.Maybe (catMaybes)
+import Data.Time.Clock (NominalDiffTime)
 
 import Brick
   ( Size (Fixed, Greedy)
@@ -458,15 +461,20 @@ outputRows (Just line) out = Heading line Nothing : map Entry out
 -- in-flight state and hands these over, so what the pane says is decided
 -- without a terminal and the drawing suite can hold it to its text.
 --
--- **No start time and no elapsed yet.** Nothing in the TUI records when a job
--- began — the re-run's thread keeps its own @start@ and posts only a
--- past-half-a-second flag — so an elapsed column would be an invention. It is
--- the next piece of work on the pane and not a gap in this type.
+-- **How long it has been running is 'jobElapsed', and it is a string by the
+-- time it reaches here.** The clock belongs to the event loop, the same
+-- division 'Tui.Layout.stripTitle' makes with the spinner's frame: this
+-- module decides how a job reads, not what time it is.
 data Job = Job
-  { jobLabel  :: String
+  { jobLabel   :: String
     -- ^ what is running, in the words the pane says it in: @re-running the
     -- transcript@, not a constructor name.
-  , jobDetail :: Maybe String
+  , jobElapsed :: Maybe String
+    -- ^ how long it has been running, already written — @4s@, @1m 15s@.
+    -- 'Nothing' for a job too young to have a whole second to report, and
+    -- for one that is not timed at all; 'elapsedLabel' is where both of
+    -- those are decided.
+  , jobDetail  :: Maybe String
     -- ^ how far along, where the job can honestly say. **Only the transcript
     -- re-run can**: it is a batch of lines and knows how many it has done. A
     -- model request is one round trip with no interior, so it has 'Nothing'
@@ -476,18 +484,59 @@ data Job = Job
   }
   deriving (Eq, Show)
 
+-- | **How long a job has been running, in the pane's own words** — `~fp5nf`
+-- step three.
+--
+-- **Whole seconds, and never a zero.** A job in its first second has nothing
+-- to say that @0s@ would not say worse: the row is already on screen saying
+-- the work is running, and a counter that sits at zero for the whole life of
+-- a short job reads as a stuck clock rather than a young one. So this is
+-- 'Nothing' under a second and the row draws its label alone — which is also
+-- the whole of what the offer worker ever draws, since it answers in tens of
+-- milliseconds.
+--
+-- **Minutes once there are minutes**, because @150s@ is a number to divide
+-- and @2m 30s@ is one to read. His own re-run measured 25.2s before `~twdbp`
+-- threaded it, and a massive import — `~hq7vp`, not a job here yet — is the
+-- case that goes past a minute.
+--
+-- A negative difference cannot arise from a monotonic pair, but a clock that
+-- has been set backwards is not this function's problem to diagnose: it
+-- reads as /not a whole second yet/, which draws nothing.
+elapsedLabel :: NominalDiffTime -> Maybe String
+elapsedLabel d
+  | secs < 1 = Nothing
+  | secs < 60 = Just (show secs <> "s")
+  | otherwise = Just (show m <> "m " <> show r <> "s")
+  where
+    secs = floor d :: Int
+    (m, r) = secs `divMod` 60
+
 -- | **The jobs pane** — `~fp5nf`, his request of 2026-11-19 for a pane showing
 -- /"background working AI agents but also any time our engine just \'goes and
 -- runs\' our program"/.
 --
--- One 'Entry' per job, with its detail under it as a 'Detail' where it has
--- one. **Nothing at all when nothing is running**, which is the ordinary case
--- and not a state to put a message in: the choices pane is empty with no live
--- choice point and says nothing about it either.
+-- One 'Entry' per job, with everything else it has to say on **one** 'Detail'
+-- under it, the parts joined by a middle dot. **Nothing at all when nothing
+-- is running**, which is the ordinary case and not a state to put a message
+-- in: the choices pane is empty with no live choice point and says nothing
+-- about it either.
+--
+-- **The elapsed comes first and the progress second** — @4s · re-running line
+-- 21 of 481@. Every timed job's detail then begins with its age, so the eye
+-- reads a column of ages the way a process list is read, and the part that
+-- only one job has is the part that varies.
+--
+-- **One detail row rather than two, because the pane is narrow.** At position
+-- 3 a pane is 22 columns inside its bar, so a second row per job would put
+-- three rows under every job once the text wraps — and the pane has to hold
+-- several jobs at once without pushing the oldest off the bottom.
 jobRows :: [Job] -> [PaneRow n]
 jobRows js = concatMap row js
   where
-    row j = Entry (jobLabel j) : maybe [] (pure . Detail) (jobDetail j)
+    row j = Entry (jobLabel j) : case catMaybes [jobElapsed j, jobDetail j] of
+      [] -> []
+      parts -> [Detail (intercalate " · " parts)]
 
 -- | **How a slot's key is written in its cell** — `~w2tk2` slice 2.
 --
