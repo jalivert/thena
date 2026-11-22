@@ -58,7 +58,7 @@ import Text.Wrap
 
 import Thena.View.Failure (StopView (..))
 
-import Tui.Failure (StopLine (..), natureIsFault, stopLines)
+import Tui.Failure (StopLine (..), natureIsFault, positionSuffix, stopLines)
 
 -- | One row of a list pane.
 --
@@ -228,13 +228,19 @@ moduleRows modules files =
     -- padded widget, so 'paneWrap''s @preserveIndentation@ keeps a wrapped
     -- module path under its own step rather than back at the pane's margin.
     moduleGroup me =
-      row : [Detail (indent <> f) | Just f <- [meFile me]] <> unfolded
+      row : [Detail (indent <> f <> rootPos) | Just f <- [meFile me]] <> unfolded
       where
         row
           | meMark me == AllIn = Entry labelled
           | otherwise = Tap (meName me) labelled
         labelled = indent <> markGlyph (meMark me) <> " " <> meName me
         indent = replicate (2 * meDepth me) ' '
+        -- | **The root unfinished item's own place, beside its file** —
+        -- `~hcr2d`. The rest of 'meUnfinished' are merely pending and carry no
+        -- story of their own, so there is nothing of theirs to point at.
+        rootPos = case meUnfinished me of
+          (_, sv) : _ -> positionSuffix (stopViewAt sv)
+          [] -> ""
         -- | **The first is the root and the rest are pending** — the engine's
         -- ruling of 2026-11-11, /"one failure and forty-seven pending, not
         -- forty-eight warnings"/. The root's own answer is shown; the rest are

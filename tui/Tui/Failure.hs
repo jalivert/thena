@@ -24,6 +24,7 @@
 module Tui.Failure
   ( StopLine (..)
   , stopLines
+  , positionSuffix
   , natureGlyph
   , natureIsFault
   , refusedClaimsShown
@@ -41,6 +42,7 @@ import Thena.View.Failure
   , Nature (..)
   , PartView (..)
   , Piece (..)
+  , Pos (..)
   , Role (..)
   , Spot (..)
   , Stage (..)
@@ -111,6 +113,20 @@ whyLines d why = case why of
   OutOfFuel _ -> []
   Trusting tv -> trustLines d tv
   WasGivenUp -> []
+
+-- | **The place a row's file line points at, once there is one — `~hcr2d`,
+-- MS12 phase 334.** 'Nothing' draws nothing: a module with nothing wrong has
+-- no unfinished item to read a position off, and an item the engine could not
+-- place in any file (one handed over as items, or one a grammar generated)
+-- carries no 'Pos' either.
+--
+-- **@:line:col@, not a sentence**, so a pane can append it straight onto the
+-- file path already drawn beside the row — @path@ plus this is the whole of
+-- the destination, the same shape this project's own documents use to point
+-- at a line.
+positionSuffix :: Maybe Pos -> String
+positionSuffix Nothing = ""
+positionSuffix (Just p) = ":" <> show (posLine p) <> ":" <> show (posColumn p)
 
 -- ---------------------------------------------------------------------------
 -- A fault
