@@ -44,6 +44,7 @@ import Thena.View.Failure
   , Piece (..)
   , Pos (..)
   , Role (..)
+  , Side (..)
   , Spot (..)
   , Stage (..)
   , StopView (..)
@@ -251,6 +252,29 @@ kindWords k = case k of
   GrammarRefused -> Words "that block was not admitted" "not admitted: " [TheName]
   TokenClassRefused -> Words "that token class was refused" "token class refused: " [TheName]
   NotATokenType -> plain "a token class cannot be read at that type"
+  -- What is wrong inside a refused block — MS12 phase 338. **Most of that tree
+  -- lands on the kinds above**, because a kind says what went wrong and never
+  -- what it went wrong about; these are the ones only a grammar can say.
+  VariableProductionAmbiguous ->
+    Words "two productions stand for that class" "two productions stand for " [TheType]
+  ClassOwnedTwice -> Words "two languages read that class" "two languages read " [TheType]
+  ConstructorUnspelled ->
+    Words "a constructor with no production" "no production spells " [TheCandidates]
+  MetavariableNotAllowed ->
+    Words "a notation block cannot declare a metavariable" "it cannot declare " [TheCandidates]
+  ParameterUnspelled ->
+    Words "a parameter the notation never writes" "the notation never writes " [TheParameter]
+  BindsNothing -> Words "it binds nothing" "binds nothing: " [TheName]
+  ScopesDiffer ->
+    Words "it is written under different binders" "written under different binders: " [TheName]
+  OccurrenceNotAlone ->
+    Words "an occurrence is not alone in its production" "not alone in its production: " [TheName]
+  NothingToRename -> Words "there would be nothing to rename" "nothing to rename in " [TheName]
+  SlotAtAUniverse -> Words "a slot at a universe" "at a universe: " [TheParameter]
+  NoConstructorForMetadata -> plain "metadata with no constructor to be about"
+  RoleAfterTheGrammar ->
+    Words "a role after the grammar is installed" "the grammar is already installed by " [TheLanguage]
+  NotQuantified -> Words "it is not quantified" "not quantified: " [TheName]
 
 -- ---------------------------------------------------------------------------
 -- A part
@@ -304,6 +328,7 @@ roleLabel r = case r of
   TheObligations -> "obligations"
   TheClaimed -> "claimed"
   TheActual -> "actually"
+  TheSide -> "the side"
 
 -- | What a part is, as one line.
 --
@@ -332,6 +357,7 @@ pieceText pc = case pc of
   APattern t -> t
   AnObligation os -> intercalate ", " os
   AText t -> oneLine t
+  ASide sd -> sideText sd
 
 wantedText :: Wanted -> String
 wantedText w = case w of
@@ -359,6 +385,8 @@ wantedText w = case w of
   AConstructorOf -> "a constructor of it"
   AProduction -> "a production"
   ABinder -> "a binder"
+  AFunction -> "a declared function"
+  ATokenClass -> "a token class"
 
 stageText :: Stage -> String
 stageText st = case st of
@@ -403,6 +431,16 @@ formText f = case f of
   AsAHole -> "a hole"
   AsAGuess -> "a guess"
   AsAConstraint -> "a constraint"
+
+-- | Which side of a judgment's rule something was read on.
+--
+-- **Above and below the line, which is how he wrote them**, rather than
+-- /premises/ and /conclusion/: the block draws a line and the row says which
+-- side of it the reading stopped on.
+sideText :: Side -> String
+sideText sd = case sd of
+  ThePremises -> "above the line"
+  TheConclusion -> "below the line"
 
 blockText :: Block -> String
 blockText b = case b of
