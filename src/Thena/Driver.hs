@@ -4110,7 +4110,19 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
                     -- **Everything new that the module's own program did not
                     -- declare** (@~3c2db@) — what the user typed at the prompt
                     -- while it stood.
-                    usersOwn = filter (`notElem` importingTheirs imp)
+                    --
+                    -- **AND THE RUN THAT FINISHES THE MODULE IS ONE OF THE
+                    -- MODULE'S RUNS** (MS12 phase 337, @~9qrnz@).
+                    -- 'importingTheirs' is seeded with what the load's own first
+                    -- run declared and extended by every @yield@ that hands
+                    -- control back — and the walk below is neither, so what it
+                    -- declared was extended into nothing and came out as the
+                    -- user's. A module with no @exporting@ clause publishes what
+                    -- it declared, so a declaration written after the yield was
+                    -- missing from the module's interface: the same file offered
+                    -- different names depending on whether it stopped.
+                    theirs = importingTheirs imp ++ declaredSince s s2
+                    usersOwn = filter (`notElem` theirs)
                                       (declaredSince at closed)
                     landed
                       | null unfin =
@@ -4126,9 +4138,22 @@ finishingImport gaveUp s0 = case sessionImporting s0 of
                                             (ws ++ unlistedTravelling restored
                                                      (map (placedItem . landedItem) done))
                                             unfin
+                    -- **AND A FILE NO MODULE NAME REACHES IS STILL OPENED FOR
+                    -- THE PROMPT** (MS12 phase 337, @~hdzp7@). It is recorded
+                    -- nowhere and nothing may import it, but the user asked for
+                    -- it by path and its declarations are under its header's
+                    -- namespace, so without this there is no way to write them —
+                    -- which is exactly what 'loadProofItemsConsultingAt''s
+                    -- @marked@ does for the same file when it goes in in one
+                    -- go. **'openingModule' is the half of 'moduleDeclared'
+                    -- that is about the prompt**, and this branch had only the
+                    -- other half's absence: the same file answered /nothing
+                    -- named stands has been declared/ one line after its own
+                    -- load said @declared stands@, depending on nothing but
+                    -- whether its elaboration happened to stop.
                     s' = markedPartly (importingName imp) (importingText imp) unfin
                        $ case importingName imp of
-                           Nothing -> restored
+                           Nothing -> openingModule hdr restored
                            Just n  -> moduleDeclared n (interfaceOf items)
                                                      usersOwn at restored
                     -- **The accumulator starts with this module alone.** What
