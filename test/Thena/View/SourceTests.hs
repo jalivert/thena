@@ -23,6 +23,8 @@ import Test.Tasty.HUnit (assertFailure, testCase)
 import Thena.Core.Term (Literal (..))
 import Thena.Driver
   ( Item (..)
+  , Placed (..)
+  , itemsIn
   , moduleText
   , parseSurfaceModule
   , parseSurfaceTerm
@@ -94,13 +96,13 @@ termsOf i = case i of
   ItemBlock _ -> []
   ItemGrammar _ -> []
   ItemOpen _ -> []
-  ItemConsult _ _ ds -> concatMap termsOf (concat ds)
-  ItemImport _ _ _ ds -> concatMap termsOf (concat ds)
+  ItemConsult _ _ ds -> concatMap termsOf (itemsIn (concat ds))
+  ItemImport _ _ _ ds -> concatMap termsOf (itemsIn (concat ds))
   ItemExporting _ -> []
   ItemHiding _ -> []
-  ItemPrivate is -> concatMap termsOf is
-  ItemNamespace _ is -> concatMap termsOf is
-  ItemOpenIn _ is -> concatMap termsOf is
+  ItemPrivate is -> concatMap termsOf (itemsIn is)
+  ItemNamespace _ is -> concatMap termsOf (itemsIn is)
+  ItemOpenIn _ is -> concatMap termsOf (itemsIn is)
 
 -- | Every surface file the project ships.
 paths :: IO [FilePath]
@@ -194,7 +196,8 @@ namespaces = case parseSurfaceModule src of
     Left e -> assertFailure ("its printing did not parse: " <> take 300 (show e))
     Right (nm', items')
       | nm' /= nm -> assertFailure ("came back as module " <> moduleText nm')
-      | items' /= items -> assertFailure ("items differ: " <> take 400 (show items'))
+      | map unlined items' /= map unlined items ->
+          assertFailure ("items differ: " <> take 400 (show items'))
       | otherwise -> pure ()
   where
     src =
@@ -219,6 +222,19 @@ unlined i = case i of
         { blockProductions = [ pr { productionLine = 0 } | pr <- blockProductions b ]
         , blockRules = [ r { ruleLine = 0 } | r <- blockRules b ]
         }
-  ItemNamespace g is -> ItemNamespace g (map unlined is)
-  ItemOpenIn os is -> ItemOpenIn os (map unlined is)
+  ItemNamespace g is -> ItemNamespace g (map (placed unlined) is)
+  ItemOpenIn os is -> ItemOpenIn os (map (placed unlined) is)
+  ItemPrivate is -> ItemPrivate (map (placed unlined) is)
+  ItemConsult r m ds -> ItemConsult r m (map (placed unlined) <$> ds)
+  ItemImport r m sel ds -> ItemImport r m sel (map (placed unlined) <$> ds)
   other -> other
+
+-- | The same inside a block, **and the place is forgotten with the lines**
+-- (MS12 phase 336, @~6g27s@).
+--
+-- A block's declarations carry where each was written since that phase, and
+-- what this test is about is the text: a printer lays a block out canonically,
+-- so a declaration comes back on a line of the printer's choosing and the
+-- positions are no more the claim than a production's source line is.
+placed :: (Item -> Item) -> Placed -> Placed
+placed f p = Placed Nothing (f (placedItem p))

@@ -21,6 +21,9 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (nameDotted, rootName)
+import Thena.Declared (named)
+import Thena.Engine (Machine (..))
+import Thena.Global.Env (isDeclared)
 import Thena.Driver
   ( Leniency (..)
   , CommandError (..)
@@ -33,6 +36,7 @@ import Thena.Driver
   , currentQuest
   , declaredByModule
   , importSuspended
+  , machineOf
   , moduleName
   , moduleText
   , modulePartly
@@ -86,6 +90,20 @@ suspendedMore :: IO (Session, [Response])
 suspendedMore = do
   s <- pausing
   Just m <- pure (moduleName "test.modules.PausesThenMore")
+  (s', out, trouble) <- importModule Lenient s m
+  assertBool ("nothing should be trouble here: " ++ show trouble) (null trouble)
+  pure (s', out)
+
+-- | __Import @test.modules.PausesInBlock@ and stop in a placeholder INSIDE a
+-- @namespace@ block__ (MS12 phase 336, @~6g27s@).
+--
+-- **It is the case the walk's own work list is for**: the loader goes into a
+-- block, so what is left of the module when the wheel comes back has the end of
+-- the block in it, and resuming has to leave that namespace exactly once.
+suspendedInBlock :: IO (Session, [Response])
+suspendedInBlock = do
+  s <- pausing
+  Just m <- pure (moduleName "test.modules.PausesInBlock")
   (s', out, trouble) <- importModule Lenient s m
   assertBool ("nothing should be trouble here: " ++ show trouble) (null trouble)
   pure (s', out)
@@ -494,5 +512,41 @@ parking = testGroup "parking it, so that a lemma can be proved"
           (_, out) <- lenientLine s ":abandon"
           [ (nm, ds) | ImportAbandonedItem nm ds _ <- out ]
             @?= [("test.modules.PausesThenMore", ["picked"])]
+      ]
+
+  , testGroup "a yield inside a namespace block (MS12 phase 336, ~6g27s)"
+      [ testCase "the suspension is inside the block, and resuming leaves it once" $ do
+          -- **What the work list is for.** The loader walks into a block, so
+          -- what is left of the module across the suspension has the end of the
+          -- block in it: @stands@ is written after the yield and inside the
+          -- block, @after@ outside it, and the prefix each lands under is what
+          -- says the namespace was left exactly once and in the right place.
+          (s, _) <- suspendedInBlock
+          assertBool "the import should be standing" (isJust (importSuspended s))
+          (s1, _)   <- lenientLine s "try-core core`this`"
+          (s2, _)   <- lenientLine s1 "solve"
+          (s3, out) <- lenientLine s2 "yield"
+          assertBool "nothing should be suspended once it finished"
+                     (isNothing (importSuspended s3))
+          [ ds | ProofLoaded _ ds _ _ <- out ]
+            @?= [["Two", "inner.picked", "inner.stands", "after"]]
+
+      , testCase "and the ENVIRONMENT has them at those names, not the summary" $ do
+          -- **The summary is derived from the walk's own prefix**, so a walk
+          -- that left the namespace in the wrong place could still print the
+          -- right lines. This asks the environment instead: the key under the
+          -- block's prefix is there, the one that would mean the namespace was
+          -- never left is not.
+          (s, _)  <- suspendedInBlock
+          (s1, _) <- lenientLine s "try-core core`this`"
+          (s2, _) <- lenientLine s1 "solve"
+          (s3, _) <- lenientLine s2 "yield"
+          let env = globals (machineOf s3)
+          assertBool "inner.stands should be in the environment"
+                     (isDeclared (named "test.modules.PausesInBlock.inner.stands") env)
+          assertBool "after should be at the module's own level"
+                     (isDeclared (named "test.modules.PausesInBlock.after") env)
+          assertBool "and not inside the block"
+                     (not (isDeclared (named "test.modules.PausesInBlock.inner.after") env))
       ]
   ]

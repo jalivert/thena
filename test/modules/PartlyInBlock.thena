@@ -1,0 +1,20 @@
+module test.modules.PartlyInBlock where
+
+-- A declaration inside an act's block that does not elaborate, with a sibling
+-- that does (MS12 phase 336, ~6g27s): the loader walks into the block, so
+-- `good` lands and only `broken` is left behind.
+--
+-- `outside` is the other half. It writes the imported name AFTER the block, and
+-- an `import … where` block reveals its names inside itself and nowhere else,
+-- so this one is refused — which is what says the block's reveal came off with
+-- the block.
+
+import test.modules.Bit where
+  good : Bit.Bit
+  good = Bit.off
+
+  broken : Flag.Flag
+  broken = nonesuch
+
+outside : Bit.Bit
+outside = Bit.off
