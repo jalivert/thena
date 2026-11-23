@@ -466,10 +466,23 @@ there is a goal inside the part you are working on, `next` goes there; when that
 part is finished, it widens, and the goal it then reaches is usually the guess
 that encloses you. That last step is the `goto-root` at the end of a proof.
 
+Here there is one unfinished goal, `id1`, so that is where it goes — and
+`goto id` puts the cursor back, because the rest of this chapter walks down to
+the same place by hand:
+
 ```
-thena spine> prove
 thena spine> next
-thena spine> prove
+thena spine> :where
+focus
+  let ? id1 : A in
+path
+  root ▸ ≐ id ▸ A ▸ x
+context
+  A : Type₀
+  x : A
+type
+  A
+thena spine> goto id
 ```
 
 Three things follow from the definition and are worth knowing.
@@ -986,8 +999,14 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-5340  intro   untried: solve, regret, prove
+5340  intro (standard.thena.rules:80)   untried: solve (standard.thena.rules:114), regret (standard.thena.rules:117), prove (standard.thena.rules:153)
 ```
+
+Each alternative names **the file and line its clause is written at**. That is
+not decoration: the thing the engine picks is a *clause*, and a rule may have
+several, so a fork between two clauses written under one name would otherwise
+print that name twice and tell you nothing about the difference. With the line
+you can go and read the clause that is about to run.
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
 Here both remaining alternatives fail, so it exhausts the choice point and
@@ -1001,7 +1020,7 @@ thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-5340  regret   untried: prove
+5340  regret (standard.thena.rules:117)   untried: prove (standard.thena.rules:153)
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was

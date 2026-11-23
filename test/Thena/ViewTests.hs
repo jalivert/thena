@@ -57,7 +57,8 @@ import Thena.View
   , sessionNames
   )
 import Thena.View.Address (follow)
-import Thena.View.Choices (ChoiceView (..))
+import Thena.View.Choices (AltView (..), ChoiceView (..))
+import Thena.Syntax.Lexer (Pos (..))
 import Thena.View.Redraw (markedChainText, redraw, redrawChain)
 import Thena.View.Matches (MatchView (..))
 import Thena.View.TypeTests (redrawSignature)
@@ -239,8 +240,18 @@ choiceCase (name, s) = testCase name (drawn @?= turnOutput (turn s ":choices"))
       [] -> ["no choice points"]
       ls -> ls
     line cv =
-      show (choiceViewId cv) <> "  " <> choiceViewRunning cv
-        <> "   untried: " <> intercalate ", " (choiceViewUntried cv)
+      show (choiceViewId cv) <> "  " <> alt (choiceViewRunning cv)
+        <> "   untried: " <> intercalate ", " (map alt (choiceViewUntried cv))
+
+    -- **The line and the paths are part of the row since MS12 phase 342**
+    -- (@~mhz7j@), so they are part of what this crossing holds to one
+    -- spelling: a pane that drew the name alone would now say less than the
+    -- prompt does.
+    alt a = case (altViewPath a, altViewAt a) of
+      (Just f, Just p) ->
+        altViewName a <> " (" <> reverse (takeWhile (/= '/') (reverse f))
+                      <> ":" <> show (posLine p) <> ")"
+      _ -> altViewName a
 
 -- ---------------------------------------------------------------------------
 -- Non-vacuity

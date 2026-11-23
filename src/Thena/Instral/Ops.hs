@@ -30,6 +30,7 @@ module Thena.Instral.Ops
 
     -- * Rules (§8)
   , Rule (..)
+  , Origin (..)
     -- | Re-exported from "Thena.Instral.Pattern" (MS5 phase 84), so that every
     -- existing @import Thena.Instral.Ops (Pattern (..))@ still reads. The type moved a
     -- layer down because "Thena.Errors" must name it; nothing else changed.
@@ -62,6 +63,7 @@ import Thena.Surface.Concrete (Plicity, SurfacePattern)
 import Thena.Tactics.Eliminate (MethodShape)
 import Thena.Tactics.Specialise (Binder)
 import Thena.Syntax.Concrete (Raw, splicesIn)
+import Thena.Syntax.Lexer (Pos)
 import Thena.Surface.Zipper (SurfaceZipper)
 
 -- | A name in a rule body's environment. Not a 'Thena.Core.Term.Var' and not an
@@ -2105,6 +2107,41 @@ data Rule = Rule
     -- (MS5 phase 82 — they were @['Name']@ until patterns arrived).
   , ruleHead   :: [Test]   -- ^ all must pass
   , ruleBody   :: [Instr]
+  , ruleOrigin :: Maybe Origin
+    -- ^ __where this clause was written__ (MS12 phase 342, his direction of
+    -- 2026-11-23: /"perhaps clauses should carry data for where they come
+    -- from"/).
+    --
+    -- **A clause and not a rule**, which is the whole point: a 'Rule' value /is/
+    -- one clause, so two clauses written under one name are two values with two
+    -- origins, and where each sits in its file is the only thing that always
+    -- tells them apart. @:choices@ names a row by its rule, so a fork between
+    -- clauses of one name printed that name twice and said nothing more
+    -- (@~mhz7j@).
+    --
+    -- **'Nothing' is a clause that is in no file** — the synthetic @entry@ and
+    -- @do@ rules a typed line is wrapped in, and anything a caller builds by
+    -- hand. The same meaning 'Thena.View.Failure.stopViewAt' gives it for a
+    -- declaration, and for the same reason.
+  }
+  deriving (Eq, Show)
+
+-- | __Where a clause was written__ (MS12 phase 342).
+--
+-- **The path is on the clause and not looked up from the base**, which is the
+-- one decision here. A base knows its own file ('Thena.Rules.basePath'), so the
+-- path could have been found by searching the loaded bases for the rule — but a
+-- choice point hands out clauses, not bases, and two bases may hold a rule of
+-- the same name, so the search can answer the wrong file. A clause that carries
+-- its own origin cannot.
+--
+-- **'Thena.Syntax.Lexer.Pos' and not a second position type.** A line and a
+-- column already mean one thing in this project; 'Thena.View.Failure.stopViewAt'
+-- carries the same type for a declaration, and a frontend that can already turn
+-- one into a place to go needs no second shape to learn.
+data Origin = Origin
+  { originPath :: FilePath
+  , originAt   :: Pos
   }
   deriving (Eq, Show)
 

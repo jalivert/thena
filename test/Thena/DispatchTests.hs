@@ -21,7 +21,8 @@ import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Partial (..))
 import Thena.Core.Trust (TrustLevel (..))
 import Thena.Engine
-  ( ChoicePoint (..)
+  ( ChoiceAlt (..)
+  , ChoicePoint (..)
   , Exec (..)
   , Frame (..)
   , Machine (..)
@@ -40,7 +41,7 @@ import Thena.Instral.Ops (Instr (..), Rule (..), Test (..))
 import qualified Thena.Instral.Ops as Ops
 import qualified Thena.Rules
 import Thena.Rules (RuleBase, dispatch, matches, ruleBase)
-import Thena.Standard (expectedBase)
+import Thena.Standard (aRule, expectedBase)
 
 tests :: TestTree
 tests =
@@ -66,7 +67,7 @@ hole = enter (Under (Claim v (Ident "goal") type0) (Trailing (Free v)))
   where v = fst (fresh 0)
 
 rule :: String -> [Instr] -> Rule
-rule n = Rule (rootName n) [] [FocusIsHole]
+rule n = aRule (rootName n) [] [FocusIsHole]
 
 -- | Succeeds, and changes the development: the hole becomes a guess.
 works :: Rule
@@ -160,7 +161,8 @@ peekTests =
       -- §7.3, DECIDED 2026-08-20: kept on success, Prolog-style, so the user
       -- can ask for a different solution after one has been found.
     , testCase "the frame survives the program running out" $
-        map pointAlts (choicePoints (ranTo (machine (bases [works, fails]) hole [Do Ops.Prove])))
+        map (map altRule . pointAlts)
+            (choicePoints (ranTo (machine (bases [works, fails]) hole [Do Ops.Prove])))
           @?= [[rootName "fails"]]
 
       -- No Choice frame ever exists without a live alternative (§7.3): taking
@@ -486,7 +488,8 @@ dispatchableTests =
       -- alternative is taken — so what stands is @attack@'s one choice point
       -- with @abandon@ and @prove@ left, which is what this assertion reads.
     , testCase "so the alternative after attack is abandon" $
-        map pointAlts (choicePoints (ranTo (machine expectedBase hole [Do Ops.Prove])))
+        map (map altRule . pointAlts)
+            (choicePoints (ranTo (machine expectedBase hole [Do Ops.Prove])))
           @?= [[rootName "abandon", rootName "prove"]]
     ]
   where

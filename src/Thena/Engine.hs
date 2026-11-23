@@ -46,6 +46,7 @@ module Thena.Engine
 
     -- * Going back (§7.7)
   , ChoicePoint (..)
+  , ChoiceAlt (..)
   , choicePoints
   , RetryError (..)
   , retryFrom
@@ -130,6 +131,7 @@ import Thena.Language.Grammar
 import Thena.Language.Reader (Block)
 import Thena.Instral.Ops
   ( AnswerKind
+  , Origin (..)
   , Env
   , Rule (..)
   , Instr (..)
@@ -552,6 +554,12 @@ data Frame
         -- building one copies nothing.
       , choiceId  :: Int         -- ^ what @retry ‹n›@ names it by
       , chosen    :: GlobalName  -- ^ the rule this frame is currently running
+      , chosenAt  :: Maybe Origin
+        -- ^ **where the clause it is running was written** (MS12 phase 342).
+        -- 'chosen' is a name, and two clauses written under one name share it,
+        -- so this is the only field that tells which of them is in flight.
+        -- 'Nothing' for a clause that is in no file — see
+        -- 'Thena.Instral.Ops.ruleOrigin'.
       , returned  :: Bool
         -- ^ **the same field a 'Call' carries, and it means the same thing.**
         -- Both frames have exactly one lifetime as of MS4 phase 57: entered,
@@ -1143,6 +1151,7 @@ choicePoint m dest rest it' r vs seed =
     , savedBelow     = stack (exec m)
     , choiceId       = names m
     , chosen         = ruleName r
+    , chosenAt       = ruleOrigin r
     , returned       = False
     , callArgs       = vs
     , entryEnv       = seed
@@ -1164,6 +1173,7 @@ demote fr r it'
         , savedBelow     = savedBelow fr
         , choiceId       = choiceId fr
         , chosen         = ruleName r
+        , chosenAt       = ruleOrigin r
         , returned       = False
         , callArgs       = callArgs fr
         , entryEnv       = entryEnv fr
@@ -3484,8 +3494,24 @@ quantifyIn env ctx n i dom p = case p of
 -- (§7.3), so this is a projection and not a filter.
 data ChoicePoint = ChoicePoint
   { pointId    :: Int          -- ^ what @retry ‹n›@ names it by
-  , pointRule  :: GlobalName   -- ^ the alternative it is running now
-  , pointAlts  :: [GlobalName] -- ^ the ones still untried, in dispatch order
+  , pointRule  :: ChoiceAlt    -- ^ the alternative it is running now
+  , pointAlts  :: [ChoiceAlt]  -- ^ the ones still untried, in dispatch order
+  }
+  deriving (Eq, Show)
+
+-- | __One alternative of a choice point, and where its clause was written__
+-- (MS12 phase 342, his direction of 2026-11-23).
+--
+-- **A name was not enough and that is the whole reason this type exists.** The
+-- unit the engine picks is a clause; the name belongs to the rule. A fork
+-- between two clauses written under one name listed that name twice and carried
+-- nothing that told them apart (@~mhz7j@), and where a clause sits in its file
+-- is the only thing that always does.
+data ChoiceAlt = ChoiceAlt
+  { altRule :: GlobalName
+  , altAt   :: Maybe Origin
+    -- ^ 'Nothing' for a clause that is in no file. Every clause a rule base
+    -- read has one.
   }
   deriving (Eq, Show)
 
@@ -3493,7 +3519,9 @@ data ChoicePoint = ChoicePoint
 -- @retry@ with no argument walks.
 choicePoints :: Machine -> [ChoicePoint]
 choicePoints m =
-  [ ChoicePoint (choiceId fr) (chosen fr) (map ruleName (drainIter (alts fr)))
+  [ ChoicePoint (choiceId fr)
+                (ChoiceAlt (chosen fr) (chosenAt fr))
+                [ ChoiceAlt (ruleName r) (ruleOrigin r) | r <- drainIter (alts fr) ]
   | fr@Choice {} <- stack (exec m)
   ]
 

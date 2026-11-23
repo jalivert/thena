@@ -42,6 +42,8 @@ module Thena.Instral.Concrete
   , RawTest (..)
   ) where
 
+import Thena.Syntax.Lexer (Pos)
+
 -- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› do ‹body›@.
 --
 -- Named and unresolved like every other tree here: the tests and the op words
@@ -56,7 +58,10 @@ module Thena.Instral.Concrete
 -- matching on the focused term and on the goal is coming, and it will attach to
 -- the head, left of @:-@ or right of it. @when@ stays underneath whatever
 -- arrives — it is the low-level, manual way to ask whether a rule applies.
-data RawRule = RawRule String [RawPattern] [RawTest] [RawInstr]
+-- **The 'Thena.Syntax.Lexer.Pos' is where the clause begins** (MS12 phase 342) —
+-- the @rule@ keyword's own line and column, so a reader is handed the start of
+-- the clause and not of its name.
+data RawRule = RawRule Pos String [RawPattern] [RawTest] [RawInstr]
   deriving (Eq, Show)
 
 -- | A written parameter (MS5 phase 82) — @x@, @_@, @[a, ...rest]@, @(x, y)@,
@@ -260,7 +265,14 @@ data RawOpenSpec
 -- answers with an ordinary 'Thena.Instral.Ops.Rule' whose body ends in @return@. Nothing
 -- in the engine knows the difference, which is the point of there being one
 -- language.
-data RawFunction = RawFunction String [RawPattern] RawBody
+-- **The 'Thena.Syntax.Lexer.Pos' is the @=@'s** (MS12 phase 342) and not the
+-- name's, which is the one place this differs from 'RawRule'. A function
+-- declaration opens with an @ident@, and the grammar reads an identifier through
+-- @$$@ — the token's text without its position — so the nearest token that
+-- carries one is the @=@. Every function in a base is written with its
+-- parameters and its @=@ on one line, so the line is the clause's; the column is
+-- the @=@'s.
+data RawFunction = RawFunction Pos String [RawPattern] RawBody
   deriving (Eq, Show)
 
 -- | What stands right of an @=@ — in a function declaration and in a binding

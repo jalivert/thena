@@ -82,7 +82,7 @@ import Thena.View.Failure
   , StopView (..)
   , Why (..)
   )
-import Thena.View.Choices (ChoiceView (..))
+import Thena.View.Choices (AltView (..), ChoiceView (..))
 import Thena.View.Development (LinkView (..))
 import Thena.View.Goals (GoalKind (..), GoalView (..))
 import Thena.View.Machine (MachineView (..))
@@ -169,8 +169,14 @@ checks =
   , \s -> want "choicesView reaches a live choice point"
             (case choicesView (advance s [":step 2", "prove"]) of
                c : _ -> choiceViewId c > 0
-                          && not (null (choiceViewRunning c))
+                          && not (null (altViewName (choiceViewRunning c)))
                           && not (null (choiceViewUntried c))
+                          -- **And the clause is placed** (MS12 phase 342): a
+                          -- pane that offers to open the alternative needs a
+                          -- path and a line, and every clause the shipped base
+                          -- read has both. A name alone is what @~mhz7j@ is
+                          -- about.
+                          && all placed (choiceViewRunning c : choiceViewUntried c)
                []    -> False)
   , \s -> want "choicesView is empty where nothing can be retried"
             (null (choicesView s))
@@ -370,3 +376,9 @@ grammar = do
             , [ASide TheConclusion] <-
                 [ pc | PartView TheSide pc <- faultViewParts inner ] -> []
         other -> ["FAILED: failureView of a refused grammar: " <> show other]
+
+-- | Does this alternative say where its clause is written (MS12 phase 342)?
+placed :: AltView -> Bool
+placed a = case (altViewPath a, altViewAt a) of
+  (Just f, Just _) -> not (null f)
+  _                -> False

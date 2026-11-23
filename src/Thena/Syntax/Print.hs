@@ -406,9 +406,9 @@ rawTyAtom t = case t of
 rawDecl :: RawDecl -> [String]
 rawDecl d = case d of
   DeclSignature (RawSignature n t) -> [n ++ " : " ++ rawTy t]
-  DeclFunction (RawFunction n ps b) ->
+  DeclFunction (RawFunction _ n ps b) ->
     header (n ++ concatMap ((" " ++) . rawPattern) ps) b
-  DeclRule (RawRule n ps ts is) ->
+  DeclRule (RawRule _ n ps ts is) ->
     ("rule " ++ n ++ concatMap ((" " ++) . rawPattern) ps ++ " :-" ++ whens ts ++ " do")
       : map (("  " ++) . rawInstruction) is
   -- **An @open@ line, as written** (MS10 phase 267). @open X in ‹d›@ is one

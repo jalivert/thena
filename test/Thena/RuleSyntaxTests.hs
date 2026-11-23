@@ -12,6 +12,7 @@
 -- checks that what they say is a word the parser and resolver actually accept.
 module Thena.RuleSyntaxTests (tests) where
 
+import Data.List (nub)
 import Data.Maybe (listToMaybe)
 
 import Test.Tasty (TestTree, testGroup)
@@ -25,6 +26,7 @@ import Thena.Instral.Ops
   , Instr (..)
   , Op (..)
   , Operand (..)
+  , Origin (..)
   , Rule (..)
   , Value (..)
   , opKeyword
@@ -43,8 +45,8 @@ import Thena.Rules
   , testWord
   , validate
   )
-import Thena.Standard (expectedStandard, standardBases)
-import Thena.Syntax.Lexer (Located, Token, lexTokens)
+import Thena.Standard (expectedStandard, forgetOrigins, standardBases)
+import Thena.Syntax.Lexer (Located, Pos (..), Token, lexTokens)
 import Thena.Surface.Layout (layout)
 import Thena.Syntax.Parser (parseRule)
 
@@ -85,7 +87,7 @@ readRule src = case laidOut src of
   Left e -> Left e
   Right ts -> case parseRule ts of
     Left e -> Left ("parse: " ++ show e)
-    Right raw -> case resolveRule (rootReading []) raw of
+    Right raw -> case resolveRule "test" (rootReading []) raw of
       Left es -> Left ("resolve: " ++ show es)
       Right r -> Right r
 
@@ -124,7 +126,27 @@ againstTheBase =
     , testCase "its rules are exactly the expected ones, in order" $ do
         rs <- allRules <$> standardBases
         map ruleName rs @?= map ruleName expectedStandard
-        rs @?= expectedStandard
+        -- **Origins dropped before the comparison** (MS12 phase 342): a clause
+        -- carries its file, line and column now, and 'expectedStandard' says
+        -- what the clauses ARE and deliberately not where they sit — pinning a
+        -- hundred line numbers here would redden this list every time a comment
+        -- is added to the file.
+        forgetOrigins rs @?= expectedStandard
+
+    , testCase "and every clause knows the file and the line it was written at" $ do
+        -- **The other half of the same phase, and it is what keeps the list
+        -- above from hiding a regression**: the comparison forgets origins, so
+        -- this is where the origins are asserted. Every clause of the shipped
+        -- base comes out of the base's own file at a line of its own — which is
+        -- what @:choices@ needs to tell two clauses of one name apart (@~mhz7j@).
+        bs <- standardBases
+        let rs' = concatMap baseRules bs
+            paths = map basePath bs
+        [ () | r <- rs', Nothing <- [ruleOrigin r] ] @?= []
+        [ () | r <- rs', Just o <- [ruleOrigin r]
+             , originPath o `notElem` paths ] @?= []
+        length (nub [ posLine (originAt o) | r <- rs', Just o <- [ruleOrigin r] ])
+          @?= length rs'
 
     , testCase "and every one of them validates" $ do
         rs <- allRules <$> standardBases
@@ -624,7 +646,7 @@ regions =
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
-        Right raw -> case resolveRule (rootReading []) raw of
+        Right raw -> case resolveRule "test" (rootReading []) raw of
           Left es -> Just es
           Right _ -> Nothing
 
@@ -758,6 +780,6 @@ mistakes =
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
-        Right raw -> case resolveRule (rootReading []) raw of
+        Right raw -> case resolveRule "test" (rootReading []) raw of
           Left es -> Just es
           Right _ -> Nothing

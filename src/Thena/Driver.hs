@@ -55,6 +55,7 @@ module Thena.Driver
   , filesRead
   , noteRead
   , ChoicePoint (..)
+  , ChoiceAlt (..)
   , LoadError (..)
   , Loaded (..)
   , command
@@ -199,6 +200,7 @@ import Thena.Development.Cursor
 import Thena.Development.Partial (Partial (..), extract, termsIn, wordsTaken)
 import Thena.Engine
   ( ChoicePoint (..)
+  , ChoiceAlt (..)
   , rules
   , setBases
   , Exec (..)
@@ -2126,7 +2128,7 @@ instralEntry gs sc bases bound src = do
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts. All three checks are 'checkBlock' since phase 90.
-  case checkBlock gs bases bound (Rule (rootName "entry") [] [] prog) of
+  case checkBlock gs bases bound (Rule (rootName "entry") [] [] prog Nothing) of
     Just (BlockIll es)      -> Left (LineIllFormed es)
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
@@ -2162,7 +2164,7 @@ entryBindings gs sc bases bound src = case instralEntry gs sc bases bound src of
   Left _     -> []
   Right prog ->
     boundBy (allSignatures bases) (allCallable bases) bound
-      (Rule (rootName "entry") [] [] prog)
+      (Rule (rootName "entry") [] [] prog Nothing)
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
@@ -5889,7 +5891,7 @@ dispatch s name arg = case name of
        in case resolveBlock (Reading (grammars machine) (scope machine))
                             (rootName "entry") (map fst bound) body of
         Left errs -> (s, Failed (blockProblem errs))
-        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] [] is) of
+        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] [] is Nothing) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionFuel s)
@@ -7118,7 +7120,7 @@ ruleBaseOfDecls
   -> String -> Maybe String
   -> [RawDecl] -> Either RuleFileError RuleBase
 ruleBaseOfDecls reveals brought gs env conc path nm desc raws = do
-  (sigs, fns, rs) <- resolveAll reveals brought gs env conc raws
+  (sigs, fns, rs) <- resolveAll reveals brought gs env conc path raws
   Right (ruleBase nm desc path sigs fns rs)
 
 -- | A rule file's header and its declarations, parsed and /not/ resolved.
@@ -7304,10 +7306,10 @@ openedOf (RawOpen ns spec) = [ said (ps ++ [x]) | (ps, x) <- ns ]
 resolveAll
   :: ((ModuleName, Selection) -> [GlobalName])
   -> (ModuleName -> ([FilePath], [GlobalName], [Opened]))
-  -> [Grammar] -> GlobalEnv -> InScope -> [RawDecl]
+  -> [Grammar] -> GlobalEnv -> InScope -> FilePath -> [RawDecl]
   -> Either RuleFileError
        ([(String, Signature)], [Rule], [Rule])
-resolveAll reveals brought gs env conc raws =
+resolveAll reveals brought gs env conc path raws =
   case ( concat ruleErrs ++ concat fnErrs ++ sigErrs
            ++ dups ++ collisions ++ overlapping
        , concatMap validate (ok ++ fns)
@@ -7321,11 +7323,11 @@ resolveAll reveals brought gs env conc raws =
     decls = scopedDecls reveals brought gs env conc raws
 
     (ruleErrs, ok)  =
-      partitionEithers [ pushing ps <$> resolveRule rd r | (rd, ps, DeclRule r) <- decls ]
+      partitionEithers [ pushing ps <$> resolveRule path rd r | (rd, ps, DeclRule r) <- decls ]
     -- **A function is validated like any rule**, because it is one
     -- ('Thena.Rules.resolveFunction').
     (fnErrs, fns)   =
-      partitionEithers [ pushing ps <$> resolveFunction rd f
+      partitionEithers [ pushing ps <$> resolveFunction path rd f
                        | (rd, ps, DeclFunction f) <- decls ]
     -- **A signature needs no scope**: @instral@'s types are its own words, and
     -- a tag never appears in one.
@@ -8885,7 +8887,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- itself declared above it, and a @language@ block is exactly such a thing.
   --
   -- **The same checker the prompt uses**, so the messages are unchanged.
-  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] [] is) of
+  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] [] is Nothing) of
     Just (BlockIll errs)      -> stop (load [] m) msgs warns (BlockRefused errs)
     Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
     Nothing ->

@@ -315,7 +315,7 @@ basesOf :: Session -> [RuleBase]
 basesOf = rules . machineOf
 
 ruleNames :: RuleBase -> [String]
-ruleNames b = [ nameDotted g | Rule g _ _ _ <- baseRules b ]
+ruleNames b = [ nameDotted g | Rule g _ _ _ _ <- baseRules b ]
 
 loading :: TestTree
 loading =

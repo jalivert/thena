@@ -39,7 +39,7 @@ import Thena.Render
   ( rendering
   ,renderCursor, renderRuleError)
 import Thena.Repl (transcriptFrom)
-import Thena.Standard (expectedBase, expectedStandard, standardBases)
+import Thena.Standard (aRule, expectedBase, expectedStandard, standardBases)
 
 tests :: TestTree
 tests =
@@ -1260,9 +1260,9 @@ wellTyped =
 blockReturn :: TestTree
 blockReturn =
   testCase "a return inside a block is not the rule's" $
-    let blocked = Rule (rootName "blocked") [] []
+    let blocked = aRule (rootName "blocked") [] []
                     [Do (Block [Do (Return (Lit (VText "x")))])]
-        bad     = Rule (rootName "bad") [] []
+        bad     = aRule (rootName "bad") [] []
                     [Bind (PVar "y") Nothing (Call "blocked" []), Do (Say (Ref "y"))]
      in snd (inferProgram [] (reachingAll [blocked, bad]))
           @?= [BindsNothing (InBody (rootName "bad") 0) (rootName "blocked")]

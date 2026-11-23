@@ -75,6 +75,7 @@ import Thena.Instral.Ops
   , Op (..)
   , Operand (..)
   , Rule (..)
+  , Origin (..)
   , Pattern (..)
   , Skeleton (..)
   , patternBinds
@@ -1140,10 +1141,14 @@ rootReading gs = Reading gs rootScope
 -- the same one — @resolveBlock@\'s own comment says /nothing about a block is a
 -- second dialect/ — and phase 77\'s annotation pairing landed in one of them.
 -- A rule body silently ignored every @n : Ty@ it was given.
-resolveRule :: Reading -> RawRule -> Either [RuleError] Rule
-resolveRule rd (RawRule nm ps ts body) =
+-- **It takes the file it is reading** (MS12 phase 342), for the one thing the
+-- raw tree cannot carry: a clause records its own line and column, and the path
+-- they are line and column /of/ is the reader's to supply. 'Nothing' is never
+-- produced here — every clause this function sees was written somewhere.
+resolveRule :: FilePath -> Reading -> RawRule -> Either [RuleError] Rule
+resolveRule path rd (RawRule at nm ps ts body) =
   case (patErrs, headErrs, resolveBlock rd g (concatMap patternBinds qs) body) of
-    ([], [], Right instrs) -> Right (Rule g qs tests instrs)
+    ([], [], Right instrs) -> Right (Rule g qs tests instrs (Just (Origin path at)))
     (_,  _,  Right _)      -> Left (patErrs ++ headErrs)
     (_,  _,  Left bodyErrs) -> Left (patErrs ++ headErrs ++ bodyErrs)
   where
@@ -1226,10 +1231,11 @@ builtInTypes =
 --
 -- **A function must produce.** @f x = say "hi"@ is refused here rather than by
 -- 'validate', which would report it against a binding the author never wrote.
-resolveFunction :: Reading -> RawFunction -> Either [RuleError] Rule
-resolveFunction rd (RawFunction nm ps body) =
+resolveFunction :: FilePath -> Reading -> RawFunction -> Either [RuleError] Rule
+resolveFunction path rd (RawFunction at nm ps body) =
   case partitionEithers (map (resolvePattern rd g) ps) of
-    ([], qs) -> Rule g qs [] <$> bodyInstrs rd g nm (concatMap patternBinds qs) body
+    ([], qs) -> (\is -> Rule g qs [] is (Just (Origin path at)))
+                  <$> bodyInstrs rd g nm (concatMap patternBinds qs) body
     (es, _)  -> Left es
   where
     g = rootName nm
@@ -2250,7 +2256,7 @@ surfaceBlocks rd g is = concat <$> traverse one (zip [0 :: Int ..] (blocksUnder 
         e : es -> Left (e : es)
         []     -> do
           inner <- surfaceBlocks rd nm body
-          Right (Rule nm [] [] body : inner)
+          Right (Rule nm [] [] body Nothing : inner)
       where
         nm = rootName (unGlobal g ++ ", do block " ++ show (k + 1))
 
