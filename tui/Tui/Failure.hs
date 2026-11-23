@@ -25,12 +25,13 @@ module Tui.Failure
   ( StopLine (..)
   , stopLines
   , positionSuffix
+  , placeSuffix
   , natureGlyph
   , natureIsFault
   , refusedClaimsShown
   ) where
 
-import Data.List (intercalate)
+import Data.List (intercalate, stripPrefix)
 import Data.Maybe (listToMaybe, mapMaybe)
 
 import Thena.View.Failure
@@ -128,6 +129,32 @@ whyLines d why = case why of
 positionSuffix :: Maybe Pos -> String
 positionSuffix Nothing = ""
 positionSuffix (Just p) = ":" <> show (posLine p) <> ":" <> show (posColumn p)
+
+-- | **A place a pane row could take you, spelled so that the terminal can take
+-- you there** — `~8rn4d`, and **his ruling of 2026-11-23**: the TUI does not
+-- open a clause, the terminal emulator does. He runs it from a Zed terminal,
+-- which detects a path in a program's output and opens the file at the line it
+-- detects, so the whole affordance is a row that prints a path the emulator can
+-- resolve. Two leading spaces, then @path:line:col@, and @\"\"@ for a clause
+-- that is in no file — the synthetic rule a typed line is wrapped in.
+--
+-- **The path is spelled against the launch directory and that is not cosmetic.**
+-- 'Thena.View.Choices.altViewPath' is absolute by design, a pane not being a
+-- transcript — but an absolute path here runs to seventy-odd characters against
+-- a pane column measured at fifty, and 'paneWrapped' breaks a word longer than
+-- its pane mid-word, which leaves two fragments and no path. Relative, it is
+-- @rules\/standard.thena.rules:80@ and survives whole onto a continuation line.
+placeSuffix :: FilePath -> Maybe FilePath -> Maybe Pos -> String
+placeSuffix _ Nothing _ = ""
+placeSuffix cwd (Just p) at = "  " <> pathUnder cwd p <> positionSuffix at
+
+-- | A path spelled against a directory it is inside, and left alone otherwise.
+--
+-- **By hand and not @System.FilePath@'s @makeRelative@**, which answers the
+-- path unchanged for anything not under the base anyway and would be the only
+-- reason this module needed @filepath@.
+pathUnder :: FilePath -> FilePath -> FilePath
+pathUnder cwd p = maybe p id (stripPrefix (cwd <> "/") p)
 
 -- ---------------------------------------------------------------------------
 -- A fault

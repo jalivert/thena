@@ -80,7 +80,7 @@ import Graphics.Vty.UnicodeWidthTable.Types
   , WidthTableRange (..)
   )
 import Lens.Micro ((^.), Lens', lens)
-import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
+import System.Directory (doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory)
 import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStr, readFile', stdout)
 
@@ -207,9 +207,11 @@ import Tui.Panes
   , stripHintLines
   , outputRows
   , paneBarWidget
+  , headingText
   , paneRowWidget
   , paneWrapped
   )
+import Tui.Failure (placeSuffix)
 import Tui.Database
   ( Stored (..)
   , clockName
@@ -1045,6 +1047,19 @@ data St = St
     -- 'draw' is pure. Set at launch, then by every 'JobTick' and by every
     -- job that starts, so what a row says is at most a second behind the
     -- wall clock — which is the resolution the rows are written to anyway.
+  , stCwd :: FilePath
+    -- ^ **the directory the TUI was launched in, read once at launch** —
+    -- `~8rn4d`. It is here for one job: a clause's path arrives from the
+    -- engine absolute (deliberately, since a pane is not a transcript), and
+    -- **an absolute path is longer than the pane it has to fit in**, so it
+    -- breaks mid-word and stops being a path at all. Spelled against this it
+    -- is @rules\/standard.thena.rules@, which fits and which the terminal
+    -- emulator can resolve — **his ruling, 2026-11-23: the TUI does not open
+    -- the clause, Zed does**, and he runs the TUI from a Zed terminal for
+    -- that reason. A path outside this directory is left absolute.
+    --
+    -- **Read once rather than per frame** because 'draw' is pure, the same
+    -- reason 'stNow' is a field. The TUI never changes directory.
   , stJobClock :: Bool
     -- ^ **whether a 'JobTick' chain is already running**, so that two jobs
     -- starting in the same second cannot leave two timers redrawing the same
@@ -1099,6 +1114,8 @@ runTui = do
   -- the first frame — `~fp5nf` step three. Nothing is running yet, so nothing
   -- reads it until a job starts and sets it again.
   now0 <- getCurrentTime
+  -- **Read once, for `~8rn4d`'s path spelling** — see 'stCwd'.
+  cwd0 <- getCurrentDirectory
   let theme0 = maybe neonPinkDark id (themeByName (cfgTheme cfg))
       autoSelect0 = cfgAutoSelect cfg
       -- | **The launch offers, computed once and read twice** — `~wvtz2`.
@@ -1180,6 +1197,7 @@ runTui = do
         , stOfferGen    = 0
         , stOfferDone   = 0
         , stNow         = now0
+        , stCwd         = cwd0
         , stJobClock    = False
         , stJevSince    = Nothing
         , stHintSince   = Nothing
@@ -2403,11 +2421,39 @@ draw st =
     -- least one name.
     choiceRows cvs =
       concat
-        [ Heading (show (choiceViewId cv) <> "  " <> altViewName (choiceViewRunning cv)) (Just (length untried))
-            : map (Entry . altViewName) untried
+        [ Heading (headingText (show (choiceViewId cv) <> "  " <> altViewName run) (Just (length untried)) <> placeOf run) Nothing
+            : map (Entry . place) untried
         | cv <- cvs
         , let untried = choiceViewUntried cv
+              run = choiceViewRunning cv
         ]
+      where
+        -- | **A row names its clause and then says where that clause is
+        -- written** — `~8rn4d`, his ruling of 2026-11-23. The name alone was
+        -- the whole row until then, and a name is not enough: what the engine
+        -- picks is a *clause*, a rule may be written as several, and two of
+        -- them under one name gave two rows reading identically
+        -- (@elaborate@ / @elaborate@, his own pane, 2026-11-13).
+        --
+        -- **The path is also the whole of the clicking, and the TUI does none
+        -- of it** — /nowhere in the TUI, with the Zed link/, his words. He runs
+        -- the TUI from a Zed terminal, whose own path detection opens the file
+        -- at the line. So no viewer is built here and none should be:
+        -- 'Tui.Failure.placeSuffix' spelling the path against 'stCwd' is the
+        -- feature.
+        --
+        -- **THE PLACE IS THE LAST THING ON THE LINE AND THE COUNT MOVES IN
+        -- FRONT OF IT**, which is why the heading is built through
+        -- 'Tui.Panes.headingText' by hand and handed over with no count of its
+        -- own. A heading reads @4691  intro  3  rules\/standard.thena.rules:80:1@.
+        -- The count is still in its usual column, right after the label; what
+        -- is new is a path beyond it, and **a path wants nothing after it**,
+        -- because what opens the file is a path detector reading the terminal's
+        -- own output and a trailing token is the one thing that could make it
+        -- read the line wrong. Measured under a pty at a 200-column terminal:
+        -- the pane's column is 50 and no row of this shape wraps.
+        place a = altViewName a <> placeOf a
+        placeOf a = placeSuffix (stCwd st) (altViewPath a) (altViewAt a)
 
     -- | **The matches pane's rows.** Which rules apply at the focus, in
     -- dispatch order — 'matchesView' is a look and running it never moves

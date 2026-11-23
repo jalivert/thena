@@ -26,6 +26,7 @@ module Tui.Panes
   , stripHintLines
   , hintRegionWidget
   , paneRowWidget
+  , headingText
   , paneWrapped
   , paneWrapAt
   , paneWrapFloor
