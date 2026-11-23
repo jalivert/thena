@@ -5813,6 +5813,50 @@ that reach it from the root, so a click compiles to `goto-root` and then those
 moves — an ordinary program you could have typed, snapshotted and undoable like
 any line. Clicking the top of a development is `goto-root` on its own.
 
+### `next` works out the goal to go to, and Thena keeps no list of open goals
+
+*Decided 2026-11-23. Adds a word.*
+
+The fourth member of the `goto` family, and the one that is handed nothing: the
+development already says what is unfinished and in what order, so there is
+nothing to tell it.
+
+```
+prove                 -- closes this goal
+next                  -- and on to the next one, whatever and wherever it is
+```
+
+**`next` means: the first unfinished goal in the innermost piece of work that
+still has one.** A piece of work is a guess body — what `attack` opens — and the
+outermost one is the development itself. So while the part you are working on
+still has a goal inside it, `next` goes there and nowhere else; when that part is
+finished it widens, and what it then reaches is usually the guess enclosing you.
+
+**A goal counts only when nothing is open inside it.** The root of a proof under
+way is itself a guess, and it stays one until the end, so "the first goal in the
+development" would name the root for ever. `solve` refuses a guess whose body is
+not yet pure, so a guess with work inside it is not something anyone can act on;
+only its innermost descendants are.
+
+**Most proof assistants keep an ordered list of open goals in their state. Thena
+does not, and that is the decision.** Coq keeps `comb` beside its evar map and
+Lean a `List MVarId` beside its metavariable context, because in both the store
+the holes live in is an unordered map, so the order has to be recorded
+separately — and kept in step, which is what Lean's `pruneSolvedGoals` is for.
+Thena's development is an ordered chain, so the order is already there to be
+read. The closest precedent is Isabelle, where the subgoals *are* the proof
+state's premises and there is no list beside them either.
+
+**What it buys.** A tactic that claims a hole for an argument names that hole
+itself, so until now a proof needed a `goto` typed by hand between the tactics,
+naming something no rule base could have contained. `next` needs no name, so a
+strategy written in the rule language can walk the goals. It refuses, saying
+*there is no goal left to go to*, exactly when the development is finished.
+
+**What it gives up, deliberately.** There is no queue, so nothing reorders the
+search and no rule can set a goal aside and come back to it — Idris 1's `UNFOCUS`
+and Coq's shelf have no equivalent. Moving away from a goal by hand is `goto`.
+
 ### Every datatype generates `caseD` as well as `elimD`
 
 *Decided 2026-10-18.*

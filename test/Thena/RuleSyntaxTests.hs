@@ -194,6 +194,8 @@ everyOp =
   , ("goto x",       Goto (Ref "x"))
   , ("goto-named x", Op.GotoNamed (Ref "x"))
   , ("goto-root",   Op.GotoRoot)
+    -- The goal to work on next, worked out from the development (@~g3qnw@).
+  , ("next",        Op.NextGoal)
   , ("along",        Along)
   , ("into",         Into)
   , ("cross type",   CrossType)

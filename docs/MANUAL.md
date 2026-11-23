@@ -458,6 +458,33 @@ written `goto-named "h"` and not `goto-named h`. `goto-root` takes nothing and
 goes to the top. `goto-root` is the only move that cannot fail — `back` refuses
 when there is nothing above it, and `goto-root` is already where it is going.
 
+**And `next` takes nothing either, because the development already says where to
+go.** It moves to the goal to work on next: the first unfinished goal in the
+innermost piece of work that still has one. A *piece of work* is a guess body —
+what `attack` opens — and the outermost one is the development itself. So while
+there is a goal inside the part you are working on, `next` goes there; when that
+part is finished, it widens, and the goal it then reaches is usually the guess
+that encloses you. That last step is the `goto-root` at the end of a proof.
+
+```
+thena spine> prove
+thena spine> next
+thena spine> prove
+```
+
+Three things follow from the definition and are worth knowing.
+
+- **Standing on a goal, `next` stays put.** So you can write it before every
+  step without skipping anything.
+- **It reaches goals you cannot name.** A tactic that claims a hole for an
+  argument names it itself, so there was no word to type; `next` needs none.
+- **It refuses once nothing is left**, saying *there is no goal left to go to*.
+  That is how a strategy written in the rule language knows to stop.
+
+**Thena keeps no list of open goals.** There is no queue to reorder, so nothing
+defers a goal and comes back to it later — if you want to leave one for now,
+move away from it yourself with `goto`.
+
 `goto` is also the more precise of the first two. A search by name takes the
 first component of that name from the root, and a name is unique in a
 development — but the name a nested position *asks* for is not always the name
@@ -2237,6 +2264,7 @@ language and elaborated on load.
 | `` apply-core core`f` `` / `` unify-refine-core core`t` `` | apply a function / refine by unification |
 | `goto-named "‹name›"` | move to a hole by name |
 | `goto-root` | move to the root of the development |
+| `next` | move to the goal to work on next, worked out from the development |
 | `` assume "‹x›" core`‹S›` `` / `` claim "‹x›" core`‹S›` `` | add a hypothesis / a hole above the focus |
 | `` assume core`‹S›` `` / `` claim core`‹S›` `` | the same, asking for the name |
 | `` unify core`‹t›` core`‹u›` `` | solve by unification |

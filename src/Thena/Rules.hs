@@ -1703,6 +1703,7 @@ nullaryOps =
   , ("fresh-level", Op.FreshLevel)
   , ("here", Here)
   , ("goto-root", Op.GotoRoot)
+  , ("next", Op.NextGoal)
   , ("none", Op.None)
   , ("prim-prove", Prove)
   , ("pop-development", Op.PopDevelopment)

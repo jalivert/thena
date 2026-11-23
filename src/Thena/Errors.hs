@@ -595,6 +595,10 @@ data MoveError
     -- scope" has already been answered by resolution before this is reached
   | NoSuchPart
     -- ^ a descent naming a field the focused form does not have
+  | NoGoalLeft
+    -- ^ @next@ with nothing left to prove: the development holds no goal, so
+    -- there is nowhere to go. Distinct from 'NoSuchHole', which is a name that
+    -- reaches nothing — this one is the development being finished
   deriving (Eq, Show)
 
 -- --------------------------------------------------------------------------

@@ -38,6 +38,8 @@ module Thena.Development.Cursor
   , toRoot
   , identsIn
   , goalsIn
+  , goalsWithin
+  , nextGoal
   , freshIdent
   , into
   , crossType
@@ -455,7 +457,16 @@ identsIn = idents . rebuild
 -- this and 'gotoNamed' disagree in exactly one place: 'searchFrom' has found a
 -- 'Define' since MS12 phase 320 and this does not list one.
 goalsIn :: Cursor -> [(Ident, Var)]
-goalsIn = goals . rebuild
+goalsIn = goalsWithin . rebuild
+
+-- | The same walk, over a 'Partial' rather than a focused development.
+--
+-- **It is separate because 'nextGoal' asks it of a guess's body**, to decide
+-- whether that guess has anything open inside it. One walk, so the goal list a
+-- pane shows and the goal @next@ picks cannot come to disagree about what a
+-- goal is.
+goalsWithin :: Partial -> [(Ident, Var)]
+goalsWithin = goals
   where
     goals q = case q of
       Under   c rest -> at c ++ within c ++ goals rest
@@ -473,6 +484,93 @@ goalsIn = goals . rebuild
       Claim  x i _   -> [(i, x)]
       Guess  x i _ _ -> [(i, x)]
       _              -> []
+
+-- | __The goal to work on next__ (MS12, @~g3qnw@): __the first unfinished goal
+-- in the innermost piece of work that still has one__.
+--
+-- A /piece of work/ is a guess body — what an @attack@ opened — and the
+-- outermost piece of work is the development itself. So the search is innermost
+-- body first, and it widens only when the body it is in has nothing left.
+--
+-- **The machine keeps no list of open goals and this is why** — his ruling of
+-- 2026-11-23, written up in @.jalivert\/discussion\/focusing-the-next-goal.md@.
+-- The development already says what is unfinished and in what order, so there is
+-- no second structure to keep in step with it and nothing that can fall out of
+-- date. Coq and Lean keep a goal list because their hole stores are unordered
+-- maps; an ordered chain does not have that problem.
+--
+-- **A goal counts only when no goal is open inside it, and that filter is part
+-- of the definition rather than a refinement of it.** 'goalsIn' puts the root
+-- guess first and the root is a guess from @attack@ until @qed@, so /the first
+-- goal in the list/ would name the root for ever and @next@ would never move.
+-- 'Thena.Engine' refuses @solve@ on a guess whose body is not pure, so a guess
+-- with work inside it is not a goal anybody can act on — only its innermost
+-- descendants are. A 'Claim' always counts: it has no body.
+--
+-- **Innermost first is the locality he asked for**: goals inside the part you
+-- are working on /"have much to do with our current work and intention"/, so
+-- @next@ may not leave for an unrelated part of the proof while that part still
+-- has work. Document order from the root would: an open hole claimed earlier by
+-- a sibling application sits before the body you are standing in, and
+-- @prove-in-scope.golden@\'s @goto a@ is that case by hand.
+--
+-- **Within a level the answer does not depend on where in it you stand**, which
+-- is what makes @next@ predictable for a rule: it is a function of the
+-- development and the body you are in, not of where a tactic happened to leave
+-- the focus. So @next@ on a goal that is already countable stays put, and a
+-- strategy can write @next@ before every step without skipping work.
+nextGoal :: Cursor -> Either MoveError Cursor
+nextGoal cur = maybe (Left NoGoalLeft) Right (firstOf (map search levels))
+  where
+    root = enter (rebuild cur)
+
+    -- The bodies the cursor stands inside, innermost first, then the
+    -- development itself. A level is named by the guess that opened it, and
+    -- 'goto' then 'into' is how it is re-entered — both existing moves, so no
+    -- second way of walking the chain is introduced here.
+    levels = [ body x | x <- reverse (enclosing (prefix cur)) ] ++ [Just root]
+
+    enclosing p = [ x | IntoGuess x _ _ _ <- toList p ]
+
+    body x = case goto x root of
+      Right c -> either (const Nothing) Just (into c)
+      Left _  -> Nothing
+
+    search Nothing  = Nothing
+    search (Just c) = leafFrom c
+
+    firstOf xs = case [ a | Just a <- xs ] of
+      a : _ -> Just a
+      []    -> Nothing
+
+-- | The first countable goal at or after a position, depth first: the focus,
+-- then inside it, then on along the chain.
+--
+-- The same shape as 'searchFrom' — @here@, @inside@, @next@ — and deliberately
+-- so, except that it starts where it is put rather than at the root and tests
+-- for a goal with nothing open inside it.
+leafFrom :: Cursor -> Maybe Cursor
+leafFrom = go
+  where
+    go c = here c `orElse` inside c `orElse` onward c
+
+    here c = case focus c of
+      OnComponent k | countable k -> Just c
+      _                           -> Nothing
+
+    inside c = either (const Nothing) go (into c)
+    onward c = either (const Nothing) go (along c)
+
+    orElse (Just a) _ = Just a
+    orElse Nothing  b = b
+
+-- | Is this component a goal with nothing open inside it — the thing @next@
+-- lands on? See 'nextGoal' for why the second half is not optional.
+countable :: Component -> Bool
+countable c = case c of
+  Claim _ _ _     -> True
+  Guess _ _ g _   -> null (goalsWithin g)
+  _               -> False
 
 -- 'freshIdent' is re-exported from "Thena.Core.Context" and not defined here.
 -- **One numbering rule for a word the system supplies**, his ruling of

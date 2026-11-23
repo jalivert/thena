@@ -465,6 +465,33 @@ data Op
     -- where it is going. So the empty address is @goto-root@ rather than an
     -- empty program, and clicking the root moves the cursor instead of
     -- silently doing nothing.
+  | NextGoal
+    -- ^ **to the goal to work on next** (MS12, @~g3qnw@) — the fourth @goto@,
+    -- and the one that needs no operand because the development already says
+    -- where to go.
+    --
+    -- __The machine keeps no list of open goals.__ His ruling of 2026-11-23,
+    -- written up in @.jalivert\/discussion\/focusing-the-next-goal.md@: the
+    -- development already says what is unfinished and in what order, so a
+    -- queue beside it would be a second copy of the truth to keep in step.
+    -- Coq and Lean keep one because their hole stores are unordered maps;
+    -- Isabelle keeps none, because its subgoals /are/ its proof state's
+    -- premises. An ordered chain is Isabelle's case.
+    --
+    -- __It is the wall this clears.__ A bare @prove@ could close a goal and
+    -- then had nothing to do, because the new hole was elsewhere and the names
+    -- that reach it are minted by the machine — so no rule base could contain
+    -- them and every proof needed a @goto@ typed by hand between the tactics.
+    -- A nullary move needs no name, so a rule can walk the goals.
+    --
+    -- 'Thena.Development.Cursor.nextGoal' is the definition and says what
+    -- /next/ means: the first unfinished goal in the innermost piece of work
+    -- that still has one. It refuses with 'Thena.Errors.NoGoalLeft' when the
+    -- development is finished, which is what makes a strategy able to stop.
+    --
+    -- __A rule still cannot defer a goal.__ There is no @unfocus@, so nothing
+    -- reorders the search; setting a goal aside by hand is @goto@. The sidecar
+    -- queue that would allow it is unrefuted and not foreclosed — @~4xqh5@.
   | Back                      -- ^ undo the last move
   | Reduce                    -- ^ commit a whnf at the core focus (§4.7, phase 7)
   | Unify Operand Operand     -- ^ two terms — solve holes, or park the equation (§6, phase 9)
@@ -1765,6 +1792,7 @@ resultOf o = case o of
   Goto _       -> Nothing   -- a move; it rewrites the cursor and yields nothing
   GotoNamed _  -> Nothing
   GotoRoot     -> Nothing
+  NextGoal     -> Nothing
   Back         -> Nothing
   Play _       -> Nothing
   Attack       -> Nothing
@@ -2038,6 +2066,7 @@ operandTypes o = case o of
   Goto a       -> [(a, TCore)]
   GotoNamed a  -> [(a, TName)]
   GotoRoot     -> []
+  NextGoal     -> []
   Back         -> []
   Reduce       -> []
   Attack       -> []
@@ -2471,6 +2500,7 @@ opKeyword o = case o of
   Goto _       -> "goto"
   GotoNamed _  -> "goto-named"
   GotoRoot     -> "goto-root"
+  NextGoal     -> "next"
   Back         -> "back"
   Reduce       -> "reduce"
   Unify _ _    -> "unify"
