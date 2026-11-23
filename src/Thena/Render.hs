@@ -2714,8 +2714,8 @@ whereRuleError ren e = case e of
                                ++ ", the type of " ++ n ++ ": "
   ReturnInSurfaceBlock g i -> inRule g i
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
-  FunctionClauseUnreachable n _ -> "in " ++ n ++ ": "
-  RuleAndFunction n _     -> "in " ++ n ++ ": "
+  FunctionClauseUnreachable n _ _ -> "in " ++ n ++ ": "
+  RuleAndFunction n _ _   -> "in " ++ n ++ ": "
   where
     -- **Counted from 1, as a type error is** (MS5 phase 91, @ms5\/CLOSEOUT.md@
     -- 44). The index is the written statement from zero — the same count
@@ -2807,11 +2807,11 @@ whatRuleError e = case e of
       ++ "so there is nothing for a return to answer"
   FunctionLeavesNothing _ ->
     "the right of the = leaves no value, so there is nothing to return"
-  FunctionClauseUnreachable _ k ->
+  FunctionClauseUnreachable _ k _ ->
     "a function has one clause, and nothing tells a second one at " ++ show k
       ++ (if k == 1 then " argument" else " arguments")
       ++ " apart from the first — write a rule if you want the clauses searched"
-  RuleAndFunction _ k     ->
+  RuleAndFunction _ k _   ->
     "this name is both a rule and a function at " ++ show k
       ++ (if k == 1 then " argument" else " arguments")
 

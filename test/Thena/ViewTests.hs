@@ -21,7 +21,7 @@
 -- second walk of the chain.
 module Thena.ViewTests (tests) where
 
-import Data.List (intercalate)
+import Data.List (intercalate, isInfixOf)
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
@@ -30,7 +30,13 @@ import Thena.Core.Term (Var)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Focus (..), focus)
 import Thena.Driver
-  ( Session
+  ( NotDone (..)
+  , Response (..)
+  , RuleFileError (..)
+  , Session
+  , Stop (..)
+  , Unfinished (..)
+  , loadRuleTexts
   , newSession
   , oneLine
   , withRuleBases
@@ -38,13 +44,16 @@ import Thena.Driver
 import Thena.Engine (goalEnv)
 import Thena.Render
   ( rendering
-  ,renderCursor)
+  , renderCursor
+  , renderResponse
+  )
 import Thena.Repl (Turn (..), turn)
 import Thena.Standard (expectedBase)
 import Thena.View
   ( Budget (..)
   , binderAddresses
   , developmentView
+  , failureView
   , focusTypeView
   , goalsView
   , GoalKind (..)
@@ -58,6 +67,15 @@ import Thena.View
   )
 import Thena.View.Address (follow)
 import Thena.View.Choices (AltView (..), ChoiceView (..))
+import Thena.View.Failure
+  ( FaultKind (..)
+  , FaultView (..)
+  , PartView (..)
+  , Piece (..)
+  , Role (..)
+  , Why (..)
+  , stopViewWhy
+  )
 import Thena.Syntax.Lexer (Pos (..))
 import Thena.View.Redraw (markedChainText, redraw, redrawChain)
 import Thena.View.Matches (MatchView (..))
@@ -73,6 +91,7 @@ tests =
     , testGroup "the match list, against :matches" (map matchCase fixtures)
     , testGroup "the choice points, against :choices" (map choiceCase choiceFixtures)
     , testGroup "the goals, against what a line is given" (map goalCase fixtures)
+    , testGroup "a refused rule file, against what the prompt prints" ruleRefusalCases
     , testGroup "and the fixtures really exercise it" notVacuous
     ]
 
@@ -252,6 +271,74 @@ choiceCase (name, s) = testCase name (drawn @?= turnOutput (turn s ":choices"))
         altViewName a <> " (" <> reverse (takeWhile (/= '/') (reverse f))
                       <> ":" <> show (posLine p) <> ")"
       _ -> altViewName a
+
+-- ---------------------------------------------------------------------------
+-- A refused rule file (MS12 phase 343, `~w3q27`)
+-- ---------------------------------------------------------------------------
+
+-- | __Three refusals that talk about a clause, crossed against the prompt__.
+--
+-- **The errors are real and the envelope is not, and that is the point of the
+-- comment.** A @.thena.rules@ file that will not load answers
+-- 'Thena.Driver.RuleFileRefused', and **nothing turns that into a view**: the
+-- only 'Thena.Driver.Stop' that carries a 'Thena.Rules.RuleError' is
+-- @BlockRefused@, which 'Thena.Driver.checkBlock' builds for a @do@ block, and a
+-- module cannot declare a rule ('Thena.Surface.Concrete.SurfaceDecl'). So these
+-- three mappings are unreachable from any frontend today, `~cjznk` is the item
+-- for that, and this test drives them the only way there is: the errors come
+-- out of a real load, and only the 'Thena.Driver.Unfinished' around them is
+-- made here.
+--
+-- **What is asserted is the crossing.** The number the pane is given is the
+-- number the prompt's own sentence says, and the clause's place is a line the
+-- file really has — the line and not the column, the column of a function's
+-- clause being its @=@ (@~5n7tz@) — which is what @~w3q27@ was about: the arity was handed over
+-- as @ALine (arity + 1)@, so a pane drew a line number that did not exist.
+ruleRefusalCases :: [TestTree]
+ruleRefusalCases =
+  [ refusal "a second clause of a function" "a.thena.rules"
+      "rule base f where\nf x = concat x \"a\"\nf y = concat y \"b\"\n"
+      ClauseUnreachable 1 (Just 3)
+  , refusal "a second clause at two arguments" "b.thena.rules"
+      "rule base g where\ng x y = concat x y\ng a b = concat b a\n"
+      ClauseUnreachable 2 (Just 3)
+  , refusal "a name that is a rule and a function" "c.thena.rules"
+      "rule base h where\nrule dup x :- do say \"rule\"\ndup x = concat x x\n"
+      NameAlreadyDeclared 1 (Just 3)
+    -- **A signature written twice names no clause**, two @f : …@ lines being two
+    -- declarations and not one of them: the arity is the whole of what a pane is
+    -- given, and 'Thena.Instral.Concrete.RawSignature' carries no position to
+    -- give it more.
+  , refusal "two signatures for one name" "d.thena.rules"
+      "rule base i where\nf : Core -> ()\nf : Surface -> ()\nrule f x :- do prim-prove\n"
+      RuleTypeWrong 1 Nothing
+  ]
+  where
+    refusal name path src kind arity line = testCase name $
+      case snd (loadRuleTexts newSession [(path, src)]) of
+        resp@(RuleFileRefused _ (RuleIllFormed es)) ->
+          let s = newSession
+              u = Unfinished [] Nothing (ItStopped [] [] (BlockRefused es))
+              said = unlines (renderResponse s resp)
+           in case stopViewWhy (failureView (Budget 200) s u) of
+                Faulty fs | [f] <- [ x | x <- fs, faultViewKind x == kind ] -> do
+                  -- the arity, as a count and never as a line
+                  [ pc | PartView TheArity pc <- faultViewParts f ]
+                    @?= [ACount arity]
+                  -- …and it is the number the prompt said
+                  assertBool ("the prompt said: " <> said)
+                    (show arity `isInfixOf` said)
+                  -- the clause, as a place in a file that has that line
+                  case [ pc | PartView TheClause pc <- faultViewParts f ] of
+                    [] -> line @?= Nothing
+                    [APlace f' at] -> do
+                      f' @?= path
+                      Just (posLine at) @?= line
+                      assertBool (show at <> " is not a line of " <> path)
+                        (posLine at >= 1 && posLine at <= length (lines src))
+                    other -> assertFailure ("expected one place, got " <> show other)
+                other -> assertFailure ("expected a " <> show kind <> ", got " <> show other)
+        other -> assertFailure ("expected a refusal, got " <> show other)
 
 -- ---------------------------------------------------------------------------
 -- Non-vacuity

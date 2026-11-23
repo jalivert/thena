@@ -5127,6 +5127,16 @@ The path is the file's name and not the whole path, because a loaded base's path
 absolute and a transcript carrying it would be a transcript of one machine. A frontend
 is handed the full path, since a pane that offers to open the clause needs it.
 
+**And so is every other place a clause is handed over.** A pane listing a rule's clauses
+gets each one's file and line, and a refusal that is about a clause — a second clause of a
+function that nothing can tell from the first, a name that is both a rule and a function —
+names it by where it is written rather than by counting. A clause is somewhere you can go
+or it is nowhere, and which pane you happen to be looking at does not change that.
+
+One limit worth knowing: for a function the column is its `=` rather than its name, and
+if you write the `=` on a line of its own, that line is what you are sent to. A `rule`
+clause is exact.
+
 ### A choice point is made by writing rules, and no instruction mints one
 
 Every choice point in Thena comes from the rule base. A call looks for clauses

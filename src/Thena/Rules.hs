@@ -748,9 +748,11 @@ data RuleError
   | FunctionLeavesNothing String
     -- ^ @f x = say "hi"@ — the right of an @=@ ran something that produces no
     -- value, so there is nothing for the function to be (MS5 phase 68a)
-  | FunctionClauseUnreachable String Int
+  | FunctionClauseUnreachable String Int (Maybe Origin)
     -- ^ **a second clause of a function at one arity** (MS5 phase 80, his
-    -- ruling). A function is called and a rule is searched: a call enters one
+    -- ruling), **and where the unreachable clause is written** (MS12 phase 343,
+    -- @~zx8cb@) — the later one, which is the one the author has to change.
+    -- 'Nothing' is a clause in no file; see 'Thena.Instral.Ops.ruleOrigin'. A function is called and a rule is searched: a call enters one
     -- clause and stays in it, so a second clause is reached only if something
     -- tells the two apart — and until there are patterns, nothing can. It was
     -- accepted before this phase, and reached by the first clause /failing/,
@@ -759,9 +761,11 @@ data RuleError
     -- **The phase that adds patterns lifts this**, and is where a function's
     -- clause selection stops being /the only one/ and becomes /the first that
     -- matches/.
-  | RuleAndFunction String Int
+  | RuleAndFunction String Int (Maybe Origin)
     -- ^ one name is both a rule and a function at one arity (MS5, reviewed
-    -- 2026-09-12)
+    -- 2026-09-12), **and where the function is written** (MS12 phase 343): the
+    -- rule of that name is the declaration that was there first, so the
+    -- function is the one in the way. 'Nothing' is a clause in no file.
   deriving (Eq, Show)
 
 -- | The load-time pass (§2.4, §7.2). Three checks, one traversal, **every**

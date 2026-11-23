@@ -180,6 +180,19 @@ checks =
                []    -> False)
   , \s -> want "choicesView is empty where nothing can be retried"
             (null (choicesView s))
+    -- **AND A CLAUSE IN THE RULES VIEW IS PLACED TOO** (MS12 phase 343,
+    -- @~zx8cb@). The choice-point check above proves it for an alternative;
+    -- this is the view whose every row /is/ a clause, and a pane built from it
+    -- is the one that will offer to open one. Asserted here rather than only in
+    -- the suite because naming 'Thena.View.Failure.Pos' for a clause is the
+    -- half only a frontend-shaped caller can prove.
+  , \s -> want "a clause in the rules view says where it is written"
+            (let rs = [ r | (_, vs) <- rulesView budget s, r <- vs ]
+              in not (null rs)
+                   && all (\r -> case (ruleViewPath r, ruleViewAt r) of
+                                   (Just f, Just at) -> not (null f) && posLine at > 0
+                                   _                 -> False)
+                          rs)
     -- A rule's declared type arrives structured, not as a rendered line
     -- (MS7 phase 133) — so "Thena.View.Type" really is past the seam.
   , \s -> want "a signature view is structured"

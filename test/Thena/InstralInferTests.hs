@@ -30,7 +30,8 @@ import Thena.Instral.Infer
   , renderInstralTypeError
   )
 import Thena.Instral.Type (Signature (..), Ty (..), renderSignature)
-import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Pattern (..), Rule (..), Value (..))
+import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Origin (..), Pattern (..), Rule (..), Value (..))
+import Thena.Syntax.Lexer (Pos (..))
 import Thena.Errors (SyntaxError (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Rules (RuleBase (..), RuleError (..), writtenPositions)
@@ -355,7 +356,14 @@ functionsAreFunctions =
     [ testCase "a second clause at the same arity is refused" $
         case loadRaw "rule base f where\nf x = concat x \"a\"\nf x = concat x \"b\"\n" of
           RuleFileRefused _ (RuleIllFormed es)
-            | [FunctionClauseUnreachable "f" 1] <- es -> pure ()
+            -- **The position is the DEAD clause's** (MS12 phase 343, @~zx8cb@):
+            -- the file's third line is the second @f@, which is the one the
+            -- author has to change. The arity is the @1@ beside it.
+            --
+            -- **The column is the @=@'s and not the name's** — 'RawFunction'
+            -- says why, and @~5n7tz@ is the item for making it exact.
+            | [FunctionClauseUnreachable "f" 1 o] <- es
+            , Just (Origin "f.thena.rules" (Pos 3 5)) <- o -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **A different arity is a different callable**, which is how dispatch
@@ -391,7 +399,8 @@ functionsAreFunctions =
     , testCase "…and still refused when the first matches everything" $
         case loadRaw "rule base f where\nf x = concat x \"a\"\nf [] = \"b\"\n" of
           RuleFileRefused _ (RuleIllFormed es)
-            | [FunctionClauseUnreachable "f" 1] <- es -> pure ()
+            | [FunctionClauseUnreachable "f" 1 o] <- es
+            , Just (Origin "f.thena.rules" (Pos 3 6)) <- o -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **A function is CALLED**: first match, no decision left standing.
@@ -1526,7 +1535,12 @@ functions =
     , testCase "may not share a name and arity with a rule" $
         case load "rule dup x :- do say \"rule\"\ndup x = concat x x" of
           RuleFileRefused _ (RuleIllFormed es)
-            | RuleAndFunction "dup" 1 `elem` es -> pure ()
+            -- **And the position is the FUNCTION's** (MS12 phase 343): the
+            -- rule of that name was declared first, so the function is the one
+            -- in the way. @load@ puts the fixture under a header, so the
+            -- function is the file's third line.
+            | [RuleAndFunction "dup" 1 o] <- [ e | e@RuleAndFunction{} <- es ]
+            , Just (Origin "t.thena.rules" (Pos 3 7)) <- o -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
       -- …and at a different arity they are two callables, as they are for two
       -- rules.

@@ -7361,7 +7361,7 @@ resolveAll reveals brought gs env conc path raws =
     -- backtracking and a call could run either. A function has one clause and no
     -- head, which is exactly what that is not.
     collisions =
-      [ RuleAndFunction n (length (ruleParams f))
+      [ RuleAndFunction n (length (ruleParams f)) (ruleOrigin f)
       | f <- fns
       , let n = nameDotted (ruleName f)
       , any (\r -> ruleName r == ruleName f
@@ -7399,7 +7399,7 @@ resolveAll reveals brought gs env conc path raws =
     -- dead code the author can see is not, and a real overlap checker is the
     -- coverage question stage c opens rather than something owed here.
     overlapping =
-      [ FunctionClauseUnreachable n (length (ruleParams f))
+      [ FunctionClauseUnreachable n (length (ruleParams f)) (ruleOrigin f)
       | (i, f) <- zip [0 :: Int ..] fns
       , let n = nameDotted (ruleName f)
       , any (\g -> ruleName g == ruleName f
