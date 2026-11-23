@@ -28,6 +28,7 @@ module Tui.Render
   , displayText
   , developmentText
   , goalTexts
+  , ruleHeadText
   , mark
   ) where
 
@@ -63,6 +64,7 @@ import Thena.View.Instral
   , ValueView (..)
   )
 import Thena.View.Machine (FrameView (..), MachineView (..))
+import Thena.View.Rules (TestView (..))
 
 -- | Whether the reading-flow fold is on, and if so, where the cursor is —
 -- an 'ARegion' folds unless the cursor stands at or beneath its own
@@ -621,6 +623,28 @@ developmentText = concatMap (go 0)
 -- missing from the pane.
 goalTexts :: [GoalView] -> [String]
 goalTexts = map (\g -> goalMarker g <> concatMap pieceText (goalPieces NoFold g))
+
+-- | **A rule's head tests, in one line** — what the rule's own clause
+-- requires of the situation before its body runs, which is the nearest thing
+-- the system has to /this rule is for a goal of this shape/.
+--
+-- **It is derived and that is the whole point — `~czz2h`.** The knowledge
+-- Jev was short of is which rule opens which shape of goal, and the only
+-- places it is written down are a rule's head and its signature. A sentence
+-- of English saying the same thing was measured to work and **ruled out by
+-- him, 2026-11-23**, because nothing would keep it true: /"we will not keep a
+-- side-car kind of source of the truth. Nobody will be able to remember to
+-- keep it up to date."/ A head test cannot go stale — it is the rule.
+--
+-- Empty when the head is irrefutable, which is most helper rules: a clause
+-- that tests nothing says nothing about the situation, and an empty string is
+-- what the caller leaves out.
+ruleHeadText :: [TestView] -> String
+ruleHeadText = unwords . map one
+  where
+    one t = case testViewOperands t of
+      [] -> testViewWord t
+      ops -> testViewWord t <> " " <> unwords (map renderOperand ops)
 
 renderMachineView :: MachineView -> [String]
 renderMachineView (MachineView pc env stack) =

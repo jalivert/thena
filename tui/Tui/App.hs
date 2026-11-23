@@ -119,12 +119,14 @@ import Thena.View
   , matchesView
   , nameDotted
   , proofsView
+  , rulesView
   , statementOfferView
   )
 import Thena.View.Choices (ChoiceView (..))
 import Thena.View.Development (LinkView)
 import Thena.View.Goals (goalsOf)
 import Thena.View.Matches (MatchView (..))
+import Thena.View.Rules (RuleView (..))
 import Thena.View.Type (SignatureView (..), TypeView (..))
 import Thena.View.Proofs
   ( ProofsView (..)
@@ -146,6 +148,7 @@ import Tui.Render
   , displayText
   , foldAttr
   , goalTexts
+  , ruleHeadText
   , renderDevelopment
   , renderDisplay
   , renderGoals
@@ -7543,13 +7546,62 @@ jevRequest s typedSoFar offered = (JevState fields, candidates)
       [ ( Text.pack (rowLabel r)
         , Text.pack
             ( rowLabel r
-                <> if takeWhile (not . isSpace) (rowLabel r) `Set.member` applyingNames
-                  then " (applies at the current focus)"
-                  else ""
+                <> (if firstWord r `Set.member` applyingNames
+                      then " (applies at the current focus)" <> headNote (firstWord r)
+                      else "")
             )
         )
       | r <- offered
       ]
+
+    firstWord r = takeWhile (not . isSpace) (rowLabel r)
+
+    -- | **What the rule's own clauses require before their bodies run, read
+    -- off the rule base — `~czz2h`.** This is the knowledge Jev was short of:
+    -- not what the situation is, which @open_goals@ and @proof_term@ already
+    -- carry, but which rule is for a situation of this shape. **Derived, so
+    -- it cannot go stale** — the alternative, a sentence of English naming
+    -- the opening move for a @∀@ goal, was measured to work and ruled out by
+    -- him on 2026-11-23 as a side-car source of truth nobody would keep true.
+    --
+    -- **One clause per line is too much for a criterion**, which the API
+    -- reads as a short description, so the clauses are joined with @ / @ and
+    -- the whole note is capped: a rule with forty clauses would otherwise
+    -- bury the label it is describing.
+    --
+    -- **ONLY A CANDIDATE THAT APPLIES HERE CARRIES ITS HEAD, and that is a
+    -- measurement and not caution.** Attached to every candidate, the note
+    -- made things worse where the focus is a hole: @intro@'s head reads
+    -- @focus-is-guess goal-type-is-pi@, the goal's type /was/ a pi, and Jev
+    -- ranked it first — 0.19–0.22 against @attack@'s 0.13–0.15 — in a state
+    -- where @intro@ cannot run at all. A head is evidence about a rule, so a
+    -- rule that does not apply must not be handed one to argue with.
+    headNote w = case filter (not . null) (map ruleHeadText (clausesOf w)) of
+      [] -> ""
+      hs -> " [matches: " <> ellipsis (intercalate " / " hs) <> "]"
+
+    ellipsis t = if length t > headNoteWidth then take headNoteWidth t <> "…" else t
+
+    -- | Every clause of every loaded base, by the word that selects it. The
+    -- bases are grouped by name in 'rulesView' and a rule's clauses are
+    -- separate 'RuleView's, so one word gathers several.
+    clausesOf w = Map.findWithDefault [] w clauseHeads
+
+    clauseHeads =
+      Map.fromListWith
+        (<>)
+        [ (ruleViewName rv, [ruleViewHead rv])
+        | (_, rvs) <- rulesView budget s
+        , rv <- rvs
+        ]
+
+-- | **How wide a candidate's head note may be** — `~czz2h`. A criterion's
+-- description is read as a short line, and a rule with many clauses would
+-- otherwise push the label it describes out of sight. 120 is a judgement and
+-- is not measured; what it is weighed against is answer quality, the same
+-- limit 'matchesSent' records.
+headNoteWidth :: Int
+headNoteWidth = 120
 
 -- | **How much of @:matches@ goes out.** Measured 2026-11-13 against
 -- @exe:thena@: 110 lines with no proof open, 81 after @:theorem@ + @attack@ +
