@@ -1,0 +1,106 @@
+thena spine> :step 600
+thena spine> :theorem second : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> B -> B
+proving second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B
+thena spine> next
+thena spine> :show
+▶ let ? second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B in
+  second
+thena spine> prove
+chose 10: try-in-scope
+backtracking to 10: fit-in-scope
+backtracking to 10: attack
+thena spine> prove
+chose 12: intro
+thena spine> prove
+chose 15: intro
+thena spine> prove
+chose 18: intro
+thena spine> prove
+chose 21: intro
+thena spine> next
+thena spine> :show
+  let ? second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B ≐ (
+    λ (A : Type₀) ->
+    λ (B : Type₀) ->
+    λ (x : A) ->
+    λ (x1 : B) ->
+▶   let ? second1 : B in
+    second1
+  ) in
+  second
+thena spine> prove
+chose 24: try-in-scope
+chose 25: any-of
+thena spine> next
+thena spine> :show
+  let ? second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B ≐ (
+    λ (A : Type₀) ->
+    λ (B : Type₀) ->
+    λ (x : A) ->
+    λ (x1 : B) ->
+▶   let ? second1 : B ≐ (
+      x1
+    ) in
+    second1
+  ) in
+  second
+thena spine> solve
+thena spine> next
+thena spine> :show
+▶ let ? second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B ≐ (
+    λ (A : Type₀) ->
+    λ (B : Type₀) ->
+    λ (x : A) ->
+    λ (x1 : B) ->
+    let second1 = x1 : B in
+    second1
+  ) in
+  second
+thena spine> solve
+thena spine> next
+stuck: there is no goal left to go to
+  undoing that would backtrack to 25, which was chosen before this line — retry 25 to take it
+thena spine> qed
+second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B   ∎
+thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
+proving mp : ∀ (A : Type₀) (B : Type₀) -> A -> (A -> B) -> B
+thena spine> prove
+chose 38: try-in-scope
+backtracking to 38: fit-in-scope
+backtracking to 38: attack
+thena spine> prove
+chose 40: intro
+thena spine> prove
+chose 43: intro
+thena spine> prove
+chose 46: intro
+thena spine> prove
+chose 49: intro
+thena spine> next
+thena spine> prove
+chose 52: try-in-scope
+chose 53: any-of
+backtracking to 53: any-of
+chose 54: any-of
+backtracking to 54: any-of
+chose 55: any-of
+backtracking to 55: any-of
+chose 56: any-of
+backtracking to 56: any-of
+backtracking to 52: fit-in-scope
+chose 57: any-of
+chose 59: fit-core
+already equal
+thena spine> next
+thena spine> prove
+chose 61: try-in-scope
+chose 62: any-of
+backtracking to 62: any-of
+chose 63: any-of
+thena spine> prove
+chose 64: solve
+thena spine> next
+thena spine> solve
+thena spine> qed
+mp : ∀ (A : Type₀) (B : Type₀) -> A -> (A -> B) -> B   ∎
+thena spine> :quit

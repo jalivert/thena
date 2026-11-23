@@ -1765,6 +1765,69 @@ tests =
         , "qed"
         , ":quit"
         ]
+      -- **The machine focuses the next goal itself** (@~g3qnw@, his ruling of
+      -- 2026-11-23: derive it, do not keep a queue). Every @goto@ in
+      -- @prove-in-scope@ above is a @next@ here and nothing else changes, so
+      -- the two transcripts together are the before and after.
+      --
+      -- Three things are pinned, and they are the definition.
+      --
+      --   * **@next@ on a goal stays put.** The first one, before any tactic,
+      --     leaves the focus on @second@ — so a strategy may write @next@
+      --     before every step without skipping work.
+      --   * **Innermost first, then outward.** After the four @intro@s the
+      --     focus is deep in @second@'s body and @next@ takes @second1@; once
+      --     @second1@ is solved the only goal left /encloses/ the position, and
+      --     @next@ takes it. **That is the cascade @goto-root@ used to be.**
+      --   * **It refuses when the development is finished**, which is what lets
+      --     a strategy stop rather than wander.
+      --
+      -- @second@ is the case his question was about: nothing below the cursor,
+      -- and the one goal left above it. The list is @[second, second1]@ and
+      -- @second@ does not count while it holds a goal — @solve@ would refuse
+      -- it — so the answer is @second1@, where the cursor already is.
+    , script
+        "next-goal"
+        [ ":step 600"
+        , ":theorem second : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> B -> B"
+        , "next"
+        , ":show"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "next"
+        , ":show"
+        , "prove"
+        , "next"
+        , ":show"
+        , "solve"
+        , "next"
+        , ":show"
+        , "solve"
+        , "next"
+        , "qed"
+          -- **And the applying case, with no name typed by hand at all.**
+          -- @fit-in-scope@ claims @? a : A@ above the focus; @next@ reaches it
+          -- without knowing its name, which is the whole point — @a@ was minted
+          -- by the machine, so no rule base could have contained it.
+        , ":theorem mp : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> (A -> B) -> B"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "next"
+        , "prove"
+        , "next"
+        , "prove"
+        , "prove"
+        , "next"
+        , "solve"
+        , "qed"
+        , ":quit"
+        ]
     , script
         "help"
         [ ":help"

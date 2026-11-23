@@ -977,6 +977,7 @@ displayStop sp grammars budget env binders counter here u = case Dr.unfinishedWh
           E.NoCrossingIntoAConstraint -> ACoreTerm
           E.NoSuchHole -> AHole
           E.NoSuchPart -> AnArgument
+          E.NoGoalLeft -> AHole
 
     -- ** Why a region of the user's own text did not read
 

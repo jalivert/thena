@@ -1855,6 +1855,7 @@ renderMoveError m = case m of
   NoCrossingIntoAConstraint -> "there is no position inside a constraint"
   NoSuchHole    -> "that names no hole or guess"
   NoSuchPart     -> "the focus has no such part"
+  NoGoalLeft     -> "there is no goal left to go to"
 
 -- --------------------------------------------------------------------------
 -- Declarations, made readable (§3.7)

@@ -13,6 +13,8 @@ module Thena.Fixtures
   , trailingLam
   , trailingPi
   , richTypes
+  , nestedGoals
+  , soleGuess
   ) where
 
 import Thena.Core.Level (Level (..))
@@ -63,6 +65,43 @@ withConstraint =
           (Under (Claim vh (Ident "h") (Free vA))
             (Pending (Equate xi (Free vh) (Free vx) (Free vA))
               (Trailing (Free vh)))))
+
+-- | __An open goal inside a guess, and another open goal before it__ — the
+-- fixture @next@\'s locality is measured against (@~g3qnw@).
+--
+-- @e@ is open and earlier in the chain than the guess; @i@ is open inside the
+-- guess\'s body. From inside that body @next@ must answer @i@ and not @e@: the
+-- body is the piece of work the cursor is in, and a goal elsewhere in the proof
+-- may not take precedence over one inside it.
+nestedGoals :: Partial
+nestedGoals =
+  let (vE, n1) = fresh 0
+      (vg, n2) = fresh n1
+      (vi, _)  = fresh n2
+      body =
+        Under (Claim vi (Ident "i") type0)
+          (Trailing (Free vi))
+   in Under (Claim vE (Ident "e") type0)
+        (Under (Guess vg (Ident "g") body type0)
+          (Trailing (Free vg)))
+
+-- | __A guess whose body is finished, and nothing else open__ — the cascade
+-- outward (@~g3qnw@).
+--
+-- From inside the body there is no goal left in it, so @next@ widens and
+-- answers the guess itself, which is now the only thing left to solve. It is
+-- the @goto-root@ that used to end every proof.
+soleGuess :: Partial
+soleGuess =
+  let (vA, n1) = fresh 0
+      (vg, n2) = fresh n1
+      (va, _)  = fresh n2
+      body =
+        Under (Assume va (Ident "a") (Free vA))
+          (Trailing (Free va))
+   in Under (Assume vA (Ident "A") type0)
+        (Under (Guess vg (Ident "g") body (Free vA))
+          (Trailing (Free vg)))
 
 -- | One link of each kind, so the four-case display is exercised at once.
 allFour :: Partial

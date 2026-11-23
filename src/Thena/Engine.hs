@@ -2686,6 +2686,11 @@ perform instr rest m = case operation instr of
   -- 'Either' like its siblings rather than gaining a total sibling of its own
   -- — what is uniform here is that every move goes through one helper.
   GotoRoot -> moveTo (Right . Cursor.toRoot)
+
+  -- The fourth @goto@, and the only one that needs nothing said to it: the
+  -- development already holds the answer. 'Cursor.nextGoal' is the definition
+  -- and 'Op.NextGoal' is why there is no queue behind it.
+  NextGoal -> moveTo Cursor.nextGoal
   Down part  -> navigate (down part)
 
   -- Commit a whnf at the core focus (§4.7). Not 'navigate': a move never has
