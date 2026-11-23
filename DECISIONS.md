@@ -5133,9 +5133,9 @@ function that nothing can tell from the first, a name that is both a rule and a 
 names it by where it is written rather than by counting. A clause is somewhere you can go
 or it is nowhere, and which pane you happen to be looking at does not change that.
 
-One limit worth knowing: for a function the column is its `=` rather than its name, and
-if you write the `=` on a line of its own, that line is what you are sent to. A `rule`
-clause is exact.
+A clause's position is where it begins — a `rule` clause at its `rule` keyword, a
+function clause at its name — and that holds however the clause is laid out, so a function
+whose `=` sits on a line of its own still sends you to the line it begins on.
 
 ### A choice point is made by writing rules, and no instruction mints one
 

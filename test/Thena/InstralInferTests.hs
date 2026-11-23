@@ -360,10 +360,24 @@ functionsAreFunctions =
             -- the file's third line is the second @f@, which is the one the
             -- author has to change. The arity is the @1@ beside it.
             --
-            -- **The column is the @=@'s and not the name's** — 'RawFunction'
-            -- says why, and @~5n7tz@ is the item for making it exact.
+            -- **The column is the name's** (MS12 phase 344, @~5n7tz@): the
+            -- clause begins at the @f@, which is column 1 here, and not at the
+            -- @=@ five characters along.
             | [FunctionClauseUnreachable "f" 1 o] <- es
-            , Just (Origin "f.thena.rules" (Pos 3 5)) <- o -> pure ()
+            , Just (Origin "f.thena.rules" (Pos 3 1)) <- o -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- **And the clause's own line, where the @=@ is on another** (MS12
+      -- phase 344, @~5n7tz@). This is the case that made the position wrong:
+      -- the grammar admits a clause written over two lines, and while the name
+      -- was read without its position the @=@ was the nearest token that had
+      -- one, so the refusal pointed at the fourth line of a file whose second
+      -- clause begins on the third.
+    , testCase "…and the position is the clause's first line, not the @=@'s" $
+        case loadRaw "rule base f where\nf x = concat x \"a\"\nf y\n  = concat y \"b\"\n" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | [FunctionClauseUnreachable "f" 1 o] <- es
+            , Just (Origin "f.thena.rules" (Pos 3 1)) <- o -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **A different arity is a different callable**, which is how dispatch
@@ -400,7 +414,7 @@ functionsAreFunctions =
         case loadRaw "rule base f where\nf x = concat x \"a\"\nf [] = \"b\"\n" of
           RuleFileRefused _ (RuleIllFormed es)
             | [FunctionClauseUnreachable "f" 1 o] <- es
-            , Just (Origin "f.thena.rules" (Pos 3 6)) <- o -> pure ()
+            , Just (Origin "f.thena.rules" (Pos 3 1)) <- o -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **A function is CALLED**: first match, no decision left standing.
@@ -1540,7 +1554,7 @@ functions =
             -- in the way. @load@ puts the fixture under a header, so the
             -- function is the file's third line.
             | [RuleAndFunction "dup" 1 o] <- [ e | e@RuleAndFunction{} <- es ]
-            , Just (Origin "t.thena.rules" (Pos 3 7)) <- o -> pure ()
+            , Just (Origin "t.thena.rules" (Pos 3 1)) <- o -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
       -- …and at a different arity they are two callables, as they are for two
       -- rules.

@@ -291,8 +291,7 @@ choiceCase (name, s) = testCase name (drawn @?= turnOutput (turn s ":choices"))
 --
 -- **What is asserted is the crossing.** The number the pane is given is the
 -- number the prompt's own sentence says, and the clause's place is a line the
--- file really has — the line and not the column, the column of a function's
--- clause being its @=@ (@~5n7tz@) — which is what @~w3q27@ was about: the arity was handed over
+-- file really has — which is what @~w3q27@ was about: the arity was handed over
 -- as @ALine (arity + 1)@, so a pane drew a line number that did not exist.
 ruleRefusalCases :: [TestTree]
 ruleRefusalCases =
