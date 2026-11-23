@@ -2589,14 +2589,24 @@ renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
       where
         promptLine = case turnPrompt t of
           Nothing -> []
-          Just line -> [str "❯ " <+> str line]
+          Just line -> [str "❯ " <+> paneWrapped line]
     -- | **The repl pane's output wraps too, and that is slightly past what he
     -- asked for.** His report named the output pane, but what it named is a
     -- message he could not read, and the engine's answer to a line is the same
     -- text in both places — `:show And.elim` is twelve lines of type either
-    -- way. A prompt line and a document line are deliberately NOT wrapped:
-    -- those are lines you put a caret in, and one that occupied two screen
-    -- rows would have the editor's own single-row line jumping under it.
+    -- way.
+    --
+    -- **AND SO DOES THE PROMPT LINE ABOVE IT NOW — HIS REPORT, 2026-11-23,
+    -- `~rhkm3`**: /"it literally ends up hidden (end of it) behind the pane on
+    -- the right. That's not good. It should wrap the line!"/ It was not
+    -- wrapped until then, and the reason recorded here was that a line you put
+    -- a caret in should not occupy two screen rows, or the editor's own
+    -- single-row line jumps under it. **That reason was never true of this
+    -- line.** A committed turn's echo is history: no caret ever enters it, and
+    -- `stInput` is nowhere near it. It held only for the *document* lines of
+    -- script mode, where the caret does walk onto a line and the editor
+    -- replaces it — which is why 'renderScript' still draws its rows with
+    -- 'str' and why that half is its own question.
     outputLine accented l = marker <+> str " " <+> paneWrapped l
       where
         marker = if accented then withAttr (attrName "accent.output") (str "▏") else str " "
@@ -2639,10 +2649,25 @@ renderScript st inputLine =
     -- length ('handleEventForKeys' refuses the keys that would reach it
     -- anyway), so there is nothing here to edit; it falls through to 'dim',
     -- which is what a batch's lines already are the instant the run starts.
+    -- | **A COMMITTED LINE WRAPS; THE ONE THE CARET IS ON CANNOT — HIS REPORT,
+    -- 2026-11-23, `~rhkm3`.** A document line longer than the column used to be
+    -- cut at the pane's edge and the tail was simply not on screen: /"it
+    -- literally ends up hidden (end of it) behind the pane on the right."/
+    -- Both unfocused arms now draw through 'paneWrapped', which puts the
+    -- continuation two columns in from the marker, exactly as a refusal under
+    -- the line already does.
+    --
+    -- **The focused arm is the live editor and it is one row by
+    -- construction** ('emptyInput' is @editorText … (Just 1)@), so a long line
+    -- scrolls horizontally while the caret is in it and wraps the moment the
+    -- caret leaves. **That is a real row-height change under the caret and it
+    -- is the honest trade**: unreadable text is worse than a line below
+    -- shifting by a row. A wrapping editor would need the cursor placed at a
+    -- wrapped position, which brick's single-line editor does not do.
     row i sl
       | stScriptPos st == Just i, isNothing (stRerun st) = [marker <+> inputLine] <> refusal sl
-      | dim i = [marker <+> withAttr (attrName "script.stale") (str (slText sl))] <> refusal sl
-      | otherwise = [marker <+> str (slText sl)] <> refusal sl
+      | dim i = [marker <+> withAttr (attrName "script.stale") (paneWrapped (slText sl))] <> refusal sl
+      | otherwise = [marker <+> paneWrapped (slText sl)] <> refusal sl
       where
         marker
           | rerunRow == Just i = withAttr (attrName "script.marker") (str "> ")
