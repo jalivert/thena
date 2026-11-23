@@ -145,6 +145,7 @@ import Tui.Render
   , developmentText
   , displayText
   , foldAttr
+  , goalShapeText
   , goalTexts
   , renderDevelopment
   , renderDisplay
@@ -7502,6 +7503,12 @@ jevRequest s typedSoFar offered = (JevState fields, candidates)
               [ ("proving", proving)
               , ("open_goals", unlines' (goalTexts (goalsOf links)))
               , ("proof_term", unlines' (developmentText links))
+              -- **The focused goal's shape as a fact, `~czz2h`** — the two
+              -- fields above carry it only as printed text Jev has to parse
+              -- itself, which is what his framing of 2026-11-19 says is
+              -- short. 'Tui.Render.goalShapeText' has the whole argument,
+              -- including why no strategy belongs in it.
+              , ("goal_shape", maybe "" id (goalShapeText (goalsOf links)))
               , ("applies_here", unlines' (take matchesSent applying))
               ]
           , not (null v)

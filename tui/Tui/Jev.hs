@@ -154,8 +154,15 @@ rankCandidates cfg st@(JevState fields) offered = do
       "answer: ok, " <> show (Map.size m) <> " scored, Jev's own "
         <> show (jevNucleus (Map.elems m))
         <> " at " <> showFFloat (Just 2) jevNucleusMass ""
+        -- **Each top mass carries the candidate it belongs to.** The masses
+        -- alone say how confident Jev was and not what it was confident
+        -- about, so the log could not answer /did it pick the right move/ —
+        -- which is the question `~czz2h` turns on.
         <> " (top: "
-        <> unwords [showFFloat (Just 4) p "" | p <- take 6 (sortOn negate (Map.elems m))]
+        <> unwords
+             [ Text.unpack n <> "=" <> showFFloat (Just 4) p ""
+             | (n, p) <- take 6 (sortOn (negate . snd) (Map.toList m))
+             ]
         <> ")"
   pure result
   where
