@@ -2142,9 +2142,10 @@ data Rule = Rule
 data Origin = Origin
   { originPath :: FilePath
   , originAt   :: Pos
-    -- ^ **Where the clause begins, except for a function, where it is the @=@**
-    -- — 'Thena.Instral.Concrete.RawFunction' says why and @~5n7tz@ is the item.
-    -- A @rule@ clause is exact: the @rule@ keyword's own line and column.
+    -- ^ **Where the clause begins**, for a function as for a rule: the name's
+    -- line and column, and the @rule@ keyword's where there is one. A function
+    -- carried its @=@'s position until MS12 phase 344 (@~5n7tz@);
+    -- 'Thena.Instral.Concrete.RawFunction' says what it was and why.
   }
   deriving (Eq, Show)
 

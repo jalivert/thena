@@ -265,22 +265,17 @@ data RawOpenSpec
 -- answers with an ordinary 'Thena.Instral.Ops.Rule' whose body ends in @return@. Nothing
 -- in the engine knows the difference, which is the point of there being one
 -- language.
--- **The 'Thena.Syntax.Lexer.Pos' is the @=@'s** (MS12 phase 342) and not the
--- name's, which is the one place this differs from 'RawRule'. A function
--- declaration opens with an @ident@, and the grammar reads an identifier through
--- @$$@ — the token's text without its position — so the nearest token that
--- carries one is the @=@. **So this is the @=@'s position and not the name's**:
--- the column is the @=@'s, and the line is the clause's only where the two are
--- on one line.
+-- **The 'Thena.Syntax.Lexer.Pos' is the name's**, exactly as 'RawRule'\'s is the
+-- @rule@ keyword's: where the clause begins.
 --
--- **THAT LAST PART WAS WRITTEN AS A PROPERTY OF THE LANGUAGE AND IS NOT ONE**
--- (MS12 phase 343): it said every function in a base is written with its
--- parameters and its @=@ on one line, which is true of
--- @rules\/standard.thena.rules@ as it stands and not of what the grammar
--- admits. @f y@ on one line and @= concat y "b"@ on the next loads, and its
--- clause then records the second line. @~5n7tz@ is the item, and it carries the
--- measured cost: the fix is to stop reading an identifier through @$$@, which is
--- 28 use sites in @Thena.Syntax.Parser@.
+-- **It was the @=@'s until MS12 phase 344** (@~5n7tz@), because the grammar read
+-- an identifier through Happy's @$$@ — the token's text without its position — so
+-- the @=@ was the nearest token on the production that carried one. Phase 342
+-- took that for harmless on the grounds that a function is written on one line,
+-- which is true of @rules\/standard.thena.rules@ and not of the language: @f y@
+-- on one line and @= concat y "b"@ on the next loads, and the clause then
+-- recorded the second line. The grammar now reads @ident@ whole and takes its
+-- text with @wordOf@, so a two-line clause records the line it begins on.
 data RawFunction = RawFunction Pos String [RawPattern] RawBody
   deriving (Eq, Show)
 
