@@ -317,7 +317,7 @@ Renaming :: { (String, String) }
   : ident '->' ident                       { ($1, $3) }
 
 Rule :: { RawRule }
-  : rule ident Params ':-' Tests do Block    { RawRule $2 (reverse $3) $5 (reverse $7) }
+  : rule ident Params ':-' Tests do Block    { RawRule (posOf $1) $2 (reverse $3) $5 (reverse $7) }
 
 -- **A body is a block** (MS5 phase 75). @do@ is a layout keyword, so
 -- "Thena.Surface.Layout" inserts these braces where the offside rule says they
@@ -343,7 +343,7 @@ Block :: { [RawInstr] }
 -- beginning with a plain word is one of the two and the token after the name
 -- tells them apart: @=@ or another parameter here, @:@ there.
 Function :: { RawFunction }
-  : ident Params '=' FunBody               { RawFunction $1 (reverse $2) $4 }
+  : ident Params '=' FunBody               { RawFunction (posOf $3) $1 (reverse $2) $4 }
 
 -- **A body is one expression or a @do@ block** (MS5 phase 75b, his choice of
 -- opener). @do@ is already a layout keyword, so the block's braces come from
@@ -715,6 +715,11 @@ regionAt :: Located Token -> String -> RawOperand
 regionAt t src = case t of
   Located _ (TTagOpenAt lang prod) -> RawRegion lang (Just prod) src
   _ -> error "the tag token is TTagOpenAt"
+
+-- | Where a token is, for the trees that record where a clause was written
+-- (MS12 phase 342).
+posOf :: Located Token -> Pos
+posOf (Located p _) = p
 
 patternAt :: Located Token -> String -> RawPattern
 patternAt t src = case t of

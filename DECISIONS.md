@@ -5101,6 +5101,32 @@ They do not reuse the cursor's words — `dom` and `cod` already move the
 development's ambient cursor, and one word for two different things is what the
 project rules out.
 
+### A choice point names each alternative by its clause's file and line
+
+`:choices` lists what is running and what is still to try. Each one is printed with
+the file and line its clause is written at:
+
+```
+thena spine> :choices
+4706  any-of (standard.thena.rules:457)   untried: any-of (standard.thena.rules:458)
+```
+
+**The thing the engine picks is a clause, and the name belongs to the rule.** A rule
+may have several clauses, so a fork between two of them — `any-of` above, which has one
+clause for the head of a list and one for its tail — would otherwise print the same word
+twice and tell you nothing about which is which, or about what `retry` is about to run.
+
+**The line is the only label that always works.** You cannot tell two clauses apart by
+their parameters: two clauses may take the same shapes and differ only in a `when`. You
+cannot tell them apart by anything you could type, either, because nothing in the
+language names a clause — `retry` names a choice point and a call picks a clause by
+matching. Where a clause sits in its file is what is left, and it is also what lets you
+go and read it.
+
+The path is the file's name and not the whole path, because a loaded base's path is
+absolute and a transcript carrying it would be a transcript of one machine. A frontend
+is handed the full path, since a pane that offers to open the clause needs it.
+
 ### A choice point is made by writing rules, and no instruction mints one
 
 Every choice point in Thena comes from the rule base. A call looks for clauses

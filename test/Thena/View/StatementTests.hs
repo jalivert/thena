@@ -23,7 +23,8 @@ import Thena.Driver (Leniency (..), Session)
 import Thena.Files (following, startingSession)
 import Thena.Driver (commandSummary, oneLine, openableNamespaces)
 import Thena.Instral.Commands (Command (..), actWords, commands)
-import Thena.Instral.Ops (Pattern (..), Rule (..), signatureOf)
+import Thena.Standard (aRule)
+import Thena.Instral.Ops (Pattern (..), signatureOf)
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Instral (instralRules, operandHead, statementHead)
@@ -483,7 +484,7 @@ nameAnywhere = do
 fixture :: [(String, Signature)] -> [String] -> RuleBase
 fixture sigs names =
   ruleBase "fixture" Nothing "" sigs []
-    [ Rule (rootName nm) [PWild] [] [] | nm <- names ]
+    [ aRule (rootName nm) [PWild] [] [] | nm <- names ]
 
 askIn :: Session -> RuleBase -> String -> [SymbolView]
 askIn s b before =

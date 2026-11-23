@@ -113,6 +113,7 @@ import Thena.Driver
   , Response (..)
   , moduleText
   , ChoicePoint (..)
+  , ChoiceAlt (..)
   , Session
   , Stop (..)
   , machineOf
@@ -2897,6 +2898,21 @@ renderMatches ren rs = map one rs
 -- listed has something left, which is the peek's invariant (§7.3) and the
 -- reason there is no \"exhausted\" column.
 --
+-- **EVERY ALTERNATIVE CARRIES THE LINE ITS CLAUSE WAS WRITTEN AT** (MS12 phase
+-- 342, @~mhz7j@, his direction of 2026-11-23). The unit being chosen is a
+-- clause and the name belongs to the rule, so a fork between two clauses of one
+-- name printed that name twice and said nothing else — @any-of   untried:
+-- any-of@. The line is what always tells them apart.
+--
+-- **THE FILE'S NAME AND NOT ITS PATH**, and that is deliberate twice over. A
+-- base's 'Thena.Rules.basePath' is absolute by the time it is loaded —
+-- @\/Users\/…\/rules\/standard.thena.rules@ — so a transcript carrying it would
+-- be a transcript of the machine it ran on, and every golden holding a
+-- @:choices@ row would be unportable. The name is also what a person needs: it
+-- tells two bases apart, which a line number alone does not.
+-- 'Thena.View.Choices.altViewPath' hands a frontend the whole path, because a
+-- pane that opens the clause needs it and is not a transcript.
+--
 -- The identifier is minted from the session's name counter, chosen by the user
 -- 2026-08-23, so the numbers are unique and stable but not consecutive — every
 -- binder minted in between spends the counter too.
@@ -2905,8 +2921,22 @@ renderChoices _ [] = ["no choice points"]
 renderChoices ren cs = map one cs
   where
     one c =
-      show (pointId c) ++ "  " ++ nameString ren (pointRule c)
-        ++ "   untried: " ++ intercalate ", " (map (nameString ren) (pointAlts c))
+      show (pointId c) ++ "  " ++ alt (pointRule c)
+        ++ "   untried: " ++ intercalate ", " (map alt (pointAlts c))
+
+    alt a = nameString ren (altRule a) ++ case altAt a of
+      Nothing -> ""
+      Just o  ->
+        " (" ++ fileNameOf (Ops.originPath o)
+             ++ ":" ++ show (posLine (Ops.originAt o)) ++ ")"
+
+-- | The last segment of a path (MS12 phase 342).
+--
+-- **By hand and not @System.FilePath@**: the library depends on @base@ and the
+-- parsers alone, @filepath@ is a dependency of the TUI executable only, and one
+-- @reverse@ is not worth widening what this package needs.
+fileNameOf :: FilePath -> FilePath
+fileNameOf = reverse . takeWhile (/= '/') . reverse
 
 -- | A definition's prenex level parameters, as a declaration writes them:
 -- @{ℓ₀ ℓ₁}@, and nothing at all when there are none (phase 31b).

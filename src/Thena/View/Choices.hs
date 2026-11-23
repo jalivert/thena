@@ -15,11 +15,14 @@
 -- 'Thena.Engine.Machine', and a frontend holds a session.
 module Thena.View.Choices
   ( ChoiceView (..)
+  , AltView (..)
   , displayChoice
   ) where
 
 import Thena.Core.Term (Spelling, spelledIn)
-import Thena.Engine (ChoicePoint (..))
+import Thena.Engine (ChoiceAlt (..), ChoicePoint (..))
+import Thena.Instral.Ops (Origin (..))
+import Thena.Syntax.Lexer (Pos)
 
 -- | One live choice point: the identifier @retry ‹n›@ names it by, the rule it
 -- is running now, and the rules still untried, in dispatch order.
@@ -39,11 +42,32 @@ data ChoiceView = ChoiceView
     -- consecutive — every binder minted in between spends the counter too, and
     -- a pane that numbers its own rows instead would hand the user a number
     -- @retry@ refuses.
-  , choiceViewRunning :: String
+  , choiceViewRunning :: AltView
     -- ^ the alternative being run now.
-  , choiceViewUntried :: [String]
+  , choiceViewUntried :: [AltView]
     -- ^ the ones still to try, in dispatch order, which is the order @retry@
     -- with no argument walks.
+  }
+  deriving (Eq, Show)
+
+-- | __One alternative, and where its clause is written__ (MS12 phase 342, his
+-- direction of 2026-11-23: /"perhaps clauses should carry data for where they
+-- come from"/).
+--
+-- **It was a bare 'String' until this phase**, and that is what @~mhz7j@ is
+-- about: the unit the engine picks is a clause, the name belongs to the rule, so
+-- a fork between two clauses written under one name gave a pane that name twice
+-- and nothing to tell them apart. **A path, a line and a column are what makes a
+-- row a place to go** rather than a word — the same thing
+-- 'Thena.View.Failure.stopViewAt' does for a declaration, and the same shape, so
+-- a pane that can already open one can open this.
+--
+-- **'altViewAt' is 'Nothing' for a clause that is in no file** — the synthetic
+-- rule a typed line is wrapped in. Every clause a base read has one.
+data AltView = AltView
+  { altViewName :: String
+  , altViewPath :: Maybe FilePath
+  , altViewAt   :: Maybe Pos
   }
   deriving (Eq, Show)
 
@@ -60,5 +84,12 @@ displayChoice :: Spelling -> ChoicePoint -> ChoiceView
 displayChoice sp cp =
   ChoiceView
     (pointId cp)
-    (spelledIn sp (pointRule cp))
-    (map (spelledIn sp) (pointAlts cp))
+    (altView sp (pointRule cp))
+    (map (altView sp) (pointAlts cp))
+
+altView :: Spelling -> ChoiceAlt -> AltView
+altView sp a =
+  AltView
+    (spelledIn sp (altRule a))
+    (originPath <$> altAt a)
+    (originAt <$> altAt a)

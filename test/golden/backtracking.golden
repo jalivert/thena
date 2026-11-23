@@ -60,7 +60,7 @@ thena spine> :show
   ) in
   id
 thena spine> :choices
-7  intro   untried: solve, regret, prove
+7  intro (standard.thena.rules:80)   untried: solve (standard.thena.rules:114), regret (standard.thena.rules:117), prove (standard.thena.rules:153)
 thena spine> into
 thena spine> along
 thena spine> :where
@@ -75,7 +75,7 @@ type
 thena spine> back
 thena spine> back
 thena spine> :choices
-7  intro   untried: solve, regret, prove
+7  intro (standard.thena.rules:80)   untried: solve (standard.thena.rules:114), regret (standard.thena.rules:117), prove (standard.thena.rules:153)
 thena spine> retry
 retrying 7: solve
 backtracking to 7: regret
@@ -83,7 +83,7 @@ thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-7  regret   untried: prove
+7  regret (standard.thena.rules:117)   untried: prove (standard.thena.rules:153)
 thena spine> retry
 retrying 7: prove
 chose 10: intro
@@ -98,7 +98,7 @@ chose 15: try-in-scope
 backtracking to 15: fit-in-scope
 backtracking to 15: attack
 thena spine> :choices
-15  attack   untried: abandon, prove
+15  attack (standard.thena.rules:71)   untried: abandon (standard.thena.rules:77), prove (standard.thena.rules:151)
 thena spine> :suspend
 suspended gone
 thena spine> :theorem lemma : Type₁
@@ -110,5 +110,5 @@ abandoned lemma
 thena spine> :resume gone
 resumed gone
 thena spine> :choices
-15  attack   untried: abandon, prove
+15  attack (standard.thena.rules:71)   untried: abandon (standard.thena.rules:77), prove (standard.thena.rules:151)
 thena spine> :quit

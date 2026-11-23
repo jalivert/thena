@@ -21,9 +21,11 @@ module Thena.Standard
   , expectedStandard
   , expectedBase
   , withRules
+  , aRule
+  , forgetOrigins
   ) where
 
-import Thena.Core.Term (rootName)
+import Thena.Core.Term (GlobalName, rootName)
 import Thena.Driver
   ( Session
   , machineOf
@@ -81,7 +83,7 @@ expectedStandard =
     -- cycled attack\/solve\/regret for ever with this rule untried at every
     -- choice point it made. The order of the two is the fix, and it is in the
     -- file as well as here.
-  [ Rule (rootName "try-in-scope") [] [FocusIsHole]
+  [ aRule (rootName "try-in-scope") [] [FocusIsHole]
       [ Bind (Op.PVar "hs") Nothing Op.InScopeAt
       , Bind (Op.PVar "h") Nothing (Op.Call "any-of" [Ref "hs"])
       , Do (Try (Ref "h"))
@@ -90,46 +92,46 @@ expectedStandard =
     -- instruction of 2026-11-23), below the bare guess because it opens a hole
     -- per argument. It starts at ONE argument, so it does not repeat the rule
     -- above: @fit-core@\'s own first clause is the bare spine.
-  , Rule (rootName "fit-in-scope") [] [FocusIsHole]
+  , aRule (rootName "fit-in-scope") [] [FocusIsHole]
       [ Bind (Op.PVar "hs") Nothing Op.InScopeAt
       , Bind (Op.PVar "h") Nothing (Op.Call "any-of" [Ref "hs"])
       , Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "a")))
       , Bind (Op.PVar "f") Nothing (Op.ApplyNext (Ref "h") (Ref "n"))
       , Do (Call "fit-core" [Ref "f"])
       ]
-  , Rule (rootName "attack")     []    [FocusIsHole]                 [Do Attack]
-  , Rule (rootName "try-core") [PVar "t"] [FocusIsHole] [Do (Try (Ref "t"))]
-  , Rule (rootName "abandon")    []    [FocusIsHole]                 [Do Abandon]
+  , aRule (rootName "attack")     []    [FocusIsHole]                 [Do Attack]
+  , aRule (rootName "try-core") [PVar "t"] [FocusIsHole] [Do (Try (Ref "t"))]
+  , aRule (rootName "abandon")    []    [FocusIsHole]                 [Do Abandon]
     -- **Two clauses of one name** (phase 23b): table 2.8 has two intro rules and
     -- they differ only in their head, which is exactly what a second clause is
     -- for. Before phase 23 a call could not backtrack, so they had to be
     -- @intro-pi@ and @intro-let@; now they are @intro@, and typing @intro@ at
     -- the REPL reaches whichever one applies.
-  , Rule (rootName "intro")      []    [FocusIsGuess, GoalTypeIsPi]  [Do (IntroPi Nothing)]
-  , Rule (rootName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do (IntroLet Nothing)]
+  , aRule (rootName "intro")      []    [FocusIsGuess, GoalTypeIsPi]  [Do (IntroPi Nothing)]
+  , aRule (rootName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do (IntroLet Nothing)]
     -- **And the same two at arity one** (MS12 phase 326, his ask of
     -- 2026-11-20): @intro "a"@ says what the binding is called, which is the
     -- way past an argument the statement never named. @prim-lambda@ and
     -- @prim-let@ have taken an optional name since MS4 phase 41f; nothing in
     -- the base passed one. A call is matched by name /and/ arity, so these are
     -- two further rules and neither shadows the nullary pair.
-  , Rule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsPi]
+  , aRule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsPi]
       [Do (IntroPi (Just (Ref "n")))]
-  , Rule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsLet]
+  , aRule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsLet]
       [Do (IntroLet (Just (Ref "n")))]
     -- **The repair for a shadowed binder** (MS12 phase 330), his ruling of
     -- 2026-11-20, /THERE IS ONE NAME/, part four: the word the component at the
     -- focus is bound under, changed in the development and so in the term.
-  , Rule (rootName "rename") [PVar "n"] [FocusIsComponent]
+  , aRule (rootName "rename") [PVar "n"] [FocusIsComponent]
       [Do (Op.Rename (Ref "n"))]
-  , Rule (rootName "solve")      []    [FocusIsGuess]                [Do Solve]
-  , Rule (rootName "regret")     []    [FocusIsGuess]                [Do Regret]
+  , aRule (rootName "solve")      []    [FocusIsGuess]                [Do Solve]
+  , aRule (rootName "regret")     []    [FocusIsGuess]                [Do Regret]
     -- **Two rules, two constructions** (MS9 phase 211, `~84x46`):
     -- @eliminate-core@ is §3.7 with every premise fixed, and the generalising
     -- one is that plus §2.8's copies. The base's own comment has why the
     -- generalising construction does not squat the plain word.
-  , Rule (rootName "eliminate-core")  [PVar "t"] [FocusIsHole]                 [Do (Op.EliminateFixed (Ref "t"))]
-  , Rule (rootName "eliminate-generalising-core") [PVar "t"] [FocusIsHole]      [Do (Op.Eliminate (Ref "t"))]
+  , aRule (rootName "eliminate-core")  [PVar "t"] [FocusIsHole]                 [Do (Op.EliminateFixed (Ref "t"))]
+  , aRule (rootName "eliminate-generalising-core") [PVar "t"] [FocusIsHole]      [Do (Op.Eliminate (Ref "t"))]
   , proveRule
   , proveGuess
   , fillRule
@@ -174,7 +176,7 @@ expectedStandard =
 -- check — and left this rule symmetric, so the same operation answered
 -- differently depending on which one you reached it through.
 fillRule :: Rule
-fillRule = Rule (rootName "fill") [PVar "t"] [FocusIsHole]
+fillRule = aRule (rootName "fill") [PVar "t"] [FocusIsHole]
   [ Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "refined")))
   , Bind (Op.PVar "x") Nothing (Define (Ref "n") (Ref "t"))
   , Bind (Op.PVar "s") Nothing (Typing (Ref "x"))
@@ -190,7 +192,7 @@ fillRule = Rule (rootName "fill") [PVar "t"] [FocusIsHole]
 -- discharge. It calls the /rules/ and not the primitives, so the seam Brady
 -- needs — @FILL@, the two @FOCUS@es, @SOLVE@ — is one a caller can get at.
 unifyRefine :: Rule
-unifyRefine = Rule (rootName "unify-refine-core") [PVar "t"] [FocusIsHole]
+unifyRefine = aRule (rootName "unify-refine-core") [PVar "t"] [FocusIsHole]
   [ Do (Call "fill" [Ref "t"])
   , Do (Call "solve" [])
   ]
@@ -201,7 +203,7 @@ unifyRefine = Rule (rootName "unify-refine-core") [PVar "t"] [FocusIsHole]
 -- saturated spine and 'unifyRefine' is what makes it fit, unchanged. @apply@
 -- adds no capability the two of them did not already have.
 applyRule :: Rule
-applyRule = Rule (rootName "apply-core") [PVar "f"] [FocusIsHole]
+applyRule = aRule (rootName "apply-core") [PVar "f"] [FocusIsHole]
   [ Bind (Op.PVar "s") Nothing (Op.Apply (Ref "f"))
   , Do (Call "unify-refine-core" [Ref "s"])
   ]
@@ -219,13 +221,13 @@ applyRule = Rule (rootName "apply-core") [PVar "f"] [FocusIsHole]
 -- phase 49f for 'spineArguments', which is this same recursion with a surface
 -- term saying how many arguments there are instead of the search finding out.
 fitFits :: Rule
-fitFits = Rule (rootName "fit-core") [PVar "f"] [FocusIsHole]
+fitFits = aRule (rootName "fit-core") [PVar "f"] [FocusIsHole]
   [ Do (Call "fill" [Ref "f"])
   , Do (Call "solve" [])
   ]
 
 fitMore :: Rule
-fitMore = Rule (rootName "fit-core") [PVar "f"] [FocusIsHole]
+fitMore = aRule (rootName "fit-core") [PVar "f"] [FocusIsHole]
   [ Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "a")))
   , Bind (Op.PVar "f2") Nothing (Op.ApplyNext (Ref "f") (Ref "n"))
   , Do (Call "fit-core" [Ref "f2"])
@@ -252,7 +254,7 @@ fitMore = Rule (rootName "fit-core") [PVar "f"] [FocusIsHole]
 -- 'Thena.Rules.dispatch' runs no rule that takes parameters, so @prove@ cannot
 -- reach them.
 askingRule :: String -> String -> (Operand -> Operand -> Op) -> Rule
-askingRule word what op = Rule (rootName word) [PVar "ty"] []
+askingRule word what op = aRule (rootName word) [PVar "ty"] []
   [ Bind (Op.PVar "n") Nothing (Op.Ask (Lit (VText ("name for the " ++ what ++ "?"))) Op.AName)
   , Do (op (Ref "n") (Ref "ty"))
   , Bind (Op.PVar "t") Nothing (Op.NameText (Ref "n"))
@@ -286,7 +288,7 @@ expectedBase = [ruleBase "standard" Nothing "" [] expectedFunctions expectedStan
 -- @:matches@ at every focus.
 expectedFunctions :: [Rule]
 expectedFunctions =
-  [ Rule (rootName "fresh-universe") [] []
+  [ aRule (rootName "fresh-universe") [] []
       [ Bind (Op.PVar "l") Nothing Op.FreshLevel
       , Bind (Op.PVar "u") Nothing (Op.UniverseAt (Ref "l"))
       , Do (Op.Return (Ref "u"))
@@ -307,10 +309,10 @@ expectedFunctions =
 -- empty head would have offered it in the core fragment, where nothing can
 -- act at all.
 proveRule :: Rule
-proveRule = Rule (rootName "prove") [] [FocusIsHole] [Do Prove]
+proveRule = aRule (rootName "prove") [] [FocusIsHole] [Do Prove]
 
 proveGuess :: Rule
-proveGuess = Rule (rootName "prove") [] [FocusIsGuess] [Do Prove]
+proveGuess = aRule (rootName "prove") [] [FocusIsGuess] [Do Prove]
 
 -- | Elaboration (MS4 phase 41): one clause over the large instruction.
 --
@@ -385,17 +387,17 @@ elaborateClauses =
       -- methods are the same ones without them. Both answer the same pair, so
       -- everything downstream is shared — an arm-less split included, which is
       -- why @case e of { }@ really applies @D.case@.
-    ++ [ Rule (rootName "split-claim") [PVar "t", PVar "x"]
+    ++ [ aRule (rootName "split-claim") [PVar "t", PVar "x"]
            [SplitIsInduction (Ref "t")]
            [ Bind (Op.PVar "r") Nothing (Op.Eliminate (Ref "x"))
            , Do (Op.Return (Ref "r"))
            ]
-       , Rule (rootName "split-claim") [PVar "t", PVar "x"]
+       , aRule (rootName "split-claim") [PVar "t", PVar "x"]
            [SplitIsCases (Ref "t")]
            [ Bind (Op.PVar "r") Nothing (Op.CaseAnalyse (Ref "x"))
            , Do (Op.Return (Ref "r"))
            ]
-       , Rule (rootName "split-elaborate") [PVar "t"] []
+       , aRule (rootName "split-elaborate") [PVar "t"] []
            [ Bind (Op.PVar "h") Nothing Here
            , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
            , Bind (Op.PVar "ty") Nothing (Op.Claim (Lit (VText "Tsplit")) (Ref "u"))
@@ -419,13 +421,13 @@ elaborateClauses =
          -- the arm taken out. @argument-patterns@ hands the method's own binder
          -- names over as patterns, so @intro-arm-binders@ is reached unchanged;
          -- @open-case@ leaves a surviving method open and solves a vanished one.
-       , Rule (rootName "argument-patterns")
+       , aRule (rootName "argument-patterns")
            [PList [] Nothing, PVar "acc"] []
            [ Bind (Op.PVar "r") Nothing
                (Op.Call "reverse-onto" [Ref "acc", Op.ListOf []])
            , Do (Op.Return (Ref "r"))
            ]
-       , Rule (rootName "argument-patterns")
+       , aRule (rootName "argument-patterns")
            [ PList [PPair (PVar "b") (PVar "oc")] (Just (PVar "bs"))
            , PVar "acc"
            ]
@@ -436,7 +438,7 @@ elaborateClauses =
                (Op.Call "argument-patterns" [Ref "bs", Ref "acc2"])
            , Do (Op.Return (Ref "r"))
            ]
-       , Rule (rootName "argument-patterns")
+       , aRule (rootName "argument-patterns")
            [ PList [PPair (PVar "b") (PVar "oc")] (Just (PVar "bs"))
            , PVar "acc"
            ]
@@ -445,7 +447,7 @@ elaborateClauses =
                (Op.Call "argument-patterns" [Ref "bs", Ref "acc"])
            , Do (Op.Return (Ref "r"))
            ]
-       , Rule (rootName "argument-patterns")
+       , aRule (rootName "argument-patterns")
            [ PList [PPair (PVar "b") (PVar "oc")] (Just (PVar "bs"))
            , PVar "acc"
            ]
@@ -454,17 +456,17 @@ elaborateClauses =
                (Op.Call "argument-patterns" [Ref "bs", Ref "acc"])
            , Do (Op.Return (Ref "r"))
            ]
-       , Rule (rootName "argument-pattern") [PVar "b"] []
+       , aRule (rootName "argument-pattern") [PVar "b"] []
            [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
            , Bind (Op.PVar "n2") Nothing
                (Op.Call "name-or-stem" [Ref "n", Lit (VText "u")])
            , Bind (Op.PVar "p") Nothing (Op.PatternForName (Ref "n2"))
            , Do (Op.Return (Ref "p"))
            ]
-       , Rule (rootName "open-case")
+       , aRule (rootName "open-case")
            [PVar "mh", PNone, PVar "bs", PVar "fs"] []
            [Do (Goto (Ref "mh")), call "solve" []]
-       , Rule (rootName "open-case")
+       , aRule (rootName "open-case")
            [PVar "mh", PSome (PVar "sub"), PVar "bs", PVar "fs"] []
            [ Bind (Op.PVar "ps") Nothing
                (Op.Call "argument-patterns" [Ref "bs", Op.ListOf []])
@@ -480,9 +482,9 @@ elaborateClauses =
                         ])
            , Do (Goto (Ref "k1"))
            ]
-       , Rule (rootName "split-holes")
+       , aRule (rootName "split-holes")
            [PList [] Nothing, PList [] Nothing, PVar "m"] [] []
-       , Rule (rootName "split-holes")
+       , aRule (rootName "split-holes")
            [ PList [PPair (PVar "c") (PVar "ihs")] (Just (PVar "cs"))
            , PList [PVar "mh"] (Just (PVar "ms")), PVar "m"
            ] []
@@ -492,15 +494,15 @@ elaborateClauses =
            , call "open-case" [Ref "mh", Ref "sub", Ref "bs", Ref "fs"]
            , call "split-holes" [Ref "cs", Ref "ms", Ref "m"]
            ]
-       , Rule (rootName "split-holes-over")
+       , aRule (rootName "split-holes-over")
            [PVar "cs", PPair (PVar "hs") (PVar "m")] []
            [call "split-holes" [Ref "cs", Ref "hs", Ref "m"]]
          -- **Which hypotheses each method carries, paired with its
          -- constructor** — @ihs-for@ for a path with no surface node to read
          -- the word off. Two rules, each about one word.
-       , Rule (rootName "with-hypotheses") [PList [] Nothing] []
+       , aRule (rootName "with-hypotheses") [PList [] Nothing] []
            [Do (Op.Return (Op.ListOf []))]
-       , Rule (rootName "with-hypotheses")
+       , aRule (rootName "with-hypotheses")
            [PList [PVar "c"] (Just (PVar "cs"))] []
            [ Bind (Op.PVar "ihs") Nothing
                (Op.ConstructorRecursiveArguments (Ref "c"))
@@ -509,9 +511,9 @@ elaborateClauses =
                (Op.Prepend (Op.PairOf (Ref "c") (Ref "ihs")) (Ref "r"))
            , Do (Op.Return (Ref "p"))
            ]
-       , Rule (rootName "without-hypotheses") [PList [] Nothing] []
+       , aRule (rootName "without-hypotheses") [PList [] Nothing] []
            [Do (Op.Return (Op.ListOf []))]
-       , Rule (rootName "without-hypotheses")
+       , aRule (rootName "without-hypotheses")
            [PList [PVar "c"] (Just (PVar "cs"))] []
            [ Bind (Op.PVar "r") Nothing
                (Op.Call "without-hypotheses" [Ref "cs"])
@@ -521,7 +523,7 @@ elaborateClauses =
            ]
          -- **The two tactics, and each ends where it was invoked.** The word is
          -- the rule's name, which is why there are two and no flag.
-       , Rule (rootName "induction-core") [PVar "t"] [FocusIsHole]
+       , aRule (rootName "induction-core") [PVar "t"] [FocusIsHole]
            [ Bind (Op.PVar "h") Nothing Here
            , Bind (Op.PVar "r") Nothing (Op.Eliminate (Ref "t"))
            , Bind (Op.PVar "tt") Nothing (Op.Typing (Ref "t"))
@@ -531,7 +533,7 @@ elaborateClauses =
            , call "split-holes-over" [Ref "cs2", Ref "r"]
            , Do (Goto (Ref "h"))
            ]
-       , Rule (rootName "case-core") [PVar "t"] [FocusIsHole]
+       , aRule (rootName "case-core") [PVar "t"] [FocusIsHole]
            [ Bind (Op.PVar "h") Nothing Here
            , Bind (Op.PVar "r") Nothing (Op.CaseAnalyse (Ref "t"))
            , Bind (Op.PVar "tt") Nothing (Op.Typing (Ref "t"))
@@ -542,19 +544,19 @@ elaborateClauses =
            , call "split-holes-over" [Ref "cs2", Ref "r"]
            , Do (Goto (Ref "h"))
            ]
-       , Rule (rootName "elaborate") [PVar "t"]
+       , aRule (rootName "elaborate") [PVar "t"]
            [ FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
            , SplitIsInduction (Ref "t")
            ]
            [call "split-elaborate" [Ref "t"]]
          -- **Two clauses only because the head language has no disjunction.**
          -- The word means something inside, at @split-claim@ and @ihs-for@.
-       , Rule (rootName "elaborate") [PVar "t"]
+       , aRule (rootName "elaborate") [PVar "t"]
            [ FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
            , SplitIsCases (Ref "t")
            ]
            [call "split-elaborate" [Ref "t"]]
-       , Rule (rootName "elaborate") [PVar "t"]
+       , aRule (rootName "elaborate") [PVar "t"]
            [FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")]
            [call "split-elaborate" [Ref "t"]]
        ]
@@ -566,12 +568,12 @@ elaborateClauses =
     -- to the second, which is what the Haskell @case@ did: a partial
     -- application of a head with recorded plicities is an ordinary binary
     -- application.
-    Rule (rootName "elaborate") [PVar "t"]
+    aRule (rootName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsElim (Ref "t")]
       [ Bind (Op.PVar "a") Nothing (Op.ElimSpine (Ref "t"))
       , call "elaborate" [Ref "a"]
       ]
-  , Rule (rootName "elaborate") [PVar "t"]
+  , aRule (rootName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsName (Ref "t")]
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "e") Nothing (Op.ExpandImplicits (Ref "t"))
@@ -580,7 +582,7 @@ elaborateClauses =
       , Bind (Op.PVar "f") Nothing (Op.ResolveName (Ref "w"))
       , Do (Call "spine-arguments" [Ref "h", Ref "f", Ref "e"])
       ]
-  , Rule (rootName "elaborate") [PVar "t"]
+  , aRule (rootName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsTerm (Ref "t"), AppArgsAreExplicit (Ref "t")]
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
@@ -661,13 +663,13 @@ elaborateClauses =
       ]
     -- **Two clauses for @let@**, because the annotation is optional and the
     -- head language has no negation.
-  , Rule (rootName "elaborate") [PVar "t"] [FocusIsHole, LetIsAnnotated (Ref "t")]
+  , aRule (rootName "elaborate") [PVar "t"] [FocusIsHole, LetIsAnnotated (Ref "t")]
       (letPrelude ++
         [ Do (Goto (Ref "x"))
         , Bind (Op.PVar "ty") Nothing (Op.LetType (Ref "t"))
         , call "elaborate" [Ref "ty"]
         ] ++ letBody [Do (Op.RecordImplicits (Ref "t"))])
-  , Rule (rootName "elaborate") [PVar "t"] [FocusIsHole, LetIsBare (Ref "t")]
+  , aRule (rootName "elaborate") [PVar "t"] [FocusIsHole, LetIsBare (Ref "t")]
       (letPrelude ++ letBody [])
   , clause SurfaceIsAscription
       [ Bind (Op.PVar "h") Nothing Here
@@ -717,11 +719,11 @@ elaborateClauses =
     -- **A module's top-level block, and it is not a clause of @elaborate@**
     -- (MS6 phase 104b): no head test, its own name, and the driver calls it
     -- by that name.
-    ++ [Rule (rootName "run-block") [PVar "t"] [] [Do (Op.Play (Ref "t"))]]
+    ++ [aRule (rootName "run-block") [PVar "t"] [] [Do (Op.Play (Ref "t"))]]
     ++ binderWalkers
     ++ spineWalkers
   where
-    clause test = Rule (rootName "elaborate") [PVar "t"] [FocusIsHole, test (Ref "t")]
+    clause test = aRule (rootName "elaborate") [PVar "t"] [FocusIsHole, test (Ref "t")]
     call nm as = Do (Call nm as)
 
     letPrelude =
@@ -767,7 +769,7 @@ elaborateClauses =
 -- rule therefore cannot hand a value back.
 spineWalkers :: [Rule]
 spineWalkers =
-  [ Rule (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
+  [ aRule (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
       [FocusIsComponent, SurfaceIsApp (Ref "t")]
       [ Do (Goto (Ref "h"))
       , Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "a")))
@@ -778,7 +780,7 @@ spineWalkers =
       , Bind (Op.PVar "tl") Nothing (Op.AppTail (Ref "t"))
       , Do (Call "spine-arguments" [Ref "h", Ref "f2", Ref "tl"])
       ]
-  , Rule (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
+  , aRule (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
       [FocusIsComponent, SurfaceIsName (Ref "t")]
       [ Do (Goto (Ref "h"))
       , Do (Call "fill" [Ref "f"])
@@ -788,7 +790,7 @@ spineWalkers =
 
 binderWalkers :: [Rule]
 binderWalkers =
-  [ Rule (rootName "intro-binders") [PVar "t", PVar "k"]
+  [ aRule (rootName "intro-binders") [PVar "t", PVar "k"]
       [FocusIsGuess, LambdaBindsMore (Ref "t"), LambdaIsBare (Ref "t")]
       [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
       , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
@@ -796,7 +798,7 @@ binderWalkers =
       , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "tl", Ref "k2"])
       , Do (Op.Return (Ref "body"))
       ]
-  , Rule (rootName "intro-binders") [PVar "t", PVar "k"]
+  , aRule (rootName "intro-binders") [PVar "t", PVar "k"]
       [FocusIsGuess, LambdaBindsOne (Ref "t"), LambdaIsBare (Ref "t")]
       [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
       , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
@@ -806,14 +808,14 @@ binderWalkers =
     -- is still the goal's, and what was written is elaborated into a hole
     -- claimed /inside/ the binders already introduced — the only place an
     -- earlier binder of the same group is in scope — and then unified with it.
-  , Rule (rootName "intro-binders") [PVar "t", PVar "k"]
+  , aRule (rootName "intro-binders") [PVar "t", PVar "k"]
       [FocusIsGuess, LambdaBindsMore (Ref "t"), LambdaIsAnnotated (Ref "t")]
       (annotatedBinder
          ++ [ Bind (Op.PVar "tl") Nothing (Op.LambdaTail (Ref "t"))
             , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "tl", Ref "k2"])
             , Do (Op.Return (Ref "body"))
             ])
-  , Rule (rootName "intro-binders") [PVar "t", PVar "k"]
+  , aRule (rootName "intro-binders") [PVar "t", PVar "k"]
       [FocusIsGuess, LambdaBindsOne (Ref "t"), LambdaIsAnnotated (Ref "t")]
       (annotatedBinder ++ [Do (Op.Return (Ref "k2"))])
   ]
@@ -864,17 +866,17 @@ annotatedBinder =
 -- and a @some@ on a copy binds nothing at all.
 splitClauses :: [Rule]
 splitClauses =
-  [ Rule (rootName "no-nesting") [PList [] Nothing] [] []
+  [ aRule (rootName "no-nesting") [PList [] Nothing] [] []
     -- **Which hypotheses a method carries** (MS9 phase 188), and the one place
     -- the written word means anything once a method is in hand: @induction@ one
     -- per recursive argument, @case@ none, @D.case@'s methods being the
     -- eliminator's minus exactly these. Complementary tests, so no choice point.
-  , Rule (rootName "ihs-for") [PVar "t", PVar "c"]
+  , aRule (rootName "ihs-for") [PVar "t", PVar "c"]
       [SplitIsInduction (Ref "t")]
       [ Bind (Op.PVar "r") Nothing (Op.ConstructorRecursiveArguments (Ref "c"))
       , Do (Op.Return (Ref "r"))
       ]
-  , Rule (rootName "ihs-for") [PVar "t", PVar "c"]
+  , aRule (rootName "ihs-for") [PVar "t", PVar "c"]
       [SplitIsCases (Ref "t")]
       [Do (Op.Return (Op.ListOf []))]
     -- **A list reversed onto another, and a term applied to a list of terms**
@@ -882,9 +884,9 @@ splitClauses =
     -- introduces, so @prepend@ builds its accumulator and these two consume it;
     -- list code is rules rather than ops, and @prepend@ is the one operation
     -- the operand language was missing.
-  , Rule (rootName "reverse-onto") [PList [] Nothing, PVar "acc"] []
+  , aRule (rootName "reverse-onto") [PList [] Nothing, PVar "acc"] []
       [Do (Op.Return (Ref "acc"))]
-  , Rule (rootName "reverse-onto")
+  , aRule (rootName "reverse-onto")
       [PList [PVar "x"] (Just (PVar "xs")), PVar "acc"] []
       [ Bind (Op.PVar "acc2") Nothing (Op.Prepend (Ref "x") (Ref "acc"))
       , Bind (Op.PVar "r") Nothing (Op.Call "reverse-onto" [Ref "xs", Ref "acc2"])
@@ -894,15 +896,15 @@ splitClauses =
     -- builds a choice point and a later failure comes back for the tail. It is
     -- what turns a list an op reports into a search the machine runs, and it is
     -- a rule and not a function for exactly that reason.
-  , Rule (rootName "any-of") [PList [PVar "x"] (Just PWild)] []
+  , aRule (rootName "any-of") [PList [PVar "x"] (Just PWild)] []
       [Do (Op.Return (Ref "x"))]
-  , Rule (rootName "any-of") [PList [PWild] (Just (PVar "xs"))] []
+  , aRule (rootName "any-of") [PList [PWild] (Just (PVar "xs"))] []
       [ Bind (Op.PVar "r") Nothing (Op.Call "any-of" [Ref "xs"])
       , Do (Op.Return (Ref "r"))
       ]
-  , Rule (rootName "apply-all") [PVar "f", PList [] Nothing] []
+  , aRule (rootName "apply-all") [PVar "f", PList [] Nothing] []
       [Do (Op.Return (Ref "f"))]
-  , Rule (rootName "apply-all")
+  , aRule (rootName "apply-all")
       [PVar "f", PList [PVar "x"] (Just (PVar "xs"))] []
       [ Bind (Op.PVar "g") Nothing (Op.ApplyTo (Ref "f") (Ref "x"))
       , Bind (Op.PVar "r") Nothing (Op.Call "apply-all" [Ref "g", Ref "xs"])
@@ -912,7 +914,7 @@ splitClauses =
     -- @expose@ reducing the β-redexes the application leaves — a redex
     -- elaboration made is elaboration's own bookkeeping, and this term is
     -- written into a definition the user can @:show@.
-  , Rule (rootName "instantiate-with") [PVar "f", PVar "vs"] []
+  , aRule (rootName "instantiate-with") [PVar "f", PVar "vs"] []
       [ Bind (Op.PVar "args") Nothing (Op.Call "reverse-onto" [Ref "vs", Op.ListOf []])
       , Bind (Op.PVar "g") Nothing (Op.Call "apply-all" [Ref "f", Ref "args"])
       , Bind (Op.PVar "r") Nothing (Op.Expose (Ref "g"))
@@ -921,15 +923,15 @@ splitClauses =
     -- **A binder the declaration gave no name** (MS9 phase 231): a bare-arrow
     -- argument is `_`, and so is the hypothesis about it. The written path never
     -- noticed; the interactive one hands both to an author.
-  , Rule (rootName "name-or-stem") [PVar "n", PVar "stem"]
+  , aRule (rootName "name-or-stem") [PVar "n", PVar "stem"]
       [DifferentName (Ref "n") (Lit (VText "_"))]
       [Do (Op.Return (Ref "n"))]
-  , Rule (rootName "name-or-stem") [PVar "n", PVar "stem"]
+  , aRule (rootName "name-or-stem") [PVar "n", PVar "stem"]
       [SameName (Ref "n") (Lit (VText "_"))]
       [ Bind (Op.PVar "w") Nothing (Op.FreshName (Ref "stem"))
       , Do (Op.Return (Ref "w"))
       ]
-  , Rule (rootName "intro-arm-binders")
+  , aRule (rootName "intro-arm-binders")
       [ PList [] Nothing, PList [] Nothing, PVar "vs", PVar "ds", PVar "fs"
       , PVar "k"
       ] []
@@ -944,7 +946,7 @@ splitClauses =
     -- An argument the subgoal still binds, named by the arm's pattern — a
     -- wildcard asks for no name, so one is minted. **Its term is kept**, which
     -- is what a solved binder's function is applied to.
-  , Rule (rootName "intro-arm-binders")
+  , aRule (rootName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
       , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
       , PVar "vs", PVar "ds", PVar "fs", PVar "k"
@@ -961,7 +963,7 @@ splitClauses =
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
-  , Rule (rootName "intro-arm-binders")
+  , aRule (rootName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
       , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
       , PVar "vs", PVar "ds", PVar "fs", PVar "k"
@@ -985,7 +987,7 @@ splitClauses =
     -- **The term is a function of the binders bound before it** (MS9 phase
     -- 195), so it is applied to them here and the binding itself waits for the
     -- last λ.
-  , Rule (rootName "intro-arm-binders")
+  , aRule (rootName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
       , PList [PPair (PVar "b") (PSome (PVar "f"))] (Just (PVar "bs"))
       , PVar "vs", PVar "ds", PVar "fs", PVar "k"
@@ -995,7 +997,7 @@ splitClauses =
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds", Ref "fs", Ref "k"])
       , Do (Op.Return (Ref "r"))
       ]
-  , Rule (rootName "intro-arm-binders")
+  , aRule (rootName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
       , PList [PPair (PVar "b") (PSome (PVar "f"))] (Just (PVar "bs"))
       , PVar "vs", PVar "ds", PVar "fs", PVar "k"
@@ -1020,7 +1022,7 @@ splitClauses =
     -- **It consumes its pattern either way**, which is what keeps
     -- @same-length@ honest: a dot is written in a position, so it counts as
     -- one.
-  , Rule (rootName "intro-arm-binders")
+  , aRule (rootName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
       , PList [PPair (PVar "b") (PVar "oc")] (Just (PVar "bs"))
       , PVar "vs", PVar "ds", PVar "fs", PVar "k"
@@ -1049,7 +1051,7 @@ splitClauses =
     -- **It runs at @k@ and not where the walk stands**, which is
     -- @bind-solved@'s sandwich: the forced term is a function of the binders
     -- introduced before this position, and those are in scope at @k@.
-  , Rule (rootName "dotted-position-is-forced")
+  , aRule (rootName "dotted-position-is-forced")
       [PVar "e", PSome (PVar "f"), PVar "vs", PVar "k"] []
       [ Bind (Op.PVar "g") Nothing Here
       , Do (Goto (Ref "k"))
@@ -1068,7 +1070,7 @@ splitClauses =
     -- about is already in the development, and shadowing it would resolve the
     -- arm's body to the hypothesis with nothing failing. It consumes no
     -- pattern — an outer position is not in an arm's pattern.
-  , Rule (rootName "intro-arm-binders")
+  , aRule (rootName "intro-arm-binders")
       [ PVar "ps"
       , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
       , PVar "vs", PVar "ds", PVar "fs", PVar "k"
@@ -1094,7 +1096,7 @@ splitClauses =
     -- name as a definition** (MS9 phase 195, his ruling of 2026-10-20): the
     -- user must not be able to tell that a copy was made, let alone which ones
     -- were solved, so the ambient name means the refined thing either way.
-  , Rule (rootName "intro-arm-binders")
+  , aRule (rootName "intro-arm-binders")
       [ PVar "ps"
       , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
       , PVar "vs", PVar "ds", PVar "fs", PVar "k"
@@ -1111,7 +1113,7 @@ splitClauses =
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
-  , Rule (rootName "intro-arm-binders")
+  , aRule (rootName "intro-arm-binders")
       [ PVar "ps"
       , PList [PPair (PVar "b") (PSome (PVar "f"))] (Just (PVar "bs"))
       , PVar "vs", PVar "ds", PVar "fs", PVar "k"
@@ -1135,10 +1137,10 @@ splitClauses =
     -- variable outright, with no equation and no copy, so the two copy clauses
     -- above have nothing to bind that name from and it went on meaning the
     -- entry outside — the thing the split refined away.
-  , Rule (rootName "bind-friendlies")
+  , aRule (rootName "bind-friendlies")
       [PList [] Nothing, PVar "vs", PVar "ds"] []
       [Do (Op.Return (Ref "ds"))]
-  , Rule (rootName "bind-friendlies")
+  , aRule (rootName "bind-friendlies")
       [ PList [PPair (PVar "n") (PVar "f")] (Just (PVar "fs"))
       , PVar "vs", PVar "ds"
       ] []
@@ -1149,8 +1151,8 @@ splitClauses =
           (Op.Call "bind-friendlies" [Ref "fs", Ref "vs", Ref "ds2"])
       , Do (Op.Return (Ref "r"))
       ]
-  , Rule (rootName "bind-solved") [PList [] Nothing, PVar "k"] [] []
-  , Rule (rootName "bind-solved")
+  , aRule (rootName "bind-solved") [PList [] Nothing, PVar "k"] [] []
+  , aRule (rootName "bind-solved")
       [PList [PPair (PVar "n") (PVar "v")] (Just (PVar "ds")), PVar "k"] []
       [ Bind (Op.PVar "g") Nothing Here
       , Do (Goto (Ref "k"))
@@ -1158,16 +1160,16 @@ splitClauses =
       , Do (Goto (Ref "g"))
       , call "bind-solved" [Ref "ds", Ref "k"]
       ]
-  , Rule (rootName "same-length") [PList [] Nothing, PList [] Nothing] [] []
-  , Rule (rootName "same-length")
+  , aRule (rootName "same-length") [PList [] Nothing, PList [] Nothing] [] []
+  , aRule (rootName "same-length")
       [PList [PVar "p"] (Just (PVar "ps")), PList [PVar "n"] (Just (PVar "ns"))] []
       [call "same-length" [Ref "ps", Ref "ns"]]
-  , Rule (rootName "arm-for") [PVar "t", PVar "c"]
+  , aRule (rootName "arm-for") [PVar "t", PVar "c"]
       [SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")]
       [ Bind (Op.PVar "z") Nothing Op.None
       , Do (Op.Return (Ref "z"))
       ]
-  , Rule (rootName "arm-for") [PVar "t", PVar "c"]
+  , aRule (rootName "arm-for") [PVar "t", PVar "c"]
       [SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "p") Nothing (Op.SplitArmPattern (Ref "t"))
       , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
@@ -1177,13 +1179,13 @@ splitClauses =
           (Op.Call "pick" [Ref "w", Ref "c", Ref "p", Ref "b", Ref "r"])
       , Do (Op.Return (Ref "a"))
       ]
-  , Rule (rootName "pick")
+  , aRule (rootName "pick")
       [PVar "w", PVar "c", PVar "p", PVar "b", PVar "r"]
       [SameName (Ref "w") (Ref "c")]
       [ Bind (Op.PVar "a") Nothing (Op.Some (Op.PairOf (Ref "p") (Ref "b")))
       , Do (Op.Return (Ref "a"))
       ]
-  , Rule (rootName "pick")
+  , aRule (rootName "pick")
       [PVar "w", PVar "c", PVar "p", PVar "b", PVar "r"]
       [DifferentName (Ref "w") (Ref "c")]
       [ Bind (Op.PVar "a") Nothing (Op.Call "arm-for" [Ref "r", Ref "c"])
@@ -1193,15 +1195,15 @@ splitClauses =
     -- clause for @some@ and none for @none@, which is @case-must-vanish@'s
     -- idiom mirrored, because an empty arm is how a user says the case cannot
     -- arise and this one did not.
-  , Rule (rootName "arm-needs-body") [PVar "k", PSome (PVar "b")] []
+  , aRule (rootName "arm-needs-body") [PVar "k", PSome (PVar "b")] []
       [call "elaborate" [Ref "b"]]
     -- **And the missing body names the equation that kept the case alive**
     -- (MS9 phase 230, his instruction of 2026-10-28). @case-survived@ is the
     -- only op that cannot succeed: a rule's own refusal carries a rule's name
     -- and nothing else, so a refusal that has to name a term cannot be one.
-  , Rule (rootName "arm-needs-body") [PVar "k", PNone] []
+  , aRule (rootName "arm-needs-body") [PVar "k", PNone] []
       [Do (Op.CaseSurvivedOp (Ref "k"))]
-  , Rule (rootName "elaborate-arm")
+  , aRule (rootName "elaborate-arm")
       [ PVar "t", PVar "c", PVar "sub", PVar "bs", PVar "fs"
       , PPair (PVar "p") (PVar "ob")
       ] []
@@ -1228,42 +1230,42 @@ splitClauses =
     -- **A case that survived needs an arm** (MS9 phase 190) — coverage, said
     -- by a rule with a clause for @some@ and none for @none@, so the refusal
     -- names the missing arm and not the search that went looking for it.
-  , Rule (rootName "case-needs-an-arm")
+  , aRule (rootName "case-needs-an-arm")
       [ PVar "t", PVar "c", PVar "sub", PVar "bs", PVar "fs", PSome (PVar "a")
       ] []
       [ call "elaborate-arm"
           [Ref "t", Ref "c", Ref "sub", Ref "bs", Ref "fs", Ref "a"]
       ]
-  , Rule (rootName "case-needs-an-arm")
+  , aRule (rootName "case-needs-an-arm")
       [ PVar "t", PVar "c", PVar "sub", PVar "bs", PVar "fs", PNone
       ] []
       [Do (Op.CaseSurvivedOp (Ref "sub"))]
     -- **And a case that vanished takes no body** — between them the two clauses
     -- are every legal shape: no arm at all, or an arm that stops at the arrow.
-  , Rule (rootName "vanished-case-takes-no-body") [PNone] [] []
-  , Rule (rootName "vanished-case-takes-no-body")
+  , aRule (rootName "vanished-case-takes-no-body") [PNone] [] []
+  , aRule (rootName "vanished-case-takes-no-body")
       [PSome (PPair (PVar "p") PNone)] [] []
     -- **Writing no arms is the claim that every case vanishes**, so a method
     -- that survived one is refused here, by a rule with a clause for @none@
     -- and none for @some@ — @no-nesting@'s idiom, naming the user's complaint
     -- instead of the search for an arm there is no syntax for.
-  , Rule (rootName "case-must-vanish") [PNone] [] []
-  , Rule (rootName "case-must-vanish") [PSome (PVar "h")] []
+  , aRule (rootName "case-must-vanish") [PNone] [] []
+  , aRule (rootName "case-must-vanish") [PSome (PVar "h")] []
       [Do (Op.CaseSurvivedOp (Ref "h"))]
     -- **Two questions, asked separately**: did the method vanish, and did the
     -- user write arms. The arm-less clause's test is complementary to the other
     -- two, so this search records no choice point — @pick@'s shape.
-  , Rule (rootName "one-case")
+  , aRule (rootName "one-case")
       [PVar "t", PVar "c", PVar "sub", PVar "bs", PVar "fs"]
       [SplitHasNoArms (Ref "t")]
       [call "case-must-vanish" [Ref "sub"]]
-  , Rule (rootName "one-case")
+  , aRule (rootName "one-case")
       [PVar "t", PVar "c", PNone, PVar "bs", PVar "fs"]
       [SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "oa") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
       , call "vanished-case-takes-no-body" [Ref "oa"]
       ]
-  , Rule (rootName "one-case")
+  , aRule (rootName "one-case")
       [PVar "t", PVar "c", PSome (PVar "sub"), PVar "bs", PVar "fs"]
       [SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "oa") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
@@ -1274,11 +1276,11 @@ splitClauses =
     -- 2026-10-20). Elaboration asks the datatype's constructors for arms; these
     -- two walks ask the other direction, and neither knows which mistake it is
     -- catching.
-  , Rule (rootName "arm-must-be-for-this-datatype") [PVar "a", PVar "b"]
+  , aRule (rootName "arm-must-be-for-this-datatype") [PVar "a", PVar "b"]
       [SameName (Ref "a") (Ref "b")] []
-  , Rule (rootName "arms-are-for-this-datatype") [PVar "t", PVar "d"]
+  , aRule (rootName "arms-are-for-this-datatype") [PVar "t", PVar "d"]
       [SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")] []
-  , Rule (rootName "arms-are-for-this-datatype") [PVar "t", PVar "d"]
+  , aRule (rootName "arms-are-for-this-datatype") [PVar "t", PVar "d"]
       [SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "p") Nothing (Op.SplitArmPattern (Ref "t"))
       , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
@@ -1287,11 +1289,11 @@ splitClauses =
       , Bind (Op.PVar "r") Nothing (Op.SplitTail (Ref "t"))
       , call "arms-are-for-this-datatype" [Ref "r", Ref "d"]
       ]
-  , Rule (rootName "one-arm-per-constructor") [PVar "a", PVar "b"]
+  , aRule (rootName "one-arm-per-constructor") [PVar "a", PVar "b"]
       [DifferentName (Ref "a") (Ref "b")] []
-  , Rule (rootName "arm-not-repeated") [PVar "w", PVar "t"]
+  , aRule (rootName "arm-not-repeated") [PVar "w", PVar "t"]
       [SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")] []
-  , Rule (rootName "arm-not-repeated") [PVar "w", PVar "t"]
+  , aRule (rootName "arm-not-repeated") [PVar "w", PVar "t"]
       [SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "p") Nothing (Op.SplitArmPattern (Ref "t"))
       , Bind (Op.PVar "w2") Nothing (Op.PatternHead (Ref "p"))
@@ -1299,9 +1301,9 @@ splitClauses =
       , Bind (Op.PVar "r") Nothing (Op.SplitTail (Ref "t"))
       , call "arm-not-repeated" [Ref "w", Ref "r"]
       ]
-  , Rule (rootName "arms-are-distinct") [PVar "t"]
+  , aRule (rootName "arms-are-distinct") [PVar "t"]
       [SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")] []
-  , Rule (rootName "arms-are-distinct") [PVar "t"]
+  , aRule (rootName "arms-are-distinct") [PVar "t"]
       [SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "p") Nothing (Op.SplitArmPattern (Ref "t"))
       , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
@@ -1309,9 +1311,9 @@ splitClauses =
       , call "arm-not-repeated" [Ref "w", Ref "r"]
       , call "arms-are-distinct" [Ref "r"]
       ]
-  , Rule (rootName "split-cases")
+  , aRule (rootName "split-cases")
       [PVar "t", PList [] Nothing, PList [] Nothing, PVar "m"] [] []
-  , Rule (rootName "split-cases")
+  , aRule (rootName "split-cases")
       [ PVar "t", PList [PVar "c"] (Just (PVar "cs"))
       , PList [PVar "mh"] (Just (PVar "ms")), PVar "m"
       ] []
@@ -1329,9 +1331,26 @@ splitClauses =
       , call "solve" []
       , call "split-cases" [Ref "t", Ref "cs", Ref "ms", Ref "m"]
       ]
-  , Rule (rootName "split-over")
+  , aRule (rootName "split-over")
       [PVar "t", PVar "cs", PPair (PVar "hs") (PVar "m")] []
       [call "split-cases" [Ref "t", Ref "cs", Ref "hs", Ref "m"]]
   ]
   where
     call nm as = Do (Call nm as)
+
+-- | A clause with no origin (MS12 phase 342).
+--
+-- **The mirror below says what the shipped base's clauses ARE and deliberately
+-- not where they are written.** A 'Thena.Instral.Ops.Rule' carries its file,
+-- line and column since phase 342, and writing those into this list would pin
+-- every clause of @rules\/standard.thena.rules@ to a line number — so a comment
+-- added to that file would redden a hundred expectations that are about its
+-- rules and not about its layout. 'forgetOrigins' is what the comparison runs
+-- through.
+aRule :: GlobalName -> [Pattern] -> [Test] -> [Instr] -> Rule
+aRule n ps ts body = Rule n ps ts body Nothing
+
+-- | The same clauses with their origins dropped, for comparing against a
+-- hand-written list (MS12 phase 342).
+forgetOrigins :: [Rule] -> [Rule]
+forgetOrigins = map (\r -> r { ruleOrigin = Nothing })

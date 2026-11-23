@@ -25,7 +25,7 @@ import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, crossType, enter)
 import Thena.Development.Partial (Partial (..))
 import Thena.Declared (nat, natDecl, opensIn)
-import Thena.Standard (expectedBase)
+import Thena.Standard (aRule, expectedBase)
 import Thena.Driver (parseDeclaration)
 import Thena.Core.Trust (TrustLevel (..))
 import Thena.Engine
@@ -281,7 +281,7 @@ iteratorTests =
 -- helper turns each name into the pattern that binds it and the fixtures below
 -- read exactly as they did.
 named :: String -> [Name'] -> [Instr] -> Rule
-named n ps = Rule (rootName n) (map Ops.PVar ps) []
+named n ps = aRule (rootName n) (map Ops.PVar ps) []
 
 type Name' = String
 
@@ -438,9 +438,9 @@ dataTests =
     -- pieces while it is there.
     shapes =
       ruleBase "shapes" Nothing "" [] []
-        [ Rule (rootName "shape") [Ops.PList [] Nothing] []
+        [ aRule (rootName "shape") [Ops.PList [] Nothing] []
             [Do (Ops.Say (Lit (VText "empty")))]
-        , Rule (rootName "shape") [Ops.PList [Ops.PWild] (Just Ops.PWild)] []
+        , aRule (rootName "shape") [Ops.PList [Ops.PWild] (Just Ops.PWild)] []
             [Do (Ops.Say (Lit (VText "cons")))]
         ]
 
@@ -757,23 +757,23 @@ returning =
     [ returningRule
       -- @return@ ends the body: the @prim-attack@ after it must not run, which
       -- is what makes this rule safe to call at a hole in any state.
-    , Rule (rootName "runs-on") [] []
+    , aRule (rootName "runs-on") [] []
         [Do (Ops.Return (Lit (VText "first"))), Do Ops.Attack]
       -- A body with no @return@ at all.
-    , Rule (rootName "silent") [] [] [Do (Ops.Say (Lit (VText "nothing")))]
+    , aRule (rootName "silent") [] [] [Do (Ops.Say (Lit (VText "nothing")))]
       -- Two clauses, one arity. The first fails before it can return — it
       -- cannot fail /after/, because @return@ ends the body — so the value the
       -- caller ends up with is the second clause's.
-    , Rule (rootName "two-ways") [] []
+    , aRule (rootName "two-ways") [] []
         [Do Ops.Into, Do (Ops.Return (Lit (VText "first")))]
-    , Rule (rootName "two-ways") [] []
+    , aRule (rootName "two-ways") [] []
         [Do (Ops.Return (Lit (VText "second")))]
     ]
 
 -- | @rule gives :- do return \"a value\"@.
 returningRule :: Rule
 returningRule =
-  Rule (rootName "gives") [] [] [Do (Ops.Return (Lit (VText "a value")))]
+  aRule (rootName "gives") [] [] [Do (Ops.Return (Lit (VText "a value")))]
 
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt = machineIn emptyGlobals
