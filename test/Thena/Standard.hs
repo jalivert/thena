@@ -71,16 +71,34 @@ standardVisible = allRules <$> standardBases
 -- rules and not one because table 2.8 has two.
 expectedStandard :: [Rule]
 expectedStandard =
-  [ Rule (rootName "attack")     []    [FocusIsHole]                 [Do Attack]
-  , Rule (rootName "try-core") [PVar "t"] [FocusIsHole] [Do (Try (Ref "t"))]
     -- **@try-core@ without being told which term** (MS12) — the first rule in
     -- the base that can close a goal with no argument, so the first nullary
     -- candidate a bare @prove@ has that is not a hole-life operation.
-  , Rule (rootName "try-in-scope") [] [FocusIsHole]
+    --
+    -- **AND IT IS ABOVE @attack@, not below it** (MS12, his instruction of
+    -- 2026-11-23). @attack@ matches at every hole and never fails, so with
+    -- @attack@ first a bare @prove@ at a goal a hypothesis closes outright
+    -- cycled attack\/solve\/regret for ever with this rule untried at every
+    -- choice point it made. The order of the two is the fix, and it is in the
+    -- file as well as here.
+  [ Rule (rootName "try-in-scope") [] [FocusIsHole]
       [ Bind (Op.PVar "hs") Nothing Op.InScopeAt
       , Bind (Op.PVar "h") Nothing (Op.Call "any-of" [Ref "hs"])
       , Do (Try (Ref "h"))
       ]
+    -- **The same walk for a hypothesis that has to be applied** (MS12, his
+    -- instruction of 2026-11-23), below the bare guess because it opens a hole
+    -- per argument. It starts at ONE argument, so it does not repeat the rule
+    -- above: @fit-core@\'s own first clause is the bare spine.
+  , Rule (rootName "fit-in-scope") [] [FocusIsHole]
+      [ Bind (Op.PVar "hs") Nothing Op.InScopeAt
+      , Bind (Op.PVar "h") Nothing (Op.Call "any-of" [Ref "hs"])
+      , Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "a")))
+      , Bind (Op.PVar "f") Nothing (Op.ApplyNext (Ref "h") (Ref "n"))
+      , Do (Call "fit-core" [Ref "f"])
+      ]
+  , Rule (rootName "attack")     []    [FocusIsHole]                 [Do Attack]
+  , Rule (rootName "try-core") [PVar "t"] [FocusIsHole] [Do (Try (Ref "t"))]
   , Rule (rootName "abandon")    []    [FocusIsHole]                 [Do Abandon]
     -- **Two clauses of one name** (phase 23b): table 2.8 has two intro rules and
     -- they differ only in their head, which is exactly what a second clause is

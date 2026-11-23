@@ -9,9 +9,10 @@ opened Maybe
 thena spine> :theorem g : Maybe Bool
 proving g : Maybe Bool
 thena spine> :matches
+try-in-scope : ()
+fit-in-scope : ()
 attack : ()
 try-core ‹t› : Core -> ()
-try-in-scope : ()
 abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()

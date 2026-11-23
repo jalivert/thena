@@ -1,8 +1,9 @@
 thena spine> :rules
 standard
+  try-in-scope
+  fit-in-scope
   attack
   try-core ‹t›
-  try-in-scope
   abandon
   intro
   intro
@@ -127,9 +128,10 @@ standard
   spine-arguments ‹h› ‹f› ‹t›
   spine-arguments ‹h› ‹f› ‹t›
 thena spine> :matches
+try-in-scope : ()
+fit-in-scope : ()
 attack : ()
 try-core ‹t› : Core -> ()
-try-in-scope : ()
 abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
@@ -277,9 +279,10 @@ thena core> back
 thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
 proving id : ∀ (A : Type₀) -> A -> A
 thena spine> :matches
+try-in-scope : ()
+fit-in-scope : ()
 attack : ()
 try-core ‹t› : Core -> ()
-try-in-scope : ()
 abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
@@ -396,9 +399,10 @@ context
 type
   A -> A
 thena spine> :matches
+try-in-scope : ()
+fit-in-scope : ()
 attack : ()
 try-core ‹t› : Core -> ()
-try-in-scope : ()
 abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()

@@ -1720,6 +1720,52 @@ tests =
         , ":quit"
         ]
     , script
+        "prove-in-scope"
+        [ -- **A bare @prove@ can close a goal from the context now**, which is
+          -- what putting @try-in-scope@ above @attack@ bought (his instruction
+          -- of 2026-11-23). The first five @prove@s are @attack@ and four
+          -- @intro@s, each taken only after @try-in-scope@ and @fit-in-scope@
+          -- have failed at a goal with nothing in scope; the sixth closes
+          -- @second1@ with @x1@ and no term was typed.
+          --
+          -- **The cap is here so that a regression fails the suite rather than
+          -- hanging it.** Before the reorder these six lines were an
+          -- attack, solve, regret cycle that never came back.
+          ":step 600"
+        , ":theorem second : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> B -> B"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "goto second1"
+        , "prove"
+        , ":show"
+        , ":choices"
+        , ":abandon"
+          -- **And a statement whose hypothesis has to be APPLIED.**
+          -- @try-in-scope@ offers all four context entries and none of them
+          -- fits; @fit-in-scope@ then takes @x1@, claims @? a : A@ above the
+          -- focus and fits @x1 a@ at @B@. Every proof step here is @prove@;
+          -- the three moves and the final @solve@ are typed by hand because
+          -- nothing in the machine focuses the next goal.
+        , ":theorem mp : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> (A -> B) -> B"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "prove"
+        , "goto mp1"
+        , "prove"
+        , "goto a"
+        , "prove"
+        , "prove"
+        , "goto-root"
+        , "solve"
+        , "qed"
+        , ":quit"
+        ]
+    , script
         "help"
         [ ":help"
         , ":nonesuch"

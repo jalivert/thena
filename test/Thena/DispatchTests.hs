@@ -413,12 +413,15 @@ dispatchableTests =
     [ testCase "matches shows try, dispatch does not" $ do
         let std = expectedBase
         names' (matches std emptyGlobals hole)
-          @?= ["attack", "try-core"
-               -- **@try-in-scope@ is nullary and dispatch DOES run it** (MS12):
+          @?= [ -- **@try-in-scope@ is nullary and dispatch DOES run it** (MS12):
                -- it finds its own term, so it is the one candidate in this list
-               -- that can close the goal. It is below @attack@ in the base, so
-               -- @attack@ is still what a bare @prove@ takes first.
-             , "try-in-scope", "abandon"
+               -- that can close the goal. **It is ABOVE @attack@** (his
+               -- instruction of 2026-11-23), so it is what a bare @prove@ tries
+               -- first; @attack@ never fails, and below it this rule was never
+               -- reached at all. @fit-in-scope@ is the same walk for a
+               -- hypothesis that has to be applied to something.
+               "try-in-scope", "fit-in-scope"
+             , "attack", "try-core", "abandon"
                -- **@rename@ is offered here too** (MS12 phase 330): its head is
                -- @focus-is-component@, and dispatch runs it no more than it runs
                -- @try-core@ — it takes a parameter.
@@ -470,14 +473,21 @@ dispatchableTests =
                ++ ["run-block"]
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals hole)
-          @?= ["attack", "try-in-scope", "abandon", "prove"]
+          @?= ["try-in-scope", "fit-in-scope", "attack", "abandon", "prove"]
 
-      -- And that is what the engine actually runs: @try@ would have been first
-      -- past @attack@, so a dispatch that did not skip it would fail on an
+      -- And that is what the engine actually runs: @try-core@ would have been
+      -- in the list, so a dispatch that did not skip it would fail on an
       -- unbound @Ref@ rather than offering @abandon@.
+      --
+      -- **This hole has nothing in scope, so the two closing rules above
+      -- @attack@ are taken and fail before it** (MS12 phase 340): @any-of []@
+      -- matches no clause and @apply-next@ has no candidate to apply. Neither
+      -- leaves a frame behind — 'demote' unbuilds a 'Choice' as its last
+      -- alternative is taken — so what stands is @attack@'s one choice point
+      -- with @abandon@ and @prove@ left, which is what this assertion reads.
     , testCase "so the alternative after attack is abandon" $
         map pointAlts (choicePoints (ranTo (machine expectedBase hole [Do Ops.Prove])))
-          @?= [[rootName "try-in-scope", rootName "abandon", rootName "prove"]]
+          @?= [[rootName "abandon", rootName "prove"]]
     ]
   where
     names' it = [ nameDotted (ruleName r) | r <- drainIt it ]
