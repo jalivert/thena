@@ -228,14 +228,7 @@ requestPayload cfg (JevState fields) candidates =
                          \`applies_here` is evidence and not a shortlist: a \
                          \candidate outside it may still be the right answer, but \
                          \it is still an answer for the `>` position, never for a \
-                         \goal elsewhere. \
-                         \When the goal at `>` is a dependent function type — a \
-                         \`\8704` — the usual opening is `attack`, which turns the \
-                         \hole into a guess, and then one `intro` for each binder; \
-                         \`intro-binders` does the whole run of them at once. When \
-                         \it is an application of a global, the move is normally a \
-                         \rule in `applies_here` that mentions that global. \
-                         \Which candidate is the user most likely \
+                         \goal elsewhere. Which candidate is the user most likely \
                          \about to write next?" ::
                            Text
                        )
