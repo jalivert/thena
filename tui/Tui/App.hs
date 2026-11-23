@@ -6062,9 +6062,15 @@ scriptSubmit = do
       Nothing -> pure ()
       Just s -> case scriptLocal st line of
         Nothing -> do
-          sl <- liftIO (runScriptLine s line)
-          put st { stScript = stScript st ++ [sl], stInput = emptyInput, stScriptNote = Nothing }
-          afterScriptEdit
+          let at = length (stScript st)
+          rerunTail at s [line] [] $ \rebuilt -> do
+            st' <- get
+            put st'
+              { stScript = take at (stScript st') ++ rebuilt
+              , stInput = emptyInput
+              , stScriptNote = Nothing
+              }
+            afterScriptEdit
         Just action -> do
           said <- action
           let sl = ScriptLine
@@ -6156,32 +6162,25 @@ scriptCutAndRun = do
     Just _ | all isSpace line -> scriptTruncate
     Just i -> case scriptSessionBefore st i of
       Nothing -> pure ()
-      Just s -> do
-        rebuilt <- liftIO (foldRun s [line])
-        put st
-          { stScript = take i (stScript st) ++ rebuilt
+      Just s -> rerunTail i s [line] [] $ \rebuilt -> do
+        st' <- get
+        put st'
+          { stScript = take i (stScript st') ++ rebuilt
           , stScriptPos = Nothing
-          , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
+          , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st'))
           , stScriptDraft = ""
           , stScriptNote = Nothing
           }
         afterScriptEdit
-
--- | Run a list of lines in order from one session, keeping each line's own
--- result — the rebuild every edit and every insert goes through.
-foldRun :: Session -> [String] -> IO [ScriptLine]
-foldRun _ [] = pure []
-foldRun s (l : ls) = do
-  sl <- runScriptLine s l
-  rest <- foldRun (maybe s id (slSession sl)) ls
-  pure (sl : rest)
 
 -- | **'foldRun', off the keypress** — `~twdbp`, his ruling of 2026-11-18 on
 -- his own report that a 500-line re-run froze the terminal for 9.6 to 25.2
 -- seconds with no sign anything was happening. Every call site that used to
 -- do @rebuilt <- liftIO (foldRun s texts)@ and then splice the three pieces
 -- together now does that splicing inside @finish@ instead, and hands it to
--- this.
+-- this. **`foldRun` itself is gone as of `~62sk9`** — its one remaining
+-- caller was the single-line edit-and-cut path, and a one-element batch
+-- through this does exactly what it computed, off the keypress.
 --
 -- @at@ is the document index the batch starts at — everything before it in
 -- 'stScript' is never touched. @unrun@ is whatever was already sitting below
