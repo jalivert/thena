@@ -28,7 +28,6 @@ module Tui.Render
   , displayText
   , developmentText
   , goalTexts
-  , goalShapeText
   , mark
   ) where
 
@@ -622,73 +621,6 @@ developmentText = concatMap (go 0)
 -- missing from the pane.
 goalTexts :: [GoalView] -> [String]
 goalTexts = map (\g -> goalMarker g <> concatMap pieceText (goalPieces NoFold g))
-
--- | **The focused goal's own shape, in words, as a fact and never as advice**
--- — `~czz2h`. 'Nothing' when no goal is focused, so the caller drops the
--- field rather than sending an empty one.
---
--- Jev reads @open_goals@ and @proof_term@, both of which carry the focused
--- goal's type as *printed text it has to parse itself*; measured on
--- 2026-11-19, a bare @∀ (T : Type) -> T -> T@ left its top pick at 14–17%
--- out of 255 candidates while an idle prompt scored 51–64%. **His framing is
--- that what is short is specific context about the goal's shape rather than
--- the ranking**, so this says the shape outright.
---
--- **It says what the goal /is/, not what to do about it.** "A @∀@ goal is
--- normally attacked and its binders introduced" is strategy, it would live in
--- the request's instructions, and nothing would keep it true as the rule base
--- moves; every word below is read off 'Shape', which the engine computed.
-goalShapeText :: [GoalView] -> Maybe String
-goalShapeText gs = describe <$> lookup True [(goalViewFocus g, g) | g <- gs]
-  where
-    describe g =
-      "the focused goal is " <> kind (goalViewKind g)
-        <> ", and its type is " <> shapeOf (goalViewType g)
-    kind AHole = "a hole, with nothing standing in it"
-    kind AGuess = "a guess, with something standing in it that is not committed"
-
-    -- | A run of 'AFunction's is one fact and not n nested ones, the same
-    -- reading 'chainPi' gives the panes: what a reader calls /a ∀ with three
-    -- binders/ is three nodes in the tree.
-    shapeOf d = case displayShape d of
-      AFunction{} ->
-        let (bs, result) = binders d
-         in "a dependent function type with "
-              <> count (length bs) "binder"
-              <> " ("
-              <> intercalate ", " [n <> " : " <> t | (n, t) <- bs]
-              <> "), and its result is " <> displayText result
-      AnApplication{} ->
-        let (hd, args) = spine d
-         in "an application of " <> displayText hd <> " to " <> count (length args) "argument"
-      AVariable n _ _ -> "the variable " <> n
-      AGlobal n _ -> "the global " <> n
-      AUniverse l -> "the universe " <> l
-      ALiteral t -> "a literal, " <> t
-      AnAbstraction{} -> "a lambda, which is not a type"
-      ALet{} -> "a let"
-      AFormer n _ as -> "the type former " <> n <> " applied to " <> count (length as) "argument"
-      AnElimination{eliminatorName = n} -> "an elimination by " <> n
-      ATrusted{} -> "a trusted term"
-      ADangling _ -> "a dangling index, which is not well formed"
-      AnElision -> "elided — the drawing budget stopped before the type"
-      ARegion _ -> "a tagged literal of an object language"
-      AnObjectTerm lang prod _ ->
-        "a term of the object language " <> lang <> ", written by the production " <> prod
-      AToken t -> "a token of an object language, " <> t
-
-    binders d = case displayShape d of
-      AFunction b body ->
-        let (bs, result) = binders body
-         in ((bindingName b, displayText (bindingType b)) : bs, result)
-      _ -> ([], d)
-
-    spine d = case displayShape d of
-      AnApplication f x -> let (hd, args) = spine f in (hd, args <> [x])
-      _ -> (d, [])
-
-    count 1 w = "1 " <> w
-    count n w = show n <> " " <> w <> "s"
 
 renderMachineView :: MachineView -> [String]
 renderMachineView (MachineView pc env stack) =
