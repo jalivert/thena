@@ -85,6 +85,7 @@ import Thena.Core.Context (Context)
 import Thena.Core.Level (levelVarName)
 import Thena.Core.Term (Ident (..), Spelling, Var, nameDotted, spelledIn)
 import Thena.Syntax.Lexer (Pos (..))
+import Thena.Instral.Ops (Origin (..))
 import Thena.Instral.Type (renderTy)
 import Thena.Language.Grammar (Grammar)
 import Thena.Syntax.Print (Env, nameOf, reachesIn, renderLevel, scopeOf)
@@ -403,6 +404,13 @@ data Role
   | TheForm
   | TheLevel
   | TheRule
+  | TheArity
+    -- ^ __how many arguments the callable the failure is about takes__ (MS12
+    -- phase 343). A name alone does not say which callable is meant — @foo\/2@
+    -- and @foo\/4@ are two of them, his own spelling of 2026-11-19 — so a
+    -- refusal about one carries the arity beside the name. **It was 'TheClause'
+    -- with an 'ALine' until this phase and that was a defect**: the number is an
+    -- arity, it was handed over as a line, and a pane drew it as one (@~w3q27@).
   | TheInstruction
   | TheClause
   | TheTest
@@ -449,6 +457,21 @@ data Piece
   | ACount Int
   | ALine Int
     -- ^ a line, counting from 1.
+    --
+    -- **An ordinal is not one of these.** Three faults handed an arity over as
+    -- an 'ALine' until MS12 phase 343 (@~w3q27@); where a number counts things
+    -- rather than locating one, 'ACount' is the piece.
+  | APlace FilePath Pos
+    -- ^ __a file, and the line and column inside it__ (MS12 phase 343) — what
+    -- makes a part a destination rather than a word, which is the whole of
+    -- @~zx8cb@ and of his ask of 2026-11-20 that @~hcr2d@ answered for a
+    -- declaration.
+    --
+    -- **The path rides with the position and is not taken from the row.**
+    -- 'Thena.View.Choices.AltView' settled that for a clause one phase earlier:
+    -- a clause carries its own file ('Thena.Instral.Ops.Origin'), two bases may
+    -- hold a rule of one name, and a part that borrowed the item's path could
+    -- therefore name the wrong file.
   | AWanted Wanted
   | ALevel String
     -- ^ a universe level, as the prompt writes it. Text: a level is spelled and
@@ -1329,8 +1352,14 @@ displayStop sp grammars budget env binders counter here u = case Dr.unfinishedWh
           ]
       R.TypeVariableApplied r t -> fault RuleTypeWrong [is TheRule (AName r), is TheType (ARuleType t)]
       R.UnitInsideAType r -> fault RuleTypeWrong [is TheRule (AName r)]
+      -- **A signature written twice is not about a clause** (MS12 phase 343,
+      -- @~w3q27@): two @f : …@ lines are two declarations, and the number here
+      -- is the arity they agree on. There is no position because
+      -- 'Thena.Instral.Concrete.RawSignature' carries none — the one of the
+      -- three that cannot be made a destination without threading one out of
+      -- the reader, which the item records.
       R.DuplicateSignature r i ->
-        fault RuleTypeWrong [is TheRule (AName r), is TheClause (ALine (i + 1))]
+        fault RuleTypeWrong [is TheRule (AName r), is TheArity (ACount i)]
       R.InAnnotation g i n why ->
         FaultView BlockShapeWrong
           [ is TheRule (name g)
@@ -1341,13 +1370,26 @@ displayStop sp grammars budget env binders counter here u = case Dr.unfinishedWh
       R.AnnotationWithoutBinding g i n -> lineOf BlockShapeWrong g i [is TheWord (AName n)]
       R.ReturnInSurfaceBlock g i -> lineOf BlockShapeWrong g i []
       R.FunctionLeavesNothing r -> fault RuleTypeWrong [is TheRule (AName r)]
-      R.FunctionClauseUnreachable r i ->
-        fault ClauseUnreachable [is TheRule (AName r), is TheClause (ALine (i + 1))]
-      R.RuleAndFunction r i ->
-        fault NameAlreadyDeclared [is TheRule (AName r), is TheClause (ALine (i + 1))]
+      -- **THE CLAUSE IS THE DEAD ONE, AND IT IS A PLACE TO GO** (MS12 phase
+      -- 343, @~zx8cb@ and @~w3q27@). The origin is the later clause's own — the
+      -- one nothing can reach — which is the clause the author has to change;
+      -- the earlier one that eats it is found from there by reading up.
+      -- 'Nothing' is a clause in no file, which these two cannot be in practice
+      -- and are not promised not to be.
+      R.FunctionClauseUnreachable r i o ->
+        fault ClauseUnreachable
+          ([is TheRule (AName r), is TheArity (ACount i)] ++ place o)
+      R.RuleAndFunction r i o ->
+        fault NameAlreadyDeclared
+          ([is TheRule (AName r), is TheArity (ACount i)] ++ place o)
 
     lineOf k g i ps =
       fault k (is TheRule (name g) : is TheInstruction (ALine (i + 1)) : ps)
+
+    -- | Where a clause is written, as a part, or no part at all.
+    place o = case o of
+      Just (Origin f at) -> [is TheClause (APlace f at)]
+      Nothing              -> []
 
     -- ** Why a rule's own types did not work out
 

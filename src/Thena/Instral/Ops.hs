@@ -2142,6 +2142,9 @@ data Rule = Rule
 data Origin = Origin
   { originPath :: FilePath
   , originAt   :: Pos
+    -- ^ **Where the clause begins, except for a function, where it is the @=@**
+    -- — 'Thena.Instral.Concrete.RawFunction' says why and @~5n7tz@ is the item.
+    -- A @rule@ clause is exact: the @rule@ keyword's own line and column.
   }
   deriving (Eq, Show)
 

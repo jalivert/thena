@@ -269,9 +269,18 @@ data RawOpenSpec
 -- name's, which is the one place this differs from 'RawRule'. A function
 -- declaration opens with an @ident@, and the grammar reads an identifier through
 -- @$$@ — the token's text without its position — so the nearest token that
--- carries one is the @=@. Every function in a base is written with its
--- parameters and its @=@ on one line, so the line is the clause's; the column is
--- the @=@'s.
+-- carries one is the @=@. **So this is the @=@'s position and not the name's**:
+-- the column is the @=@'s, and the line is the clause's only where the two are
+-- on one line.
+--
+-- **THAT LAST PART WAS WRITTEN AS A PROPERTY OF THE LANGUAGE AND IS NOT ONE**
+-- (MS12 phase 343): it said every function in a base is written with its
+-- parameters and its @=@ on one line, which is true of
+-- @rules\/standard.thena.rules@ as it stands and not of what the grammar
+-- admits. @f y@ on one line and @= concat y "b"@ on the next loads, and its
+-- clause then records the second line. @~5n7tz@ is the item, and it carries the
+-- measured cost: the fix is to stop reading an identifier through @$$@, which is
+-- 28 use sites in @Thena.Syntax.Parser@.
 data RawFunction = RawFunction Pos String [RawPattern] RawBody
   deriving (Eq, Show)
 
