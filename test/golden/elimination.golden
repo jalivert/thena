@@ -49,9 +49,10 @@ thena spine> along
 thena spine> along
 thena spine> along
 thena spine> :matches
+try-in-scope : ()
+fit-in-scope : ()
 attack : ()
 try-core ‹t› : Core -> ()
-try-in-scope : ()
 abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()

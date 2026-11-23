@@ -802,11 +802,13 @@ baseTests =
       -- of it: the choice point between them is the search.
       testCase "every rule whose head passes is a candidate" $
         [ nameDotted g | Rule g _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
-          @?= [ "attack", "try-core"
-                -- **The first nullary candidate that can close a goal** (MS12):
+          @?= [ -- **The first nullary candidate that can close a goal** (MS12):
                 -- it reads the context itself, so it needs no argument and a
-                -- bare @prove@ therefore has it.
-              , "try-in-scope", "abandon"
+                -- bare @prove@ therefore has it. **It is first, above @attack@**
+                -- (his instruction of 2026-11-23), with @fit-in-scope@ — the
+                -- same walk through a hypothesis that has to be applied — next.
+                "try-in-scope", "fit-in-scope"
+              , "attack", "try-core", "abandon"
                 -- **@rename@ is offered at every component** (MS12 phase 330),
                 -- a hole among them, so it is a candidate here.
               , "rename", "eliminate-core"

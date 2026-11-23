@@ -5982,11 +5982,89 @@ which fits — so the proof closes with no backtracking at all. Outermost first
 would have failed three times to reach the same term. A strategy that wants the
 other order reverses the list with `reverse-onto`.
 
-**A bare `prove` can reach it, and still takes `attack` first.** `try-in-scope`
-is nullary, so dispatch offers it; `attack` is above it in the base and succeeds
-at every hole, so it is `attack` that a first `prove` takes and `try-in-scope`
-that a `retry` reaches. Rule order is how that is arranged, as it is for
-everything else.
+**A bare `prove` reaches it, and it is the first thing `prove` tries.** That was
+decided a day later and is the next section.
+
+---
+
+### The tactics that can close a goal are tried before the one that opens it up
+
+*Decided 2026-11-23.*
+
+`try-in-scope` shipped below `attack` in the standard base, and a bare `prove`
+could not reach it. `attack` applies at every hole and always succeeds, so at a
+goal that a hypothesis closes outright, `prove` went
+
+```
+thena spine> prove
+chose 4708: attack
+thena spine> prove
+chose 4710: solve
+backtracking to 4710: regret
+thena spine> prove
+chose 4711: attack
+```
+
+— and on, for as long as you kept typing, with `try-in-scope` sitting in
+`:choices` as an untried alternative at every one of those forks. It was never
+reached, because reaching it needs everything above it to fail and `attack`
+cannot fail.
+
+**So `try-in-scope` is now the first rule in the base, and `attack` follows it.**
+Trying to finish is the cheap guess: at a goal where nothing in scope fits, it
+fails at once and costs one `backtracking to` line. At the same goal as above it
+closes the proof:
+
+```
+thena spine> prove
+chose 4708: try-in-scope
+chose 4709: any-of
+```
+
+**`fit-in-scope` is beside it, for a hypothesis that has to be applied to
+something**, and below it because it opens a hole per argument where the bare
+guess opens none:
+
+```
+fit-in-scope : ()
+rule fit-in-scope :- when focus-is-hole
+  do hs = in-scope
+     ; h = any-of hs
+     ; n = fresh-name "a"
+     ; f = apply-next h n
+     ; call fit-core f
+```
+
+It starts at one argument rather than nought, so it does not repeat the rule
+above it; `fit-core` then searches the arity, and `apply-next` refuses a
+candidate whose type is not a function, so a hypothesis that cannot be applied
+costs one step. Together the two prove modus ponens with `prove` as the only
+tactic typed:
+
+```
+thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
+thena spine> prove    -- ×5: attack, and four intros
+thena spine> goto mp1
+thena spine> prove
+chose 4710: try-in-scope
+…
+backtracking to 4710: fit-in-scope
+chose 4715: any-of
+chose 4717: fit-core
+already equal
+thena spine> goto a
+thena spine> prove    -- closes ? a : A with x
+```
+
+**What this is not is a search strategy.** Rule order is global, and which rule
+you want depends on the goal: at `Even (succ (succ zero))` you want the rule
+that refines, and at `A -> A` with the hypothesis to hand you want the rule that
+finishes. One order cannot be both, and ordering the base is the only control
+over the search that exists today.
+
+**And the three `goto`s above are typed by hand because nothing focuses the next
+goal.** The names in them were minted by the machine, so no rule base could
+contain them. That is the limit on automatic proof, not the order of the rules.
 
 ---
 

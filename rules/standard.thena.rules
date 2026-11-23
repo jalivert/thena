@@ -22,12 +22,6 @@ fresh-universe = do
   u = universe-at l
   return u
 
-attack : ()
-rule attack :- when focus-is-hole do prim-attack
-
-try-core : Core -> ()
-rule try-core t :- when focus-is-hole do prim-try t
-
 -- `try-core` WITHOUT BEING TOLD WHICH TERM, and it is the first rule in this
 -- base that can close a goal without being handed the answer. `in-scope`
 -- reports the entries at the focus as terms, `any-of` offers them one at a time,
@@ -37,11 +31,47 @@ rule try-core t :- when focus-is-hole do prim-try t
 -- **Nullary, so `prove` offers it.** Until this rule every nullary rule here was
 -- a hole-life operation — attack, abandon, intro, solve, regret — so a bare
 -- `prove` could move a proof around and never finish one.
+--
+-- **IT IS ABOVE `attack` ON PURPOSE — his instruction, 2026-11-23.** `prove`
+-- offers every matching rule in base order, and `attack` matches at every hole
+-- and never fails. With `attack` first, a bare `prove` at a goal that a
+-- hypothesis closes outright went attack, solve, regret, attack — for ever —
+-- while this rule sat untried at every choice point that cycle made. Trying to
+-- close the goal is the cheap guess and it fails at once when nothing fits, so
+-- it goes first.
 try-in-scope : ()
 rule try-in-scope :- when focus-is-hole
   do hs = in-scope
      ; h = any-of hs
      ; prim-try h
+
+-- THE SAME WALK FOR A HYPOTHESIS THAT HAS TO BE APPLIED TO SOMETHING — his
+-- instruction, 2026-11-23 — and it is BELOW `try-in-scope` because the bare
+-- candidate is the cheaper guess and this one opens a hole per argument.
+--
+-- `fit-in-scope` rather than `apply-in-scope`, because the base already draws
+-- that distinction and this is the second of the two: `apply-core` saturates
+-- the spine in one step from the telescope, `fit-core` searches the arity
+-- minimal-arity-first. `apply-next` claims one argument above the focus and
+-- fails outright when the candidate's type is not a function, so a hypothesis
+-- that cannot be applied at all costs one step.
+--
+-- **It starts at one argument so that it does not repeat the rule above**:
+-- `fit-core`'s own first clause is the bare spine, which is exactly the guess
+-- `try-in-scope` has already made by the time this runs.
+fit-in-scope : ()
+rule fit-in-scope :- when focus-is-hole
+  do hs = in-scope
+     ; h = any-of hs
+     ; n = fresh-name "a"
+     ; f = apply-next h n
+     ; call fit-core f
+
+attack : ()
+rule attack :- when focus-is-hole do prim-attack
+
+try-core : Core -> ()
+rule try-core t :- when focus-is-hole do prim-try t
 
 abandon : ()
 rule abandon :- when focus-is-hole do prim-abandon

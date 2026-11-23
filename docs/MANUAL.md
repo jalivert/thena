@@ -489,9 +489,18 @@ type
 `try-in-scope` is `try-core` with the term left to the machine: it reads the
 context at the focus, offers each entry in turn starting with the innermost, and
 a candidate whose type does not fit the goal is refused and the next one taken.
-Here that would be `x` on the first try. It is the one tactic in the shipped base
-that closes a goal without being told what to close it with, so a bare `prove`
-can reach it too.
+Here that would be `x` on the first try.
+
+`fit-in-scope` is the same walk for a hypothesis that has to be applied to
+something first: it takes a candidate, claims a hole for one argument, and asks
+whether the application fits the goal, claiming another argument if it does not.
+A hypothesis whose type is not a function is refused at once.
+
+**These two are the tactics in the shipped base that close a goal without being
+told what to close it with, and they are the first two the engine tries**, so a
+bare `prove` reaches them before anything else. The order matters: `attack`
+always applies at a hole and never fails, so with `attack` ahead of them a
+`prove` at a goal that a hypothesis closes outright would never get to either.
 
 ```
 thena spine> try-core core`x`
@@ -574,6 +583,7 @@ until you do, `:theorem` will tell you there is one in progress.
 | `rename "a"` | give the binding you are standing on the word `a` |
 | `` try-core core`term` `` | propose a term for the focused hole |
 | `try-in-scope` | the same, with the term found for you from what is in scope |
+| `fit-in-scope` | the same again, for a hypothesis that has to be applied to something |
 | `solve` | accept the focused guess — it becomes a definition |
 | `regret` | throw away a guess's body, back to a plain hole |
 | `abandon` | remove the focused hole entirely |
@@ -985,7 +995,9 @@ line left is yours to reach with `retry`, and nothing reaches it for you:
 thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
 proving t : ∀ (A : Type₀) -> A -> A
 thena spine> prove
-chose 4690: attack
+chose 4690: try-in-scope
+backtracking to 4690: fit-in-scope
+backtracking to 4690: attack
 thena spine> regret
 thena spine> back
 stuck: already at the root
@@ -1018,9 +1030,10 @@ list like everything else, because elaboration is search:
 
 ```
 thena spine> :matches
+try-in-scope : ()
+fit-in-scope : ()
 attack : ()
 try-core ‹t› : Core -> ()
-try-in-scope : ()
 abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
@@ -1391,7 +1404,7 @@ already there goes on being searched underneath them.
 ```
 thena spine> :consult examples/ChoicePoints.thena.rules
 loaded demo (3 rules)
-loaded standard (126 rules)
+loaded standard (127 rules)
 ```
 
 **The last thing you consulted is tried first.** The shipped base is consulted for
@@ -2220,6 +2233,7 @@ language and elaborated on load.
 | `rename "‹a›"` | give the binding you are standing on a word, when it has lost its own |
 | `` try-core core`term` `` | propose a term for the focused hole |
 | `try-in-scope` | the same, with the term found for you from what is in scope |
+| `fit-in-scope` | the same again, for a hypothesis that has to be applied to something |
 | `` apply-core core`f` `` / `` unify-refine-core core`t` `` | apply a function / refine by unification |
 | `goto-named "‹name›"` | move to a hole by name |
 | `goto-root` | move to the root of the development |

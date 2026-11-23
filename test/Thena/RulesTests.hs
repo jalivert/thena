@@ -820,10 +820,13 @@ ranOk m = case runOut m of
 -- point between them is what makes it a search rather than a loop.
 everyHoleRule :: [String]
 everyHoleRule =
-  [ "attack", "try-core"
     -- **@try-in-scope@ asks @focus-is-hole@ and nothing else** (MS12), so it is
-    -- offered at every hole and at no guess.
-  , "try-in-scope", "abandon"
+    -- offered at every hole and at no guess. **It is first, ABOVE @attack@**
+    -- (his instruction of 2026-11-23): @attack@ never fails, so below it this
+    -- rule was never reached by a bare @prove@. @fit-in-scope@ is the same walk
+    -- for a hypothesis that has to be applied, and sits just under it.
+  [ "try-in-scope", "fit-in-scope"
+  , "attack", "try-core", "abandon"
     -- **@rename@ is offered at every component** (MS12 phase 330): its head is
     -- @focus-is-component@, because a word belongs to a binder and all five
     -- components are one. It is therefore in this list and in every guess
