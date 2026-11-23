@@ -814,6 +814,22 @@ data St = St
     -- the feature**: a percentage is a rule about the screen, and what he
     -- asked for is a width he chose. 'draw' shrinks them proportionally if
     -- the terminal is too narrow to honour them, and does not write that back.
+  , stPaneHeights :: Map.Map Pane Int
+    -- ^ **how tall a pane is pinned, in rows** — @:pane ‹name› height ‹n›@.
+    -- **Sparse, unlike 'stPaneWidths'**: a pane not in this map is still
+    -- Greedy, splitting its column's height evenly with whichever other
+    -- panes there are unset too, exactly as every pane did before this
+    -- existed. There is no terminal-derived default to fill in at startup
+    -- the way 'appStart' fills 'stPaneWidths' — "its share of the column" is
+    -- not a number until the column and the terminal are both known, and
+    -- 'draw' computes that fresh every frame rather than storing it.
+    --
+    -- **Scaled down, not honoured past the column's own height.** When the
+    -- pinned heights in one column add up to more rows than the terminal
+    -- has for it, 'draw' shrinks all of that column's pinned heights
+    -- proportionally to fit — the same rule 'stPaneWidths' already lives
+    -- under when a window is too narrow — and does not write the shrunk
+    -- number back here.
   , stDrag :: Maybe Drag
     -- ^ a resize in progress — see 'Drag'. 'Nothing' between drags, which is
     -- almost always.
@@ -1135,6 +1151,7 @@ runTui = do
           -- **The stored widths start here and 'appStart' fills the gaps**,
           -- because the terminal's width is not known until there is a vty.
         , stPaneWidths  = Map.fromList (cfgWidths cfg)
+        , stPaneHeights = Map.fromList (cfgHeights cfg)
         , stDrag        = Nothing
         , stStrip       = cfgStrip cfg
         , stStripDrag   = Nothing
@@ -1373,42 +1390,66 @@ resizablePanes = map PaneVP . placedPanes . stLayout
 -- **One function for both keyboards.** The REPL and live-script mode's command
 -- bar each dispatch their own commands, and a command built twice is a command
 -- that will eventually behave two ways.
-paneCommand :: [String] -> Layout -> Strip -> Maybe (Layout, Strip, String)
-paneCommand ws layout strip = case ws of
+paneCommand
+  :: [String] -> Layout -> Strip -> Map.Map Pane Int
+  -> Maybe (Layout, Strip, Map.Map Pane Int, String)
+paneCommand ws layout strip heights = case ws of
   -- | **The suggestion strip, which has no position** — `~w2tk2` slice 1.
   -- Three arms of its own rather than a 'Tui.Layout.Pane' that ignores its
   -- argument: the strip has exactly one place it can be, so @open@ takes
   -- nothing and @open ‹3›@ is a sentence to refuse rather than to honour by
   -- dropping half of it.
   [":pane", name, "open"] | name == stripName ->
-    Just (layout, openStrip strip, stripName <> " open under the prompt")
+    Just (layout, openStrip strip, heights, stripName <> " open under the prompt")
   [":pane", name, "close"] | name == stripName ->
-    Just (layout, closeStrip strip, stripName <> " closed")
+    Just (layout, closeStrip strip, heights, stripName <> " closed")
   [":pane", name, "open", _] | name == stripName ->
     Just
-      ( layout
-      , strip
+      ( layout, strip, heights
       , stripName <> " has no position — it sits under the prompt, the width "
           <> "of the script column, so \":pane " <> stripName <> " open\" is "
           <> "the whole of it"
       )
+  -- | **The strip is sized in rows of its own already, by dragging its
+  -- bar** — `~w2tk2` slice 3a. @height@ is a 'Pane' thing, not a second door
+  -- onto the strip's.
+  [":pane", name, "height", _] | name == stripName ->
+    Just
+      ( layout, strip, heights
+      , stripName <> " already has its own height, pulled by dragging its "
+          <> "bar — there is no \":pane " <> stripName <> " height\""
+      )
   [":pane", name, "close"] ->
-    withPane name (\p -> (closePane p layout, paneName p <> " closed"))
+    withPane name (\p -> (closePane p layout, heights, paneName p <> " closed"))
   [":pane", name, "open", n] -> withPane name $ \p -> case readPosition n of
     Nothing ->
       ( layout
+      , heights
       , n <> " is not a position — they are 1 to 6, two columns of three "
           <> "numbered across"
       )
     Just pos -> placed p pos
-  (":pane" : _) -> Just (layout, strip, paneUsage)
+  -- | **@height auto@ lets go of a pin and returns the pane to splitting its
+  -- column evenly** — the same word 'readHeight' refuses as a number, so the
+  -- two can share one case.
+  [":pane", name, "height", "auto"] ->
+    withPane name (\p -> (layout, Map.delete p heights, paneName p <> " height: auto"))
+  [":pane", name, "height", n] -> withPane name $ \p -> case readHeight n of
+    Nothing ->
+      ( layout
+      , heights
+      , n <> " is not a height — rows as a number, at least " <> show minPaneHeight
+      )
+    Just h -> (layout, Map.insert p h heights, paneName p <> " height: " <> show h)
+  (":pane" : _) -> Just (layout, strip, heights, paneUsage)
   _ -> Nothing
   where
     withPane name k = Just $ case paneByName name of
-      Just p -> let (l, said) = k p in (l, strip, said)
+      Just p -> let (l, h, said) = k p in (l, strip, h, said)
       Nothing ->
         ( layout
         , strip
+        , heights
         , "no pane called " <> name <> " — " <> intercalate ", " paneWords
         )
     -- | **What a move cost is said, not left to be noticed.** A swap moves the
@@ -1417,6 +1458,7 @@ paneCommand ws layout strip = case ws of
     -- reported by 'openPane', which keeps that function about the placement.
     placed p pos =
       ( after
+      , heights
       , intercalate ", "
           ( (paneName p <> " at " <> show pos)
               : [ paneName q <> " at " <> show w
@@ -1437,13 +1479,20 @@ paneWords = map paneName allPanes <> [stripName]
 
 paneUsage :: String
 paneUsage =
-  ":pane ‹name› open ‹1-6›, :pane ‹name› close, :pane " <> stripName
-    <> " open|close — "
+  ":pane ‹name› open ‹1-6›, :pane ‹name› close, :pane ‹name› height ‹n›|auto, "
+    <> ":pane " <> stripName <> " open|close — "
     <> intercalate ", " paneWords
 
 readPosition :: String -> Maybe Position
 readPosition w = case reads w of
   [(n, "")] | n `elem` positions -> Just n
+  _ -> Nothing
+
+-- | A row count a pane may be pinned to — digits only, same reasoning as
+-- 'readPosition', and never below 'minPaneHeight'.
+readHeight :: String -> Maybe Int
+readHeight w = case reads w of
+  [(n, "")] | n >= minPaneHeight -> Just n
   _ -> Nothing
 
 -- | The words @:pane@ offers where the caret stands, or 'Nothing' off a
@@ -1458,11 +1507,14 @@ paneVocabulary line
     -- | A line ending in a space is one word further on than its words say.
     slot = if not (null line) && last line /= ' ' then length ws - 1 else length ws
     vocab 1 = paneWords
-    vocab 2 = ["open", "close"]
+    -- | **No @height@ offered for the strip** — it has no third verb, only
+    -- its own drag; see 'paneCommand'.
+    vocab 2 = ["open", "close"] <> ["height" | ws !! 1 /= stripName]
     -- | **No positions offered after @:pane suggestions open@** — `~w2tk2`.
     -- The strip has none, and a completion that offers six numbers the very
     -- next word will refuse is the dropdown telling him something untrue.
     vocab 3 | ws !! 2 == "open", ws !! 1 /= stripName = map show positions
+    vocab 3 | ws !! 2 == "height" = ["auto"]
     vocab _ = []
 
 paneCommandPrefix :: String
@@ -1493,6 +1545,12 @@ paneWidthStep = 4
 -- is twelve columns with no room for a module under it.
 minPaneWidth :: Int
 minPaneWidth = 12
+
+-- | Shorter than this in rows and a pane holds nothing worth drawing — the
+-- same floor 'stripMinRows' sets for the suggestion strip, a title plus two
+-- lines of body being the least that reads as a pane at all.
+minPaneHeight :: Int
+minPaneHeight = 3
 
 -- | **What the document keeps, whatever the panes are doing.** A drag cannot
 -- take the screen away from the thing being edited.
@@ -2168,6 +2226,7 @@ draw st =
     paneColumns = Widget Fixed Greedy $ do
       ctx <- getContext
       let spare = max (2 * minPaneWidth) (ctx ^. availWidthL - docMinWidth - 1)
+          avail = ctx ^. availHeightL
           (first', second') = columnsOf (stLayout st)
           wide ns = maximum (minPaneWidth : map storedWidth ns)
           (w1, w2) = (wide first', wide second')
@@ -2191,6 +2250,39 @@ draw st =
           -- on the left instead pins every right edge to the column's, so a
           -- pane's own bar is the only thing its width moves.
           drawn cw n = hLimit cw . padLeft Max . hLimit (width n)
+          -- | **A pinned height, squeezed to fit the column it is actually
+          -- in** — the same shrink 'scale' already does for a width, applied
+          -- per column rather than across both, because the two columns do
+          -- not share rows. **An unpinned pane is untouched**: 'vLimit' only
+          -- wraps a pane that has one, so it stays Greedy and takes whatever
+          -- its pinned neighbours leave — splitting it evenly with any other
+          -- Greedy panes there are, exactly as every pane did before pinning
+          -- existed. **If the pinned heights alone outgrow the column, the
+          -- leftover a column doesn't use is backdrop below it, not given
+          -- back to anyone** — the same "not a rectangle" rule 'colWidth'
+          -- already leaves to the right of a narrower pane.
+          --
+          -- **A pin is shrunk before it is allowed to starve an unpinned
+          -- sibling to nothing.** Measured under a pty: pinning one pane to
+          -- 50 rows in a column that also holds two untouched ones left both
+          -- of them zero height, invisible, because the shrink only checked
+          -- the pin against the column's whole budget — a number comfortably
+          -- below it even though two Greedy panes needed a share of that same
+          -- budget too. 'reserve' sets aside 'minPaneHeight' for every
+          -- unpinned pane in the column *before* asking whether a pin fits,
+          -- so the room a pin is measured against never counts rows an
+          -- unpinned sibling was already owed.
+          pinnedIn ns =
+            let gaps = max 0 (length ns - 1)
+                unpinned = length [() | n <- ns, Nothing <- [storedHeight n]]
+                reserve = unpinned * minPaneHeight
+                room = max 0 (avail - gaps - reserve)
+                asked = [(n, h) | n <- ns, Just h <- [storedHeight n]]
+                total = sum (map snd asked)
+                shrink h
+                  | total <= room || total <= 0 = h
+                  | otherwise = max minPaneHeight (h * room `div` total)
+            in [(n, shrink h) | (n, h) <- asked]
           -- | **An empty column draws nothing at all, not an empty box** —
           -- `~fxc89` made that a state he can reach, @:pane@-ing all three of
           -- a column away. 'maximum' over no panes has no answer and 'vBox'
@@ -2198,8 +2290,11 @@ draw st =
           -- rather than guarded further down.
           column [] = emptyWidget
           column ns =
-            vBox (intersperse gapRow [drawn (colWidth ns) n (paneOf n) | n <- ns])
-            where colWidth = maximum . map width
+            vBox (intersperse gapRow [drawn (colWidth ns) n (sized n (paneOf n)) | n <- ns])
+            where
+              colWidth = maximum . map width
+              pins = pinnedIn ns
+              sized n = maybe id vLimit (lookup n pins)
           -- | **The stage gap belongs to the second column, not to the pair.**
           -- With that column closed there is nothing to its right to be
           -- separated from, and a gap drawn anyway is a column of backdrop the
@@ -2208,6 +2303,7 @@ draw st =
       render (hBox [column first', gapIf second', column second'])
 
     storedWidth = paneWidthOf st
+    storedHeight = paneHeightOf st
 
     -- | **A spacer row of one column, not a greedy fill.** The row this
     -- replaced was @vLimit 1 (fill ' ')@, as wide as it was allowed to be,
@@ -3851,6 +3947,12 @@ barRightOf st col row = do
 paneWidthOf :: St -> Pane -> Int
 paneWidthOf st p = Map.findWithDefault minPaneWidth p (stPaneWidths st)
 
+-- | **'Nothing' means Greedy** — unlike 'paneWidthOf' there is no fallback
+-- number, because the fallback is "share the column evenly," which is not a
+-- height until the column and the terminal are both in view. See 'draw'.
+paneHeightOf :: St -> Pane -> Maybe Int
+paneHeightOf st p = Map.lookup p (stPaneHeights st)
+
 -- | **Option held at the press means the whole column moves as one** —
 -- `~t927j`, his instruction of 2026-11-13: /"the whole column of panes snaps
 -- together and moves as one line… this way I can resize the entire column at
@@ -4598,8 +4700,10 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- TUI-local like `:theme` and `:fold`: the engine has no panes, so
         -- this never reaches it.
         paneLine@(":pane" : _)
-          | Just (layout', strip', said) <- paneCommand paneLine (stLayout st0) (stStrip st0) -> do
-              let st' = closeReplyIfStripClosed strip' st0 { stLayout = layout', stStrip = strip' }
+          | Just (layout', strip', heights', said) <-
+              paneCommand paneLine (stLayout st0) (stStrip st0) (stPaneHeights st0) -> do
+              let st' = closeReplyIfStripClosed strip' st0
+                    { stLayout = layout', stStrip = strip', stPaneHeights = heights' }
               liftIO (saveConfig (configOf st'))
               appendTurn st' (Just line) [said]
         -- | `:script` enters live-script mode (`~5vtt3`). TUI-local like the
@@ -5270,8 +5374,10 @@ scriptLocal st text = case words text of
     put st { stFoldOn = mode == "on" }
     pure ("fold: " <> mode)
   paneLine@(":pane" : _)
-    | Just (layout', strip', said) <- paneCommand paneLine (stLayout st) (stStrip st) -> Just $ do
-        let st' = closeReplyIfStripClosed strip' st { stLayout = layout', stStrip = strip' }
+    | Just (layout', strip', heights', said) <-
+        paneCommand paneLine (stLayout st) (stStrip st) (stPaneHeights st) -> Just $ do
+        let st' = closeReplyIfStripClosed strip' st
+              { stLayout = layout', stStrip = strip', stPaneHeights = heights' }
         liftIO (saveConfig (configOf st'))
         put st'
         pure said
@@ -5380,6 +5486,8 @@ tuiHelpLines =
     , ("",                  "  1 2 / 3 4 / 5 6, so odd is the left column and even the right")
     , ("",                  "  " <> intercalate ", " (map paneName allPanes))
     , (":pane ‹name› close", "take it off the screen — its width is remembered")
+    , (":pane ‹name› height ‹n›", "pin it to n rows — the others in its column")
+    , ("",                  "  split what's left evenly. :pane ‹name› height auto lets go")
     , (":pane " <> stripName <> " open", "the suggestion strip, under the prompt and as wide as")
     , ("",                  "  the document — it has no position, and nothing else does")
     , ("",                  "  either. Pull its accent bar UP to make it taller;")
@@ -6731,6 +6839,10 @@ configOf st = Config
       | (p, w) <- Map.toAscList (stPaneWidths st)
       , Just w /= Map.lookup p (stDefaultWidths st)
       ]
+  , cfgHeights    = Map.toAscList (stPaneHeights st)
+    -- ^ **No filtering needed here, unlike 'cfgWidths'** — 'stPaneHeights' is
+    -- sparse already, holding only a pane he has actually pinned, so there is
+    -- no terminal-derived default to filter it against.
   , cfgStrip      = stStrip st
   , cfgDropdownOn = stDropdownOn st
   , cfgJevOn = stJevOn st

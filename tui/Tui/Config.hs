@@ -59,6 +59,13 @@ data Config = Config
     -- so a pane he has never touched keeps taking its width from the terminal's
     -- own, which is what 'Tui.App.appStart' computes and what makes an unwritten
     -- dotfile indistinguishable from no feature.
+  , cfgHeights    :: [(Pane, Int)]
+    -- ^ **the height he pinned a pane to, in rows** — @:pane ‹name› height
+    -- ‹n›@. Same shape as 'cfgWidths' and for the same reason: only a pane he
+    -- has actually pinned belongs here, so an untouched pane keeps splitting
+    -- its column evenly with the others, which is a relation and not a
+    -- number — unlike a width, there is no terminal-derived default to fall
+    -- back to, so there is nothing for 'Tui.App.appStart' to fill in here.
   , cfgStrip      :: Strip
     -- ^ **whether the suggestion strip is on screen and how tall** —
     -- `~w2tk2` slice 1, two keys in the file (@suggestions@ and
@@ -99,6 +106,7 @@ defaultConfig = Config
   , cfgConfirmQuit = True
   , cfgLayout     = defaultLayout
   , cfgWidths     = []
+  , cfgHeights    = []
   , cfgStrip      = defaultStrip
   -- **OFF, which is `~492hq` applied rather than deferred.** His ruling of
   -- 2026-11-19 was that the dropdown is /"disabled pretty much immediately as
@@ -151,6 +159,7 @@ applyLine cfg line = case break (== '=') line of
   ("confirm-quit", '=' : v) | Just b <- parseBool v -> cfg { cfgConfirmQuit = b }
   ("panes", '=' : v)     -> cfg { cfgLayout = layoutFrom (mapMaybe parsePane (commas v)) }
   ("widths", '=' : v)    -> cfg { cfgWidths = mapMaybe parseWidth (commas v) }
+  ("heights", '=' : v)   -> cfg { cfgHeights = mapMaybe parseHeight (commas v) }
   ("suggestions", '=' : v) | Just b <- parseBool v ->
     cfg { cfgStrip = (cfgStrip cfg) { stripOpen = b } }
   -- | **A height out of range is clamped and not dropped**, unlike a bad
@@ -205,6 +214,11 @@ parseWidth entry = case break (== ':') entry of
   (name, ':' : n) -> (,) <$> paneByName name <*> readInt n
   _               -> Nothing
 
+-- | @jobs:20@ — the pane, then its pinned height in rows. Same shape as
+-- 'parseWidth', only the key file differs.
+parseHeight :: String -> Maybe (Pane, Int)
+parseHeight = parseWidth
+
 -- | @abandon:3@ — a candidate's key ('Tui.App.usageKey'), then how many times
 -- it has been taken. Same shape as 'parseWidth'; an entry whose count doesn't
 -- parse is dropped rather than read as zero, same forgiving rule 'commas'
@@ -246,6 +260,8 @@ writeConfig path cfg = do
         [show n <> ":" <> paneName p | (n, p) <- layoutPairs (cfgLayout cfg)]
     , "widths=" <> intercalate ","
         [paneName p <> ":" <> show w | (p, w) <- cfgWidths cfg]
+    , "heights=" <> intercalate ","
+        [paneName p <> ":" <> show h | (p, h) <- cfgHeights cfg]
     , "suggestions=" <> (if stripOpen (cfgStrip cfg) then "on" else "off")
     , "suggestion-rows=" <> show (stripRows (cfgStrip cfg))
     , "dropdown=" <> (if cfgDropdownOn cfg then "on" else "off")
