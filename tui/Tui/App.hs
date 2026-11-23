@@ -122,7 +122,7 @@ import Thena.View
   , rulesView
   , statementOfferView
   )
-import Thena.View.Choices (ChoiceView (..))
+import Thena.View.Choices (AltView (..), ChoiceView (..))
 import Thena.View.Development (LinkView)
 import Thena.View.Goals (goalsOf)
 import Thena.View.Matches (MatchView (..))
@@ -2403,8 +2403,8 @@ draw st =
     -- least one name.
     choiceRows cvs =
       concat
-        [ Heading (show (choiceViewId cv) <> "  " <> choiceViewRunning cv) (Just (length untried))
-            : map Entry untried
+        [ Heading (show (choiceViewId cv) <> "  " <> altViewName (choiceViewRunning cv)) (Just (length untried))
+            : map (Entry . altViewName) untried
         | cv <- cvs
         , let untried = choiceViewUntried cv
         ]

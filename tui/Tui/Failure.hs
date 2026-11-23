@@ -305,6 +305,11 @@ roleLabel r = case r of
   TheForm -> "the form"
   TheLevel -> "the level"
   TheRule -> "the rule"
+  -- **An arity, so "arity  2" and not "the clause  2"** (MS12 phase 343).
+  -- A name alone does not say which callable a refusal is about: @foo\/2@ and
+  -- @foo\/4@ are two of them. It rode as a clause number until that phase,
+  -- which drew a count as though it located something.
+  TheArity -> "arity"
   TheInstruction -> "instruction"
   TheClause -> "clause"
   TheTest -> "test"
@@ -346,6 +351,11 @@ pieceText pc = case pc of
   AVariable x reach -> x <> mark reach
   ACount n -> show n
   ALine n -> show n
+  -- **The whole path and then @:line:col@** (MS12 phase 343) — a part that
+  -- is a destination rather than a word. A pane is not a transcript, so it
+  -- gets the absolute path the engine hands over rather than the file name
+  -- @:choices@ prints at the prompt.
+  APlace f at -> f <> positionSuffix (Just at)
   AWanted w -> wantedText w
   ALevel l -> l
   ABlock b -> blockText b
