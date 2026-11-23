@@ -373,9 +373,12 @@ data RerunState = RerunState
 freshPending :: String -> ScriptLine
 freshPending t = ScriptLine t Nothing Nothing [] True
 
--- | One completed round: the line that was run (absent for the startup
--- trouble dump and the `:theme`/`:fold` pseudo-commands, which never echoed
--- what was typed even before this) and the output lines it produced.
+-- | One completed round: the line that was run (absent only for the startup
+-- trouble dump, which has no typed line at all) and the output lines it
+-- produced. **Every TUI-local pseudo-command echoes its own line too, same as
+-- an engine-bound one** — his report, 2026-11-23: a bad `:pane` line used to
+-- vanish from the transcript, replaced by its own usage message, which read
+-- as the command eating what he typed rather than answering it.
 data Turn = Turn
   { turnPrompt :: Maybe String
   , turnOutput :: [String]
@@ -4580,17 +4583,17 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         [":theme", name] | Just th <- themeByName name -> do
           let st' = st0 { stTheme = th }
           liftIO (saveConfig (configOf st'))
-          appendTurn st' Nothing ["theme: " <> name]
+          appendTurn st' (Just line) ["theme: " <> name]
         -- | `~fn3d9`: an unknown theme used to fall through this guard and
         -- reach the engine, which answered "no such command: :theme" — the
         -- command exists, the argument doesn't. Matching the word itself
         -- here names the actual choices, read off `themes` so they can't
         -- drift from what `themeByName` accepts.
         [":theme", name] ->
-          appendTurn st0 Nothing
+          appendTurn st0 (Just line)
             ["no such theme: " <> name <> " — " <> intercalate ", " (map themeName themes)]
         [":fold", mode] | mode `elem` ["on", "off"] ->
-          appendTurn st0 { stFoldOn = mode == "on" } Nothing ["fold: " <> mode]
+          appendTurn st0 { stFoldOn = mode == "on" } (Just line) ["fold: " <> mode]
         -- | **@:pane@ — which panes are on screen and where** — `~fxc89`.
         -- TUI-local like `:theme` and `:fold`: the engine has no panes, so
         -- this never reaches it.
@@ -4598,7 +4601,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
           | Just (layout', strip', said) <- paneCommand paneLine (stLayout st0) (stStrip st0) -> do
               let st' = closeReplyIfStripClosed strip' st0 { stLayout = layout', stStrip = strip' }
               liftIO (saveConfig (configOf st'))
-              appendTurn st' Nothing [said]
+              appendTurn st' (Just line) [said]
         -- | `:script` enters live-script mode (`~5vtt3`). TUI-local like the
         -- rest of this block, and the only way *in* — leaving again is the
         -- command bar's `:script`, because once the mode is on, what you type
@@ -4624,17 +4627,17 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         [":script", "resume", handle] -> do
           index <- liftIO loadIndex
           case storedNamed handle index of
-            Left why -> appendTurn st0 Nothing [why]
+            Left why -> appendTurn st0 (Just line) [why]
             Right stored -> do
               held <- liftIO (readTranscript (stSlug stored))
               case held of
-                Nothing -> appendTurn st0 Nothing [transcriptGoneSaid stored]
+                Nothing -> appendTurn st0 (Just line) [transcriptGoneSaid stored]
                 Just texts -> resumeStored st0 stored texts
         -- | **The slug left off, said as that and not as a missing file.**
         -- The branch below reads anything after `:script` as a path, so
         -- without this one a forgotten slug answers /no such file: resume/.
         [":script", "resume"] ->
-          appendTurn st0 Nothing
+          appendTurn st0 (Just line)
             [":script resume ‹slug› takes a stored session up where its caret was"
             , "  :script sessions picks one from a list instead"]
         -- | **A path argument is the whole of the rest of the line, spaces
@@ -4649,7 +4652,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         (":script" : rest@(_ : _)) -> do
           let path = unwords rest
           ok <- openScriptFile st0 path 0
-          if ok then pure () else appendTurn st0 Nothing ["no such file: " <> path]
+          if ok then pure () else appendTurn st0 (Just line) ["no such file: " <> path]
         -- | Two more TUI-local toggles, his `.jalivert/TUI.md` #23 — same
         -- standing as `:theme`/`:fold` (not instral, so special-casing them
         -- here is his own ruling already covers this). Disabling either is
@@ -4661,11 +4664,11 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         [":preselect", mode] | mode `elem` ["on", "off"] -> do
           let st' = st0 { stAutoSelect = mode == "on" }
           liftIO (saveConfig (configOf st'))
-          appendTurn st' Nothing ["preselect: " <> mode]
+          appendTurn st' (Just line) ["preselect: " <> mode]
         [":whisper", mode] | mode `elem` ["on", "off"] -> do
           let st' = st0 { stWhisperOn = mode == "on" }
           liftIO (saveConfig (configOf st'))
-          appendTurn st' Nothing ["whisper: " <> mode]
+          appendTurn st' (Just line) ["whisper: " <> mode]
         -- | **`:dropdown on|off`** — `~492hq`, his sequencing ruling of
         -- 2026-11-19. Same standing as the three above: a preference, not an
         -- Esc, persisted to the dotfile. See 'stDropdownOn' for what \"off\"
@@ -4673,13 +4676,13 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         [":dropdown", mode] | mode `elem` ["on", "off"] -> do
           let st' = st0 { stDropdownOn = mode == "on" }
           liftIO (saveConfig (configOf st'))
-          appendTurn st' Nothing ["dropdown: " <> mode]
+          appendTurn st' (Just line) ["dropdown: " <> mode]
         -- | **`:jev on|off`** — `~zttnz`. See 'stJevOn' for what off means
         -- on screen and for his quota.
         [":jev", mode] | mode `elem` ["on", "off"] -> do
           let st' = st0 { stJevOn = mode == "on" }
           liftIO (saveConfig (configOf st'))
-          appendTurn st' Nothing ["jev: " <> mode]
+          appendTurn st' (Just line) ["jev: " <> mode]
         -- | **`:hint ‹text›` and `:hint`** — `~w2tk2` slice 4, and it is a
         -- **stub on purpose**: the hint region has to be drawable, and its
         -- geometry measurable, before the model that would write one
@@ -4693,13 +4696,13 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- invented a third.
         (":hint" : rest) -> do
           let st' = st0 { stHint = hintFrom rest, stHintAbout = hintAboutNow st0 rest }
-          appendTurn st' Nothing [hintSaid (hintFrom rest)]
+          appendTurn st' (Just line) [hintSaid (hintFrom rest)]
         -- | **`:model` and `:model ‹id›`** — `~w2tk2` slice 6.
-        [":model"] -> appendTurn st0 Nothing ["model: " <> Text.unpack (stModel st0)]
+        [":model"] -> appendTurn st0 (Just line) ["model: " <> Text.unpack (stModel st0)]
         [":model", m] -> do
           said <- setModel st0 (Text.pack m)
           st' <- get
-          appendTurn st' Nothing [said]
+          appendTurn st' (Just line) [said]
         -- | **`:models` and `:models ‹filter›`** — the picker.
         (":models" : rest) -> openModelPicker st0 (Text.pack (unwords rest))
         -- | **`:hint-prompt` and `:hint-prompt reset`** — `~3p9g2`. The
@@ -4708,16 +4711,16 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- later reaches him**, and taking it is his keystroke.
         [":hint-prompt"] -> do
           path <- liftIO hintPromptPath
-          appendTurn st0 Nothing ["the prompt the model is sent is " <> path]
+          appendTurn st0 (Just line) ["the prompt the model is sent is " <> path]
         [":hint-prompt", "reset"] -> do
           path <- liftIO resetHintPrompt
-          appendTurn st0 Nothing [path <> " is back to the one that ships"]
+          appendTurn st0 (Just line) [path <> " is back to the one that ships"]
         -- | **`:confirm-quit on|off`**, his instruction of 2026-11-18 — same
         -- standing as the two above. See 'maybeQuit'.
         [":confirm-quit", mode] | mode `elem` ["on", "off"] -> do
           let st' = st0 { stConfirmQuit = mode == "on" }
           liftIO (saveConfig (configOf st'))
-          appendTurn st' Nothing ["confirm-quit: " <> mode]
+          appendTurn st' (Just line) ["confirm-quit: " <> mode]
         -- | **`:clear` and `:clear ‹n›`** — `~p6g53`. TUI-local for the
         -- plainest possible reason: the engine has no transcript. It holds a
         -- session and answers lines; what is still on screen from an earlier
@@ -4726,7 +4729,7 @@ handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         -- there. 'dropTurns' says what it does and does not touch.
         [":clear"] -> clearTurns 1 st0
         [":clear", n] | Just k <- readCount n -> clearTurns k st0
-        (":clear" : _) -> appendTurn st0 Nothing clearUsage
+        (":clear" : _) -> appendTurn st0 (Just line) clearUsage
         -- | `:help` runs through the engine as usual (below) — its table is
         -- `Thena.Driver`'s, and stays that way, since it's the one command
         -- the engine and every other frontend share. `:preselect`/`:whisper`
@@ -6773,10 +6776,9 @@ submitted st = st { stInput = emptyInput, stDropdown = Nothing, stOfferDropdown 
 --
 -- **A turn is exactly his "output + input pair"** — 'Turn' is the prompt
 -- line and the output it produced, so the count he gives is a count of turns
--- and needs no interpretation. Note that a few turns have no prompt at all
--- ('turnPrompt' is 'Maybe'): the startup trouble dump and `:theme`/`:fold`
--- never echoed what was typed. Those are still one turn each, which is what
--- he means by the thing on screen he wants gone.
+-- and needs no interpretation. Note that one turn has no prompt at all
+-- ('turnPrompt' is 'Maybe'): the startup trouble dump, which is still one
+-- turn, and is what he means by the thing on screen he wants gone.
 --
 -- **IT TAKES THE SESSION BACK WITH THE TURNS — HIS INSTRUCTION, 2026-11-19,
 -- AND IT REVERSES WHAT THIS FUNCTION USED TO SAY** (`~hxzjq`): /"ctr + l,
