@@ -7695,7 +7695,7 @@ headNoteWidth = 120
 -- after those three steps took 0.417s against 0.140s for the same run without
 -- them, so ~5.5ms each, rendering included, and it is paid on the 'forkIO'
 -- rather than on a keystroke anyway. The list is in dispatch order, so its
--- head is the tactics (@intro@, @solve@, @regret@, @prove@, @claim ‹ty›@,
+-- head is the tactics (@intro@, @solve@, @regret@, @step@, @claim ‹ty›@,
 -- @assume ‹ty›@, @quantify ‹ty›@) and its tail is helper rules whose heads are
 -- irrefutable and pass everywhere.
 --
@@ -7811,7 +7811,7 @@ hintFields st =
     -- but specify the name of the argument?"/ has an answer.
     --
     -- **`commandSummary` does not cover them and that is not an omission in
-    -- it**: @attack@, @intro@, @fill@, @solve@, @try-core@ and @prove@ are
+    -- it**: @attack@, @intro@, @fill@, @solve@, @try-core@ and @step@ are
     -- ordinary instral rules in a rule base, not words the engine knows, so
     -- the engine's own command list has no business listing them. The two
     -- fields are the two halves of the vocabulary and neither contains the
