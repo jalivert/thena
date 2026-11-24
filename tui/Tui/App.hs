@@ -6337,6 +6337,9 @@ scriptSubmit = do
         let (ran, unrun) = tailFrom st (i + 1)
         rerunTail i s ran unrun $ \rebuilt -> do
           st' <- get
+          -- **@i@, not @i + 1@**: this line is gone and the document has
+          -- closed over it, so the line the caret should take is sitting at
+          -- the index the removed one had.
           put (reseated st' i (take i (stScript st') ++ rebuilt ++ unrun))
           afterScriptEdit
     Just i -> case scriptSessionBefore st i of
@@ -6345,32 +6348,43 @@ scriptSubmit = do
         let (ran, unrun) = tailFrom st (i + 1)
         commitTailFrom i s line ran unrun $ \rebuilt -> do
           st' <- get
-          put (reseated st' i (take i (stScript st') ++ rebuilt ++ unrun))
+          put (reseated st' (i + 1) (take i (stScript st') ++ rebuilt ++ unrun))
           afterScriptEdit
 
--- | The document after a commit on line @i@, and where the caret goes with
--- it.
+-- | The document after a commit, and where the caret goes with it. @want@ is
+-- the index the caret is asking for — the line after the one just committed,
+-- or, for a splice, the line that has moved up into the removed one's place.
 --
--- **It un-parks to the composing line, as it always has, when every line of
--- the document has run.** That was the only possible answer while an edit
--- severed the tail: there was nothing below to stand on.
+-- **ENTER LEAVES THE CARET ON THE NEXT LINE, WHICH IS HIS OWN WORDS FOR WHAT
+-- ENTER MEANS** — `~htff2`, 2026-11-18: /"enter is only the natural thing to
+-- do if I am ok with ending up (my caret) on the next line."/
 --
--- **It stays on line @i@ when lines below have not run** — an opened
--- proof-script, @~22qjj@. There is no composing line past the end of a
--- document whose last lines have never been submitted; un-parking there would
--- seat the caret below the frontier, which is the one position the prefix
--- invariant does not allow. **A splice is the one case where line @i@ is a
--- different line afterwards**, so the text is read back out of the new
--- document rather than carried over.
+-- **It un-parked to the composing line instead, from the day the mode was
+-- built until `~6p7mg` — his report of 2026-11-24**: /"every time I rewrite
+-- `prove` to `step` and hit enter, it moves my caret to the end of the
+-- script."/ It did, for any document whose every line had run, which is every
+-- resumed session. The reason recorded for it — /"that was the only possible
+-- answer while an edit severed the tail: there was nothing below to stand
+-- on"/ — **stopped being true the same day it was written**, when Enter began
+-- re-running the tail rather than cutting it (@~bxmsc@). A line below has
+-- been there to stand on ever since.
+--
+-- **The three answers, and the middle one is why this is not simply
+-- @want@:**
+--
+-- * the wanted line has run, so the caret takes it;
+-- * it exists but has never run, so the caret cannot stand there — walking
+--   onto an un-run line *runs* it, which is Down's meaning (@~22qjj@) and not
+--   Enter's — and it stays on the line it committed;
+-- * there is no line there at all, so the composing line, which is what
+--   committing the document's last line has always done.
+--
+-- **A splice is the one case where @want@ is a line that already existed**, so
+-- the text is read back out of the new document rather than carried over.
 reseated :: St -> Int -> [ScriptLine] -> St
-reseated st i doc = case (all (isJust . slSession) doc, nthOf i doc) of
-  (False, Just sl) ->
-    st
-      { stScript = doc
-      , stScriptPos = Just i
-      , stInput = E.editorText Input (Just 1) (Text.pack (slText sl))
-      , stScriptNote = Nothing
-      }
+reseated st want doc = case nthOf want doc of
+  Just sl | isJust (slSession sl) -> parked want sl
+  Just _ | Just sl <- nthOf (want - 1) doc -> parked (want - 1) sl
   _ ->
     st
       { stScript = doc
@@ -6379,6 +6393,14 @@ reseated st i doc = case (all (isJust . slSession) doc, nthOf i doc) of
       , stScriptDraft = ""
       , stScriptNote = Nothing
       }
+  where
+    parked j sl =
+      st
+        { stScript = doc
+        , stScriptPos = Just j
+        , stInput = E.editorText Input (Just 1) (Text.pack (slText sl))
+        , stScriptNote = Nothing
+        }
 
 -- | Shift+Enter's operation: **the caret's line is run and everything after
 -- it is discarded.** On the composing line there is no tail, so it is an
