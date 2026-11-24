@@ -184,7 +184,7 @@ transcriptIO s0 = fmap unlines . replay s0
 -- | The same, from a session that has already had something loaded into it.
 --
 -- Phase 22: the rule base comes off disk now, so a transcript that uses
--- @:matches@, @prove@ or @retry@ has to start from a session that has one.
+-- @:matches@, @step@ or @retry@ has to start from a session that has one.
 -- That makes the golden suite test the **shipped file** rather than a Haskell
 -- literal, which is strictly stronger than what it tested before.
 transcriptFrom :: Session -> [String] -> String

@@ -457,7 +457,7 @@ setBases bs hs m =
 rules :: Machine -> [RuleBase]
 rules m = pushes (exec m) ++ pool m
 
--- | Phase 4 pushes none of these — nothing nests until @Prove@ dispatches the
+-- | Phase 4 pushes none of these — nothing nests until @Dispatch@ dispatches the
 -- rule engine (phase 16) — but 'Exec' carries the stack because that is the
 -- settled shape, and 'step'\'s return case below is written for it.
 --
@@ -572,7 +572,7 @@ data Frame
         -- 'seedFor', which is the one place the two are put together.
       , entryEnv  :: Env
         -- ^ the environment /every/ alternative of this choice point starts in
-        -- (phase 17b). Empty for a plain @prove@; @[(hint, …)]@ when the
+        -- (phase 17b). Empty for a plain @step@; @[(hint, …)]@ when the
         -- dispatch carried one, because a hint belongs to the dispatch and not
         -- to the alternative that happened to be tried first.
         --
@@ -1134,7 +1134,7 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
 -- decisions and nothing dead.
 -- | The one place a 'Choice' is built, so a field added to it is answered once.
 --
--- Both dispatch sites — @Prove@'s and @Call@'s — differ only in the arguments
+-- Both dispatch sites — @Dispatch@'s and @Call@'s — differ only in the arguments
 -- and the entry environment they seed; everything else they said was the same
 -- thing written twice, and 'savedEnclosing' (MS4 phase 42) is the field that
 -- made writing it twice cost something.
@@ -1672,7 +1672,7 @@ perform instr rest m = case operation instr of
   -- the callee's environment under the name @hint@. Both are gone: elaboration
   -- is a rule called by name, so it was never a dispatch, and there is no magic
   -- name in the instruction language any more.
-  Prove -> case next it of
+  Dispatch -> case next it of
     Nothing       -> failure NoRuleMatched m
     Just (r, it')
       -- Announced only when the dispatch was a real decision, which is
@@ -1701,11 +1701,11 @@ perform instr rest m = case operation instr of
       entering r fr k =
         k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) (pushes (exec m)) }
 
-  -- **Call by name: the same search as @Prove@, over a narrower candidate
+  -- **Call by name: the same search as @Dispatch@, over a narrower candidate
   -- list** (§8, phase 23). The user's own framing, and it is why this case now
-  -- reads almost exactly like @Prove@'s above:
+  -- reads almost exactly like @Dispatch@'s above:
   --
-  -- > @Prove@ means \"search any rule that fits and wants to try solving the
+  -- > @Dispatch@ means \"search any rule that fits and wants to try solving the
   -- > goal\" and @Call@ means \"see if any rules named like this can succeed\".
   -- > Calling is not that different from searching. Calling is essentially what
   -- > Prolog does.

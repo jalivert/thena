@@ -13,7 +13,7 @@ rule base standard where
 --
 -- **A function and not a rule**, and that is not a preference: it has no head,
 -- and a headless rule matches everywhere, so `:matches` would offer it at every
--- focus and `prove` would run it. That is phase 49c's `enter-binders` lesson —
+-- focus and `step` would run it. That is phase 49c's `enter-binders` lesson —
 -- a helper wants a head that is TRUE, and there is no true head here because it
 -- reads nothing about the development at all.
 fresh-universe : Core
@@ -28,13 +28,13 @@ fresh-universe = do
 -- and a candidate whose type does not fit fails the guess and brings the search
 -- back for the next one.
 --
--- **Nullary, so `prove` offers it.** Until this rule every nullary rule here was
+-- **Nullary, so `step` offers it.** Until this rule every nullary rule here was
 -- a hole-life operation — attack, abandon, intro, solve, regret — so a bare
--- `prove` could move a proof around and never finish one.
+-- `step` could move a proof around and never finish one.
 --
--- **IT IS ABOVE `attack` ON PURPOSE — his instruction, 2026-11-23.** `prove`
+-- **IT IS ABOVE `attack` ON PURPOSE — his instruction, 2026-11-23.** `step`
 -- offers every matching rule in base order, and `attack` matches at every hole
--- and never fails. With `attack` first, a bare `prove` at a goal that a
+-- and never fails. With `attack` first, a bare `step` at a goal that a
 -- hypothesis closes outright went attack, solve, regret, attack — for ever —
 -- while this rule sat untried at every choice point that cycle made. Trying to
 -- close the goal is the cheap guess and it fails at once when nothing fits, so
@@ -149,10 +149,18 @@ rule eliminate-core t :- when focus-is-hole do prim-eliminate-fixed t
 eliminate-generalising-core : Core -> ()
 rule eliminate-generalising-core t :- when focus-is-hole do prim-eliminate t
 
-prove : ()
-rule prove :- when focus-is-hole do prim-prove
+-- step — ONE move, chosen by the rules. It was called `prove` until MS12 phase
+-- 346, and the rename is his: a rule that does exactly one step is not proving
+-- anything, and `prove` is reserved. **Nothing is shipped under the word
+-- `prove`**, so a base is free to define what proving means in its own
+-- development, and `search` is the word kept for running to a finish.
+--
+-- Two clauses because a hole and a guess are two places a move can be made, and
+-- the word for the second one is not `solve`: at a guess the rules decide again.
+step : ()
+rule step :- when focus-is-hole do prim-step
 
-rule prove :- when focus-is-guess do prim-prove
+rule step :- when focus-is-guess do prim-step
 
 fill : Core -> ()
 rule fill t :- when focus-is-hole
@@ -230,7 +238,7 @@ rule fit-core f :- when focus-is-hole
 --
 -- So they are offered wherever there is a focus, the core fragment included.
 -- That costs a row in `:matches` and nothing else: `dispatch` runs no rule that
--- takes parameters, so `prove` cannot reach them.
+-- takes parameters, so `step` cannot reach them.
 -- --------------------------------------------------------------------------
 
 claim : Core -> ()

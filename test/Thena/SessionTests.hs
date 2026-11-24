@@ -315,7 +315,7 @@ failureStaysInTheLine =
           (before == after)
     ]
   where
-    script = [":theorem t : ∀ (A : Type₀) -> A -> A", "prove"]
+    script = [":theorem t : ∀ (A : Type₀) -> A -> A", "step"]
 
 -- --------------------------------------------------------------------------
 -- The deliverable

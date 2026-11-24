@@ -6,7 +6,7 @@
 --
 -- The user's framing, 2026-08-25, which the whole phase is:
 --
--- > @Prove@ means \"search any rule that fits and wants to try solving the
+-- > @Dispatch@ means \"search any rule that fits and wants to try solving the
 -- > goal\" and @Call@ means \"see if any rules named like this can succeed\".
 -- > Calling is not that different from searching. Calling is essentially what
 -- > Prolog does.

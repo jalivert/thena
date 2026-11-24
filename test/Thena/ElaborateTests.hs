@@ -813,7 +813,7 @@ baseTests =
                 -- a hole among them, so it is a candidate here.
               , "rename", "eliminate-core"
               , "eliminate-generalising-core"
-              , "prove", "fill", "unify-refine-core", "apply-core"
+              , "step", "fill", "unify-refine-core", "apply-core"
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
@@ -859,9 +859,9 @@ baseTests =
               ++ ["run-block"]
               ++ replicate 2 "spine-arguments"
 
-    , testCase "prove is a rule over prim-prove" $
-        case [ r | r@(Rule (GlobalName [] "prove") _ _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
-          [Rule _ ps _ b _] -> (ps, b) @?= ([], [Do Ops.Prove])
+    , testCase "prove is a rule over prim-step" $
+        case [ r | r@(Rule (GlobalName [] "step") _ _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
+          [Rule _ ps _ b _] -> (ps, b) @?= ([], [Do Ops.Dispatch])
           other           -> assertFailure ("expected one clause: " ++ show other)
     ]
 

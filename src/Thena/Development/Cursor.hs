@@ -512,7 +512,7 @@ goalsWithin = goals
 -- @next@ may not leave for an unrelated part of the proof while that part still
 -- has work. Document order from the root would: an open hole claimed earlier by
 -- a sibling application sits before the body you are standing in, and
--- @prove-in-scope.golden@\'s @goto a@ is that case by hand.
+-- @step-in-scope.golden@\'s @goto a@ is that case by hand.
 --
 -- **Within a level the answer does not depend on where in it you stand**, which
 -- is what makes @next@ predictable for a rule: it is a function of the

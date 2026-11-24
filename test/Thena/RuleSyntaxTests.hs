@@ -263,7 +263,7 @@ everyOp =
   , ("prim-regret",  Regret)
   , ("prim-solve",   Solve)
   , ("prim-abandon", Abandon)
-  , ("prim-prove",   Prove)
+  , ("prim-step",   Dispatch)
   , ("expand-implicits t", Op.ExpandImplicits (Ref "t"))
   , ("record-implicits t", Op.RecordImplicits (Ref "t"))
   , ("app-head t", Op.AppHead (Ref "t"))

@@ -154,7 +154,7 @@ data RuleBase = RuleBase
     -- an ordinary 'Rule' — his §1.1: /a function is a rule with one clause and
     -- no head/. They are kept apart from 'baseRules' for one reason and it is
     -- not the engine's: a function must not appear in 'matches', because a
-    -- headless rule matches everywhere and @prove@ would run it. Phase 71's
+    -- headless rule matches everywhere and @step@ would run it. Phase 71's
     -- by-type query wants the list on its own anyway.
   , baseRules       :: [Rule]
   }
@@ -272,7 +272,7 @@ matchingRules bases env cur = byCallable (drain (matches bases env cur))
 -- groups and for the clauses inside each.
 --
 -- Separate from 'matchingRules' because the grouping is not about matching:
--- @Prove@\'s candidates and a choice point\'s untried alternatives are the same
+-- @Dispatch@\'s candidates and a choice point\'s untried alternatives are the same
 -- kind of list, and a caller that wants them by rule rather than by clause
 -- groups them the same way.
 byCallable :: [Rule] -> [((GlobalName, Int), [Rule])]
@@ -339,11 +339,11 @@ groupParams rs@(first : _) =
         []    -> fallback
     at i ps = if i < length ps then Just (ps !! i) else Nothing
 
--- | The rules @Prove@ may actually run: 'matches', less the ones it could not
+-- | The rules @Dispatch@ may actually run: 'matches', less the ones it could not
 -- supply arguments for.
 --
 -- **A parameterised rule is @Call@-only** — §8 says @ruleParams@ are "for
--- @Call@" and @Prove@ passes nothing, so a rule with parameters would be
+-- @Call@" and @Dispatch@ passes nothing, so a rule with parameters would be
 -- dispatched into a body whose first @Ref@ is unbound. Decided by the user
 -- 2026-08-23 (@AGENDA.md@ item 34); asking the user for each parameter was the
 -- alternative and was declined.
@@ -1715,7 +1715,7 @@ nullaryOps =
   , ("goto-root", Op.GotoRoot)
   , ("next", Op.NextGoal)
   , ("none", Op.None)
-  , ("prim-prove", Prove)
+  , ("prim-step", Dispatch)
   , ("pop-development", Op.PopDevelopment)
   ]
 unaryOps :: [(String, Operand -> Op)]

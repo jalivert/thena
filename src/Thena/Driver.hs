@@ -1754,7 +1754,7 @@ data Response
     -- **A second matching instruction, and deliberately not a pair with
     -- 'Matched'** — his ruling, §1.1: different input (a type, not the
     -- development), different relation (a signature fits, no head passes),
-    -- different consumer (the engine uses 'Matched' for @Prove@ and will never
+    -- different consumer (the engine uses 'Matched' for @Dispatch@ and will never
     -- use this). *\"Let's skip the pair and only make a rule that packages them
     -- into a pair if we ever need one.\"*
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
@@ -5622,7 +5622,7 @@ dispatch s name arg = case name of
   -- driver asks for the matches at the current state and shows them. Picking
   -- one and running its body is phase 16's.
   --
-  -- **The optional argument is a hint** (phase 17b), read exactly as @prove@\'s
+  -- **The optional argument is a hint** (phase 17b), read exactly as @step@\'s
   -- is. A hint partitions the base, so the two forms answer two questions:
   -- @:matches@ is what could be done here, @:matches ‹hint›@ is what could
   -- elaborate that.
@@ -6679,9 +6679,10 @@ dispatch s name arg = case name of
 -- ask for a name are **rules**, in @rules\/standard.thena.rules@, and are
 -- absent for the paragraph above's reason.
 --
--- **@prove@ was listed and is not any more** (MS4 phase 43). Phase 41 made it a
--- rule over @prim-prove@, at which point the paragraph above started applying
--- to it and nothing noticed — the same phase left @prove ‹hint›@ and
+-- **@step@ was listed and is not any more** (MS4 phase 43). Phase 41 made it a
+-- rule over @prim-step@, at which point the paragraph above started applying
+-- to it and nothing noticed — the same phase left @prove ‹hint›@, the word
+-- @step@ carried until phase 346, and
 -- @:matches ‹hint›@ here after retiring hints. @declare@ and @quantify@ were
 -- missing for the opposite reason: they are the driver's own and had never been
 -- added. **All four were found by crossing this list against @dispatch@ by

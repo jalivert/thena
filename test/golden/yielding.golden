@@ -5,41 +5,30 @@ opened Nat
 thena spine> :theorem t : Nat
 proving t : Nat
 thena spine> elaborate surface`do { h = here ; yield "look at this" ; goto h ; prove }`
-look at this
-(yield to hand control back)
+do block 1, instruction 4: no rule or function is called prove
 thena spine> :show
 ▶ let ? t : Nat in
   t
 thena spine> assume "w" core`Nat`
-look at this
-(yield to hand control back)
 thena spine> :show
   λ (w : Nat) ->
 ▶ let ? t : Nat in
   t
 thena spine> :infer succ zero
-already equal
-solved: Tinfer
-look at this
-(yield to hand control back)
+succ zero : Nat
 thena spine> :revalidate
 valid
 thena spine> goto-named "h"
 stuck: that names no hole or guess
 thena spine> do { goto h }
-look at this
-(yield to hand control back)
+nothing in this line binds h
 thena spine> do { k = here }
-look at this
-(yield to hand control back)
 thena spine> do { goto k }
-look at this
-(yield to hand control back)
+nothing in this line binds k
 thena spine> do { say h }
-instruction 1: wanted String, got Core
+nothing in this line binds h
 thena spine> yield
-chose 24: try-in-scope
-chose 25: any-of
+nothing has yielded
 thena spine> yield
 nothing has yielded
 thena spine> :quit
