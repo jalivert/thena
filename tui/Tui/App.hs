@@ -746,6 +746,13 @@ data St = St
     -- it.
   , stScriptDraft :: String
     -- ^ the new-line text Up interrupted, same job as 'stHistoryDraft'.
+  , stScriptFollow :: Bool
+    -- ^ **whether the document pane is pinned to the caret's row** —
+    -- `~k2v4m`, his report of 2026-11-24. 'True' is the ordinary state and
+    -- every edit and every move re-arms it ('followInput'); a wheel tick turns
+    -- it off, so the one gesture that means /look somewhere else/ is the one
+    -- gesture the pane stops fighting. See 'renderScript', which is where the
+    -- pin is actually asked for.
   , stScriptBar :: Maybe (Editor Text Name)
     -- ^ the command bar, his own design call: **nothing typed in the
     -- document is ever a command**, so a command needs somewhere else to be
@@ -1163,6 +1170,7 @@ runTui = do
         , stScriptBase  = Nothing
         , stScriptPos   = Nothing
         , stScriptDraft = ""
+        , stScriptFollow = True
         , stScriptBar   = Nothing
         , stScriptNote  = Nothing
         , stStored      = Nothing
@@ -2659,17 +2667,18 @@ renderScript st inputLine =
     -- continuation two columns in from the marker, exactly as a refusal under
     -- the line already does.
     --
-    -- **The focused arm is the live editor and it is one row by
-    -- construction** ('emptyInput' is @editorText … (Just 1)@), so a long line
-    -- scrolls horizontally while the caret is in it and wraps the moment the
-    -- caret leaves. **That is a real row-height change under the caret and it
-    -- is the honest trade**: unreadable text is worse than a line below
-    -- shifting by a row. A wrapping editor would need the cursor placed at a
-    -- wrapped position, which brick's single-line editor does not do.
+    -- **AND THE FOCUSED ARM WRAPS THE SAME WAY, WHICH IS THE SECOND HALF OF
+    -- `~rhkm3`.** It used to be 'Brick.renderEditor', one row by construction,
+    -- so a long line scrolled sideways under the caret and wrapped the moment
+    -- the caret left — recorded here as an honest trade until he refused it:
+    -- /"I hate the row shift. That's what editors like Nano do and I hate it.
+    -- Fix it properly."/ 'inputWidget' is the drawing now, wrapping through
+    -- 'Tui.Panes.wrapRows' — 'paneWrapped''s own policy — so a line looks the
+    -- same focused or not and nothing reflows as the caret walks on and off.
     row i sl
-      | stScriptPos st == Just i, isNothing (stRerun st) = [marker <+> inputLine] <> refusal sl
-      | dim i = [marker <+> withAttr (attrName "script.stale") (paneWrapped (slText sl))] <> refusal sl
-      | otherwise = [marker <+> paneWrapped (slText sl)] <> refusal sl
+      | stScriptPos st == Just i, isNothing (stRerun st) = [pin i (marker <+> inputLine)] <> refusal sl
+      | dim i = [pin i (marker <+> withAttr (attrName "script.stale") (paneWrapped (slText sl)))] <> refusal sl
+      | otherwise = [pin i (marker <+> paneWrapped (slText sl))] <> refusal sl
       where
         marker
           | rerunRow == Just i = withAttr (attrName "script.marker") (str "> ")
@@ -2692,6 +2701,24 @@ renderScript st inputLine =
       | slOk sl = []
       | otherwise =
           [ withAttr (attrName "script.refused") (paneWrapped ("  " <> l)) | l <- slOutput sl ]
+    -- | **THE ROW THE CARET IS ON IS THE ROW THAT STAYS ON SCREEN** —
+    -- `~k2v4m`, his report of 2026-11-24. A document of refused lines is far
+    -- taller than the pane, and the pane used to be scrolled to the end on
+    -- every keypress ('followInput'), so walking up to the first bad line
+    -- edited it from off-screen. **This is the request that follows the
+    -- caret**, and it is asked for on the caret's row whatever that row is
+    -- drawing — the live editor, a stale line, or a line a re-run is replacing.
+    --
+    -- **Only the line, never the refusal under it.** 'visible' over a block
+    -- taller than the viewport scrolls to the block's *end*, so pinning the
+    -- line together with a three-row complaint would push the line being
+    -- edited back off the top — the defect again, wearing the fix's clothes.
+    -- The complaint is the next row down and shows when there is room for it.
+    --
+    -- **A wheel tick drops the pin ('unpinScript') and the next edit or move
+    -- takes it back ('followInput').** Without that, a request made every
+    -- frame cancels the scroll the wheel just performed.
+    pin i w = if stScriptFollow st && stScriptPos st == Just i then visible w else w
     -- | The composing line sits past the end, which is where a document's
     -- cursor is when you have not walked back into it.
     tail' = if isNothing (stScriptPos st) then [str "  " <+> inputLine] else []
@@ -5112,8 +5139,13 @@ handleReplEvent (VtyEvent (V.EvKey V.KBS [V.MMeta])) = do
   followInput
   refreshDropdown
   refreshOfferDropdown
-handleReplEvent (MouseDown n V.BScrollUp _ _) = vScrollBy (viewportScroll n) (-1)
-handleReplEvent (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 1
+-- | **A wheel tick unpins the document from the caret** (`~k2v4m`). Scrolling
+-- is the gesture for looking at a line the caret is not on, and the pin
+-- 'renderScript' asks for would cancel it on the very next frame. The next
+-- edit or move re-arms it in 'followInput', which is the same bargain the
+-- repl pane has always had with this clause.
+handleReplEvent (MouseDown n V.BScrollUp _ _) = unpinScript >> vScrollBy (viewportScroll n) (-1)
+handleReplEvent (MouseDown n V.BScrollDown _ _) = unpinScript >> vScrollBy (viewportScroll n) 1
 -- | Press-and-release gestures end here, all of them. A wheel tick arrives
 -- as a press *and* a release (SGR 'M' then 'm'), and so does an ordinary
 -- click — neither half carries editing intent, so neither reaches the
@@ -7079,8 +7111,38 @@ clearUsage =
 -- 'appendTurn' — the prompt is just the last line of the same scrollable
 -- document now, not a fixed row, so it can scroll out of view like anything
 -- else unless something puts it back.
+--
+-- **WHAT STAYS IN VIEW IS THE CARET, AND IN LIVE-SCRIPT MODE THE CARET IS NOT
+-- ALWAYS THE END OF THE DOCUMENT — `~k2v4m`, his report of 2026-11-24**:
+-- /"whatever I do, the script view is always scrolled to the bottom… I should
+-- be able to go to the top and start editing the first `prove` line and the
+-- scroll position needs to respect that."/ It did exactly that, because this
+-- was 'vScrollToEnd' unconditionally and it is on the path of every Up, every
+-- Down and every keystroke ('afterScriptEdit'). Walking to line 0 of a
+-- refused fifteen-line script put the caret off the top of the pane and left
+-- the view on the tail.
+--
+-- **So the scroll-to-end is for the composing line only**, which is where the
+-- caret is when 'stScriptPos' is 'Nothing' — in the ordinary REPL, always.
+-- With the caret standing *on* a document line, 'renderScript' asks for that
+-- row with 'visible' and this must not pull the other way: two requests on
+-- one viewport in one frame is the pane fighting itself.
 followInput :: EventM Name St ()
-followInput = vScrollToEnd (viewportScroll HistoryVP)
+followInput = do
+  st <- get
+  -- **Re-arm the pin.** Every call here is an edit or a move, which is
+  -- exactly when the caret is what he is looking at.
+  put st { stScriptFollow = True }
+  unless (stScriptMode st && isJust (stScriptPos st)) $
+    vScrollToEnd (viewportScroll HistoryVP)
+
+-- | **Let the document go where the wheel put it** — `~k2v4m`. The counterpart
+-- to 'followInput': one gesture lets go of the caret, every other one takes
+-- hold of it again. Harmless in the ordinary REPL, which never reads the flag.
+unpinScript :: EventM Name St ()
+unpinScript = do
+  st <- get
+  put st { stScriptFollow = False }
 
 -- | Recomputes the `:load` dropdown from the input's current text —
 -- called after anything that can change it (typing, Tab, an accepted
