@@ -2167,6 +2167,27 @@ data Rule = Rule
     -- @do@ rules a typed line is wrapped in, and anything a caller builds by
     -- hand. The same meaning 'Thena.View.Failure.stopViewAt' gives it for a
     -- declaration, and for the same reason.
+  , ruleWrittenAt :: [Pos]
+    -- ^ __where each of the clause's written instructions begins__ (MS12 phase
+    -- 349, @~8w6qw@), in writing order, in the file 'ruleOrigin' names.
+    --
+    -- **A fault inside a body says /instruction 2/ and that is not a line in a
+    -- file.** His ask of 2026-11-24 is that a refusal name a place a terminal
+    -- can open; a clause's own origin reaches the rule and not the mistake
+    -- inside it, so the position of each written statement is kept beside it.
+    -- 'Thena.Rules.faultAt' is what turns an index into a place and is the only
+    -- thing that reads this.
+    --
+    -- **Indexed by WRITTEN position, which is not the position in 'ruleBody'** —
+    -- a nested call is lifted into a binding in front of the instruction that
+    -- wanted it, and an annotation is folded into the binding under it.
+    -- 'Thena.Rules.writtenPositions' is the map from one to the other and
+    -- already existed, for the index.
+    --
+    -- **Empty is a clause whose instructions are in no file**, which is what
+    -- 'ruleOrigin' being 'Nothing' means: the synthetic @entry@ and @do@ rules,
+    -- a block written inside a surface region, and anything a caller builds by
+    -- hand.
   }
   deriving (Eq, Show)
 

@@ -56,6 +56,7 @@ module Thena.Errors
 
     -- * Reading a term (§2.5, §2.6) — moved here at phase 17b
   , SyntaxError (..)
+  , syntaxErrorAt
   , ResolveError (..)
   , DevForm (..)
   ) where
@@ -64,13 +65,13 @@ import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Instral.Pattern (Pattern)
-import Thena.Syntax.Lexer (BlockKind, LexError)
+import Thena.Syntax.Lexer (BlockKind, LexError (..), Pos)
 import Thena.Language.Earley (ParseFailure)
 import Thena.Language.Reader (ReadError)
 import Thena.Surface.Concrete (PairingError (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
-import Thena.Syntax.Parser (ParseError)
+import Thena.Syntax.Parser (ParseError (..))
 
 -- | Something worth telling the user about a load that nonetheless succeeded
 -- (MS6 phase 98).
@@ -965,6 +966,35 @@ data SyntaxError
     -- elaboration fails through the machine.
   | ResolveFailed ResolveError
   deriving (Eq, Show)
+
+-- | __Where in the text a syntax error is__, where it is anywhere (MS12 phase
+-- 349, @~8w6qw@).
+--
+-- **The position was always carried and never read.** Every one of the four
+-- failures a reader produces holds the position of the token it stopped at —
+-- the prompt prints it, @syntax.thena.rules: 4:21: unexpected (@ — and
+-- 'Thena.View.Failure' matched the constructors and discarded their payloads,
+-- so a pane drawing a refused rule file could say /could not be read/ and not
+-- where. This is the one function that answers it, so the two readings cannot
+-- drift.
+--
+-- **'Nothing' is a failure at the end of the input**, which is the one place
+-- there is no token to point at, and the three shapes whose own payload is a
+-- structure with its own idea of a line ('BlockIllFormed' counts
+-- instructions, 'BlockUnreadable' counts lines inside a block).
+syntaxErrorAt :: SyntaxError -> Maybe Pos
+syntaxErrorAt e = case e of
+  LexFailed (LexError p _)                        -> Just p
+  ParseFailed (UnexpectedToken p _)               -> Just p
+  ParseFailed UnexpectedEndOfInput                -> Nothing
+  LayoutFailed (UnmatchedClose p)                 -> Just p
+  LayoutFailed (MissingClose p)                   -> Just p
+  SurfaceParseFailed (SurfaceUnexpectedToken p _) -> Just p
+  SurfaceParseFailed SurfaceUnexpectedEndOfInput  -> Nothing
+  DeclarationsUnpaired {}                         -> Nothing
+  BlockUnreadable {}                              -> Nothing
+  BlockIllFormed {}                               -> Nothing
+  ResolveFailed {}                                -> Nothing
 
 -- | Why a named tree could not be turned into 'Core' (§2.5, §3.5).
 --

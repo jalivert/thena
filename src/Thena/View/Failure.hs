@@ -413,7 +413,17 @@ data Role
     -- with an 'ALine' until this phase and that was a defect**: the number is an
     -- arity, it was handed over as a line, and a pane drew it as one (@~w3q27@).
   | TheInstruction
-  | TheClause
+  | ThePlace
+    -- ^ __where in a file the thing the failure is about is written__ (MS12
+    -- phase 349, @~8w6qw@), as an 'APlace' — his ask of 2026-11-24 that a
+    -- refusal name something a terminal can open.
+    --
+    -- **It replaced 'TheClause'**, which carried the same piece for the two
+    -- faults that had an origin to carry. The role is not /which clause/ but
+    -- /where this is/: a fault about an instruction is at that instruction's
+    -- line, a fault about a signature at the signature's, and a fault about a
+    -- clause at the clause's. One role, because a pane draws a destination the
+    -- same way wherever it came from.
   | TheTest
   | TheChoice
   | ThePattern
@@ -681,10 +691,11 @@ displayRuleFile
   -> [(Var, Address)]
   -> Int
   -> Address
+  -> FilePath
   -> Dr.RuleFileError
   -> StopView
-displayRuleFile sp grammars budget env binders counter here e =
-  displayRefused sp grammars budget env binders counter here (ARefusedRuleFile e)
+displayRuleFile sp grammars budget env binders counter here p e =
+  displayRefused sp grammars budget env binders counter here (ARefusedRuleFile p e)
 
 -- | __What a view is being asked for__ (MS12 phase 348).
 --
@@ -694,7 +705,7 @@ displayRuleFile sp grammars budget env binders counter here e =
 -- them.
 data Refused
   = AnUnfinishedItem Dr.Unfinished
-  | ARefusedRuleFile Dr.RuleFileError
+  | ARefusedRuleFile FilePath Dr.RuleFileError
 
 displayRefused
   :: Spelling
@@ -707,7 +718,7 @@ displayRefused
   -> Refused
   -> StopView
 displayRefused sp grammars budget env binders counter here refused = case refused of
-  ARefusedRuleFile e ->
+  ARefusedRuleFile _ e ->
     let w = Faulty (ruleFileError e)
      in StopView
           { stopViewNature = natureOf w
@@ -735,6 +746,13 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
             , stopViewWhy = w
             }
   where
+    -- | **The file a refusal is of**, where there is one (MS12 phase 349):
+    -- what a reader's own position is a position /in/. A stop is not about a
+    -- file.
+    path = case refused of
+      ARefusedRuleFile p _ -> Just p
+      AnUnfinishedItem _   -> Nothing
+
     -- ** The stop itself
 
     whyOf stop = case stop of
@@ -745,7 +763,7 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
       Dr.Halted r -> Faulty [failReason r]
       Dr.Refused e -> Faulty [declareError e]
       Dr.Uncertified e -> Faulty [kernelError e]
-      Dr.BlockRefused es -> Faulty (map ruleError es)
+      Dr.BlockRefused es -> Faulty (map ruleFault es)
       Dr.BlockIllTyped es -> Faulty (map instralError es)
       Dr.Untrusted lvl claims ->
         Trusting (displayTrust sp grammars budget binders counter here lvl claims)
@@ -1393,8 +1411,17 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
     -- thing the author has to change.
     ruleFileError e = case e of
       Dr.NoRuleHeader -> [fault CouldNotRead [is TheStage (AStage ReadingTheHeader)]]
-      Dr.RuleSyntaxError why -> [syntaxError why]
-      Dr.RuleIllFormed es -> map ruleError es
+      -- **The position the reader stopped at, which was thrown away until MS12
+      -- phase 349** (@~8w6qw@): 'syntaxError' matched the four reader failures
+      -- and dropped every payload, so the prompt printed
+      -- @‹path›: 4:21: unexpected (@ off the same error and the pane said only
+      -- /could not be read/. 'Thena.Errors.syntaxErrorAt' is the one reading of
+      -- it.
+      Dr.RuleSyntaxError why ->
+        [ placed (E.syntaxErrorAt why >>= \at -> (`Origin` at) <$> path)
+            (syntaxError why)
+        ]
+      Dr.RuleIllFormed es -> map ruleFault es
       -- **One fault per name the module does not offer**, and the module is a
       -- part of each: the kind is the one a typed name that resolves to
       -- nothing gets, because that is what the clause's name did.
@@ -1413,6 +1440,20 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
         [ fault NoSuchNamespace [is TheNamespace (ADottedName (Dr.moduleText m))]
         | m <- ms
         ]
+
+    -- | **A fault, drawn where it is written** (MS12 phase 349, @~8w6qw@).
+    --
+    -- The place rides on the fault ('Thena.Rules.RuleFault') and is appended as
+    -- the last part, so a pane that does not know the role still draws
+    -- everything the fault said. 'Nothing' is a fault about text that is in no
+    -- file — a @do@ block typed at the prompt.
+    ruleFault (R.RuleFault o e) = placed o (ruleError e)
+
+    -- | Put a place on a fault, if there is one to put.
+    placed o v = case o of
+      Just (Origin f at) ->
+        v { faultViewParts = faultViewParts v ++ [is ThePlace (APlace f at)] }
+      Nothing -> v
 
     ruleError e = case e of
       R.UnboundInRule g i n ty ->
@@ -1475,25 +1516,18 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
       R.ReturnInSurfaceBlock g i -> lineOf BlockShapeWrong g i []
       R.FunctionLeavesNothing r -> fault RuleTypeWrong [is TheRule (AName r)]
       -- **THE CLAUSE IS THE DEAD ONE, AND IT IS A PLACE TO GO** (MS12 phase
-      -- 343, @~zx8cb@ and @~w3q27@). The origin is the later clause's own — the
+      -- 343, @~zx8cb@ and @~w3q27@). The place is the later clause's own — the
       -- one nothing can reach — which is the clause the author has to change;
-      -- the earlier one that eats it is found from there by reading up.
-      -- 'Nothing' is a clause in no file, which these two cannot be in practice
-      -- and are not promised not to be.
-      R.FunctionClauseUnreachable r i o ->
-        fault ClauseUnreachable
-          ([is TheRule (AName r), is TheArity (ACount i)] ++ place o)
-      R.RuleAndFunction r i o ->
-        fault NameAlreadyDeclared
-          ([is TheRule (AName r), is TheArity (ACount i)] ++ place o)
+      -- the earlier one that eats it is found from there by reading up. **It is
+      -- the fault's place since MS12 phase 349** and no longer a field of its
+      -- own, because every fault carries one.
+      R.FunctionClauseUnreachable r i ->
+        fault ClauseUnreachable [is TheRule (AName r), is TheArity (ACount i)]
+      R.RuleAndFunction r i ->
+        fault NameAlreadyDeclared [is TheRule (AName r), is TheArity (ACount i)]
 
     lineOf k g i ps =
       fault k (is TheRule (name g) : is TheInstruction (ALine (i + 1)) : ps)
-
-    -- | Where a clause is written, as a part, or no part at all.
-    place o = case o of
-      Just (Origin f at) -> [is TheClause (APlace f at)]
-      Nothing              -> []
 
     -- ** Why a rule's own types did not work out
 

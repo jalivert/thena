@@ -45,11 +45,13 @@ import Thena.Driver
   )
 import Thena.Engine (rules)
 import qualified Thena.Engine as Engine
-import Thena.Instral.Ops (Value (..))
+import Thena.Instral.Ops (Origin (..), Value (..))
 import Thena.Errors (FailReason (..))
 import Thena.Instral.Ops (Rule (..), Pattern (..))
 import Thena.Instral.Type (Ty (..))
-import Thena.Rules (RuleBase (..), RuleError (..))
+import Thena.Instral.Concrete (RawSignature (..))
+import Thena.Rules (RuleBase (..), RuleError (..), RuleFault (..))
+import Thena.Syntax.Lexer (Pos (..))
 import Thena.View.Source (printItem)
 
 tests :: TestTree
@@ -99,7 +101,7 @@ opens =
     , testCase "open X in a declaration holds that declaration" $
         decls ["open A in", "  r : Core"]
           @?= Right [ DeclOpenIn (RawOpen [([], "A")] RawOpenWhole)
-                        (DeclSignature (signatureOf "r")) ]
+                        (DeclSignature (signatureAt (Pos 4 3) "r")) ]
 
       -- **A path is written where a word is**, since a namespace may be nested.
     , testCase "the namespace may be a path" $
@@ -129,8 +131,13 @@ opens =
     -- The signature @r : Core@ as the parser builds it, reached by parsing it
     -- rather than written out: 'RawTy' is a type this module has no other
     -- reason to import.
-    signatureOf n = case decls [n ++ " : Core"] of
-      Right [DeclSignature g] -> g
+    --
+    -- **At a position of the caller's choosing** (MS12 phase 349, @~8w6qw@): a
+    -- signature records where it was written, and a signature nested in a block
+    -- is not where this fixture's own one-line parse puts it. So the expected
+    -- place is written down, which is what makes these cases assert it.
+    signatureAt at n = case decls [n ++ " : Core"] of
+      Right [DeclSignature (RawSignature _ nm t)] -> RawSignature at nm t
       other -> error ("the fixture signature did not parse: " ++ show other)
 
 -- | **An `import` line in a rule file** (MS11 phase 276), **a `consult` line
@@ -174,7 +181,8 @@ imports =
       -- @Nothing@ above is the line with none and this is the same constructor.
     , testCase "import X where { … }" $
         decls ["import Stlc where", "  r : Core"]
-          @?= Right [DeclImport Own [] "Stlc" SelectWide (Just [DeclSignature (signatureOf "r")])]
+          @?= Right [DeclImport Own [] "Stlc" SelectWide
+                       (Just [DeclSignature (signatureAt (Pos 4 3) "r")])]
 
       -- **@where@ with nothing after it is an EMPTY block and not a line with
       -- no block**, which is the layout rule and not a case of its own
@@ -189,7 +197,8 @@ imports =
       -- gets it.
     , testCase "public import X where { … }" $
         decls ["public import Stlc where", "  r : Core"]
-          @?= Right [DeclImport Public [] "Stlc" SelectWide (Just [DeclSignature (signatureOf "r")])]
+          @?= Right [DeclImport Public [] "Stlc" SelectWide
+                       (Just [DeclSignature (signatureAt (Pos 4 3) "r")])]
 
       -- **Nesting costs no mechanism**, because a block holds what the file
       -- holds — the production takes @Decls@.
@@ -198,7 +207,7 @@ imports =
           @?= Right
                 [ DeclImport Own [] "Stlc" SelectWide
                     (Just [ DeclImport Own ["Stlc"] "Terms" SelectWide
-                              (Just [DeclSignature (signatureOf "r")]) ]) ]
+                              (Just [DeclSignature (signatureAt (Pos 5 5) "r")]) ]) ]
 
     , testCase "it survives being printed and read again" $ do
         let written = [ "import Stlc", "import Stlc.Syntax.Terms"
@@ -231,10 +240,10 @@ imports =
       Right (_, _, ds) -> Right ds
       Left e           -> Left (show e)
 
-    -- Reached by parsing it, as the group above does: 'RawSignature' is a type
-    -- this module has no other reason to import.
-    signatureOf n = case decls [n ++ " : Core"] of
-      Right [DeclSignature g] -> g
+    -- Reached by parsing it, as the group above does, and placed where the
+    -- block really puts it (MS12 phase 349).
+    signatureAt at n = case decls [n ++ " : Core"] of
+      Right [DeclSignature (RawSignature _ nm t)] -> RawSignature at nm t
       other -> error ("the fixture signature did not parse: " ++ show other)
 
 -- --------------------------------------------------------------------------
@@ -315,7 +324,7 @@ basesOf :: Session -> [RuleBase]
 basesOf = rules . machineOf
 
 ruleNames :: RuleBase -> [String]
-ruleNames b = [ nameDotted g | Rule g _ _ _ _ <- baseRules b ]
+ruleNames b = [ nameDotted g | Rule g _ _ _ _ _ <- baseRules b ]
 
 loading :: TestTree
 loading =
@@ -362,7 +371,13 @@ loading =
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do frobnicate; prim-solve x")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [UnboundInRule (rootName "r") 1 "x" (TVar 0)]
+                , RuleIllFormed
+                    -- **The place is the statement's, not the clause's**
+                    -- (MS12 phase 349, @~8w6qw@): @prim-solve x@ begins 44
+                    -- characters along the line the rule begins on.
+                    [ RuleFault (Just (Origin "x.thena.rules" (Pos 2 45)))
+                        (UnboundInRule (rootName "r") 1 "x" (TVar 0))
+                    ]
                 )
 
     , -- The load-time pass §2.4 asked for, now running at load rather than in
@@ -371,7 +386,10 @@ loading =
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do prim-try nothing")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [UnboundInRule (rootName "r") 0 "nothing" TCore] )
+                , RuleIllFormed
+                    [ RuleFault (Just (Origin "x.thena.rules" (Pos 2 33)))
+                        (UnboundInRule (rootName "r") 0 "nothing" TCore)
+                    ] )
     ]
   where
     refusal fs = case snd (load1 fs) of

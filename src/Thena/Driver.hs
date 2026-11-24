@@ -298,7 +298,6 @@ import Thena.Instral.Infer
 import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
   ( RuleBase (..)
-  , RuleError
   , Reading (..)
   , rootReading
   , matchingRules
@@ -307,6 +306,9 @@ import Thena.Rules
   , resolveBlock
   , surfaceBlocks
   , RuleError (..)
+  , RuleFault (..)
+  , faultIn
+  , faultsIn
   , allCallable
   , baseRules
   , allSignatures
@@ -343,6 +345,7 @@ import Thena.Instral.Concrete
   , RawOp (..)
   , RawOperand (..)
   , RawPattern (..)
+  , RawSignature (..)
   )
 import Thena.Syntax.Lexer (BlockKind (..), Located (..), Pos (..), Token (..), lexModule, lexTokens, rawEscapes)
 import Thena.Language.Reader (Block (..), readBlock)
@@ -1774,7 +1777,7 @@ data Response
     -- warning the system had (no-confusion skipped) was a 'Message', so it was
     -- shown at the prompt and lost in a file.
   | Failed SyntaxError
-  | LineRefused [RuleError]
+  | LineRefused [RuleFault]
     -- ^ the line parsed, and then said something no op or rule could be given
     -- (MS5 phase 62b) — an unknown tag, a region that did not parse, a word
     -- written with operands it does not take. The same errors a rule file is
@@ -1806,7 +1809,7 @@ data Stop
     -- @:choices@ after one says so. What the machine is kept /for/ is the
     -- messages and the reason; the proof itself is rewound by 'oneLine'.
   | Refused DeclareError -- ^ a @data@ declaration the checker would not admit
-  | BlockRefused [RuleError]
+  | BlockRefused [RuleFault]
     -- ^ a @do@ block reached by the program did not validate (MS6 phase 104b).
     --
     -- **Two stops rather than one**, matching the two ways a block is wrong
@@ -2001,13 +2004,13 @@ parseDevelopment gr env opens = parseWith gr (\g e -> resolvePartial g e opens) 
 -- different reasons, so collapsing them would lose which.
 data LineError
   = LineSyntax SyntaxError
-  | LineIllFormed [RuleError]
+  | LineIllFormed [RuleFault]
   | LineMistyped [InstralTypeError]
     -- ^ the entry resolved and does not type check (MS5, reviewed 2026-09-12)
 
 -- | What was wrong with the @do@ blocks a surface term holds.
 data BlockProblem
-  = BlockIll [RuleError]
+  = BlockIll [RuleFault]
   | BlockMistyped [InstralTypeError]
 
 -- | Resolve, validate and type every @do@ block written inside a surface term
@@ -2089,7 +2092,7 @@ instralEntry gs sc bases bound src = do
   -- the prompt as well as in a file.
   ts' <- mapLeft (LineSyntax . LayoutFailed) (layoutFile ts)
   is  <- mapLeft (LineSyntax . ParseFailed) (parseEntry ts')
-  prog <- mapLeft LineIllFormed
+  prog <- mapLeft (LineIllFormed . faultsIn Nothing [])
             -- **A prompt entry starts with the session\'s goals bound** (MS12
             -- phase 324, his ruling of 2026-11-19) and with nothing else. Its
             -- own lines bind as it goes, which 'resolveBlock' threads; the
@@ -2115,8 +2118,12 @@ instralEntry gs sc bases bound src = do
             -- @~jmw4k@'s seam, recorded at 'Thena.Engine.Play': a block inside a
             -- surface literal is the file's and this one is the session's, so
             -- the only scope both could agree on was none.
+            -- **A typed entry drops the positions its statements were read
+            -- with** (MS12 phase 349): the prompt is not a file, and the
+            -- refusal of a line says so by naming no place — the engine's own
+            -- /the line is in front of you/.
             (resolveBlock (Reading gs sc) (rootName "entry") (map fst bound)
-               (concatMap hoist (reverse is)))
+               (concatMap hoist (map snd (reverse is))))
   -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
   -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
   -- prompt halted mid-run where the same instruction in a rule body is refused
@@ -2128,7 +2135,7 @@ instralEntry gs sc bases bound src = do
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts. All three checks are 'checkBlock' since phase 90.
-  case checkBlock gs bases bound (Rule (rootName "entry") [] [] prog Nothing) of
+  case checkBlock gs bases bound (Rule (rootName "entry") [] [] prog Nothing []) of
     Just (BlockIll es)      -> Left (LineIllFormed es)
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
@@ -2164,7 +2171,7 @@ entryBindings gs sc bases bound src = case instralEntry gs sc bases bound src of
   Left _     -> []
   Right prog ->
     boundBy (allSignatures bases) (allCallable bases) bound
-      (Rule (rootName "entry") [] [] prog Nothing)
+      (Rule (rootName "entry") [] [] prog Nothing [])
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
@@ -2336,8 +2343,8 @@ parseSurfaceModuleAt src = do
 -- 'Thena.Engine.blockFailureOf'\'s twin, and the same reasoning: resolution can
 -- only produce 'Thena.Rules.BadOperands', because a word that names no op is a
 -- rule call and not an error.
-blockProblem :: [RuleError] -> SyntaxError
-blockProblem errs = case errs of
+blockProblem :: [RuleFault] -> SyntaxError
+blockProblem errs = case map faultWhy errs of
   BadOperands _ i w : _ -> BlockIllFormed i w
   _                     -> BlockIllFormed 0 "do"
 
@@ -5890,8 +5897,8 @@ dispatch s name arg = case name of
                     ++ goals
        in case resolveBlock (Reading (grammars machine) (scope machine))
                             (rootName "entry") (map fst bound) body of
-        Left errs -> (s, Failed (blockProblem errs))
-        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] [] is Nothing) of
+        Left errs -> (s, Failed (blockProblem (faultsIn Nothing [] errs)))
+        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] [] is Nothing []) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionFuel s)
@@ -6994,7 +7001,7 @@ data RuleFileError
   | RuleSyntaxError SyntaxError
     -- ^ it did not lex or parse. The position is inside, and it is the true
     -- line: the header is blanked rather than dropped so that nothing shifts
-  | RuleIllFormed [RuleError]
+  | RuleIllFormed [RuleFault]
     -- ^ it parsed, and one or more rules did not resolve or did not validate
   | RuleSelectsUnoffered ModuleName [GlobalName]
     -- ^ **an import's clause named something the module does not offer** (MS11
@@ -7164,10 +7171,10 @@ parseInstralType src = do
   ts <- mapLeft LineSyntax (tokensOf src)
   t  <- mapLeft (LineSyntax . ParseFailed) (parseInstralTy ts)
   case resolveTy "a query" t of
-    Left e         -> Left (LineIllFormed [e])
+    Left e         -> Left (LineIllFormed (faultsIn Nothing [] [e]))
     -- @()@ says /nothing is left/, which is not a type a value can have — the
     -- same refusal it gets as a parameter (MS5 phase 67).
-    Right Nothing  -> Left (LineIllFormed [UnitInsideAType "a query"])
+    Right Nothing  -> Left (LineIllFormed (faultsIn Nothing [] [UnitInsideAType "a query"]))
     Right (Just u) -> Right u
 
 -- | **Every declaration of a rule file beside the scope it stands in** (MS10
@@ -7315,9 +7322,15 @@ resolveAll reveals brought gs env conc path raws =
            ++ dups ++ collisions ++ overlapping
        , concatMap validate (ok ++ fns)
        ) of
-    ([], [])     -> Right (sigs, fns, ok)
+    ([], [])     -> Right ([ (n, t) | (_, n, t) <- sigs ], fns, ok)
     (res, valid) -> Left (RuleIllFormed (res ++ valid))
   where
+    -- | **A fault about a declaration this file holds, placed in this file**
+    -- (MS12 phase 349, @~8w6qw@). The position is the declaration's own: a
+    -- clause's for a rule or a function, the signature's name for a signature.
+    -- 'Thena.Rules.resolveRule' and 'Thena.Rules.validate' place their own,
+    -- because only they know which written instruction a fault is about.
+    here at = Just (Ops.Origin path at)
     -- **Each declaration beside the scope it was written in.** An @open@ is not
     -- a declaration to resolve, so it does not appear here — what it says is
     -- already in the reading beside everything under it.
@@ -7333,7 +7346,10 @@ resolveAll reveals brought gs env conc path raws =
     -- **A signature needs no scope**: @instral@'s types are its own words, and
     -- a tag never appears in one.
     (sigErrs, sigs) =
-      partitionEithers [ resolveSignature g | (_, _, DeclSignature g) <- decls ]
+      partitionEithers
+        [ either (Left . faultIn (here at) []) Right (resolveSignature g)
+        | (_, _, DeclSignature g@(RawSignature at _ _)) <- decls
+        ]
 
     -- **WHAT A @consult … where@ BLOCK COMPILES TO** (MS11 phase 300, his
     -- ruling of 2026-11-06): a push of the base at the front of the body and a
@@ -7362,7 +7378,7 @@ resolveAll reveals brought gs env conc path raws =
     -- backtracking and a call could run either. A function has one clause and no
     -- head, which is exactly what that is not.
     collisions =
-      [ RuleAndFunction n (length (ruleParams f)) (ruleOrigin f)
+      [ RuleFault (ruleOrigin f) (RuleAndFunction n (length (ruleParams f)))
       | f <- fns
       , let n = nameDotted (ruleName f)
       , any (\r -> ruleName r == ruleName f
@@ -7400,7 +7416,7 @@ resolveAll reveals brought gs env conc path raws =
     -- dead code the author can see is not, and a real overlap checker is the
     -- coverage question stage c opens rather than something owed here.
     overlapping =
-      [ FunctionClauseUnreachable n (length (ruleParams f)) (ruleOrigin f)
+      [ RuleFault (ruleOrigin f) (FunctionClauseUnreachable n (length (ruleParams f)))
       | (i, f) <- zip [0 :: Int ..] fns
       , let n = nameDotted (ruleName f)
       , any (\g -> ruleName g == ruleName f
@@ -7408,10 +7424,13 @@ resolveAll reveals brought gs env conc path raws =
                      && all Ops.patternIrrefutable (ruleParams g)) (take i fns)
       ]
 
+    -- **The place is the SECOND signature's**, which is the one in the way —
+    -- the same choice 'overlapping' makes for a function's second clause (MS12
+    -- phase 349).
     dups =
-      [ DuplicateSignature n (length (sigParams t))
-      | (i, (n, t)) <- zip [0 :: Int ..] sigs
-      , (n', t') <- take i sigs
+      [ faultIn (here at) [] (DuplicateSignature n (length (sigParams t)))
+      | (i, (at, n, t)) <- zip [0 :: Int ..] sigs
+      , (_, n', t') <- take i sigs
       , n' == n
       , length (sigParams t') == length (sigParams t)
       ]
@@ -8888,7 +8907,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- itself declared above it, and a @language@ block is exactly such a thing.
   --
   -- **The same checker the prompt uses**, so the messages are unchanged.
-  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] [] is Nothing) of
+  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] [] is Nothing []) of
     Just (BlockIll errs)      -> stop (load [] m) msgs warns (BlockRefused errs)
     Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
     Nothing ->

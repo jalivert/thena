@@ -109,7 +109,7 @@ import Thena.Render
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
 import Thena.Standard (withRules)
-import Thena.Rules (RuleError (..), baseName)
+import Thena.Rules (RuleError (..), RuleFault (..), baseName, faultWhy)
 import Thena.Instral.Infer (InstralTypeError (..), Site (..))
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty.Golden (goldenVsString)
@@ -741,7 +741,7 @@ publicBaseTests =
       (_, _, trouble) <- consultRuleFiles s0 ["test/modules/MissesLent.thena.rules"]
       case trouble of
         [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
-          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- es ]))
+          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- map faultWhy es ]))
         other -> assertFailure (show (map (renderTrouble s0) other))
 
   , -- **AND A RULE FILE'S IMPORT MAY STATE HOW FAR IT REACHES** (MS11 phase
@@ -772,7 +772,7 @@ publicBaseTests =
         consultRuleFiles s0 ["test/modules/ScopedHides.thena.rules"]
       case trouble of
         [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
-          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- es ]))
+          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- map faultWhy es ]))
         other -> assertFailure (show (map (renderTrouble s0) other))
 
   , -- **AND SO MAY A RULE FILE'S CONSULT** (MS11 phase 300, his ruling of
@@ -797,7 +797,7 @@ publicBaseTests =
         consultRuleFiles s0 ["test/modules/ScopedBorrowsAfter.thena.rules"]
       case trouble of
         [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
-          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- es ]))
+          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- map faultWhy es ]))
         other -> assertFailure (show (map (renderTrouble s0) other))
 
   , -- **AND THE POOL HALF IS PRIORITY** (MS11 phase 300, his ruling: /"that's
@@ -1397,7 +1397,7 @@ baseImportTests =
       (_, _, trouble) <- consultRuleFiles s1 ["test/modules/Unstated.thena.rules"]
       case trouble of
         [Unloadable _ (RuleFileRefused _ (RuleIllFormed es))] ->
-          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- es ]))
+          assertBool (show es) (not (null [ () | NoSuchTag _ _ "LC" <- map faultWhy es ]))
         other -> assertFailure (show (map (renderTrouble s1) other))
 
   , -- A dependency asks that the module BE there, not that this act load it.
@@ -2491,7 +2491,7 @@ moduleTests =
     testCase "a name bound in one top-level block is not in scope in the next" $ do
       (s0, _) <- startingSession
       case loadProofSource Strict s0 twoBlockModule of
-        (_, Ran _ _ (BlockRefused [UnboundInRule _ _ "x" _])) -> pure ()
+        (_, Ran _ _ (BlockRefused [RuleFault _ (UnboundInRule _ _ "x" _)])) -> pure ()
         (_, other) -> assertFailure (show other)
 
   , -- **A global block is a call to a rule** (MS6 phase 104b), so how a module
