@@ -230,15 +230,20 @@ substituted =
         , "            \915 \8866 S <: S'"
         , "open sub" ])
       -- **The metavariables are implicit and undetermined** (MS12 phase 320),
-      -- so @:infer@ quantifies them — and under the holes' own names, since a
-      -- signature records which positions are implicit and not what the
-      -- declaration called them. The premise is still an argument you supply,
-      -- so it is still an arrow.
+      -- so @:infer@ quantifies them — **and since phase 345 under the words
+      -- the judgment was written with**, @\915@, @X@, @T@, @S@ and @S'@,
+      -- rather than the @a@, @a1@, @a2@ the caller used to mint. The premise
+      -- is still an argument you supply, so it is still an arrow.
+      --
+      -- **@X@ comes back as @X1@ because @X@ is taken**: the header declares a
+      -- type variable of that word, so the hole's word is freshened against
+      -- the development exactly as every other claimed word is. That is the
+      -- case to watch — the declared word is a /request/, not a guarantee.
       said s ":infer S-narrow" @?=
-        [ "S-narrow : \8704 {a : Ctx} {a1 : String} {a2 : Ty} {a3 : Ty}"
-            ++ " {a4 : Ty}"
-            ++ " -> sub`${a} [ ${a1} -> ${a2} ] \8866 ${a3} <: ${a4}`"
-            ++ " -> sub`${a} \8866 ${a3} <: ${a4}`" ]
+        [ "S-narrow : \8704 {\915 : Ctx} {X1 : String} {T : Ty} {S : Ty}"
+            ++ " {S' : Ty}"
+            ++ " -> sub`${\915} [ ${X1} -> ${T} ] \8866 ${S} <: ${S'}`"
+            ++ " -> sub`${\915} \8866 ${S} <: ${S'}`" ]
     -- **A context whose entries can hold no name gets nothing**, which is
     -- STLC's: its @Ty@ has no variable production, so there is nothing in a Γ
     -- to substitute for.

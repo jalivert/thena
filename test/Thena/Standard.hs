@@ -95,7 +95,10 @@ expectedStandard =
   , aRule (rootName "fit-in-scope") [] [FocusIsHole]
       [ Bind (Op.PVar "hs") Nothing Op.InScopeAt
       , Bind (Op.PVar "h") Nothing (Op.Call "any-of" [Ref "hs"])
-      , Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "a")))
+      , Bind (Op.PVar "n0") Nothing (Op.NextArgumentName (Ref "h"))
+      , Bind (Op.PVar "n1") Nothing
+          (Op.Call "name-or-stem" [Ref "n0", Lit (VText "a")])
+      , Bind (Op.PVar "n") Nothing (FreshName (Ref "n1"))
       , Bind (Op.PVar "f") Nothing (Op.ApplyNext (Ref "h") (Ref "n"))
       , Do (Call "fit-core" [Ref "f"])
       ]
@@ -228,7 +231,10 @@ fitFits = aRule (rootName "fit-core") [PVar "f"] [FocusIsHole]
 
 fitMore :: Rule
 fitMore = aRule (rootName "fit-core") [PVar "f"] [FocusIsHole]
-  [ Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "a")))
+  [ Bind (Op.PVar "n0") Nothing (Op.NextArgumentName (Ref "f"))
+  , Bind (Op.PVar "n1") Nothing
+      (Op.Call "name-or-stem" [Ref "n0", Lit (VText "a")])
+  , Bind (Op.PVar "n") Nothing (FreshName (Ref "n1"))
   , Bind (Op.PVar "f2") Nothing (Op.ApplyNext (Ref "f") (Ref "n"))
   , Do (Call "fit-core" [Ref "f2"])
   ]
@@ -772,7 +778,10 @@ spineWalkers =
   [ aRule (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
       [FocusIsComponent, SurfaceIsApp (Ref "t")]
       [ Do (Goto (Ref "h"))
-      , Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "a")))
+      , Bind (Op.PVar "n0") Nothing (Op.NextArgumentName (Ref "f"))
+      , Bind (Op.PVar "n1") Nothing
+          (Op.Call "name-or-stem" [Ref "n0", Lit (VText "a")])
+      , Bind (Op.PVar "n") Nothing (FreshName (Ref "n1"))
       , Bind (Op.PVar "f2") Nothing (Op.ApplyNext (Ref "f") (Ref "n"))
       , Do (Op.GotoNamed (Ref "n"))
       , Bind (Op.PVar "a") Nothing (Op.AppFirstArgument (Ref "t"))

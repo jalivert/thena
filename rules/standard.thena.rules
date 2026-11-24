@@ -63,7 +63,9 @@ fit-in-scope : ()
 rule fit-in-scope :- when focus-is-hole
   do hs = in-scope
      ; h = any-of hs
-     ; n = fresh-name "a"
+     ; n0 = next-argument-name h
+     ; n1 = name-or-stem n0 "a"
+     ; n = fresh-name n1
      ; f = apply-next h n
      ; call fit-core f
 
@@ -195,7 +197,9 @@ rule fit-core f :- when focus-is-hole
      ; solve
 
 rule fit-core f :- when focus-is-hole
-  do n  = fresh-name "a"
+  do n0 = next-argument-name f
+     ; n1 = name-or-stem n0 "a"
+     ; n  = fresh-name n1
      ; f2 = apply-next f n
      ; call fit-core f2
 
@@ -1495,7 +1499,9 @@ rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-an
 spine-arguments : Core -> Core -> Surface -> ()
 rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
   do goto h
-     ; n  = fresh-name "a"
+     ; n0 = next-argument-name f
+     ; n1 = name-or-stem n0 "a"
+     ; n  = fresh-name n1
      ; f2 = apply-next f n
      ; goto-named n
      ; a  = app-first-argument t

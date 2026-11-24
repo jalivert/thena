@@ -6110,7 +6110,9 @@ fit-in-scope : ()
 rule fit-in-scope :- when focus-is-hole
   do hs = in-scope
      ; h = any-of hs
-     ; n = fresh-name "a"
+     ; n0 = next-argument-name h
+     ; n1 = name-or-stem n0 "a"
+     ; n = fresh-name n1
      ; f = apply-next h n
      ; call fit-core f
 ```
@@ -6912,14 +6914,18 @@ thena spine> apply-core core`succ`              -- saturates, lands on Nat
 stuck: Nat and Nat -> Nat cannot be made equal
 ```
 
-**It is two clauses of a rule and nothing else** — no loop, no new operation:
+**It is two clauses of a rule and nothing else** — no loop, and nothing in it searches but the engine:
 
 ```
 rule fit-core f :- when focus-is-hole
   do fill f ; solve
 
 rule fit-core f :- when focus-is-hole
-  do n = fresh-name "a" ; f2 = apply-next f n ; call fit-core f2
+  do n0 = next-argument-name f
+     ; n1 = name-or-stem n0 "a"
+     ; n = fresh-name n1
+     ; f2 = apply-next f n
+     ; call fit-core f2
 ```
 
 Nothing sequences them. Both heads pass, so the engine builds a choice point,
@@ -7314,6 +7320,38 @@ what the screen says it reaches.
 **Where you still meet a mark is a word a tactic re-binds on purpose**: a split's
 method, above, and the arm of an induction, which re-binds the target under the
 word you gave it.
+
+### An argument you did not write keeps the name the declaration gave it
+
+*Decided 2026-11-24.*
+
+A signature may mark an argument implicit, and then nobody writes it: the system
+claims a hole for the position and unification settles it. **That hole is shown
+under the word the declaration wrote**, not under one the elaborator invented.
+
+```
+thena spine> :show S-refl
+S-refl : ∀ {M : LC} -> steps`${M} -->* ${M}`
+thena spine> :infer S-refl
+S-refl : ∀ {M : LC} -> steps`${M} -->* ${M}`
+```
+
+The second line used to read `∀ {a : LC} -> …`, so the one position the author
+calls `M` had two names depending on which command you asked. It shows up
+wherever an inserted argument is still undetermined — `:infer`, `:dev`, `:show`
+of a definition that was elaborated — and the words were `a`, `a1`, `a2` in the
+order the holes were claimed.
+
+**The word is a request, not a guarantee.** It is freshened where it lands, like
+every other word the system supplies: a judgment whose metavariable is `X`, used
+where an `X` is already bound, gives `X1`. See *A word the system takes off a
+type is made free where the binder lands* above — this is the same rule one
+place further out.
+
+**Where the declaration named nothing, the tactic's own word is used.** An
+anonymous domain has no word to copy, and `_` is not a name you can write, so the
+rule that claims the argument supplies one as it always did.
+
 
 ### A word that reaches nothing is marked, and nothing is renamed behind your back
 

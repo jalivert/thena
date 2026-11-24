@@ -1358,6 +1358,28 @@ data Op
     -- by that argument a moment later, so where it sits changes nothing; an
     -- inserted hole is filled by unification from wherever the information
     -- turns up, so it wants to be as far out as it can get.
+  | NextArgumentName Operand
+    -- ^ **the word the head's next argument position was declared with**, or
+    -- @_@ where it has none (MS12 phase 345) — @next-argument-name f@, the
+    -- read a rule makes just before 'ApplyNext' so that the hole carries the
+    -- author's own word.
+    --
+    -- **His ruling, 2026-11-24**: an argument nobody wrote keeps the name the
+    -- declaration gave its position. @S-refl : ∀ {M : LC} -> …@ used to come
+    -- back from @:infer@ as @∀ {a : LC} -> …@, because the caller minted the
+    -- word with @fresh-name "a"@ and had nothing to mint it from.
+    --
+    -- **It takes the spine and not the type**, so it reads the Π that
+    -- 'ApplyNext' will claim from and cannot come to disagree with it: both
+    -- infer the operand's type and reduce it, and a domain that only appears
+    -- after an unfolding is the case where asking @typeof@ and matching a Π in
+    -- the rule would differ.
+    --
+    -- **The @_@ is answered rather than repaired**, which is
+    -- 'Thena.Core.Term.freeAmong'\'s rule: the base pairs this with
+    -- @name-or-stem@ and @fresh-name@, exactly as the arm walk already pairs
+    -- @binder-name@ with them, so the stem for an anonymous position stays a
+    -- word the base writes down rather than one buried in here.
   | Apply Operand
     -- ^ the head to apply — thesis §2.7's @naive-refine@ with the search
     -- taken out (phase 25). Walks the head's Π telescope, claims a hole for
@@ -1882,6 +1904,7 @@ resultOf o = case o of
   ConstructorArguments _ -> Just (TList TName)
   ConstructorRecursiveArguments _ -> Just (TList TName)
   ApplyNext _ _ -> Just TCore  -- the spine, one argument longer
+  NextArgumentName _ -> Just TName
   ExpandImplicits _ -> Just TSurface
   RecordImplicits _ -> Nothing
   AppHead _ -> Just TSurface
@@ -2042,6 +2065,7 @@ operandTypes o = case o of
   ConstructorRecursiveArguments a -> [(a, TName)]
   -- The spine, and the name to claim the next domain hole under.
   ApplyNext f x -> [(f, TCore), (x, TName)]
+  NextArgumentName f -> [(f, TCore)]
   ExpandImplicits a -> [(a, TSurface)]
   RecordImplicits a -> [(a, TSurface)]
   AppHead a    -> [(a, TSurface)]
@@ -2638,6 +2662,7 @@ opKeyword o = case o of
   ConstructorArguments _ -> "constructor-arguments"
   ConstructorRecursiveArguments _ -> "constructor-recursive-arguments"
   ApplyNext _ _ -> "apply-next"
+  NextArgumentName _ -> "next-argument-name"
   ExpandImplicits _ -> "expand-implicits"
   RecordImplicits _ -> "record-implicits"
   AppHead _ -> "app-head"

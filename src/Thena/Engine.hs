@@ -1928,6 +1928,24 @@ perform instr rest m = case operation instr of
         (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
         (Right ty, _, n1) -> claimNext h i ty m { names = n1 }
 
+  -- **The word the next argument position was declared with** (MS12 phase
+  -- 345). The same two steps 'ApplyNext' takes before it claims — infer the
+  -- spine's type, reduce it to a Π — and then the binder's word instead of its
+  -- domain, so the two cannot come to disagree about which position is next.
+  --
+  -- **It fails where 'ApplyNext' would fail**, and with the same refusal: a
+  -- head that takes no further argument has no word to answer, and a rule that
+  -- asks for one was going to claim one in the next instruction.
+  NextArgumentName hd ->
+    case term hd of
+      Left r  -> failure r m
+      Right h -> case infer (globals m) contextAt (names m) h of
+        (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
+        (Right ty, _, n1) ->
+          case whnf (globals m) (focusContext (development m)) ty of
+            Pi (Ident w) _ _ -> produce (VName (rootName w)) m { names = n1 }
+            _                -> failure TooManyArgumentsForHead m { names = n1 }
+
   -- **The application a surface @elim D …@ means** (MS4 phase 49e). §3.7
   -- generates a wrapper for the eliminator, so the node reads as an ordinary
   -- name-headed spine and elaboration needs no eliminator case: the clause is
@@ -2918,6 +2936,19 @@ perform instr rest m = case operation instr of
     -- where @make-apply@ carried the type down its own loop, and it is what
     -- lets the walk live in a rule body, which has nowhere to keep a type
     -- between two instructions.
+    -- **THE HOLE IS CLAIMED UNDER THE NAME THE CALLER MINTED, AND THE CALLER
+    -- IS WHERE THE DECLARED WORD IS READ — MS12 PHASE 345.** His ruling of
+    -- 2026-11-24 is that an inserted argument keeps the word the declaration
+    -- gave its position, and the word is on the domain's binder: a signature
+    -- @∀ {M : LC} -> …@ is stored as @Pi (Ident "M") …@. **Reading it here and
+    -- overriding the operand was built first and does not work**: the name is
+    -- the caller's /handle/ on the hole, which @spine-arguments@ reaches with
+    -- @goto-named@ in the next instruction, so a hole claimed under a word the
+    -- rule did not choose is a hole the rule cannot find — it broke the
+    -- prelude's first spine. 'NextArgumentName' is the read the rule makes
+    -- instead, one instruction earlier, so the word and the handle are the
+    -- same word. 'saturate' below reads the binder itself, and may: it claims
+    -- the whole telescope and hands nothing back.
     claimNext hd i ty m' =
       case whnf (globals m') (focusContext (development m')) ty of
         Pi _ dom _ ->

@@ -30,13 +30,13 @@ thena spine> :show
   ) in
   second
 thena spine> :choices
-25  any-of (standard.thena.rules:457)   untried: any-of (standard.thena.rules:458)
-24  try-in-scope (standard.thena.rules:43)   untried: fit-in-scope (standard.thena.rules:63), attack (standard.thena.rules:71), abandon (standard.thena.rules:77), prove (standard.thena.rules:151)
-21  intro (standard.thena.rules:80)   untried: solve (standard.thena.rules:114), regret (standard.thena.rules:117), prove (standard.thena.rules:153)
-18  intro (standard.thena.rules:80)   untried: solve (standard.thena.rules:114), regret (standard.thena.rules:117), prove (standard.thena.rules:153)
-15  intro (standard.thena.rules:80)   untried: solve (standard.thena.rules:114), regret (standard.thena.rules:117), prove (standard.thena.rules:153)
-12  intro (standard.thena.rules:80)   untried: solve (standard.thena.rules:114), regret (standard.thena.rules:117), prove (standard.thena.rules:153)
-10  attack (standard.thena.rules:71)   untried: abandon (standard.thena.rules:77), prove (standard.thena.rules:151)
+25  any-of (standard.thena.rules:461)   untried: any-of (standard.thena.rules:462)
+24  try-in-scope (standard.thena.rules:43)   untried: fit-in-scope (standard.thena.rules:63), attack (standard.thena.rules:73), abandon (standard.thena.rules:79), prove (standard.thena.rules:153)
+21  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), prove (standard.thena.rules:155)
+18  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), prove (standard.thena.rules:155)
+15  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), prove (standard.thena.rules:155)
+12  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), prove (standard.thena.rules:155)
+10  attack (standard.thena.rules:73)   untried: abandon (standard.thena.rules:79), prove (standard.thena.rules:153)
 thena spine> :abandon
 abandoned second
 thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B

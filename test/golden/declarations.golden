@@ -8,7 +8,7 @@ already equal
 already equal
 thena spine> :show one
 one : Nat
-one = let refined = zero : Nat in let a = refined : Nat in let refined1 = succ a : Nat in let goal = refined1 : Nat in goal
+one = let refined = zero : Nat in let x = refined : Nat in let refined1 = succ x : Nat in let goal = refined1 : Nat in goal
 thena spine> declare idn : Nat -> Nat ; idn = \ n -> n
 solved: ?ℓ29
 solved: ?ℓ31
@@ -61,11 +61,11 @@ idty : ∀ {A : Type₀} -> A -> A
 idty = let goal = λ (A : Type₀) (x : A) -> let refined = x : A in let goal1 = refined : A in goal1 : ∀ (A : Type₀) -> A -> A in goal
 thena spine> declare z : Nat ; z = idty zero
 solved: ?ℓ193
-solved: a
+solved: A
 already equal
 thena spine> :show z
 z : Nat
-z = let a = Nat : Type₀ in let refined = zero : Nat in let a1 = refined : a in let refined1 = idty a a1 : a in let goal = refined1 : Nat in goal
+z = let A = Nat : Type₀ in let refined = zero : Nat in let a = refined : A in let refined1 = idty A a : A in let goal = refined1 : Nat in goal
 thena spine> declare z2 : Nat ; z2 = idty {Nat} zero
 solved: ?ℓ208
 already equal
@@ -73,7 +73,7 @@ already equal
 already equal
 thena spine> :show z2
 z2 : Nat
-z2 = let refined = Nat : Type₀ in let a = refined : Type₀ in let refined1 = zero : Nat in let a1 = refined1 : a in let refined2 = idty a a1 : a in let goal = refined2 : Nat in goal
+z2 = let refined = Nat : Type₀ in let A = refined : Type₀ in let refined1 = zero : Nat in let a = refined1 : A in let refined2 = idty A a : A in let goal = refined2 : Nat in goal
 thena spine> declare wri : Nat -> Nat ; wri = \ (n : Nat) -> n
 solved: ?ℓ225
 solved: ?ℓ227

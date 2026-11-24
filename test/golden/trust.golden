@@ -17,7 +17,7 @@ already equal
 solved: ?ℓ245
 solved: ?ℓ256
 already equal
-solved: A
+solved: A1
 solved: ?ℓ243
 thena spine> :trust none
 trust: no trust
@@ -35,7 +35,7 @@ already equal
 solved: ?ℓ298
 solved: ?ℓ311
 already equal
-solved: A
+solved: A1
 solved: ?ℓ296
 the trust level refused it
 trust: no trust
@@ -58,7 +58,7 @@ already equal
 solved: ?ℓ355
 solved: ?ℓ368
 already equal
-solved: A
+solved: A1
 solved: ?ℓ353
 thena spine> :trust none
 trust: no trust
