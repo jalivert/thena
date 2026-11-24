@@ -86,7 +86,7 @@ twice s = concat s s
 **A rule is searched; a function is called.** A rule's clauses are alternatives:
 the first that matches runs, and if it fails the next is tried, so a rule can
 leave a choice point. A function makes no choice point, is never offered by
-`:matches`, and is never run by `prove`.
+`:matches`, and is never run by `step`.
 
 **A declaration begins in column 1**, and a block's lines line up under its
 first instruction. That is what lets a function need no keyword of its own:
@@ -96,7 +96,7 @@ rule base indented where
 
 rule f :-
   do say "hi"
-     prove                -- lined up under say: still the rule above
+     step                -- lined up under say: still the rule above
  g x = concat x x         -- column 2: neither part of f nor a new declaration
 ```
 

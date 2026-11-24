@@ -164,10 +164,10 @@ checks =
     -- **A standalone choice-points pane is reachable from the boundary** (his
     -- ruling, 2026-11-16), and the one thing worth asserting is that it is not
     -- always empty: at a settled prompt there is nothing to retry, so this
-    -- check drives the session two instructions into @prove@ and stops there,
+    -- check drives the session two instructions into @step@ and stops there,
     -- where a 'Thena.Engine.Choice' frame is standing.
   , \s -> want "choicesView reaches a live choice point"
-            (case choicesView (advance s [":step 2", "prove"]) of
+            (case choicesView (advance s [":step 2", "step"]) of
                c : _ -> choiceViewId c > 0
                           && not (null (altViewName (choiceViewRunning c)))
                           && not (null (choiceViewUntried c))

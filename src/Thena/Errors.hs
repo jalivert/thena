@@ -417,7 +417,7 @@ data FailReason
     -- ^ @goal@ where nothing is written down (§4.5, phase 24). The top of a
     -- development claims nothing, so it has no goal to read
   | NoRuleMatched
-    -- ^ @prove@ found no rule whose head passes at the focus (§7.3). It says
+    -- ^ @step@ found no rule whose head passes at the focus (§7.3). It says
     -- only that, and no more: the focus is what it is about, and 'Stuck'
     -- carries the whole machine, so @:where@ still says where (§7.5).
     --

@@ -120,7 +120,7 @@ genBlocky n
       frequency
         [ (2, leaf)
         , (3, BLet <$> bindings <*> genBlocky (n - 1))
-        , (1, BDo <$> listOf1 (elements ["attack", "intro", "prove", "back"]))
+        , (1, BDo <$> listOf1 (elements ["attack", "intro", "step", "back"]))
         ]
   where
     leaf = Leaf <$> elements ["a", "b", "f a", "f a b", "zero"]

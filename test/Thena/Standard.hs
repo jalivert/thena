@@ -304,7 +304,7 @@ expectedFunctions =
 -- | Search: every rule whose head passes, in definition order (MS4 phase 41).
 --
 -- @prove@ is a rule and no longer a special case in the driver — his ruling,
--- 2026-09-01. The op under it is @prim-prove@, the good word having gone to the
+-- 2026-09-01. The op under it is @prim-step@, the good word having gone to the
 -- rule (phase 23b's convention).
 --
 -- **Two clauses, and that is how the rule language spells a disjunction** —
@@ -315,10 +315,10 @@ expectedFunctions =
 -- empty head would have offered it in the core fragment, where nothing can
 -- act at all.
 proveRule :: Rule
-proveRule = aRule (rootName "prove") [] [FocusIsHole] [Do Prove]
+proveRule = aRule (rootName "step") [] [FocusIsHole] [Do Dispatch]
 
 proveGuess :: Rule
-proveGuess = aRule (rootName "prove") [] [FocusIsGuess] [Do Prove]
+proveGuess = aRule (rootName "step") [] [FocusIsGuess] [Do Dispatch]
 
 -- | Elaboration (MS4 phase 41): one clause over the large instruction.
 --

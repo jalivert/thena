@@ -158,25 +158,25 @@ matchTests =
 
     , testCase "a guess at a non-Π offers only solve and regret" $
         matching emptyGlobals (guessAt type0)
-          @?= ["rename", "solve", "regret", "prove"] ++ walkers
+          @?= ["rename", "solve", "regret", "step"] ++ walkers
 
       -- **Two @intro@ rows, not one** (MS12 phase 326): the nullary pair and the
       -- @intro "a"@ pair his ask of 2026-11-20 added. A row per name and arity,
       -- and every matching rule is always offered.
     , testCase "a guess at a Π offers intro as well" $
         matching emptyGlobals (guessAt (arrow type0 type0))
-          @?= ["intro", "intro", "rename", "solve", "regret", "prove"] ++ walkers
+          @?= ["intro", "intro", "rename", "solve", "regret", "step"] ++ walkers
 
       -- §8: "Head matching runs whnf. A goal typed @id Type (Nat → Nat)@ is a Π
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
     , testCase "a goal type that only reduces to a Π still matches" $
         matching withArrow (guessAt (Global (rootName "Arrow") []))
-          @?= ["intro", "intro", "rename", "solve", "regret", "prove"] ++ walkers
+          @?= ["intro", "intro", "rename", "solve", "regret", "step"] ++ walkers
 
     , testCase "and does not, in an environment where it does not unfold" $
         matching emptyGlobals (guessAt (Global (rootName "Arrow") []))
-          @?= ["rename", "solve", "regret", "prove"] ++ walkers
+          @?= ["rename", "solve", "regret", "step"] ++ walkers
 
       -- The one test that must NOT reduce: whnf δ-reduces a term-level let
       -- away (§5.1), so asking about the reduced type would make GoalTypeIsLet
@@ -184,7 +184,7 @@ matchTests =
       -- 'Thena.Engine.introduce'.
     , testCase "a goal type written as a let offers intro" $
         matching emptyGlobals (guessAt (Let (Ident "x") type0 type1 (close var type0)))
-          @?= ["intro", "intro", "rename", "solve", "regret", "prove"] ++ walkers
+          @?= ["intro", "intro", "rename", "solve", "regret", "step"] ++ walkers
 
       -- The invariant checked by different code from the code that maintains
       -- it: the head says @intro@ applies, so @intro@ must actually apply. It
@@ -194,7 +194,7 @@ matchTests =
         let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
          in do
               nameOf `map` drain (matches expectedBase emptyGlobals cur)
-                @?= ["intro", "intro", "rename", "solve", "regret", "prove"] ++ walkers
+                @?= ["intro", "intro", "rename", "solve", "regret", "step"] ++ walkers
               ranOk (machineAt cur [Do (Ops.IntroLet Nothing)])
 
     , testCase "where the Π clause is offered, intro succeeds" $
@@ -255,7 +255,7 @@ iteratorTests =
       -- rule is added.
     , testCase "an empty iterator has nothing" $
         let it = matches expectedBase emptyGlobals (guessAt type0)
-         in case drop (length (["rename", "solve", "regret", "prove"] ++ walkers)) (drain it) of
+         in case drop (length (["rename", "solve", "regret", "step"] ++ walkers)) (drain it) of
               [] -> pure ()
               rs -> assertFailure ("expected no more, got " ++ show (map nameOf rs))
 
@@ -560,7 +560,7 @@ producesTests =
         -- development, while a @call@ produces whatever the clause that ran
         -- handed back with @return@. So the call here is to 'returningRule',
         -- which does exactly that and nothing else.
-      , ("prim-prove",  e, hole,    [],            Ops.Prove)
+      , ("prim-step",  e, hole,    [],            Ops.Dispatch)
       , ("call",        e, hole,    [],            Ops.Call "gives" [])
         -- **A λ** (MS4 phase 49b): every other shape this op once handled is a
         -- clause of @elaborate@ now, and it refuses those — so the term has to
@@ -832,7 +832,7 @@ everyHoleRule =
     -- components are one. It is therefore in this list and in every guess
     -- listing below, and only the core fragment loses it.
   , "rename", "eliminate-core"
-  , "eliminate-generalising-core", "prove", "fill"
+  , "eliminate-generalising-core", "step", "fill"
   , "unify-refine-core", "apply-core"
   , "fit-core", "fit-core"
     -- The asking half of the three component tactics (MS5 phase 62b). They

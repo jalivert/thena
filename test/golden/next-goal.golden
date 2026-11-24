@@ -5,17 +5,17 @@ thena spine> next
 thena spine> :show
 ▶ let ? second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B in
   second
-thena spine> prove
+thena spine> step
 chose 10: try-in-scope
 backtracking to 10: fit-in-scope
 backtracking to 10: attack
-thena spine> prove
+thena spine> step
 chose 12: intro
-thena spine> prove
+thena spine> step
 chose 15: intro
-thena spine> prove
+thena spine> step
 chose 18: intro
-thena spine> prove
+thena spine> step
 chose 21: intro
 thena spine> next
 thena spine> :show
@@ -28,7 +28,7 @@ thena spine> :show
     second1
   ) in
   second
-thena spine> prove
+thena spine> step
 chose 24: try-in-scope
 chose 25: any-of
 thena spine> next
@@ -64,20 +64,20 @@ thena spine> qed
 second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B   ∎
 thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
 proving mp : ∀ (A : Type₀) (B : Type₀) -> A -> (A -> B) -> B
-thena spine> prove
+thena spine> step
 chose 38: try-in-scope
 backtracking to 38: fit-in-scope
 backtracking to 38: attack
-thena spine> prove
+thena spine> step
 chose 40: intro
-thena spine> prove
+thena spine> step
 chose 43: intro
-thena spine> prove
+thena spine> step
 chose 46: intro
-thena spine> prove
+thena spine> step
 chose 49: intro
 thena spine> next
-thena spine> prove
+thena spine> step
 chose 52: try-in-scope
 chose 53: any-of
 backtracking to 53: any-of
@@ -92,12 +92,12 @@ chose 57: any-of
 chose 59: fit-core
 already equal
 thena spine> next
-thena spine> prove
+thena spine> step
 chose 61: try-in-scope
 chose 62: any-of
 backtracking to 62: any-of
 chose 63: any-of
-thena spine> prove
+thena spine> step
 chose 64: solve
 thena spine> next
 thena spine> solve

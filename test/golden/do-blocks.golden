@@ -9,8 +9,7 @@ opened Nat
 thena spine> :theorem t : Nat
 proving t : Nat
 thena spine> elaborate surface`do { attack ; prove }`
-chose 18: solve
-backtracking to 18: regret
+do block 1, instruction 2: no rule or function is called prove
 thena spine> :show
 ▶ let ? t : Nat in
   t

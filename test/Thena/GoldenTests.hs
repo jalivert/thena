@@ -285,7 +285,7 @@ tests =
           -- Three rules match a guess; two are nullary, so dispatch is a real
           -- choice and the machine says which it took.
         , ":matches"
-        , "prove"
+        , "step"
         , ":show"
         , ":choices"
           -- Deterministic commands in between. They push no frame (the peek),
@@ -316,7 +316,7 @@ tests =
           -- **And a suspended proof keeps its own**, which is what makes going
           -- away to prove a side lemma safe: `:suspend` snapshots before it
           -- clears, and a snapshot is @(Exec, Development, [Development])@.
-        , "prove"
+        , "step"
         , ":choices"
         , ":suspend"
         , ":theorem lemma : Type\8321"
@@ -1720,7 +1720,7 @@ tests =
         , ":quit"
         ]
     , script
-        "prove-in-scope"
+        "step-in-scope"
         [ -- **A bare @prove@ can close a goal from the context now**, which is
           -- what putting @try-in-scope@ above @attack@ bought (his instruction
           -- of 2026-11-23). The first five @prove@s are @attack@ and four
@@ -1733,13 +1733,13 @@ tests =
           -- attack, solve, regret cycle that never came back.
           ":step 600"
         , ":theorem second : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> B -> B"
-        , "prove"
-        , "prove"
-        , "prove"
-        , "prove"
-        , "prove"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
         , "goto second1"
-        , "prove"
+        , "step"
         , ":show"
         , ":choices"
         , ":abandon"
@@ -1750,16 +1750,16 @@ tests =
           -- the three moves and the final @solve@ are typed by hand because
           -- nothing in the machine focuses the next goal.
         , ":theorem mp : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> (A -> B) -> B"
-        , "prove"
-        , "prove"
-        , "prove"
-        , "prove"
-        , "prove"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
         , "goto mp1"
-        , "prove"
+        , "step"
         , "goto a"
-        , "prove"
-        , "prove"
+        , "step"
+        , "step"
         , "goto-root"
         , "solve"
         , "qed"
@@ -1767,7 +1767,7 @@ tests =
         ]
       -- **The machine focuses the next goal itself** (@~g3qnw@, his ruling of
       -- 2026-11-23: derive it, do not keep a queue). Every @goto@ in
-      -- @prove-in-scope@ above is a @next@ here and nothing else changes, so
+      -- @step-in-scope@ above is a @next@ here and nothing else changes, so
       -- the two transcripts together are the before and after.
       --
       -- Three things are pinned, and they are the definition.
@@ -1792,14 +1792,14 @@ tests =
         , ":theorem second : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> B -> B"
         , "next"
         , ":show"
-        , "prove"
-        , "prove"
-        , "prove"
-        , "prove"
-        , "prove"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
         , "next"
         , ":show"
-        , "prove"
+        , "step"
         , "next"
         , ":show"
         , "solve"
@@ -1813,16 +1813,16 @@ tests =
           -- without knowing its name, which is the whole point — @a@ was minted
           -- by the machine, so no rule base could have contained it.
         , ":theorem mp : \8704 (A : Type\8320) -> \8704 (B : Type\8320) -> A -> (A -> B) -> B"
-        , "prove"
-        , "prove"
-        , "prove"
-        , "prove"
-        , "prove"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
+        , "step"
         , "next"
-        , "prove"
+        , "step"
         , "next"
-        , "prove"
-        , "prove"
+        , "step"
+        , "step"
         , "next"
         , "solve"
         , "qed"

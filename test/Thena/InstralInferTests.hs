@@ -387,7 +387,7 @@ functionsAreFunctions =
 
       -- **A rule is unchanged**: several clauses, searched.
     , loads "…and a rule may still have as many clauses as it likes"
-        "rule g :- when focus-is-hole do prim-prove\nrule g :- when focus-is-guess do prim-solve"
+        "rule g :- when focus-is-hole do prim-step\nrule g :- when focus-is-guess do prim-solve"
 
       -- **The positive half, and it needed no engine code.** A call to a
       -- function leaves the stack with no live decision on it — before the
@@ -537,7 +537,7 @@ destructuringRuns =
       -- not from the list pattern. A mutation found that; the fixture now has
       -- no second reason to fail.
     , testCase "a pattern that cannot fit the op's result is a clash" $
-        clashAt (pairs ++ "rule go :- do p = mk \"l\" \"r\" ; [x] = p ; prim-prove")
+        clashAt (pairs ++ "rule go :- do p = mk \"l\" \"r\" ; [x] = p ; prim-step")
 
       -- **An ASK's answer lands through the pattern too**, and this is the one
       -- shape that can tell the difference: a compound pattern is refused by
@@ -565,7 +565,7 @@ destructuringRuns =
       -- @ms5\/CLOSEOUT.md@ 28's class exactly: a message must identify the
       -- thing it is about uniquely.
     , testCase "…reported against the instruction, not a parameter" $
-        siteOf (pairs ++ "rule go :- do p = mk \"l\" \"r\" ; [x] = p ; prim-prove")
+        siteOf (pairs ++ "rule go :- do p = mk \"l\" \"r\" ; [x] = p ; prim-step")
           @?= Just (InBody (rootName "go") 1)
     ]
   where
@@ -801,14 +801,14 @@ spliceTemplates =
       -- **A splice must be a term**, and that is known when the file loads,
       -- because the hole's type comes from the grammar position.
     , testCase "a splice that is not a term is refused at load" $
-        case load "rule go :- do n = fresh-name \"q\" ; u = resolve-core core`${n} -> ${n}` ; prim-prove" of
+        case load "rule go :- do n = fresh-name \"q\" ; u = resolve-core core`${n} -> ${n}` ; prim-step" of
           BasesIllTyped (Clash{} : _) -> pure ()
           other -> assertFailure ("expected a type error, got " ++ show other)
 
       -- …and a splice naming nothing is caught by @validate@, which sees inside
       -- a written term now for the same reason it sees inside a list literal.
     , testCase "a splice naming nothing is refused at load" $
-        case loadRaw "rule base s where\nrule go :- do h = here ; u = resolve-core core`${h} -> ${nope}` ; prim-prove\n" of
+        case loadRaw "rule base s where\nrule go :- do h = here ; u = resolve-core core`${h} -> ${nope}` ; prim-step\n" of
           RuleFileRefused _ (RuleIllFormed es)
             | [UnboundInRule _ _ "nope" _] <- es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
@@ -896,7 +896,7 @@ spliceTemplates =
 
       -- @fresh-universe@ is a function over the two now; its word is unchanged.
     , testCase "…and fresh-universe still reads as it always did" $ do
-        r <- loadWithStandard "rule go :- do u = fresh-universe ; t = resolve-core core`${u} -> ${u}` ; prim-prove"
+        r <- loadWithStandard "rule go :- do u = fresh-universe ; t = resolve-core core`${u} -> ${u}` ; prim-step"
         case r of
           BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
@@ -915,19 +915,19 @@ spliceTemplates =
       -- An unfilled name splice is a load-time scope error, exactly as an
       -- unfilled term one is — 'Thena.Instral.Ops.refsIn' sees both.
     , testCase "a name splice naming nothing is refused at load" $
-        case loadRaw "rule base s where\nrule go :- do d = goal ; t = resolve-core core`\955 (${nope} : ${d}) -> ${d}` ; prim-prove\n" of
+        case loadRaw "rule base s where\nrule go :- do d = goal ; t = resolve-core core`\955 (${nope} : ${d}) -> ${d}` ; prim-step\n" of
           RuleFileRefused _ (RuleIllFormed es)
             | [UnboundInRule _ _ "nope" _] <- es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
     ]
   where
     loadsWith what body = testCase what $
-      case load ("rule go :- do " ++ body ++ " ; prim-prove") of
+      case load ("rule go :- do " ++ body ++ " ; prim-step") of
         BasesLoaded _ _ -> pure ()
         other -> assertFailure ("expected a load, got " ++ show other)
 
     clashesWith what body = testCase what $
-      case load ("rule go :- do " ++ body ++ " ; prim-prove") of
+      case load ("rule go :- do " ++ body ++ " ; prim-step") of
         BasesIllTyped (Clash{} : _) -> pure ()
         other -> assertFailure ("expected a type error, got " ++ show other)
 
@@ -1062,7 +1062,7 @@ noKeyword =
       -- declaration beginning @signature@ used to be a keyword and can now only
       -- be a name.
     , loads "signature is an ordinary name for a rule"
-        "rule signature :- do prim-prove"
+        "rule signature :- do prim-step"
 
     , loads "…for a function"
         "signature s = concat s s"
@@ -1195,7 +1195,7 @@ illTyped =
       -- dispatch chooses between them at run time and a caller cannot know
       -- which it got.
     , refused "two clauses that disagree about a parameter"
-        "rule two t :- when (surface-is-name t) do prim-prove\n\
+        "rule two t :- when (surface-is-name t) do prim-step\n\
         \rule two t :- do prim-try t"
         [ Clash (InBody (rootName "two") 0) TCore TSurface ]
 
@@ -1241,7 +1241,7 @@ wellTyped =
       -- whole program rather than one rule at a time.
     , accepted "a call to a rule written below it"
         "rule fine t :- do call later t\n\
-        \rule later t :- when (surface-is-name t) do prim-prove"
+        \rule later t :- when (surface-is-name t) do prim-step"
 
       -- **Recursion**: the one that would not terminate if a rule's signature
       -- had to be known before its own body was walked.
@@ -1259,7 +1259,7 @@ wellTyped =
       -- reason @alpha@'s one-argument clause is known when the bad call is
       -- checked is that a call draws an edge to every arity of its name.
     , testCase "a rule at the wrong arity says what it takes, whichever is walked first" $
-        load "rule zeta :- do alpha 1 2\nrule alpha x :- do prim-prove"
+        load "rule zeta :- do alpha 1 2\nrule alpha x :- do prim-step"
           @?= BasesIllTyped [Undefined (InBody (rootName "zeta") 0) "alpha" 2 [1]]
 
     , accepted "a rule that calls itself"
@@ -1344,13 +1344,13 @@ annotations =
       -- …and a signature that is simply the wrong type is still reported in the
       -- body, which is §6.5(a) — the author's own rule, local and clear.
     , testCase "that names the wrong type is refused in the body" $
-        load "f : Core -> ()\nrule f x :- when (surface-is-name x) do prim-prove"
+        load "f : Core -> ()\nrule f x :- when (surface-is-name x) do prim-step"
           @?= BasesIllTyped [Clash (InHead (rootName "f") 0) TSurface TCore]
 
       -- A signature is a claim about a callable, so a claim nothing answers is
       -- a mistake — most likely a typo or a changed arity.
     , testCase "for a callable nothing defines is refused" $
-        load "nobody : Core -> ()\nrule f :- do prim-prove"
+        load "nobody : Core -> ()\nrule f :- do prim-step"
           @?= BasesIllTyped [SignatureUnanswered (rootName "nobody") 1]
 
       -- **The arity is the arrow chain's**, so this signature is about @f@ at
@@ -1363,7 +1363,7 @@ annotations =
       -- noticed, because a collapsed signature is still a signature.
     , testCase "keeps its variables apart" $
         case load "ignore2 : a -> b -> ()\n\
-                  \rule ignore2 x y :- do prim-prove\n\
+                  \rule ignore2 x y :- do prim-step\n\
                   \rule use :- do h = here ; n = fresh-name \"k\" ; ignore2 h n" of
           BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
@@ -1381,14 +1381,14 @@ annotations =
       -- 'Thena.Instral.Infer.generalEnough' and was untested until now.
     , testCase "and a body may not force two of them together" $
         case load "pairUp : a -> a -> ()\n\
-                  \rule pairUp x y :- do prim-prove\n\
+                  \rule pairUp x y :- do prim-step\n\
                   \same : a -> b -> ()\n\
                   \rule same x y :- do pairUp x y" of
           BasesIllTyped (AnnotationTooGeneral _ _ : _) -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
     , testCase "is about one arity only" $
-        case load "f : Core -> ()\nrule f x :- do prim-try x\nrule f :- do prim-prove" of
+        case load "f : Core -> ()\nrule f x :- do prim-try x\nrule f :- do prim-step" of
           BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1399,7 +1399,7 @@ annotations =
       -- where the same name outside the lambda is a load error. Phase 68b added
       -- lambdas and the walk was not told.
     , testCase "an unbound name inside a lambda is a load error, like anywhere else" $
-        case load "rule go :- do g = \\ z -> concat z nosuchname ; prim-prove" of
+        case load "rule go :- do g = \\ z -> concat z nosuchname ; prim-step" of
           RuleFileRefused _ (RuleIllFormed es)
             | UnboundInRule (rootName "go") 0 "nosuchname" TString `elem` es -> pure ()
           other -> assertFailure ("expected an unbound name, got " ++ show other)
@@ -1407,13 +1407,13 @@ annotations =
       -- …and one that IS bound by the lambda is not reported, which is the
       -- half a walk that simply refused every lambda would get wrong.
     , testCase "and a name the lambda binds is not" $
-        case load "rule go :- do g = \\ z -> concat z z ; prim-prove" of
+        case load "rule go :- do g = \\ z -> concat z z ; prim-step" of
           BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- Nested one level down, so the walk has to recurse rather than peek.
     , testCase "and it looks inside a lambda inside a lambda" $
-        case load "rule go :- do g = \\ z -> (\\ w -> concat w deepermissing) ; prim-prove" of
+        case load "rule go :- do g = \\ z -> (\\ w -> concat w deepermissing) ; prim-step" of
           RuleFileRefused _ (RuleIllFormed es)
             | UnboundInRule (rootName "go") 0 "deepermissing" TString `elem` es -> pure ()
           other -> assertFailure ("expected an unbound name, got " ++ show other)
@@ -1467,7 +1467,7 @@ badSignatures =
     ]
   where
     refused label src want =
-      testCase label $ case load (src ++ "\nrule f x :- do prim-prove") of
+      testCase label $ case load (src ++ "\nrule f x :- do prim-step") of
         RuleFileRefused _ (RuleIllFormed es) | want `elem` es -> pure ()
         other -> assertFailure ("expected " ++ show want ++ ", got " ++ show other)
 
@@ -1499,18 +1499,18 @@ functions =
       -- the disagreement that is the mistake, and that is what used to be
       -- misparsed in silence.
     , testCase "and a declaration that does not line up is refused" $
-        case loadRaw "rule base i where\nrule f :- do prim-prove\n  rule g :- do prim-prove\n" of
+        case loadRaw "rule base i where\nrule f :- do prim-step\n  rule g :- do prim-step\n" of
           RuleFileRefused _ (RuleSyntaxError _) -> pure ()
           other -> assertFailure ("expected a syntax error, got " ++ show other)
 
     , testCase "…in either direction" $
-        case loadRaw "rule base i where\n  rule f :- do prim-prove\nrule g :- do prim-prove\n" of
+        case loadRaw "rule base i where\n  rule f :- do prim-step\nrule g :- do prim-step\n" of
           RuleFileRefused _ (RuleSyntaxError _) -> pure ()
           other -> assertFailure ("expected a syntax error, got " ++ show other)
 
       -- **A file indented as a whole is a file**, which is the half that is new.
     , testCase "…but a file that lines up at another column loads" $
-        case loadRaw "rule base i where\n  rule f :- do prim-prove\n  rule g :- do prim-prove\n" of
+        case loadRaw "rule base i where\n  rule f :- do prim-step\n  rule g :- do prim-step\n" of
           BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1519,7 +1519,7 @@ functions =
       -- rules, @prove@ would run them. 'Thena.Rules.baseFunctions' is why they
       -- are a separate list.
     , testCase "is not listed among the rules" $
-        case load "twice x = concat x x\nrule go :- do prim-prove" of
+        case load "twice x = concat x x\nrule go :- do prim-step" of
           BasesLoaded bs _ -> map (map ruleNameOf . baseRules) bs @?= [["go"]]
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1577,11 +1577,11 @@ functions =
       -- place a bare word went somewhere else — so this used to say /no rule is
       -- called false/.
     , testCase "and a boolean on the right of an = is the literal" $
-        case load "rule go :- do b = false ; prim-prove" of
+        case load "rule go :- do b = false ; prim-step" of
           BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     , testCase "and a literal can be bound to a name at last" $
-        case load "rule go :- do p = (1, true) ; l = [1, 2, 3] ; n = 42 ; prim-prove" of
+        case load "rule go :- do p = (1, true) ; l = [1, 2, 3] ; n = 42 ; prim-step" of
           BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
@@ -1661,11 +1661,11 @@ lambdas =
       -- Without it a lambda would be a hole in the type system that anything
       -- could be hidden in.
     , testCase "has its body type checked too" $
-        load "rule go :- do f = \\ z -> concat z 3 ; prim-prove"
+        load "rule go :- do f = \\ z -> concat z 3 ; prim-step"
           @?= BasesIllTyped [Clash (InBody (rootName "go") 0) TString TInt]
 
     , testCase "whose body leaves nothing is refused" $
-        case load "rule go :- do d = \\ s -> prim-try s ; prim-prove" of
+        case load "rule go :- do d = \\ s -> prim-try s ; prim-step" of
           RuleFileRefused _ (RuleIllFormed es)
             | FunctionLeavesNothing "λ" `elem` es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)

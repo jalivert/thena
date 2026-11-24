@@ -242,7 +242,7 @@ choiceFixtures =
   ]
   where
     paused =
-      [":theorem t : \8704 (A : Type\8320) -> A -> A", "attack", ":step 2", "prove"]
+      [":theorem t : \8704 (A : Type\8320) -> A -> A", "attack", ":step 2", "step"]
 
 -- | 'choicesView' against @:choices@, which is 'Thena.Engine.choicePoints' plus
 -- 'Thena.Render.renderChoices' and no part of this module.
@@ -309,7 +309,7 @@ ruleRefusalCases =
     -- given, and 'Thena.Instral.Concrete.RawSignature' carries no position to
     -- give it more.
   , refusal "two signatures for one name" "d.thena.rules"
-      "rule base i where\nf : Core -> ()\nf : Surface -> ()\nrule f x :- do prim-prove\n"
+      "rule base i where\nf : Core -> ()\nf : Surface -> ()\nrule f x :- do prim-step\n"
       RuleTypeWrong 1 Nothing
   ]
   where

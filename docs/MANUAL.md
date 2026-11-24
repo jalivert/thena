@@ -538,9 +538,9 @@ A hypothesis whose type is not a function is refused at once.
 
 **These two are the tactics in the shipped base that close a goal without being
 told what to close it with, and they are the first two the engine tries**, so a
-bare `prove` reaches them before anything else. The order matters: `attack`
+bare `step` reaches them before anything else. The order matters: `attack`
 always applies at a hole and never fails, so with `attack` ahead of them a
-`prove` at a goal that a hypothesis closes outright would never get to either.
+`step` at a goal that a hypothesis closes outright would never get to either.
 
 ```
 thena spine> try-core core`x`
@@ -935,7 +935,7 @@ impossible is not posted at all; you are shown only what is left to do.
 
 Thena has a small base of named rules, and it can pick one for you.
 
-`:matches` lists the rules that apply where you are standing. `prove` runs one.
+`:matches` lists the rules that apply where you are standing. `step` runs one.
 
 ```
 thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
@@ -947,7 +947,7 @@ intro ‹n› : Name -> ()
 rename ‹n› : Name -> ()
 solve : ()
 regret : ()
-prove : ()
+step : ()
 claim ‹ty› : Core -> ()
 assume ‹ty› : Core -> ()
 quantify ‹ty› : Core -> ()
@@ -990,7 +990,7 @@ without-hypotheses ‹list› : List a -> List (a, List b)
 run-block ‹t› : Surface -> ()
 intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
-thena spine> prove
+thena spine> step
 chose 5383: intro
 ```
 
@@ -999,7 +999,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-5383  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), prove (standard.thena.rules:155)
+5383  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), step (standard.thena.rules:163)
 ```
 
 Each alternative names **the file and line its clause is written at**. That is
@@ -1020,7 +1020,7 @@ thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-5383  regret (standard.thena.rules:119)   untried: prove (standard.thena.rules:155)
+5383  regret (standard.thena.rules:119)   untried: step (standard.thena.rules:163)
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -1040,7 +1040,7 @@ line left is yours to reach with `retry`, and nothing reaches it for you:
 ```
 thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
 proving t : ∀ (A : Type₀) -> A -> A
-thena spine> prove
+thena spine> step
 chose 4730: try-in-scope
 backtracking to 4730: fit-in-scope
 backtracking to 4730: attack
@@ -1051,7 +1051,7 @@ stuck: already at the root
 ```
 
 `regret` took the guess back off and `back` had nothing left to pop. Without the
-boundary, that `back` would have taken `prove`'s untried alternatives and put the
+boundary, that `back` would have taken `step`'s untried alternatives and put the
 guess back — a navigation command undoing the line before it.
 
 Nothing is forbidden: `retry 685` still takes it. The point is that crossing out
@@ -1084,8 +1084,55 @@ abandon : ()
 rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
 eliminate-generalising-core ‹t› : Core -> ()
-prove : ()
-…
+step : ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 ```
 
 `:rules` is the other half of the picture and it is still per clause: it lists
@@ -2296,7 +2343,7 @@ language and elaborated on load.
 | `cross type` / `cross val` | move into a term |
 | `fun` `arg` `dom` `cod` `val` `type` `body` `motive` `target` `claimed` `actual` | descend into a field |
 | `param ‹n›` `method ‹n›` `index ‹n›` `arg ‹n›` | descend into a numbered field |
-| `prove` | let the rule engine choose and run a rule |
+| `step` | let the rule engine choose and run a rule |
 | `retry` / `retry ‹n›` | backtrack to a choice point |
 | `data ‹D› … where { … }` | declare an inductive family |
 | `declare ‹sig› ; ‹equation›` | elaborate a surface declaration |

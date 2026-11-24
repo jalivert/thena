@@ -146,34 +146,34 @@ peekTests =
     [ -- Prolog's determinism detection: one candidate costs a two-field frame
       -- and no snapshot.
       testCase "a deterministic dispatch builds a Call, not a Choice" $ do
-        let m = ranTo (machine (only works) hole [Do Ops.Prove])
+        let m = ranTo (machine (only works) hole [Do Ops.Dispatch])
         choicePoints m @?= []
         isGuess m @?= True
 
     , testCase "and says nothing, because there was no decision" $
-        fst (runOut (machine (only works) hole [Do Ops.Prove])) @?= []
+        fst (runOut (machine (only works) hole [Do Ops.Dispatch])) @?= []
 
     , testCase "an ambiguous dispatch builds a Choice, and says so" $ do
         let base = bases [works, fails]
-            (msgs, _) = runOut (machine base hole [Do Ops.Prove])
+            (msgs, _) = runOut (machine base hole [Do Ops.Dispatch])
         msgs @?= ["chose 1000: works"]
 
       -- §7.3, DECIDED 2026-08-20: kept on success, Prolog-style, so the user
       -- can ask for a different solution after one has been found.
     , testCase "the frame survives the program running out" $
         map (map altRule . pointAlts)
-            (choicePoints (ranTo (machine (bases [works, fails]) hole [Do Ops.Prove])))
+            (choicePoints (ranTo (machine (bases [works, fails]) hole [Do Ops.Dispatch])))
           @?= [[rootName "fails"]]
 
       -- No Choice frame ever exists without a live alternative (§7.3): taking
       -- the last one demotes the frame on the spot, so "that choice is
       -- exhausted" is a state that cannot arise.
     , testCase "taking the last alternative leaves no choice point" $
-        choicePoints (ranTo (machine (bases [fails, works]) hole [Do Ops.Prove]))
+        choicePoints (ranTo (machine (bases [fails, works]) hole [Do Ops.Dispatch]))
           @?= []
 
     , testCase "no rule at all is a definite failure, not a suspension" $
-        case snd (runOut (machine (bases []) hole [Do Ops.Prove])) of
+        case snd (runOut (machine (bases []) hole [Do Ops.Dispatch])) of
           Left NoRuleMatched -> pure ()
           other              -> assertFailure ("expected NoRuleMatched, got " ++ show other)
     ]
@@ -187,7 +187,7 @@ backtrackTests =
   testGroup
     "backtracking"
     [ testCase "a failing alternative is followed by the next one" $ do
-        let (msgs, out) = runOut (machine (bases [fails, works]) hole [Do Ops.Prove])
+        let (msgs, out) = runOut (machine (bases [fails, works]) hole [Do Ops.Dispatch])
         msgs @?= ["chose 1000: fails", "backtracking to 1000: works"]
         case out of
           Right m -> isGuess m @?= True
@@ -196,7 +196,7 @@ backtrackTests =
       -- The whole point of 'saved': a body that has already changed the
       -- development needs no cleanup, because the snapshot restores it (§7.2).
     , testCase "and what the failing one changed is undone first" $ do
-        let m = ranTo (machine (bases [messes, fails, works]) hole [Do Ops.Prove])
+        let m = ranTo (machine (bases [messes, fails, works]) hole [Do Ops.Dispatch])
         -- @messes@ attacked and then failed; @fails@ failed; @works@ attacked.
         -- One attack deep, not two, which is what says @saved@ was restored.
         isGuess m @?= True
@@ -208,11 +208,11 @@ backtrackTests =
       -- §7.4: the counter keeps counting across a rewind. If it were rolled
       -- back, a retried branch would hand out names the abandoned one used.
     , testCase "the name counter is not rewound" $ do
-        let m = ranTo (machine (bases [messes, works]) hole [Do Ops.Prove])
+        let m = ranTo (machine (bases [messes, works]) hole [Do Ops.Dispatch])
         (names m > 1000) @?= True
 
     , testCase "every alternative failing is Stuck, with the last reason" $
-        case snd (runOut (machine (bases [fails, fails]) hole [Do Ops.Prove])) of
+        case snd (runOut (machine (bases [fails, fails]) hole [Do Ops.Dispatch])) of
           Left NotAGuessHere -> pure ()
           other              -> assertFailure ("expected NotAGuessHere, got " ++ show other)
     ]
@@ -343,14 +343,14 @@ retryTests =
           other              -> assertFailure ("expected NoChoicePoint, got " ++ show other)
 
     , testCase "an identifier that is not there" $
-        case retryFrom (Just 5) (ranTo (machine (bases [works, fails]) hole [Do Ops.Prove])) of
+        case retryFrom (Just 5) (ranTo (machine (bases [works, fails]) hole [Do Ops.Dispatch])) of
           Left (UnknownChoice 5) -> pure ()
           other                  -> assertFailure ("expected UnknownChoice, got " ++ show other)
 
       -- §7.7: a solution found is not the last word. This is the deliverable
       -- in one test — a goal solved one way, then the other on request.
     , testCase "takes the next alternative and restores what the first did" $ do
-        let m0 = ranTo (machine (bases [works, fails]) hole [Do Ops.Prove])
+        let m0 = ranTo (machine (bases [works, fails]) hole [Do Ops.Dispatch])
         isGuess m0 @?= True
         case retryFrom Nothing m0 of
           Left e -> assertFailure ("expected a retry, got " ++ show e)
@@ -366,7 +366,7 @@ retryTests =
     , testCase "the note says how far it popped" $ do
         let base = bases [works, fails]
             -- A Call frame between the choice point and the top of the stack.
-            m0 = (ranTo (machine base hole [Do Ops.Prove]))
+            m0 = (ranTo (machine base hole [Do Ops.Dispatch]))
             m1 = m0 { exec = (exec m0) { stack = Call [] [] Nothing [] False : stack (exec m0) } }
         case retryFrom Nothing m1 of
           Right (_, note) -> note @?= "retrying 1000: fails (1 frame(s) dropped)"
@@ -377,7 +377,7 @@ retryTests =
       -- returned frame rather than popping it.
     , testCase "with no argument it takes the nearest" $ do
         let base = bases [descends, fails]
-            m0   = ranTo (machine base hole [Do Ops.Prove, Do Ops.Prove])
+            m0   = ranTo (machine base hole [Do Ops.Dispatch, Do Ops.Dispatch])
         -- 1002 and not 1001: identifiers are minted from the session's name
         -- counter (decided by the user 2026-08-23), and @attack@ spent it in
         -- between. They are unique and stable, not consecutive.
@@ -388,7 +388,7 @@ retryTests =
 
     , testCase "with an argument it takes that one, dropping what is above" $ do
         let base = bases [descends, fails]
-            m0   = ranTo (machine base hole [Do Ops.Prove, Do Ops.Prove])
+            m0   = ranTo (machine base hole [Do Ops.Dispatch, Do Ops.Dispatch])
         case retryFrom (Just 1000) m0 of
           Right (m1, note) -> do
             note @?= "retrying 1000: fails (1 frame(s) dropped)"
@@ -400,7 +400,7 @@ retryTests =
       -- newer one, or 'retry' could not reach it at all.
     , testCase "a returned choice point is still reachable" $
         length (choicePoints (ranTo (machine (bases [descends, fails]) hole
-                                       [Do Ops.Prove, Do Ops.Prove])))
+                                       [Do Ops.Dispatch, Do Ops.Dispatch])))
           @?= 2
     ]
 
@@ -428,7 +428,7 @@ dispatchableTests =
                -- @focus-is-component@, and dispatch runs it no more than it runs
                -- @try-core@ — it takes a parameter.
              , "rename", "eliminate-core"
-             , "eliminate-generalising-core", "prove", "fill"
+             , "eliminate-generalising-core", "step", "fill"
              , "unify-refine-core", "apply-core"
                -- **@fit-core@'s two clauses both pass, and dispatch runs
                -- neither** (MS2 phase 27) — it takes a parameter, exactly like
@@ -475,7 +475,7 @@ dispatchableTests =
                ++ ["run-block"]
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals hole)
-          @?= ["try-in-scope", "fit-in-scope", "attack", "abandon", "prove"]
+          @?= ["try-in-scope", "fit-in-scope", "attack", "abandon", "step"]
 
       -- And that is what the engine actually runs: @try-core@ would have been
       -- in the list, so a dispatch that did not skip it would fail on an
@@ -489,8 +489,8 @@ dispatchableTests =
       -- with @abandon@ and @prove@ left, which is what this assertion reads.
     , testCase "so the alternative after attack is abandon" $
         map (map altRule . pointAlts)
-            (choicePoints (ranTo (machine expectedBase hole [Do Ops.Prove])))
-          @?= [[rootName "abandon", rootName "prove"]]
+            (choicePoints (ranTo (machine expectedBase hole [Do Ops.Dispatch])))
+          @?= [[rootName "abandon", rootName "step"]]
     ]
   where
     names' it = [ nameDotted (ruleName r) | r <- drainIt it ]

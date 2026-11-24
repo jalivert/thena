@@ -480,7 +480,7 @@ data Op
     -- Isabelle keeps none, because its subgoals /are/ its proof state's
     -- premises. An ordered chain is Isabelle's case.
     --
-    -- __It is the wall this clears.__ A bare @prove@ could close a goal and
+    -- __It is the wall this clears.__ A bare @step@ could close a goal and
     -- then had nothing to do, because the new hole was elsewhere and the names
     -- that reach it are minted by the machine — so no rule base could contain
     -- them and every proof needed a @goto@ typed by hand between the tactics.
@@ -553,30 +553,30 @@ data Op
     -- @\ y -> y@ against a goal @∀ (x : A) -> A@ must bind **y**, or the body's
     -- @y@ resolves to nothing.
     --
-    -- **An optional argument, not an optional mode.** @Prove (Maybe Operand)@
+    -- **An optional argument, not an optional mode.** @Dispatch (Maybe Operand)@
     -- was deleted one phase ago for being the latter — two mechanisms behind
     -- one constructor. This is one operation with a default.
   | Try     Operand           -- ^ attach a guess to the hole at the focus
   | Regret                    -- ^ discard it again
   | Solve                     -- ^ commit a guess whose body is pure
   | Abandon                   -- ^ drop a hole nothing refers to
-  | Prove
+  | Dispatch
     -- ^ **dispatch the rule engine at the focus** (§7.3, §8) — every rule whose
     -- head passes, in definition order, with a choice point if there is more
     -- than one.
     --
-    -- **It carries nothing** (MS4 phase 41). It was @Prove (Maybe Operand)@,
+    -- **It carries nothing** (MS4 phase 41). It was @Dispatch (Maybe Operand)@,
     -- the operand being the surface term to elaborate, and the base was
     -- /partitioned/ on whether a rule's head asked about one. Both are gone,
     -- and the reason is that **elaboration was never a dispatch**: it is a rule
     -- of many clauses called by name, which is @Call@. The user, 2026-09-01:
     -- /"There is no `elaborate` command — there will be an elaborate rule!"/
     --
-    -- So this op's only customers are search — a bare @prove@ at the REPL,
-    -- which is now the rule @prove@ over this, and the body of a strategy rule
+    -- So this op's only customers are search — a bare @step@ at the REPL,
+    -- which is now the rule @step@ over this, and the body of a strategy rule
     -- like @auto@ when one is written.
     --
-    -- Its written word is **@prim-prove@**: the good word belongs to the rule
+    -- Its written word is **@prim-step@**: the good word belongs to the rule
     -- (phase 23b's convention).
   | Yield Operand
     -- ^ hand control to the REPL and stay where you are (MS4 phase 45b).
@@ -677,10 +677,10 @@ data Op
     --
     -- **'Thena.Instral.Ops.Rule'\'s @ruleName@ is the same confusion one level over**
     -- and is deliberately left alone here — @ms5\/CLOSEOUT.md@ 38.
-    -- ^ **call a rule by name — the same search as 'Prove', with a narrower
+    -- ^ **call a rule by name — the same search as 'Dispatch', with a narrower
     -- candidate list** (§8, phase 23, and the user's own framing):
     --
-    -- > @Prove@ means \"search any rule that fits and wants to try solving the
+    -- > @Dispatch@ means \"search any rule that fits and wants to try solving the
     -- > goal\" and @Call@ means \"see if any rules named like this can succeed\".
     -- > Calling is not that different from searching. Calling is essentially
     -- > what Prolog does.
@@ -703,7 +703,7 @@ data Op
     --     92 inference refuses it when the bases load.
     --
     -- **A call carries no hint**, so a rule whose head asks about one is never
-    -- a call candidate; it is reached by @prove ‹hint›@. Hints are on MS2's
+    -- a call candidate; it is reached by @step ‹hint›@. Hints are on MS2's
     -- closeout list.
   | FreshName Operand
     -- ^ a name nothing has taken, from a hint (phase 24c, the user's
@@ -1837,7 +1837,7 @@ resultOf o = case o of
   Regret       -> Nothing
   Solve        -> Nothing
   Abandon      -> Nothing
-  Prove        -> Nothing
+  Dispatch        -> Nothing
   -- **A call produces, as of MS5 phase 63** — whatever the clause that ran
   -- handed back with @return@. It is a value unconditionally here, because
   -- which clauses a name has is not known when ONE body is read (a rule may
@@ -2082,7 +2082,7 @@ operandTypes o = case o of
   None         -> []
   CaseSurvivedOp a -> [(a, TCore)]
   Prepend a b  -> [(a, TVar 0), (b, TList (TVar 0))]
-  Prove        -> []
+  Dispatch        -> []
   DefineData _ -> []
   Along        -> []
   Into         -> []
@@ -2311,7 +2311,7 @@ primitiveValue l = case l of
 -- offer something that will not work. Prolog has exactly this.
 --
 -- Phase 15 defines the four its rule base asks, and no more (§12 invariant 5);
--- phase 17b adds a fifth when @Prove@ carries a hint, and phase 41 removes it
+-- phase 17b adds a fifth when @Dispatch@ carries a hint, and phase 41 removes it
 -- again with the hint itself.
 --
 -- == A test may ask about an argument — MS4 phase 47
@@ -2579,7 +2579,7 @@ opKeyword o = case o of
   Regret       -> "prim-regret"
   Solve        -> "prim-solve"
   Abandon      -> "prim-abandon"
-  Prove        -> "prim-prove"
+  Dispatch        -> "prim-step"
   Call _ _     -> "call"
   Return _     -> "return"
   Some _       -> "some"

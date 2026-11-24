@@ -7,7 +7,7 @@ intro ‹n› : Name -> ()
 rename ‹n› : Name -> ()
 solve : ()
 regret : ()
-prove : ()
+step : ()
 claim ‹ty› : Core -> ()
 assume ‹ty› : Core -> ()
 quantify ‹ty› : Core -> ()
@@ -50,7 +50,7 @@ without-hypotheses ‹list› : List a -> List (a, List b)
 run-block ‹t› : Surface -> ()
 intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
-thena spine> prove
+thena spine> step
 chose 7: intro
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A ≐ (
@@ -60,7 +60,7 @@ thena spine> :show
   ) in
   id
 thena spine> :choices
-7  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), prove (standard.thena.rules:155)
+7  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), step (standard.thena.rules:163)
 thena spine> into
 thena spine> along
 thena spine> :where
@@ -75,7 +75,7 @@ type
 thena spine> back
 thena spine> back
 thena spine> :choices
-7  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), prove (standard.thena.rules:155)
+7  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), step (standard.thena.rules:163)
 thena spine> retry
 retrying 7: solve
 backtracking to 7: regret
@@ -83,9 +83,9 @@ thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-7  regret (standard.thena.rules:119)   untried: prove (standard.thena.rules:155)
+7  regret (standard.thena.rules:119)   untried: step (standard.thena.rules:163)
 thena spine> retry
-retrying 7: prove
+retrying 7: step
 chose 10: intro
 thena spine> :abandon
 abandoned id
@@ -93,12 +93,12 @@ thena spine> :theorem gone : Type₁
 proving gone : Type₁
 thena spine> :choices
 no choice points
-thena spine> prove
+thena spine> step
 chose 15: try-in-scope
 backtracking to 15: fit-in-scope
 backtracking to 15: attack
 thena spine> :choices
-15  attack (standard.thena.rules:73)   untried: abandon (standard.thena.rules:79), prove (standard.thena.rules:153)
+15  attack (standard.thena.rules:73)   untried: abandon (standard.thena.rules:79), step (standard.thena.rules:161)
 thena spine> :suspend
 suspended gone
 thena spine> :theorem lemma : Type₁
@@ -110,5 +110,5 @@ abandoned lemma
 thena spine> :resume gone
 resumed gone
 thena spine> :choices
-15  attack (standard.thena.rules:73)   untried: abandon (standard.thena.rules:79), prove (standard.thena.rules:153)
+15  attack (standard.thena.rules:73)   untried: abandon (standard.thena.rules:79), step (standard.thena.rules:161)
 thena spine> :quit

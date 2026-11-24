@@ -1555,7 +1555,7 @@ consult Stlc.Tactics     -- which imports Stlc.Terms, so Stlc.Terms is loaded fi
 ```
 
 **This is the order the engine tries rules in when no name is given** — you at a
-hole, `:matches`, `prove`. **It is also the order a rule called *by name* is tried in,
+hole, `:matches`, `step`. **It is also the order a rule called *by name* is tried in,
 because a rule IS open to extension** — see *A later rule base may refine an earlier
 base's rule* below. This paragraph said the opposite until 2026-11-06, when it was
 measured and was wrong: there may be several clauses of one name, in several bases, and
@@ -4196,7 +4196,7 @@ attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
 eliminate-core ‹t› : Core -> ()
-prove : ()
+step : ()
 fill ‹t› : Core -> ()
 claim ‹ty› : Core -> ()
 elaborate ‹t› : Surface -> ()
@@ -5456,7 +5456,7 @@ or to a name at an arity it does not have, is a type error:
 
 ```
 rule go :- do helper 1 2
-rule helper x :- do prim-prove
+rule helper x :- do prim-step
 ```
 ```
 the rules do not type check:
@@ -5488,7 +5488,7 @@ shout x = twice (twice x)
 **A function is a rule with one clause and no head**, and that is not an analogy
 — it becomes one. Call it from a rule body by name, exactly as you call a rule.
 The one difference you can see: a function is **not offered as a tactic**, so it
-never appears in `:matches` and `prove` never runs it.
+never appears in `:matches` and `step` never runs it.
 
 **A function must produce a value.** `f x = say "hi"` is refused — `say` leaves
 nothing, so there is nothing for `f` to be.
@@ -5696,7 +5696,7 @@ rule file says where a declaration stops by indentation:
 
 ```
 rule f :- do say "hi"
-     ; prove              -- indented: still part of the rule above
+     ; step              -- indented: still part of the rule above
 g x = concat x x          -- column 1: a new declaration
 ```
 
@@ -5858,7 +5858,7 @@ development already says what is unfinished and in what order, so there is
 nothing to tell it.
 
 ```
-prove                 -- closes this goal
+step                 -- closes this goal
 next                  -- and on to the next one, whatever and wherever it is
 ```
 
@@ -6062,7 +6062,7 @@ which fits — so the proof closes with no backtracking at all. Outermost first
 would have failed three times to reach the same term. A strategy that wants the
 other order reverses the list with `reverse-onto`.
 
-**A bare `prove` reaches it, and it is the first thing `prove` tries.** That was
+**A bare `step` reaches it, and it is the first thing `step` tries.** That was
 decided a day later and is the next section.
 
 ---
@@ -6071,17 +6071,17 @@ decided a day later and is the next section.
 
 *Decided 2026-11-23.*
 
-`try-in-scope` shipped below `attack` in the standard base, and a bare `prove`
+`try-in-scope` shipped below `attack` in the standard base, and a bare `step`
 could not reach it. `attack` applies at every hole and always succeeds, so at a
-goal that a hypothesis closes outright, `prove` went
+goal that a hypothesis closes outright, `step` went
 
 ```
-thena spine> prove
+thena spine> step
 chose 4708: attack
-thena spine> prove
+thena spine> step
 chose 4710: solve
 backtracking to 4710: regret
-thena spine> prove
+thena spine> step
 chose 4711: attack
 ```
 
@@ -6096,7 +6096,7 @@ fails at once and costs one `backtracking to` line. At the same goal as above it
 closes the proof:
 
 ```
-thena spine> prove
+thena spine> step
 chose 4708: try-in-scope
 chose 4709: any-of
 ```
@@ -6120,14 +6120,14 @@ rule fit-in-scope :- when focus-is-hole
 It starts at one argument rather than nought, so it does not repeat the rule
 above it; `fit-core` then searches the arity, and `apply-next` refuses a
 candidate whose type is not a function, so a hypothesis that cannot be applied
-costs one step. Together the two prove modus ponens with `prove` as the only
+costs one step. Together the two prove modus ponens with `step` as the only
 tactic typed:
 
 ```
 thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
-thena spine> prove    -- ×5: attack, and four intros
+thena spine> step    -- ×5: attack, and four intros
 thena spine> goto mp1
-thena spine> prove
+thena spine> step
 chose 4710: try-in-scope
 …
 backtracking to 4710: fit-in-scope
@@ -6135,7 +6135,7 @@ chose 4715: any-of
 chose 4717: fit-core
 already equal
 thena spine> goto a
-thena spine> prove    -- closes ? a : A with x
+thena spine> step    -- closes ? a : A with x
 ```
 
 **What this is not is a search strategy.** Rule order is global, and which rule
@@ -6151,6 +6151,37 @@ contain them. That is the limit on automatic proof, not the order of the rules.
 ---
 
 ## The REPL and the session
+
+### One move is `step`, and nothing ships under the word `prove`
+
+*Decided 2026-11-24.*
+
+`step` asks the rule base what applies where you are standing and runs one of
+the rules it offers. It was called `prove` until this decision, and the word was
+misleading: one dispatch is one move, and a goal usually takes many.
+
+```
+thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
+proving mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
+thena spine> step    -- ×5: attack, and four intros
+thena spine> step
+chose 14: fit-in-scope
+```
+
+**No rule is shipped under the word `prove`.** A base is free to define one, and
+that is the point of keeping the word free: `rule prove :- do search` says what
+proving means in a development, and the system has no opinion about it. Typed
+with nothing defining it, `prove` answers *no rule is called prove*.
+
+**`search` is reserved for running to a finish** — a bounded, backtracking
+search that either closes the goal or fails — and it is not built yet. The two
+words are kept apart deliberately: `step` is what you type to watch a proof
+being made, and the thing that finishes one on its own is not a step.
+
+**The operation underneath is `prim-step`.** As everywhere else in the base, the
+plain word belongs to the rule and the `prim-` word to the operation it is
+written over.
+
 
 ### The prompt completes the acts a file writes, and not only the colon commands
 
@@ -6318,7 +6349,7 @@ written in. Two places take one, and they are the same syntax in two roles:
 
 ```
 -- an expression: elaborating it means playing it
-foo = do { attack ; prove }
+foo = do { attack ; step }
 
 -- an item: it plays where the declarations around it declare
 do
@@ -6329,7 +6360,7 @@ It lays out like everything else, and it is an **atom**, so an argument run
 takes one without parentheses: `try do { attack }`.
 
 **This is why there is no surface term meaning *no proof given, search for one*.**
-You write `do { prove }`, and a search strategy is then a rule name rather than
+You write `do { step }`, and a search strategy is then a rule name rather than
 syntax — `do { auto }` names a rule you wrote, and the system knows nothing
 about it.
 
@@ -6457,7 +6488,7 @@ A mistake inside a lambda names the line the lambda is on.
 A rule body can stop and hand control to you:
 
 ```
-elaborate (do { h = here ; yield "look at this" ; goto h ; prove })
+elaborate (do { h = here ; yield "look at this" ; goto h ; step })
    look at this
    (yield to hand control back)
 ```
@@ -6581,7 +6612,7 @@ nothing — `prim-solve`, `prim-try`, `say` — so a rule that wanted to return 
 have had to be written to end on the producing op. The return value would then be
 a constraint on the order of the body, and invisible where the rule is called.
 
-`prove` is not a call and returns nothing: what the rule it chose did is in the
+`step` is not a call and returns nothing: what the rule it chose did is in the
 development.
 
 ### An argument may itself be a call
@@ -6840,7 +6871,7 @@ that is what makes a tactic a search. **It stops at the line you typed.** A
 choice point an earlier line left is not reached implicitly:
 
 ```
-thena spine> prove
+thena spine> step
 chose 685: attack
 thena spine> regret                 -- take the guess back off
 thena spine> back                   -- at the root: nothing to pop
@@ -6848,7 +6879,7 @@ stuck: already at the root
   undoing that would backtrack to 685, which was chosen before this line — retry 685 to take it
 ```
 
-Before this, `back` would have taken `prove`'s untried alternatives and put the
+Before this, `back` would have taken `step`'s untried alternatives and put the
 guess back — **undoing the `regret` you had just typed, with a navigation
 command.**
 
@@ -6869,10 +6900,10 @@ through to the next one inside that command.
 worth understanding, because it is the one that bites hardest:
 
 ```
-rule pause :- do prove ; yield "over to you" ; say "rule resumed"
+rule pause :- do step ; yield "over to you" ; say "rule resumed"
 ```
 
-`prove` leaves a choice point, then the rule hands you the prompt. If a command
+`step` leaves a choice point, then the rule hands you the prompt. If a command
 you type there fell past that choice point, **control would be taken back from
 you** — the rest of your line discarded, your bindings replaced, and the rule
 re-entered on another alternative. And because the choice point was made *inside*
@@ -7939,7 +7970,7 @@ smallest case of one notion, not a mode of its own.
 
 ```
 thena> :step 500
-thena> prove              -- runs 500 instructions, then pauses
+thena> step              -- runs 500 instructions, then pauses
 thena> :run 500           -- one more slice
 thena> :run               -- and let it finish
 ```

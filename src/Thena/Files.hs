@@ -166,7 +166,7 @@ rulesPath = Paths_thena.getDataFileName "rules/standard.thena.rules"
 -- | Load the shipped rule base at startup, keeping only what went wrong.
 --
 -- 'loadPrelude'\'s bargain, in the same words: a broken or missing rule base is
--- reported and the session starts anyway, with an empty base. @prove@ then
+-- reported and the session starts anyway, with an empty base. @step@ then
 -- matches nothing, which says more than refusing to start would.
 loadStandardRules :: Session -> IO (Session, [Trouble])
 loadStandardRules s = do
