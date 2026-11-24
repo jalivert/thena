@@ -1778,6 +1778,10 @@ unaryOps =
   , ("let-value", Op.LetValue), ("let-body", Op.LetBody)
   , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
   , ("forall-tail", Op.ForallTail), ("play", Op.Play)
+    -- The Π counterpart of @forall-name@, read off the spine rather than off a
+    -- written @∀@ (MS12 phase 345): the word the next argument position was
+    -- declared with, so an inserted hole carries it.
+  , ("next-argument-name", Op.NextArgumentName)
   , ("elim-spine", Op.ElimSpine)
     -- Tying a recursive call to its induction hypothesis (MS9 phase 186): the
     -- driver's, between pop-development and define-global.

@@ -359,6 +359,9 @@ everyOp =
   , ("binder-name b", Op.BinderName (Ref "b"))
     -- Giving the binder at the focus a word (MS12 phase 330).
   , ("prim-rename n", Op.Rename (Ref "n"))
+    -- The word the head's next argument position was declared with (MS12
+    -- phase 345).
+  , ("next-argument-name f", Op.NextArgumentName (Ref "f"))
   ]
 
 vocabulary :: TestTree

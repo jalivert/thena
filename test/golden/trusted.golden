@@ -17,7 +17,7 @@ already equal
 solved: ?ℓ245
 solved: ?ℓ256
 already equal
-solved: A
+solved: A1
 solved: ?ℓ243
 thena spine> :whnf honest {0}
 refl {0} Nat zero
@@ -37,7 +37,7 @@ already equal
 solved: ?ℓ298
 solved: ?ℓ311
 already equal
-solved: A
+solved: A1
 solved: ?ℓ296
 thena spine> :whnf liar {0}
 trusted (Eq {0} Nat zero (succ zero)) (Eq {0} Nat zero zero) (refl {0} Nat zero)

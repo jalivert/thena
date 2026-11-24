@@ -63,8 +63,8 @@ thena spine> :show
   let V = refined1 : X in
   let y = V : X in
   let refined2 = y : X in
-  let a = refined2 : Nat in
-  let refined3 = succ a : Nat in
+  let x = refined2 : Nat in
+  let refined3 = succ x : Nat in
 ▶ let lt = refined3 : Nat in
   lt
 thena spine> qed
