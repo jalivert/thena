@@ -3130,7 +3130,7 @@ fileEntries st =
     -- the test and not the path alone: a load that succeeds tells a frontend
     -- nothing, and the hash moving is the one thing that does.
     refusedAt p d = case Map.lookup p (stRuleRefused st) of
-      Just (d', e) | d' == d -> Just (refusedFileView paneBudget s e)
+      Just (d', e) | d' == d -> Just (refusedFileView paneBudget s p e)
       _ -> Nothing
 
 -- | **The line the output pane is about, and what it answered** — `~wx6m3`.

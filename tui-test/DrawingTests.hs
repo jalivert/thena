@@ -31,7 +31,8 @@ import Thena.View.Failure
   , FaultView (..)
   , Nature (..)
   , PartView (..)
-  , Piece (AName, AStage, AWanted)
+  , Piece (AName, APlace, AStage, AWanted)
+  , Pos (..)
   , Role (..)
   , Stage (ReadingTheHeader)
   , StopView (..)
@@ -699,6 +700,19 @@ noHeader :: StopView
 noHeader =
   stopOf (Faulty [FaultView CouldNotRead [PartView TheStage (AStage ReadingTheHeader)] Nothing])
 
+-- | **A fault that says where it is written** — MS12 phase 349, @~8w6qw@:
+-- every fault about a refused rule file carries a 'ThePlace' part now, and
+-- `~29733` is how it is drawn.
+placedFault :: FilePath -> Int -> Int -> StopView
+placedFault f ln col =
+  stopOf
+    (Faulty
+      [ FaultView
+          NotInScope
+          [PartView TheWord (AName "nonesuch"), PartView ThePlace (APlace f (Pos ln col))]
+          Nothing
+      ])
+
 -- | The same module one step further down the import tree — `~84j24`.
 nested :: Int -> ModuleEntry -> ModuleEntry
 nested d me = me { meDepth = d }
@@ -799,6 +813,49 @@ paneRowCases =
         ]
         (moduleRows []
           [(refused "crush.thena.rules" noHeader) { feOpen = True }])
+  , -- | **A PLACE IS ITS OWN ROW, BARE AND FLUSH** — `~29733`, and MS12 phase
+    -- 349 is what made it matter: every fault about a rule file carries a
+    -- place now, so this is the row his ruling `~8rn4d` asked for — the TUI
+    -- prints a place and the terminal emulator opens it.
+    --
+    -- **Three things are asserted at once and each of them was a defect.** It
+    -- is a 'Place' and not a 'Detail', so the pane draws it two columns in
+    -- rather than four plus the glyph's pad; it carries no @at@ label, the
+    -- role 'Tui.Failure.faultLines' lifts it out of; and it does not take the
+    -- fault's own step. At 'Tui.Panes.paneWrapped''s thirty columns those ten
+    -- columns are the difference between one word and two fragments —
+    -- measured under a pty at 200 columns on 2026-11-24, where
+    -- @notatype.thena.rules:3:1@ broke after @:3@.
+    testCase "a fault that says where it is written gets a bare row of its own" $
+      assertEqual ""
+        [ Heading "rule bases" (Just 1)
+        , Tap "crush.thena.rules" "\x274C crush.thena.rules"
+        , Detail "   not in scope: nonesuch"
+        , Place "crush.thena.rules:5:1"
+        ]
+        (moduleRows []
+          [(refused "crush.thena.rules" (placedFault "crush.thena.rules" 5 1))
+             { feOpen = True }])
+  , -- | **A module's fold keeps the module's own step and drops the fold's** —
+    -- `~29733`. The import tree's indent says which module the row is under
+    -- and earns its columns; the fold's step only says how deep in a sentence
+    -- the fault was, and a path that does not fit says nothing at all.
+    testCase "a place inside a module's fold keeps the module's indent only" $
+      assertEqual ""
+        [ Heading "modules" (Just 1)
+        , Tap "m" "\x274C m"
+        , Alert "\x274C b did not go in:"
+        , Detail "  not in scope: nonesuch"
+        , Place "m.thena.rules:5:1"
+        ]
+        (moduleRows
+          [ (partial "m")
+              { meMark = NoneIn
+              , meOpen = True
+              , meUnfinished = [("b", placedFault "m.thena.rules" 5 1)]
+              }
+          ]
+          [])
   , -- | **The glyph's columns are reserved for the whole group once one row
     -- carries one**, so the names line up and nothing shifts when a second
     -- base is refused.

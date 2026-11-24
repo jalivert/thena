@@ -74,8 +74,21 @@ data StopLine = StopLine
     -- ^ 0 is the fold's own first line — what became of the item. Everything
     -- else is 1 or more.
   , slText :: String
+  , slPlace :: Bool
+    -- ^ __this line is a place and nothing else__ — @path:line:col@, no label
+    -- and no sentence (`~29733`, and MS12 phase 349 is what made it matter:
+    -- every fault about a rule file carries one now). **A pane draws it at its
+    -- own margin and ignores 'slDepth'**, because a path is only useful whole
+    -- and the fold's indent is what breaks it: 'Tui.Panes.paneWrapped' splits
+    -- a word longer than its pane mid-word, so two columns too many turn a
+    -- destination into two fragments. The fault it belongs to is the line above
+    -- it.
   }
   deriving (Eq, Show)
+
+-- | A line of the fold that is prose, at the depth it sits at.
+line_ :: Int -> String -> StopLine
+line_ d t = StopLine { slDepth = d, slText = t, slPlace = False }
 
 -- | **The fold for one unfinished item**, given what it would have declared.
 --
@@ -85,10 +98,10 @@ data StopLine = StopLine
 -- disagree about which came first.
 stopLines :: String -> StopView -> [StopLine]
 stopLines what sv =
-  StopLine 0 (natureCell (stopViewNature sv) <> " " <> became what sv)
+  line_ 0 (natureCell (stopViewNature sv) <> " " <> became what sv)
     : concatMap (whyLines 1) [stopViewWhy sv]
-    <> [StopLine 1 ("it said: " <> oneLine m) | m <- stopViewSaid sv]
-    <> [StopLine 1 (warningText w) | w <- stopViewWarned sv]
+    <> [line_ 1 ("it said: " <> oneLine m) | m <- stopViewSaid sv]
+    <> [line_ 1 (warningText w) | w <- stopViewWarned sv]
 
 -- | **The fold for a refused rule file** — MS12 phase 348, @~cjznk@.
 --
@@ -129,9 +142,9 @@ became what sv = case stopViewWhy sv of
 whyLines :: Int -> Why -> [StopLine]
 whyLines d why = case why of
   NothingWrong -> []
-  Yielding msg -> [StopLine d (oneLine msg)]
+  Yielding msg -> [line_ d (oneLine msg)]
   Faulty fs -> concatMap (faultLines d) fs
-  Asked ask -> [StopLine d (oneLine ask)]
+  Asked ask -> [line_ d (oneLine ask)]
   OutOfFuel _ -> []
   Trusting tv -> trustLines d tv
   WasGivenUp -> []
@@ -187,16 +200,36 @@ pathUnder cwd p = maybe p id (stripPrefix (cwd <> "/") p)
 -- are not — @that term has no type@ / @because not in scope: nonesuch@.
 faultLines :: Int -> FaultView -> [StopLine]
 faultLines d fv =
-  StopLine d headline
-    : [StopLine (d + 1) (partText p) | p <- rest]
+  line_ d headline
+    : [line_ (d + 1) (partText p) | p <- labelled]
+    <> [ StopLine { slDepth = d, slText = pieceText (partViewPiece p), slPlace = True }
+       | p <- places
+       ]
     <> case faultViewInside fv of
       Nothing -> []
       Just inner -> because (faultLines (d + 1) inner)
   where
     (headline, rest) = said (faultViewKind fv) (faultViewParts fv)
+    -- | **A PLACE GETS A ROW OF ITS OWN, BARE** — `~29733`, and since MS12
+    -- phase 349 (@~8w6qw@) every fault about a rule file carries one, so this
+    -- decides whether the affordance his ruling `~8rn4d` asked for works at
+    -- all: the TUI prints a place and the terminal emulator opens it.
+    --
+    -- **A path is only useful whole**, and 'Tui.Panes.paneWrapped' breaks a
+    -- word longer than its pane mid-word on purpose — right for a module path,
+    -- wrong for a destination, which becomes two fragments and no path. So the
+    -- row carries nothing in front of it: no @at  @ label, which is four
+    -- columns of a role nobody needs told, and 'slPlace' tells the pane to
+    -- draw it at its own margin rather than at this depth. Measured in the
+    -- modules pane at 200 columns, whose content is thirty: at the fault\'s
+    -- depth @notatype.thena.rules:3:1@ broke after @:3@, and at the margin all
+    -- five of `~8w6qw`\'s cases fit whole.
+    isPlace p = partViewRole p == ThePlace
+    places = filter isPlace rest
+    labelled = filter (not . isPlace) rest
     because ls = case ls of
       [] -> []
-      StopLine d' t : more -> StopLine d' ("because " <> t) : more
+      sl : more -> sl { slText = "because " <> slText sl } : more
 
 -- | A fault's headline, and the parts it did not absorb.
 --
@@ -358,7 +391,13 @@ roleLabel r = case r of
   -- which drew a count as though it located something.
   TheArity -> "arity"
   TheInstruction -> "instruction"
-  TheClause -> "clause"
+  -- **A place is drawn without this label** — 'faultLines' lifts a 'ThePlace'
+  -- part out and gives it a row of its own, bare, because a path is only
+  -- useful whole and @clause  @ in front of it cost eight columns of a pane
+  -- measured at thirty (`~29733`). The word is here because the role is a
+  -- role like any other and a total case is cheaper than a promise that
+  -- nothing else ever draws one.
+  ThePlace -> "at"
   TheTest -> "test"
   TheChoice -> "choice point"
   ThePattern -> "the pattern"
@@ -532,8 +571,8 @@ refusedClaimsShown = 3
 -- second copy of it.
 trustLines :: Int -> TrustView -> [StopLine]
 trustLines d tv =
-  [StopLine d (claimText c) | c <- take refusedClaimsShown refused]
-    <> [ StopLine d ("and " <> show (n - refusedClaimsShown) <> " more")
+  [line_ d (claimText c) | c <- take refusedClaimsShown refused]
+    <> [ line_ d ("and " <> show (n - refusedClaimsShown) <> " more")
        | n > refusedClaimsShown
        ]
   where

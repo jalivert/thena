@@ -123,6 +123,26 @@ data PaneRow n
     -- TUI says /present but not in play/ everywhere, and a fault is in play.
     -- **Drawn at a 'Detail''s indent exactly**, so a fold's lines stay in one
     -- column whichever nature they carry.
+  | Place String
+    -- ^ **a destination and nothing else** — @path:line:col@, drawn two
+    -- columns in whatever fold it came out of (`~29733`, and MS12 phase 349 is
+    -- what made it general: every fault about a rule file carries a place
+    -- now).
+    --
+    -- **A seventh kind rather than a 'Detail', because the indent is the whole
+    -- point.** His ruling `~8rn4d` is that the TUI prints a place and the
+    -- terminal emulator opens it, so the row is useful exactly while the path
+    -- is one unbroken word on screen — and 'paneWrap' breaks a word longer
+    -- than its pane mid-word, which a 'Detail' four columns in plus a fold's
+    -- own step reliably provokes. Measured in the modules pane at 200 columns,
+    -- whose content is thirty: @notatype.thena.rules:3:1@ is twenty-four and
+    -- broke after @:3@ as a 'Detail' at the fault's depth; at two columns it
+    -- fits whole.
+    --
+    -- **Dim like a 'Detail'**, which is what it is in the fold's reading — the
+    -- fault above it is the thing in play. **The caller keeps whatever indent
+    -- locates the row's own subject** (a module's step in the import tree) and
+    -- drops the fold's.
   | Tap n String
     -- ^ **an entry that answers to a click** — `~nf5tx`, the ⚠️ a module's
     -- unfinished list hangs off. **The whole row is the target, not the glyph**:
@@ -291,11 +311,16 @@ moduleRows modules files =
               (name, sv) : pending ->
                 stopped name sv
                   <> [Detail (indent <> nm <> " is pending") | (nm, _) <- pending]
-        stopped name sv =
-          [ kindOf (slDepth sl) (indent <> step sl <> slText sl)
-          | sl <- stopLines name sv
-          ]
+        stopped name sv = map rowOf (stopLines name sv)
           where
+            -- | **A place keeps the module's own step and drops the fold's**
+            -- — `~29733`. The module's indent says which module in the import
+            -- tree the row is under and is worth its columns; the fold's step
+            -- only says how deep in a sentence the fault was, and a path that
+            -- does not fit says nothing at all.
+            rowOf sl
+              | slPlace sl = Place (indent <> slText sl)
+              | otherwise = kindOf (slDepth sl) (indent <> step sl <> slText sl)
             step sl = replicate (2 * slDepth sl) ' '
             kindOf 0
               | natureIsFault (stopViewNature sv) = Alert
@@ -340,13 +365,17 @@ moduleRows modules files =
       Nothing -> [Entry (pad <> labelled)]
       Just sv ->
         Tap (fePath fe) (markGlyph NoneIn <> " " <> labelled)
-          : [ Detail (pad <> step sl <> slText sl)
-            | feOpen fe
-            , sl <- refusalLines sv
-            ]
+          : [rowOf sl | feOpen fe, sl <- refusalLines sv]
       where
         labelled = shorten (feKind fe) (fePath fe)
         pad = replicate (if reserve then markColumns NoneIn + 1 else 0) ' '
+        -- | **A place takes neither the glyph's pad nor the fold's step** —
+        -- `~29733`. A file's row has no tree position to keep, unlike a
+        -- module's, so the destination starts as near the margin as the pane
+        -- allows.
+        rowOf sl
+          | slPlace sl = Place (slText sl)
+          | otherwise = Detail (pad <> step sl <> slText sl)
         -- | **The same step 'moduleGroup' gives a module's fold**, and the
         -- 'Detail' the line is drawn as supplies the first one.
         step sl = replicate (2 * slDepth sl) ' '
@@ -830,6 +859,7 @@ paneRowWidget row = case row of
     withAttr (attrName "pane.heading") (wrapped (headingText label count))
   Entry t -> wrapped ("  " <> t)
   Detail t -> withAttr (attrName "pane.detail") (wrapped ("    " <> t))
+  Place t -> withAttr (attrName "pane.detail") (wrapped ("  " <> t))
   Alert t -> wrapped ("    " <> t)
   TapHeading n label count ->
     clickable n (withAttr (attrName "pane.heading") (wrapped (headingText label count)))
