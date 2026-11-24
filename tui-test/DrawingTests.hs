@@ -31,8 +31,9 @@ import Thena.View.Failure
   , FaultView (..)
   , Nature (..)
   , PartView (..)
-  , Piece (AName, AWanted)
+  , Piece (AName, AStage, AWanted)
   , Role (..)
+  , Stage (ReadingTheHeader)
   , StopView (..)
   , Wanted (ACoreTerm)
   , WarningView (..)
@@ -44,6 +45,7 @@ import Thena.View.Instral (ValueView (..))
 import Thena.View.Machine (MachineView (..))
 import Tui.Panes
   ( BarSpot (..)
+  , FileEntry (..)
   , FileKind (..)
   , ModuleEntry (..)
   , ModuleMark (..)
@@ -668,6 +670,14 @@ whole n f = ModuleEntry n f AllIn False [] 0
 partial :: String -> ModuleEntry
 partial n = ModuleEntry n Nothing SomeIn False [] 0
 
+-- | A file the session read and went in with — MS12 phase 348.
+went :: FileKind -> FilePath -> FileEntry
+went k p = FileEntry k p Nothing False
+
+-- | A rule base the session refused, folded away — MS12 phase 348, `~cjznk`.
+refused :: FilePath -> StopView -> FileEntry
+refused p sv = FileEntry ARuleBase p (Just sv) False
+
 -- | **A stop, built by hand** — the same discipline as a 'Display' here: the
 -- suite draws from the view's own type and never from a session, so what a
 -- fold says is settled without loading a module.
@@ -681,6 +691,13 @@ stopOf w = StopView (natureOf w) Nothing [] [] w
 -- | The commonest one: a declaration that names something not in scope.
 notInScope :: String -> StopView
 notInScope n = stopOf (Faulty [FaultView NotInScope [PartView TheWord (AName n)] Nothing])
+
+-- | A rule file with no @rule base ‹name› where@ line — MS12 phase 348. The
+-- one 'Stage' that phase added, and the only 'RuleFileError' that is a stage
+-- rather than a name or a rule.
+noHeader :: StopView
+noHeader =
+  stopOf (Faulty [FaultView CouldNotRead [PartView TheStage (AStage ReadingTheHeader)] Nothing])
 
 -- | The same module one step further down the import tree — `~84j24`.
 nested :: Int -> ModuleEntry -> ModuleEntry
@@ -746,13 +763,75 @@ paneRowCases =
         , Entry "rules/standard.thena.rules"
         ]
         (moduleRows []
-          [ (ARuleBase, "examples/demo/Demo08Pausing.thena.rules")
-          , (AShippedFile, "/Users/x/.cabal/share/aarch64-osx-ghc-9.12.4/thena-0.1.0.0/rules/standard.thena.rules")
+          [ went ARuleBase "examples/demo/Demo08Pausing.thena.rules"
+          , went AShippedFile "/Users/x/.cabal/share/aarch64-osx-ghc-9.12.4/thena-0.1.0.0/rules/standard.thena.rules"
           ])
+  , -- | **MS12 phase 348, `~cjznk`, and it closes a real defect.** A base the
+    -- session would not load stays in 'Thena.Driver.filesRead' by design, so
+    -- before this it sat in this group looking exactly like one that loaded.
+    testCase "a refused rule base is marked, and its reasons are folded away" $
+      assertEqual ""
+        [ Heading "rule bases" (Just 1)
+        , Tap "crush.thena.rules" "\x274C crush.thena.rules"
+        ]
+        (moduleRows [] [refused "crush.thena.rules" (notInScope "nonesuch")])
+  , -- | **No second headline, and that is 'Tui.Failure.refusalLines'.** A
+    -- module's fold names the declaration that did not go in; a rule file has
+    -- nothing inside it to name, so the faults follow the row directly rather
+    -- than under /it did not go in/.
+    testCase "an open refused base draws its faults and no headline of its own" $
+      assertEqual ""
+        [ Heading "rule bases" (Just 1)
+        , Tap "crush.thena.rules" "\x274C crush.thena.rules"
+        , Detail "   not in scope: nonesuch"
+        ]
+        (moduleRows []
+          [(refused "crush.thena.rules" (notInScope "nonesuch")) { feOpen = True }])
+  , -- | **The stage a rule file's header fails at** — phase 348's one new
+    -- 'Thena.View.Failure.Stage', and the words are this track's — and
+    -- 'Tui.Failure.said' puts the stage on the headline rather than under it,
+    -- because 'kindWords' for /could not be read/ is about the stage.
+    testCase "a file with no rule-base header says which stage it died at" $
+      assertEqual ""
+        [ Heading "rule bases" (Just 1)
+        , Tap "crush.thena.rules" "\x274C crush.thena.rules"
+        , Detail "   could not be read while reading the header"
+        ]
+        (moduleRows []
+          [(refused "crush.thena.rules" noHeader) { feOpen = True }])
+  , -- | **The glyph's columns are reserved for the whole group once one row
+    -- carries one**, so the names line up and nothing shifts when a second
+    -- base is refused.
+    testCase "a group holding a refusal pads the rows that went in" $
+      assertEqual ""
+        [ Heading "rule bases" (Just 2)
+        , Entry "   a.thena.rules"
+        , Tap "b.thena.rules" "\x274C b.thena.rules"
+        ]
+        (moduleRows []
+          [ went ARuleBase "a.thena.rules"
+          , refused "b.thena.rules" (notInScope "nonesuch")
+          ])
+  , -- | **And a group with no refusal is not padded**, because an indent for a
+    -- column nothing can ever occupy is an indent for nothing.
+    testCase "a group with nothing refused keeps its rows flush" $
+      assertEqual ""
+        [Heading "rule bases" (Just 1), Entry "a.thena.rules"]
+        (moduleRows [] [went ARuleBase "a.thena.rules"])
+  , -- | **A file that went in is not a click target**, the same bargain a
+    -- whole module's row makes: there is nothing to unfold.
+    testCase "only a refused base is clickable, and its name is its path" $
+      assertEqual ""
+        [ Tap "b.thena.rules" "\x274C b.thena.rules" ]
+        [ r | r@(Tap _ _) <- moduleRows []
+                [ went ARuleBase "a.thena.rules"
+                , refused "b.thena.rules" (notInScope "nonesuch")
+                ]
+        ]
   , testCase "a module's own file is not repeated outside its module" $
       assertEqual ""
         [Heading "modules" (Just 1), Entry "\x2705 m", Detail "m.thena"]
-        (moduleRows [whole "m" (Just "m.thena")] [(AModuleFile, "m.thena")])
+        (moduleRows [whole "m" (Just "m.thena")] [went AModuleFile "m.thena"])
   , -- | **`~nf5tx`, his instruction of 2026-11-13.** A whole module is a plain
     -- entry; a module that came in partly is a 'Tap', because only it has
     -- something to unfold and a row that looks clickable and does nothing is

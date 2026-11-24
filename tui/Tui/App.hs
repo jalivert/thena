@@ -85,9 +85,11 @@ import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, 
 import System.IO (hFlush, hPutStr, readFile', stdout)
 
 import Thena.Driver
-  ( Leniency (..)
+  ( Digest
+  , Leniency (..)
   , Partly (..)
   , Response (..)
+  , RuleFileError
   , commandSummary
   , Unfinished (..)
   , Session
@@ -108,7 +110,7 @@ import Thena.Driver
   , provedSlices
   , submittedLines
   )
-import Thena.Files (following, preludePath, rulesPath, startingSession)
+import Thena.Files (Trouble (..), following, preludePath, rulesPath, startingSession)
 import Thena.Render (renderResponse, renderTrouble)
 import Thena.View
   ( choicesView
@@ -119,6 +121,7 @@ import Thena.View
   , matchesView
   , nameDotted
   , proofsView
+  , refusedFileView
   , rulesView
   , statementOfferView
   )
@@ -192,6 +195,7 @@ import Tui.Layout
   )
 import Tui.Panes
   ( BarSpot (..)
+  , FileEntry (..)
   , FileKind (..)
   , Job (..)
   , ModuleEntry (..)
@@ -333,6 +337,19 @@ data ScriptLine = ScriptLine
     -- never stale either — there is no session under it to disagree with.
   , slOutput  :: [String]
   , slOk      :: Bool
+  , slRefused :: [(FilePath, (Digest, RuleFileError))]
+    -- ^ **the rule files this line would not load** — MS12 phase 348,
+    -- @~cjznk@, on their way to 'stRuleRefused', which is where they live.
+    --
+    -- **A carrier and not state.** The refusal is a 'Thena.Driver.Response'
+    -- and the session does not keep it, so somebody has to; and the line is
+    -- the only thing that comes back from 'runRerunBatch', which runs on a
+    -- worker thread and posts its lines through 'RerunStep'. Riding here it
+    -- needs no field on that event and is exactly as cumulative as the lines
+    -- are, so merging a step's prefix twice is merging the same pairs twice.
+    --
+    -- @[]@ for a line that has never run, and for the overwhelming majority
+    -- that have.
   }
 
 -- | **A tail re-run in flight, off the keypress** — `~twdbp`, his ruling of
@@ -378,7 +395,7 @@ data RerunState = RerunState
 -- | A fresh line nothing has run yet, for text with no existing 'ScriptLine'
 -- to start from — the same shape 'unran' leaves one in.
 freshPending :: String -> ScriptLine
-freshPending t = ScriptLine t Nothing Nothing [] True
+freshPending t = ScriptLine t Nothing Nothing [] True []
 
 -- | One completed round: the line that was run (absent only for the startup
 -- trouble dump, which has no typed line at all) and the output lines it
@@ -796,6 +813,38 @@ data St = St
     -- **A module that stops being partial simply stops being drawn unfolded.**
     -- Nothing prunes this set — a name left in it after the module loads whole
     -- costs a string and means the fold is still open if it breaks again.
+    --
+    -- **A refused rule base's row is keyed in here by its PATH** — MS12 phase
+    -- 348, @~cjznk@ — which shares this set with the module names rather than
+    -- adding a second one, because a file path and a module name are never the
+    -- same string and the gesture is the same gesture.
+  , stRuleRefused :: Map.Map FilePath (Digest, RuleFileError)
+    -- ^ **why a @.thena.rules@ file would not load, for every one that was
+    -- turned away** — MS12 phase 348, @~cjznk@, and the modules pane draws it
+    -- as a fold under the file's own row ('Tui.Panes.feRefused').
+    --
+    -- **It has to be held here because the session does not hold it.** A
+    -- refused base stays in 'Thena.Driver.filesRead' — MS11 phase 295 notes
+    -- the read before the install is tried, and 'Thena.Files' keeps the note
+    -- when the install refuses — but the refusal itself is a
+    -- 'Thena.Driver.Response', said once and gone. So until this the pane
+    -- listed a refused base under @rule bases@ with nothing to say about it,
+    -- measured under a pty on 2026-11-24.
+    --
+    -- **The error and not the view.** 'Thena.View.refusedFileView' takes a
+    -- session, so viewing it at draw time against the session as it now is
+    -- keeps the spelling and the scope current — the same thing
+    -- 'Thena.View.failureView' does for a module, which is read out of the
+    -- session every frame.
+    --
+    -- **THE DIGEST IS WHAT MAKES AN ENTRY GO AWAY, AND IT IS WHY THIS IS NOT
+    -- JUST A PATH.** Nothing tells a frontend that a load *succeeded* for a
+    -- given path: a @consult@ may name a module rather than a file, and a base
+    -- may be read as a dependency of something else. So an entry is kept only
+    -- while 'Thena.Driver.filesRead' still reports the digest it was refused
+    -- at — he edits the file, anything re-reads it, the hash moves and the ❌
+    -- goes with it. **Re-consulting the same broken file records the same
+    -- entry again**, which is correct: nothing changed.
   , stLayout :: Layout
     -- ^ **which panes are on screen and at which of the six positions** —
     -- `~fxc89`, his instruction of 2026-11-12. 'Tui.Layout.defaultLayout' is
@@ -1176,6 +1225,10 @@ runTui = do
         , stStored      = Nothing
         , stGlobalsClosed = Set.empty
         , stModulesOpen = Set.empty
+          -- **A base the boot would not load is marked from the first frame**
+          -- — MS12 phase 348, @~cjznk@. The shipped base cannot fail here, but
+          -- a `.thena.rules` named on the command line can.
+        , stRuleRefused = Map.fromList (refusalsOf s0 [] trouble)
         , stLayout      = cfgLayout cfg
         , stDefaultWidths = Map.empty
           -- **The stored widths start here and 'appStart' fills the gaps**,
@@ -3055,8 +3108,16 @@ moduleEntries st = concat [walk 0 m | m <- modulesLoaded s, m `notElem` imported
 -- consulted, which is the half of the distinction that is visible.
 -- **Thena's own two files are told apart by 'stShipped'** so that his corpus is
 -- never listed under our prelude.
-fileEntries :: St -> [(FileKind, FilePath)]
-fileEntries st = [(sortOf p, p) | (p, _) <- filesRead s]
+fileEntries :: St -> [FileEntry]
+fileEntries st =
+  [ FileEntry
+      { feKind = sortOf p
+      , fePath = p
+      , feRefused = refusedAt p d
+      , feOpen = Set.member p (stModulesOpen st)
+      }
+  | (p, d) <- filesRead s
+  ]
   where
     s = activeSession st
     sortOf p
@@ -3064,6 +3125,13 @@ fileEntries st = [(sortOf p, p) | (p, _) <- filesRead s]
       | kindOf p == LoadRules = ARuleBase
       | Just m <- moduleOfFile p, m `elem` modulesLoaded s = AModuleFile
       | otherwise = AnotherFile
+    -- | **Why this base would not load, while that is still what is on disc**
+    -- — MS12 phase 348, @~cjznk@. See 'stRuleRefused' for why the digest is
+    -- the test and not the path alone: a load that succeeds tells a frontend
+    -- nothing, and the hash moving is the one thing that does.
+    refusedAt p d = case Map.lookup p (stRuleRefused st) of
+      Just (d', e) | d' == d -> Just (refusedFileView paneBudget s e)
+      _ -> Nothing
 
 -- | **The line the output pane is about, and what it answered** — `~wx6m3`.
 --
@@ -5424,9 +5492,16 @@ runEngineLine st line extra = do
             renderResponse s' resp
               ++ concatMap (renderResponse sLoaded) responses
               ++ concatMap (renderTrouble sLoaded) trouble
-      appendTurn st { stSession = sLoaded } (Just line) (out ++ extra)
+      appendTurn
+        (noteRefused (refusalsOf sLoaded (resp : responses) trouble)
+           st { stSession = sLoaded })
+        (Just line)
+        (out ++ extra)
     _ -> do
-      appendTurn st { stSession = s' } (Just line) (renderResponse s' resp ++ extra)
+      appendTurn
+        (noteRefused (refusalsOf s' [resp] []) st { stSession = s' })
+        (Just line)
+        (renderResponse s' resp ++ extra)
       if resp == Quit then get >>= maybeQuit else pure ()
 
 -- | **Every door a quit can be requested through** — Ctrl+D on an empty
@@ -5608,6 +5683,9 @@ commitTailFrom at s text ran unrun finish = do
       let sl = ScriptLine
             { slText = text, slSession = Just s, slRan = Just text
             , slOutput = [said], slOk = True
+              -- A TUI-local pseudo-command never reaches the engine, so it
+              -- cannot refuse a rule file.
+            , slRefused = []
             }
       rerunTail at s ran unrun (\rest -> finish (sl : rest))
 
@@ -5809,8 +5887,47 @@ runScriptLine s line = do
             renderResponse s' resp
               ++ concatMap (renderResponse sLoaded) responses
               ++ concatMap (renderTrouble sLoaded) trouble
-      pure (ScriptLine line (Just sLoaded) (Just line) out (responseTook resp))
-    _ -> pure (ScriptLine line (Just s') (Just line) (renderResponse s' resp) (responseTook resp))
+      pure
+        (ScriptLine line (Just sLoaded) (Just line) out (responseTook resp)
+           (refusalsOf sLoaded (resp : responses) trouble))
+    _ ->
+      pure
+        (ScriptLine line (Just s') (Just line) (renderResponse s' resp)
+           (responseTook resp) (refusalsOf s' [resp] []))
+
+-- | **Every rule file a run would not load, keyed for 'stRuleRefused'** —
+-- MS12 phase 348, @~cjznk@.
+--
+-- **The session is the one the run ended in**, because that is where the read
+-- note is: "Thena.Files" notes every base it read before it tries to install
+-- any of them and keeps the note when the install refuses (MS11 phase 295),
+-- so the digest to pin the entry to is in 'Thena.Driver.filesRead' by the
+-- time this is asked.
+--
+-- **A refusal whose path is NOT in 'filesRead' is dropped, and nothing is
+-- lost by that.** The modules pane lists the files the session read, so a path
+-- that is not among them has no row to mark; it is the driver's own door
+-- ('Thena.Driver.loadRuleBases' answering on a session it then throws away)
+-- rather than the one a frontend goes through, and the repl's own text still
+-- says what happened.
+--
+-- **'Thena.Driver.BasesIllTyped' is not here** — it is the other way a base is
+-- turned away, it carries no path and it has no view. `~cxh8s` is the ask.
+refusalsOf :: Session -> [Response] -> [Trouble] -> [(FilePath, (Digest, RuleFileError))]
+refusalsOf s resps troubles =
+  [ (p, (d, e))
+  | RuleFileRefused p e <- resps ++ [r | Unloadable _ r <- troubles]
+  , Just d <- [lookup p (filesRead s)]
+  ]
+
+-- | **Keep what 'refusalsOf' found** — MS12 phase 348, @~cjznk@.
+--
+-- **The later entry wins**, which is the only sensible reading of two
+-- refusals of one path: the second is what the file says now.
+noteRefused :: [(FilePath, (Digest, RuleFileError))] -> St -> St
+noteRefused [] st = st
+noteRefused new st =
+  st { stRuleRefused = Map.union (Map.fromList new) (stRuleRefused st) }
 
 -- | Whether a response means the line actually advanced the session.
 --
@@ -6122,7 +6239,7 @@ openDocument st stored texts upto said = do
     Just s -> pure s
     Nothing -> fst <$> liftIO startingSession
   let (runNow, rest) = splitAt (max 0 (min upto (length texts))) texts
-      unrun = [ScriptLine t Nothing Nothing [] True | t <- rest]
+      unrun = [ScriptLine t Nothing Nothing [] True [] | t <- rest]
   put st { stScriptMode = True, stScriptBase = Just base, stStored = Just stored }
   rerunTail 0 base runNow unrun $ \ran -> do
     let doc = ran ++ unrun
@@ -6327,6 +6444,7 @@ scriptSubmit = do
           let sl = ScriptLine
                 { slText = line, slSession = Just s, slRan = Just line
                 , slOutput = [said], slOk = True
+                , slRefused = []
                 }
           st' <- get
           put st' { stScript = stScript st' ++ [sl], stInput = emptyInput, stScriptNote = Nothing }
@@ -6552,15 +6670,21 @@ handleRerunStep :: Int -> [ScriptLine] -> Bool -> Bool -> EventM Name St ()
 handleRerunStep gen soFar shown finished = do
   st <- get
   case stRerun st of
-    Just rs | rrGen rs == gen ->
+    Just rs | rrGen rs == gen -> do
+      -- **Every step's refusals, and a step's lines are a growing prefix** —
+      -- MS12 phase 348, @~cjznk@ — so this merges the same pairs again on
+      -- each post, which 'noteRefused' is idempotent under. Done before the
+      -- 'put' either way, so 'rrFinish''s own continuation reads the map with
+      -- them in it.
+      let st' = noteRefused (concatMap slRefused soFar) st
       if finished
         then do
-          put st { stRerun = Nothing }
+          put st' { stRerun = Nothing }
           rrFinish rs soFar
         else
-          put st
+          put st'
             { stScript =
-                take (rrAt rs) (stScript st)
+                take (rrAt rs) (stScript st')
                   ++ soFar
                   ++ drop (length soFar) (rrPending rs)
                   ++ rrUnrun rs
@@ -6782,7 +6906,7 @@ runNextScriptLine :: St -> Int -> EventM Name St ()
 runNextScriptLine st at = case (scriptSessionBefore st at, nthOf at (stScript st)) of
   (Just s, Just sl) -> do
     ran <- liftIO (runScriptLine s (slText sl))
-    put st
+    put (noteRefused (slRefused ran) st)
       { stScript = take at (stScript st) ++ [ran] ++ drop (at + 1) (stScript st)
       , stScriptPos = Just at
       , stInput = E.editorText Input (Just 1) (Text.pack (slText ran))

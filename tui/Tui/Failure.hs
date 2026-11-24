@@ -24,6 +24,7 @@
 module Tui.Failure
   ( StopLine (..)
   , stopLines
+  , refusalLines
   , positionSuffix
   , placeSuffix
   , natureGlyph
@@ -88,6 +89,25 @@ stopLines what sv =
     : concatMap (whyLines 1) [stopViewWhy sv]
     <> [StopLine 1 ("it said: " <> oneLine m) | m <- stopViewSaid sv]
     <> [StopLine 1 (warningText w) | w <- stopViewWarned sv]
+
+-- | **The fold for a refused rule file** — MS12 phase 348, @~cjznk@.
+--
+-- **'stopLines' without its first line, and that is the whole difference.** A
+-- module's row names the module and the fold's first line names the
+-- /declaration/ that did not go in — two different things, so both are said.
+-- A rule file has nothing inside it to name: the file is the item, the row
+-- above already carries its path and its ❌, and a headline here would say
+-- @it did not go in@ under a row that has just said so.
+--
+-- **Depth 0, because this is the fold's own top level.** The pane steps every
+-- line in by its own indent either way.
+--
+-- **Nothing is said and nothing is warned on one of these** —
+-- 'Thena.View.Failure.displayRuleFile' leaves both empty, because a load that
+-- is refused never reaches a rule — so this is the faults and no more. If that
+-- ever stops being true the two lists belong here, in 'stopLines'\' order.
+refusalLines :: StopView -> [StopLine]
+refusalLines sv = whyLines 0 (stopViewWhy sv)
 
 -- | What became of the item, as the fold's first line says it.
 --
@@ -427,6 +447,7 @@ wantedText w = case w of
 
 stageText :: Stage -> String
 stageText st = case st of
+  ReadingTheHeader -> "reading the header"
   Lexing -> "lexing"
   LayingOut -> "laying it out"
   Parsing -> "parsing"

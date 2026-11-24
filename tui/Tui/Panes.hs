@@ -17,6 +17,7 @@ module Tui.Panes
   , ModuleEntry (..)
   , moduleRows
   , FileKind (..)
+  , FileEntry (..)
   , outputRows
   , Job (..)
   , jobRows
@@ -36,8 +37,16 @@ module Tui.Panes
   , paneBarWidget
   ) where
 
-import Data.List (dropWhileEnd, intercalate, intersperse, isPrefixOf, nub, sort)
-import Data.Maybe (catMaybes)
+import Data.List
+  ( dropWhileEnd
+  , intercalate
+  , intersperse
+  , isPrefixOf
+  , nub
+  , sort
+  , sortOn
+  )
+import Data.Maybe (catMaybes, isJust)
 import Data.Time.Clock (NominalDiffTime)
 
 import Brick
@@ -66,7 +75,13 @@ import Text.Wrap
 
 import Thena.View.Failure (StopView (..))
 
-import Tui.Failure (StopLine (..), natureIsFault, positionSuffix, stopLines)
+import Tui.Failure
+  ( StopLine (..)
+  , natureIsFault
+  , positionSuffix
+  , refusalLines
+  , stopLines
+  )
 
 -- | One row of a list pane.
 --
@@ -216,7 +231,15 @@ foldMark open = if open then "\x25be" else "\x25b8"
 -- **Rule bases are not in the tree and that is not an omission.** A consulted
 -- @.thena.rules@ file is not a module, so no module's import list names it and
 -- there is no edge to draw; it keeps its own group below.
-moduleRows :: [ModuleEntry] -> [(FileKind, FilePath)] -> [PaneRow String]
+--
+-- **AND A RULE BASE THAT WAS REFUSED IS MARKED AND UNFOLDS, THE SAME AS A
+-- MODULE** — MS12 phase 348, @~cjznk@, and it closes a real defect. A base the
+-- session would not load stays in 'Thena.Driver.filesRead' by design (MS11
+-- phase 295, so that an engine upgrade shows as a changed hash), so until this
+-- it sat in the @rule bases@ group indistinguishable from one that loaded —
+-- measured under a pty on 2026-11-24, @noheader.thena.rules@ listed plainly
+-- under @rule bases  1@ with the only word about it in the repl's text.
+moduleRows :: [ModuleEntry] -> [FileEntry] -> [PaneRow String]
 moduleRows modules files =
   concat
     [ Heading "modules" (Just distinct) : concatMap moduleGroup modules
@@ -277,9 +300,56 @@ moduleRows modules files =
             kindOf 0
               | natureIsFault (stopViewNature sv) = Alert
             kindOf _ = Detail
+    -- | **One group of files, in order of the label it is drawn under** — not
+    -- of the path, because 'shorten' is what decides what the row says and a
+    -- group sorted on a path it does not show is a group sorted at random.
     group label kind =
-      let ps = sort [shorten kind p | (k, p) <- files, k == kind]
-       in concat [Heading label (Just (length ps)) : map Entry ps | not (null ps)]
+      let fs = sortOn labelOf [f | f <- files, feKind f == kind]
+          reserve = any (isJust . feRefused) fs
+       in concat
+            [ Heading label (Just (length fs)) : concatMap (fileGroup reserve) fs
+            | not (null fs)
+            ]
+      where
+        labelOf = shorten kind . fePath
+    -- | **A file's row, and what it unfolds to when the session refused it.**
+    --
+    -- **Only a refused base is a 'Tap'**, the same bargain 'moduleGroup'
+    -- makes: a file that loaded has nothing to unfold, and a row that looks
+    -- clickable and does nothing is worse than one that does not look it.
+    -- **The click name is the path**, which is what 'Tui.App' keys its open
+    -- set on — a module's name and a file's path cannot be the same string.
+    --
+    -- **The glyph's two columns are reserved for every row of a group that
+    -- holds a refusal, and for none of a group that does not.** Padding a
+    -- group where no row can ever carry a mark would be an indent for
+    -- nothing; leaving the pad out of a group that has one would start the
+    -- names of its rows in two different columns. 'markColumns' is the width
+    -- and 'wideGlyphs' is why it is two and not one.
+    --
+    -- **A base that loaded gets no ✅.** His instruction `~nf5tx` asked for
+    -- the three marks on the modules, and a tick on every shipped and
+    -- consulted base is a convention he has not asked for; the column is
+    -- reserved so the absence reads as /nothing to say/ rather than as a row
+    -- that lost its glyph.
+    --
+    -- **The pad is the mark's columns plus the space after it**, read off
+    -- 'markColumns' rather than written as two, so a glyph that ever measures
+    -- differently moves the pad with it.
+    fileGroup reserve fe = case feRefused fe of
+      Nothing -> [Entry (pad <> labelled)]
+      Just sv ->
+        Tap (fePath fe) (markGlyph NoneIn <> " " <> labelled)
+          : [ Detail (pad <> step sl <> slText sl)
+            | feOpen fe
+            , sl <- refusalLines sv
+            ]
+      where
+        labelled = shorten (feKind fe) (fePath fe)
+        pad = replicate (if reserve then markColumns NoneIn + 1 else 0) ' '
+        -- | **The same step 'moduleGroup' gives a module's fold**, and the
+        -- 'Detail' the line is drawn as supplies the first one.
+        step sl = replicate (2 * slDepth sl) ' '
     -- **Thena's own two files are shown by their tail and nothing else.**
     -- They live wherever the package was installed —
     -- @~\/.cabal\/share\/aarch64-osx-ghc-9.12.4-6f4d\/thena-0.1.0.0\/prelude\/prelude.thena@
@@ -304,6 +374,43 @@ moduleRows modules files =
 -- beside his, and a module's own file is named under its module rather than
 -- twice.
 data FileKind = AShippedFile | ARuleBase | AModuleFile | AnotherFile
+  deriving (Eq, Show)
+
+-- | **One file the session read** — MS12 phase 348, @~cjznk@.
+--
+-- Plain data in and rows out, the same discipline as 'ModuleEntry': "Tui.App"
+-- reads the session and hands these over, so what the pane says is decided
+-- without a terminal.
+--
+-- **It replaced a bare @(FileKind, FilePath)@ pair when a file gained
+-- something to say about itself.** A rule base the session refused is still a
+-- file it read — 'Thena.Driver.filesRead' keeps the note on purpose — so the
+-- row has to be able to carry the refusal, and a third element of a tuple is
+-- not a name for it.
+data FileEntry = FileEntry
+  { feKind :: FileKind
+  , fePath :: FilePath
+    -- ^ as 'Thena.Driver.filesRead' spells it. **Also the row's click name**
+    -- when there is something to unfold, which is why 'moduleRows' can share
+    -- one open set with the module rows: a path and a module name are never
+    -- the same string.
+  , feRefused :: Maybe StopView
+    -- ^ **why the session would not load it**, for a @.thena.rules@ file it
+    -- refused — 'Thena.View.refusedFileView', MS12 phase 348. 'Nothing' for
+    -- every file that went in, and for every file that is not a rule base.
+    --
+    -- **A view and not lines of text**, the rule `~8btbp` closed for the
+    -- modules pane: until phase 348 a refused rule file had no view at all and
+    -- the only thing to show was 'Thena.Render'\'s prompt text.
+    --
+    -- **It does not cover 'Thena.Driver.BasesIllTyped'**, which is the other
+    -- way a base is turned away — the rules parsed and resolved and the
+    -- program they make does not type check. That response carries no path and
+    -- has no view, so it stays in the repl's text; `~cxh8s` is the ask.
+  , feOpen :: Bool
+    -- ^ whether 'feRefused' is unfolded. **Clicking the row toggles this**,
+    -- the same gesture a ⚠️ module's row has.
+  }
   deriving (Eq, Show)
 
 -- | **How much of a module went in** — `~nf5tx`, and the three states are the
