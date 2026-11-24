@@ -36,6 +36,7 @@ import Thena.Driver
   , Stop (..)
   , digestText
   , filesRead
+  , loadRuleTexts
   , moduleName
   , fuelOf
   , oneLine
@@ -67,7 +68,7 @@ import Thena.View
   , sessionTrust
   , trustView
   )
-import Thena.View (failureView)
+import Thena.View (failureView, refusedFileView)
 import Thena.View.Chart (BoundView (..), OfferView (..), Written (..))
 import Thena.View.Failure
   ( Block (..)
@@ -113,10 +114,12 @@ main = do
   -- from the shared session above.
   unfinished <- partial
   refused <- grammar
-  failures <- pure (booted <> unfinished <> refused <> concatMap ($ s) checks)
+  base <- ruleFile
+  failures <-
+    pure (booted <> unfinished <> refused <> base <> concatMap ($ s) checks)
   mapM_ putStrLn failures
   unless (null failures) exitFailure
-  putStrLn ("the boundary holds: " <> show (length checks + 2) <> " views reached")
+  putStrLn ("the boundary holds: " <> show (length checks + 3) <> " views reached")
   where
     step acc l = fst (oneLine acc l)
 
@@ -389,6 +392,34 @@ grammar = do
             , [ASide TheConclusion] <-
                 [ pc | PartView TheSide pc <- faultViewParts inner ] -> []
         other -> ["FAILED: failureView of a refused grammar: " <> show other]
+
+-- | **A rule file that would not load, walked** (MS12 phase 348, @~cjznk@, his
+-- ruling of 2026-11-24).
+--
+-- Its own check for 'partial'\'s reason and one more: this failure arrives in a
+-- 'Response' that no view was ever reached from, so what is asserted is that a
+-- frontend can get from a refused @:load@ to a laid-out fault — the kind, and a
+-- clause as a place to go — without naming an engine type. **A pane drew the
+-- prompt's text or nothing at all before this phase.**
+--
+-- **The fixture is written here rather than read from disc**, because
+-- 'loadRuleTexts' is the door a frontend holding its own buffer uses: the file
+-- the author is editing need not have been saved.
+ruleFile :: IO [String]
+ruleFile = do
+  (s0, _) <- startingSession
+  let src = "rule base boundary where\nf x = concat x \"a\"\nf y = concat y \"b\"\n"
+  pure $ case snd (loadRuleTexts s0 [("boundary.thena.rules", src)]) of
+    RuleFileRefused _ e ->
+      let v = refusedFileView (Budget 200) s0 e
+       in case (stopViewNature v, stopViewWhy v) of
+            (Broken, Faulty [f])
+              | ClauseUnreachable <- faultViewKind f
+              , [ACount 1] <- [ pc | PartView TheArity pc <- faultViewParts f ]
+              , [APlace "boundary.thena.rules" (Pos 3 1)] <-
+                  [ pc | PartView TheClause pc <- faultViewParts f ] -> []
+            other -> ["FAILED: refusedFileView: " <> show other]
+    other -> ["FAILED: the rule file was not refused: " <> show other]
 
 -- | Does this alternative say where its clause is written (MS12 phase 342)?
 placed :: AltView -> Bool
