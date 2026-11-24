@@ -1627,11 +1627,22 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "title.script",   surface (themePanel th) (themeRepl th))
   -- The caret's own row marker, his suggested '⟩'. The accent, because it
   -- answers "where am I in the document" and nothing else on screen does.
-  , (attrName "script.marker",  ink (themeRepl th))
+  , (attrName "script.marker",  surface (themePanel th) (themeRepl th))
   -- A line the engine refused, and its complaint. Dim rather than loud:
   -- the line is still in the document and still yours to fix, which is not
   -- an alarm.
-  , (attrName "script.refused", ink (themeDim th))
+  --
+  -- **A SURFACE, AND THE COMMENT BELOW IS WHY — `~vzjsc`, his report of
+  -- 2026-11-24.** This was an 'ink' and the note under 'script.stale' excused
+  -- it: /"on a short run of output that is a near-black seam nobody
+  -- notices"/. A session whose every line is refused is not a short run — the
+  -- document he opened drew a black band on every other row. **The excuse was
+  -- the defect**, and the rule it was excusing itself from is the rule: an
+  -- attribute drawn inside a filled container names that container's
+  -- background. Measured under the pty: the refusal row read @bg:0;0;0@ from
+  -- the marker column to the pane's edge where the line above it read
+  -- @bg:95;95;95@.
+  , (attrName "script.refused", surface (themePanel th) (themeDim th))
   -- **A line below an edit, still there and no longer true of anything** —
   -- his ruling of 2026-11-11, that the tail survives an edit and says so by
   -- colour rather than by vanishing. The same dim ink a refusal wears, and
@@ -1831,7 +1842,10 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- unmistakably part of the same broken run as the text around it.
   , (attrName "recovered",             V.withStyle (ink (themeRepl th)) V.underline)
   , (attrName "placeholder.recovered", V.withStyle (ink (themeRepl th)) V.underline)
-  , (attrName "accent.output",  ink (themeSoft th))
+  -- | **The output marker '▏' beside a repl turn's answer, and a surface for
+  -- the same reason 'script.refused' is** — `~vzjsc`. One cell of stage
+  -- colour in the middle of a filled pane is a hole in it.
+  , (attrName "accent.output",  surface (themePanel th) (themeSoft th))
   , (attrName "dropdown",          surface (themePopup th) (themePopupInk th))
   , (attrName "dropdown.jevpick",  surface (themeJevPick th) (themeStage th))
   -- A real background swap for the selected row, not a foreground tint
@@ -3602,7 +3616,12 @@ renderPopup vp padSide rows =
         styled
           | prSelected r = withAttr (attrName "dropdown.selected")
           | prJevPick r  = withAttr (attrName "dropdown.jevpick")
-          | prDim r      = withAttr (attrName "dim")
+          -- | **'dropdown.faint', not 'dim' — `~vzjsc`.** A row of this box is
+          -- on 'themePopup', and 'dim' is an ink with no background of its
+          -- own: brick resolves it against the stage and draws a black band
+          -- across the box. The attribute beside it exists for exactly this
+          -- and its haddock says so.
+          | prDim r      = withAttr (attrName "dropdown.faint")
           | otherwise    = id
         mark = if prSelected r then visible else id
 
