@@ -428,7 +428,7 @@ dispatchableTests =
                -- @focus-is-component@, and dispatch runs it no more than it runs
                -- @try-core@ — it takes a parameter.
              , "rename", "eliminate-core"
-             , "eliminate-generalising-core", "step", "fill"
+             , "eliminate-generalising-core", "step", "step", "step", "fill"
              , "unify-refine-core", "apply-core"
                -- **@fit-core@'s two clauses both pass, and dispatch runs
                -- neither** (MS2 phase 27) — it takes a parameter, exactly like

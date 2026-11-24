@@ -137,6 +137,8 @@ expectedStandard =
   , aRule (rootName "eliminate-generalising-core") [PVar "t"] [FocusIsHole]      [Do (Op.Eliminate (Ref "t"))]
   , proveRule
   , proveGuess
+  , stepZero
+  , stepMany
   , fillRule
   , unifyRefine
   , applyRule
@@ -319,6 +321,23 @@ proveRule = aRule (rootName "step") [] [FocusIsHole] [Do Dispatch]
 
 proveGuess :: Rule
 proveGuess = aRule (rootName "step") [] [FocusIsGuess] [Do Dispatch]
+
+-- | @step ‹n›@ — n moves (MS12 phase 347), his instruction of 2026-11-24.
+--
+-- **The arity picks the clause**, so the nullary pair above is untouched, and
+-- the two clauses here are disjoint: a literal @0@ against
+-- 'Thena.Instral.Ops.NumberIsPositive', so the dispatch makes no choice point
+-- and a retry cannot count below nought.
+stepZero :: Rule
+stepZero = aRule (rootName "step") [Op.PInt 0] [FocusIsComponent] []
+
+stepMany :: Rule
+stepMany = aRule (rootName "step") [PVar "n"]
+  [FocusIsComponent, NumberIsPositive (Ref "n")]
+  [ Do (Call "step" [])
+  , Bind (Op.PVar "m") Nothing (Op.OneLess (Ref "n"))
+  , Do (Call "step" [Ref "m"])
+  ]
 
 -- | Elaboration (MS4 phase 41): one clause over the large instruction.
 --

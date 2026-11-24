@@ -935,7 +935,13 @@ impossible is not posted at all; you are shown only what is left to do.
 
 Thena has a small base of named rules, and it can pick one for you.
 
-`:matches` lists the rules that apply where you are standing. `step` runs one.
+`:matches` lists the rules that apply where you are standing. `step` runs one of
+them — one move, not a proof. `step ‹n›` makes `n` moves, so `step 5` is five
+dispatches in a row and stops early only if one of them fails.
+
+**There is no `prove`.** The word is kept free for a base of your own to define,
+and nothing is shipped under it; typed as it stands, it answers *no rule is
+called prove*.
 
 ```
 thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
@@ -948,6 +954,7 @@ rename ‹n› : Name -> ()
 solve : ()
 regret : ()
 step : ()
+step ‹n› : Int -> ()
 claim ‹ty› : Core -> ()
 assume ‹ty› : Core -> ()
 quantify ‹ty› : Core -> ()
@@ -1085,6 +1092,7 @@ rename ‹n› : Name -> ()
 eliminate-core ‹t› : Core -> ()
 eliminate-generalising-core ‹t› : Core -> ()
 step : ()
+step ‹n› : Int -> ()
 fill ‹t› : Core -> ()
 unify-refine-core ‹t› : Core -> ()
 apply-core ‹f› : Core -> ()
@@ -1497,7 +1505,7 @@ already there goes on being searched underneath them.
 ```
 thena spine> :consult examples/ChoicePoints.thena.rules
 loaded demo (3 rules)
-loaded standard (127 rules)
+loaded standard (129 rules)
 ```
 
 **The last thing you consulted is tried first.** The shipped base is consulted for
@@ -2344,6 +2352,7 @@ language and elaborated on load.
 | `fun` `arg` `dom` `cod` `val` `type` `body` `motive` `target` `claimed` `actual` | descend into a field |
 | `param ‹n›` `method ‹n›` `index ‹n›` `arg ‹n›` | descend into a numbered field |
 | `step` | let the rule engine choose and run a rule |
+| `step ‹n›` | do that n times |
 | `retry` / `retry ‹n›` | backtrack to a choice point |
 | `data ‹D› … where { … }` | declare an inductive family |
 | `declare ‹sig› ; ‹equation›` | elaborate a surface declaration |

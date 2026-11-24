@@ -33,7 +33,7 @@ thena spine> :show
   ) in
   second
 thena spine> :choices
-19  any-of (standard.thena.rules:469)   untried: any-of (standard.thena.rules:470)
+19  any-of (standard.thena.rules:499)   untried: any-of (standard.thena.rules:500)
 thena spine> :abandon
 abandoned second
 thena spine> :theorem first : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> B -> A

@@ -362,6 +362,8 @@ everyOp =
     -- The word the head's next argument position was declared with (MS12
     -- phase 345).
   , ("next-argument-name f", Op.NextArgumentName (Ref "f"))
+    -- All the arithmetic there is (MS12 phase 347).
+  , ("one-less n", Op.OneLess (Ref "n"))
   ]
 
 vocabulary :: TestTree

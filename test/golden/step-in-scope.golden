@@ -30,7 +30,7 @@ thena spine> :show
   ) in
   second
 thena spine> :choices
-25  any-of (standard.thena.rules:469)   untried: any-of (standard.thena.rules:470)
+25  any-of (standard.thena.rules:499)   untried: any-of (standard.thena.rules:500)
 24  try-in-scope (standard.thena.rules:43)   untried: fit-in-scope (standard.thena.rules:63), attack (standard.thena.rules:73), abandon (standard.thena.rules:79), step (standard.thena.rules:161)
 21  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), step (standard.thena.rules:163)
 18  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), step (standard.thena.rules:163)

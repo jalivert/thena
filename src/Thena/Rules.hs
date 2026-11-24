@@ -509,6 +509,9 @@ holds env cur args t = case t of
   -- **The one test that reads TWO operands**, and the one that is not about a
   -- shape at all (MS9 phase 183). A splitting tree pairs an arm with a
   -- constructor, and both names are read rather than written.
+  -- **The one test about a number** (MS12 phase 347). Its complement is the
+  -- literal pattern @0@ in the sibling clause, not a second test.
+  NumberIsPositive o      -> numberIsPositive o
   SameName a b            -> sameName a b
   DifferentName a b       -> differentName a b
   AppArgsAreExplicit o    -> surfaceIs o argsExplicit
@@ -562,6 +565,11 @@ holds env cur args t = case t of
     -- it is — so the comparison is on the name, which is what makes a path
     -- structure rather than punctuation. A written @"…"@ still compares, as a
     -- name at the root, which is what @name-or-stem n "_"@ asks.
+    numberIsPositive o = case Op.operandIn args o of
+      Right (VInt k) -> k > 0
+      Right _        -> False
+      Left _         -> True
+
     sameName a b = withNames a b (==)
     differentName a b = withNames a b (/=)
 
@@ -1728,6 +1736,9 @@ unaryOps =
   , ("prim-rename", Op.Rename)
   , ("case-survived", Op.CaseSurvivedOp)
   , ("level", Op.LevelOf), ("universe-at", Op.UniverseAt)
+    -- @instral@'s whole arithmetic (MS12 phase 347): what @step ‹n›@ counts
+    -- down with.
+  , ("one-less", Op.OneLess)
   , ("push-development", Op.PushDevelopment)
   , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
   , ("prim-case", Op.CaseAnalyse)
@@ -2045,6 +2056,7 @@ withOperands t os = case (t, os) of
   (BinderIsArgument _, [o])      -> Just (BinderIsArgument o)
   (BinderIsHypothesis _, [o])    -> Just (BinderIsHypothesis o)
   (BinderIsCopy _, [o])          -> Just (BinderIsCopy o)
+  (NumberIsPositive _, [o])      -> Just (NumberIsPositive o)
   (SameName _ _, [a, b])         -> Just (SameName a b)
   (DifferentName _ _, [a, b])    -> Just (DifferentName a b)
   (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
@@ -2093,6 +2105,7 @@ testTypes t = case t of
   BinderIsArgument o      -> [(o, Ty.TBinder)]
   BinderIsHypothesis o    -> [(o, Ty.TBinder)]
   BinderIsCopy o          -> [(o, Ty.TBinder)]
+  NumberIsPositive o      -> [(o, Ty.TInt)]
   SameName a b            -> [(a, Ty.TName), (b, Ty.TName)]
   DifferentName a b       -> [(a, Ty.TName), (b, Ty.TName)]
   SurfaceIsName o         -> [(o, Ty.TSurface)]
@@ -2153,6 +2166,7 @@ testWord t = case t of
   BinderIsArgument _      -> "binder-is-argument"
   BinderIsHypothesis _    -> "binder-is-hypothesis"
   BinderIsCopy _          -> "binder-is-copy"
+  NumberIsPositive _      -> "number-is-positive"
   SameName _ _            -> "same-name"
   DifferentName _ _       -> "different-name"
   SurfaceIsName _         -> "surface-is-name"
@@ -2219,6 +2233,7 @@ everyTest =
   , BinderIsArgument (Lit (VText ""))
   , BinderIsHypothesis (Lit (VText ""))
   , BinderIsCopy (Lit (VText ""))
+  , NumberIsPositive (Lit (VText ""))
   , SameName (Lit (VText "")) (Lit (VText ""))
   , DifferentName (Lit (VText "")) (Lit (VText ""))
   , AppArgsAreExplicit (Lit (VText ""))

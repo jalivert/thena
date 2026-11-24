@@ -6182,6 +6182,36 @@ being made, and the thing that finishes one on its own is not a step.
 plain word belongs to the rule and the `prim-` word to the operation it is
 written over.
 
+**`step ‹n›` makes n moves**, and the arity picks the clause, so a bare `step` is
+unchanged:
+
+```
+thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
+proving t : ∀ (A : Type₀) -> A -> A
+thena spine> step 3
+chose 4730: try-in-scope
+backtracking to 4730: fit-in-scope
+backtracking to 4730: attack
+chose 4732: intro
+chose 4735: intro
+```
+
+A move that fails fails the whole count, and the backtracking is the engine's own
+as it is everywhere else. **It is not a brake**: a rule that calls itself without
+a count still does not terminate, and `step ‹n›` says nothing about that.
+
+**It is two clauses, counting down in the rule language.** `step 0` matches the
+literal and does nothing; `step n` makes one move and calls itself with `n - 1`.
+The two are disjoint — a literal pattern against `number-is-positive` — so there
+is no choice point between them, and a negative count matches neither, which
+answers *no rule matches* rather than quietly doing nothing. The whole of the
+arithmetic this needed is one operation, `one-less`.
+
+**`step ‹n›` and `:step ‹n›` are different things and the words collide.**
+`:step 120` lets every typed line run at most 120 *instructions* — a debugging
+cap on the machine — where `step 5` makes five *moves*. The collision was weighed
+and taken deliberately; if it costs anything, the cap is what gets renamed.
+
 
 ### The prompt completes the acts a file writes, and not only the colon commands
 

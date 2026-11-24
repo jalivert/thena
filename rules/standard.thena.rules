@@ -162,6 +162,36 @@ rule step :- when focus-is-hole do prim-step
 
 rule step :- when focus-is-guess do prim-step
 
+-- step ‹n› — n moves, his instruction of 2026-11-24: *"let's ship a rule `step`
+-- with one more argument — a fuel, an integer. like `step 5` which does 5
+-- steps."*
+--
+-- **The arity picks the clause**, so a bare `step` is untouched — the same
+-- arrangement `claim` has had since MS5 phase 62b, where the one-argument form
+-- is a rule and the two-argument one an op.
+--
+-- **Two clauses, and they are disjoint.** `0` is a literal pattern and
+-- `number-is-positive` is its complement, so dispatch builds no choice point
+-- between them and a retry cannot walk the count downwards past nought. A
+-- negative count matches neither clause, which answers *no rule matches*.
+--
+-- **A move that fails fails the whole count**, and the backtracking is the
+-- engine's as it is everywhere else: `step 5` is five dispatches in a row, not
+-- five attempts to make progress. There is no brake here and this is not one —
+-- a rule that calls itself without a count still does not terminate.
+-- **Both clauses ask `focus-is-component`** rather than going headless: a rule
+-- with no head matches everywhere, the core fragment included, which is why
+-- `fresh-universe` at the top of this file is a function. The count is about
+-- the chain, so the chain is what the head asks about, and `number-is-positive`
+-- rides beside it on the clause that recurses.
+step : Int -> ()
+rule step 0 :- when focus-is-component do
+
+rule step n :- when focus-is-component (number-is-positive n)
+  do step
+     ; m = one-less n
+     ; call step m
+
 fill : Core -> ()
 rule fill t :- when focus-is-hole
   do n = fresh-name "refined"
