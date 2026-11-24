@@ -785,6 +785,24 @@ data Op
     -- computed.
   | UniverseAt Operand
     -- ^ the universe at a level (MS5 phase 89) — @universe-at l@.
+  | OneLess Operand
+    -- ^ **one less than a whole number** (MS12 phase 347) — @one-less n@, the
+    -- whole of @instral@\'s arithmetic.
+    --
+    -- **It exists so that a counted tactic can be written as a rule.** @step
+    -- ‹n›@ is two clauses — the literal @0@, and a positive count that makes
+    -- one move and calls itself with this — so the counting down is in the base
+    -- where the control flow belongs, and not in a loop in here.
+    --
+    -- **Total, and it does not guard.** @one-less 0@ is @-1@: a rule that must
+    -- not go below nought says so with the @number-is-positive@ head test,
+    -- which is where the @step@ clauses say it. An op that refused at nought
+    -- would be a guard dressed as arithmetic, and the head is where this base
+    -- states every other condition.
+    --
+    -- **Nothing else arithmetic is added with it.** A general @minus@, a
+    -- comparison and a successor are all absent because nothing asks for them;
+    -- @instral@ computes with the machine\'s data and not with numbers (§5.3).
   | ResolveName Operand
     -- ^ what a name denotes, with its level arguments inserted (MS4 phase 48).
     -- The other two of those nine operands.
@@ -1767,6 +1785,7 @@ resultOf o = case o of
   FreshLevel     -> Just TLevel
   LevelOf _      -> Just TLevel
   UniverseAt _   -> Just TCore
+  OneLess _ -> Just TInt
   ResolveName _  -> Just TCore
   SurfaceNameOf _ -> Just TName
   SurfaceLiteralOf _ -> Just TCore
@@ -2010,6 +2029,7 @@ operandTypes o = case o of
   FreshLevel     -> []
   LevelOf a      -> [(a, TInt)]
   UniverseAt a   -> [(a, TLevel)]
+  OneLess a -> [(a, TInt)]
   ResolveName x  -> [(x, TName)]
   SurfaceNameOf x -> [(x, TSurface)]
   SurfaceLiteralOf x -> [(x, TSurface)]
@@ -2419,6 +2439,20 @@ data Test
     -- reason: a clause that matches on one keeps declining a group it was never
     -- written for. The three really are three — each is bound under a name from
     -- a different place.
+  | NumberIsPositive Operand
+    -- ^ **a whole number is more than nought** (MS12 phase 347) —
+    -- @number-is-positive n@, and the only head test in the language that asks
+    -- about a number.
+    --
+    -- **Its complement is a pattern and not a second test.** @step ‹n›@\'s other
+    -- clause is written @rule step 0 :- do@, matching the literal, which is what
+    -- 'Thena.Instral.Pattern.PInt' is for; so the two clauses are disjoint and
+    -- the dispatch makes no choice point between them, which is what the
+    -- @let-is-annotated@ / @let-is-bare@ pairing exists to achieve.
+    --
+    -- **A negative count matches neither**, and that is deliberate: @step -3@ is
+    -- not a number of moves, so /no rule matches/ is the honest answer rather
+    -- than a silent nought.
   | SameName Operand Operand
     -- ^ two names are the same word — @same-name a b@ (MS9 phase 183).
     --
@@ -2593,6 +2627,7 @@ opKeyword o = case o of
   FreshLevel     -> "fresh-level"
   LevelOf _      -> "level"
   UniverseAt _   -> "universe-at"
+  OneLess _ -> "one-less"
   ResolveName _  -> "resolve-name"
   SurfaceNameOf _ -> "surface-name"
   SurfaceLiteralOf _ -> "surface-literal"

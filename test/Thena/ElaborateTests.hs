@@ -813,7 +813,7 @@ baseTests =
                 -- a hole among them, so it is a candidate here.
               , "rename", "eliminate-core"
               , "eliminate-generalising-core"
-              , "step", "fill", "unify-refine-core", "apply-core"
+              , "step", "step", "step", "fill", "unify-refine-core", "apply-core"
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
@@ -859,8 +859,12 @@ baseTests =
               ++ ["run-block"]
               ++ replicate 2 "spine-arguments"
 
-    , testCase "prove is a rule over prim-step" $
-        case [ r | r@(Rule (GlobalName [] "step") _ _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
+      -- **The nullary @step@ is a rule over the op and nothing else** — the
+      -- clause @dispatch@ actually runs, since it runs no rule that takes
+      -- parameters. @step ‹n›@ is in this listing too (MS12 phase 347) and is
+      -- filtered out here by its arity.
+    , testCase "step is a rule over prim-step" $
+        case [ r | r@(Rule (GlobalName [] "step") [] _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
           [Rule _ ps _ b _] -> (ps, b) @?= ([], [Do Ops.Dispatch])
           other           -> assertFailure ("expected one clause: " ++ show other)
     ]

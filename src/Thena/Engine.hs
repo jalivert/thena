@@ -2158,6 +2158,14 @@ perform instr rest m = case operation instr of
     Right (VLevel l) -> produce (VTerm (Universe l)) m
     Right _          -> failure ExpectedLevel m
 
+  -- **One less, and that is the whole of the arithmetic** (MS12 phase 347).
+  -- Total: @one-less 0@ is @-1@, because the condition belongs in a head and
+  -- @step ‹n›@'s positive clause writes it there.
+  OneLess a -> case operandValue (env (exec m)) a of
+    Left e        -> failure e m
+    Right (VInt k) -> produce (VInt (k - 1)) m
+    Right _       -> failure ExpectedInt m
+
   -- **The six declaration readers** (MS9 phase 176). Until this phase
   -- @make-data@ could declare a datatype and nothing could read one back, so a
   -- rule could not ask how many constructors a family has — which is the
