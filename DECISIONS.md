@@ -7668,6 +7668,32 @@ its glyph and its wording from that field, so *you typed `:abandon`* never reads
 like an error, and a stop added later draws correctly without anything being
 told.
 
+### A rule file that will not load reports the same way a declaration does
+
+*Decided 2026-11-24, MS12.*
+
+The four kinds of thing you write — a proof, a `language` block, a module, a
+rule base — can each be refused, and all four now hand a frontend the same
+shape: which failure it is, and its typed parts. **A refused rule base was the
+exception until this decision.** It had the sentence the prompt prints and
+nothing structured, so a pane could draw the terminal's text in a window with a
+border, or draw nothing.
+
+Two things made it worth closing rather than living with. A rule base is text
+you are *editing*, so its refusal is what you are working on, not a report about
+something elsewhere; and the vocabulary a rule's refusal is said in was already
+written and already complete — what was missing was the way out of a load. The
+alternative, that an editor draws its own faults for a file it owns and asks
+the session for nothing, is not refuted: it is what a language server would do.
+It was not taken because it would make this one file the thing the system
+refuses without saying why.
+
+**Every shape of refusal is walked**, including the two that are about the
+file's `import` lines rather than its rules. Where the prompt's sentence and a
+pane's fault say different things, the pane is told what the *session* can say:
+a base that imports a module nobody read is told there is no such namespace,
+which is the same answer a name written at that namespace gets.
+
 ### A region is written text and splices, and may name its production
 
 A region of object syntax is not a string. It is the runs the user typed with the

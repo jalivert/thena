@@ -41,6 +41,7 @@ module Thena.View.Failure
   , Nature (..)
   , Why (..)
   , displayStop
+  , displayRuleFile
   , natureOf
 
     -- * A fault, and its parts
@@ -531,7 +532,13 @@ data Wanted
 
 -- | How far reading got before it stopped.
 data Stage
-  = Lexing
+  = ReadingTheHeader
+    -- ^ __a rule file's @rule base ‹name› where@ line__ (MS12 phase 348,
+    -- @~cjznk@). **Before lexing, and that is why it is a stage of its own**:
+    -- 'Thena.Driver.baseHead' reads the header textually so that a description
+    -- may hold characters that would not lex, so a file with no header fails
+    -- before any of the stages below is reached.
+  | Lexing
   | LayingOut
   | Parsing
   | ParsingSurface
@@ -640,24 +647,93 @@ displayStop
   -> Address
   -> Dr.Unfinished
   -> StopView
-displayStop sp grammars budget env binders counter here u = case Dr.unfinishedWhy u of
-  Dr.ItWasAbandoned ->
-    StopView
-      { stopViewNature = GivenUp
-      , stopViewAt = Dr.unfinishedAt u
-      , stopViewSaid = []
-      , stopViewWarned = []
-      , stopViewWhy = WasGivenUp
-      }
-  Dr.ItStopped msgs ws stop ->
-    let w = whyOf stop
+displayStop sp grammars budget env binders counter here u =
+  displayRefused sp grammars budget env binders counter here (AnUnfinishedItem u)
+
+-- | __Why a rule file would not load__ (MS12 phase 348, @~cjznk@, his ruling of
+-- 2026-11-24: a refusal of text the author is editing is a pane's business).
+--
+-- **A pane reached this through 'Thena.Render' or not at all until this phase.**
+-- A refused @.thena.rules@ file answers 'Thena.Driver.RuleFileRefused', which is
+-- a 'Thena.Driver.Response' and not a 'Thena.Driver.Stop', so nothing turned one
+-- into a view — and the vocabulary a rule's refusal is said in was reached from
+-- @BlockRefused@ alone, which is built for a @do@ block about to run. The
+-- vocabulary was complete and the door was missing, which is how three of its
+-- mappings were wrong for a phase with nothing able to call them (@~w3q27@).
+--
+-- **A 'StopView' and not a list of faults**, which is what the frontend that
+-- exists can draw: a pane lays an unfinished item out by its nature, its first
+-- line and its faults, and a refused file is the same row with the same parts
+-- under it.
+--
+-- **'stopViewAt' is 'Nothing', and that is not a gap.** Where a refusal is
+-- belongs to the clause it is about, and a clause carries its own file beside
+-- its position ('APlace'), because two bases may hold a rule of one name. The
+-- file as a whole is the path the response already handed over.
+--
+-- **Nothing was said and nothing was warned**, because no program ran: a load
+-- that is refused never reaches a rule.
+displayRuleFile
+  :: Spelling
+  -> [Grammar]
+  -> Budget
+  -> Env
+  -> [(Var, Address)]
+  -> Int
+  -> Address
+  -> Dr.RuleFileError
+  -> StopView
+displayRuleFile sp grammars budget env binders counter here e =
+  displayRefused sp grammars budget env binders counter here (ARefusedRuleFile e)
+
+-- | __What a view is being asked for__ (MS12 phase 348).
+--
+-- **Internal, and the two entries above are what a frontend sees.** The walk is
+-- one @where@ block and a @where@ block belongs to one function, so a second
+-- door into the same walkers is a constructor here rather than a second copy of
+-- them.
+data Refused
+  = AnUnfinishedItem Dr.Unfinished
+  | ARefusedRuleFile Dr.RuleFileError
+
+displayRefused
+  :: Spelling
+  -> [Grammar]
+  -> Budget
+  -> Env
+  -> [(Var, Address)]
+  -> Int
+  -> Address
+  -> Refused
+  -> StopView
+displayRefused sp grammars budget env binders counter here refused = case refused of
+  ARefusedRuleFile e ->
+    let w = Faulty (ruleFileError e)
      in StopView
           { stopViewNature = natureOf w
-          , stopViewAt = Dr.unfinishedAt u
-          , stopViewSaid = msgs
-          , stopViewWarned = map warningView ws
+          , stopViewAt = Nothing
+          , stopViewSaid = []
+          , stopViewWarned = []
           , stopViewWhy = w
           }
+  AnUnfinishedItem u -> case Dr.unfinishedWhy u of
+    Dr.ItWasAbandoned ->
+      StopView
+        { stopViewNature = GivenUp
+        , stopViewAt = Dr.unfinishedAt u
+        , stopViewSaid = []
+        , stopViewWarned = []
+        , stopViewWhy = WasGivenUp
+        }
+    Dr.ItStopped msgs ws stop ->
+      let w = whyOf stop
+       in StopView
+            { stopViewNature = natureOf w
+            , stopViewAt = Dr.unfinishedAt u
+            , stopViewSaid = msgs
+            , stopViewWarned = map warningView ws
+            , stopViewWhy = w
+            }
   where
     -- ** The stop itself
 
@@ -1309,6 +1385,34 @@ displayStop sp grammars budget env binders counter here u = case Dr.unfinishedWh
       G.OfUniverse k -> ALevel (G.universeSpelling k)
 
     -- ** Why a line of instructions did not validate
+
+    -- ** Why a whole rule file would not load
+
+    -- | **A list and not one fault**: a file that parsed and did not validate
+    -- is wrong once per rule that is wrong, and a pane draws a row for each
+    -- thing the author has to change.
+    ruleFileError e = case e of
+      Dr.NoRuleHeader -> [fault CouldNotRead [is TheStage (AStage ReadingTheHeader)]]
+      Dr.RuleSyntaxError why -> [syntaxError why]
+      Dr.RuleIllFormed es -> map ruleError es
+      -- **One fault per name the module does not offer**, and the module is a
+      -- part of each: the kind is the one a typed name that resolves to
+      -- nothing gets, because that is what the clause's name did.
+      Dr.RuleSelectsUnoffered m gs ->
+        [ fault NotInScope
+            [is TheWord (name g), is TheNamespace (ADottedName (Dr.moduleText m))]
+        | g <- gs
+        ]
+      -- **The session has no such namespace, which is what it can say.** The
+      -- text door says /they were not read/ because it is answering the caller
+      -- that skipped them; a pane is told the same fact a typed @M.foo@ is told
+      -- when @M@ is not in, and it is the same fact. **Through
+      -- "Thena.Files" this cannot arise** — the modules are loaded and then the
+      -- base is read — so it is reachable only from the driver's own door.
+      Dr.RuleImportsUnread ms ->
+        [ fault NoSuchNamespace [is TheNamespace (ADottedName (Dr.moduleText m))]
+        | m <- ms
+        ]
 
     ruleError e = case e of
       R.UnboundInRule g i n ty ->

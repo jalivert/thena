@@ -73,6 +73,7 @@ module Thena.View
   , MatchView
   , trustView
   , failureView
+  , refusedFileView
   , proofsView
   , parseView
   , offerView
@@ -92,7 +93,8 @@ import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefix, rebuild)
 import Thena.Development.Partial (Partial (..))
 import Thena.Driver
-  ( Session
+  ( RuleFileError
+  , Session
   , Unfinished
   , currentQuest
   , fuelOf
@@ -131,7 +133,7 @@ import Thena.View.Machine (MachineView, displayMachine)
 import Thena.View.Proofs (ProofsView, displayProofs)
 import Thena.View.Goals (GoalKind (..), GoalView (..), goalsOf)
 import Thena.View.Statement (statementOffer)
-import Thena.View.Failure (StopView, displayStop)
+import Thena.View.Failure (StopView, displayRuleFile, displayStop)
 import Thena.View.Trust (TrustView, displayTrust)
 import Thena.View.Rules (RuleView, displayRule)
 
@@ -408,6 +410,30 @@ trustView budget s =
 failureView :: Budget -> Session -> Unfinished -> StopView
 failureView budget s =
   displayStop
+    (spellingOf s)
+    (sessionGrammars s)
+    budget
+    (envAt s)
+    (binderAddresses s)
+    (sessionNames s)
+    (focusAddress s)
+
+-- | __Why a rule file would not load__ (MS12 phase 348, @~cjznk@).
+--
+-- **The 'Thena.Driver.RuleFileError' comes out of the response that refused the
+-- file** — 'Thena.Driver.RuleFileRefused', or the one 'Thena.Files.Unloadable'
+-- wraps for a file walk — and not out of the session, for 'failureView'\'s
+-- reason: a load's answer is said once and this is the view of what it said.
+-- The path rides in that response, so it is not an argument here.
+--
+-- **His ruling of 2026-11-24**, on whether a refusal of text the author is
+-- editing belongs to a pane of the session at all: it does, for the reason that
+-- decided the same question for a @language@ block two phases earlier
+-- (@~csndm@) — a rule file would otherwise be the one thing the author writes
+-- that the session refuses without telling a pane why.
+refusedFileView :: Budget -> Session -> RuleFileError -> StopView
+refusedFileView budget s =
+  displayRuleFile
     (spellingOf s)
     (sessionGrammars s)
     budget

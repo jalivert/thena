@@ -30,13 +30,11 @@ import Thena.Core.Term (Var)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Focus (..), focus)
 import Thena.Driver
-  ( NotDone (..)
+  ( Leniency (..)
   , Response (..)
-  , RuleFileError (..)
   , Session
-  , Stop (..)
-  , Unfinished (..)
   , loadRuleTexts
+  , moduleName
   , newSession
   , oneLine
   , withRuleBases
@@ -47,14 +45,15 @@ import Thena.Render
   , renderCursor
   , renderResponse
   )
+import Thena.Files (importModule, startingSession)
 import Thena.Repl (Turn (..), turn)
 import Thena.Standard (expectedBase)
 import Thena.View
   ( Budget (..)
   , binderAddresses
   , developmentView
-  , failureView
   , focusTypeView
+  , refusedFileView
   , goalsView
   , GoalKind (..)
   , GoalView (..)
@@ -70,10 +69,16 @@ import Thena.View.Choices (AltView (..), ChoiceView (..))
 import Thena.View.Failure
   ( FaultKind (..)
   , FaultView (..)
+  , Nature (..)
   , PartView (..)
   , Piece (..)
   , Role (..)
+  , Stage (..)
   , Why (..)
+  , stopViewAt
+  , stopViewNature
+  , stopViewSaid
+  , stopViewWarned
   , stopViewWhy
   )
 import Thena.Syntax.Lexer (Pos (..))
@@ -92,6 +97,7 @@ tests =
     , testGroup "the choice points, against :choices" (map choiceCase choiceFixtures)
     , testGroup "the goals, against what a line is given" (map goalCase fixtures)
     , testGroup "a refused rule file, against what the prompt prints" ruleRefusalCases
+    , testGroup "every way a rule file is refused reaches a pane" ruleFileShapes
     , testGroup "and the fixtures really exercise it" notVacuous
     ]
 
@@ -276,18 +282,15 @@ choiceCase (name, s) = testCase name (drawn @?= turnOutput (turn s ":choices"))
 -- A refused rule file (MS12 phase 343, `~w3q27`)
 -- ---------------------------------------------------------------------------
 
--- | __Three refusals that talk about a clause, crossed against the prompt__.
+-- | __Four refusals that talk about a clause, crossed against the prompt__.
 --
--- **The errors are real and the envelope is not, and that is the point of the
--- comment.** A @.thena.rules@ file that will not load answers
--- 'Thena.Driver.RuleFileRefused', and **nothing turns that into a view**: the
--- only 'Thena.Driver.Stop' that carries a 'Thena.Rules.RuleError' is
--- @BlockRefused@, which 'Thena.Driver.checkBlock' builds for a @do@ block, and a
--- module cannot declare a rule ('Thena.Surface.Concrete.SurfaceDecl'). So these
--- three mappings are unreachable from any frontend today, `~cjznk` is the item
--- for that, and this test drives them the only way there is: the errors come
--- out of a real load, and only the 'Thena.Driver.Unfinished' around them is
--- made here.
+-- **The envelope is the real one since MS12 phase 348** (@~cjznk@, his ruling of
+-- 2026-11-24). Until then nothing turned 'Thena.Driver.RuleFileRefused' into a
+-- view — the vocabulary for a rule's refusal was reached from @BlockRefused@
+-- alone, which is built for a @do@ block — so this test made an
+-- 'Thena.Driver.Unfinished' by hand around errors from a real load, and the
+-- three mappings it drove were unreachable from any frontend. 'refusedFileView'
+-- is the door now, and this test goes through it.
 --
 -- **What is asserted is the crossing.** The number the pane is given is the
 -- number the prompt's own sentence says, and the clause's place is a line the
@@ -315,11 +318,10 @@ ruleRefusalCases =
   where
     refusal name path src kind arity line = testCase name $
       case snd (loadRuleTexts newSession [(path, src)]) of
-        resp@(RuleFileRefused _ (RuleIllFormed es)) ->
+        resp@(RuleFileRefused _ e) ->
           let s = newSession
-              u = Unfinished [] Nothing (ItStopped [] [] (BlockRefused es))
               said = unlines (renderResponse s resp)
-           in case stopViewWhy (failureView (Budget 200) s u) of
+           in case stopViewWhy (refusedFileView (Budget 200) s e) of
                 Faulty fs | [f] <- [ x | x <- fs, faultViewKind x == kind ] -> do
                   -- the arity, as a count and never as a line
                   [ pc | PartView TheArity pc <- faultViewParts f ]
@@ -338,6 +340,88 @@ ruleRefusalCases =
                     other -> assertFailure ("expected one place, got " <> show other)
                 other -> assertFailure ("expected a " <> show kind <> ", got " <> show other)
         other -> assertFailure ("expected a refusal, got " <> show other)
+
+-- ---------------------------------------------------------------------------
+-- Every shape of refusal (MS12 phase 348, `~cjznk`)
+-- ---------------------------------------------------------------------------
+
+-- | __Every way a rule file can be refused reaches a pane__.
+--
+-- Its own group because the four cases above are all 'Thena.Driver.RuleIllFormed'
+-- — a file that parsed and did not validate. **The five constructors of
+-- 'Thena.Driver.RuleFileError' are the whole of what a load can answer with**,
+-- and a walk that is total in the type and driven in one of its arms is how
+-- @~w3q27@ survived a phase, so each arm is reached here from a real load.
+--
+-- **The envelope is asserted once**, in the first case: a pane is told the file
+-- is broken, is given no position of its own — where a refusal is belongs to the
+-- clause it is about, which carries its own file — and is given nothing said and
+-- nothing warned, because no rule ran.
+ruleFileShapes :: [TestTree]
+ruleFileShapes =
+  [ testCase "a file with no header" $
+      case snd (loadRuleTexts newSession [("e.thena.rules", "f x = concat x \"a\"\n")]) of
+        RuleFileRefused _ e -> do
+          let v = refusedFileView (Budget 200) newSession e
+          stopViewNature v @?= Broken
+          stopViewAt v @?= Nothing
+          stopViewSaid v @?= []
+          stopViewWarned v @?= []
+          case stopViewWhy v of
+            Faulty fs -> do
+              map faultViewKind fs @?= [CouldNotRead]
+              [ pc | f <- fs, PartView TheStage pc <- faultViewParts f ]
+                @?= [AStage ReadingTheHeader]
+            other -> assertFailure ("expected faults, got " <> show other)
+        other -> assertFailure ("expected a refusal, got " <> show other)
+
+  , testCase "a file that does not parse" $
+      shape "f.thena.rules" "rule base j where\nrule :- do\n" $ \fs -> do
+        map faultViewKind fs @?= [CouldNotRead]
+        -- **The stage says how far it got, and it is not the header's**: the
+        -- header read, so the file is past 'ReadingTheHeader'.
+        case [ pc | f <- fs, PartView TheStage pc <- faultViewParts f ] of
+          [AStage st] -> assertBool "the header was read" (st /= ReadingTheHeader)
+          other -> assertFailure ("expected one stage, got " <> show other)
+
+  , -- **A base that imports a module nobody read**, which only the driver's own
+    -- door can answer: "Thena.Files" loads the modules and then reads the base.
+    testCase "a base whose import was never read" $ do
+      src <- readFile "test/modules/Inspecting.thena.rules"
+      shape "test/modules/Inspecting.thena.rules" src $ \fs -> do
+        map faultViewKind fs @?= [NoSuchNamespace]
+        [ pc | f <- fs, PartView TheNamespace pc <- faultViewParts f ]
+          @?= [ADottedName "test.modules.Lang"]
+
+  , -- **A clause that asks a module for a name it does not offer.** The module
+    -- has to be in for this to be the answer, so this case loads one.
+    testCase "a clause that asks for what a module does not offer" $ do
+      (s0, _) <- startingSession
+      case moduleName "test.modules.Lang" of
+        Nothing -> assertFailure "the fixture's name does not read"
+        Just m -> do
+          (s1, _, _) <- importModule Lenient s0 m
+          let src = "rule base k where\n\nimport test.modules.Lang ( nonesuch )\n\n"
+                 <> "rule noop :- do say \"hi\"\n"
+          case snd (loadRuleTexts s1 [("g.thena.rules", src)]) of
+            RuleFileRefused _ e ->
+              case stopViewWhy (refusedFileView (Budget 200) s1 e) of
+                Faulty fs -> do
+                  map faultViewKind fs @?= [NotInScope]
+                  [ pc | f <- fs, PartView TheWord pc <- faultViewParts f ]
+                    @?= [AName "nonesuch"]
+                  [ pc | f <- fs, PartView TheNamespace pc <- faultViewParts f ]
+                    @?= [ADottedName "test.modules.Lang"]
+                other -> assertFailure ("expected faults, got " <> show other)
+            other -> assertFailure ("expected a refusal, got " <> show other)
+  ]
+  where
+    shape path src k = case snd (loadRuleTexts newSession [(path, src)]) of
+      RuleFileRefused _ e ->
+        case stopViewWhy (refusedFileView (Budget 200) newSession e) of
+          Faulty fs -> k fs
+          other -> assertFailure ("expected faults, got " <> show other)
+      other -> assertFailure ("expected a refusal, got " <> show other)
 
 -- ---------------------------------------------------------------------------
 -- Non-vacuity
