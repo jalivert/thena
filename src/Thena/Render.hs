@@ -199,7 +199,7 @@ import Thena.Instral.Ops
   , operandsOf
   )
 import Thena.Tactics.Specialise (binderWord)
-import Thena.Rules (RuleBase (..), RuleError (..), patternKind)
+import Thena.Rules (RuleBase (..), RuleError (..), RuleFault (..), patternKind)
 import qualified Thena.Instral.Ops as Ops
 import Thena.Syntax.Lexer (BlockKind (..), LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
@@ -492,7 +492,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   Failed e       -> [renderSyntaxError e]
   -- The same errors a rule file is refused with, said without the /in rule ‹r›,
   -- instruction ‹i›/ that a typed line has no use for (MS5 phase 62b).
-  LineRefused es -> map whatLineError es
+  LineRefused es -> map (whatLineError . faultWhy) es
   Rejected e     -> [renderCommandError ren e]
   Quit           -> []
 
@@ -534,7 +534,7 @@ renderStop ren s stop = case stop of
   -- The same words the prompt gives for the same two mistakes ('LineRefused'
   -- and 'EntryMistyped'), because a block is checked by the same checker —
   -- it is only reached later now (MS6 phase 104b).
-  BlockRefused es        -> map whatLineError es
+  BlockRefused es        -> map (whatLineError . faultWhy) es
   BlockIllTyped errs     -> map (dropEntry . renderInstralTypeError) errs
   -- **The machine, and not a word about the spend** (phase 128). The number is
   -- for a job's pane; here the printed machine /is/ the sign that the run is not
@@ -2663,7 +2663,7 @@ renderRuleFileError ren path e = case e of
   NoRuleHeader ->
     [ path ++ ": needs a header line — rule base \8249name\8250 \8249description\8250 where" ]
   RuleSyntaxError se -> [path ++ ": " ++ renderSyntaxError se]
-  RuleIllFormed es   -> map ((path ++ ": ") ++) (map (renderRuleError ren) es)
+  RuleIllFormed es   -> map ((path ++ ": ") ++) (map (renderRuleError ren . faultWhy) es)
   -- **A caller's mistake, said plainly** (MS11 phase 276), the twin of
   -- 'ConsultsUnread': a base that states a dependency reached a door that
   -- cannot read a file.
@@ -2714,8 +2714,8 @@ whereRuleError ren e = case e of
                                ++ ", the type of " ++ n ++ ": "
   ReturnInSurfaceBlock g i -> inRule g i
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
-  FunctionClauseUnreachable n _ _ -> "in " ++ n ++ ": "
-  RuleAndFunction n _ _   -> "in " ++ n ++ ": "
+  FunctionClauseUnreachable n _ -> "in " ++ n ++ ": "
+  RuleAndFunction n _     -> "in " ++ n ++ ": "
   where
     -- **Counted from 1, as a type error is** (MS5 phase 91, @ms5\/CLOSEOUT.md@
     -- 44). The index is the written statement from zero — the same count
@@ -2807,11 +2807,11 @@ whatRuleError e = case e of
       ++ "so there is nothing for a return to answer"
   FunctionLeavesNothing _ ->
     "the right of the = leaves no value, so there is nothing to return"
-  FunctionClauseUnreachable _ k _ ->
+  FunctionClauseUnreachable _ k ->
     "a function has one clause, and nothing tells a second one at " ++ show k
       ++ (if k == 1 then " argument" else " arguments")
       ++ " apart from the first — write a rule if you want the clauses searched"
-  RuleAndFunction _ k _   ->
+  RuleAndFunction _ k     ->
     "this name is both a rule and a function at " ++ show k
       ++ (if k == 1 then " argument" else " arguments")
 

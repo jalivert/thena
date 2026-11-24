@@ -98,6 +98,7 @@ tests =
     , testGroup "the goals, against what a line is given" (map goalCase fixtures)
     , testGroup "a refused rule file, against what the prompt prints" ruleRefusalCases
     , testGroup "every way a rule file is refused reaches a pane" ruleFileShapes
+    , testGroup "and every fault says where it is written" faultPlaces
     , testGroup "and the fixtures really exercise it" notVacuous
     ]
 
@@ -307,13 +308,14 @@ ruleRefusalCases =
   , refusal "a name that is a rule and a function" "c.thena.rules"
       "rule base h where\nrule dup x :- do say \"rule\"\ndup x = concat x x\n"
       NameAlreadyDeclared 1 (Just 3)
-    -- **A signature written twice names no clause**, two @f : …@ lines being two
-    -- declarations and not one of them: the arity is the whole of what a pane is
-    -- given, and 'Thena.Instral.Concrete.RawSignature' carries no position to
-    -- give it more.
+    -- **A signature written twice names no clause and is still a place to go**
+    -- (MS12 phase 349, @~8w6qw@): two @f : …@ lines are two declarations, the
+    -- arity is the whole of what a pane is told /about/ them, and the place is
+    -- the second signature's — the one in the way. It had none until
+    -- 'Thena.Instral.Concrete.RawSignature' carried its position.
   , refusal "two signatures for one name" "d.thena.rules"
       "rule base i where\nf : Core -> ()\nf : Surface -> ()\nrule f x :- do prim-step\n"
-      RuleTypeWrong 1 Nothing
+      RuleTypeWrong 1 (Just 3)
   ]
   where
     refusal name path src kind arity line = testCase name $
@@ -321,7 +323,7 @@ ruleRefusalCases =
         resp@(RuleFileRefused _ e) ->
           let s = newSession
               said = unlines (renderResponse s resp)
-           in case stopViewWhy (refusedFileView (Budget 200) s e) of
+           in case stopViewWhy (refusedFileView (Budget 200) s path e) of
                 Faulty fs | [f] <- [ x | x <- fs, faultViewKind x == kind ] -> do
                   -- the arity, as a count and never as a line
                   [ pc | PartView TheArity pc <- faultViewParts f ]
@@ -330,7 +332,7 @@ ruleRefusalCases =
                   assertBool ("the prompt said: " <> said)
                     (show arity `isInfixOf` said)
                   -- the clause, as a place in a file that has that line
-                  case [ pc | PartView TheClause pc <- faultViewParts f ] of
+                  case [ pc | PartView ThePlace pc <- faultViewParts f ] of
                     [] -> line @?= Nothing
                     [APlace f' at] -> do
                       f' @?= path
@@ -362,7 +364,7 @@ ruleFileShapes =
   [ testCase "a file with no header" $
       case snd (loadRuleTexts newSession [("e.thena.rules", "f x = concat x \"a\"\n")]) of
         RuleFileRefused _ e -> do
-          let v = refusedFileView (Budget 200) newSession e
+          let v = refusedFileView (Budget 200) newSession "e.thena.rules" e
           stopViewNature v @?= Broken
           stopViewAt v @?= Nothing
           stopViewSaid v @?= []
@@ -405,7 +407,7 @@ ruleFileShapes =
                  <> "rule noop :- do say \"hi\"\n"
           case snd (loadRuleTexts s1 [("g.thena.rules", src)]) of
             RuleFileRefused _ e ->
-              case stopViewWhy (refusedFileView (Budget 200) s1 e) of
+              case stopViewWhy (refusedFileView (Budget 200) s1 "g.thena.rules" e) of
                 Faulty fs -> do
                   map faultViewKind fs @?= [NotInScope]
                   [ pc | f <- fs, PartView TheWord pc <- faultViewParts f ]
@@ -418,10 +420,85 @@ ruleFileShapes =
   where
     shape path src k = case snd (loadRuleTexts newSession [(path, src)]) of
       RuleFileRefused _ e ->
-        case stopViewWhy (refusedFileView (Budget 200) newSession e) of
+        case stopViewWhy (refusedFileView (Budget 200) newSession path e) of
           Faulty fs -> k fs
           other -> assertFailure ("expected faults, got " <> show other)
       other -> assertFailure ("expected a refusal, got " <> show other)
+
+-- ---------------------------------------------------------------------------
+-- Where a fault is written (MS12 phase 349, `~8w6qw`)
+-- ---------------------------------------------------------------------------
+
+-- | __Every fault a refused rule file draws names a place a terminal can
+-- open__.
+--
+-- **His ask of 2026-11-24**: /"does the failure get reported with a clickable
+-- file-path and line number to the mistake? Because that's kind of the point of
+-- reporting"/. Two faults out of twenty carried an 'Origin' before this phase;
+-- the rest said @instruction 2@, which counts statements inside the rule and is
+-- not a line of any file.
+--
+-- **What is asserted is the place and what it is a place OF.** A fault about one
+-- statement is at that statement's first token — not at the clause above it,
+-- which is what the clause's own origin would have given — and a fault about a
+-- head, a pattern or a signature is at the declaration it belongs to. The
+-- column matters as much as the line: @~29733@ on the other side is about a
+-- path being readable, and a place that pointed at the @=@ instead of the name
+-- is the defect @~5n7tz@ fixed one phase earlier.
+faultPlaces :: [TestTree]
+faultPlaces =
+  [ -- **A statement's own line, two lines below the clause's.** This is the
+    -- case the ask is about: @say x@ is the rule's second written instruction,
+    -- so the old answer was /instruction 2/ and nothing else.
+    place "an unbound name is at the statement that reads it" "p.thena.rules"
+      "rule base p where\nrule crush :- when focus-is-hole do\n  say \"hi\"\n  say x\n"
+      BlockShapeWrong (Pos 4 3)
+
+  , -- …and the first statement of the same body, so that the line is read and
+    -- not guessed from the clause.
+    place "…and the first statement is its own line too" "q.thena.rules"
+      "rule base q where\nrule crush :- when focus-is-hole do\n  say x\n  say \"hi\"\n"
+      BlockShapeWrong (Pos 3 3)
+
+  , -- **A head belongs to the clause**, there being no statement for it to be
+    -- at: it runs before the body.
+    place "a head naming something that is not a parameter is at the clause"
+      "r.thena.rules"
+      "rule base r where\nrule crush s :- when (surface-is-name z) do prim-solve\n"
+      BlockShapeWrong (Pos 2 1)
+
+  , -- **A signature is a declaration of its own**, so its faults are at its own
+    -- line and not at any clause's.
+    place "a type that names no type is at the signature" "s.thena.rules"
+      "rule base s where\nrule crush :- do prim-step\ncrush : Nonesuch\n"
+      RuleTypeWrong (Pos 3 1)
+
+  , -- **A reader's own position, which was carried and thrown away.** The
+    -- prompt printed it off the same error all along.
+    place "a file that does not parse is at the token it stopped on"
+      "t.thena.rules"
+      "rule base t where\nrule crush :- when (((\n"
+      CouldNotRead (Pos 2 21)
+  ]
+  where
+    place name path src kind at = testCase name $
+      case snd (loadRuleTexts newSession [(path, src)]) of
+        RuleFileRefused _ e ->
+          case stopViewWhy (refusedFileView (Budget 200) newSession path e) of
+            Faulty fs | [f] <- [ x | x <- fs, faultViewKind x == kind ] ->
+              case [ pc | PartView ThePlace pc <- faultViewParts f ] of
+                [APlace f' at'] -> do
+                  f' @?= path
+                  at' @?= at
+                  -- …and it is a line the file really has, which is what
+                  -- @~w3q27@ was about: an arity was handed over as a line.
+                  assertBool (show at' <> " is not a line of " <> path)
+                    (posLine at' >= 1 && posLine at' <= length (lines src))
+                other -> assertFailure
+                  ("expected one place, got " <> show other <> " in " <> show f)
+            other -> assertFailure
+              ("expected one " <> show kind <> ", got " <> show other)
+        other -> assertFailure ("expected a refusal, got " <> show other)
 
 -- ---------------------------------------------------------------------------
 -- Non-vacuity

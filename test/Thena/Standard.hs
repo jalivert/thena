@@ -1376,9 +1376,9 @@ splitClauses =
 -- rules and not about its layout. 'forgetOrigins' is what the comparison runs
 -- through.
 aRule :: GlobalName -> [Pattern] -> [Test] -> [Instr] -> Rule
-aRule n ps ts body = Rule n ps ts body Nothing
+aRule n ps ts body = Rule n ps ts body Nothing []
 
 -- | The same clauses with their origins dropped, for comparing against a
 -- hand-written list (MS12 phase 342).
 forgetOrigins :: [Rule] -> [Rule]
-forgetOrigins = map (\r -> r { ruleOrigin = Nothing })
+forgetOrigins = map (\r -> r { ruleOrigin = Nothing, ruleWrittenAt = [] })

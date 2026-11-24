@@ -20,7 +20,7 @@ import Thena.Instral.Concrete
   ( RawSignature (..)
   , RawTy (..)
   )
-import Thena.Syntax.Lexer (lexTokens)
+import Thena.Syntax.Lexer (Pos (..), lexTokens)
 import Thena.Syntax.Parser (parseInstralTy)
 
 import Thena.Instral.Type
@@ -222,9 +222,9 @@ readBack src = case lexTokens src of
   Left e   -> Left (show e)
   Right ts -> case parseInstralTy ts of
     Left e  -> Left (show e)
-    Right t -> case resolveSignature (RawSignature "f" t) of
-      Left e       -> Left (show e)
-      Right (_, s) -> Right (renumbered s)
+    Right t -> case resolveSignature (RawSignature (Pos 1 1) "f" t) of
+      Left e          -> Left (show e)
+      Right (_, _, s) -> Right (renumbered s)
 
 -- | A signature's variables, numbered by where they first appear.
 renumbered :: Signature -> Signature

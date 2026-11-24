@@ -22,7 +22,7 @@ import Thena.Declared (declaredAs, named, natDecl)
 import Thena.Standard (withRules)
 import Thena.Instral.Infer (InstralTypeError (..), Site (..))
 import Thena.Instral.Type (Ty (..))
-import Thena.Rules (RuleError (..))
+import Thena.Rules (RuleError (..), faultWhy)
 import Thena.Driver
   ( CommandError (..)
   , Entry (..)
@@ -1087,7 +1087,7 @@ halts name ls why = testCase name $
 refuses :: String -> [String] -> [RuleError] -> TestTree
 refuses name ls es = testCase name $
   case reverse (loadedResponses (run ls)) of
-    LineRefused es' : _ -> es' @?= es
+    LineRefused es' : _ -> map faultWhy es' @?= es
     other -> assertFailure ("expected a refusal: " ++ show (take 1 other))
 
 -- | The entry resolved and does not type check (MS5 review).

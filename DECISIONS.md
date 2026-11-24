@@ -5137,6 +5137,45 @@ A clause's position is where it begins — a `rule` clause at its `rule` keyword
 function clause at its name — and that holds however the clause is laid out, so a function
 whose `=` sits on a line of its own still sends you to the line it begins on.
 
+### A rule file's refusal says which line of it to go and fix
+
+Every fault a rule base is refused with carries a path, a line and a column, and they
+are the smallest written thing the fault is about. A mistake inside a body sends you to
+the statement that holds it, not to the clause above it:
+
+```
+rule base crusher where
+
+rule crush :- when focus-is-hole do
+  say "trying"
+  say nonesuch
+```
+
+sends you to line 5, column 3 — where `say nonesuch` begins — and not to line 3 where
+the clause does. A mistake in a signature sends you to the signature, a mistake in a
+`when` or in a parameter list sends you to the clause, and a file that will not lex or
+parse sends you to the token the reader stopped on.
+
+**A statement's number inside a rule is not a line and never was.** A refusal also says
+which statement of the rule it is about — *instruction 2* — because that is how you read
+a rule you are looking at; the two travel together and answer different questions. Before
+this, the number was all there was, and *instruction 2* in a file whose rule starts on
+line 40 is not somewhere you can go.
+
+**A statement you did not write belongs to the line that caused it.** `f (g x)` is
+compiled into two statements, the inner call bound in front of the outer one, and both
+are at the line you wrote. The same holds for the bases a `consult … where` block pushes
+and pops around each rule in it.
+
+**Text that is in no file has no place**: a `do` block typed at the prompt, and a block
+written inside a term of a modelled language, which is read on its own so a position in it
+is an offset into the term rather than a line of the file.
+
+**And a refusal about the file as a whole has none either** — a file that does not begin
+`rule base ‹name› where` is not wrong at a point. Two faults about a line that is there to
+go to do not have one yet: a name an `import` clause asks a module for and the module does
+not offer, and a module a rule base imports that nobody read.
+
 ### A choice point is made by writing rules, and no instruction mints one
 
 Every choice point in Thena comes from the rule base. A call looks for clauses

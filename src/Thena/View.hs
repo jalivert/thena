@@ -424,14 +424,21 @@ failureView budget s =
 -- file** — 'Thena.Driver.RuleFileRefused', or the one 'Thena.Files.Unloadable'
 -- wraps for a file walk — and not out of the session, for 'failureView'\'s
 -- reason: a load's answer is said once and this is the view of what it said.
--- The path rides in that response, so it is not an argument here.
+--
+-- **THE PATH IS THE ONE THAT RESPONSE CARRIED BESIDE THE ERROR** (MS12 phase
+-- 349, @~8w6qw@), and it is an argument because a reader's position is a
+-- position /in a file/ and the error does not hold one: @.thena.rules@ text is
+-- parsed by a function that is also given a file's contents out of a project,
+-- where there is no path at all ('Thena.Driver.rawRuleDecls'). A fault about a
+-- /clause/ still carries its own file, because two bases may hold a rule of one
+-- name; a file that would not parse is this file and no other.
 --
 -- **His ruling of 2026-11-24**, on whether a refusal of text the author is
 -- editing belongs to a pane of the session at all: it does, for the reason that
 -- decided the same question for a @language@ block two phases earlier
 -- (@~csndm@) — a rule file would otherwise be the one thing the author writes
 -- that the session refuses without telling a pane why.
-refusedFileView :: Budget -> Session -> RuleFileError -> StopView
+refusedFileView :: Budget -> Session -> FilePath -> RuleFileError -> StopView
 refusedFileView budget s =
   displayRuleFile
     (spellingOf s)

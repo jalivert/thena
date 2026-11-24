@@ -115,11 +115,12 @@ main = do
   unfinished <- partial
   refused <- grammar
   base <- ruleFile
+  inside <- ruleStatement
   failures <-
-    pure (booted <> unfinished <> refused <> base <> concatMap ($ s) checks)
+    pure (booted <> unfinished <> refused <> base <> inside <> concatMap ($ s) checks)
   mapM_ putStrLn failures
   unless (null failures) exitFailure
-  putStrLn ("the boundary holds: " <> show (length checks + 3) <> " views reached")
+  putStrLn ("the boundary holds: " <> show (length checks + 4) <> " views reached")
   where
     step acc l = fst (oneLine acc l)
 
@@ -411,14 +412,43 @@ ruleFile = do
   let src = "rule base boundary where\nf x = concat x \"a\"\nf y = concat y \"b\"\n"
   pure $ case snd (loadRuleTexts s0 [("boundary.thena.rules", src)]) of
     RuleFileRefused _ e ->
-      let v = refusedFileView (Budget 200) s0 e
+      let v = refusedFileView (Budget 200) s0 "boundary.thena.rules" e
        in case (stopViewNature v, stopViewWhy v) of
             (Broken, Faulty [f])
               | ClauseUnreachable <- faultViewKind f
               , [ACount 1] <- [ pc | PartView TheArity pc <- faultViewParts f ]
               , [APlace "boundary.thena.rules" (Pos 3 1)] <-
-                  [ pc | PartView TheClause pc <- faultViewParts f ] -> []
+                  [ pc | PartView ThePlace pc <- faultViewParts f ] -> []
             other -> ["FAILED: refusedFileView: " <> show other]
+    other -> ["FAILED: the rule file was not refused: " <> show other]
+
+-- | __And a mistake inside a body is at the statement that holds it__ (MS12
+-- phase 349, @~8w6qw@, his ask of 2026-11-24: /"does the failure get reported
+-- with a clickable file-path and line number to the mistake?"/).
+--
+-- Its own check beside 'ruleFile' because it is the other half of the question:
+-- that one asserts a fault /about a clause/ is a place to go, which two faults
+-- already were; this one asserts it of a fault about something inside a clause,
+-- which is the common case and had only the statement's index inside the rule
+-- — a number that reads like a line and is not one.
+--
+-- **The statement is on the fourth line and the clause on the second**, so a
+-- place taken from the clause would pass the type and send the author three
+-- lines up.
+ruleStatement :: IO [String]
+ruleStatement = do
+  (s0, _) <- startingSession
+  let src = "rule base inside where\nrule crush :- when focus-is-hole do\n"
+         <> "  say \"trying\"\n  say nonesuch\n"
+  pure $ case snd (loadRuleTexts s0 [("inside.thena.rules", src)]) of
+    RuleFileRefused _ e ->
+      let v = refusedFileView (Budget 200) s0 "inside.thena.rules" e
+       in case (stopViewNature v, stopViewWhy v) of
+            (Broken, Faulty [f])
+              | [ALine 2] <- [ pc | PartView TheInstruction pc <- faultViewParts f ]
+              , [APlace "inside.thena.rules" (Pos 4 3)] <-
+                  [ pc | PartView ThePlace pc <- faultViewParts f ] -> []
+            other -> ["FAILED: refusedFileView of a statement: " <> show other]
     other -> ["FAILED: the rule file was not refused: " <> show other]
 
 -- | Does this alternative say where its clause is written (MS12 phase 342)?

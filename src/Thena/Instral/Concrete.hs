@@ -61,7 +61,19 @@ import Thena.Syntax.Lexer (Pos)
 -- **The 'Thena.Syntax.Lexer.Pos' is where the clause begins** (MS12 phase 342) —
 -- the @rule@ keyword's own line and column, so a reader is handed the start of
 -- the clause and not of its name.
-data RawRule = RawRule Pos String [RawPattern] [RawTest] [RawInstr]
+-- **AND WHERE EACH OF ITS WRITTEN STATEMENTS BEGINS** (MS12 phase 349,
+-- @~8w6qw@) — one position per element of the body above, in the same order,
+-- and the one place in this file where a position is kept beside a list rather
+-- than inside what it is about. 'RawInstr' says why it is not inside: a @do@
+-- block in a surface term is the same tree read out of text that is not a file,
+-- and two readings of one program must stay one tree.
+--
+-- **His ask of 2026-11-24** is that a fault in a rule file name a place a
+-- terminal can open; without this, a fault inside a body could say only which
+-- statement of the rule it was — a number that reads like a line and is not
+-- one. 'Thena.Instral.Ops.ruleWrittenAt' is where the list ends up, and
+-- 'Thena.Rules.faultIn' reads it.
+data RawRule = RawRule Pos String [RawPattern] [RawTest] [RawInstr] [Pos]
   deriving (Eq, Show)
 
 -- | A written parameter (MS5 phase 82) — @x@, @_@, @[a, ...rest]@, @(x, y)@,
@@ -276,7 +288,12 @@ data RawOpenSpec
 -- on one line and @= concat y "b"@ on the next loads, and the clause then
 -- recorded the second line. The grammar now reads @ident@ whole and takes its
 -- text with @wordOf@, so a two-line clause records the line it begins on.
-data RawFunction = RawFunction Pos String [RawPattern] RawBody
+-- **AND WHERE EACH OF ITS BODY'S WRITTEN STATEMENTS BEGINS** (MS12 phase 349),
+-- exactly as 'RawRule' carries it. **The short form @f x = e@ has none**, the
+-- statement it compiles to being a binding the author did not write
+-- ('Thena.Rules.bodyInstrs'), so the clause's own position is what a fault in
+-- it is reported at.
+data RawFunction = RawFunction Pos String [RawPattern] RawBody [Pos]
   deriving (Eq, Show)
 
 -- | What stands right of an @=@ — in a function declaration and in a binding
@@ -321,7 +338,11 @@ data RawBody
 -- @signature f : Core -> Surface -> ()@ is the signature of @f@ at arity two,
 -- and it says nothing about an @f@ of another arity — which is a different
 -- callable ('Thena.Rules.clauses' dispatches on both).
-data RawSignature = RawSignature String RawTy
+-- **It carries where it was written** (MS12 phase 349, @~8w6qw@): the position
+-- of the signature's name. A fault about a type — @crush : Nonesuch@ — is
+-- about the signature and not about any clause, so a clause's origin cannot
+-- stand in for it.
+data RawSignature = RawSignature Pos String RawTy
   deriving (Eq, Show)
 
 -- | A written type. Resolved into 'Thena.Instral.Type.Ty' by "Thena.Rules".
@@ -353,6 +374,16 @@ data RawTy
   deriving (Eq, Show)
 
 -- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Instral.Ops.Instr''s two cases, written.
+--
+-- **WHERE A STATEMENT IS WRITTEN IS NOT HERE, AND THAT IS DELIBERATE** (MS12
+-- phase 349, @~8w6qw@). A rule file's statements carry their positions on the
+-- declaration that holds them — 'RawRule' and 'RawFunction' — for two reasons.
+-- This type is also the tree a @do@ block inside a /surface term/ parses to,
+-- and such a block is read on its own, so a position in it is an offset into
+-- the term's text and not a line of any file. And a position here would make
+-- two readings of one program two different trees, where the grammar's own
+-- parity tests assert they are one — @do { step }@ laid out and braced,
+-- and a block read through the rule grammar against the surface grammar.
 data RawInstr
   = RawBind RawPattern RawRhs
     -- ^ **The left is a PATTERN since MS5 phase 84** — stage d of

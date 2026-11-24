@@ -46,7 +46,7 @@ import Thena.Instral.Ops (AnswerKind (..), partWords)
 import Thena.Instral.Infer (InstralTypeError (..), Site (..), inferProgram, reachingAll)
 import Thena.Files (loadStandardRules)
 import Thena.Instral.Type (Ty (..))
-import Thena.Rules (RuleError (..), allCallable, allSignatures)
+import Thena.Rules (RuleError (..), allCallable, allSignatures, faultsIn)
 
 -- | Run a script of command lines, answering nothing, and give back the last
 -- response and the session it left.
@@ -175,19 +175,19 @@ tests =
           -- refusals; what changed is who says so.
           testCase "cross must say which field" $
             snd (command withRules "cross")
-              @?= LineRefused [BadOperands (rootName "entry") 0 "cross"]
+              @?= LineRefused (faultsIn Nothing [] [BadOperands (rootName "entry") 0 "cross"])
         , testCase "and it must be one of the two there are" $
             snd (command withRules "cross body")
-              @?= LineRefused [BadOperands (rootName "entry") 0 "cross"]
+              @?= LineRefused (faultsIn Nothing [] [BadOperands (rootName "entry") 0 "cross"])
         , testCase "a positional descent needs a number" $
             snd (command withRules "param")
-              @?= LineRefused [BadOperands (rootName "entry") 0 "param"]
+              @?= LineRefused (faultsIn Nothing [] [BadOperands (rootName "entry") 0 "param"])
         , testCase "and it has to be one" $
             snd (command withRules "param x")
-              @?= LineRefused [BadOperands (rootName "entry") 0 "param"]
+              @?= LineRefused (faultsIn Nothing [] [BadOperands (rootName "entry") 0 "param"])
         , testCase "a plain descent takes no argument" $
             snd (command withRules "cod 2")
-              @?= LineRefused [BadOperands (rootName "entry") 0 "cod"]
+              @?= LineRefused (faultsIn Nothing [] [BadOperands (rootName "entry") 0 "cod"])
         , testCase ":where answers with the cursor, not with text" $
             case snd (command withRules ":where") of
               Where _ -> pure ()
@@ -257,7 +257,7 @@ tests =
             -- gone is reported before anything runs rather than halting mid-way.
             snd (say [ natCommand, ":theorem t : Nat"
                      , "m = concat \"a\" \"b\"", "say m" ])
-              @?= LineRefused [UnboundInRule (rootName "entry") 0 "m" TString]
+              @?= LineRefused (faultsIn Nothing [] [UnboundInRule (rootName "entry") 0 "m" TString])
           -- A value may be bound at the prompt now too (phase 68a's `Op.Value`).
         , testCase "a literal may be bound" $
             snd (say [natCommand, ":theorem t : Nat", "n = 42 ; say \"ok\""])
@@ -274,7 +274,7 @@ tests =
               other -> assertFailure ("expected a type error, got " ++ show other)
         , testCase "and an unbound name in one is refused" $
             snd (say [":theorem t : Type\8320", "do { say nope }"])
-              @?= LineRefused [UnboundInRule (rootName "entry") 0 "nope" TString]
+              @?= LineRefused (faultsIn Nothing [] [UnboundInRule (rootName "entry") 0 "nope" TString])
         , testCase "and the development is as it was" $
             devOf (fst (say [":theorem t : Type\8320", "do { attack ; prim-try 3 }"]))
               @?= devOf (fst (say [":theorem t : Type\8320"]))

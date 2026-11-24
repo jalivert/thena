@@ -36,6 +36,7 @@ import qualified Thena.Instral.Ops as Op
 import Thena.Rules
   ( RuleBase (..)
   , RuleError (..)
+  , faultWhy
   , allRules
   , opWords
   , resolveRule
@@ -465,7 +466,7 @@ headOperands =
       -- have come from.
       testCase "a head naming something that is not a parameter is refused" $ do
         r <- expectRule "rule r s :- when (surface-is-name q) do prim-solve"
-        validate r @?= [UnboundInHead (rootName "r") "q"]
+        map faultWhy (validate r) @?= [UnboundInHead (rootName "r") "q"]
 
     , testCase "and a parameter it does name is fine" $ do
         r <- expectRule "rule r s :- when (surface-is-name s) do prim-solve"
@@ -652,7 +653,9 @@ regions =
       Right ts -> case parseRule ts of
         Left _ -> Nothing
         Right raw -> case resolveRule "test" (rootReading []) raw of
-          Left es -> Just es
+          -- **The place each fault carries is "Thena.ViewTests"' subject** and
+          -- these cases are about which fault (MS12 phase 349).
+          Left es -> Just (map faultWhy es)
           Right _ -> Nothing
 
 mistakes :: TestTree
@@ -786,5 +789,7 @@ mistakes =
       Right ts -> case parseRule ts of
         Left _ -> Nothing
         Right raw -> case resolveRule "test" (rootReading []) raw of
-          Left es -> Just es
+          -- **The place each fault carries is "Thena.ViewTests"' subject** and
+          -- these cases are about which fault (MS12 phase 349).
+          Left es -> Just (map faultWhy es)
           Right _ -> Nothing

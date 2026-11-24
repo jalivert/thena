@@ -32,6 +32,10 @@ module Thena.Rules
 
     -- * Well-formedness (§2.4, §7.2)
   , RuleError (..)
+  , RuleFault (..)
+  , faultInstruction
+  , faultIn
+  , faultsIn
   , validate
   , validateBase
   , writtenPositions
@@ -97,7 +101,7 @@ import qualified Thena.Surface.Zipper as Zipper
 import Thena.Errors (BuildError (..), SyntaxError (..))
 import Thena.Surface.Read (parseSurfaceText)
 import Thena.Surface.Zipper (rootedAt)
-import Thena.Syntax.Lexer (isIdentifier, lexTokens)
+import Thena.Syntax.Lexer (Pos, isIdentifier, lexTokens)
 import Thena.Syntax.Parser (parseTerm)
 import qualified Thena.Instral.Type as Ty
 import Thena.Instral.Type (Signature (..), Ty (..))
@@ -756,11 +760,12 @@ data RuleError
   | FunctionLeavesNothing String
     -- ^ @f x = say "hi"@ — the right of an @=@ ran something that produces no
     -- value, so there is nothing for the function to be (MS5 phase 68a)
-  | FunctionClauseUnreachable String Int (Maybe Origin)
+  | FunctionClauseUnreachable String Int
     -- ^ **a second clause of a function at one arity** (MS5 phase 80, his
-    -- ruling), **and where the unreachable clause is written** (MS12 phase 343,
-    -- @~zx8cb@) — the later one, which is the one the author has to change.
-    -- 'Nothing' is a clause in no file; see 'Thena.Instral.Ops.ruleOrigin'. A function is called and a rule is searched: a call enters one
+    -- ruling). **Where the unreachable clause is written is the fault's**
+    -- (MS12 phase 349) — the later clause, which is the one the author has to
+    -- change; it was a field here from phase 343 until every fault carried a
+    -- place. A function is called and a rule is searched: a call enters one
     -- clause and stays in it, so a second clause is reached only if something
     -- tells the two apart — and until there are patterns, nothing can. It was
     -- accepted before this phase, and reached by the first clause /failing/,
@@ -769,12 +774,104 @@ data RuleError
     -- **The phase that adds patterns lifts this**, and is where a function's
     -- clause selection stops being /the only one/ and becomes /the first that
     -- matches/.
-  | RuleAndFunction String Int (Maybe Origin)
+  | RuleAndFunction String Int
     -- ^ one name is both a rule and a function at one arity (MS5, reviewed
-    -- 2026-09-12), **and where the function is written** (MS12 phase 343): the
-    -- rule of that name is the declaration that was there first, so the
-    -- function is the one in the way. 'Nothing' is a clause in no file.
+    -- 2026-09-12). The rule of that name is the declaration that was there
+    -- first, so the function is the one in the way, and **the fault's place is
+    -- the function's** (MS12 phase 349; it was a field here from phase 343).
   deriving (Eq, Show)
+
+-- | __A fault in a rule file, and where it is written__ (MS12 phase 349,
+-- @~8w6qw@).
+--
+-- **His ask of 2026-11-24**, on the fold a refused rule file draws in a pane:
+-- /"does the failure get reported with a clickable file-path and line number to
+-- the mistake? Because that's kind of the point of reporting"/. Two of the
+-- twenty 'RuleError's carried an 'Origin' and the rest carried nothing — the
+-- others answered with the instruction's index /inside the rule/, which a
+-- reader can take for a line in the file and which no terminal can open.
+--
+-- **The place is worked out where the fault is raised and rides with it.** It
+-- is not looked up afterwards from the name the error carries: two clauses of
+-- one name are two rules, and two bases may hold a rule of one name, so a
+-- lookup can answer the wrong line or the wrong file — which is the argument
+-- 'Thena.Instral.Ops.Origin' was introduced with.
+--
+-- **One field and not twenty**, which is the first principle: a constructor
+-- cannot forget a place it does not carry, and every fault is drawn the same
+-- way ('Thena.View.Failure').
+--
+-- **'Nothing' is a fault about text that is in no file** — a @do@ block typed
+-- at the prompt, a block written inside a surface region.
+data RuleFault = RuleFault
+  { faultWhere :: Maybe Origin
+  , faultWhy   :: RuleError
+  }
+  deriving (Eq, Show)
+
+-- | __Which written instruction a fault is about__, where it is about one
+-- (MS12 phase 349).
+--
+-- **The index is the written one** — 'writtenPositions'' — so it keys straight
+-- into 'Thena.Instral.Ops.ruleWrittenAt'.
+--
+-- **'Nothing' is a fault that is not about one statement**: a head and a
+-- pattern belong to the clause, and a signature is a declaration of its own.
+-- Those take the place the raiser hands over, which is the clause's or the
+-- signature's.
+faultInstruction :: RuleError -> Maybe Int
+faultInstruction e = case e of
+  DeclarationInBody _ i        -> Just i
+  BoundNonProducing _ i _      -> Just i
+  UnboundInRule _ i _ _        -> Just i
+  BadOperands _ i _            -> Just i
+  NoSuchTag _ i _              -> Just i
+  AmbiguousTag _ i _ _         -> Just i
+  BadRegion _ i _ _            -> Just i
+  ObjectRegionUnparsed _ i _ _ _ -> Just i
+  ObjectRegionNotATerm _ i _ _ -> Just i
+  NoObjectProduction _ i _ _   -> Just i
+  InAnnotation _ i _ _         -> Just i
+  AnnotationWithoutBinding _ i _ -> Just i
+  ReturnInSurfaceBlock _ i     -> Just i
+  NoSuchTest {}                -> Nothing
+  UnboundInHead {}             -> Nothing
+  BadTestOperands {}           -> Nothing
+  BadPattern {}                -> Nothing
+  RepeatedInPattern {}         -> Nothing
+  ReservedName {}              -> Nothing
+  UnknownType {}               -> Nothing
+  TypeArity {}                 -> Nothing
+  TypeVariableApplied {}       -> Nothing
+  UnitInsideAType {}           -> Nothing
+  DuplicateSignature {}        -> Nothing
+  FunctionLeavesNothing {}     -> Nothing
+  FunctionClauseUnreachable {} -> Nothing
+  RuleAndFunction {}           -> Nothing
+
+-- | A rule error, with its place worked out (MS12 phase 349).
+--
+-- The origin is the one the fault falls back to — a clause's, or a signature's
+-- — and the positions are the written instructions' in that same file, which is
+-- 'Thena.Instral.Ops.ruleWrittenAt'. A fault about an instruction takes that
+-- instruction's position; anything else takes the origin as given.
+--
+-- **An index past the end takes the origin.** It cannot arise from the readers
+-- — the list is the written instructions' and the index is a written one — and
+-- answering rather than failing is what keeps a generated instruction
+-- ('Thena.Instral.Ops.PushBase') from being able to crash a message.
+faultIn :: Maybe Origin -> [Pos] -> RuleError -> RuleFault
+faultIn o ps e = RuleFault (maybe o Just inside) e
+  where
+    inside = do
+      i  <- faultInstruction e
+      at <- case drop i ps of { q : _ | i >= 0 -> Just q ; _ -> Nothing }
+      Origin f _ <- o
+      Just (Origin f at)
+
+-- | 'faultIn' over a list.
+faultsIn :: Maybe Origin -> [Pos] -> [RuleError] -> [RuleFault]
+faultsIn o ps = map (faultIn o ps)
 
 -- | The load-time pass (§2.4, §7.2). Three checks, one traversal, **every**
 -- error rather than the first.
@@ -789,9 +886,11 @@ data RuleError
 -- What it deliberately does not check: that the ops in a body /apply/ at the
 -- states the head admits. That is not decidable shallowly, and §8 already
 -- states the answer — a rule may match, run and fail.
-validate :: Rule -> [RuleError]
-validate r = reserved ++ repeated ++ headScope
-               ++ go (writtenPositions (ruleBody r)) (initiallyBound r) (ruleBody r)
+validate :: Rule -> [RuleFault]
+validate r =
+  faultsIn (ruleOrigin r) (ruleWrittenAt r)
+    ( reserved ++ repeated ++ headScope
+        ++ go (writtenPositions (ruleBody r)) (initiallyBound r) (ruleBody r) )
   where
     nm = ruleName r
 
@@ -915,8 +1014,11 @@ validate r = reserved ++ repeated ++ headScope
 -- **The arity comes out of the type**: an arrow chain with three links before
 -- the result is a signature at arity three, so nothing is written twice and a
 -- signature cannot claim an arity its own type contradicts.
-resolveSignature :: RawSignature -> Either RuleError (String, Signature)
-resolveSignature (RawSignature nm t) = do
+-- **It answers where the signature was written** (MS12 phase 349, @~8w6qw@): a
+-- fault about a type is about the signature and not about any clause, so
+-- nothing else can supply its place.
+resolveSignature :: RawSignature -> Either RuleError (Pos, String, Signature)
+resolveSignature (RawSignature at nm t) = do
   -- **The variable list is threaded ACROSS the links** (found by mutation
   -- testing, 2026-09-12). Resolving each link on its own numbered every
   -- lowercase name from zero within that link, so @a -> b -> ()@ became
@@ -928,7 +1030,7 @@ resolveSignature (RawSignature nm t) = do
   -- quietly dropping a parameter.
   case sequence (init ts) of
     Nothing -> Left (UnitInsideAType nm)
-    Just ps -> Right (nm, Signature ps (last ts))
+    Just ps -> Right (at, nm, Signature ps (last ts))
   where
     chain (RawTyArrow a b) = a : chain b
     chain u                = [u]
@@ -1096,10 +1198,19 @@ writtenPositions = go 0 0
     go line held [] = replicate held line
     go line held (instr : rest) = case instr of
       Bind (PVar n) Nothing _ | not (isIdentifier n) -> go line (held + 1) rest
+      -- **A base pushed or popped around a body is not a statement anybody
+      -- wrote** (MS12 phase 349). @consult ‹base› where@ compiles to a
+      -- @push-base@ in front of each rule in the block and a @pop-base@ after
+      -- it ('Thena.Driver.resolveAll'), and @push-base@ written in a body is
+      -- refused ('operation'), so these two are always generated. They counted
+      -- as written lines until this phase, which moved every instruction number
+      -- in such a rule's messages up by one per base consulted.
+      Do (PushBase _)   -> go line (held + 1) rest
+      Do PopBase        -> go line (held + 1) rest
       Bind _ (Just _) _ -> replicate (held + 1) (line + 1) ++ go (line + 2) 0 rest
       _                 -> replicate (held + 1) line ++ go (line + 1) 0 rest
 
-validateBase :: RuleBase -> [RuleError]
+validateBase :: RuleBase -> [RuleFault]
 validateBase = concatMap validate . baseRules
 
 -- --------------------------------------------------------------------------
@@ -1157,14 +1268,21 @@ rootReading gs = Reading gs rootScope
 -- raw tree cannot carry: a clause records its own line and column, and the path
 -- they are line and column /of/ is the reader's to supply. 'Nothing' is never
 -- produced here — every clause this function sees was written somewhere.
-resolveRule :: FilePath -> Reading -> RawRule -> Either [RuleError] Rule
-resolveRule path rd (RawRule at nm ps ts body) =
+-- **AND WHERE EACH OF ITS WRITTEN INSTRUCTIONS IS** (MS12 phase 349, @~8w6qw@),
+-- which is the list the raw body already carries one position per element of:
+-- a fault about an instruction is drawn at the instruction's own line, and that
+-- is what makes the fold a place a terminal can open.
+resolveRule :: FilePath -> Reading -> RawRule -> Either [RuleFault] Rule
+resolveRule path rd (RawRule at nm ps ts body written) =
   case (patErrs, headErrs, resolveBlock rd g (concatMap patternBinds qs) body) of
-    ([], [], Right instrs) -> Right (Rule g qs tests instrs (Just (Origin path at)))
-    (_,  _,  Right _)      -> Left (patErrs ++ headErrs)
-    (_,  _,  Left bodyErrs) -> Left (patErrs ++ headErrs ++ bodyErrs)
+    ([], [], Right instrs) -> Right (Rule g qs tests instrs here written)
+    (_,  _,  Right _)      -> Left (faults (patErrs ++ headErrs))
+    (_,  _,  Left bodyErrs) -> Left (faults (patErrs ++ headErrs ++ bodyErrs))
   where
     g = rootName nm
+
+    here   = Just (Origin path at)
+    faults = faultsIn here written
 
     (patErrs, qs) = partitionEithers (map (resolvePattern rd g) ps)
 
@@ -1191,7 +1309,7 @@ headOperand :: RawOperand -> Maybe Operand
 headOperand o = case o of
   -- **A head takes no lambda.** It is a restricted fragment on purpose (§1.1,
   -- his) — 'holds' must answer without running anything.
-  RawLambda _ _ -> Nothing
+  RawLambda {} -> Nothing
   RawRef "true"  -> Just (Lit (VBool True))
   RawRef "false" -> Just (Lit (VBool False))
   RawRef n  -> Just (Ref n)
@@ -1243,14 +1361,19 @@ builtInTypes =
 --
 -- **A function must produce.** @f x = say "hi"@ is refused here rather than by
 -- 'validate', which would report it against a binding the author never wrote.
-resolveFunction :: FilePath -> Reading -> RawFunction -> Either [RuleError] Rule
-resolveFunction path rd (RawFunction at nm ps body) =
+resolveFunction :: FilePath -> Reading -> RawFunction -> Either [RuleFault] Rule
+resolveFunction path rd (RawFunction at nm ps body written) =
   case partitionEithers (map (resolvePattern rd g) ps) of
-    ([], qs) -> (\is -> Rule g qs [] is (Just (Origin path at)))
-                  <$> bodyInstrs rd g nm (concatMap patternBinds qs) body
-    (es, _)  -> Left es
+    ([], qs) -> either (Left . faults) (Right . built qs)
+                  (bodyInstrs rd g nm (concatMap patternBinds qs) body)
+    (es, _)  -> Left (faults es)
   where
     g = rootName nm
+
+    built qs is = Rule g qs [] is here written
+
+    here   = Just (Origin path at)
+    faults = faultsIn here written
 
 -- | Compile what stands right of a function's @=@ or a lambda's @->@.
 --
@@ -1556,7 +1679,7 @@ operandOf :: Reading -> GlobalName -> Int -> String -> RawOperand -> Either Rule
 operandOf rd g i w o = case o of
   -- **Cannot arise**, for 'RawNested'\'s reason: 'hoisted' lifts every lambda
   -- into a binding of its own before this runs (MS5 phase 68b).
-  RawLambda _ _ -> Left (BadOperands g i w)
+  RawLambda {} -> Left (BadOperands g i w)
   -- **Cannot arise**: 'hoisted' lifts every nested call into a binding of
   -- its own before this runs, so what reaches here is always a leaf (MS5
   -- phase 63). Written out rather than left to a pattern-match failure.
@@ -2270,16 +2393,20 @@ everyTest =
 -- error in one says which block of which rule it was in.
 surfaceBlocks
   :: Reading -> GlobalName -> [Instr]
-  -> Either [RuleError] [Rule]
+  -> Either [RuleFault] [Rule]
 surfaceBlocks rd g is = concat <$> traverse one (zip [0 :: Int ..] (blocksUnder is))
   where
     one (k, raws) = do
-      body <- resolveBlock rd nm [] raws
+      -- **A block inside a surface region is in no file**, which is why its
+      -- rule carries no origin and no written positions (MS12 phase 349): the
+      -- region is lexed on its own, so a position in it is an offset into the
+      -- region's text and not a line of the file the region was written in.
+      body <- either (Left . faultsIn Nothing []) Right (resolveBlock rd nm [] raws)
       case [ ReturnInSurfaceBlock nm i | (i, instr) <- zip (writtenPositions body) body, returns instr ] of
-        e : es -> Left (e : es)
+        e : es -> Left (faultsIn Nothing [] (e : es))
         []     -> do
           inner <- surfaceBlocks rd nm body
-          Right (Rule nm [] [] body Nothing : inner)
+          Right (Rule nm [] [] body Nothing [] : inner)
       where
         nm = rootName (unGlobal g ++ ", do block " ++ show (k + 1))
 

@@ -68,6 +68,7 @@ import Thena.Surface.Zipper (rootedAt)
 import Thena.Rules
   ( RuleBase
   , RuleError (..)
+  , faultWhy
   , clauses
   , RuleIter
   , allRules
@@ -283,6 +284,14 @@ iteratorTests =
 named :: String -> [Name'] -> [Instr] -> Rule
 named n ps = aRule (rootName n) (map Ops.PVar ps) []
 
+-- | What 'validate' found, without the place it found it at (MS12 phase 349).
+--
+-- Every rule here is built by hand and so is in no file ('Thena.Instral.Ops.ruleOrigin'
+-- is 'Nothing'); what these cases are about is which fault, and the crossing of
+-- a fault against a real file's lines is "Thena.ViewTests"'.
+whys :: Rule -> [RuleError]
+whys = map faultWhy . validate
+
 type Name' = String
 
 validateTests :: TestTree
@@ -305,7 +314,7 @@ validateTests =
       -- line with — recorded here so the disappearance is deliberate rather
       -- than a check quietly lost.
     , testCase "nor a binding false" $
-        validate (named "r" [] [Bind (Ops.PVar "false") Nothing Ops.Here])
+        whys (named "r" [] [Bind (Ops.PVar "false") Nothing Ops.Here])
           @?= [ReservedName (rootName "r") "false"]
     , testCase "and an ordinary name is untouched" $
         validate (named "r" ["t"] [Bind (Ops.PVar "x") Nothing Ops.Here]) @?= []
@@ -313,11 +322,11 @@ validateTests =
       -- §3.7's line, made structural: a declaration is a command, not a
       -- rule-body operation.
     , testCase "define-data in a body is rejected" $
-        validate (named "bad" [] [Do (Ops.DefineData someData)])
+        whys (named "bad" [] [Do (Ops.DefineData someData)])
           @?= [DeclarationInBody (rootName "bad") 0]
 
     , testCase "binding an op that produces nothing is rejected" $
-        validate (named "bad" [] [Bind (Ops.PVar "x") Nothing Ops.Attack])
+        whys (named "bad" [] [Bind (Ops.PVar "x") Nothing Ops.Attack])
           @?= [BoundNonProducing (rootName "bad") 0 "x"]
 
     , testCase "binding an op that produces something is fine" $
@@ -325,7 +334,7 @@ validateTests =
           @?= []
 
     , testCase "a Ref to nothing is rejected" $
-        validate (named "bad" [] [Do (Ops.Say (Ref "z"))])
+        whys (named "bad" [] [Do (Ops.Say (Ref "z"))])
           @?= [UnboundInRule (rootName "bad") 0 "z" TString]
 
     , testCase "a parameter binds it" $
@@ -341,7 +350,7 @@ validateTests =
 
       -- A later Bind does not: the environment is built as the body runs.
     , testCase "a later Bind does not" $
-        validate
+        whys
           (named "bad" []
             [ Do (Ops.Say (Ref "z"))
             , Bind (Ops.PVar "z") Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
@@ -351,7 +360,7 @@ validateTests =
       -- Every error, not the first: a rule author fixing one at a time would
       -- reload once per mistake.
     , testCase "all three are reported, with their positions" $
-        validate
+        whys
           (named "bad" []
             [ Bind (Ops.PVar "x") Nothing Ops.Attack
             , Do (Ops.DefineData someData)
@@ -400,7 +409,7 @@ dataTests =
     , -- An unbound name inside a literal is the body's mistake and is caught
       -- when the base loads, which needs 'Thena.Instral.Ops.refsIn' to look inside.
       testCase "an unbound name inside a list is refused at load" $
-        validate (named "r" [] [Do (Ops.Say (ListOf [Ref "nope"]))])
+        whys (named "r" [] [Do (Ops.Say (ListOf [Ref "nope"]))])
           @?= [UnboundInRule (rootName "r") 0 "nope" TString]
 
       -- **The five destructors are gone** (MS5 phase 86): @list-head@,

@@ -34,13 +34,21 @@ import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Origin (..), Patter
 import Thena.Syntax.Lexer (Pos (..))
 import Thena.Errors (SyntaxError (..))
 import Thena.Syntax.Parser (ParseError (..))
-import Thena.Rules (RuleBase (..), RuleError (..), writtenPositions)
+import Thena.Rules (RuleBase (..), RuleError (..), RuleFault (..), faultWhy, writtenPositions)
 import Data.List (isInfixOf, sort)
 import Thena.Render
   ( rendering
   ,renderCursor, renderRuleError)
 import Thena.Repl (transcriptFrom)
 import Thena.Standard (aRule, expectedBase, expectedStandard, standardBases)
+
+-- | The faults, without the places they carry (MS12 phase 349, @~8w6qw@).
+--
+-- **A place is "Thena.ViewTests"' subject**, where it is crossed against a real
+-- file's lines; what these cases are about is which fault a file is refused
+-- with. The three that /are/ about a position read it out of the fault itself.
+whys :: [RuleFault] -> [RuleError]
+whys = map faultWhy
 
 tests :: TestTree
 tests =
@@ -92,7 +100,7 @@ writtenLines =
 
     , testCase "the scope check counts the same lines" $
         case loadRaw "rule base a where\ntwice s = concat s s\nrule go t :- do\n  m = twice (twice t)\n  say nope\n" of
-          RuleFileRefused _ (RuleIllFormed [UnboundInRule (GlobalName [] "go") 1 "nope" TString]) -> pure ()
+          RuleFileRefused _ (RuleIllFormed [RuleFault _ (UnboundInRule (GlobalName [] "go") 1 "nope" TString)]) -> pure ()
           other -> assertFailure ("expected nope refused at the second line, got " ++ show other)
 
       -- **Inside a lambda, the lambda's own line is what is named** — the
@@ -116,6 +124,23 @@ writtenLines =
           , Do (Return (Ref "(=)"))
           ]
           @?= [0, 0, 2, 3, 3]
+
+      -- **A base pushed around a body is not a statement anybody wrote** (MS12
+      -- phase 349, @~8w6qw@, found while placing the faults). @consult ‹base›
+      -- where@ compiles to a @push-base@ in front of each rule in the block and
+      -- a @pop-base@ after it ('Thena.Driver.resolveAll'), and @push-base@ in a
+      -- body is refused — so both are always generated. They counted as written
+      -- lines until this phase, which moved every instruction number in such a
+      -- rule's messages up by one per base consulted, and would have sent every
+      -- place in one to the wrong statement.
+    , testCase "a pushed and popped base are not written lines" $
+        writtenPositions
+          [ Do (PushBase "a.thena.rules")
+          , Do (Say (Lit (VText "x")))
+          , Do (Say (Lit (VText "y")))
+          , Do PopBase
+          ]
+          @?= [0, 0, 1, 2]
 
       -- **And both print from 1.**
     , testCase "a rule error and a type error print the same number" $
@@ -248,8 +273,8 @@ annotatedLocals =
       -- **An annotation about nothing is a typo, most often a renamed line.**
     , testCase "an annotation with no binding after it is refused" $
         case loadRaw "rule base a where\nrule go :- do\n  g : a -> a\n  say \"hi\"\n" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | [AnnotationWithoutBinding _ _ "g"] <- es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | [AnnotationWithoutBinding _ _ "g"] <- whys fs -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **A mistake in a local's type is said about the local** (MS5 phase 90,
@@ -257,16 +282,16 @@ annotatedLocals =
       -- GlobalName "go"/ — Haskell's rendering of the rule, called a signature.
     , testCase "a mistake in a local's type names the rule, the line and the local" $
         case loadRaw "rule base a where\nrule go :- do\n  k : Nope\n  k = \"x\"\n" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | [InAnnotation (GlobalName [] "go") 0 "k" (UnknownType _ "Nope")] <- es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | [InAnnotation (GlobalName [] "go") 0 "k" (UnknownType _ "Nope")] <- whys fs -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **…and () is impossible for a local**, not merely misplaced: a local
       -- always holds a value, so a type that is () or gives () has no inhabitant.
     , testCase "a local's type may not give ()" $
         case loadRaw "rule base a where\nrule go :- do\n  k : a -> ()\n  k = \\ x -> \"k\"\n" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | [InAnnotation (GlobalName [] "go") 0 "k" (UnitInsideAType _)] <- es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | [InAnnotation (GlobalName [] "go") 0 "k" (UnitInsideAType _)] <- whys fs -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
     ]
   where
@@ -319,8 +344,8 @@ surfaceBlockTyping =
       -- A @return@ in one is refused at resolution, before typing.
     , testCase "a return in one is refused" $
         case loadRaw "rule base b where\nrule go :- do call elaborate surface`do { u = fresh-universe ; return u }`\n" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | [ReturnInSurfaceBlock _ _] <- es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | [ReturnInSurfaceBlock _ _] <- whys fs -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
     ]
   where
@@ -355,7 +380,7 @@ functionsAreFunctions =
     "a function has one clause"
     [ testCase "a second clause at the same arity is refused" $
         case loadRaw "rule base f where\nf x = concat x \"a\"\nf x = concat x \"b\"\n" of
-          RuleFileRefused _ (RuleIllFormed es)
+          RuleFileRefused _ (RuleIllFormed fs)
             -- **The position is the DEAD clause's** (MS12 phase 343, @~zx8cb@):
             -- the file's third line is the second @f@, which is the one the
             -- author has to change. The arity is the @1@ beside it.
@@ -363,7 +388,7 @@ functionsAreFunctions =
             -- **The column is the name's** (MS12 phase 344, @~5n7tz@): the
             -- clause begins at the @f@, which is column 1 here, and not at the
             -- @=@ five characters along.
-            | [FunctionClauseUnreachable "f" 1 o] <- es
+            | [RuleFault o (FunctionClauseUnreachable "f" 1)] <- fs
             , Just (Origin "f.thena.rules" (Pos 3 1)) <- o -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
@@ -375,8 +400,8 @@ functionsAreFunctions =
       -- clause begins on the third.
     , testCase "…and the position is the clause's first line, not the @=@'s" $
         case loadRaw "rule base f where\nf x = concat x \"a\"\nf y\n  = concat y \"b\"\n" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | [FunctionClauseUnreachable "f" 1 o] <- es
+          RuleFileRefused _ (RuleIllFormed fs)
+            | [RuleFault o (FunctionClauseUnreachable "f" 1)] <- fs
             , Just (Origin "f.thena.rules" (Pos 3 1)) <- o -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
@@ -412,8 +437,8 @@ functionsAreFunctions =
       -- …and the refusal is still there, narrowed to the case it was about.
     , testCase "…and still refused when the first matches everything" $
         case loadRaw "rule base f where\nf x = concat x \"a\"\nf [] = \"b\"\n" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | [FunctionClauseUnreachable "f" 1 o] <- es
+          RuleFileRefused _ (RuleIllFormed fs)
+            | [RuleFault o (FunctionClauseUnreachable "f" 1)] <- fs
             , Just (Origin "f.thena.rules" (Pos 3 1)) <- o -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
@@ -809,8 +834,8 @@ spliceTemplates =
       -- a written term now for the same reason it sees inside a list literal.
     , testCase "a splice naming nothing is refused at load" $
         case loadRaw "rule base s where\nrule go :- do h = here ; u = resolve-core core`${h} -> ${nope}` ; prim-step\n" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | [UnboundInRule _ _ "nope" _] <- es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | [UnboundInRule _ _ "nope" _] <- whys fs -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **The values a splice carries are ones no text could.** Every term the
@@ -916,8 +941,8 @@ spliceTemplates =
       -- unfilled term one is — 'Thena.Instral.Ops.refsIn' sees both.
     , testCase "a name splice naming nothing is refused at load" $
         case loadRaw "rule base s where\nrule go :- do d = goal ; t = resolve-core core`\955 (${nope} : ${d}) -> ${d}` ; prim-step\n" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | [UnboundInRule _ _ "nope" _] <- es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | [UnboundInRule _ _ "nope" _] <- whys fs -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
     ]
   where
@@ -1009,8 +1034,8 @@ blockBodies =
       -- name, not against a binding the author never wrote.
     , testCase "a block that returns nothing is refused" $
         case loadRaw "rule base b where\nf s = do { say s }\n" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | FunctionLeavesNothing "f" `elem` es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | FunctionLeavesNothing "f" `elem` whys fs -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- It is an ordinary rule body by the time anything else sees it, so
@@ -1400,8 +1425,8 @@ annotations =
       -- lambdas and the walk was not told.
     , testCase "an unbound name inside a lambda is a load error, like anywhere else" $
         case load "rule go :- do g = \\ z -> concat z nosuchname ; prim-step" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | UnboundInRule (rootName "go") 0 "nosuchname" TString `elem` es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | UnboundInRule (rootName "go") 0 "nosuchname" TString `elem` whys fs -> pure ()
           other -> assertFailure ("expected an unbound name, got " ++ show other)
 
       -- …and one that IS bound by the lambda is not reported, which is the
@@ -1414,8 +1439,8 @@ annotations =
       -- Nested one level down, so the walk has to recurse rather than peek.
     , testCase "and it looks inside a lambda inside a lambda" $
         case load "rule go :- do g = \\ z -> (\\ w -> concat w deepermissing) ; prim-step" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | UnboundInRule (rootName "go") 0 "deepermissing" TString `elem` es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | UnboundInRule (rootName "go") 0 "deepermissing" TString `elem` whys fs -> pure ()
           other -> assertFailure ("expected an unbound name, got " ++ show other)
 
       -- **A RESULT may be a function, and could not be said until 2026-09-12.**
@@ -1468,7 +1493,7 @@ badSignatures =
   where
     refused label src want =
       testCase label $ case load (src ++ "\nrule f x :- do prim-step") of
-        RuleFileRefused _ (RuleIllFormed es) | want `elem` es -> pure ()
+        RuleFileRefused _ (RuleIllFormed fs) | want `elem` whys fs -> pure ()
         other -> assertFailure ("expected " ++ show want ++ ", got " ++ show other)
 
 -- --------------------------------------------------------------------------
@@ -1538,8 +1563,8 @@ functions =
       -- function body is refused.
     , testCase "is validated like a rule" $
         case load "f x = concat x y" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | UnboundInRule (rootName "f") 0 "y" TString `elem` es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | UnboundInRule (rootName "f") 0 "y" TString `elem` whys fs -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **A name may not be a rule and a function at one arity** (MS5 review).
@@ -1548,12 +1573,13 @@ functions =
       -- what a function is not.
     , testCase "may not share a name and arity with a rule" $
         case load "rule dup x :- do say \"rule\"\ndup x = concat x x" of
-          RuleFileRefused _ (RuleIllFormed es)
+          RuleFileRefused _ (RuleIllFormed fs)
             -- **And the position is the FUNCTION's** (MS12 phase 343): the
             -- rule of that name was declared first, so the function is the one
             -- in the way. @load@ puts the fixture under a header, so the
             -- function is the file's third line.
-            | [RuleAndFunction "dup" 1 o] <- [ e | e@RuleAndFunction{} <- es ]
+            | [RuleFault o (RuleAndFunction "dup" 1)] <-
+                [ f | f@(RuleFault _ RuleAndFunction{}) <- fs ]
             , Just (Origin "t.thena.rules" (Pos 3 1)) <- o -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
       -- …and at a different arity they are two callables, as they are for two
@@ -1565,8 +1591,8 @@ functions =
 
     , testCase "that leaves nothing is refused" $
         case load "f x = say \"hi\"" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | FunctionLeavesNothing "f" `elem` es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | FunctionLeavesNothing "f" `elem` whys fs -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **@x = ‹value›@, which `ms5/CLOSEOUT.md` 3 owed this phase** (his
@@ -1666,8 +1692,8 @@ lambdas =
 
     , testCase "whose body leaves nothing is refused" $
         case load "rule go :- do d = \\ s -> prim-try s ; prim-step" of
-          RuleFileRefused _ (RuleIllFormed es)
-            | FunctionLeavesNothing "λ" `elem` es -> pure ()
+          RuleFileRefused _ (RuleIllFormed fs)
+            | FunctionLeavesNothing "λ" `elem` whys fs -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **A function type is writable in a signature now**, which it was not
