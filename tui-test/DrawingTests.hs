@@ -65,6 +65,8 @@ import Tui.Panes
   , paneWrapAt
   , paneWrapFloor
   , stripKeyLabel
+  , wrapCaret
+  , wrapRows
   )
 import qualified Data.Text as Text
 import Text.Wrap (wrapTextToLines)
@@ -217,7 +219,50 @@ drawingTests =
     , testGroup "the suggestion strip's grid, `~w2tk2`" stripGridCases
     , testGroup "the suggestion strip's hint region, `~w2tk2` slice 4" hintRegionCases
     , testGroup "the goals pane lists a guess as a goal, phase 324" goalRowCases
+    , testGroup "the caret in a wrapped line, `~rhkm3` and `~hq6x6`" caretCases
     ]
+
+-- | **Where a character offset lands once the line being edited is wrapped**
+-- — 'Tui.Panes.wrapRows' and 'Tui.Panes.wrapCaret', the two the live editor
+-- draws itself from.
+--
+-- **`~hq6x6` is the reason this group exists, and it is the case it opens
+-- with.** A trailing space was in no row, so it was never drawn and the caret
+-- never reached it: his report of 2026-11-24 was that a space moves nothing
+-- and then everything jumps at once. `~rhkm3` shipped the wrapping without
+-- holding this arithmetic to anything, and a pty screenshot of a line with a
+-- space at its end would have said so.
+--
+-- **The width is 20 throughout** so a break is cheap to write down, and the
+-- expected pairs are @(row, column)@ in the wrapped image's own coordinates.
+caretCases :: [TestTree]
+caretCases =
+  [ testCase "a space typed at the end of the line is a column the caret reaches" $
+      assertEqual "" [(0, 2), (0, 3), (0, 4)]
+        [wrapCaret 20 "ab   " n | n <- [2, 3, 4]]
+  , testCase "and the row it is on carries it" $
+      assertEqual "" [(0, 0, 5)] (wrapRows 20 "ab   ")
+  , testCase "a line of nothing but spaces is still columns to stand in" $
+      assertEqual "" [(0, 3)] [wrapCaret 20 "   " 3]
+  , -- | **The space at offset 19 is in neither row**, which is the one the
+    -- wrapper ate to make the break — 19 characters on the first row, 5 on the
+    -- second, out of a string of 25.
+    testCase "the space the wrapper ate at a break is not one of them" $
+      assertEqual "" [(0, 0, 19), (20, 2, 5)] (wrapRows 20 "alpha bravo charlie delta")
+  , testCase "a caret past a break is on the second row, past its indent" $
+      assertEqual "" (1, 2) (wrapCaret 20 "alpha bravo charlie delta" 20)
+  , -- | **The continuation indent is 2 even though the text above it never
+    -- wrapped** — it comes from 'Tui.Panes.paneWrapAt''s settings, not from a
+    -- second row that may not exist.
+    testCase "trailing spaces that do not fit take a row of their own" $
+      assertEqual "" [(0, 0, 20), (20, 2, 4)] (wrapRows 20 (replicate 20 'x' <> "    "))
+  , testCase "a caret at the very end of those is on that row" $
+      assertEqual "" (1, 6) (wrapCaret 20 (replicate 20 'x' <> "    ") 24)
+  , -- | **An empty line is one row and column zero**, which is what gives the
+    -- caret somewhere to be before anything is typed.
+    testCase "an empty line is one empty row" $
+      assertEqual "" ([(0, 0, 0)], (0, 0)) (wrapRows 20 "", wrapCaret 20 "" 0)
+  ]
 
 -- | **HIS INSTRUCTION, 2026-11-19**: /"change the goals pane such that each goal
 -- shows the variable under which it is bound. And also … report there guesses

@@ -36,7 +36,7 @@ module Tui.Panes
   , paneBarWidget
   ) where
 
-import Data.List (intercalate, intersperse, isPrefixOf, nub, sort)
+import Data.List (dropWhileEnd, intercalate, intersperse, isPrefixOf, nub, sort)
 import Data.Maybe (catMaybes)
 import Data.Time.Clock (NominalDiffTime)
 
@@ -58,7 +58,7 @@ import Brick.AttrMap (attrName)
 import Graphics.Text.Width (safeWcwidth)
 import qualified Data.Text as T
 import Text.Wrap
-  ( FillStrategy (FillIndent, NoFill)
+  ( FillStrategy (FillIndent, FillPrefix, NoFill)
   , WrapSettings (..)
   , defaultWrapSettings
   , wrapTextToLines
@@ -799,23 +799,82 @@ paneWrapped s = Widget Greedy Fixed $ do
 -- spaces; a long word broken mid-word has no space to skip and matches at
 -- once. **An empty string is one empty row** rather than none, so that a caret
 -- in an empty line still has a row to sit on.
+--
+-- **THE SPACES AT THE END OF THE STRING ARE ROWS OF THEIR OWN, AND THAT IS
+-- `~hq6x6` — his report of 2026-11-24**: /"when I am editing a line and do
+-- space the caret doesn't move at all … when I hit a few spaces and then
+-- finally type some visible character, the spaces appear and the character too
+-- and the caret obviously teleports"/. 'wrapTextToLines' trims the trailing
+-- whitespace off every row it returns, so a line ending in spaces had rows
+-- covering everything **but** those spaces: nothing drew them, and 'wrapCaret'
+-- clamped the caret to the end of the last row's text. Measured under a pty —
+-- the terminal's cursor stood still at @x=7@ for three spaces and then jumped
+-- to @x=11@ on the next character.
+--
+-- **The rows this answers with therefore cover every character of the string.**
+-- A space the *wrapper* ate at a break is still in no row and still found by
+-- matching — that one is a space the line does not need, because the break
+-- stands for it — but a space at the end is one the typist put there and has
+-- not finished typing after. They fill the last row's remaining columns and
+-- then take rows of their own at the continuation indent, so a run of them
+-- wraps like anything else rather than running off the pane.
 wrapRows :: Int -> String -> [(Int, Int, Int)]
 wrapRows w s
   | null s = [(0, 0, 0)]
-  | otherwise = go 0 (map T.unpack (wrapTextToLines (paneWrapAt w s) (max 1 w) (T.pack s)))
+  | null body = spaceRows 0 0 trailing
+  | otherwise = withTrailing (go 0 (map T.unpack (wrapTextToLines settings width (T.pack body))))
   where
+    width = max 1 w
+    settings = paneWrapAt width body
+    -- | The string as the wrapper will see it, and the spaces it would drop.
+    body = dropWhileEnd (== ' ') s
+    trailing = length s - length body
+    -- | The trailing spaces, onto the last row and then onto rows of their own.
+    withTrailing rows
+      | trailing == 0 = rows
+      | otherwise = case reverse rows of
+          [] -> spaceRows 0 contIndent trailing
+          ((start, indent, len) : front) ->
+            let here = min trailing (max 0 (width - indent - len))
+             in reverse front
+                  <> [(start, indent, len + here)]
+                  <> spaceRows (start + len + here) contIndent (trailing - here)
+    -- | **The indent a continuation row wears, read off the settings rather
+    -- than off the rows.** Inferring it from the second row would answer
+    -- nothing for a line that did not wrap, so a run of spaces long enough to
+    -- spill would be indented or not depending on whether the text above it
+    -- happened to break — and 'paneWrapAt' is the one place this policy is
+    -- allowed to live.
+    contIndent = preserved + filled
+      where
+        preserved
+          | preserveIndentation settings = length (takeWhile (== ' ') body)
+          | otherwise = 0
+        filled = case fillStrategy settings of
+          FillIndent n -> n
+          FillPrefix t -> T.length t
+          NoFill -> 0
+    -- | Rows for a run of spaces with nothing else on them. **The indent is
+    -- passed in for the first of them and is the continuation's from there
+    -- on** — a line that is nothing but spaces starts flush, because its first
+    -- row is a first row and not a continuation of anything. **'max 1' is what
+    -- makes this terminate** when the indent is as wide as the pane.
+    spaceRows _ _ 0 = []
+    spaceRows at indent n =
+      let here = max 1 (min n (width - indent))
+       in (at, indent, here) : spaceRows (at + here) contIndent (n - here)
     go _ [] = []
     go cur (l : ls) =
-      let body = dropWhile (== ' ') l
-          start = locate cur body
-      in (start, length l - length body, length body) : go (start + length body) ls
+      let line = dropWhile (== ' ') l
+          start = locate cur line
+      in (start, length l - length line, length line) : go (start + length line) ls
     -- | Where this row's text sits in the original. **Spaces are the only
     -- thing skipped**; anything else would let a row match a later repeat of
     -- its own text. The search is the fallback that keeps this total — it
     -- cannot loop, and nothing has been seen to reach it.
-    locate cur body
-      | body `isPrefixOf` drop skipped s = skipped
-      | otherwise = case [i | i <- [cur .. length s], body `isPrefixOf` drop i s] of
+    locate cur text
+      | text `isPrefixOf` drop skipped s = skipped
+      | otherwise = case [i | i <- [cur .. length s], text `isPrefixOf` drop i s] of
           (i : _) -> i
           [] -> cur
       where
@@ -825,7 +884,10 @@ wrapRows w s
 -- of a character offset, in the wrapped image's own coordinates. `~rhkm3`.
 --
 -- **An offset past the end of a row's text lands at the end of that row**,
--- which is the case where the caret sits in the space the wrapper ate.
+-- which is the case where the caret sits in the space the wrapper ate at a
+-- break. **A space at the end of the string is not that case** — `~hq6x6`:
+-- those have rows of their own now, so the caret walks onto them as it does
+-- onto any other character.
 --
 -- **A caret that would land past the last column goes to a row of its own**,
 -- at a continuation's indent — the line is exactly full and the next character
