@@ -5156,6 +5156,12 @@ the clause does. A mistake in a signature sends you to the signature, a mistake 
 `when` or in a parameter list sends you to the clause, and a file that will not lex or
 parse sends you to the token the reader stopped on.
 
+**Where you see it is an interface's choice, and today the two differ.** The place travels
+on the refusal itself, so an interface that draws a refusal as structure — the four-pane one
+— shows it and can make it a click. The terminal REPL prints its refusal as a sentence and
+that sentence still carries the statement's number alone; it is not gaining the place,
+because it is the interface being retired.
+
 **A statement's number inside a rule is not a line and never was.** A refusal also says
 which statement of the rule it is about — *instruction 2* — because that is how you read
 a rule you are looking at; the two travel together and answer different questions. Before
