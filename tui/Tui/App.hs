@@ -210,6 +210,8 @@ import Tui.Panes
   , headingText
   , paneRowWidget
   , paneWrapped
+  , wrapCaret
+  , wrapRows
   )
 import Tui.Failure (placeSuffix)
 import Tui.Database
@@ -2177,7 +2179,7 @@ draw st =
     -- bar.** 'showFirstCursor' takes the first cursor any widget reports in
     -- draw order, so an editor still rendered focused under a modal leaves
     -- the caret blinking in a document that is not taking keys.
-    editorWidget = reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) (isNothing (stScriptBar st) && isNothing (stPicker st) && isNothing (stStripReply st)) (stInput st))
+    editorWidget = reportExtent Input (inputWidget (isNothing (stScriptBar st) && isNothing (stPicker st) && isNothing (stStripReply st)) (getEditContents (stInput st)) col ghost skip (stRecoveredSpan st))
       where
         -- | `:whisper off` (his `.jalivert/TUI.md` #23) silences this
         -- outright rather than 'ghostAt' itself carrying the flag — the
@@ -3648,6 +3650,13 @@ popupTotalH n = popupVisibleH n + popupFarBlanks n
 -- **One row of air from the input, his `.jalivert/TUI.md` #15** — below it
 -- the box opens a row lower, above it a row higher. Distance, not a drawn
 -- widget: below shows empty pane, above the document behind.
+-- **THE OFFSET IS TURNED INTO A ROW AND A COLUMN, BECAUSE THE INPUT WRAPS** —
+-- `~rhkm3`. It used to add @col@ straight onto the extent's upper-left, which
+-- was right while the line was one row that scrolled sideways. Now a line
+-- longer than the column occupies several rows, so a text offset has a row as
+-- well as a column, and both come from 'Tui.Panes.wrapCaret' — the same
+-- function that places the caret, against the extent's own width, so the box
+-- cannot hang anywhere but under the character it is about.
 popupAt :: St -> Int -> Int -> Name -> [PopupRow] -> [Widget Name]
 popupAt st col n vp rows = case stInputExtent st of
   Nothing -> []
@@ -3655,8 +3664,14 @@ popupAt st col n vp rows = case stInputExtent st of
     where
       above = popupAbove st
       content = renderPopup vp (if above then PadTop else PadBottom) (if above then reverse rows else rows)
-      popupCol   = max 0 (locationColumn (extentUpperLeft inputExt) + col - dropdownMarkerWidth)
-      inputRow   = locationRow (extentUpperLeft inputExt)
+      -- | **The plain line, with no whisper in it.** The one popup still
+      -- reached in a default session is @:load@'s listing, and a path-taking
+      -- line's slate is 'emptySlate' by construction, so there is no ghost on
+      -- it to move the wrap.
+      line = concatMap Text.unpack (getEditContents (stInput st))
+      (caretRow, caretCol) = wrapCaret (fst (extentSize inputExt)) line col
+      popupCol = max 0 (locationColumn (extentUpperLeft inputExt) + caretCol - dropdownMarkerWidth)
+      inputRow = locationRow (extentUpperLeft inputExt) + caretRow
       popupRow = if above then inputRow - popupTotalH n - 1 else inputRow + 2
 
 -- | Whether a popup at the input flips above it: past 80% of the pane's
@@ -8391,59 +8406,89 @@ toWritten = merge . map one
     merge (w : rest) = w : merge rest
     merge [] = []
 
--- | The input line's own content, a placeholder box drawn dimmer than
--- ordinary text — see the "placeholder" attr's own haddock for why (the
--- caret going dark standing on one) — and a recovered span underlined
--- ('recoveredSpan', his `.jalivert/TUI.md` #7). Real text splits into runs
--- at the glyph the same way 'toWritten' does, since it's answering the
--- same question one level down: not "is this a box" for the engine, but
--- "is this a box" for the renderer.
+-- | **The line being edited, wrapped exactly as a committed line is** —
+-- `~rhkm3`, his ruling of 2026-11-24: /"Oh I hate the row shift. That's what
+-- editors like Nano do and I hate it. Fix it properly."/
 --
--- **The ghost ('ghostAt') rides inline at the caret, not appended past
--- everything** — his `.jalivert/TUI.md` #21: real text up to 'col' renders
--- first, unchanged; then the dimmed ghost; then real text resumes from
--- 'col + skip', skipping whatever the accept would consume there (a box,
--- typically). Splitting the real text at 'col' rather than threading the
--- ghost through 'mergeRuns' itself is what keeps Brick's own cursor
--- placement correct — 'Edit.hs's own 'renderEditor' fixes the caret at a
--- column count into the *unmodified* zipper, so everything rendered before
--- that many real characters have gone by must still measure the same
--- width, and only ever inserting the ghost at that exact boundary
--- guarantees it does.
-renderInputContent :: [Text] -> Int -> String -> Int -> Maybe (Int, Int) -> Widget Name
-renderInputContent ts col ghost skip recovered =
-  hBox (map renderRun (mergeRuns before recovered)
-        <> [withAttr (attrName "dim") (str ghost)]
-        <> map renderRun (mergeRuns after (shift (col + skip) recovered)))
+-- **What this replaces and why it had to be replaced.** @Brick.renderEditor@
+-- draws its contents inside a @viewport Both@ and reports the cursor in the
+-- text's own unwrapped coordinates, so a line longer than the column
+-- **scrolls sideways** and its head goes off screen. Wrapping the committed
+-- lines alone left the focused line the odd one out: it was one row while
+-- every other line of the same length was two, so the document shifted by a
+-- row as the caret walked on and off it. **There is no way to wrap inside
+-- @renderEditor@** — it owns both the viewport and the cursor report — so the
+-- editor's rendering is done here instead. Nothing else about the editor
+-- changes: 'stInput' is still a @brick@ 'Editor', every key still edits the
+-- zipper, and this is only the drawing.
+--
+-- **It wraps through 'Tui.Panes.wrapRows', which is 'paneWrapped''s own
+-- policy**, so a line looks identical whether or not the caret is in it and
+-- nothing reflows when the caret arrives or leaves. That identity is the whole
+-- fix; a second wrap policy here would be the same defect wearing different
+-- numbers.
+--
+-- **The caret comes from 'Tui.Panes.wrapCaret' and the rows from
+-- 'wrapRows'** — the same offsets, so the cursor cannot drift from the text
+-- under it. @wrapCaret@ may answer a row past the last one drawn (a line
+-- exactly filling its last row), which is why the height is the greater of the
+-- two.
+--
+-- **The ghost is part of the string that gets wrapped.** It is dim text
+-- inserted at the caret, so a line with a whisper on it wraps where the
+-- whisper makes it wrap — which is what the eye expects, and what the
+-- unwrapped version did within its one row.
+inputWidget :: Bool -> [Text] -> Int -> String -> Int -> Maybe (Int, Int) -> Widget Name
+inputWidget focused ts col ghost skip recovered =
+  withAttr (if focused then editFocusedAttr else editAttr) $ Widget Greedy Fixed $ do
+    ctx <- getContext
+    let w = max 1 (ctx ^. availWidthL)
+        tagged = taggedInput ts col ghost skip recovered
+        shown = map snd tagged
+        rows = wrapRows w shown
+        (caretRow, caretCol) = wrapCaret w shown col
+        -- | **A row the wrapper did not produce is drawn empty**, which is the
+        -- one 'wrapCaret' asks for when the text exactly fills its last row.
+        padded = take (max (length rows) (caretRow + 1)) (rows <> repeat (length shown, 0, 0))
+        place = if focused then showCursor Input (Location (caretCol, caretRow)) else id
+    render (place (vBox (map (rowWidget tagged) padded)))
   where
-    full   = concatMap Text.unpack ts
-    before = take col full
-    after  = drop (col + skip) full
-    shift n = fmap (\(from, len) -> (from - n, len))
-    -- | One named attr per combination, not two nested 'withAttr' calls —
-    -- see the "recovered"/"placeholder.recovered" attrs' own haddock for
-    -- why nesting silently drops one of the two.
-    renderRun ((isPlaceholder, isRecovered), s) = case (isPlaceholder, isRecovered) of
-      (True,  True ) -> withAttr (attrName "placeholder.recovered") (str s)
-      (True,  False) -> withAttr (attrName "placeholder")           (str s)
-      (False, True ) -> withAttr (attrName "recovered")             (str s)
-      (False, False) -> str s
+    rowWidget tagged (start, indent, len) =
+      hBox (str (replicate indent ' ') : map inked (runsOf (take len (drop start tagged))))
+    inked (ink, cs) = maybe (str cs) (\a -> withAttr a (str cs)) ink
+    runsOf = foldr step []
+      where
+        step (ink, c) ((ink', cs) : rest) | ink == ink' = (ink', c : cs) : rest
+        step (ink, c) acc = (ink, [c]) : acc
 
--- | Per-character tags, merged into runs the same way the placeholder-only
--- version did: is this a box, and does it fall in the recovered span, both
--- by offset into whatever string is passed in (a local index, not
--- necessarily the whole line's own column — see 'renderInputContent's own
--- 'shift' for the "after the caret" half).
-mergeRuns :: String -> Maybe (Int, Int) -> [((Bool, Bool), String)]
-mergeRuns s recovered = merge (zipWith tag [0 ..] s)
+-- | **Every character of the line as it is shown, with the ink it is shown
+-- in** — `~rhkm3`. 'renderInputContent' built the same thing as runs of a
+-- single row; wrapping needs it per character, because a run can be cut by a
+-- row boundary.
+--
+-- **The ghost sits at the caret and is dim**, and the characters the accept
+-- would consume ('skip' of them, a box typically) are left out, exactly as
+-- before.
+taggedInput :: [Text] -> Int -> String -> Int -> Maybe (Int, Int) -> [(Maybe AttrName, Char)]
+taggedInput ts col ghost skip recovered =
+  tag before recovered
+    <> [(Just (attrName "dim"), c) | c <- ghost]
+    <> tag after (shift (col + skip) recovered)
   where
-    tag i c = ((c == placeholderGlyph, inSpan i), [c])
-    inSpan i = case recovered of
-      Just (from, len) -> i >= from && i < from + len
-      Nothing           -> False
-    merge ((a, x) : (b, y) : rest) | a == b = merge ((a, x <> y) : rest)
-    merge (r : rest) = r : merge rest
-    merge [] = []
+    full = concatMap Text.unpack ts
+    before = take col full
+    after = drop (col + skip) full
+    shift n = fmap (\(from, len) -> (from - n, len))
+    tag cs rec = [(ink (c == placeholderGlyph) (inSpan i rec), c) | (i, c) <- zip [0 :: Int ..] cs]
+    inSpan i (Just (from, len)) = i >= from && i < from + len
+    inSpan _ Nothing = False
+    -- | **One named attr per combination, not two nested 'withAttr' calls** —
+    -- see the "recovered" / "placeholder.recovered" attrs' own haddock for why
+    -- nesting silently drops one of the two.
+    ink True True = Just (attrName "placeholder.recovered")
+    ink True False = Just (attrName "placeholder")
+    ink False True = Just (attrName "recovered")
+    ink False False = Nothing
 
 -- | Replace 'len' characters starting at column 'start' with 'ins', cursor
 -- landing right after — the same shape 'killWordBack' already established

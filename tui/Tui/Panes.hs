@@ -29,12 +29,14 @@ module Tui.Panes
   , headingText
   , paneWrapped
   , paneWrapAt
+  , wrapRows
+  , wrapCaret
   , paneWrapFloor
   , BarSpot (..)
   , paneBarWidget
   ) where
 
-import Data.List (intercalate, intersperse, nub, sort)
+import Data.List (intercalate, intersperse, isPrefixOf, nub, sort)
 import Data.Maybe (catMaybes)
 import Data.Time.Clock (NominalDiffTime)
 
@@ -773,6 +775,75 @@ paneWrapped :: String -> Widget n
 paneWrapped s = Widget Greedy Fixed $ do
   ctx <- getContext
   render (strWrapWith (paneWrapAt (availWidth ctx) s) s)
+
+-- | **The rows 'paneWrapped' would draw, told as offsets into the string it
+-- was given** — one row as @(where its text starts, how many columns of indent
+-- the wrapper put in front of it, how many characters of the original it
+-- carries)@.
+--
+-- **Why this exists: so that the line the caret is in can wrap too** —
+-- `~rhkm3`, his ruling of 2026-11-24, /"I hate the row shift … fix it
+-- properly"/. A widget that wraps text is enough for a line nobody is editing;
+-- a line being edited also has to say **where on screen a given character
+-- offset ended up**, because that is where the caret has to be drawn. Letting
+-- the wrapper draw and then guessing the caret is how the two drift, so both
+-- read these rows.
+--
+-- **It goes through 'paneWrapAt', not a second set of settings.** That is the
+-- whole point: a line looks the same whether or not the caret is in it, so
+-- nothing reflows when the caret arrives or leaves.
+--
+-- **The offsets are recovered by matching, because word wrap eats the space it
+-- broke at** and that space is in the original but in no row. Each row's text
+-- is looked for at or just after where the previous row ended, skipping only
+-- spaces; a long word broken mid-word has no space to skip and matches at
+-- once. **An empty string is one empty row** rather than none, so that a caret
+-- in an empty line still has a row to sit on.
+wrapRows :: Int -> String -> [(Int, Int, Int)]
+wrapRows w s
+  | null s = [(0, 0, 0)]
+  | otherwise = go 0 (map T.unpack (wrapTextToLines (paneWrapAt w s) (max 1 w) (T.pack s)))
+  where
+    go _ [] = []
+    go cur (l : ls) =
+      let body = dropWhile (== ' ') l
+          start = locate cur body
+      in (start, length l - length body, length body) : go (start + length body) ls
+    -- | Where this row's text sits in the original. **Spaces are the only
+    -- thing skipped**; anything else would let a row match a later repeat of
+    -- its own text. The search is the fallback that keeps this total — it
+    -- cannot loop, and nothing has been seen to reach it.
+    locate cur body
+      | body `isPrefixOf` drop skipped s = skipped
+      | otherwise = case [i | i <- [cur .. length s], body `isPrefixOf` drop i s] of
+          (i : _) -> i
+          [] -> cur
+      where
+        skipped = cur + length (takeWhile (== ' ') (drop cur s))
+
+-- | **Where the caret goes once the line is wrapped** — the row and the column
+-- of a character offset, in the wrapped image's own coordinates. `~rhkm3`.
+--
+-- **An offset past the end of a row's text lands at the end of that row**,
+-- which is the case where the caret sits in the space the wrapper ate.
+--
+-- **A caret that would land past the last column goes to a row of its own**,
+-- at a continuation's indent — the line is exactly full and the next character
+-- typed will start a new row, so that is where the caret already belongs.
+-- Whoever draws this has to leave that row there to be drawn on.
+wrapCaret :: Int -> String -> Int -> (Int, Int)
+wrapCaret w s off
+  | col >= max 1 w = (ix + 1, continuationIndent)
+  | otherwise = (ix, col)
+  where
+    rows = wrapRows w s
+    (ix, start, indent, len) = case [r | r@(_, (st, _, _)) <- zip [0 ..] rows, st <= off] of
+      [] -> (0, 0, 0, 0)
+      xs -> let (i, (st, ind, l)) = last xs in (i, st, ind, l)
+    col = indent + min (off - start) len
+    continuationIndent = case drop 1 rows of
+      ((_, ind, _) : _) -> ind
+      [] -> 0
 
 -- | 'paneWrap' when the pane can afford the indent, and a flush wrap when it
 -- cannot — **pure, so the drawing suite can hold the whole rule to its text
