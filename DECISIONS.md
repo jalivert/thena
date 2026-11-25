@@ -1789,6 +1789,27 @@ bare `Type`. If a name has level parameters, you write them.
 types (`And {ℓ₇₂ ℓ₇₃} : Type (ℓ₇₂ ⊔ ℓ₇₃)`), but **you cannot write one.** Only
 inference builds a join.
 
+### A level in a pattern is a numeral or a splice, and a bound level cannot be taken apart
+
+A pattern over a core term writes level arguments in the same braces a use does,
+numerals only as above, and may put a splice in one:
+
+```
+core`Empty {0}`         matches Empty at level 0 and at nothing else
+core`Empty {${_}}`      matches it at any level
+core`Empty {${l}}`      the same, and binds that level as l
+```
+
+Levels are compared by normal form rather than by written shape, so the numeral
+matches every level that normalises to it.
+
+**A splice is the only way to reach a join.** `ℓ ⊔ ℓ'` prints in inferred types
+and cannot be written, here as anywhere else, so no pattern matches one
+literally; `${l}` binds it whole. A rule that holds a level that way can pass it
+on but cannot look inside it: there is no pattern for *is this a successor*, and
+a question about a level's shape is one to ask of the level rather than a shape
+to match.
+
 ### A reference's level arguments are part of what it is
 
 `Eq {0}` and `Eq {1}` are two different things and Thena will not convert one
