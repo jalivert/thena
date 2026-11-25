@@ -20,6 +20,7 @@ module Thena.Rules
 
     -- * Finding rules (§7.6)
   , RuleIter
+  , Match (..)
   , matches
   , matchingRules
   , byCallable
@@ -211,7 +212,31 @@ allCallable bs = concatMap baseRules bs ++ concatMap baseFunctions bs
 -- Laziness is not a nicety here: 'matches' filters by running heads, heads run
 -- 'whnf' (§8), so the tail is real work that 'hasNext' should not do more of
 -- than it must.
-newtype RuleIter = RuleIter [Rule]
+newtype RuleIter = RuleIter [Match]
+  deriving (Eq, Show)
+
+-- | __A clause that matched, and the environment the match built__ (MS12,
+-- §8's /the environment a match built is carried, never recomputed/).
+--
+-- **The environment is the part that could not be recomputed.** 'clauses'
+-- builds one to choose a clause at all — @matchClause@'s answer, the arguments
+-- bound to /this/ clause's parameters — and it used to throw it away, leaving
+-- "Thena.Engine" to run the same match a second time on entry and a third time
+-- in @seedFor@ when @retry@ re-enters the alternative. That was free only while
+-- matching is a function of its inputs. A pattern over a core term opens a
+-- binder, which mints a token, so a second run of the same match answers a
+-- /different/ environment — differing only in a variable nothing prints, which
+-- is exactly the invariant @seedFor@ exists to keep: the clause that was chosen
+-- and the environment it runs in cannot disagree about what a pattern bound.
+--
+-- So the match travels with the clause, through the iterator and onto the
+-- frame. 'matches' and 'dispatch' bind nothing — they are asked no arguments —
+-- so their environment is empty, and that is not a special case: it is what
+-- matching no patterns against no values answers.
+data Match = Match
+  { matchRule :: Rule
+  , matchEnv  :: Op.Env
+  }
   deriving (Eq, Show)
 
 -- | Every rule whose head passes at the focus, in definition order (§7.6).
@@ -236,7 +261,8 @@ newtype RuleIter = RuleIter [Rule]
 -- said in the first place.
 matches :: [RuleBase] -> GlobalEnv -> Cursor -> RuleIter
 matches bases env cur =
-  RuleIter [ r | r <- allRules bases, all (holds env cur []) (ruleHead r) ]
+  RuleIter
+    [ Match r [] | r <- allRules bases, all (holds env cur []) (ruleHead r) ]
 
 -- | __The matching RULES, as against the matching clauses__ — his ruling,
 -- 2026-11-19: /"each rule-arity, in other words — each rule, gets to be
@@ -269,8 +295,8 @@ matchingRules
 matchingRules bases env cur = byCallable (drain (matches bases env cur))
   where
     drain it = case next it of
-      Nothing        -> []
-      Just (r, rest) -> r : drain rest
+      Nothing         -> []
+      Just (mt, rest) -> matchRule mt : drain rest
 
 -- | Group rules by name and arity, **keeping first-appearance order** for the
 -- groups and for the clauses inside each.
@@ -358,8 +384,8 @@ groupParams rs@(first : _) =
 -- @try x@. @:matches@ keeps showing it.
 dispatch :: [RuleBase] -> GlobalEnv -> Cursor -> RuleIter
 dispatch base env cur =
-  let RuleIter rs = matches base env cur
-   in RuleIter [ r | r <- rs, null (ruleParams r) ]
+  let RuleIter ms = matches base env cur
+   in RuleIter [ mt | mt <- ms, null (ruleParams (matchRule mt)) ]
 
 -- | The clauses @Call@ may run: **this name, this arity, and a head that
 -- passes** (§8, phase 23).
@@ -400,7 +426,7 @@ clauses
 clauses bases env cur nm vs = RuleIter (searched ++ take 1 called)
   where
     fitting rs =
-      [ r
+      [ Match r bound
       | r <- rs
       , ruleName r == nm
       , Just bound <- [matchClause env r vs]
@@ -419,16 +445,16 @@ arities :: [RuleBase] -> GlobalName -> [Int]
 arities bases nm =
   [ length (ruleParams r) | r <- allCallable bases, ruleName r == nm ]
 
-next :: RuleIter -> Maybe (Rule, RuleIter)
-next (RuleIter rs) = case rs of
-  []      -> Nothing
-  r : rest -> Just (r, RuleIter rest)
+next :: RuleIter -> Maybe (Match, RuleIter)
+next (RuleIter ms) = case ms of
+  []        -> Nothing
+  mt : rest -> Just (mt, RuleIter rest)
 
 -- | Is there another? Phase 16's peek asks this to decide whether a @Choice@
 -- frame is worth building at all (§7.3), so it must not force more of the list
 -- than one more head match.
 hasNext :: RuleIter -> Bool
-hasNext (RuleIter rs) = not (null rs)
+hasNext (RuleIter ms) = not (null ms)
 
 -- | One shape question, answered against the focus.
 --

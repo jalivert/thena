@@ -42,7 +42,7 @@ import Thena.Global.Env (emptyGlobals)
 import Thena.Standard (aRule)
 import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Rule (..), Test (..), Value (..))
 import qualified Thena.Instral.Ops as Ops
-import Thena.Rules (RuleBase, matches, next, ruleBase)
+import Thena.Rules (RuleBase, matchRule, matches, next, ruleBase)
 import Thena.Surface.Concrete (Surface (..))
 import Thena.Surface.Zipper (rootedAt)
 
@@ -222,7 +222,8 @@ headArguments =
       -- term the user has not typed — so the clause is listed, exactly as a
       -- parameterised rule has always been.
       testCase "matches lists it, having no argument to ask about" $
-        fmap (ruleName . fst) (next (matches (bases [nameClause]) emptyGlobals hole))
+        fmap (ruleName . matchRule . fst)
+             (next (matches (bases [nameClause]) emptyGlobals hole))
           @?= Just (rootName "pick")
     ]
 

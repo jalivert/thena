@@ -495,5 +495,5 @@ dispatchableTests =
   where
     names' it = [ nameDotted (ruleName r) | r <- drainIt it ]
     drainIt it = case Thena.Rules.next it of
-      Nothing        -> []
-      Just (r, rest) -> r : drainIt rest
+      Nothing         -> []
+      Just (mt, rest) -> Thena.Rules.matchRule mt : drainIt rest

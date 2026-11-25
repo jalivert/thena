@@ -73,6 +73,7 @@ import Thena.Rules
   , RuleIter
   , allRules
   , hasNext
+  , Match (..)
   , matches
   , next
   , ruleBase
@@ -140,9 +141,13 @@ nameOf = nameDotted . ruleName
 -- | Walk an iterator to the end with 'next' alone, which is how the driver's
 -- display walks it.
 drain :: RuleIter -> [Rule]
-drain it = case next it of
-  Nothing        -> []
-  Just (r, rest) -> r : drain rest
+drain = map matchRule . drainMatches
+
+-- | The same walk, keeping what each match bound (MS12).
+drainMatches :: RuleIter -> [Match]
+drainMatches it = case next it of
+  Nothing         -> []
+  Just (mt, rest) -> mt : drainMatches rest
 
 -- --------------------------------------------------------------------------
 -- What matches where (§7.6)
@@ -430,6 +435,21 @@ dataTests =
       -- question, it does not fail.
       testCase "and a value of the wrong kind fits neither" $
         clauseFor [VText "a"] @?= []
+
+    , -- **The environment the match built rides out with the clause** (MS12,
+      -- §8's /the environment a match built is carried, never recomputed/).
+      -- 'Thena.Rules.clauses' has to match to choose a clause at all, and it
+      -- used to answer the clause alone — leaving "Thena.Engine" to run the
+      -- same match a second time on entry and a third in @seedFor@. This is
+      -- the answer being kept, which is what makes the body's environment and
+      -- the clause's choice one event instead of two.
+      testCase "the iterator carries what the match bound" $
+        envFor [VList [VText "a", VText "b"]]
+          @?= [[("x", VText "a"), ("xs", VList [VText "b"])]]
+    , -- A clause whose patterns bind nothing is not a missing environment: it
+      -- is matching no names, which answers none.
+      testCase "and a clause that binds nothing carries an empty one" $
+        envFor [VList []] @?= [[]]
     ]
   where
     run is = runOut (machineIn emptyGlobals (holeAt type1) is)
@@ -458,6 +478,23 @@ dataTests =
       | r <- drain (clauses [shapes] emptyGlobals (holeAt type1)
                             (rootName "shape") vs)
       , Do (Ops.Say (Lit (VText w))) <- ruleBody r
+      ]
+
+    -- The same two clauses with patterns that BIND, so that what the match
+    -- answered can be looked at and not only which clause it chose.
+    binders =
+      ruleBase "binders" Nothing "" [] []
+        [ aRule (rootName "split") [Ops.PList [] Nothing] []
+            [Do (Ops.Say (Lit (VText "empty")))]
+        , aRule (rootName "split")
+                [Ops.PList [Ops.PVar "x"] (Just (Ops.PVar "xs"))] []
+            [Do (Ops.Say (Lit (VText "cons")))]
+        ]
+
+    envFor vs =
+      [ matchEnv mt
+      | mt <- drainMatches (clauses [binders] emptyGlobals (holeAt type1)
+                                    (rootName "split") vs)
       ]
 
 -- | What a rule hands back (MS5 phase 63).

@@ -138,7 +138,6 @@ import Thena.Instral.Ops
   , Op (..)
   , Operand (..)
   , Value (..)
-  , matchClause
   )
 import Thena.Global.Declare (buildInductive)
 import Thena.Global.Env
@@ -174,8 +173,9 @@ import Thena.Tactics.Specialise
 import Thena.Instral.Infer (inferProgram, reachingAll)
 import Thena.Instral.Type (Signature)
 import Thena.Rules
-  ( RuleBase, RuleError (..), RuleIter, allCallable, allSignatures, arities
-  , basePath, clauses, dispatch, hasNext, next, resolveBlock, rootReading )
+  ( Match (..), RuleBase, RuleError (..), RuleIter, allCallable, allSignatures
+  , arities, basePath, clauses, dispatch, hasNext, next, resolveBlock
+  , rootReading )
 import Thena.Syntax.Lexer (isIdentifier)
 import Thena.Surface.Zipper (SurfaceZipper)
 import qualified Thena.Surface.Zipper as Zipper
@@ -564,17 +564,19 @@ data Frame
         -- ^ **the same field a 'Call' carries, and it means the same thing.**
         -- Both frames have exactly one lifetime as of MS4 phase 57: entered,
         -- returned, and stepped over ever after. See 'resumeFrom'.
-      , callArgs  :: [Value]
-        -- ^ the arguments a @call@ was given, or @[]@ for a dispatch (phase
-        -- 23). Kept beside 'entryEnv' rather than folded into it because each
-        -- clause binds them to **its own** parameter names — clauses of one
-        -- name need not agree on those, or even on how many there are. See
-        -- 'seedFor', which is the one place the two are put together.
       , entryEnv  :: Env
         -- ^ the environment /every/ alternative of this choice point starts in
         -- (phase 17b). Empty for a plain @step@; @[(hint, …)]@ when the
         -- dispatch carried one, because a hint belongs to the dispatch and not
         -- to the alternative that happened to be tried first.
+        --
+        -- **What an alternative adds to it is the alternative's own**, and it
+        -- rides in 'alts' (MS12): a @callArgs@ field used to stand beside this
+        -- one so that @seedFor@ could re-match the arguments against whichever
+        -- clause was taken next, since clauses of one name need not agree on
+        -- what they call their parameters. The match now travels with the
+        -- clause, so there is nothing left to re-match and the arguments need
+        -- not be kept.
         --
         -- Without it, backtracking into a second elaboration rule would enter
         -- it with @hint@ unbound and it would fail as an unbound 'Ref'. MS1
@@ -1096,10 +1098,10 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
             -- **And the pool goes back with it** (MS11 phase 300): the
             -- branch being abandoned may have pushed a base, and the
             -- alternative about to run is one on which that body never ran.
-            Just (r, it') -> Saying (took "backtracking to" fr r) m
+            Just (mt, it') -> Saying (took "backtracking to" fr (matchRule mt)) m
               { development = saved fr
-              , exec  = Exec (ruleBody r) (seedFor (globals m) fr r)
-                             (demote fr r it' : savedBelow fr)
+              , exec  = Exec (ruleBody (matchRule mt)) (seedFor fr mt)
+                             (demote fr (matchRule mt) it' : savedBelow fr)
                              (savedPushes fr)
               }
 
@@ -1138,8 +1140,8 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
 -- and the entry environment they seed; everything else they said was the same
 -- thing written twice, and 'savedEnclosing' (MS4 phase 42) is the field that
 -- made writing it twice cost something.
-choicePoint :: Machine -> Maybe Op.Pattern -> [Instr] -> RuleIter -> Rule -> [Value] -> Env -> Frame
-choicePoint m dest rest it' r vs seed =
+choicePoint :: Machine -> Maybe Op.Pattern -> [Instr] -> RuleIter -> Rule -> Env -> Frame
+choicePoint m dest rest it' r seed =
   Choice
     { resume         = rest
     , resumeEnv      = env (exec m)
@@ -1153,7 +1155,6 @@ choicePoint m dest rest it' r vs seed =
     , chosen         = ruleName r
     , chosenAt       = ruleOrigin r
     , returned       = False
-    , callArgs       = vs
     , entryEnv       = seed
     }
 
@@ -1175,7 +1176,6 @@ demote fr r it'
         , chosen         = ruleName r
         , chosenAt       = ruleOrigin r
         , returned       = False
-        , callArgs       = callArgs fr
         , entryEnv       = entryEnv fr
         }
     -- **@returned = False@ in both branches**: the frame is being /entered/,
@@ -1673,8 +1673,8 @@ perform instr rest m = case operation instr of
   -- is a rule called by name, so it was never a dispatch, and there is no magic
   -- name in the instruction language any more.
   Dispatch -> case next it of
-    Nothing       -> failure NoRuleMatched m
-    Just (r, it')
+    Nothing        -> failure NoRuleMatched m
+    Just (mt, it')
       -- Announced only when the dispatch was a real decision, which is
       -- exactly when a 'Choice' was built. A message marks a choice; where
       -- there was one candidate there was none, and a line per deterministic
@@ -1685,11 +1685,12 @@ perform instr rest m = case operation instr of
       -- runs therefore ends that rule and its value is dropped, which is what
       -- @x = prove@ being refused at load time already said.
       | hasNext it' ->
-          Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                 (entering r (choicePoint m Nothing rest it' r [] []) m { names = names m + 1 })
+          Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule (matchRule mt))
+                 (entering mt (choicePoint m Nothing rest it' (matchRule mt) [])
+                           m { names = names m + 1 })
       | otherwise ->
-          Continue (entering r (Thena.Engine.Call rest (env (exec m)) Nothing
-                                                  (pushes (exec m)) False) m)
+          Continue (entering mt (Thena.Engine.Call rest (env (exec m)) Nothing
+                                                   (pushes (exec m)) False) m)
     where
       it = dispatch (rules m) (globals m) (cursor (development m))
 
@@ -1698,8 +1699,14 @@ perform instr rest m = case operation instr of
       -- Otherwise this is an ordinary 'Call', carrying no iterator, no
       -- snapshot and no identifier. The cost is Prolog's own: one more head
       -- match is computed than is used.
-      entering r fr k =
-        k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) (pushes (exec m)) }
+      -- **The match's own environment**, which for a dispatch is empty: a
+      -- dispatch supplies no arguments and 'Thena.Rules.dispatch' skips any
+      -- rule with parameters, so there is nothing for a pattern to have bound.
+      -- It is written as the match's environment all the same, because that is
+      -- the one place an entered body's bindings come from.
+      entering mt fr k =
+        k { exec = Exec (ruleBody (matchRule mt)) (matchEnv mt)
+                     (fr : stack (exec m)) (pushes (exec m)) }
 
   -- **Call by name: the same search as @Dispatch@, over a narrower candidate
   -- list** (§8, phase 23). The user's own framing, and it is why this case now
@@ -1755,26 +1762,26 @@ perform instr rest m = case operation instr of
     Left e   -> failure e m
     Right vs -> case next (it vs) of
       Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) (rootName nm))) m
-      Just (r, it')
+      Just (mt, it')
         | hasNext it' ->
-            Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                   (entering vs r (choicePoint m wants rest it' r vs []) m { names = names m + 1 })
+            Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule (matchRule mt))
+                   (entering mt (choicePoint m wants rest it' (matchRule mt) [])
+                             m { names = names m + 1 })
         | otherwise ->
-            Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) wants
-                                                       (pushes (exec m)) False) m)
+            Continue (entering mt (Thena.Engine.Call rest (env (exec m)) wants
+                                                     (pushes (exec m)) False) m)
     where
       it vs = clauses (rules m) (globals m) (cursor (development m)) (rootName nm) vs
 
-      -- The callee's parameters, bound to the arguments. 'clauses' has already
-      -- filtered on arity, so the two lists agree by construction — and the
-      -- frame keeps @vs@ rather than this, because the next clause may name its
-      -- parameters differently ('seedFor').
-      -- @fromMaybe []@ cannot arise: 'clauses' answered with @r@ only because
-      -- 'Op.matchClause' succeeded on these very values. Written this way
-      -- rather than with a partial pattern so that the total function stays
-      -- total, which is what the one-matcher design is for.
-      entering vs r fr k =
-        k { exec = Exec (ruleBody r) (fromMaybe [] (matchClause (globals m) r vs))
+      -- **The callee's parameters, bound to the arguments by the match that
+      -- chose this clause** — not by a second match run here. 'Thena.Rules.clauses'
+      -- had to match to choose at all, and its answer rides in the
+      -- 'Thena.Rules.Match'; running it again would be a different environment
+      -- the moment a pattern mints anything (§8). The @fromMaybe []@ that used
+      -- to stand here, and the proof that it could not arise, are gone with the
+      -- second call.
+      entering mt fr k =
+        k { exec = Exec (ruleBody (matchRule mt)) (matchEnv mt)
                      (fr : stack (exec m)) (pushes (exec m)) }
 
   -- §3.7's elimination tactic (phase 17). The goal is the focus, as with the
@@ -3571,8 +3578,8 @@ nameOfRule = nameDotted . ruleName
 
 drainIter :: RuleIter -> [Rule]
 drainIter it = case next it of
-  Nothing        -> []
-  Just (r, rest) -> r : drainIter rest
+  Nothing         -> []
+  Just (mt, rest) -> matchRule mt : drainIter rest
 
 -- | Why @retry@ could not.
 --
@@ -3598,16 +3605,22 @@ data RetryError = NoChoicePoint | UnknownChoice Int
 --
 -- **One expression covers a dispatch and a call**, which is the whole reason
 -- @Call@ could stop being a separate mechanism. A dispatch has no arguments and
--- 'Thena.Rules.dispatch' skips parameterised rules, so this is just its
--- 'entryEnv' — the hint, or nothing. A call carries no hint and binds its
--- arguments to the clause's own parameters by MATCHING them (MS5 phase 82),
--- which 'Thena.Rules.clauses' has already done once to choose this clause.
+-- 'Thena.Rules.dispatch' skips parameterised rules, so an alternative of one
+-- adds nothing to the frame's 'entryEnv' — the hint, or nothing. A call carries
+-- no hint and binds its arguments to the clause's own parameters by MATCHING
+-- them (MS5 phase 82), which 'Thena.Rules.clauses' did once to choose this
+-- clause at all.
 --
--- **It is the same 'Thena.Instral.Ops.matchClause' call**, and that is the point: the
--- clause that was chosen and the environment it runs in cannot disagree about
--- what a pattern bound. Before patterns both were @zip@ and agreeing was free.
-seedFor :: GlobalEnv -> Frame -> Rule -> Env
-seedFor env fr r = entryEnv fr ++ fromMaybe [] (matchClause env r (callArgs fr))
+-- **It is that match's own answer and not a second call of it** (MS12, §8).
+-- This used to re-run 'Thena.Instral.Ops.matchClause' on the arguments the frame had
+-- kept, which was free only while matching is a function of its inputs: a
+-- pattern that opens a binder mints a token, so the second run answers an
+-- environment differing from the first in a variable nothing prints — and
+-- keeping those two from disagreeing about what a pattern bound is the whole
+-- reason this function exists. Carrying the match removes the disagreement
+-- rather than defending against it.
+seedFor :: Frame -> Match -> Env
+seedFor fr mt = entryEnv fr ++ matchEnv mt
 
 retryFrom :: Maybe Int -> Machine -> Either RetryError (Machine, String)
 retryFrom target m = go (0 :: Int) (stack (exec m))
@@ -3617,11 +3630,11 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
     go _ [] = Left missing
     go popped (fr : stk) = case fr of
       Choice {} | maybe True (== choiceId fr) target -> case next (alts fr) of
-        Nothing       -> Left missing      -- cannot arise; see 'demote'
-        Just (r, it') -> Right
+        Nothing        -> Left missing     -- cannot arise; see 'demote'
+        Just (mt, it') -> Right
           ( m { development = saved fr
-              , exec  = Exec (ruleBody r) (seedFor (globals m) fr r)
-                             (demote fr r it' : savedBelow fr)
+              , exec  = Exec (ruleBody (matchRule mt)) (seedFor fr mt)
+                             (demote fr (matchRule mt) it' : savedBelow fr)
                              (savedPushes fr)
                 -- **'savedBelow' and not @stk@** (MS12), so that
                 -- this really is 'failure''s unwind with a target instead of
@@ -3647,7 +3660,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
                 -- the floor moves to exactly this frame's depth and no further.
               , lineFloor = length stk
               }
-          , note (choiceId fr) (ruleName r) popped
+          , note (choiceId fr) (ruleName (matchRule mt)) popped
           )
       _ -> go (popped + 1) stk
 
