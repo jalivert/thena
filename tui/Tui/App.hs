@@ -224,7 +224,7 @@ import Tui.Panes
   , wrapCaret
   , wrapRows
   )
-import Tui.Failure (placeSuffix)
+import Tui.Failure (placeSuffix, placeText)
 import Tui.Database
   ( Stored (..)
   , clockName
@@ -2612,10 +2612,69 @@ draw st =
     -- a lookup miss, which cannot arise).
     matchRows mvs =
       [Heading "matches" (Just (length mvs)) | not (null mvs)]
-        <> [Entry (matchLine mv) | mv <- mvs]
+        <> concatMap matchGroup mvs
+
+    -- | **A row, and under it the clause it is written as — when it is written
+    -- as exactly one.** His instruction, 2026-11-25, generalising `~8rn4d`:
+    -- the TUI shows a place and the terminal emulator opens it, so a row that
+    -- can name one should.
+    --
+    -- **ONE CLAUSE OR NO PLACE, AND THAT IS NOT A SPECIAL CASE BUT THE ROW'S
+    -- OWN MEANING.** A row here is a name and an arity, which is the unit his
+    -- ruling of 2026-11-19 collapsed @:matches@ to, and a name with twenty-two
+    -- clauses is one row standing for all of them — so there is no place that
+    -- is /the/ row's, and picking the first clause's would send him to a file
+    -- the row does not stand for. Where the group holds one clause the two
+    -- units coincide and the place is exact. This is why
+    -- 'Thena.View.Matches.MatchView' carries no position of its own and
+    -- 'Thena.View.Rules.RuleView' does: the join is ours to make, over data the
+    -- engine already exposes, and it is made on the pair the engine groups by.
+    --
+    -- **A ROW OF ITS OWN, BARE** — `~29733`'s rule, and here it is forced
+    -- rather than chosen. A match row already carries a name, every argument's
+    -- placeholder and an inferred signature (@claim ‹ty› : Core -> ()@), so a
+    -- path appended to it would land past the pane's width on nearly every row
+    -- and 'Tui.Panes.paneWrapped' breaks a word longer than its pane mid-word.
+    -- The @choices@ pane can put a place on the heading line because that
+    -- heading is an identifier and a word.
+    matchGroup mv =
+      Entry (matchLine mv) : [Place pl | Just pl <- [matchPlace mv]]
 
     matchLine mv =
       matchViewLine mv <> maybe "" ((" : " <>) . drawSignature) (matchViewType mv)
+
+    -- | Where the one clause behind a row is written, or 'Nothing'.
+    --
+    -- **'Nothing' covers three cases and all three are right**: a group of
+    -- several clauses, which has no one place; a clause in no file, which is
+    -- the synthetic @entry@ and @do@ rules a typed line is wrapped in
+    -- ('Thena.Instral.Ops.ruleOrigin' answers 'Nothing' for those); and a rule
+    -- the match list named that no loaded base holds, which cannot arise and
+    -- is a blank rather than a crash if it ever does.
+    matchPlace mv =
+      case Map.findWithDefault [] (matchViewName mv, matchViewArity mv) clausePlaces of
+        [(p, at)] -> case placeText (stCwd st) p at of
+          "" -> Nothing
+          t -> Just t
+        _ -> Nothing
+
+    -- | Every loaded clause's place, keyed the way the match list is grouped —
+    -- by spelled name and arity ('Thena.Rules.matchingRules' groups by exactly
+    -- that pair, and 'Thena.View.Rules.displayRule' spells a clause's name
+    -- through the same 'Thena.Core.Term.spelledIn' the match list uses, so the
+    -- two keys cannot drift).
+    --
+    -- **It costs a map of the base's rules per frame and nothing more.**
+    -- 'rulesView' builds a record per clause whose expensive field is its body,
+    -- and nothing here forces a body — 129 shipped rules, four lazy fields
+    -- touched each.
+    clausePlaces =
+      Map.fromListWith
+        (<>)
+        [ ((ruleViewName rv, length (ruleViewParams rv)), [(ruleViewPath rv, ruleViewAt rv)])
+        | (_, rvs) <- rulesView budget s
+        , rv <- rvs
+        ]
 
     -- | The redraw 'Thena.View.Type' asks a frontend to keep — an arrow
     -- chain, 'AFenced' the only place a parenthesis is drawn. Kept in step

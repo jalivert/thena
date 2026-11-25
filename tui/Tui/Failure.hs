@@ -27,6 +27,7 @@ module Tui.Failure
   , refusalLines
   , positionSuffix
   , placeSuffix
+  , placeText
   , natureGlyph
   , natureIsFault
   , refusedClaimsShown
@@ -178,8 +179,23 @@ positionSuffix (Just p) = ":" <> show (posLine p) <> ":" <> show (posColumn p)
 -- its pane mid-word, which leaves two fragments and no path. Relative, it is
 -- @rules\/standard.thena.rules:80@ and survives whole onto a continuation line.
 placeSuffix :: FilePath -> Maybe FilePath -> Maybe Pos -> String
-placeSuffix _ Nothing _ = ""
-placeSuffix cwd (Just p) at = "  " <> pathUnder cwd p <> positionSuffix at
+placeSuffix cwd mp at = case placeText cwd mp at of
+  "" -> ""
+  t -> "  " <> t
+
+-- | **The same place with nothing in front of it**, for a row that is a place
+-- and nothing else — `~29733`'s shape, which 'Tui.Panes.PaneRow''s @Place@
+-- draws at the pane's own margin. 'placeSuffix' is this plus the two spaces
+-- that separate it from a name it follows on one line.
+--
+-- **Which of the two a pane wants is decided by the row's length, not by
+-- taste.** A place may follow a name on one line only where the whole row fits
+-- the pane — the @choices@ pane's headings, measured at fifty columns — because
+-- 'Tui.Panes.paneWrapped' breaks a word longer than its pane mid-word and half
+-- a path resolves to nothing. Everything longer puts the place on its own row.
+placeText :: FilePath -> Maybe FilePath -> Maybe Pos -> String
+placeText _ Nothing _ = ""
+placeText cwd (Just p) at = pathUnder cwd p <> positionSuffix at
 
 -- | A path spelled against a directory it is inside, and left alone otherwise.
 --
