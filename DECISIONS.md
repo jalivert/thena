@@ -1810,6 +1810,21 @@ on but cannot look inside it: there is no pattern for *is this a successor*, and
 a question about a level's shape is one to ask of the level rather than a shape
 to match.
 
+### A pattern over a trusted term sees all three of its parts
+
+`trusted T e` writes two things — the type you claim and the body — and Thena
+works out the third, the type the body actually has. A core term writes all
+three, and **a pattern over one matches all three**:
+
+```
+core`trusted ${claimed} ${actual} ${body}`
+```
+
+The claim and the actual type are what the trust is: a trusted term stops being
+trusted the moment those two agree, which is when the node contracts away. A
+rule that wants to know whether a claim is still carrying weight compares them,
+so neither is hidden from it.
+
 ### A reference's level arguments are part of what it is
 
 `Eq {0}` and `Eq {1}` are two different things and Thena will not convert one
