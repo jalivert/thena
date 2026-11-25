@@ -26,6 +26,7 @@ module Thena.Syntax.Print
   , rawRhs
   , rawFunBody
   , rawPattern
+  , corePText
   , rawTy
     -- * Declarations, blocks and whole files
   , rawDecl
@@ -55,10 +56,11 @@ module Thena.Syntax.Print
 import Data.List (intercalate)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Level (Level, Normal (..), levelVarName, normalise)
+import Thena.Core.Level (Level, Normal (..), levelOfNat, levelVarName, normalise)
 import Thena.Core.Context
   (Context, entryIdent, entryVar, wordReaches)
 import Thena.Core.Term (GlobalName (..), Ident (..), Literal (..), Var, nameDotted)
+import Thena.Instral.Pattern (CoreP (..))
 import Thena.Instral.Concrete
   ( RawDecl (..)
   , Reach (..)
@@ -159,6 +161,61 @@ block is = case is of
 -- lexer does not accept. The surface case a few lines below always used the
 -- right pair; these did not, and nothing exercised them until a whole rule file
 -- had to be printed and re-read (MS7 phase 112c).
+-- | A core pattern, in the development calculus's own notation, **with the
+-- @core@ fence around it** (MS12 phase 352, @~9j34x@).
+--
+-- **Here and not in a display renderer, because it reads back**, which is this
+-- module's own line: @core\`trusted ${c} ${a} ${b}\`@ printed from a pattern
+-- parses to that pattern again. That is what 'Thena.Instral.Pattern.PObject'
+-- cannot promise — a skeleton prints as the constructor application it is,
+-- since writing the region back needs the grammar — and what a core pattern
+-- can, the development calculus being Thena's own.
+--
+-- **A name is written WHOLE, scope or none**, which is the line
+-- 'Thena.Render.renderSkeleton' already draws one language up (MS10 phase 254):
+-- a pattern is printed where there is no scope to shorten against, and a whole
+-- name resolves under any scope — so @:rules@ lists @core\`And.And ${a} ${b}\`@
+-- for a clause whose file wrote @And@, and that spelling reads back.
+--
+-- **Only a literal is region-escaped.** A name, a keyword and a level hold
+-- none of @\`@, @$@ or @\\@, and a @${…}@ must NOT be escaped or the scanner
+-- reads the @$@ as a character instead of an escape opener — which is the one
+-- thing 'Thena.Render.coreRegion' cannot be used for here.
+corePText :: (a -> String) -> CoreP a -> String
+corePText at cp = "core" ++ [tick] ++ top cp ++ [tick]
+  where
+    top c = case c of
+      CPApp {} -> unwords (map atom (hd : args))
+        where (hd, args) = spine c []
+      -- **A keyword and a fixed number of atoms**, which is the grammar's own
+      -- shape for both of these.
+      CPTrusted cl ac b -> unwords ["trusted", atom cl, atom ac, atom b]
+      CPEliminate d ls ps m ms is t ->
+        unwords
+          [ "elim", nameDotted d ++ levelArgs (map levelOfNat ls)
+          , group ps, atom m, group ms, group is, atom t
+          ]
+      _ -> atom c
+
+    atom c = case c of
+      CPHole a       -> "$" ++ ['{'] ++ at a ++ ['}']
+      CPName n ls    -> nameDotted n ++ levelArgs (map levelOfNat ls)
+      CPUniverse k   -> "Type" ++ subscript k
+      CPLit l        -> concatMap escapeRaw (literal l)
+      _              -> "(" ++ top c ++ ")"
+
+    group ps = "(" ++ unwords (map atom ps) ++ ")"
+
+    spine c acc = case c of
+      CPApp f a -> spine f (a : acc)
+      _         -> (c, acc)
+
+    literal l = case l of
+      LString x -> escapeString x
+      LChar ch  -> escapeChar ch
+      LInt k    -> show k
+      LRegex r  -> "/" ++ r ++ "/"
+
 rawPattern :: RawPattern -> String
 rawPattern rp = case rp of
   RawPWord w   -> w

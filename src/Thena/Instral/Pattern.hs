@@ -14,7 +14,9 @@ module Thena.Instral.Pattern
   ( Pattern (..)
   , Skeleton (..)
   , Slot (..)
+  , CoreP (..)
   , skeletonHoles
+  , corePHoles
   , patternBinds
   , patternIrrefutable
   ) where
@@ -72,6 +74,21 @@ data Pattern
     -- which names constructors and knows which holes are terms and which are a
     -- token class\'s literal. The grammar was consulted when the pattern was
     -- read and is never needed again.
+  | PCore (CoreP Pattern)
+    -- ^ @core\`trusted ${c} ${a} ${b}\`@ — **a term of the development
+    -- calculus**, matched against the 'Thena.Core.Term.Core' a value holds
+    -- (MS12 phase 352, @~9j34x@).
+    --
+    -- **It is a 'Pattern' and not a mechanism of its own**, which is the whole
+    -- of what @spec\/machine.md@ §8 asks for: stage b matches the shape of a
+    -- /surface/ term and this asks the same question of a /core/ one, so a
+    -- second mechanism would answer one question twice. A head and a
+    -- destructuring binding both reach this through 'Thena.Rules.resolvePattern'.
+    --
+    -- **Resolution is already done**, as it is for 'PObject': a bare word
+    -- inside the region named a global and is refused when the base is read if
+    -- it named nothing, so nothing here has to be looked up when the pattern
+    -- runs.
   deriving (Eq, Show)
 
 -- | A term of an object language with something at each of its splices (MS6
@@ -106,12 +123,76 @@ data Slot
     -- value of that type on either side of the hole
   deriving (Eq, Show)
 
+-- | A core term's shape with something at each of its splices (MS12 phase
+-- 352).
+--
+-- **The twin of 'Skeleton', one language down.** A 'Skeleton' is an object
+-- language's term with holes and this is the development calculus's, and both
+-- are a tree of the constructors the reading named with a parameter where a
+-- @${…}@ stood — so a @CoreP Pattern@ is the matching direction and the
+-- building one would be a @CoreP Thena.Instral.Ops.Operand@. Nothing builds
+-- one yet: a written @core\`…\`@ in an operand stays a
+-- 'Thena.Instral.Ops.VRaw' and is resolved where there is a development to
+-- resolve it against.
+--
+-- **Every field of a node is a position** — @spec\/machine.md@ §8 — which is
+-- why 'CPTrusted' carries three and not the two a surface term writes: the
+-- derived @actual@ is a field, so a pattern may stand at it.
+--
+-- **THE BINDERS ARE NOT HERE YET.** @∀@, @λ@ and @let@ open a scope, and
+-- opening one mints a token, which is the question @~thwhg@ asks and the
+-- landing after this one answers. 'Thena.Rules.resolvePattern' refuses one with
+-- 'Thena.Rules.CorePatternForm' rather than reading it as something else.
+data CoreP a
+  = CPHole a
+    -- ^ @${x}@ — whatever stands here, and what the position takes
+  | CPName GlobalName [Int]
+    -- ^ a word, resolved, and the level arguments written in braces after it
+    --
+    -- **No braces means no level arguments, and that is the development
+    -- calculus's own reading** (@Thena.Syntax.Resolve@'s @plain@), not a
+    -- rule of this type's: @Empty@ written in an operand is
+    -- @Global Empty []@, so @Empty@ written in a pattern is what matches it.
+    -- A level is a numeral in braces and nothing matches inside one (§8).
+  | CPUniverse Int
+    -- ^ @Type₀@ — a universe at a written level. @Type@ with no level is an
+    -- /inferred/ one and is refused in a pattern: there is nothing to infer
+    -- against when a pattern runs.
+  | CPLit Literal
+    -- ^ @"ab"@, @'c'@, @3@ — a literal of a primitive type, as written
+  | CPApp (CoreP a) (CoreP a)
+    -- ^ @f a@. **A constructor application is written this way too**, because
+    -- that is how the development calculus writes one; the matcher accepts the
+    -- saturated 'Thena.Core.Term.Canonical' spelling of the same term, which is
+    -- the line 'Thena.Instral.Ops.matchSkeleton' already draws.
+  | CPTrusted (CoreP a) (CoreP a) (CoreP a)
+    -- ^ @trusted claimed actual body@ — all three fields
+  | CPEliminate GlobalName [Int] [CoreP a] (CoreP a) [CoreP a] [CoreP a] (CoreP a)
+    -- ^ @elim d {ℓ} (params) motive (methods) (indices) target@ — positional
+    -- and in 'Thena.Core.Term.Eliminate''s own field order, exactly as the
+    -- development calculus writes it
+  deriving (Eq, Show)
+
 -- | What sits at each hole, left to right.
 skeletonHoles :: Skeleton a -> [a]
 skeletonHoles sk = case sk of
   SNode _ kids -> concatMap skeletonHoles kids
   SLit _       -> []
   SHole _ a    -> [a]
+
+-- | What sits at each of a core pattern's holes, left to right (MS12 phase
+-- 352) — 'skeletonHoles' for the language one down.
+corePHoles :: CoreP a -> [a]
+corePHoles cp = case cp of
+  CPHole a         -> [a]
+  CPName _ _       -> []
+  CPUniverse _     -> []
+  CPLit _          -> []
+  CPApp f a        -> corePHoles f ++ corePHoles a
+  CPTrusted c a b  -> corePHoles c ++ corePHoles a ++ corePHoles b
+  CPEliminate _ _ ps m ms is t ->
+    concatMap corePHoles ps ++ corePHoles m ++ concatMap corePHoles ms
+      ++ concatMap corePHoles is ++ corePHoles t
 
 -- | The names a pattern binds, left to right.
 --
@@ -132,6 +213,7 @@ patternBinds pt = case pt of
   PSome a     -> patternBinds a
   PNone       -> []
   PObject sk  -> concatMap patternBinds (skeletonHoles sk)
+  PCore cp    -> concatMap patternBinds (corePHoles cp)
 
 -- | Does this pattern match every value of its type?
 --

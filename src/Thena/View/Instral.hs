@@ -49,7 +49,8 @@ import Thena.View.Address (Address)
 import Thena.View.Core (Budget, Display, displayCore)
 import Thena.View.Surface (SurfaceShape, displaySurface)
 import Thena.Surface.Zipper (focus)
-import Thena.Syntax.Print (Env, escapeChar, escapeString, renderLevel, surfacePattern)
+import Thena.Syntax.Print
+  (Env, corePText, escapeChar, escapeString, renderLevel, surfacePattern)
 import Thena.Core.Term (Var)
 
 -- | One instruction, positioned.
@@ -309,6 +310,12 @@ patternText pt = case pt of
   PSome a     -> "(some " ++ patternText a ++ ")"
   PNone       -> "none"
   PObject sk  -> skeletonText sk
+  -- **Shared and not copied** (MS12 phase 352), unlike the rest of this
+  -- function: a core pattern's notation reads back, so its printer belongs in
+  -- "Thena.Syntax.Print", and a second copy of it here would be a second table
+  -- of the development calculus's spelling rather than the cheap duplicate the
+  -- note above justifies.
+  PCore cp    -> corePText patternText cp
   PList ps mt ->
     "[" ++ intercalate ", " (map patternText ps ++ tl) ++ "]"
     where

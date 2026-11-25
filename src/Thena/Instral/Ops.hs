@@ -37,9 +37,11 @@ module Thena.Instral.Ops
   , Pattern (..)
   , Skeleton (..)
   , Slot (..)
+  , CoreP (..)
   , patternBinds
   , patternIrrefutable
   , matchPattern
+  , matchCore
   , matchPatterns
   , matchClause
   , Test (..)
@@ -47,19 +49,24 @@ module Thena.Instral.Ops
 
 import Data.Maybe (isJust)
 
-import Thena.Core.Level (Level)
+import Thena.Core.Level (Level, levelOfNat)
 import Thena.Core.Term
-  (Core (App, Canonical, Global, Primitive), GlobalName (..), Literal (..), Opened,
+  (Core (App, Global, Primitive, Trusted, Universe),
+   GlobalName (..), Literal (..), Opened,
    nameDotted)
+-- | Qualified for one constructor: the kernel's 'Thena.Core.Term.Eliminate' and
+-- this module's own 'Eliminate' op are different things of one name.
+import qualified Thena.Core.Term as Term
 import Thena.Instral.Pattern
-  (Pattern (..), Skeleton (..), Slot (..), skeletonHoles, patternBinds, patternIrrefutable)
+  ( Pattern (..), Skeleton (..), Slot (..), CoreP (..)
+  , skeletonHoles, patternBinds, patternIrrefutable )
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Development.Cursor (Part (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Global.Env (ArgRole, GlobalEnv, InductiveDefinition)
 import Thena.Language.Reader (Block)
 import Thena.Surface.Concrete (Plicity, SurfacePattern)
-import Thena.Tactics.Eliminate (MethodShape)
+import Thena.Tactics.Eliminate (MethodShape, spineOf)
 import Thena.Tactics.Specialise (Binder)
 import Thena.Syntax.Concrete (Raw, splicesIn)
 import Thena.Syntax.Lexer (Pos)
@@ -2272,6 +2279,9 @@ matchPattern env k0 pt v = case (pt, v) of
   -- 104c). See 'matchSkeleton' for the reduction rule, which is the whole of
   -- what is interesting here.
   (PObject sk, VTerm t)    -> matchSkeleton env k0 sk t
+  -- **A core term, matched against itself** (MS12 phase 352, @~9j34x@). The
+  -- reduction rule is 'matchSkeleton'\'s and is stated once there.
+  (PCore cp, VTerm t)      -> matchCore env k0 cp t
   _                        -> Nothing
   where
     none = Just ([], k0)
@@ -2350,30 +2360,105 @@ matchSkeleton env k sk t = case here t of
       SLit l -> case term of
         Primitive l' | l == l' -> Just ([], k)
         _                      -> Nothing
+      -- **'Thena.Tactics.Eliminate.spineOf' and not a copy of it** (MS12 phase
+      -- 352): a saturated former is a 'Canonical' and a written one is nested
+      -- 'App's over a 'Global', and the one walk reads both — plus the
+      -- 'Canonical' with further arguments applied, which the copy that used to
+      -- stand here did not. **The levels are ignored here**, and the object
+      -- language is why: an object term's constructors are generated at one
+      -- level, so a skeleton has no level position to compare.
       SNode nm kids -> case spineOf term of
-        Just (nm', args)
+        Just (nm', _, args)
           | nm == nm', length args == length kids ->
               threading (\k' (sk', a) -> matchSkeleton env k' sk' a) k
                         (zip kids args)
         _ -> Nothing
 
--- | A constructor application, however it is spelled.
+-- | Match a core term's shape against a 'Core' (MS12 phase 352, @~9j34x@).
 --
--- **Both spellings arise and neither is wrong**: elaboration leaves a
--- 'Canonical' once the wrapper has reduced, and a term written out by
--- 'Thena.Language.Build.buildTerm' is the wrapper applied.
-spineOf :: Core -> Maybe (GlobalName, [Core])
-spineOf term = case term of
-  Canonical c _ args -> Just (c, args)
-  Global c _         -> Just (c, [])
-  App {}             -> case flatten term [] of
-    (Global c _, args) -> Just (c, args)
-    _                  -> Nothing
-  _ -> Nothing
+-- **The same two attempts 'matchSkeleton' makes, and for the same reason** —
+-- his rule of 2026-09-20, that a term is tried as it is written and then
+-- reduced and tried again. It is one rule for every pattern, so a core pattern
+-- gets it rather than a rule of its own, and the counter the second attempt
+-- begins from is the one the first was handed.
+--
+-- **Nothing here mints**, and the counter is threaded through anyway: that is
+-- the shape @spec\/machine.md@ §8 asks for and what the binder patterns need
+-- already in place. The binders are the landing after this one, and @~thwhg@ is
+-- the question they wait on.
+matchCore :: GlobalEnv -> Int -> CoreP Pattern -> Core -> Maybe (Env, Int)
+matchCore env k cp t = case here t of
+  Just bs -> Just bs
+  Nothing -> here (whnf env [] t)
   where
-    flatten u acc = case u of
-      App f a -> flatten f (a : acc)
-      _       -> (u, acc)
+    here term = case cp of
+      -- **A hole takes the term it stands at**, whatever it is: a @${x}@ is the
+      -- only binding marker, and what fills one is a 'VTerm'.
+      CPHole p -> matchPattern env k p (VTerm term)
+      CPLit l  -> case term of
+        Primitive l' | l == l' -> ok
+        _                      -> Nothing
+      -- **A level is compared whole** (§8, /nothing matches inside a level
+      -- expression/), and 'Thena.Core.Level' equality is equality of normal
+      -- forms — so @Type₀@ matches @max 0 0@ as it should.
+      CPUniverse n -> case term of
+        Universe l | l == levelOfNat n -> ok
+        _                              -> Nothing
+      CPTrusted c a b -> case term of
+        -- **All three fields**, the derived @actual@ included: a pattern may
+        -- stand at it, which is what makes the obligation readable from a rule.
+        Trusted c' a' b' -> run [(c, c'), (a, a'), (b, b')]
+        _                -> Nothing
+      CPEliminate d ls ps m ms is tg -> case term of
+        Term.Eliminate d' ls' ps' m' ms' is' tg'
+          | d == d'
+          , levelsAre ls ls'
+          , length ps == length ps'
+          , length ms == length ms'
+          , length is == length is' ->
+              run (zip ps ps' ++ [(m, m')] ++ zip ms ms'
+                     ++ zip is is' ++ [(tg, tg')])
+        _ -> Nothing
+      -- **A word and an application are one case**, because a constructor
+      -- application has two spellings and the head is where the name is: the
+      -- pattern's spine is flattened and so is the term's, which is the line
+      -- 'spineOf' draws for 'matchSkeleton' one language up.
+      CPName {} -> applied
+      CPApp {}  -> applied
+      where
+        ok = Just ([], k)
+        run = threading (\k' (q, u) -> matchCore env k' q u) k
+
+        -- **A pattern whose head is a hole is matched node by node**, not
+        -- through the spine: @${f} ${a}@ against @App (App g x) y@ binds @f@ to
+        -- @App g x@, and flattening both sides would have asked for two
+        -- arguments where one was written.
+        applied = case (corePSpine cp, term) of
+          ((CPHole {}, _), _) -> structural
+          ((CPName g ls, args), _) -> case spineOf term of
+            Just (g', ls', args')
+              | g == g', levelsAre ls ls', length args == length args' ->
+                  run (zip args args')
+            -- A written word that the term does not head may still be an
+            -- ordinary application underneath, which @structural@ is what
+            -- reads; a bare word with no arguments has nothing to try.
+            _ -> structural
+          _ -> structural
+
+        structural = case (cp, term) of
+          (CPApp f a, App x y) -> run [(f, x), (a, y)]
+          _                    -> Nothing
+
+    levelsAre ls ls' = map levelOfNat ls == ls'
+
+-- | A core pattern's application spine: its head, and the arguments written
+-- after it (MS12 phase 352).
+corePSpine :: CoreP a -> (CoreP a, [CoreP a])
+corePSpine = go []
+  where
+    go acc cp = case cp of
+      CPApp f a -> go (a : acc) f
+      _         -> (cp, acc)
 
 -- | A @Core@ literal as the @instral@ value a hole at a token class binds.
 primitiveValue :: Literal -> Value

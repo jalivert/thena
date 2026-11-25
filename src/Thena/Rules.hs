@@ -64,10 +64,10 @@ module Thena.Rules
 
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
-  (Core (..), GlobalName (..), InScope, nameDotted, rootName, rootScope)
+  (Core (..), GlobalName (..), InScope, globalUnder, nameDotted, rootName, rootScope)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor (Cursor, Focus (..), context, expectedType, focus)
-import Thena.Global.Env (GlobalEnv)
+import Thena.Global.Env (GlobalEnv, emptyGlobals, knownIn)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Build (skeletonOf)
 import Thena.Language.Grammar
@@ -83,6 +83,7 @@ import Thena.Instral.Ops
   , Origin (..)
   , Pattern (..)
   , Skeleton (..)
+  , CoreP (..)
   , patternBinds
   , matchClause
   , Test (..)
@@ -104,6 +105,10 @@ import Thena.Surface.Read (parseSurfaceText)
 import Thena.Surface.Zipper (rootedAt)
 import Thena.Syntax.Lexer (Pos, isIdentifier, lexTokens)
 import Thena.Syntax.Parser (parseTerm)
+import Thena.Syntax.Concrete
+  ( Raw (..)
+  , RawIdent (..)
+  )
 import qualified Thena.Instral.Type as Ty
 import Thena.Instral.Type (Signature (..), Ty (..))
 import qualified Thena.Tactics.Specialise as Spec
@@ -352,6 +357,7 @@ patternKind pt = case pt of
   PSome _   -> "option"
   PNone     -> "option"
   PObject _ -> "term"
+  PCore _   -> "term"
   PInt _    -> "int"
   PChar _   -> "char"
   PBool _   -> "bool"
@@ -770,6 +776,25 @@ data RuleError
   | ObjectRegionNotATerm GlobalName Int String BuildError
   | NoObjectProduction   GlobalName Int String String
     -- ^ a region whose contents did not parse in the language its tag named.
+    -- **The three below are a CORE pattern's** (MS12 phase 352, @~9j34x@): the
+    -- rule, and what was written. No instruction index, for 'BadPattern'\'s
+    -- reason — a parameter is not a sequence.
+  | CorePatternForm      GlobalName String
+    -- ^ a form inside @core\`…\`@ that a pattern does not read: a binder,
+    -- @->@, a @Type@ with no level, a splice where a name is written, or a
+    -- tagged region nested inside the region. **Each of them is a form the
+    -- development calculus writes and a pattern will read later**, which is why
+    -- this says what was written rather than calling the region unparsed —
+    -- @spec\/machine.md@ §8 has the landings.
+  | CorePatternNotInScope GlobalName String
+    -- ^ a bare word inside @core\`…\`@ that names nothing. **Refused when the
+    -- base is read** (§8): a word there /matches as written/ and names a
+    -- global, so one that names nothing is a clause that could never match and
+    -- the author is told at load.
+  | CorePatternAmbiguous GlobalName String [GlobalName]
+    -- ^ …and one that two opened namespaces both answer, naming every one it
+    -- reaches. 'Thena.Core.Term.globalUnder'\'s own answer, as 'AmbiguousTag'
+    -- is for a tag.
     -- ^ the right op word, written with the wrong arguments — too many, too
     -- few, or a position where a name was wanted. One error for all three: a
     -- rule body is one line, and the word is enough to find it
@@ -884,6 +909,9 @@ faultInstruction e = case e of
   UnboundInHead {}             -> Nothing
   BadTestOperands {}           -> Nothing
   BadPattern {}                -> Nothing
+  CorePatternForm {}           -> Nothing
+  CorePatternNotInScope {}     -> Nothing
+  CorePatternAmbiguous {}      -> Nothing
   RepeatedInPattern {}         -> Nothing
   ReservedName {}              -> Nothing
   UnknownType {}               -> Nothing
@@ -1281,14 +1309,35 @@ validateBase = concatMap validate . baseRules
 data Reading = Reading
   { readingGrammars :: [Grammar]
     -- ^ every installed grammar, which is what the Earley parser needs
+  , readingGlobals  :: GlobalEnv
+    -- ^ __what is declared where the text stands__ (MS12 phase 352), which is
+    -- what a bare word inside a @core\`…\`@ pattern is resolved against.
+    --
+    -- **A pattern is the one position that must resolve a name while a rule
+    -- base is read**, and @spec\/machine.md@ §8 is why: a bare word in a core
+    -- pattern /matches as written/ and names a global, so a word that names
+    -- nothing is a fault the author is shown at load rather than a clause that
+    -- silently never matches. An operand's @core\`…\`@ is the other half of
+    -- the same notation and stays unresolved for the reason
+    -- 'Thena.Instral.Ops.VRaw' gives — it may name a local at the focus, and
+    -- there is no focus here.
+    --
+    -- **It rides with the grammars and the scope and is not a parameter of its
+    -- own**, which is the line 'readingScope' drew at MS10 phase 249: a caller
+    -- saying what a text is read against says it in one place.
   , readingScope    :: InScope
     -- ^ where the text stands, which is what a tag is resolved against
   }
   deriving (Eq, Show)
 
 -- | A reading with nothing open — what a text written in no scope gets.
+--
+-- **And nothing declared**, so a @core\`…\`@ pattern in a text read this way
+-- can name only the primitive types. Every caller of this is a text that has no
+-- base to be read against: a played block, a @do@ block in a surface literal,
+-- the op table's own round trip.
 rootReading :: [Grammar] -> Reading
-rootReading gs = Reading gs rootScope
+rootReading gs = Reading gs emptyGlobals rootScope
 
 -- | A parsed rule, resolved against the base into the very value a Haskell
 -- literal would give.
@@ -1632,6 +1681,26 @@ resolvePattern rd g = go
       -- 104c): the same notation an operand uses, with @${x}@ binding where
       -- it would supply. The grammar is consulted here and nowhere later —
       -- what a clause keeps is the skeleton.
+      -- **A term of the development calculus, read the other way** (MS12 phase
+      -- 352, @~9j34x@): the region is parsed by the parser that reads one in an
+      -- operand, and what comes back is the same tree with a @${…}@ at every
+      -- hole — so there is one notation and one parser, and the position is
+      -- what decides whether a splice binds or supplies.
+      --
+      -- **The tag is dispatched before the grammars are asked**, because
+      -- @core@ and @surface@ are reserved and no installed grammar can answer
+      -- to either (MS10 phase 267).
+      RawPObject "core" (Just w) _ -> Left (NoObjectProduction g 0 "core" w)
+      RawPObject "core" Nothing src -> case lexTokens src of
+        Left e   -> Left (BadRegion g 0 "core" (LexFailed e))
+        Right ts -> case parseTerm ts of
+          Left e  -> Left (BadRegion g 0 "core" (ParseFailed e))
+          Right r -> PCore <$> corePattern rd g r
+      -- **A surface pattern is stage b and is not built** — @~6z6nx@, parked by
+      -- him. Said here rather than left to the grammars, which would call the
+      -- tag unknown when the tag is perfectly good and the /pattern/ form is
+      -- what is missing.
+      RawPObject "surface" _ _ -> Left (CorePatternForm g "a surface pattern")
       RawPObject tag prod src -> case objectGrammar rd tag of
         Left []  -> Left (NoSuchTag g 0 tag)
         Left amb -> Left (AmbiguousTag g 0 tag amb)
@@ -1643,6 +1712,76 @@ resolvePattern rd g = go
               Left e   -> Left (ObjectRegionNotATerm g 0 tag e)
               Right sk -> Right (PObject sk)
         where (pieces, names) = regionPieces src
+
+-- | A core term, as the pattern it denotes (MS12 phase 352, @~9j34x@).
+--
+-- **Resolution happens here and nowhere later**, which is the half of
+-- @spec\/machine.md@ §8 that costs a 'Reading' its 'readingGlobals': a bare
+-- word names a global and never a local, because a head has no focus and so no
+-- context to look one up in, and a word that names nothing is refused while the
+-- base is read. What the matcher is handed is a shape with
+-- 'Thena.Core.Term.GlobalName's already in it.
+--
+-- **A @${x}@ binds the name it holds**, exactly as an object region's splice
+-- does ('Thena.Language.Build.skeletonOf' is handed @map PVar names@): one
+-- answer to /what does a splice in a region bind/, and not two.
+--
+-- **THE FORMS IT REFUSES ARE THE LANDINGS AFTER THIS ONE.** The binders open a
+-- scope, and opening one mints a token — @~thwhg@ is the decision that gates
+-- them. @->@ is a binder too, non-dependent or not: its body is under a scope
+-- that has to be opened to be matched. A @Type@ with no level asks for a level
+-- to be inferred and there is nothing to infer against while a pattern runs. A
+-- splice where the grammar wants a /name/ is the binder patterns' own
+-- notation, so it lands with them.
+corePattern :: Reading -> GlobalName -> Raw -> Either RuleError (CoreP Pattern)
+corePattern rd g = go
+  where
+    go r = case r of
+      RawSplice x      -> Right (CPHole (PVar x))
+      RawName ps s     -> named (GlobalName ps s) []
+      RawAt ps i ls    -> word i >>= \s -> named (GlobalName ps s) ls
+      RawUniverse k    -> Right (CPUniverse k)
+      RawPrimitive l   -> Right (CPLit l)
+      RawApp f a       -> CPApp <$> go f <*> go a
+      RawTrusted c a b -> CPTrusted <$> go c <*> go a <*> go b
+      -- **Positional and in 'Thena.Core.Term.Eliminate''s field order**, which
+      -- is the order the development calculus writes them in, so no field has
+      -- to be named.
+      RawElim ps d ls prs m ms is t -> do
+        s   <- word d
+        d'  <- resolved (GlobalName ps s)
+        CPEliminate d' ls
+          <$> traverse go prs <*> go m <*> traverse go ms
+          <*> traverse go is <*> go t
+      RawUniverseOpen  -> refuse "Type with no level"
+      RawArrow {}      -> refuse "->"
+      RawPi {}         -> refuse "a universal"
+      RawLam {}        -> refuse "a lambda"
+      RawLet {}        -> refuse "a let"
+      RawClaim {}      -> refuse "a hole"
+      RawGuess {}      -> refuse "a guess"
+      RawPending {}    -> refuse "a constraint"
+      RawObject {}     -> refuse "a tagged region inside a core pattern"
+
+    refuse :: String -> Either RuleError a
+    refuse what = Left (CorePatternForm g what)
+
+    -- A name position takes a word or a splice, and the splice is the binder
+    -- patterns' notation.
+    word i = case i of
+      RawWord s        -> Right s
+      RawIdentSplice _ -> refuse "a splice where a name is written"
+
+    named nm ls = (\nm' -> CPName nm' ls) <$> resolved nm
+
+    -- **The one walk** — 'Thena.Core.Term.globalUnder', which is what
+    -- 'Thena.Engine.globalNamed' and a surface term's resolver both ask, so a
+    -- written word cannot mean one thing in a core pattern and another in a
+    -- term. Two answers is a refusal that names both and not a choice.
+    resolved nm = case globalUnder (knownIn (readingGlobals rd)) (readingScope rd) nm of
+      Right nm' -> Right nm'
+      Left []   -> Left (CorePatternNotInScope g (nameDotted nm))
+      Left amb  -> Left (CorePatternAmbiguous g (nameDotted nm) amb)
 
 -- | A lambda, compiled the way a function is: a body that ends in @return@.
 --

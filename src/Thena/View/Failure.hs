@@ -1470,6 +1470,21 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
       R.BadTestOperands g w -> fault BlockShapeWrong [is TheRule (name g), is TheWord (AName w)]
       R.BadPattern g w ->
         fault BlockShapeWrong [is TheRule (name g), is ThePattern (APattern w)]
+      -- **A core pattern's three** (MS12 phase 352, @~9j34x@). The form it does
+      -- not read is the pattern itself as far as a pane is concerned — what was
+      -- written, in the position a pattern stands — and the two name failures
+      -- are the ordinary ones, because a word in a core pattern is resolved
+      -- exactly as a word in a term is.
+      R.CorePatternForm g what ->
+        fault BlockShapeWrong [is TheRule (name g), is ThePattern (APattern what)]
+      R.CorePatternNotInScope g w ->
+        fault NotInScope [is TheRule (name g), is TheWord (AName w)]
+      R.CorePatternAmbiguous g w gs ->
+        fault NameAmbiguous
+          [ is TheRule (name g)
+          , is TheWord (AName w)
+          , is TheCandidates (ANames (map (spelledIn sp) gs))
+          ]
       R.RepeatedInPattern g n -> fault NameRepeated [is TheRule (name g), is TheWord (AName n)]
       R.ReservedName g n -> fault NameReserved [is TheRule (name g), is TheWord (AName n)]
       R.BadOperands g i w -> lineOf BlockShapeWrong g i [is TheWord (AName w)]

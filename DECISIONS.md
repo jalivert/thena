@@ -1791,7 +1791,8 @@ inference builds a join.
 
 ### A pattern over a core term is a tagged region, and only `${…}` binds
 
-*Decided 2026-11-25. Designed and not yet built.*
+*Decided 2026-11-25. Built for every form but the binders; `∀`, `λ` and `let`
+in a pattern are refused for now, and say so.*
 
 A rule takes a core term apart with a pattern, the same way it matches a surface
 term or a term of a language you declared — there is no separate notation for
@@ -1807,7 +1808,12 @@ with two spellings costs more than the two characters it saves.
 
 **A bare word matches as written and names a global.** Only `${…}` binds, so
 `core`Nat`` matches `Nat` and nothing else, and there is no position where a
-plain word quietly becomes a variable.
+plain word quietly becomes a variable. A word that names nothing is refused when
+the file is read, not when the clause is tried.
+
+**A word with no braces has no level arguments.** `Nat` means `Nat` at no
+levels, exactly as it does when you write it in a term, so a family you use at a
+level is matched by writing that level: `Empty {0}`.
 
 **The body of a binder is a plain splice.** `${E}` is the inside of the `∀`,
 with an ordinary variable standing where the bound occurrences were — you do
@@ -1819,6 +1825,10 @@ and `intro` is what makes it real. A rule can therefore look at the shape of a
 goal and *then* decide between introducing and doing induction.
 
 ### A level in a pattern is a numeral or a splice, and a bound level cannot be taken apart
+
+*Decided 2026-11-25. The numeral is built; a splice in a level position is not —
+the development calculus has no notation for one yet, in a pattern or anywhere
+else, so `core`Empty {${l}}`` does not parse.*
 
 A pattern over a core term writes level arguments in the same braces a use does,
 numerals only as above, and may put a splice in one:

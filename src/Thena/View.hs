@@ -514,7 +514,8 @@ proofsView budget s =
 
 statementOfferView :: Session -> [Written] -> [Written] -> OfferView
 statementOfferView s =
-  statementOffer (sessionGrammars s) (scope (machineOf s)) (sessionRules s)
+  statementOffer (sessionGrammars s) (sessionGlobals s) (scope (machineOf s))
+                 (sessionRules s)
                  (openableNamespaces s) (goalEnv (machineOf s))
 
 -- ---------------------------------------------------------------------------

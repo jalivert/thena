@@ -45,6 +45,7 @@ import Thena.Core.Term (GlobalName (..), nameDotted, rootName)
 import Thena.Syntax.Concrete (Splice (..), splices)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
 import Thena.Rules (opArities, testTypes, writtenPositions)
+import Thena.Instral.Pattern (corePHoles)
 import Thena.Instral.Ops
   ( Instr (..)
   , Name
@@ -719,6 +720,15 @@ patternCtx site ps ts st0 = foldl one ([], st0) (zip3 [0 ..] ps ts)
             hole (acc, k) (slot, q) =
               let (bs, k') = go si q (slotType slot) k in (acc ++ bs, k')
          in foldl hole ([], st1) (holesOf sk)
+      -- **A core term is a 'TCore' and so is every hole in it** (MS12 phase
+      -- 352, @~9j34x@): a @${…}@ inside a @core\`…\`@ pattern stands where a
+      -- /term/ stands, and the one position that wants a name — a binder's
+      -- identifier — is refused when the pattern is read, so there is no second
+      -- kind of hole to tell apart here.
+      PCore cp ->
+        let st1 = unify si t TCore st
+            hole (acc, k) q = let (bs, k') = go si q TCore k in (acc ++ bs, k')
+         in foldl hole ([], st1) (corePHoles cp)
       PInt _   -> ([], unify si t TInt st)
       PChar _  -> ([], unify si t TChar st)
       PBool _  -> ([], unify si t TBool st)

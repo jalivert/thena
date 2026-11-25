@@ -182,6 +182,32 @@ backtracking to 680: pick
 onetwo
 ```
 
+**A pattern may also be a term**, written in the same backticks a term is
+written in, with `${…}` where something is to be bound. `` core`…` `` is the
+development calculus, so it takes a `Core` apart:
+
+```
+rule claim-of core`trusted ${c} ${a} ${b}` :- do say "a trusted term"
+rule at-star  core`Type₀`                :- do say "the first universe"
+```
+
+Three things are worth knowing about it:
+
+- **Only `${…}` binds.** A bare word inside the region names a global and
+  matches that and nothing else, so there is no position where a plain word
+  quietly becomes a variable. A word that names nothing is refused when the file
+  is read.
+- **A word with no braces has no level arguments**, exactly as in a term you
+  write: `Empty` matches `Empty` at no levels, and `Empty {0}` matches it at the
+  first.
+- **The term is tried as written and then reduced and tried again**, so a
+  pattern matches the term elaboration actually produced as well as the one you
+  wrote.
+
+**The binders are not in yet.** `` core`∀ (${x} : ${T}) -> ${E}` ``, `λ` and
+`let` are designed and refused for now, and the refusal says which form it was;
+`->` goes with them, being a `∀` whose variable is unused.
+
 **What you type at the prompt is a block**, so a binding lives for the entry and
 dies with it:
 

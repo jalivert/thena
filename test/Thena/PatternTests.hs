@@ -21,9 +21,13 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..), levelOfNat)
+import Thena.Core.Term
+  (Core (..), Ident (..), Literal (..), close, fresh, rootName)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Instral.Ops
-  ( Instr (..)
+  ( CoreP (..)
+  , Instr (..)
   , Pattern (..)
   , Value (..)
   , matchPattern
@@ -47,6 +51,7 @@ tests =
     , spelling
     , destructuring
     , refusals
+    , coreTerms
     , totality
     ]
 
@@ -81,6 +86,26 @@ everyPattern =
   , ("(some x)",      PSome (PVar "x"))
   , ("(some [a])",    PSome (PList [PVar "a"] Nothing))
   , ("none",          PNone)
+    -- **A core term, as of MS12 phase 352** (@~9j34x@). Every row here is
+    -- crossed with the printer below, so each of these also says that
+    -- 'Thena.Syntax.Print.corePText' writes a spelling the grammar takes
+    -- back — which a 'PObject' row cannot promise and this can, the
+    -- development calculus being Thena's own notation.
+    --
+    -- **@String@ is written because it resolves under nothing**: these go
+    -- through 'rootReading', whose environment holds the primitive types and
+    -- no declarations, which is also what makes the @not in scope@ refusal
+    -- below reachable.
+  , ("core`${x}`",    PCore (CPHole (PVar "x")))
+  , ("core`${f} ${a}`",
+        PCore (CPApp (CPHole (PVar "f")) (CPHole (PVar "a"))))
+  , ("core`trusted ${c} ${a} ${b}`",
+        PCore (CPTrusted (CPHole (PVar "c")) (CPHole (PVar "a"))
+                         (CPHole (PVar "b"))))
+  , ("core`Type\8320`",  PCore (CPUniverse 0))
+  , ("core`String`",  PCore (CPName (rootName "String") []))
+  , ("core`String {0 1}`", PCore (CPName (rootName "String") [0, 1]))
+  , ("core`3`",       PCore (CPLit (LInt 3)))
   ]
 
 -- | Read a whole rule, for the binding cases above.
@@ -369,6 +394,154 @@ refusals =
             Right r -> Right r
 
 -- --------------------------------------------------------------------------
+-- A core term as a pattern (MS12 phase 352 — stage c, without the binders)
+-- --------------------------------------------------------------------------
+
+-- | **@~9j34x@: a rule can take a core term apart.**
+--
+-- Three things are crossed here, each with something that is not itself:
+--
+-- * __the reader against the forms it must refuse__ — every one of them is a
+--   term the development calculus writes, so a refusal that said "did not
+--   parse" would be wrong about why;
+-- * __the matcher against both spellings of a constructor application__, which
+--   is the case 'Thena.Instral.Ops.matchSkeleton' learned one language up:
+--   elaboration leaves a 'Canonical' and a written term is @App@s over a
+--   'Global';
+-- * __the written-then-reduced rule__ (his, 2026-09-20), with a β-redex, which
+--   needs no environment to exist.
+--
+-- The printer is crossed with the grammar in 'spelling' above, where the rows
+-- of 'everyPattern' carry it.
+coreTerms :: TestTree
+coreTerms =
+  testGroup
+    "a core term as a pattern"
+    [ testCase "a bare word resolves to the global it names" $
+        readPattern "core`String`" @?= Right (PCore (CPName strName []))
+
+    , -- §8: refused when the base is READ, because a word that names nothing
+      -- is a clause that could never match.
+      testCase "…and one that names nothing is refused at load" $
+        expect "core`nope`" "CorePatternNotInScope"
+
+    , testCase "a level is written in braces and compared whole" $
+        readPattern "core`String {0}`" @?= Right (PCore (CPName strName [0]))
+
+    , -- The development calculus's own reading, not a rule of the pattern's:
+      -- a word with no braces is @Global g []@ when it is written in an
+      -- operand, so that is what it matches here.
+      testCase "no braces means no level arguments" $ do
+        matchTerm (CPName strName []) (Global strName []) @?= Just []
+        matchTerm (CPName strName []) (Global strName [LZero]) @?= Nothing
+        matchTerm (CPName strName [0]) (Global strName [LZero]) @?= Just []
+
+    , testCase "a universe is matched at its level" $ do
+        matchTerm (CPUniverse 0) (Universe LZero) @?= Just []
+        matchTerm (CPUniverse 1) (Universe LZero) @?= Nothing
+        matchTerm (CPUniverse 1) (Universe (levelOfNat 1)) @?= Just []
+
+    , testCase "a hole binds whatever term stands at it" $
+        matchTerm (CPHole (PVar "t")) (Universe LZero)
+          @?= Just [("t", VTerm (Universe LZero))]
+
+    , -- All three fields, the derived @actual@ included: that is what makes the
+      -- obligation readable from a rule.
+      testCase "a trusted node has three positions" $
+        matchTerm (CPTrusted (CPHole (PVar "c")) (CPHole (PVar "a"))
+                             (CPHole (PVar "b")))
+                  (Trusted (Universe LZero) (Universe (levelOfNat 1)) star)
+          @?= Just [ ("c", VTerm (Universe LZero))
+                   , ("a", VTerm (Universe (levelOfNat 1)))
+                   , ("b", VTerm star)
+                   ]
+
+    , -- **The case the object-language matcher already had to learn.** A
+      -- written application and a saturated former are the same term and
+      -- neither spelling is wrong.
+      testCase "an application matches both spellings of one term" $ do
+        matchTerm applied (App (Global strName []) star)
+          @?= Just [("x", VTerm star)]
+        matchTerm applied (Canonical strName [] [star])
+          @?= Just [("x", VTerm star)]
+
+    , -- Matching is as written: @f a@ is one application and @f a b@ is two.
+      testCase "…and not an application of a different arity" $
+        matchTerm applied (App (App (Global strName []) star) star) @?= Nothing
+
+    , -- A head that is a hole is matched node by node, or flattening both
+      -- spines would ask for two arguments where one was written.
+      testCase "a hole at the head takes the whole function" $
+        matchTerm (CPApp (CPHole (PVar "f")) (CPHole (PVar "a")))
+                  (App (App (Global strName []) star) star)
+          @?= Just [ ("f", VTerm (App (Global strName []) star))
+                   , ("a", VTerm star)
+                   ]
+
+    , -- His rule of 2026-09-20, and it is one rule for every pattern: tried as
+      -- written, then reduced and tried again.
+      testCase "a term is tried as written and then reduced" $
+        matchTerm (CPUniverse 0) redex @?= Just []
+
+    , -- @spec/machine.md@ §8: the counter is threaded and nothing mints yet.
+      testCase "the counter comes back untouched" $
+        fmap snd (matchPattern emptyGlobals 7
+                    (PCore (CPTrusted (CPHole (PVar "c")) (CPHole (PVar "a"))
+                                      (CPHole (PVar "b"))))
+                    (VTerm (Trusted star star star)))
+          @?= Just 7
+
+    , -- **Every refusal below names a form the development calculus writes**,
+      -- and each is a landing of its own: the binders wait on @~thwhg@, and
+      -- @Type@ with no level asks for an inference that has nothing to run
+      -- against while a pattern runs.
+      testCase "a binder is refused, and says which form it was" $ do
+        expect "core`\8704 (x : String) -> String`" "CorePatternForm"
+        expect "core`\955 (x : String) -> x`" "CorePatternForm"
+        expect "core`String -> String`" "CorePatternForm"
+        expect "core`Type`" "CorePatternForm"
+
+    , -- **An elimination's fields are positions too**, in
+      -- 'Thena.Core.Term.Eliminate''s own order, which is the order the
+      -- development calculus writes them in.
+      testCase "an elimination is matched field by field" $
+        matchTerm (CPEliminate strName [] [] (CPHole (PVar "m")) [] []
+                               (CPHole (PVar "t")))
+                  (Eliminate strName [] [] star [] [] (Universe (levelOfNat 1)))
+          @?= Just [ ("m", VTerm star)
+                   , ("t", VTerm (Universe (levelOfNat 1)))
+                   ]
+
+    , -- The one name position the grammar reaches is an @elim@'s head, and a
+      -- splice there is the binder patterns' notation.
+      testCase "a splice where a name is written is refused" $
+        expect "core`elim ${d} () ${m} () () ${t}`" "CorePatternForm"
+
+    , -- Stage b, parked by him (@~6z6nx@). Said as itself rather than as an
+      -- unknown tag, which is what the grammars would have answered.
+      testCase "a surface pattern says it is not read, not that the tag is unknown" $
+        expect "surface`a -> b`" "CorePatternForm"
+    ]
+  where
+    strName = rootName "String"
+    star    = Universe LZero
+
+    applied = CPApp (CPName strName []) (CPHole (PVar "x"))
+
+    -- A β-redex: @(λ x : Type₀ . Type₀) Type₀@, which whnf answers @Type₀@.
+    -- Nothing has to be declared for this to reduce, which is why it is the
+    -- case the reduce rule is tested with.
+    redex =
+      let (v, _) = fresh 0
+       in App (Lam (Ident "x") star (close v star)) star
+
+    matchTerm cp t = fmap fst (matchPattern emptyGlobals 0 (PCore cp) (VTerm t))
+
+    expect src want = case readPattern src of
+      Right p -> assertFailure ("expected a refusal, got " ++ show p)
+      Left e  -> assertBool (src ++ " said " ++ e) (want `isInfixOf` e)
+
+-- --------------------------------------------------------------------------
 -- The mirror is total
 -- --------------------------------------------------------------------------
 
@@ -401,6 +574,7 @@ representatives :: [Pattern]
 representatives =
   [ PVar "x", PWild, PInt 0, PChar 'c', PBool True, PText ""
   , PList [] Nothing, PPair PWild PWild, PSome PWild, PNone
+  , PCore (CPHole PWild)
   ]
 
 tagOf :: Pattern -> String
@@ -413,6 +587,7 @@ tagOf p = case p of
   PText _   -> "PText"
   PList _ _ -> "PList"
   PObject _ -> "PObject"
+  PCore _   -> "PCore"
   PPair _ _ -> "PPair"
   PSome _   -> "PSome"
   PNone     -> "PNone"
