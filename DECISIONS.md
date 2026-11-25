@@ -1789,6 +1789,35 @@ bare `Type`. If a name has level parameters, you write them.
 types (`And {ℓ₇₂ ℓ₇₃} : Type (ℓ₇₂ ⊔ ℓ₇₃)`), but **you cannot write one.** Only
 inference builds a join.
 
+### A pattern over a core term is a tagged region, and only `${…}` binds
+
+*Decided 2026-11-25. Designed and not yet built.*
+
+A rule takes a core term apart with a pattern, the same way it matches a surface
+term or a term of a language you declared — there is no separate notation for
+it. The language is named by the tag and the pattern is written in backticks:
+
+```
+core`∀ (${x} : ${T}) -> ${E}`
+core`trusted ${c} ${a} ${b}`
+```
+
+**The tag is written even where nothing else could stand there.** One notation
+with two spellings costs more than the two characters it saves.
+
+**A bare word matches as written and names a global.** Only `${…}` binds, so
+`core`Nat`` matches `Nat` and nothing else, and there is no position where a
+plain word quietly becomes a variable.
+
+**The body of a binder is a plain splice.** `${E}` is the inside of the `∀`,
+with an ordinary variable standing where the bound occurrences were — you do
+not write the dependence, because the position already says it.
+
+**Matching never changes the proof you are building.** Taking a `∀` apart does
+not introduce its binder: the variable the body refers to is not in scope yet,
+and `intro` is what makes it real. A rule can therefore look at the shape of a
+goal and *then* decide between introducing and doing induction.
+
 ### A level in a pattern is a numeral or a splice, and a bound level cannot be taken apart
 
 A pattern over a core term writes level arguments in the same braces a use does,
