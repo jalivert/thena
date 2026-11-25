@@ -949,7 +949,7 @@ proving id : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> :matches
 intro : ()
-intro ‹n› : Name -> ()
+intro ‹n› : Ident -> ()
 rename ‹n› : Name -> ()
 solve : ()
 regret : ()
@@ -1006,7 +1006,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-5383  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:116), regret (standard.thena.rules:119), step (standard.thena.rules:163)
+5383  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:123), regret (standard.thena.rules:126), step (standard.thena.rules:170)
 ```
 
 Each alternative names **the file and line its clause is written at**. That is
@@ -1027,7 +1027,7 @@ thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-5383  regret (standard.thena.rules:119)   untried: step (standard.thena.rules:163)
+5383  regret (standard.thena.rules:126)   untried: step (standard.thena.rules:170)
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was

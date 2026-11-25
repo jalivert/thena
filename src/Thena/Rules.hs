@@ -1185,6 +1185,7 @@ resolveTyIn owner vs0 t0 = go vs0 t0
     constructor nm xs = case (nm, xs) of
       ("String", [])      -> Right TString
       ("Name", [])        -> Right TName
+      ("Ident", [])       -> Right TIdent
       ("Int", [])         -> Right TInt
       ("Char", [])        -> Right TChar
       ("Bool", [])        -> Right TBool
@@ -1437,8 +1438,8 @@ headOperand o = case o of
 -- of arguments. Written once because two copies of a list like this drift.
 builtInTypes :: [String]
 builtInTypes =
-  [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core", "Development"
-  , "Level", "Pattern", "Binder"
+  [ "String", "Name", "Ident", "Int", "Char", "Bool", "Surface", "Core"
+  , "Development", "Level", "Pattern", "Binder", "MethodShape"
   , "List", "Option"
   ]
 
@@ -2040,7 +2041,7 @@ unaryOps =
   , ("return", Op.Return)
   , ("some", Op.Some)
   , ("goto", Goto), ("goto-named", Op.GotoNamed)
-  , ("name-text", Op.NameText)
+  , ("name-text", Op.NameText), ("name-ident", Op.NameIdent)
   , ("prim-rename", Op.Rename)
   , ("case-survived", Op.CaseSurvivedOp)
   , ("level", Op.LevelOf), ("universe-at", Op.UniverseAt)

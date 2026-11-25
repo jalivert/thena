@@ -94,7 +94,14 @@ rule intro :- when focus-is-guess goal-type-is-let do prim-let
 -- One name at two arities, which is the ordinary shape here: a call is matched
 -- by name AND arity, so `intro` and `intro "a"` are two rules and neither
 -- shadows the other.
-intro : Name -> ()
+--
+-- THE ARGUMENT IS AN `Ident` AND NOT A `Name` — his ruling of 2026-11-25. An
+-- `Ident` is a word and, when there is one, the token a binder was opened at;
+-- `intro` adopts that token instead of minting a second one. `intro "a"` is
+-- unchanged, because a written literal stands at that type and means *this
+-- word, no token*. A rule holding a `Name` writes `name-ident` to say it means
+-- that word's binder.
+intro : Ident -> ()
 rule intro n :- when focus-is-guess goal-type-is-pi do prim-lambda n
 
 rule intro n :- when focus-is-guess goal-type-is-let do prim-let n
@@ -564,8 +571,9 @@ rule intro-arm-binders [] [] vs ds fs k :-
 rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds fs k :-
      when (binder-is-argument b) (pattern-is-wildcard p)
   do w = fresh-name "u"
+     ; wi = name-ident w
      ; g = here
-     ; k2 = prim-lambda w
+     ; k2 = prim-lambda wi
      ; goto k2
      ; v = resolve-name w
      ; goto g
@@ -577,8 +585,9 @@ rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds fs k :-
   do sub = pattern-arguments p
      ; no-nesting sub
      ; w = pattern-head p
+     ; wi = name-ident w
      ; g = here
-     ; k2 = prim-lambda w
+     ; k2 = prim-lambda wi
      ; goto k2
      ; v = resolve-name w
      ; goto g
@@ -643,8 +652,9 @@ rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-hypot
   do n0 = binder-name b
      ; n = name-or-stem n0 "ih"
      ; h = fresh-name n
+     ; hi = name-ident h
      ; g = here
-     ; k2 = prim-lambda h
+     ; k2 = prim-lambda hi
      ; goto k2
      ; v = resolve-name h
      ; goto g
@@ -653,8 +663,9 @@ rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-hypot
      ; return r
 rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-copy b)
   do n = binder-name b
+     ; ni = name-ident n
      ; g = here
-     ; k2 = prim-lambda n
+     ; k2 = prim-lambda ni
      ; goto k2
      ; v = resolve-name n
      ; goto g
@@ -1454,14 +1465,16 @@ rule run-block t :- do play t
 intro-binders : Surface -> Core -> Core
 rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-bare t)
   do x  = lambda-name t
-     ; k2 = prim-lambda x
+     ; xi = name-ident x
+     ; k2 = prim-lambda xi
      ; tl = lambda-tail t
      ; body = call intro-binders tl k2
      ; return body
 
 rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-bare t)
   do x = lambda-name t
-     ; k2 = prim-lambda x
+     ; xi = name-ident x
+     ; k2 = prim-lambda xi
      ; return k2
 
 -- A written type on a binder is a CHECK, not a declaration. The binder's type is
@@ -1481,7 +1494,8 @@ rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-a
      ; goto d
      ; call elaborate ty
      ; goto g
-     ; k2 = prim-lambda x
+     ; xi = name-ident x
+     ; k2 = prim-lambda xi
      ; goto k2
      ; v  = resolve-name x
      ; s  = typeof v
@@ -1502,7 +1516,8 @@ rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-an
      ; goto d
      ; call elaborate ty
      ; goto g
-     ; k2 = prim-lambda x
+     ; xi = name-ident x
+     ; k2 = prim-lambda xi
      ; goto k2
      ; v  = resolve-name x
      ; s  = typeof v

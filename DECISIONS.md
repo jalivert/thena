@@ -1864,6 +1864,38 @@ trusted the moment those two agree, which is when the node contracts away. A
 rule that wants to know whether a claim is still carrying weight compares them,
 so neither is hidden from it.
 
+### `intro` takes a binder's identity, and adopts the variable that came with it
+
+*Decided 2026-11-25. Built.*
+
+There is one `intro`. Its one-argument form takes an **`Ident`**: a word, and —
+when a rule got it by taking a binder apart — the variable that binder was opened
+at.
+
+```
+intro "a"           the word a, and a variable minted for it
+```
+
+**A written word means mint.** `intro "a"` is unchanged and so is a bare `intro`:
+there is no variable in a word, so `intro` makes one.
+
+**A variable that came with the word is adopted, not replaced.** A rule that has
+taken a `∀` apart is holding `${E}`, the inside of the binder, which refers to the
+variable the match opened it at. Minting a second one would put a *different*
+binder in the context, printed with the same word, and the term the rule is
+carrying would still refer to the first — two bindings that look identical and are
+not interchangeable.
+
+**`intro` never looks a word up.** Resolution finds a binding that is already
+real, and `resolve-name` is that word. `intro` makes one real; it does not find
+one.
+
+**A string literal stands at an `Ident`**, as it does at a `Name`. A `Name`
+*variable* does not: `name-ident n` is how a rule that holds a name says it means
+that name with no variable — the same explicit conversion `name-text` is in the
+other direction, and for the same reason. Nothing is coerced silently, because
+the thing that would be lost is exactly the variable this decision is about.
+
 ### A reference's level arguments are part of what it is
 
 `Eq {0}` and `Eq {1}` are two different things and Thena will not convert one

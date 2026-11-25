@@ -802,6 +802,7 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
         fault BlockShapeWrong [is TheInstruction (ALine (i + 1)), is TheWord (AName w)]
       E.ExpectedText -> wanting SomeText
       E.ExpectedName -> wanting AnIdentifier
+      E.ExpectedIdent -> wanting AnIdentifier
       E.NoSuchNamespace n -> fault NoSuchNamespace [is TheNamespace (AName n)]
       E.AmbiguousName n gs ->
         fault NameAmbiguous [is TheWord (AName n), is TheCandidates (ANames gs)]

@@ -71,6 +71,7 @@ redrawType :: TypeView -> String
 redrawType v = case v of
   AString        -> "String"
   AName          -> "Name"
+  AnIdent        -> "Ident"
   AnInt          -> "Int"
   AChar          -> "Char"
   ABool          -> "Bool"
@@ -243,7 +244,7 @@ asParameter t = Signature [t, TCore] (Just t)
 
 handBuilt :: [Ty]
 handBuilt =
-      [ TString, TName, TInt, TChar, TBool
+      [ TString, TName, TIdent, TInt, TChar, TBool
       , TSurface, TCore, TDevelopment, TLevel
       , TVar 0, TVar 25, TVar 26, TVar 51
       , TList TCore

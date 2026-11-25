@@ -306,6 +306,15 @@ data FailReason
   | ExpectedName
     -- ^ an operand was not a name (MS10) — neither a @VName@ nor the string
     -- literal that reads as one at the root.
+  | ExpectedIdent
+    -- ^ an operand was not a binder's identity (MS12 phase 353) — neither a
+    -- @VIdent@ nor the string literal that reads as one with no token.
+    --
+    -- **Unreachable from a loaded base**, which types every operand: a @VName@
+    -- variable at this position is a type error, and @name-ident@ is how a rule
+    -- that holds a name says it means that name's binder. It is here because
+    -- the prompt's own path and a test can reach it, exactly as 'ExpectedName'
+    -- can.
   | NoSuchNamespace String
     -- ^ @open X@ where nothing at all is named @X.…@ (MS10 phase 247).
     --

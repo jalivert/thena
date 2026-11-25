@@ -133,6 +133,7 @@ import Thena.Instral.Ops
   ( AnswerKind
   , Origin (..)
   , Env
+  , Identifier (..)
   , Rule (..)
   , Instr (..)
   , Op (..)
@@ -1558,8 +1559,10 @@ perform instr rest m = case operation instr of
   -- shape @?x : S . x@" — anything else is made ready by @attack@ first. So the
   -- shape test is the specification, not a shortcut.
   -- **The name is optional** (MS4 phase 41b). Given, it is the binder's; absent,
-  -- the binder keeps the one written in the type. Read through 'operandIdent',
-  -- so it is checked to be something the printer can print back (§2.6).
+  -- the binder keeps the one written in the type. Read through
+  -- 'operandIdentifier', so it is checked to be something the printer can print
+  -- back (§2.6) — **and so that a token that came with the word is adopted
+  -- rather than minted over** (MS12 phase 353, his ruling of 2026-11-25).
   IntroPi mn -> introOp introduceLambda mn
   IntroLet mn -> introOp introduceLet mn
 
@@ -2067,6 +2070,15 @@ perform instr rest m = case operation instr of
   NameText a -> case nameOf a of
     Left e  -> failure e m
     Right g -> produce (VText (nameDotted g)) m
+
+  -- **A name is an identifier that has no token** (MS12 phase 353), so this
+  -- forgets nothing and adds nothing — the word is checked to be one the
+  -- printer can print back, exactly as every other binder's word is, and the
+  -- token is 'Nothing'. 'Op.NameIdent' says why it is written down rather than
+  -- being a coercion inference performs.
+  NameIdent a -> case operandIdent (env (exec m)) a of
+    Left e  -> failure e m
+    Right i -> produce (VIdent (Identifier i Nothing)) m
 
   Assume name ty -> component Component.Assume name ty
   Claim  name ty -> component Component.Claim  name ty
@@ -3106,7 +3118,7 @@ perform instr rest m = case operation instr of
     -- **The hole it opened is its answer** (MS8), so a clause can @goto@ it and
     -- work in the scope the binder just created. 'onHoleProducing' is 'onHole'
     -- with that one difference.
-    introOp rule mn = case traverse (operandIdent (env (exec m))) mn of
+    introOp rule mn = case traverse (operandIdentifier (env (exec m))) mn of
       Left r   -> failure r m
       Right nm -> onHoleProducing $ \c -> case c of
         Component.Guess x i g ty ->
@@ -3396,6 +3408,29 @@ operandIdent e o = do
   s <- operandWord e o
   if isIdentifier s then Right (Ident s) else Left (NotAnIdentifier s)
 
+-- | …and the identity of a binder: that word, with the token it stands for
+-- when there is one (MS12 phase 353).
+--
+-- **The second half of his ruling of 2026-11-25**, /one @intro@, and a written
+-- literal may stand at an identifier/ — @.claude\/RULINGS.md@. The widening is
+-- in two places and this is the run-time one: 'Thena.Instral.Infer.settleText'
+-- is where a written @\"…\"@ is admitted at the type, and here is where the
+-- text it really is becomes a word with no token.
+--
+-- **A 'Op.VName' is refused rather than rooted.** Inference admits a
+-- /literal/ at this type and not a variable, so a name arriving here was
+-- written as a path — and a path names nothing in a development's own scope
+-- ('operandWord'). The conversion from a 'Thena.Instral.Type.TName' /variable/
+-- is @name-ident@, written down.
+operandIdentifier :: Env -> Operand -> Either FailReason Identifier
+operandIdentifier e o = operandValue e o >>= \v -> case v of
+  VIdent i -> Right i
+  VText s
+    | '.' `elem` s    -> Left (DottedTextName s)
+    | isIdentifier s  -> Right (Identifier (Ident s) Nothing)
+    | otherwise       -> Left (NotAnIdentifier s)
+  _ -> Left ExpectedIdent
+
 -- | Which component stopped 'extract'. Purely a translation from
 -- "Thena.Development.Partial"\'s local 'Impure' into the shared vocabulary —
 -- 'Thena.Errors' may not import @Partial@ (it sits below @Core@), so the
@@ -3435,7 +3470,7 @@ whereImpure i = case i of
 -- local one, so the @let@ survives and 'introduceLet' would eat the caller's
 -- binder on it.
 introduceLambda
-  :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
+  :: GlobalEnv -> Context -> Int -> Maybe Identifier -> Partial
   -> Either FailReason (Partial, Var, Int)
 introduceLambda = introducing FunctionOnly
 
@@ -3451,7 +3486,7 @@ introduceLambda = introducing FunctionOnly
 -- @T@ /in terms of @y@/. Reducing gives @T[s\/y]@, which is the same type and
 -- an unreadable goal. This rule is how a proof keeps the author's name.
 introduceLet
-  :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
+  :: GlobalEnv -> Context -> Int -> Maybe Identifier -> Partial
   -> Either FailReason (Partial, Var, Int)
 introduceLet = introducing LetOnly
 
@@ -3477,7 +3512,7 @@ data IntroRule
 -- binder. It is what lets the annotated λ binder be checked /inside/ the binder
 -- it belongs to.
 introducing
-  :: IntroRule -> GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
+  :: IntroRule -> GlobalEnv -> Context -> Int -> Maybe Identifier -> Partial
   -> Either FailReason (Partial, Var, Int)
 introducing rule env ctx n nm p = case p of
   Under (Component.Claim v i s) (Trailing (Free v'))
@@ -3503,8 +3538,27 @@ introducing rule env ctx n nm p = case p of
         -- @nm@ is 'Nothing' exactly when the user typed a bare @intro@, so the
         -- word is a hint copied out of a closed term and not something they
         -- wrote; a word they wrote is theirs, taken or not (MS4 phase 41f).
-        named j = maybe (writableIn ctx j) id nm
-        (y, n1) = fresh n
+        named j = maybe (writableIn ctx j) identWord nm
+        -- **A TOKEN THAT CAME WITH THE WORD IS ADOPTED, NOT MINTED OVER** —
+        -- his ruling of 2026-11-25, /one @intro@, and a written literal may
+        -- stand at an identifier/ (MS12 phase 353). The caller is holding a
+        -- term that already points at that token — the inside of a binder a
+        -- @core\`∀ (${x} : ${T}) -> ${E}\`@ pattern opened — and @Eq@ on
+        -- 'Thena.Core.Term.Core' compares tokens and ignores words, so a
+        -- second mint would leave the context entry and the rule's own term
+        -- naming different binders with the same word printed on both.
+        --
+        -- **Adopting does not advance the counter**, because the mint that
+        -- produced the token advanced it already: the match that opened the
+        -- binder threads the counter for exactly this reason (§7.6, MS12
+        -- phase 351). Minting again here would be the second token, which is
+        -- the whole defect.
+        --
+        -- **No token means mint**, which is what a bare @intro@ and
+        -- @intro \"A\"@ have always done.
+        (y, n1) = case nm >>= identToken of
+          Just adopted -> (adopted, n)
+          Nothing      -> fresh n
         (h, n2) = fresh n1
         opened binder rest =
           ( Under binder (Under (Component.Claim h i rest) (Trailing (Free h)))

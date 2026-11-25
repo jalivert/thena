@@ -344,7 +344,7 @@ spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> attack
 thena spine> :matches
 intro : ()
-intro ‹n› : Name -> ()
+intro ‹n› : Ident -> ()
 rename ‹n› : Name -> ()
 solve : ()
 regret : ()
@@ -471,7 +471,7 @@ thena spine> attack
 thena spine> intro
 thena spine> :matches
 intro : ()
-intro ‹n› : Name -> ()
+intro ‹n› : Ident -> ()
 rename ‹n› : Name -> ()
 solve : ()
 regret : ()
@@ -528,7 +528,7 @@ proving l : let x = Type₀ : Type₁ in x
 thena spine> attack
 thena spine> :matches
 intro : ()
-intro ‹n› : Name -> ()
+intro ‹n› : Ident -> ()
 rename ‹n› : Name -> ()
 solve : ()
 regret : ()

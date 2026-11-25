@@ -1055,6 +1055,11 @@ valueType si v st = case v of
   -- unlike a text literal, a name value has an introduction form of its own, so
   -- there is nothing deferred about it.
   VName _    -> (TName, st)
+  -- **And an identifier is a 'TIdent' the same way** (MS12 phase 353): it has
+  -- an introduction form of its own — @name-ident@, and a binder pattern — so
+  -- nothing about it is deferred. The /written/ form at that type is a text
+  -- literal, which never reaches here.
+  VIdent _   -> (TIdent, st)
   VInt _     -> (TInt, st)
   VChar _    -> (TChar, st)
   VBool _    -> (TBool, st)
@@ -1095,6 +1100,10 @@ settleText st0 = foldl one st0 (stText st0)
     one st (si, want) = case shallow st want of
       TName   -> st
       TString -> st
+      -- **The third member, his ruling of 2026-11-25** (MS12 phase 353): a
+      -- written literal at an identifier position is a word with no token,
+      -- which is what @intro "A"@ means and has always meant.
+      TIdent  -> st
       TVar i  -> st { stSubst = (i, TString) : stSubst st }
       other   -> oops (TextNotTextual si (deep st other)) st
 

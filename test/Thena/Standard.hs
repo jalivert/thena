@@ -821,7 +821,8 @@ binderWalkers =
   [ aRule (rootName "intro-binders") [PVar "t", PVar "k"]
       [FocusIsGuess, LambdaBindsMore (Ref "t"), LambdaIsBare (Ref "t")]
       [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
-      , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
+      , Bind (Op.PVar "xi") Nothing (Op.NameIdent (Ref "x"))
+      , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "xi")))
       , Bind (Op.PVar "tl") Nothing (Op.LambdaTail (Ref "t"))
       , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "tl", Ref "k2"])
       , Do (Op.Return (Ref "body"))
@@ -829,7 +830,8 @@ binderWalkers =
   , aRule (rootName "intro-binders") [PVar "t", PVar "k"]
       [FocusIsGuess, LambdaBindsOne (Ref "t"), LambdaIsBare (Ref "t")]
       [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
-      , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
+      , Bind (Op.PVar "xi") Nothing (Op.NameIdent (Ref "x"))
+      , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "xi")))
       , Do (Op.Return (Ref "k2"))
       ]
     -- **A written type is a check, not a declaration** (MS8): the binder's type
@@ -863,7 +865,8 @@ annotatedBinder =
   , Do (Goto (Ref "d"))
   , Do (Call "elaborate" [Ref "ty"])
   , Do (Goto (Ref "g"))
-  , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
+  , Bind (Op.PVar "xi") Nothing (Op.NameIdent (Ref "x"))
+  , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "xi")))
   , Do (Goto (Ref "k2"))
   , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "x"))
   , Bind (Op.PVar "s") Nothing (Typing (Ref "v"))
@@ -981,8 +984,9 @@ splitClauses =
       ]
       [BinderIsArgument (Ref "b"), PatternIsWildcard (Ref "p")]
       [ Bind (Op.PVar "w") Nothing (Op.FreshName (Lit (VText "u")))
+      , Bind (Op.PVar "wi") Nothing (Op.NameIdent (Ref "w"))
       , Bind (Op.PVar "g") Nothing Here
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "wi")))
       , Do (Goto (Ref "k2"))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "w"))
       , Do (Goto (Ref "g"))
@@ -1000,8 +1004,9 @@ splitClauses =
       [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
       , call "no-nesting" [Ref "sub"]
       , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
+      , Bind (Op.PVar "wi") Nothing (Op.NameIdent (Ref "w"))
       , Bind (Op.PVar "g") Nothing Here
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "wi")))
       , Do (Goto (Ref "k2"))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "w"))
       , Do (Goto (Ref "g"))
@@ -1108,8 +1113,9 @@ splitClauses =
       , Bind (Op.PVar "n") Nothing
           (Op.Call "name-or-stem" [Ref "n0", Lit (VText "ih")])
       , Bind (Op.PVar "h") Nothing (Op.FreshName (Ref "n"))
+      , Bind (Op.PVar "hi") Nothing (Op.NameIdent (Ref "h"))
       , Bind (Op.PVar "g") Nothing Here
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "h")))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "hi")))
       , Do (Goto (Ref "k2"))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "h"))
       , Do (Goto (Ref "g"))
@@ -1131,8 +1137,9 @@ splitClauses =
       ]
       [BinderIsCopy (Ref "b")]
       [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
+      , Bind (Op.PVar "ni") Nothing (Op.NameIdent (Ref "n"))
       , Bind (Op.PVar "g") Nothing Here
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "n")))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "ni")))
       , Do (Goto (Ref "k2"))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "n"))
       , Do (Goto (Ref "g"))

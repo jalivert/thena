@@ -233,7 +233,7 @@ are GHCi's spelling.
 ## 5. `instral` has types, and they are checked when a file loads
 
 ```
-String   Name   Int   Char   Bool   Level
+String   Name   Ident   Int   Char   Bool   Level
 List a   Option a   (a, b)   a -> b
 Surface   Core   Development
 ```
@@ -253,6 +253,11 @@ Two rules about types worth knowing:
 - **`Name` is not `String`.** A string literal is accepted at either, so
   `fresh-name "h"` needs nothing; a *variable* going from a name to a string is
   written down, with `name-text`.
+- **`Ident` is a binder, not a word.** It is what `intro` takes: a word, and —
+  when a rule got it by taking a binder apart — the variable that binder was
+  opened at, which `intro` then adopts instead of making a second one. A string
+  literal is accepted here too, and means *this word, no variable*; a `Name`
+  variable is written down, with `name-ident`.
 - **Inference is Hindley-Milner.** A rule or function is generalised, so
   `rule ignore x :- do say "ignored"` can be used at a `Name` in one place and a
   `Core` in another with no signature. **A local is not generalised**: a lambda

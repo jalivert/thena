@@ -29,10 +29,11 @@ module Thena.View.Instral
 
 import Data.List (intercalate)
 
-import Thena.Core.Term (Spelling, spelledIn, nameDotted, Literal (..))
+import Thena.Core.Term (Spelling, spelledIn, nameDotted, Ident (..), Literal (..))
 import Thena.Global.Env (inductiveName)
 import Thena.Instral.Ops
   ( AnswerKind (..)
+  , Identifier (..)
   , Instr (..)
   , Op (..)
   , Operand (..)
@@ -247,6 +248,13 @@ displayValue sp gs budget env bs n at v = case v of
   -- unrestricted and may hold brackets or spaces, so there is no spelling that
   -- reads it back and quoting it would promise one.
   VName g -> ValName (nameDotted g)
+  -- **An identifier rides out as 'ValOpaque', carrying its word** (MS12 phase
+  -- 353) — the escape 'VPattern' and 'VBinder' use, and for their reason: a
+  -- frontend has nothing to do with the token, and a case of its own would
+  -- break every total match over 'ValueView' for no present gain. A structured
+  -- view is owed when something asks. **Not 'ValName'**, which would say it is
+  -- a name, and the two are different types in @instral@.
+  VIdent (Identifier (Ident w) _) -> ValOpaque w
   VInt k -> ValInt k
   VChar c -> ValChar (escapeChar c)
   VBool b -> ValBool b

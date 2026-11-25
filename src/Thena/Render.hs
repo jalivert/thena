@@ -191,6 +191,7 @@ import Thena.Global.Env
   )
 import Thena.Instral.Ops
   ( AnswerKind (..)
+  , Identifier (..)
   , Instr (..)
   , Op
   , Operand (..)
@@ -1495,6 +1496,12 @@ renderValue ren ctx v = case v of
   -- form is the fallback 'nameDotted' documents — the printer's shortest-ending
   -- policy is over terms, and a bare name value has no scope to shorten in.
   VName g            -> nameDotted g
+  -- **An identifier prints as its word, and the token is NOT shown** (MS12
+  -- phase 353). **His, 2026-11-19**, of the name counter: /"The counter is sort
+  -- of like a thing that is invisible to the user, in a way. User doesn't own
+  -- it."/ So a token has no spelling to print and no number a reader could use;
+  -- what they can use is the word the binder will display.
+  VIdent i           -> identString (identWord i)
   VInt k             -> show k
   VChar c            -> escapeChar c
   VBool True         -> "true"
@@ -1678,6 +1685,7 @@ renderFailReason ren r = case r of
     n ++ " is ambiguous here: it could be " ++ intercalate " or " gs
       ++ "\n  write the one you mean"
   ExpectedName      -> "expected a name"
+  ExpectedIdent     -> "expected an identifier"
   DottedTextName s  ->
     show s
       ++ " is text, so all of it is one word — and a word may not hold a dot."

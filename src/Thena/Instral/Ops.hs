@@ -11,6 +11,7 @@
 module Thena.Instral.Ops
   ( Name
   , Env
+  , Identifier (..)
   , Value (..)
   , Operand (..)
   , operandIn
@@ -52,7 +53,7 @@ import Data.Maybe (isJust)
 import Thena.Core.Level (Level, levelOfNat)
 import Thena.Core.Term
   (Core (App, Global, Primitive, Trusted, Universe),
-   GlobalName (..), Literal (..), Opened,
+   GlobalName (..), Ident (..), Literal (..), Opened, Var,
    nameDotted)
 -- | Qualified for one constructor: the kernel's 'Thena.Core.Term.Eliminate' and
 -- this module's own 'Eliminate' op are different things of one name.
@@ -101,6 +102,24 @@ type Env = [(Name, Value)]
 -- searched at run time (§8), so nothing constructs a rule value and nothing
 -- consumes one. 'Rule' stays in this module for the other half of that argument
 -- — a body is @[Instr]@, so \"Thena.Rules\" would need this module anyway.
+-- | A binder's identity as a rule holds it (MS12 phase 353): the word it
+-- displays, and the token it stands for when there is one.
+--
+-- **A type of its own rather than a pair**, for the reason
+-- 'Thena.Instral.Type.TMethodShape' is one: the two fields are not alike —
+-- the word is display and decides nothing, the token is the identity — and a
+-- pair would have every reader spell that out again. It is also what
+-- 'Thena.Instral.Type.TIdent' names, so the value and the type have one shape
+-- between them.
+data Identifier = Identifier
+  { identWord  :: Ident
+    -- ^ what it prints as. Decides nothing — see 'Thena.Core.Term.Ident'.
+  , identToken :: Maybe Var
+    -- ^ **the binder it is, when a binder has been opened at one.** 'Nothing'
+    -- is a word and nothing more, and @intro@ reads that as /mint a token/.
+  }
+  deriving (Eq, Show)
+
 data Value
   = VText    String    -- ^ what @Ask@ returns and @Say@ consumes
   | VName    GlobalName
@@ -127,6 +146,24 @@ data Value
     -- ruling of 2026-09-12 — and it reads as a name at the root. Inference
     -- refuses a /variable/ of 'Thena.Instral.Type.TString' there, so nothing
     -- but a literal reaches that reading.
+  | VIdent   Identifier
+    -- ^ **a binder's identity: the word it displays, and the token it stands
+    -- for when there is one** (MS12 phase 353) —
+    -- 'Thena.Instral.Type.TIdent' carries why it is a type of its own and his
+    -- ruling of 2026-11-25 that put it there.
+    --
+    -- **'Nothing' is a word and nothing more**, which is what a written
+    -- @\"A\"@ literal and @name-ident n@ both give, and what @intro@ reads as
+    -- /mint a token for this word/. **'Just' is a token already minted**, and
+    -- @intro@ adopts it: the rule is holding a term that points at that token
+    -- — the inside of a binder a pattern opened — and minting a second would
+    -- leave the context entry and the term disagreeing while both printed the
+    -- same word.
+    --
+    -- **This is the first 'Value' to carry a 'Var'**, and the only one. A
+    -- variable has reached a rule body as @Free x@ inside a 'VTerm' since MS4;
+    -- what is new is naming one on its own, so that something other than a
+    -- term can say /this binder/.
   | VTerm    Core      -- ^ a core term; a variable is @Free x@
   | VSurface SurfaceZipper
     -- ^ **a focused surface term — elaboration's input** (MS4 phase 41,
@@ -411,6 +448,28 @@ data Op
     -- **One direction only.** There is no @text-name@: a 'String' becoming a
     -- 'Name' is the direction that needs checking, not forgetting, and nothing
     -- has asked for it.
+  | NameIdent Operand
+    -- ^ **a 'Name' read as an identifier with no token** (MS12 phase 353) —
+    -- @name-ident n@.
+    --
+    -- **'NameText'\'s argument, one type along, and his ruling of 2026-09-12 is
+    -- the one being applied.** 'Thena.Instral.Type.TIdent' is a word plus an
+    -- optional token, so a 'Name' is exactly an identifier that has no token —
+    -- the conversion forgets nothing and adds nothing. It is written down for
+    -- the reason an explicit coercion op was chosen over subtyping there: a
+    -- 'TName' accepted silently at a 'TIdent' position would be the first
+    -- subtyping in a language that is otherwise plain Hindley-Milner, and the
+    -- place it would be wrong is exactly the place that matters — a rule that
+    -- /has/ a token and drops it mints a second one.
+    --
+    -- **A written @\"…\"@ literal needs no op**, because his ruling of
+    -- 2026-11-25 widened the literal set instead; this is for a /variable/,
+    -- which is what @fresh-name@, @lambda-name@, @binder-name@ and
+    -- @pattern-head@ all answer with.
+    --
+    -- **One direction only, for 'NameText'\'s reason.** Going the other way
+    -- throws a token away, and a rule that means to do that can say so by
+    -- writing the word.
 
   | Along                     -- ^ past the head of the focus (§4.3)
   | Into                      -- ^ into a guess's body
@@ -1757,6 +1816,7 @@ resultOf o = case o of
   Lambda ps _  -> Just (TFun (map TVar [1 .. length ps]) (TVar 0))
   Value _      -> Just (TVar 0)
   NameText _   -> Just TString
+  NameIdent _  -> Just TIdent
   Assume _ _   -> Just TCore  -- the variable it bound; §7.3's @?x <- claim S@
   Quantify _ _ -> Nothing     -- a hole-life op, like 'Attack' and 'IntroPi'
   Claim  _ _   -> Just TCore
@@ -2006,6 +2066,7 @@ operandTypes o = case o of
   Value a      -> [(a, TVar 0)]
   Lambda _ _   -> []
   NameText a   -> [(a, TName)]
+  NameIdent a  -> [(a, TName)]
   Unify  a b   -> [(a, TCore), (b, TCore)]
   UnifyInto a b -> [(a, TCore), (b, TCore)]
   Try    a     -> [(a, TCore)]
@@ -2122,8 +2183,12 @@ operandTypes o = case o of
   Back         -> []
   Reduce       -> []
   Attack       -> []
-  IntroPi m    -> maybe [] (\x -> [(x, TName)]) m
-  IntroLet m   -> maybe [] (\x -> [(x, TName)]) m
+  -- **The one argument is an identifier and not a name** (MS12 phase 353), his
+  -- ruling of 2026-11-25: a token that came with the word is adopted, and a
+  -- word on its own means mint one. A written literal stands here; a 'TName'
+  -- variable is converted with @name-ident@.
+  IntroPi m    -> maybe [] (\x -> [(x, TIdent)]) m
+  IntroLet m   -> maybe [] (\x -> [(x, TIdent)]) m
   Rename x     -> [(x, TName)]
   Regret       -> []
   Solve        -> []
@@ -2268,6 +2333,13 @@ matchPattern env k0 pt v = case (pt, v) of
   -- here would mean a clause could test a name's spelling in a @when@ and not
   -- in a @case@.
   (PText t, VName g) | t == nameDotted g -> none
+  -- **…and an identifier by its word** (MS12 phase 353), for that same reason
+  -- and with the token ignored: a written literal is a word and nothing more,
+  -- so it says nothing about which binder this is. Without this case a clause
+  -- written @rule f "a" :- …@ over an 'Thena.Instral.Type.TIdent' parameter
+  -- would type-check — a text literal stands at that type since 2026-11-25 —
+  -- and then never fire.
+  (PText t, VIdent (Identifier (Ident w) _)) | t == w -> none
   (PPair a b, VPair x y)   -> do
     (as, k1) <- matchPattern' k0 a x
     (bs, k2) <- matchPattern' k1 b y
@@ -2737,6 +2809,7 @@ opKeyword o = case o of
   Value _      -> "value"
   Lambda _ _   -> "lambda"
   NameText _   -> "name-text"
+  NameIdent _  -> "name-ident"
   Along        -> "along"
   Into         -> "into"
   CrossType    -> "cross"

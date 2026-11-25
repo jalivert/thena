@@ -212,6 +212,7 @@ everyOp =
   , ("say x",        Say (Ref "x"))
   , ("concat x y",   Concat (Ref "x") (Ref "y"))
   , ("name-text x",  Op.NameText (Ref "x"))
+  , ("name-ident x", Op.NameIdent (Ref "x"))
     -- **Both @goto@s, because they were one op until MS5 phase 66b** and a
     -- mirror that lists neither cannot notice a split.
   , ("goto x",       Goto (Ref "x"))
