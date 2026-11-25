@@ -43,7 +43,14 @@
 -- Drives the engine through `Thena.Driver` and `Thena.Files`/`Thena.Render`
 -- for bootstrap and status text only — panes render through `Thena.View.*`.
 -- Never `Thena.Repl`: off `thena:view` entirely since MS7 phase 130.
-module Tui.App (runTui) where
+-- | **'attrPairs' is exported for one test and for nothing else** —
+-- @thena-tui-test@'s /every attr names a background/, `~vzjsc`. Five
+-- separate shipped defects were one attr drawn without a background, and the
+-- repair that holds is structural rather than per-attr: the helper that could
+-- build one is deleted and the suite pins the invariant so that the next entry
+-- in the map cannot quietly reintroduce it. Nothing else in this module's
+-- surface is for a test.
+module Tui.App (runTui, attrPairs) where
 
 import Brick
 import Brick.Widgets.Edit
@@ -1670,7 +1677,14 @@ resetCursorStyle = hPutStr stdout "\ESC[0 q" >> hFlush stdout
 -- indistinguishable pale blobs instead of four panes (`.claude/LOG.md`,
 -- 2026-09-29).
 attrs :: Theme -> AttrMap
-attrs th = attrMap (surface (themeStage th) (themeInk th))
+attrs th = attrMap (onSurface (themeStage th) (themeInk th)) (attrPairs th)
+
+-- | **Every name this TUI draws in, and the colours a theme gives it.** Split
+-- out of 'attrs' so that @thena-tui-test@ can hold the one invariant the map
+-- has — that every entry names a background — which is `~vzjsc`'s structural
+-- repair; see the note at the end of this list.
+attrPairs :: Theme -> [(AttrName, V.Attr)]
+attrPairs th =
   [ (attrName "panel",          surface (themePanel th) (themeInk th))
   , (attrName "edge.repl",      surface (themePanel th) (themeRepl th))
   -- Live-script mode's pane wears the repl's own accent — it *is* the repl
@@ -1837,7 +1851,24 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- drift.
   , (attrName "pane.heading",   surface (themePanel th) (themeDim th))
   , (attrName "pane.detail",    surface (themePanel th) (themeDim th))
-  , (attrName "dim",            ink (themeDim th))
+  -- | **The whisper's ghost at the caret, and it is named for its container**
+  -- — `~vzjsc`, the last four of that defect, 2026-11-25. It was @"dim"@ and
+  -- a plain 'ink', which is a hole in whatever is behind it; it is drawn by
+  -- 'taggedInput' and by nothing else, 'taggedInput' is only ever reached
+  -- through 'inputWidget', and 'inputWidget' is drawn in one place — the
+  -- document column, which is filled with 'themePanel'. So the background is
+  -- not a guess: there is exactly one container and this is its fill.
+  --
+  -- **THE RENAME IS THE POINT OF THE FIX AND NOT TIDYING.** A generic @"dim"@
+  -- carrying a panel background is a trap: the next thing wanting dim text
+  -- inside a popup would reach for it by name and draw a black band, which is
+  -- how this class of defect shipped three times before (@script.stale@,
+  -- @script.refused@, the picker's rows). **An attr is named after the
+  -- container it is pinned to** — @strip.dim@, @dropdown.faint@,
+  -- @script.stale@ — and @input.ghost@ says both what it is and where it may
+  -- be used. Something dim inside another container gets its own pair, the way
+  -- those three did.
+  , (attrName "input.ghost",    surface (themePanel th) (themeDim th))
   -- | **The pane bar, `~7tfhd`** — an open pane against a closed one. His
   -- instruction was that the two be /"rendered a bit differently"/, and the
   -- difference is weight rather than hue, for the same reason a pane's heading
@@ -1870,7 +1901,13 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- had nothing to invert *against*, reading as a dark cell instead of a
   -- visible caret. A dimmer ink still marks the box as a box without
   -- fighting the caret over the brightest color in the theme.
-  , (attrName "placeholder",    ink (themeDim th))
+  --
+  -- **On the panel's fill, not on an 'ink' with no background** — `~vzjsc`,
+  -- 2026-11-25, and the reasoning is 'input.ghost''s above: a placeholder box
+  -- is drawn by 'taggedInput' alone, which reaches the screen through
+  -- 'inputWidget' alone, which the document column alone draws. A box standing
+  -- in a run of panel-filled text was punching a near-black cell out of it.
+  , (attrName "placeholder",    surface (themePanel th) (themeDim th))
   -- The recovered-span underline (his `.jalivert/TUI.md` #7), and its own
   -- combination with a placeholder box inside a broken literal. **Two
   -- named attrs, not one nested inside the other** — nesting
@@ -1893,8 +1930,15 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- already is. 'themeRepl' picked as the most saturated accent in the
   -- palette, both combinations, so a box inside a recovered span reads as
   -- unmistakably part of the same broken run as the text around it.
-  , (attrName "recovered",             V.withStyle (ink (themeRepl th)) V.underline)
-  , (attrName "placeholder.recovered", V.withStyle (ink (themeRepl th)) V.underline)
+  --
+  -- **Both on the panel's fill — `~vzjsc`, 2026-11-25.** The underline is a
+  -- stroke under a character, so the cell behind it has to be the pane's and
+  -- not the terminal's: with a plain 'ink' a recovered span drew its own dark
+  -- band through the line being edited, which is the one place in the TUI
+  -- where a band is least affordable. Same single container as
+  -- 'input.ghost' and @placeholder@ above.
+  , (attrName "recovered",             V.withStyle (surface (themePanel th) (themeRepl th)) V.underline)
+  , (attrName "placeholder.recovered", V.withStyle (surface (themePanel th) (themeRepl th)) V.underline)
   -- | **The output marker '▏' beside a repl turn's answer, and a surface for
   -- the same reason 'script.refused' is** — `~vzjsc`. One cell of stage
   -- colour in the middle of a filled pane is a hole in it.
@@ -1907,12 +1951,15 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- solid bar, panel-dark text on top of it, same "selected" contrast an
   -- ordinary list widget uses.
   , (attrName "dropdown.selected", surface (themeRepl th) (themePanel th))
-  -- | **Small print *on* the popup surface, which is why it is not "dim".**
-  -- The picker's title, its key hints and the highlighted session's handle
-  -- are secondary text inside a floating box, and 'attrName "dim"' is an ink
-  -- with no background of its own — brick resolves that against the map's
-  -- default, the stage, so it would draw a black band across a box filled
-  -- with 'themePopup'. The same mistake 'script.stale' was measured making.
+  -- | **Small print *on* the popup surface, which is why dim text in a box
+  -- needs an attr of its own.** The picker's title, its key hints and the
+  -- highlighted session's handle are secondary text inside a floating box, and
+  -- an attr pinned to the *panel* — 'input.ghost', @placeholder@,
+  -- @script.stale@ — would draw that box's rows in the document's fill
+  -- instead of the popup's. **As of `~vzjsc`'s last four, 2026-11-25, every
+  -- dim-ish attr in this map names a container**, so there is no longer one to
+  -- reach for by accident; what there is instead is a pair to choose from, and
+  -- this is the popup half of it.
   , (attrName "dropdown.faint",    surface (themePopup th) (themeDim th))
   -- The input line's own editor: 'renderEditor' wraps its output in
   -- Brick's 'edit'/'editFocused' attributes, which fall back to the
@@ -1925,8 +1972,29 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (spliceAttr, V.withStyle (surface (themeSplice th) (themeInk th)) V.bold)
   ]
   where
-    surface bgC fgC = V.withBackColor (V.withForeColor V.defAttr fgC) bgC
-    ink fgC = V.withForeColor V.defAttr fgC
+    -- | **'surface' is the only way to build an attr here, and the @ink@ that
+    -- used to sit beside it is deleted on purpose** — `~vzjsc`, 2026-11-25.
+    -- @ink@ set a foreground and left the background at 'V.defAttr', which vty
+    -- resolves as /terminal default/ and which therefore /replaces/ whatever
+    -- fill the attr is drawn inside instead of deferring to it: a near-black
+    -- band through a coloured pane. That defect shipped five times under five
+    -- different names, and every time the repair was to pair the ink with the
+    -- container's own colour.
+    --
+    -- **With the helper gone it cannot ship a sixth time**, because there is no
+    -- longer a function in scope that makes a background-less attr — a new row
+    -- in this map has to name a background to typecheck its way in, and naming
+    -- one means answering /which container is this drawn inside/. Where the
+    -- answer is /two of them/, the attr becomes a pair, which is what
+    -- @strip.dim@ \/ @dropdown.faint@ \/ @script.stale@ already are. **Do not
+    -- reintroduce it**, not even for something believed to be drawn on the
+    -- stage: the stage has an attr of its own.
+    surface = onSurface
+
+-- | An ink on a fill. **The only way an attr in 'attrPairs' is built**, and
+-- 'attrs' uses it for the map's own default too.
+onSurface :: V.Color -> V.Color -> V.Attr
+onSurface bgC fgC = V.withBackColor (V.withForeColor V.defAttr fgC) bgC
 
 -- | **The first layer in this list is the topmost one, confirmed
 -- empirically** — not documented anywhere obvious, and the opposite of
@@ -8699,7 +8767,7 @@ inputWidget focused ts col ghost skip recovered =
 taggedInput :: [Text] -> Int -> String -> Int -> Maybe (Int, Int) -> [(Maybe AttrName, Char)]
 taggedInput ts col ghost skip recovered =
   tag before recovered
-    <> [(Just (attrName "dim"), c) | c <- ghost]
+    <> [(Just (attrName "input.ghost"), c) | c <- ghost]
     <> tag after (shift (col + skip) recovered)
   where
     full = concatMap Text.unpack ts

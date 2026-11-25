@@ -73,7 +73,9 @@ import Tui.Panes
   )
 import qualified Data.Text as Text
 import Text.Wrap (wrapTextToLines)
+import Tui.App (attrPairs)
 import Tui.Render (Fold (..), foldAttr, renderDisplay, renderGoals, renderMachineView)
+import Tui.Theme (Theme (..), themes)
 
 
 -- * Drawing a widget without a terminal
@@ -223,7 +225,43 @@ drawingTests =
     , testGroup "the suggestion strip's hint region, `~w2tk2` slice 4" hintRegionCases
     , testGroup "the goals pane lists a guess as a goal, phase 324" goalRowCases
     , testGroup "the caret in a wrapped line, `~rhkm3` and `~hq6x6`" caretCases
+    , testGroup "every attr names a background, which is `~vzjsc`" attrCases
     ]
+
+-- | **The one invariant the attribute map has, and the fifth repair of one
+-- defect** — `~vzjsc`.
+--
+-- **WHAT THE DEFECT IS.** An attr built with a foreground only leaves its
+-- background at 'Graphics.Vty.defAttr', which vty resolves as /the terminal's
+-- own default/ — and a default background does not inherit the fill it is drawn
+-- inside, it replaces it. So dim text inside a coloured pane drew a near-black
+-- band across it. It shipped as @script.stale@, as @script.refused@, as
+-- @script.marker@, as @accent.output@ and as the picker's rows, and each of
+-- those was repaired on its own.
+--
+-- **WHY THIS IS A TEST AND NOT ANOTHER REPAIR.** 'Tui.App.attrPairs' now has no
+-- helper that can build a background-less attr, so the compiler stops the sixth
+-- occurrence from being written by accident; this stops it from being written on
+-- purpose, which is how the first five went in — every one of them looked right
+-- in isolation, because the band only appears where the attr is drawn.
+--
+-- **It is not a test about colours.** Nothing here names a hue or compares two
+-- themes' palettes, which is the part of a theme `~6crg8` keeps out of this
+-- suite. What it asserts is a structural property of the drawing: a name this
+-- TUI draws in says what it sits on.
+attrCases :: [TestTree]
+attrCases =
+  [ testCase (name <> ": every attr names a background") $
+      assertEqual "attrs with no background" [] (bare th)
+  | th <- themes
+  , let name = themeName th
+  ]
+  where
+    bare th =
+      [ show an
+      | (an, a) <- attrPairs th
+      , Vty.attrBackColor a == Vty.Default
+      ]
 
 -- | **Where a character offset lands once the line being edited is wrapped**
 -- — 'Tui.Panes.wrapRows' and 'Tui.Panes.wrapCaret', the two the live editor
