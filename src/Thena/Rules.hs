@@ -259,8 +259,11 @@ data Match = Match
 -- @Development@ is "Thena.Engine"'s and this module sits below it — and it can,
 -- since @Development@ is a newtype over exactly this cursor. It takes a
 -- 'GlobalEnv' because §8's head matching runs 'whnf' and 'whnf' unfolds
--- globals. It needs no name counter: the type a head reads is the one the
--- development /writes down/ ('expectedType'), never one @infer@ derives.
+-- globals. **It takes the name counter and answers it unchanged** (MS12): nothing
+-- a head asks about mints — the type a head reads is the one the development
+-- /writes down/ ('expectedType'), never one @infer@ derives — and it is threaded
+-- because every candidate carries one ('Match'), §8's patterns being what will
+-- move it.
 --
 -- §7.6's signature is corrected to this.
 --
