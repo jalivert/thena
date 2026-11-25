@@ -28,8 +28,6 @@ to the file.
 **`examples/demo/` is loaded in a FRESH session** too, and for the same reason: it
 declares its own `Ty`. TAPL's arithmetic and boolean expressions carried from a grammar to
 progress, in files short enough to read off a projector, plus a tactic script.
-`examples/demo/README.md` is the account, and `DEMO.md` beside it is a running order for
-presenting the system in an hour.
 
 ## System F-sub — `poplmark/`, its own set
 
