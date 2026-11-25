@@ -53,7 +53,7 @@ module Thena.Engine
   ) where
 
 import Data.List (intercalate, nub)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
@@ -992,8 +992,10 @@ resumeAt :: Answer -> Machine -> Machine
 -- interaction: the driver asks again rather than failing on the user's behalf.
 resumeAt a m = case pc (exec m) of
   Bind p _ (Ask _ _) : rest
-    | Just bs <- Op.matchPattern (globals m) p (VText a) ->
-        m { exec = (exec m) { pc = rest, env = bs ++ env (exec m) } }
+    | Just (bs, k) <- Op.matchPattern (globals m) (names m) p (VText a) ->
+        m { exec  = (exec m) { pc = rest, env = bs ++ env (exec m) }
+          , names = k
+          }
   Do     (Ask _ _) : rest -> m { exec = (exec m) { pc = rest } }
   _                       -> m
 
@@ -1295,9 +1297,12 @@ perform instr rest m = case operation instr of
       -- belong to the body rather than to a position in it.
       Just (fr, is, e, stk') -> case destination fr of
         Nothing -> Continue m { exec = Exec is e stk' (savedPushes fr) }
-        Just p  -> case Op.matchPattern (globals m) p v of
+        Just p  -> case Op.matchPattern (globals m) (names m) p v of
           Nothing -> failure (BindingDidNotMatch p) m
-          Just bs -> Continue m { exec = Exec is (bs ++ e) stk' (savedPushes fr) }
+          Just (bs, k) -> Continue m
+            { exec  = Exec is (bs ++ e) stk' (savedPushes fr)
+            , names = k
+            }
 
   -- **Hand control over, and stay put** (MS4 phase 45b). @pc@ is deliberately
   -- unchanged — see 'Op.Yield' and 'resumeYield'.
@@ -1685,14 +1690,17 @@ perform instr rest m = case operation instr of
       -- runs therefore ends that rule and its value is dropped, which is what
       -- @x = prove@ being refused at load time already said.
       | hasNext it' ->
-          Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule (matchRule mt))
-                 (entering mt (choicePoint m Nothing rest it' (matchRule mt) [])
-                           m { names = names m + 1 })
+          let m' = reserving mt m
+           in Saying ("chose " ++ show (names m') ++ ": "
+                        ++ nameOfRule (matchRule mt))
+                     (entering mt (choicePoint m' Nothing rest it' (matchRule mt) [])
+                               m' { names = names m' + 1 })
       | otherwise ->
           Continue (entering mt (Thena.Engine.Call rest (env (exec m)) Nothing
-                                                   (pushes (exec m)) False) m)
+                                                   (pushes (exec m)) False)
+                             (reserving mt m))
     where
-      it = dispatch (rules m) (globals m) (cursor (development m))
+      it = dispatch (rules m) (globals m) (names m) (cursor (development m))
 
       -- THE PEEK, decided 2026-08-20. A 'Choice' is built only when there
       -- really is another alternative — Prolog's determinism detection.
@@ -1744,19 +1752,25 @@ perform instr rest m = case operation instr of
           -- nothing to bind. §2's ruling is that a refutable pattern that does
           -- not match /fails/ — in a rule that backtracks, which is what he
           -- wanted; in a lambda it is the caller\'s failure, as in Haskell.
-          Right vs | Nothing <- Op.matchPatterns (globals m) ps vs ->
-            failure (PatternDidNotMatch nm (length vs)) m
-          Right vs ->
-            -- **The same frame a rule call pushes**, and deliberately: a closure
-            -- is an anonymous rule, so @return@, backtracking below it and the
-            -- destination all work without a second mechanism.
-            Continue m
-              { exec = Exec body (fromMaybe [] (Op.matchPatterns (globals m) ps vs) ++ cl)
-                         (Thena.Engine.Call rest (env (exec m)) wants
-                                            (pushes (exec m)) False
-                            : stack (exec m))
-                         (pushes (exec m))
-              }
+          -- **One match and not two** (MS12). This tested with one call of
+          -- 'Op.matchPatterns' and then bound with a second call of it on the
+          -- same values, which is the mistake §8 names one level down: once a
+          -- pattern mints, the second call answers an environment differing
+          -- from the tested one in a variable nothing prints.
+          Right vs -> case Op.matchPatterns (globals m) (names m) ps vs of
+            Nothing      -> failure (PatternDidNotMatch nm (length vs)) m
+            Just (bs, k) ->
+              -- **The same frame a rule call pushes**, and deliberately: a
+              -- closure is an anonymous rule, so @return@, backtracking below
+              -- it and the destination all work without a second mechanism.
+              Continue m
+                { exec = Exec body (bs ++ cl)
+                           (Thena.Engine.Call rest (env (exec m)) wants
+                                              (pushes (exec m)) False
+                              : stack (exec m))
+                           (pushes (exec m))
+                , names = k
+                }
 
   Op.Call nm args -> case traverse (operandValue (env (exec m))) args of
     Left e   -> failure e m
@@ -1764,14 +1778,18 @@ perform instr rest m = case operation instr of
       Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) (rootName nm))) m
       Just (mt, it')
         | hasNext it' ->
-            Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule (matchRule mt))
-                   (entering mt (choicePoint m wants rest it' (matchRule mt) [])
-                             m { names = names m + 1 })
+            let m' = reserving mt m
+             in Saying ("chose " ++ show (names m') ++ ": "
+                          ++ nameOfRule (matchRule mt))
+                       (entering mt (choicePoint m' wants rest it' (matchRule mt) [])
+                                 m' { names = names m' + 1 })
         | otherwise ->
             Continue (entering mt (Thena.Engine.Call rest (env (exec m)) wants
-                                                     (pushes (exec m)) False) m)
+                                                     (pushes (exec m)) False)
+                               (reserving mt m))
     where
-      it vs = clauses (rules m) (globals m) (cursor (development m)) (rootName nm) vs
+      it vs = clauses (rules m) (globals m) (names m) (cursor (development m))
+                      (rootName nm) vs
 
       -- **The callee's parameters, bound to the arguments by the match that
       -- chose this clause** — not by a second match run here. 'Thena.Rules.clauses'
@@ -2878,9 +2896,16 @@ perform instr rest m = case operation instr of
     -- reports its subgoals /and/ hands back how many equations they carry.
     producing k v m' = case instr of
       Do _ -> k (advance m')
-      Bind p _ _ -> case Op.matchPattern (globals m) p v of
-        Nothing -> failure (BindingDidNotMatch p) m'
-        Just bs -> k (advance m' { exec = (exec m') { env = bs ++ env (exec m') } })
+      -- **The counter comes from @m'@ and not from @m@**: the op that produced
+      -- this value may have minted (and 'navigate' below always does), so a
+      -- match that mints must begin after it rather than from where the
+      -- instruction started.
+      Bind p _ _ -> case Op.matchPattern (globals m) (names m') p v of
+        Nothing      -> failure (BindingDidNotMatch p) m'
+        Just (bs, k') -> k (advance m'
+          { exec  = (exec m') { env = bs ++ env (exec m') }
+          , names = k'
+          })
 
     -- 'Assume' and 'Claim' differ only in which component they build, and both
     -- produce the variable they bound: §7.3's sketch reads @?x <- claim S@.
@@ -3621,6 +3646,22 @@ data RetryError = NoChoicePoint | UnknownChoice Int
 -- rather than defending against it.
 seedFor :: Frame -> Match -> Env
 seedFor fr mt = entryEnv fr ++ matchEnv mt
+
+-- | __The tokens the chosen match drew become the session's__ (MS12).
+--
+-- A search matches every candidate from the counter it was handed
+-- ('Thena.Rules.matchNames'), so the counter does not move until one candidate
+-- is taken — and this is the taking. Written out rather than folded into
+-- @entering@ because a choice point's identifier is drawn from the same
+-- counter, and it has to be drawn /after/ the match it is forking on.
+--
+-- **Only the first alternative of a choice point goes through this.** An
+-- alternative reached by backtracking matched before the abandoned branch's
+-- body ran, so its counter is behind the session's, and 'names' does not go
+-- backwards (§7.4). That costs nothing while matching mints nothing, and it is
+-- the open question the binder patterns of §8 have to answer.
+reserving :: Match -> Machine -> Machine
+reserving mt k = k { names = matchNames mt }
 
 retryFrom :: Maybe Int -> Machine -> Either RetryError (Machine, String)
 retryFrom target m = go (0 :: Int) (stack (exec m))

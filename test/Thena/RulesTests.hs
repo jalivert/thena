@@ -133,7 +133,7 @@ withArrow =
     emptyGlobals
 
 matching :: GlobalEnv -> Cursor -> [String]
-matching env cur = map nameOf (drain (matches expectedBase env cur))
+matching env cur = map nameOf (drain (matches expectedBase env 0 cur))
 
 nameOf :: Rule -> String
 nameOf = nameDotted . ruleName
@@ -199,7 +199,7 @@ matchTests =
     , testCase "where the let clause is offered, intro succeeds" $
         let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
          in do
-              nameOf `map` drain (matches expectedBase emptyGlobals cur)
+              nameOf `map` drain (matches expectedBase emptyGlobals 0 cur)
                 @?= ["intro", "intro", "rename", "solve", "regret", "step", "step", "step"] ++ walkers
               ranOk (machineAt cur [Do (Ops.IntroLet Nothing)])
 
@@ -253,14 +253,14 @@ iteratorTests =
         let walk it = case next it of
               Nothing        -> hasNext it @?= False
               Just (_, rest) -> (hasNext it @?= True) >> walk rest
-         in walk (matches expectedBase emptyGlobals (holeAt type0))
+         in walk (matches expectedBase emptyGlobals 0 (holeAt type0))
 
       -- **Drained by name rather than by a count**, since MS4 phase 49c: a guess
       -- offers @solve@, @regret@, @prove@ and the λ case's two recursive
       -- helpers, and a fixed number of @next@es would have to move every time a
       -- rule is added.
     , testCase "an empty iterator has nothing" $
-        let it = matches expectedBase emptyGlobals (guessAt type0)
+        let it = matches expectedBase emptyGlobals 0 (guessAt type0)
          in case drop (length (["rename", "solve", "regret", "step", "step", "step"] ++ walkers)) (drain it) of
               [] -> pure ()
               rs -> assertFailure ("expected no more, got " ++ show (map nameOf rs))
@@ -270,7 +270,7 @@ iteratorTests =
       -- gives this outright; the test is here because the requirement is on the
       -- type, and a later representation could quietly lose it.
     , testCase "advancing one copy does not disturb another" $
-        let it = matches expectedBase emptyGlobals (holeAt type0)
+        let it = matches expectedBase emptyGlobals 0 (holeAt type0)
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
@@ -450,6 +450,11 @@ dataTests =
       -- is matching no names, which answers none.
       testCase "and a clause that binds nothing carries an empty one" $
         envFor [VList []] @?= [[]]
+    , -- **The name counter rides out with the candidate too** (MS12, §8), and
+      -- nothing matches yet that mints — so a candidate reports the counter the
+      -- search was handed, unchanged.
+      testCase "and the counter the search was handed rides out with it" $
+        namesFor 9 [VList [VText "a", VText "b"]] @?= [9]
     ]
   where
     run is = runOut (machineIn emptyGlobals (holeAt type1) is)
@@ -475,7 +480,7 @@ dataTests =
 
     clauseFor vs =
       [ w
-      | r <- drain (clauses [shapes] emptyGlobals (holeAt type1)
+      | r <- drain (clauses [shapes] emptyGlobals 0 (holeAt type1)
                             (rootName "shape") vs)
       , Do (Ops.Say (Lit (VText w))) <- ruleBody r
       ]
@@ -491,11 +496,13 @@ dataTests =
             [Do (Ops.Say (Lit (VText "cons")))]
         ]
 
-    envFor vs =
-      [ matchEnv mt
-      | mt <- drainMatches (clauses [binders] emptyGlobals (holeAt type1)
-                                    (rootName "split") vs)
-      ]
+    envFor = map matchEnv . matchesFor 0
+
+    namesFor k vs = map matchNames (matchesFor k vs)
+
+    matchesFor k vs =
+      drainMatches (clauses [binders] emptyGlobals k (holeAt type1)
+                            (rootName "split") vs)
 
 -- | What a rule hands back (MS5 phase 63).
 --

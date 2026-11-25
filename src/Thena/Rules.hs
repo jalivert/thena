@@ -234,8 +234,22 @@ newtype RuleIter = RuleIter [Match]
 -- so their environment is empty, and that is not a special case: it is what
 -- matching no patterns against no values answers.
 data Match = Match
-  { matchRule :: Rule
-  , matchEnv  :: Op.Env
+  { matchRule  :: Rule
+  , matchEnv   :: Op.Env
+  , matchNames :: Int
+    -- ^ **where the name counter stands after this clause's match** (MS12).
+    -- Matching mints nothing today, so this is the counter the search was
+    -- handed; §8's binder patterns are what make it move, and the signature is
+    -- threaded now so that landing them is a change to the matchers and not to
+    -- the engine.
+    --
+    -- **Every candidate in one iterator matched from the SAME counter**, which
+    -- is deliberate and is not the same thing as a running total: a candidate
+    -- that is never entered binds nothing anywhere, so the tokens it drew were
+    -- never anybody's. What that leaves open once a pattern really does mint —
+    -- a token an abandoned alternative's body had already used being drawn
+    -- again by the alternative tried next — is written up as an item, and no
+    -- pattern mints until it is answered.
   }
   deriving (Eq, Show)
 
@@ -259,10 +273,10 @@ data Match = Match
 -- gone with the hint: elaboration is a rule called by name, so nothing about it
 -- is a dispatch. Every rule whose head passes is a candidate, which is what §7.6
 -- said in the first place.
-matches :: [RuleBase] -> GlobalEnv -> Cursor -> RuleIter
-matches bases env cur =
+matches :: [RuleBase] -> GlobalEnv -> Int -> Cursor -> RuleIter
+matches bases env k cur =
   RuleIter
-    [ Match r [] | r <- allRules bases, all (holds env cur []) (ruleHead r) ]
+    [ Match r [] k | r <- allRules bases, all (holds env cur []) (ruleHead r) ]
 
 -- | __The matching RULES, as against the matching clauses__ — his ruling,
 -- 2026-11-19: /"each rule-arity, in other words — each rule, gets to be
@@ -291,8 +305,8 @@ matches bases env cur =
 -- asked for separately, and throwing the list away here would put it behind a
 -- second traversal of the base.
 matchingRules
-  :: [RuleBase] -> GlobalEnv -> Cursor -> [((GlobalName, Int), [Rule])]
-matchingRules bases env cur = byCallable (drain (matches bases env cur))
+  :: [RuleBase] -> GlobalEnv -> Int -> Cursor -> [((GlobalName, Int), [Rule])]
+matchingRules bases env k cur = byCallable (drain (matches bases env k cur))
   where
     drain it = case next it of
       Nothing         -> []
@@ -382,9 +396,9 @@ groupParams rs@(first : _) =
 -- questions: this one is /what the engine can run/, and 'matches' is /what
 -- could be done here/, which includes @try ‹t›@ because the user can type
 -- @try x@. @:matches@ keeps showing it.
-dispatch :: [RuleBase] -> GlobalEnv -> Cursor -> RuleIter
-dispatch base env cur =
-  let RuleIter ms = matches base env cur
+dispatch :: [RuleBase] -> GlobalEnv -> Int -> Cursor -> RuleIter
+dispatch base env k cur =
+  let RuleIter ms = matches base env k cur
    in RuleIter [ mt | mt <- ms, null (ruleParams (matchRule mt)) ]
 
 -- | The clauses @Call@ may run: **this name, this arity, and a head that
@@ -422,14 +436,17 @@ dispatch base env cur =
 -- other half of lifting @FunctionClauseUnreachable@: @size []@ before
 -- @size [_, ..._]@ reads as Haskell does, top to bottom, no backtracking.
 clauses
-  :: [RuleBase] -> GlobalEnv -> Cursor -> GlobalName -> [Value] -> RuleIter
-clauses bases env cur nm vs = RuleIter (searched ++ take 1 called)
+  :: [RuleBase] -> GlobalEnv -> Int -> Cursor -> GlobalName -> [Value]
+  -> RuleIter
+clauses bases env k cur nm vs = RuleIter (searched ++ take 1 called)
   where
+    -- **Each candidate matches from the counter this search was handed**, and
+    -- not from where the candidate before it got to — see 'matchNames'.
     fitting rs =
-      [ Match r bound
+      [ Match r bound k'
       | r <- rs
       , ruleName r == nm
-      , Just bound <- [matchClause env r vs]
+      , Just (bound, k') <- [matchClause env k r vs]
       , all (holds env cur bound) (ruleHead r)
       ]
 

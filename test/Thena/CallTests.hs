@@ -223,7 +223,7 @@ headArguments =
       -- parameterised rule has always been.
       testCase "matches lists it, having no argument to ask about" $
         fmap (ruleName . matchRule . fst)
-             (next (matches (bases [nameClause]) emptyGlobals hole))
+             (next (matches (bases [nameClause]) emptyGlobals 0 hole))
           @?= Just (rootName "pick")
     ]
 

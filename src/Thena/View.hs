@@ -366,10 +366,18 @@ rulesView budget s =
 -- **The clauses are not lost.** 'rulesView' is still per clause, which is what
 -- @:rules@ shows, and a pane that shows the clauses behind one of these rows is
 -- a feature of its own.
+-- **A READ-ONLY QUERY, so the counter it passes goes nowhere** (MS12).
+-- Matching threads the session's name counter (§7.6), and this hands it the
+-- session's and throws the answer away. That is sound because a display match
+-- binds nothing that is kept and this view names no value one bound: a row
+-- carries the group's parameter /patterns/ and the inferred type, never a term
+-- a match produced. §7.6's "autocomplete is a read-only query on this
+-- iterator" is the sentence this keeps true.
 matchesView :: Budget -> Session -> [MatchView]
 matchesView _ s =
   [ displayMatch (spellingOf s) nm (groupParams grp) (lookup (nm, k) inferred)
-  | ((nm, k), grp) <- matchingRules (sessionRules s) (sessionGlobals s) (sessionCursor s)
+  | ((nm, k), grp) <- matchingRules (sessionRules s) (sessionGlobals s)
+                                    (names (machineOf s)) (sessionCursor s)
   ]
   where
     inferred = ruleTypes (machineOf s)

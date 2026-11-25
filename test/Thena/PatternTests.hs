@@ -221,56 +221,75 @@ matching =
   testGroup
     "matching"
     [ testCase "a variable takes anything and binds it" $
-        matchPattern emptyGlobals (PVar "x") (VInt 3) @?= Just [("x", VInt 3)]
+        match (PVar "x") (VInt 3) @?= Just [("x", VInt 3)]
     , testCase "a wildcard takes anything and binds nothing" $
-        matchPattern emptyGlobals PWild (VInt 3) @?= Just []
+        match PWild (VInt 3) @?= Just []
     , testCase "a literal matches its own value" $
-        matchPattern emptyGlobals (PInt 3) (VInt 3) @?= Just []
+        match (PInt 3) (VInt 3) @?= Just []
     , testCase "…and refuses another" $
-        matchPattern emptyGlobals (PInt 3) (VInt 4) @?= Nothing
+        match (PInt 3) (VInt 4) @?= Nothing
     , testCase "…and refuses another type" $
-        matchPattern emptyGlobals (PInt 3) (VText "3") @?= Nothing
+        match (PInt 3) (VText "3") @?= Nothing
     , testCase "true and false are told apart" $ do
-        matchPattern emptyGlobals (PBool True) (VBool True) @?= Just []
-        matchPattern emptyGlobals (PBool True) (VBool False) @?= Nothing
+        match (PBool True) (VBool True) @?= Just []
+        match (PBool True) (VBool False) @?= Nothing
     , testCase "a closed list must exhaust the value" $ do
-        matchPattern emptyGlobals (PList [PVar "a"] Nothing) (VList [VInt 1])
+        match (PList [PVar "a"] Nothing) (VList [VInt 1])
           @?= Just [("a", VInt 1)]
-        matchPattern emptyGlobals (PList [PVar "a"] Nothing) (VList [VInt 1, VInt 2])
+        match (PList [PVar "a"] Nothing) (VList [VInt 1, VInt 2])
           @?= Nothing
-        matchPattern emptyGlobals (PList [PVar "a"] Nothing) (VList []) @?= Nothing
+        match (PList [PVar "a"] Nothing) (VList []) @?= Nothing
     , testCase "an open list binds the remainder" $
-        matchPattern emptyGlobals (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1, VInt 2])
+        match (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1, VInt 2])
           @?= Just [("a", VInt 1), ("r", VList [VInt 2])]
     , testCase "…and the remainder may be empty" $
-        matchPattern emptyGlobals (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1])
+        match (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1])
           @?= Just [("a", VInt 1), ("r", VList [])]
     , -- The tail is a whole pattern, which is what makes this the long way of
       -- saying "exactly one element".
       testCase "a list tail is itself matched" $ do
-        matchPattern emptyGlobals (PList [PVar "a"] (Just (PList [] Nothing))) (VList [VInt 1])
+        match (PList [PVar "a"] (Just (PList [] Nothing))) (VList [VInt 1])
           @?= Just [("a", VInt 1)]
-        matchPattern emptyGlobals (PList [PVar "a"] (Just (PList [] Nothing)))
+        match (PList [PVar "a"] (Just (PList [] Nothing)))
                      (VList [VInt 1, VInt 2])
           @?= Nothing
     , testCase "a pair takes a pair apart" $
-        matchPattern emptyGlobals (PPair (PVar "x") (PVar "y")) (VPair (VInt 1) (VInt 2))
+        match (PPair (PVar "x") (PVar "y")) (VPair (VInt 1) (VInt 2))
           @?= Just [("x", VInt 1), ("y", VInt 2)]
     , testCase "some and none are told apart" $ do
-        matchPattern emptyGlobals (PSome (PVar "x")) (VOption (Just (VInt 1)))
+        match (PSome (PVar "x")) (VOption (Just (VInt 1)))
           @?= Just [("x", VInt 1)]
-        matchPattern emptyGlobals (PSome (PVar "x")) (VOption Nothing) @?= Nothing
-        matchPattern emptyGlobals PNone (VOption Nothing) @?= Just []
-        matchPattern emptyGlobals PNone (VOption (Just (VInt 1))) @?= Nothing
+        match (PSome (PVar "x")) (VOption Nothing) @?= Nothing
+        match PNone (VOption Nothing) @?= Just []
+        match PNone (VOption (Just (VInt 1))) @?= Nothing
     , -- **Arity is part of matching**, which is why 'matchPatterns' answers
       -- 'Nothing' rather than being paired with a length test.
       testCase "a run of the wrong length does not match" $ do
-        matchPatterns emptyGlobals [PVar "a"] [VInt 1, VInt 2] @?= Nothing
-        matchPatterns emptyGlobals [PVar "a", PVar "b"] [VInt 1] @?= Nothing
+        matchAll [PVar "a"] [VInt 1, VInt 2] @?= Nothing
+        matchAll [PVar "a", PVar "b"] [VInt 1] @?= Nothing
     , -- §3: a pattern matches as written. Nothing here reduces or coerces.
       testCase "a text pattern matches a name, because both are VText" $
-        matchPattern emptyGlobals (PText "h") (VText "h") @?= Just []
+        match (PText "h") (VText "h") @?= Just []
+
+    , -- **The name counter goes through the matcher** (MS12, §8), because a
+      -- pattern over a core term opens a binder and opening one mints. **No
+      -- pattern mints yet** and these are what say so: whatever a case binds,
+      -- the counter comes back exactly as it went in.
+      testCase "the counter comes back untouched, whatever was bound" $ do
+        fmap snd (matchPattern emptyGlobals 7 (PVar "x") (VInt 3)) @?= Just 7
+        fmap snd (matchPattern emptyGlobals 7
+                    (PList [PPair (PVar "a") (PVar "b")] (Just (PVar "r")))
+                    (VList [VPair (VInt 1) (VInt 2), VInt 3]))
+          @?= Just 7
+        fmap snd (matchPatterns emptyGlobals 7 [PVar "a", PWild] [VInt 1, VInt 2])
+          @?= Just 7
     ]
+  where
+    -- Matching threads the name counter (MS12). These cases are about what a
+    -- pattern binds, so they ask from zero and drop the counter; the counter
+    -- has the case directly above to itself.
+    match p v      = fmap fst (matchPattern emptyGlobals 0 p v)
+    matchAll ps vs = fmap fst (matchPatterns emptyGlobals 0 ps vs)
 
 binding :: TestTree
 binding =
@@ -302,9 +321,9 @@ binding =
         assertBool "refutable" (not (patternIrrefutable (PList [PVar "a"] (Just (PVar "r")))))
     ]
   where
-    agree (p, v) = case matchPattern emptyGlobals p v of
-      Nothing -> assertFailure ("expected a match for " ++ renderPattern p)
-      Just bs -> map fst bs @?= patternBinds p
+    agree (p, v) = case matchPattern emptyGlobals 0 p v of
+      Nothing       -> assertFailure ("expected a match for " ++ renderPattern p)
+      Just (bs, _)  -> map fst bs @?= patternBinds p
 
 -- --------------------------------------------------------------------------
 -- What is refused

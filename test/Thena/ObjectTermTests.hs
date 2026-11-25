@@ -308,27 +308,27 @@ matching io =
     -- tried as written, then reduced and tried again.
     testCase "it matches through a definition and its let-chain" $ do
       (env, p) <- setup "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
-      case matchPattern env p (VTerm (Global (named "test.modules.Rooted.fg") [])) of
+      case match env p (VTerm (Global (named "test.modules.Rooted.fg") [])) of
         Just bs -> map fst bs @?= ["f", "a"]
         Nothing -> assertFailure "it did not match"
 
   , testCase "and it matches the same term written out" $ do
       (env, p) <- setup "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
       let t = con "LC.app" [con "LC.var" [Primitive (LString "f")], con "LC.var" [Primitive (LString "g")]]
-      case matchPattern env p (VTerm t) of
+      case match env p (VTerm t) of
         Just bs -> map snd bs @?= [VTerm (con "LC.var" [Primitive (LString "f")])
                                   , VTerm (con "LC.var" [Primitive (LString "g")])]
         Nothing -> assertFailure "it did not match"
 
   , testCase "a hole at a token class binds the literal as a String" $ do
       (env, p) <- setup "rule v LC[var]`${s}` :- do say s"
-      matchPattern env p (VTerm (con "LC.var" [Primitive (LString "f")]))
+      match env p (VTerm (con "LC.var" [Primitive (LString "f")]))
         @?= Just [("s", VText "f")]
 
   , testCase "a written token matches only itself" $ do
       (env, p) <- setup "rule v LC[var]`x` :- do say \"x\""
-      ( matchPattern env p (VTerm (con "LC.var" [Primitive (LString "x")]))
-        , matchPattern env p (VTerm (con "LC.var" [Primitive (LString "y")])) )
+      ( match env p (VTerm (con "LC.var" [Primitive (LString "x")]))
+        , match env p (VTerm (con "LC.var" [Primitive (LString "y")])) )
         @?= (Just [], Nothing)
 
     -- **An arity is part of the shape.** The wrapper on its own is a term of
@@ -336,17 +336,31 @@ matching io =
     -- would bind nothing at all rather than refusing it.
   , testCase "a constructor applied to too few arguments does not match" $ do
       (env, p) <- setup "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
-      ( matchPattern env p (VTerm (Global (named "test.modules.Rooted.LC.app") []))
-        , matchPattern env p (VTerm (con "LC.app" [con "LC.var" [Primitive (LString "f")]])) )
+      ( match env p (VTerm (Global (named "test.modules.Rooted.LC.app") []))
+        , match env p (VTerm (con "LC.app" [con "LC.var" [Primitive (LString "f")]])) )
         @?= (Nothing, Nothing)
 
     -- **The brackets restrict here too**, as they do in a surface literal.
   , testCase "a production's pattern does not match another production" $ do
       (env, p) <- setup "rule v LC[var]`${s}` :- do say s"
       let t = con "LC.app" [con "LC.var" [Primitive (LString "f")], con "LC.var" [Primitive (LString "g")]]
-      matchPattern env p (VTerm t) @?= Nothing
+      match env p (VTerm t) @?= Nothing
+
+    -- **The name counter goes through the matchers** (MS12, §8), because a
+    -- pattern over a core term will open a binder and opening one mints. No
+    -- pattern mints yet, and this is what says so: the counter comes back
+    -- exactly as it went in.
+  , testCase "and the match gives the name counter back untouched" $ do
+      (env, p) <- setup "rule swap LC[app]`( ${f} ${a} )` :- do say \"x\""
+      let t = con "LC.app" [con "LC.var" [Primitive (LString "f")], con "LC.var" [Primitive (LString "g")]]
+      fmap snd (matchPattern env 7 p (VTerm t)) @?= Just 7
   ]
   where
+    -- Matching threads the name counter (MS12) and nothing in these patterns
+    -- mints, so they ask from zero and the counter it gives back is checked
+    -- once, above, rather than in every case.
+    match env p v = fmap fst (matchPattern env 0 p v)
+
     setup src = do
       (s, _) <- io
       r <- oneRule io (base src)

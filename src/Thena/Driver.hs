@@ -5985,7 +5985,9 @@ dispatch s name arg = case name of
     matching =
       [ MatchedRule nm k (groupParams grp) (lookup (nm, k) inferredTypes)
       | ((nm, k), grp) <-
-          matchingRules (rules machine) (globals machine)
+          -- **A read-only query, so the counter goes nowhere** (MS12) — the
+          -- same bargain 'Thena.View.matchesView' writes out.
+          matchingRules (rules machine) (globals machine) (names machine)
                         (cursor (development machine))
       ]
 

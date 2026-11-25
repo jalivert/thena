@@ -45,7 +45,6 @@ module Thena.Instral.Ops
   , Test (..)
   ) where
 
-import Control.Monad (zipWithM)
 import Data.Maybe (isJust)
 
 import Thena.Core.Level (Level)
@@ -2214,45 +2213,80 @@ data Origin = Origin
   }
   deriving (Eq, Show)
 
--- | Match one pattern against one value, answering the bindings it made.
+-- | __Match a run of things left to right, threading the name counter__ (MS12)
+-- and concatenating what each one bound.
+--
+-- **Left to right, and not @zipWithM@ over 'Maybe' as these were written until
+-- MS12**: the counter one match ends at is the counter the next one begins at,
+-- so the order is part of the answer rather than an accident of the combinator.
+-- A match that fails takes its counter with it, which is right — a pattern that
+-- minted and then did not match bound nothing anywhere, so the tokens it drew
+-- are free again.
+threading :: (Int -> x -> Maybe (Env, Int)) -> Int -> [x] -> Maybe (Env, Int)
+threading f = go
+  where
+    go k []       = Just ([], k)
+    go k (x : xs) = do
+      (bs, k1)  <- f k x
+      (bs', k2) <- go k1 xs
+      pure (bs ++ bs', k2)
+
+-- | Match one pattern against one value, answering the bindings it made **and
+-- where the name counter stands afterwards** (MS12).
 --
 -- **A pattern matches AS WRITTEN** — §3, his observation, and it is the line
 -- that keeps this function small: nothing here reduces, normalises or coerces.
 -- @3@ matches 'VInt' @3@ and nothing else.
-matchPattern :: GlobalEnv -> Pattern -> Value -> Maybe Env
-matchPattern env pt v = case (pt, v) of
-  (PVar n, _)              -> Just [(n, v)]
-  (PWild, _)               -> Just []
-  (PInt i,  VInt j)  | i == j -> Just []
-  (PChar c, VChar d) | c == d -> Just []
-  (PBool b, VBool c) | b == c -> Just []
-  (PText t, VText u) | t == u -> Just []
+--
+-- **Why a counter goes through a matcher** (§8). A pattern over a core term
+-- opens a binder, and opening one mints a token — so matching stops being a
+-- function of its inputs alone and every path that matches has to say where the
+-- counter got to. **No pattern mints yet**: every case here answers the counter
+-- it was handed, and the threading is what the binder patterns will need
+-- already in place rather than a signature change spread over the engine later.
+-- Nothing is put in the context and no line is added to the proof term by a
+-- match; @intro@ is what makes such a variable real, and it adopts the token it
+-- is handed.
+matchPattern :: GlobalEnv -> Int -> Pattern -> Value -> Maybe (Env, Int)
+matchPattern env k0 pt v = case (pt, v) of
+  (PVar n, _)              -> Just ([(n, v)], k0)
+  (PWild, _)               -> none
+  (PInt i,  VInt j)  | i == j -> none
+  (PChar c, VChar d) | c == d -> none
+  (PBool b, VBool c) | b == c -> none
+  (PText t, VText u) | t == u -> none
   -- **A written @\"…\"@ matches a name by its dotted form** (MS10), which is
   -- the pattern side of a literal being accepted where a name is wanted: a
   -- pattern is the only place a rule can take a name apart, and refusing one
   -- here would mean a clause could test a name's spelling in a @when@ and not
   -- in a @case@.
-  (PText t, VName g) | t == nameDotted g -> Just []
-  (PPair a b, VPair x y)   -> (++) <$> matchPattern' a x <*> matchPattern' b y
-  (PSome a, VOption (Just x)) -> matchPattern' a x
-  (PNone,   VOption Nothing)  -> Just []
-  (PList ps mt, VList xs)  -> list ps mt xs
+  (PText t, VName g) | t == nameDotted g -> none
+  (PPair a b, VPair x y)   -> do
+    (as, k1) <- matchPattern' k0 a x
+    (bs, k2) <- matchPattern' k1 b y
+    pure (as ++ bs, k2)
+  (PSome a, VOption (Just x)) -> matchPattern' k0 a x
+  (PNone,   VOption Nothing)  -> none
+  (PList ps mt, VList xs)  -> list k0 ps mt xs
   -- **An object term, matched against the 'Core' it denotes** (MS6 phase
   -- 104c). See 'matchSkeleton' for the reduction rule, which is the whole of
   -- what is interesting here.
-  (PObject sk, VTerm t)    -> matchSkeleton env sk t
+  (PObject sk, VTerm t)    -> matchSkeleton env k0 sk t
   _                        -> Nothing
   where
-    matchPattern' = matchPattern env
+    none = Just ([], k0)
+    matchPattern' k = matchPattern env k
     -- A closed pattern must exhaust the list; an open one binds the remainder,
     -- and the remainder is itself matched, which is what makes @[a, ...[]]@ the
     -- long way of saying one element.
-    list [] Nothing   []   = Just []
-    list [] Nothing   _    = Nothing
-    list [] (Just t)  rest = matchPattern' t (VList rest)
-    list _  _         []   = Nothing
-    list (q : qs) mt' (x : rest) =
-      (++) <$> matchPattern' q x <*> list qs mt' rest
+    list k [] Nothing   []   = Just ([], k)
+    list _ [] Nothing   _    = Nothing
+    list k [] (Just t)  rest = matchPattern' k t (VList rest)
+    list _ _  _         []   = Nothing
+    list k (q : qs) mt' (x : rest) = do
+      (as, k1) <- matchPattern' k q x
+      (bs, k2) <- list k1 qs mt' rest
+      pure (as ++ bs, k2)
 
 -- | Match a call's arguments against a clause's parameters (MS5 phase 82).
 --
@@ -2265,8 +2299,8 @@ matchPattern env pt v = case (pt, v) of
 -- **Arity is part of matching**, which is why this answers 'Nothing' rather
 -- than being paired with a length test: a name may carry a one-argument clause
 -- and a two-argument one, and each call picks its own ('Thena.Rules.clauses').
-matchClause :: GlobalEnv -> Rule -> [Value] -> Maybe Env
-matchClause env r = matchPatterns env (ruleParams r)
+matchClause :: GlobalEnv -> Int -> Rule -> [Value] -> Maybe (Env, Int)
+matchClause env k r = matchPatterns env k (ruleParams r)
 
 -- | Match a run of patterns against a run of values (MS5 phase 82).
 --
@@ -2277,10 +2311,11 @@ matchClause env r = matchPatterns env (ruleParams r)
 -- **Arity is part of matching**, which is why this answers 'Nothing' rather
 -- than being paired with a length test: a name may carry a one-argument clause
 -- and a two-argument one, and each call picks its own ('Thena.Rules.clauses').
-matchPatterns :: GlobalEnv -> [Pattern] -> [Value] -> Maybe Env
-matchPatterns env ps vs
+matchPatterns :: GlobalEnv -> Int -> [Pattern] -> [Value] -> Maybe (Env, Int)
+matchPatterns env k ps vs
   | length ps /= length vs = Nothing
-  | otherwise              = concat <$> zipWithM (matchPattern env) ps vs
+  | otherwise =
+      threading (\k' (p, x) -> matchPattern env k' p x) k (zip ps vs)
 
 -- | Match an object term's shape against a 'Core' (MS6 phase 104c).
 --
@@ -2298,23 +2333,28 @@ matchPatterns env ps vs
 --
 -- Reduction is weak head normal form, so it exposes one level; the recursion
 -- does the rest as it descends.
-matchSkeleton :: GlobalEnv -> Skeleton Pattern -> Core -> Maybe Env
-matchSkeleton env sk t = case here t of
+matchSkeleton :: GlobalEnv -> Int -> Skeleton Pattern -> Core -> Maybe (Env, Int)
+matchSkeleton env k sk t = case here t of
   Just bs -> Just bs
+  -- **The second attempt begins from the counter the first was handed**, not
+  -- from wherever the first got to: an attempt that failed bound nothing, so
+  -- the tokens it drew were never anybody's. That falls out of 'Maybe' here
+  -- rather than being arranged.
   Nothing -> here (whnf env [] t)
   where
     here term = case sk of
-      SHole AtTerm p          -> matchPattern env p (VTerm term)
+      SHole AtTerm p          -> matchPattern env k p (VTerm term)
       SHole (AtPrimitive _) p -> case term of
-        Primitive l -> matchPattern env p (primitiveValue l)
+        Primitive l -> matchPattern env k p (primitiveValue l)
         _           -> Nothing
       SLit l -> case term of
-        Primitive l' | l == l' -> Just []
+        Primitive l' | l == l' -> Just ([], k)
         _                      -> Nothing
       SNode nm kids -> case spineOf term of
         Just (nm', args)
           | nm == nm', length args == length kids ->
-              concat <$> zipWithM (matchSkeleton env) kids args
+              threading (\k' (sk', a) -> matchSkeleton env k' sk' a) k
+                        (zip kids args)
         _ -> Nothing
 
 -- | A constructor application, however it is spelled.

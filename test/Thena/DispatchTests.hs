@@ -414,7 +414,7 @@ dispatchableTests =
     "dispatch skips parameterised rules"
     [ testCase "matches shows try, dispatch does not" $ do
         let std = expectedBase
-        names' (matches std emptyGlobals hole)
+        names' (matches std emptyGlobals 0 hole)
           @?= [ -- **@try-in-scope@ is nullary and dispatch DOES run it** (MS12):
                -- it finds its own term, so it is the one candidate in this list
                -- that can close the goal. **It is ABOVE @attack@** (his
@@ -474,7 +474,7 @@ dispatchableTests =
                ++ replicate 15 "elaborate"
                ++ ["run-block"]
                ++ replicate 2 "spine-arguments"
-        names' (dispatch std emptyGlobals hole)
+        names' (dispatch std emptyGlobals 0 hole)
           @?= ["try-in-scope", "fit-in-scope", "attack", "abandon", "step"]
 
       -- And that is what the engine actually runs: @try-core@ would have been

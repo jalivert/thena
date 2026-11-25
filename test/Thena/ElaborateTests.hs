@@ -802,7 +802,7 @@ baseTests =
       -- **@fit-core@ is two clauses and both heads pass**, which is the point
       -- of it: the choice point between them is the search.
       testCase "every rule whose head passes is a candidate" $
-        [ nameDotted g | Rule g _ _ _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
+        [ nameDotted g | Rule g _ _ _ _ _ <- drain (matches expectedBase emptyGlobals 0 hole) ]
           @?= [ -- **The first nullary candidate that can close a goal** (MS12):
                 -- it reads the context itself, so it needs no argument and a
                 -- bare @prove@ therefore has it. **It is first, above @attack@**
@@ -865,7 +865,7 @@ baseTests =
       -- parameters. @step ‹n›@ is in this listing too (MS12 phase 347) and is
       -- filtered out here by its arity.
     , testCase "step is a rule over prim-step" $
-        case [ r | r@(Rule (GlobalName [] "step") [] _ _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
+        case [ r | r@(Rule (GlobalName [] "step") [] _ _ _ _) <- drain (matches expectedBase emptyGlobals 0 hole) ] of
           [Rule _ ps _ b _ _] -> (ps, b) @?= ([], [Do Ops.Dispatch])
           other           -> assertFailure ("expected one clause: " ++ show other)
     ]
