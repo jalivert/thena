@@ -39,8 +39,7 @@ import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
 import Thena.Instral.Ops (Instr (..), Rule (..), Test (..))
 import qualified Thena.Instral.Ops as Ops
-import qualified Thena.Rules
-import Thena.Rules (RuleBase, dispatch, matches, ruleBase)
+import Thena.Rules (RuleBase, dispatch, iterRules, matches, ruleBase)
 import Thena.Standard (aRule, expectedBase)
 
 tests :: TestTree
@@ -494,6 +493,4 @@ dispatchableTests =
     ]
   where
     names' it = [ nameDotted (ruleName r) | r <- drainIt it ]
-    drainIt it = case Thena.Rules.next it of
-      Nothing         -> []
-      Just (mt, rest) -> Thena.Rules.matchRule mt : drainIt rest
+    drainIt = iterRules

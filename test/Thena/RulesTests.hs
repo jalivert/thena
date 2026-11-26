@@ -73,6 +73,7 @@ import Thena.Rules
   , RuleIter
   , allRules
   , hasNext
+  , iterRules
   , Match (..)
   , matches
   , next
@@ -141,13 +142,17 @@ nameOf = nameDotted . ruleName
 -- | Walk an iterator to the end with 'next' alone, which is how the driver's
 -- display walks it.
 drain :: RuleIter -> [Rule]
-drain = map matchRule . drainMatches
+drain = iterRules
 
 -- | The same walk, keeping what each match bound (MS12).
-drainMatches :: RuleIter -> [Match]
-drainMatches it = case next it of
+--
+-- **It is told the counter to walk from**, because 'next' matches the clause
+-- again from whatever it is handed (MS12, @~thwhg@) — so walking an iterator
+-- built at 9 from 0 would answer matches nothing ever made.
+drainMatches :: Int -> RuleIter -> [Match]
+drainMatches k it = case next emptyGlobals k it of
   Nothing         -> []
-  Just (mt, rest) -> mt : drainMatches rest
+  Just (mt, rest) -> mt : drainMatches k rest
 
 -- --------------------------------------------------------------------------
 -- What matches where (§7.6)
@@ -250,7 +255,7 @@ iteratorTests =
   testGroup
     "the iterator"
     [ testCase "hasNext agrees with next, at every position" $
-        let walk it = case next it of
+        let walk it = case next emptyGlobals 0 it of
               Nothing        -> hasNext it @?= False
               Just (_, rest) -> (hasNext it @?= True) >> walk rest
          in walk (matches expectedBase emptyGlobals 0 (holeAt type0))
@@ -455,6 +460,30 @@ dataTests =
       -- search was handed, unchanged.
       testCase "and the counter the search was handed rides out with it" $
         namesFor 9 [VList [VText "a", VText "b"]] @?= [9]
+
+    , -- **AN ALTERNATIVE IS MATCHED AGAIN WHEN IT IS TAKEN** (MS12, @~thwhg@,
+      -- his ruling of 2026-11-26). The match made at the fork is what says the
+      -- clause is a candidate at all — 'hasNext' decides @Choice@ against
+      -- @Call@ and cannot answer without it — but the counter does not go
+      -- backwards (§7.4), so by the time backtracking reaches an alternative
+      -- the abandoned branch has minted past everything the fork drew. The
+      -- match the body runs with is therefore drawn when the alternative is
+      -- taken, not when the fork was made.
+      --
+      -- **Nothing mints in a pattern yet**, so what is observable is the
+      -- counter the match answers: built at 9, taken at 60, it answers 60.
+      -- §8's binder patterns are what make this show up as a token.
+      testCase "an alternative is matched from the counter it is taken at" $
+        fmap (matchNames . fst)
+             (next emptyGlobals 60 (splitting 9 [VList [VText "a", VText "b"]]))
+          @?= Just 60
+
+    , -- And it is the same clause bound the same way: re-matching re-draws the
+      -- tokens and changes nothing else.
+      testCase "and it binds what it bound at the fork" $
+        fmap (matchEnv . fst)
+             (next emptyGlobals 60 (splitting 9 [VList [VText "a", VText "b"]]))
+          @?= Just [("x", VText "a"), ("xs", VList [VText "b"])]
     ]
   where
     run is = runOut (machineIn emptyGlobals (holeAt type1) is)
@@ -501,8 +530,11 @@ dataTests =
     namesFor k vs = map matchNames (matchesFor k vs)
 
     matchesFor k vs =
-      drainMatches (clauses [binders] emptyGlobals k (holeAt type1)
-                            (rootName "split") vs)
+      drainMatches k (clauses [binders] emptyGlobals k (holeAt type1)
+                              (rootName "split") vs)
+
+    splitting k vs =
+      clauses [binders] emptyGlobals k (holeAt type1) (rootName "split") vs
 
 -- | What a rule hands back (MS5 phase 63).
 --

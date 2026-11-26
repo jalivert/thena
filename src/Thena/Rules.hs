@@ -30,6 +30,7 @@ module Thena.Rules
   , arities
   , next
   , hasNext
+  , iterRules
 
     -- * Well-formedness (§2.4, §7.2)
   , RuleError (..)
@@ -217,8 +218,27 @@ allCallable bs = concatMap baseRules bs ++ concatMap baseFunctions bs
 -- Laziness is not a nicety here: 'matches' filters by running heads, heads run
 -- 'whnf' (§8), so the tail is real work that 'hasNext' should not do more of
 -- than it must.
-newtype RuleIter = RuleIter [Match]
+--
+-- __It carries what its candidates were matched against__ (MS12, @~thwhg@), so
+-- that taking an alternative can match it again from the counter as it stands
+-- /then/ rather than running with the match made at the fork. 'next' is where
+-- that happens and is the only reader of this field.
+data RuleIter = RuleIter
+  { iterSubject :: [Value]
+    -- ^ the arguments every candidate in this iterator is matched against —
+    -- empty for 'matches' and 'dispatch', which supply none
+  , iterAlts    :: [Match]
+    -- ^ the candidates that matched at the fork, in search order
+  }
   deriving (Eq, Show)
+
+-- | The rules an iterator still has to offer — a diagnostic, for the
+-- choice-point view (@:choices@), which names a clause and reads no bindings.
+--
+-- Deliberately not 'next': nothing here is being taken, so nothing is matched
+-- again and no counter is needed.
+iterRules :: RuleIter -> [Rule]
+iterRules = map matchRule . iterAlts
 
 -- | __A clause that matched, and the environment the match built__ (MS12,
 -- §8's /the environment a match built is carried, never recomputed/).
@@ -243,18 +263,20 @@ data Match = Match
   , matchEnv   :: Op.Env
   , matchNames :: Int
     -- ^ **where the name counter stands after this clause's match** (MS12).
-    -- Matching mints nothing today, so this is the counter the search was
-    -- handed; §8's binder patterns are what make it move, and the signature is
-    -- threaded now so that landing them is a change to the matchers and not to
-    -- the engine.
+    -- Matching mints nothing today, so this is the counter the clause was
+    -- matched from; §8's binder patterns are what make it move, and the
+    -- signature is threaded now so that landing them is a change to the
+    -- matchers and not to the engine.
     --
-    -- **Every candidate in one iterator matched from the SAME counter**, which
-    -- is deliberate and is not the same thing as a running total: a candidate
-    -- that is never entered binds nothing anywhere, so the tokens it drew were
-    -- never anybody's. What that leaves open once a pattern really does mint —
-    -- a token an abandoned alternative's body had already used being drawn
-    -- again by the alternative tried next — is written up as an item, and no
-    -- pattern mints until it is answered.
+    -- **The counter runs along the candidate list** (MS12, @~thwhg@, his ruling
+    -- of 2026-11-26): candidate two is matched from where candidate one's match
+    -- ended, so two candidates of one fork never draw one token. That is half
+    -- of the answer and not the load-bearing half — the body of the alternative
+    -- that /runs/ mints past every candidate in the list, so an alternative
+    -- reached by backtracking would still re-draw what that body spent.
+    -- **'next' is what removes it**, by matching the clause again from the
+    -- counter as it stands when the alternative is taken; this field is then
+    -- that match's answer and not the fork's.
   }
   deriving (Eq, Show)
 
@@ -283,7 +305,7 @@ data Match = Match
 -- said in the first place.
 matches :: [RuleBase] -> GlobalEnv -> Int -> Cursor -> RuleIter
 matches bases env k cur =
-  RuleIter
+  RuleIter []
     [ Match r [] k | r <- allRules bases, all (holds env cur []) (ruleHead r) ]
 
 -- | __The matching RULES, as against the matching clauses__ — his ruling,
@@ -314,11 +336,7 @@ matches bases env k cur =
 -- second traversal of the base.
 matchingRules
   :: [RuleBase] -> GlobalEnv -> Int -> Cursor -> [((GlobalName, Int), [Rule])]
-matchingRules bases env k cur = byCallable (drain (matches bases env k cur))
-  where
-    drain it = case next it of
-      Nothing         -> []
-      Just (mt, rest) -> matchRule mt : drain rest
+matchingRules bases env k cur = byCallable (iterRules (matches bases env k cur))
 
 -- | Group rules by name and arity, **keeping first-appearance order** for the
 -- groups and for the clauses inside each.
@@ -407,8 +425,8 @@ groupParams rs@(first : _) =
 -- @try x@. @:matches@ keeps showing it.
 dispatch :: [RuleBase] -> GlobalEnv -> Int -> Cursor -> RuleIter
 dispatch base env k cur =
-  let RuleIter ms = matches base env k cur
-   in RuleIter [ mt | mt <- ms, null (ruleParams (matchRule mt)) ]
+  let RuleIter vs ms = matches base env k cur
+   in RuleIter vs [ mt | mt <- ms, null (ruleParams (matchRule mt)) ]
 
 -- | The clauses @Call@ may run: **this name, this arity, and a head that
 -- passes** (§8, phase 23).
@@ -447,17 +465,29 @@ dispatch base env k cur =
 clauses
   :: [RuleBase] -> GlobalEnv -> Int -> Cursor -> GlobalName -> [Value]
   -> RuleIter
-clauses bases env k cur nm vs = RuleIter (searched ++ take 1 called)
+clauses bases env k cur nm vs = RuleIter vs (searched ++ take 1 called)
   where
-    -- **Each candidate matches from the counter this search was handed**, and
-    -- not from where the candidate before it got to — see 'matchNames'.
-    fitting rs =
-      [ Match r bound k'
-      | r <- rs
-      , ruleName r == nm
-      , Just (bound, k') <- [matchClause env k r vs]
-      , all (holds env cur bound) (ruleHead r)
-      ]
+    -- **The counter runs along the list** (MS12, @~thwhg@): a candidate is
+    -- matched from where the candidate before it got to, so no two candidates
+    -- of one fork draw one token — see 'matchNames', which also says why that
+    -- is not the half that mattered, and 'next', which is.
+    --
+    -- A candidate that does not match leaves the counter where it was: there is
+    -- nothing to advance past, because 'matchClause' answers no counter when it
+    -- answers no bindings, and the tokens a failed match drew were never
+    -- anybody's.
+    --
+    -- **The two lists each run from @k@** and that is not a special case: a
+    -- name cannot carry both a searched clause and a called one
+    -- ('Thena.Errors.RuleAndFunction' refuses it at load), so one of them is
+    -- always empty.
+    fitting rs = go k [ r | r <- rs, ruleName r == nm ]
+
+    go _ []         = []
+    go n (r : rest) = case matchClause env n r vs of
+      Just (bound, n')
+        | all (holds env cur bound) (ruleHead r) -> Match r bound n' : go n' rest
+      _ -> go n rest
 
     searched = fitting (concatMap baseRules bases)
     called   = fitting (concatMap baseFunctions bases)
@@ -471,16 +501,52 @@ arities :: [RuleBase] -> GlobalName -> [Int]
 arities bases nm =
   [ length (ruleParams r) | r <- allCallable bases, ruleName r == nm ]
 
-next :: RuleIter -> Maybe (Match, RuleIter)
-next (RuleIter ms) = case ms of
+-- | Take the next alternative, __matching its clause again from the counter as
+-- it stands now__ (MS12, @~thwhg@, his ruling of 2026-11-26).
+--
+-- **Why the match is made twice.** A candidate is matched at the fork because
+-- nothing else can say whether it is a candidate at all — 'hasNext' is what
+-- decides @Choice@ against @Call@ (§7.3), and it cannot answer without
+-- matching. But the counter does not go backwards (§7.4): by the time
+-- backtracking reaches an alternative, the abandoned branch's body has minted
+-- past everything the fork's matches drew, so running with the fork's bindings
+-- would hand out a token that branch had already spent. Matching again here is
+-- what keeps the tokens a session hands out monotone.
+--
+-- **Nothing read the fork's bindings in between.** 'hasNext' asks only whether
+-- there is another, and 'iterRules' reads a clause and never an environment, so
+-- the environment replaced here is one nobody has seen.
+--
+-- **The first alternative goes through this too**, and that is the uniformity
+-- rather than a cost: at the fork the counter handed in is the one 'clauses'
+-- was handed, so the match is re-made identical.
+--
+-- A clause that matched at the fork matches again, because matching reads the
+-- counter only to draw tokens from it and compares nothing against its value.
+-- **That is reasoning and not a measurement** — nothing mints until §8's binder
+-- patterns land — so the case where it does not is written out rather than
+-- assumed away, and it keeps the fork's own match, which is what the engine ran
+-- with before this existed.
+next :: GlobalEnv -> Int -> RuleIter -> Maybe (Match, RuleIter)
+next env k (RuleIter vs ms) = case ms of
   []        -> Nothing
-  mt : rest -> Just (mt, RuleIter rest)
+  mt : rest -> Just (remade env k vs mt, RuleIter vs rest)
+
+-- | A chosen clause's match, re-drawn from the counter as it stands.
+remade :: GlobalEnv -> Int -> [Value] -> Match -> Match
+remade env k vs mt = case matchClause env k (matchRule mt) vs of
+  Just (bound, k') -> mt { matchEnv = bound, matchNames = k' }
+  Nothing          -> mt
 
 -- | Is there another? Phase 16's peek asks this to decide whether a @Choice@
 -- frame is worth building at all (§7.3), so it must not force more of the list
 -- than one more head match.
+--
+-- **It does not match anything again**, and it is why 'next' has to: this is
+-- the question the fork's matches exist to answer, and the fork is where it is
+-- asked.
 hasNext :: RuleIter -> Bool
-hasNext (RuleIter ms) = not (null ms)
+hasNext (RuleIter _ ms) = not (null ms)
 
 -- | One shape question, answered against the focus.
 --

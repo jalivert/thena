@@ -175,7 +175,8 @@ import Thena.Instral.Infer (inferProgram, reachingAll)
 import Thena.Instral.Type (Signature)
 import Thena.Rules
   ( Match (..), RuleBase, RuleError (..), RuleIter, allCallable, allSignatures
-  , arities, basePath, clauses, dispatch, hasNext, next, resolveBlock
+  , arities, basePath, clauses, dispatch, hasNext, iterRules, next
+  , resolveBlock
   , rootReading )
 import Thena.Syntax.Lexer (isIdentifier)
 import Thena.Surface.Zipper (SurfaceZipper)
@@ -1076,7 +1077,7 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
       | depth <= lineFloor m = declined frames
       | otherwise = case fr of
           Thena.Engine.Call {} -> unwind (depth - 1) stk
-          Choice {} -> case next (alts fr) of
+          Choice {} -> case next (globals m) (names m) (alts fr) of
             -- Cannot arise: the peek in 'perform' never builds a 'Choice'
             -- without a live alternative, and 'demote' unbuilds one the moment
             -- its last is taken. Written out rather than left to a
@@ -1680,7 +1681,7 @@ perform instr rest m = case operation instr of
   -- the callee's environment under the name @hint@. Both are gone: elaboration
   -- is a rule called by name, so it was never a dispatch, and there is no magic
   -- name in the instruction language any more.
-  Dispatch -> case next it of
+  Dispatch -> case next (globals m) (names m) it of
     Nothing        -> failure NoRuleMatched m
     Just (mt, it')
       -- Announced only when the dispatch was a real decision, which is
@@ -1777,7 +1778,7 @@ perform instr rest m = case operation instr of
 
   Op.Call nm args -> case traverse (operandValue (env (exec m))) args of
     Left e   -> failure e m
-    Right vs -> case next (it vs) of
+    Right vs -> case next (globals m) (names m) (it vs) of
       Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) (rootName nm))) m
       Just (mt, it')
         | hasNext it' ->
@@ -3646,7 +3647,7 @@ choicePoints :: Machine -> [ChoicePoint]
 choicePoints m =
   [ ChoicePoint (choiceId fr)
                 (ChoiceAlt (chosen fr) (chosenAt fr))
-                [ ChoiceAlt (ruleName r) (ruleOrigin r) | r <- drainIter (alts fr) ]
+                [ ChoiceAlt (ruleName r) (ruleOrigin r) | r <- iterRules (alts fr) ]
   | fr@Choice {} <- stack (exec m)
   ]
 
@@ -3654,11 +3655,6 @@ choicePoints m =
 -- by the time it leaves here — the same bargain 'unifyMessage' already struck.
 nameOfRule :: Rule -> String
 nameOfRule = nameDotted . ruleName
-
-drainIter :: RuleIter -> [Rule]
-drainIter it = case next it of
-  Nothing         -> []
-  Just (mt, rest) -> matchRule mt : drainIter rest
 
 -- | Why @retry@ could not.
 --
@@ -3709,11 +3705,12 @@ seedFor fr mt = entryEnv fr ++ matchEnv mt
 -- @entering@ because a choice point's identifier is drawn from the same
 -- counter, and it has to be drawn /after/ the match it is forking on.
 --
--- **Only the first alternative of a choice point goes through this.** An
--- alternative reached by backtracking matched before the abandoned branch's
--- body ran, so its counter is behind the session's, and 'names' does not go
--- backwards (§7.4). That costs nothing while matching mints nothing, and it is
--- the open question the binder patterns of §8 have to answer.
+-- **Only the first alternative of a choice point goes through this**, and an
+-- alternative reached by backtracking does not need it: 'Thena.Rules.next'
+-- matches that clause again from the counter as it stands when it is taken
+-- (@~thwhg@, his ruling of 2026-11-26), so the match it arrives with is already
+-- drawn from ahead of the session's counter rather than from behind it. 'names'
+-- does not go backwards (§7.4) and now nothing asks it to.
 reserving :: Match -> Machine -> Machine
 reserving mt k = k { names = matchNames mt }
 
@@ -3724,7 +3721,8 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
 
     go _ [] = Left missing
     go popped (fr : stk) = case fr of
-      Choice {} | maybe True (== choiceId fr) target -> case next (alts fr) of
+      Choice {} | maybe True (== choiceId fr) target ->
+        case next (globals m) (names m) (alts fr) of
         Nothing        -> Left missing     -- cannot arise; see 'demote'
         Just (mt, it') -> Right
           ( m { development = saved fr

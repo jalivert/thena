@@ -67,9 +67,8 @@ import Thena.Instral.Ops
 import qualified Thena.Instral.Ops as Ops
 import Thena.Rules
   ( RuleIter
-  , matchRule
+  , iterRules
   , matches
-  , next
   )
 import Thena.Files (startingSession)
 import Thena.Render (renderResponse)
@@ -459,9 +458,7 @@ isHole m = case focus (cursor (development m)) of
   _                             -> False
 
 drain :: RuleIter -> [Rule]
-drain it = case next it of
-  Nothing         -> []
-  Just (mt, rest) -> matchRule mt : drain rest
+drain = iterRules
 
 -- --------------------------------------------------------------------------
 -- The leaves
