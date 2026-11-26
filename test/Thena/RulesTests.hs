@@ -228,7 +228,7 @@ matchTests =
     , testCase "where the Π clause is offered, intro succeeds" $
         ranOk (machineAt (readyAt (arrow type0 type0)) [Do (Ops.IntroPi Nothing)])
 
-      -- **THE COST OF THE HEAD BEING @focus-is-hole@** (MS12 phase 357). The
+      -- **THE COST OF THE HEAD BEING @at ? _ : _@** (MS12 phase 357). The
       -- root of a development has the thesis's @?x : S . x@ shape too, so the
       -- head passes there and the op refuses: a binder put at the root would
       -- change what the development proves, which is what @attack@ is for.
@@ -998,7 +998,7 @@ ranOk m = case runOut m of
 -- point between them is what makes it a search rather than a loop.
 everyHoleRule :: [String]
 everyHoleRule =
-    -- **@try-in-scope@ asks @focus-is-hole@ and nothing else** (MS12), so it is
+    -- **@try-in-scope@ is written @at ? _ : _@ and nothing else** (MS12), so it is
     -- offered at every hole and at no guess. **It is first, ABOVE @attack@**
     -- (his instruction of 2026-11-23): @attack@ never fails, so below it this
     -- rule was never reached by a bare @prove@. @fit-in-scope@ is the same walk
@@ -1027,11 +1027,11 @@ everyHoleRule =
     -- specialiser arrived, and now calls @split-elaborate@ like the other.
     ++ splitHelpers
     -- **The two interactive tactics** (MS9 phase 231), which ask only
-    -- @focus-is-hole@ and so are offered at every one.
+    -- @at ? _ : _@ and so are offered at every one.
     ++ ["induction-core", "case-core"]
     ++ replicate 15 "elaborate"
     ++ ["run-block"]
-    -- **@intro-binders@ asks @focus-is-hole@ as of MS12 phase 357**, with
+    -- **@intro-binders@ is written @at ? _ : _@ as of MS12 phase 357**, with
     -- @intro@ itself: what it walks is the hole the cursor stands on. A test
     -- about an argument nobody supplied does not exclude a clause (phase 47),
     -- so all four are offered — a group or a single binder, written or bare.
@@ -1054,7 +1054,7 @@ holeRulesWithIntro = before ++ ["intro", "intro"] ++ after
 -- **A test about an argument nobody supplied does not exclude a clause** (phase
 -- 47), so a rule whose head only asks about its argument is offered wherever
 -- its state test passes. @intro-binders@ left this list in MS12 phase 357: it
--- asks @focus-is-hole@ now, with @intro@.
+-- is written @at ? _ : _@ now, with @intro@.
 walkers :: [String]
 walkers =
   ["claim", "assume", "quantify"]
@@ -1105,7 +1105,7 @@ splitHelpers =
   ]
   -- **The interactive spelling's own helpers** (MS9 phase 231), after
   -- @split-elaborate@ because that is where the base declares them. The two
-  -- tactics themselves ask @focus-is-hole@, so they are in 'everyHoleRule' and
+  -- tactics themselves are written @at ? _ : _@, so they are in 'everyHoleRule' and
   -- not here.
   ++ replicate 4 "argument-patterns"
   ++ ["argument-pattern", "open-case", "open-case"]

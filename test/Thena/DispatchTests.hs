@@ -37,10 +37,10 @@ import Thena.Engine
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
-import Thena.Instral.Ops (Instr (..), Rule (..), Test (..))
+import Thena.Instral.Ops (Instr (..), Rule (..))
 import qualified Thena.Instral.Ops as Ops
 import Thena.Rules (RuleBase, dispatch, iterRules, matches, ruleBase)
-import Thena.Standard (aRule, expectedBase)
+import Thena.Standard (atRule, atHole, expectedBase)
 
 tests :: TestTree
 tests =
@@ -66,7 +66,7 @@ hole = enter (Under (Claim v (Ident "goal") type0) (Trailing (Free v)))
   where v = fst (fresh 0)
 
 rule :: String -> [Instr] -> Rule
-rule n = aRule (rootName n) [] [FocusIsHole]
+rule n = atRule atHole (rootName n) [] []
 
 -- | Succeeds, and changes the development: the hole becomes a guess.
 works :: Rule
@@ -472,7 +472,7 @@ dispatchableTests =
                   ]
                ++ replicate 15 "elaborate"
                ++ ["run-block"]
-               -- @intro-binders@ asks @focus-is-hole@ as of MS12 phase 357.
+               -- @intro-binders@ is written @at ? _ : _@ as of MS12 phase 357.
                ++ replicate 4 "intro-binders"
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals 0 hole)

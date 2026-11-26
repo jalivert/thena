@@ -66,7 +66,6 @@ module Thena.Rules
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   (Core (..), GlobalName (..), InScope, globalUnder, nameDotted, rootName, rootScope)
-import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor (Cursor, Focus (..), context, expectedType, focus)
 import Thena.Global.Env (GlobalEnv, emptyGlobals, knownIn)
 import qualified Thena.Language.Earley as Earley
@@ -569,14 +568,15 @@ hasNext (RuleIter _ ms) = not (null ms)
 
 -- | One shape question, answered against the focus.
 --
--- **The cost of shallow heads, in one concrete case** (§8). @FocusIsHole@ passes
--- at the hole a fresh @:theorem@ leaves, so @intro@ is offered there — and
--- @intro@ refuses it with @NotReadyToIntroduce@, because a λ above the root of
--- a development would change what the development proves. That is §8's stated
--- cost arriving, not a bug: the rule matches, runs and fails in its body, and
--- failing in a body is already handled (§7.3). A head that could tell the two
--- holes apart would have to ask what *encloses* the focus, which is what
--- \"shallow\" rules out.
+-- **The cost of shallow heads, in one concrete case** (§8), and it is no longer
+-- a /test/ since MS12 phase 359 — it is the @at ? _ : _@ pattern that @intro@
+-- is written with. That pattern matches the hole a fresh @:theorem@ leaves, so
+-- @intro@ is offered there — and @intro@ refuses it with
+-- @NotReadyToIntroduce@, because a λ above the root of a development would
+-- change what the development proves. That is §8's stated cost arriving, not a
+-- bug: the rule matches, runs and fails in its body, and failing in a body is
+-- already handled (§7.3). A head that could tell the two holes apart would have
+-- to ask what *encloses* the focus, which is what \"shallow\" rules out.
 --
 -- **THE EXAMPLE THIS HADDOCK CARRIED UNTIL MS12 PHASE 357 NO LONGER EXISTS**, and
 -- it is worth saying why. It was @GoalTypeIsPi@ passing at
@@ -600,18 +600,9 @@ hasNext (RuleIter _ ms) = not (null ms)
 -- name here is never a mistake in the rule.
 holds :: GlobalEnv -> Cursor -> Op.Env -> Test -> Bool
 holds env cur args t = case t of
-  FocusIsHole   -> case focus cur of
-    OnComponent (Component.Claim {}) -> True
-    _                                -> False
-  FocusIsGuess  -> case focus cur of
-    OnComponent (Component.Guess {}) -> True
-    _                                -> False
   FocusIsComponent -> case focus cur of
     OnComponent _ -> True
     _             -> False
-  FocusIsDefinition -> case focus cur of
-    OnComponent (Component.Define {}) -> True
-    _                                 -> False
   GoalTypeIsPi  -> case reduced of
     Just (Pi {}) -> True
     _            -> False
@@ -2564,9 +2555,6 @@ data TestError = NoSuchTestWord | WrongTestArity Int Int
 -- forgot.
 withOperands :: Test -> [Operand] -> Maybe Test
 withOperands t os = case (t, os) of
-  (FocusIsHole,      []) -> Just FocusIsHole
-  (FocusIsDefinition, []) -> Just FocusIsDefinition
-  (FocusIsGuess,     []) -> Just FocusIsGuess
   (FocusIsComponent, []) -> Just FocusIsComponent
   (GoalTypeIsPi,     []) -> Just GoalTypeIsPi
   (GoalTypeIsLet,    []) -> Just GoalTypeIsLet
@@ -2629,9 +2617,6 @@ withOperands t os = case (t, os) of
 -- surface language's from MS4 phase 47 onward.
 testTypes :: Test -> [(Operand, Ty.Ty)]
 testTypes t = case t of
-  FocusIsHole     -> []
-  FocusIsDefinition -> []
-  FocusIsGuess    -> []
   FocusIsComponent -> []
   GoalTypeIsPi    -> []
   GoalTypeIsLet   -> []
@@ -2686,13 +2671,10 @@ testOperands = map fst . testTypes
 -- how it is spelled — 'Thena.Instral.Ops.opKeyword'\'s trick, one type over.
 --
 -- Hyphenated, which is what §8 and @OBJECTIVE.md@ have always written
--- (@focus-is-hole@, @hint-is-app@) and what the lexer could not read until this
+-- (@focus-is-component@, @hint-is-app@) and what the lexer could not read until this
 -- phase widened an identifier.
 testWord :: Test -> String
 testWord t = case t of
-  FocusIsHole     -> "focus-is-hole"
-  FocusIsDefinition -> "focus-is-definition"
-  FocusIsGuess    -> "focus-is-guess"
   FocusIsComponent -> "focus-is-component"
   GoalTypeIsPi    -> "goal-type-is-pi"
   GoalTypeIsLet   -> "goal-type-is-let"
@@ -2745,7 +2727,7 @@ testWord t = case t of
 -- not what any written one says.
 everyTest :: [Test]
 everyTest =
-  [ FocusIsHole, FocusIsGuess, FocusIsComponent, FocusIsDefinition
+  [ FocusIsComponent
   , GoalTypeIsPi, GoalTypeIsLet
   , SurfaceIsName (Lit (VText ""))
   , SurfaceIsLiteral (Lit (VText ""))

@@ -516,9 +516,9 @@ ComponentP :: { RawComponentP }
   | '∀' PatAtom ':' PatAtom                { RawCPQuantify $2 $4 }
 
 -- A head is a run of tests with nothing between them, so a test that takes
--- operands is parenthesised — @when focus-is-hole (surface-is-name t)@ — and a
+-- operands is parenthesised — @when goal-type-is-pi (surface-is-name t)@ — and a
 -- bare word is a test of no operands (MS4 phase 47). Without the brackets
--- @when focus-is-hole goal-type-is-pi@ would parse as one test applied to
+-- @when goal-type-is-pi goal-type-is-let@ would parse as one test applied to
 -- another word, which is the same ambiguity a REPL argument run has and is
 -- answered the same way.
 Tests :: { [RawTest] }

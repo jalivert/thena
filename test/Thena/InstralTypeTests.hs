@@ -435,7 +435,7 @@ headTests =
   testGroup
     "head tests"
     [ testCase "a focus question asks about nothing" $
-        map snd (testTypes FocusIsHole) @?= []
+        map snd (testTypes FocusIsComponent) @?= []
     , testCase "a surface question wants a surface term" $
         map snd (testTypes (SurfaceIsLambda r)) @?= [TSurface]
     , testCase "and so does every other one" $

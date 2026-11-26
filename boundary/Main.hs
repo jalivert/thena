@@ -453,7 +453,7 @@ ruleFile = do
 ruleStatement :: IO [String]
 ruleStatement = do
   (s0, _) <- startingSession
-  let src = "rule base inside where\nrule crush :- when focus-is-hole do\n"
+  let src = "rule base inside where\nrule crush at ? _ : _ :- do\n"
          <> "  say \"trying\"\n  say nonesuch\n"
   pure $ case snd (loadRuleTexts s0 [("inside.thena.rules", src)]) of
     RuleFileRefused _ e ->

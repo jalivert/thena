@@ -1007,7 +1007,7 @@ It stops when a rule says `yield`. The shipped rule base never does; a rule base
 consult may, and four lines are enough:
 
 ```
-rule elaborate t :- when focus-is-hole (surface-is-placeholder t)
+rule elaborate t at ? _ : _ :- when (surface-is-placeholder t)
   do yield "a placeholder: fill it and `yield` to carry on"
 ```
 
@@ -1792,7 +1792,8 @@ inference builds a join.
 
 ### A rule head says what the focus is, with `at`
 
-*Decided 2026-09-14, built 2026-11-26. `at` is a reserved word from that day.*
+*Decided 2026-09-14, built 2026-11-26. `at` is a reserved word from that day,
+and the shipped base is written with it.*
 
 A rule's head is its parameters, then the focus, then its shape tests — and the
 focus is written as a pattern over one of the five pieces a development is built
@@ -1817,8 +1818,19 @@ is over development components, which are not core terms, and the development
 calculus is built in rather than declared — so there is no fence to write. When
 it becomes a declared language it will gain one, like anything else.
 
-**A clause with no `at` is offered at every focus.** Nothing about an existing
-rule changed.
+**A clause with no `at` is offered at every focus** — every rule that is a
+function, and the five clauses below that ask about the focus without caring
+which of the five it is.
+
+**IT REPLACED THREE HEAD TESTS, AND THERE IS NO FOURTH TO REPLACE THEM WITH.**
+`focus-is-hole`, `focus-is-guess` and `focus-is-definition` are gone: they are
+`at ? _ : _`, `at ? _ ≐ _ : _` and `at _ = _ : _`, and asking the same question
+two ways is the redundancy this notation exists to remove. **`focus-is-component`
+stays**, because it asks whether the focus is *any* of the five and `at` is
+written as one of them. Five clauses of the shipped base ask it — `rename`, both
+clauses of `step` over a count, and both of `spine-arguments` — and each is the
+weakest true statement its body needs: a word belongs to a binder and all five
+components have one, while a constraint and a position inside a term do not.
 
 **Each position is an ordinary pattern, so a bare word binds there.** `at ? h :
 s` binds the hole's name and its type; a `` core`…` `` region at the type
@@ -1925,8 +1937,7 @@ occurrences of the body belong to this binder. Two binders may print the same
 word.
 
 ```
-rule rebind core`∀ (${x} : ${s}) -> ${e}` :-
-  when focus-is-hole
+rule rebind core`∀ (${x} : ${s}) -> ${e}` at ? _ : _ :-
   do g = make-forall x s e
      claim "rebuilt" g
 ```
@@ -4350,7 +4361,7 @@ their binder wherever that walk stopped. So a rule could read one position and
 change another:
 
 ```
-rule intro-pi :- when focus-is-guess
+rule intro-pi at ? _ ≐ _ : _ :-
   do g = goal
      ; core`∀ (${x} : ${T}) -> ${E}` = g
      ; call intro x
@@ -4364,8 +4375,8 @@ rule named one quantifier's binder and the system opened another's with the
 word. Nothing ill-typed came out of it — a binder's type is the one the goal
 supplies, and a binder's word decides nothing in a core term — but **the rule
 asked about one thing and the system acted on another, silently**, and no rule
-could be written that did not risk it. The same rule, with `focus-is-hole` as
-its head, now names the second binder off the arrow — the rule above in a file
+could be written that did not risk it. The same rule, written `at ? _ : _`,
+now names the second binder off the arrow — the rule above in a file
 of its own, consulted, and nothing else typed:
 
 ```
@@ -4414,7 +4425,7 @@ type
 under the binder, so the goal that was `id1` after one `intro` is still `id1`
 after two — nothing is minted and renamed behind the proof.
 
-**And they ask `focus-is-hole`, which puts them beside `attack`** in the list
+**And they are written `at ? _ : _`, which puts them beside `attack`** in the list
 the engine searches. `attack` applies at every hole and never fails, so the
 order of the base is what keeps them reachable: `intro` is written above
 `attack`, for the same reason `try-in-scope` is — see *the tactics that can
@@ -4432,8 +4443,8 @@ first always won. A test may now take operands, and it is written in
 parentheses:
 
 ```
-rule pick s :- when focus-is-hole (surface-is-name s) do say "a name"
-rule pick s :- when focus-is-hole                     do say "not a name"
+rule pick s at ? _ : _ :- when (surface-is-name s) do say "a name"
+rule pick s at ? _ : _ :-                     do say "not a name"
 ```
 
 ```
@@ -4452,7 +4463,7 @@ same rule a rule body follows.
 
 **A bare word is a test of no operands**, and that is why the brackets are
 there: a head is a run of tests with nothing between them, so
-`when focus-is-hole surface-is-name t` would read as one test applied to two
+`when goal-type-is-pi surface-is-name t` would read as one test applied to two
 words. It is the ambiguity a REPL argument run has, answered the same way.
 
 A head may name **only the rule's own parameters** — it runs before the body, so
@@ -4473,11 +4484,11 @@ already strikes for operands.
 McBride's tactic is now written as the two halves it always had:
 
 ```
-rule fill t :- when focus-is-hole
+rule fill t at ? _ : _ :-
   do n = fresh-name "refined" ; x = define n t
      ; s = typeof x ; g = goal ; unify-into s g ; prim-try x
 
-rule unify-refine-core t :- when focus-is-hole do fill t ; solve
+rule unify-refine-core t at ? _ : _ :- do fill t ; solve
 ```
 
 `` fill core`t` `` parks `t` in a `=`-binding, unifies its type with the goal's
@@ -4561,10 +4572,10 @@ interface rather than about the engine.
 `elaborate` is thirteen clauses, and each says which surface node it is for:
 
 ```
-rule elaborate t :- when focus-is-hole (surface-is-name t)
+rule elaborate t at ? _ : _ :- when (surface-is-name t)
   do w = surface-name t ; x = resolve-name w ; fill t ; solve
 
-rule elaborate t :- when focus-is-hole (surface-is-placeholder t) do
+rule elaborate t at ? _ : _ :- when (surface-is-placeholder t) do
 ```
 
 So `:step` through an elaboration shows the clause, not one opaque instruction:
@@ -5381,14 +5392,14 @@ instructions with no iteration — so a helper peels one binder and calls itself
 on the tail, and the term is its own counter:
 
 ```
-rule intro-binders t k :- when focus-is-hole (lambda-binds-more t) (lambda-is-bare t)
+rule intro-binders t k at ? _ : _ :- when (lambda-binds-more t) (lambda-is-bare t)
   do x  = lambda-name t
      ; k2 = prim-lambda x
      ; tl = lambda-tail t
      ; body = call intro-binders tl k2
      ; return body
 
-rule intro-binders t k :- when focus-is-hole (lambda-binds-one t) (lambda-is-bare t)
+rule intro-binders t k at ? _ : _ :- when (lambda-binds-one t) (lambda-is-bare t)
   do x = lambda-name t
      ; k2 = prim-lambda x
      ; return k2
@@ -5419,7 +5430,7 @@ A clause takes its surface term apart with **moves**, which answer with a
 surface term focused on the part rather than a detached one:
 
 ```
-rule elaborate t :- when focus-is-hole (surface-is-arrow t)
+rule elaborate t at ? _ : _ :- when (surface-is-arrow t)
   do … ; a = arrow-domain t ; call elaborate a
         ; … ; b = arrow-codomain t ; call elaborate b
 ```
@@ -5473,7 +5484,7 @@ the statement that holds it, not to the clause above it:
 ```
 rule base crusher where
 
-rule crush :- when focus-is-hole do
+rule crush at ? _ : _ :- do
   say "trying"
   say nonesuch
 ```
@@ -5616,7 +5627,7 @@ base of your own:
 
 ```
 -- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
-rule elaborate t :- when focus-is-hole (surface-is-name t)
+rule elaborate t at ? _ : _ :- when (surface-is-name t)
   do w = surface-name t
      ; x = resolve-name w
      ; fill x
@@ -5805,7 +5816,7 @@ already gets. Nothing is annotated; a rule's signature comes from its head
 predicates and from the ops its body uses.
 
 ```
-rule elaborate t :- when focus-is-hole (surface-is-name t) do …
+rule elaborate t at ? _ : _ :- when (surface-is-name t) do …
 ```
 
 `surface-is-name` is what makes `t` a `Surface`, so `elaborate : Surface -> ()`.
@@ -6416,7 +6427,7 @@ base that can close a goal without being handed the answer:
 
 ```
 try-in-scope : ()
-rule try-in-scope :- when focus-is-hole
+rule try-in-scope at ? _ : _ :-
   do hs = in-scope
      ; h = any-of hs
      ; prim-try h
@@ -6479,7 +6490,7 @@ guess opens none:
 
 ```
 fit-in-scope : ()
-rule fit-in-scope :- when focus-is-hole
+rule fit-in-scope at ? _ : _ :-
   do hs = in-scope
      ; h = any-of hs
      ; n0 = next-argument-name h
@@ -7097,7 +7108,7 @@ A rule file is one layout block and a rule body is a block that `do` opens, so
 a body can be written as indented lines with no separators at all:
 
 ```
-rule demo :- when focus-is-hole do
+rule demo at ? _ : _ :- do
   m = shout "hi"
   say m
 ```
@@ -7106,7 +7117,7 @@ rule demo :- when focus-is-hole do
 leading-`;` style the shipped base is written in:
 
 ```
-rule fill t :- when focus-is-hole
+rule fill t at ? _ : _ :-
   do n = fresh-name "refined"
      ; x = define n t
 ```
@@ -7354,10 +7365,10 @@ stuck: Nat and Nat -> Nat cannot be made equal
 **It is two clauses of a rule and nothing else** — no loop, and nothing in it searches but the engine:
 
 ```
-rule fit-core f :- when focus-is-hole
+rule fit-core f at ? _ : _ :-
   do fill f ; solve
 
-rule fit-core f :- when focus-is-hole
+rule fit-core f at ? _ : _ :-
   do n0 = next-argument-name f
      ; n1 = name-or-stem n0 "a"
      ; n = fresh-name n1
@@ -7556,7 +7567,7 @@ names with several types.
 *Decided 2026-09-14; it was `then` until then.*
 
 ```
-rule attack :- when focus-is-hole do prim-attack
+rule attack at ? _ : _ :- do prim-attack
 ```
 
 Two reasons: `:-` is Prolog's neck, so `:- then` read as *then then*; and a block

@@ -1,38 +1,38 @@
 thena spine> :rules
 standard
-  try-in-scope
-  fit-in-scope
-  intro
-  intro
-  intro ‹n›
-  intro ‹n›
-  attack
-  try-core ‹t›
-  abandon
+  try-in-scope at ? _ : _
+  fit-in-scope at ? _ : _
+  intro at ? _ : _
+  intro at ? _ : _
+  intro ‹n› at ? _ : _
+  intro ‹n› at ? _ : _
+  attack at ? _ : _
+  try-core ‹t› at ? _ : _
+  abandon at ? _ : _
   rename ‹n›
-  solve
-  regret
-  eliminate-core ‹t›
-  eliminate-generalising-core ‹t›
-  step
-  step
+  solve at ? _ ≐ _ : _
+  regret at ? _ ≐ _ : _
+  eliminate-core ‹t› at ? _ : _
+  eliminate-generalising-core ‹t› at ? _ : _
+  step at ? _ : _
+  step at ? _ ≐ _ : _
   step 0
   step ‹n›
-  fill ‹t›
-  unify-refine-core ‹t›
-  apply-core ‹f›
-  fit-core ‹f›
-  fit-core ‹f›
+  fill ‹t› at ? _ : _
+  unify-refine-core ‹t› at ? _ : _
+  apply-core ‹f› at ? _ : _
+  fit-core ‹f› at ? _ : _
+  fit-core ‹f› at ? _ : _
   claim ‹ty›
   assume ‹ty›
   quantify ‹ty›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
   no-nesting []
   ihs-for ‹t› ‹c›
   ihs-for ‹t› ‹c›
@@ -105,28 +105,28 @@ standard
   with-hypotheses [c, ...cs]
   without-hypotheses []
   without-hypotheses [c, ...cs]
-  induction-core ‹t›
-  case-core ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
+  induction-core ‹t› at ? _ : _
+  case-core ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
   run-block ‹t›
-  intro-binders ‹t› ‹k›
-  intro-binders ‹t› ‹k›
-  intro-binders ‹t› ‹k›
-  intro-binders ‹t› ‹k›
+  intro-binders ‹t› ‹k› at ? _ : _
+  intro-binders ‹t› ‹k› at ? _ : _
+  intro-binders ‹t› ‹k› at ? _ : _
+  intro-binders ‹t› ‹k› at ? _ : _
   spine-arguments ‹h› ‹f› ‹t›
   spine-arguments ‹h› ‹f› ‹t›
 thena spine> :matches

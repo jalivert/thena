@@ -41,7 +41,7 @@ while the rest are the tactics and the helpers they share. Two clauses of
 ```
 -- E⟦x⟧ — a bare name: resolve it, fill the goal, discharge it.
 elaborate : Surface -> ()
-rule elaborate t :- when focus-is-hole (surface-is-name t)
+rule elaborate t at ? _ : _ :- when (surface-is-name t)
   do w = surface-name t
      ; x = resolve-name w
      ; fill x
@@ -50,7 +50,7 @@ rule elaborate t :- when focus-is-hole (surface-is-name t)
 -- E⟦\ x => e⟧ — introduce the binders, elaborate the body, discharge. The
 -- group is walked by recursion: intro-binders peels one binder off and calls
 -- itself on the tail, so the term is its own counter.
-rule elaborate t :- when focus-is-hole (surface-is-lambda t)
+rule elaborate t at ? _ : _ :- when (surface-is-lambda t)
   do h = here
      ; prim-attack
      ; into

@@ -2731,17 +2731,19 @@ primitiveValue l = case l of
 -- operand kinds would be the rule language's type system in the wrong place
 -- (@ms2\/CLOSEOUT.md@ 4b, deferred at his direction 2026-09-03).
 data Test
-  = FocusIsHole     -- ^ the focus is a @? x : S@ component
-  | FocusIsGuess    -- ^ the focus is a @? x ≐ g : S@ component
-  | FocusIsComponent
+  = FocusIsComponent
     -- ^ the focus is a component of the chain rather than a core term (MS4
     -- phase 49c). What @along@ and the other component moves need, and the one
     -- thing that is true throughout a walk over a binder group.
-  | FocusIsDefinition
-    -- ^ the focus is an @x = v : S@ component (MS12 phase 320) — a hole that
-    -- has been solved, which is what elaboration finds at an argument position
-    -- the goal forced. 'FocusIsHole'\'s and 'FocusIsGuess'\'s sibling: the
-    -- three are the states a position elaboration claimed can be in.
+    --
+    -- **THE LAST OF THE FOUR FOCUS TESTS, AND IT IS HERE BECAUSE @at@ CANNOT
+    -- ASK ITS QUESTION** (MS12 phase 359, @~9m27n@). @focus-is-hole@,
+    -- @focus-is-guess@ and @focus-is-definition@ were deleted when the shipped
+    -- base was rewritten onto @at@, their questions being
+    -- @at ? _ : _@, @at ? _ ≐ _ : _@ and @at _ = _ : _@; this one asks whether
+    -- the focus is /any/ of the five components, and a 'ComponentP' is written
+    -- as one of the five. The spelling that would retire it is a decision of
+    -- his.
   | GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
   | GoalTypeIsLet   -- ^ … or to a @let@, which is table 2.8's other intro
   | SurfaceIsName Operand

@@ -172,7 +172,13 @@ mismatch r
   where
     rv = displayRule wholePath [] (Budget 200) [] [] 500 (Address []) Nothing r
     shownLine = renderRuleClause (rendering [] 0) r
-    drawnLine = unwords (ruleViewName rv : ruleViewParams rv)
+    -- **The focus is part of the line** (MS12 phase 359): the printer appends
+    -- @at ‹pattern›@ when a clause wrote one, and 'ruleViewFocus' is the same
+    -- text, so the parity this test exists for covers it. It was vacuous until
+    -- the base was rewritten onto @at@ — no clause had a focus to draw.
+    drawnLine =
+      unwords (ruleViewName rv : ruleViewParams rv)
+        ++ maybe "" (" at " ++) (ruleViewFocus rv)
     shownBody = map (renderInstr (rendering [] 500) []) (ruleBody r)
     drawnBody = map redrawStatement (ruleViewBody rv)
     shownHead =

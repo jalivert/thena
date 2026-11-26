@@ -101,7 +101,7 @@ expectRule src = either (assertFailure . ((src ++ " — ") ++)) pure (readRule s
 
 -- | A rule whose body is the one instruction under test.
 bodyOf :: String -> IO [Instr]
-bodyOf src = ruleBody <$> expectRule ("rule r :- when focus-is-hole do " ++ src)
+bodyOf src = ruleBody <$> expectRule ("rule r at ? _ : _ :- do " ++ src)
 
 -- | The head of a whole written rule (MS5 phase 64), where 'bodyOf' supplies one.
 headOf :: String -> IO [Test]
@@ -448,7 +448,7 @@ vocabulary =
 -- | **A head is a run of tests with nothing between them**, so a test taking
 -- operands is parenthesised and a bare word is a test of none. The ambiguity
 -- the brackets answer is the one the REPL's argument runs have, and it is
--- answered the same way: without them @when focus-is-hole goal-type-is-pi@
+-- answered the same way: without them @when goal-type-is-pi goal-type-is-let@
 -- reads as one test applied to another word.
 --
 -- **The existing spellings do not move**, which is why this shape and not
@@ -464,9 +464,9 @@ headOperands =
 
     , testCase "beside bare ones, in either order" $ do
         r <- expectRule
-               "rule r s :- when focus-is-hole (surface-is-name s) goal-type-is-pi \
+               "rule r s :- when focus-is-component (surface-is-name s) goal-type-is-pi \
                \do prim-solve"
-        ruleHead r @?= [FocusIsHole, SurfaceIsName (Ref "s"), GoalTypeIsPi]
+        ruleHead r @?= [FocusIsComponent, SurfaceIsName (Ref "s"), GoalTypeIsPi]
 
     , testCase "a literal is accepted where a name is" $ do
         r <- expectRule "rule r :- when (surface-is-name \"x\") do prim-solve"
@@ -517,12 +517,12 @@ shapes =
   testGroup
     "shape"
     [ testCase "no parameters, no parentheses" $ do
-        r <- expectRule "rule r :- when focus-is-hole do prim-solve"
+        r <- expectRule "rule r at ? _ : _ :- do prim-solve"
         ruleParams r @?= []
     , -- **No parentheses and no commas** — corrected by the user 2026-08-25,
       -- so that a definition and a call site write their arguments alike.
       testCase "parameters are a bare run of names" $ do
-        r <- expectRule "rule r a b c :- when focus-is-hole do prim-solve"
+        r <- expectRule "rule r a b c at ? _ : _ :- do prim-solve"
         ruleParams r @?= map Op.PVar ["a", "b", "c"]
     , -- A rule may apply everywhere, so 'when' is optional; a rule with no body
       -- does nothing, so 'then' is not.
@@ -538,7 +538,7 @@ shapes =
     , -- The hyphens are the reason the lexer was widened this phase: §8 and
       -- OBJECTIVE.md have always written rule and test names this way.
       testCase "a hyphenated name is one identifier" $ do
-        r <- expectRule "rule elab-app :- when focus-is-hole do prim-solve"
+        r <- expectRule "rule elab-app at ? _ : _ :- do prim-solve"
         ruleName r @?= rootName "elab-app"
     ]
 
@@ -587,12 +587,12 @@ text =
         b @?= [Do (Try (Lit (VText "not a term")))]
 
     , testCase "an unterminated string does not lex" $
-        case readRule "rule r :- when focus-is-hole do say \"oops" of
+        case readRule "rule r at ? _ : _ :- do say \"oops" of
           Left _  -> pure ()
           Right r -> assertFailure ("read: " ++ show r)
 
     , testCase "a rule name is still a name, not text" $
-        case readRule "rule r :- when focus-is-hole do call \"try\" x" of
+        case readRule "rule r at ? _ : _ :- do call \"try\" x" of
           Left _  -> pure ()
           Right r -> assertFailure ("read: " ++ show r)
     ]
@@ -655,7 +655,7 @@ regions =
       Bind _ _ o -> opKeyword o
       Do o     -> opKeyword o
 
-    errs src = readErrors ("rule r :- when focus-is-hole do " ++ src)
+    errs src = readErrors ("rule r at ? _ : _ :- do " ++ src)
 
     headErrs src = readErrors ("rule r :- when " ++ src ++ " do prim-solve")
 
@@ -764,7 +764,7 @@ mistakes =
       -- numeral is an 'Op.VInt' as of MS5 phase 64, so @prim-try 3@ resolves
       -- and fails when it runs.
       refused "an operand no reading of the word admits"
-        "rule r :- when focus-is-hole do cross body"
+        "rule r at ? _ : _ :- do cross body"
         [BadOperands (rootName "r") 0 "cross"]
     , -- §3.7: a declaration is a command, never a rule-body operation.
       --
@@ -774,7 +774,7 @@ mistakes =
       -- back as @DeclarationInBody@, which is why 'validate''s own check has
       -- been reachable only for a rule built in Haskell since before that.
       testCase "a declaration in a body" $
-        case laidOut "rule r :- when focus-is-hole do data" of
+        case laidOut "rule r at ? _ : _ :- do data" of
           Left _  -> pure ()
           Right ts -> case parseRule ts of
             Left _  -> pure ()
@@ -785,7 +785,7 @@ mistakes =
         , BadOperands (rootName "r") 1 "cross"
         ]
     , testCase "a body is required" $
-        case readRule "rule r :- when focus-is-hole" of
+        case readRule "rule r at ? _ : _ :-" of
           Left _  -> pure ()
           Right r -> assertFailure ("parsed: " ++ show r)
     ]
@@ -821,11 +821,12 @@ focusPatterns =
     "the focus, via at"
     [ testGroup "every component form reads back" (map formCase everyForm)
 
-      -- **A clause that wrote no @at@ asks nothing about the focus**, which is
-      -- every clause written before this phase and is why nothing in the
-      -- shipped base moved.
+      -- **A clause that wrote no @at@ asks nothing about the focus.** Five
+      -- clauses of the shipped base are still written that way, asking
+      -- @focus-is-component@ because @at@ has no spelling for /any/ component
+      -- (MS12 phase 359, @~9m27n@), and so is every rule that is a function.
     , testCase "a clause with no at has no focus pattern" $ do
-        r <- expectRule "rule r :- when focus-is-hole do attack"
+        r <- expectRule "rule r :- when focus-is-component do attack"
         ruleFocus r @?= Nothing
 
       -- **A bare word in a position BINDS**, which is the difference between

@@ -2014,7 +2014,7 @@ It stops when a rule reaches `yield`. Nothing in the shipped base does; a base y
 consult may, and `examples/demo/Demo08Pausing.thena.rules` is two lines that do:
 
 ```
-rule elaborate t :- when focus-is-hole (surface-is-placeholder t)
+rule elaborate t at ? _ : _ :- when (surface-is-placeholder t)
   do yield "a placeholder: fill it and `yield` to carry on"
 ```
 

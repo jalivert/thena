@@ -315,7 +315,7 @@ headers =
 -- --------------------------------------------------------------------------
 
 oneRule :: String
-oneRule = "rule base tiny where\nrule solve :- when focus-is-guess do prim-solve\n"
+oneRule = "rule base tiny where\nrule solve at ? _ ≐ _ : _ :- do prim-solve\n"
 
 load1 :: [(FilePath, String)] -> (Session, Response)
 load1 = loadRuleTexts newSession
@@ -343,12 +343,12 @@ loading =
       -- one is the next 'rule' keyword.
       testCase "a rule may span lines" $ do
         let src = "rule base multi where\n\
-                  \rule long :- when focus-is-hole\n\
+                  \rule long at ? _ : _ :-\n\
                   \  do prim-attack\n\
                   \     ; along\n\
                   \     ; prim-solve\n\
                   \\n\
-                  \rule short :- when focus-is-guess do prim-solve\n"
+                  \rule short at ? _ ≐ _ : _ :- do prim-solve\n"
         case basesOf (fst (load1 [("m.thena.rules", src)])) of
           [b] -> do
             ruleNames b @?= ["long", "short"]
@@ -360,7 +360,7 @@ loading =
           @?= [[]]
 
     , testCase "no header is refused" $
-        refusal [("x.thena.rules", "rule solve :- when focus-is-guess do prim-solve")]
+        refusal [("x.thena.rules", "rule solve at ? _ ≐ _ : _ :- do prim-solve")]
           @?= Just ("x.thena.rules", NoRuleHeader)
 
     , -- @frobnicate@ is a rule call as of phase 25e, and @prim-solve x@ is one
@@ -368,14 +368,14 @@ loading =
       -- is a call. So the mistake left here is the scope one: @x@ is bound by
       -- nothing, which 'validate' catches when the file loads.
       testCase "a rule that does not resolve is refused, naming every mistake" $
-        refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do frobnicate; prim-solve x")]
+        refusal [("x.thena.rules", "rule base b where\nrule r at ? _ : _ :- do frobnicate; prim-solve x")]
           @?= Just
                 ( "x.thena.rules"
                 , RuleIllFormed
                     -- **The place is the statement's, not the clause's**
-                    -- (MS12 phase 349, @~8w6qw@): @prim-solve x@ begins 44
+                    -- (MS12 phase 349, @~8w6qw@): @prim-solve x@ begins 36
                     -- characters along the line the rule begins on.
-                    [ RuleFault (Just (Origin "x.thena.rules" (Pos 2 45)))
+                    [ RuleFault (Just (Origin "x.thena.rules" (Pos 2 37)))
                         (UnboundInRule (rootName "r") 1 "x" (TVar 0))
                     ]
                 )
@@ -383,11 +383,11 @@ loading =
     , -- The load-time pass §2.4 asked for, now running at load rather than in
       -- a test.
       testCase "a rule that does not validate is refused" $
-        refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do prim-try nothing")]
+        refusal [("x.thena.rules", "rule base b where\nrule r at ? _ : _ :- do prim-try nothing")]
           @?= Just
                 ( "x.thena.rules"
                 , RuleIllFormed
-                    [ RuleFault (Just (Origin "x.thena.rules" (Pos 2 33)))
+                    [ RuleFault (Just (Origin "x.thena.rules" (Pos 2 25)))
                         (UnboundInRule (rootName "r") 0 "nothing" TCore)
                     ] )
     ]
@@ -435,12 +435,12 @@ ordering =
          in map baseName (basesOf s2) @?= ["b"]
     ]
   where
-    a = ("a.thena.rules", "rule base a where\nrule helper t :- when focus-is-hole do prim-try t")
-    b = ("b.thena.rules", "rule base b where\nrule solve :- when focus-is-guess do prim-solve")
+    a = ("a.thena.rules", "rule base a where\nrule helper t at ? _ : _ :- do prim-try t")
+    b = ("b.thena.rules", "rule base b where\nrule solve at ? _ ≐ _ : _ :- do prim-solve")
     caller =
       ( "calls.thena.rules"
       , "rule base calls where\n\
-        \rule c t :- when focus-is-hole do call helper t"
+        \rule c t at ? _ : _ :- do call helper t"
       )
 
 -- --------------------------------------------------------------------------
@@ -522,9 +522,9 @@ argumentHeads =
   where
     picking =
       "rule base pick where\n\
-      \rule pick s :- when focus-is-hole (surface-is-name s) \
+      \rule pick s at ? _ : _ :- when (surface-is-name s) \
       \do say \"that is a name\"\n\
-      \rule pick s :- when focus-is-hole do say \"that is not a name\"\n"
+      \rule pick s at ? _ : _ :- do say \"that is not a name\"\n"
 
     -- A claim to stand in, then the call. The last thing said is the answer.
     said line =
@@ -552,7 +552,7 @@ commands =
 
     , testCase ":rules lists the rules of every base, in order" $ do
         let s = fst (load1 [ ("tiny.thena.rules", oneRule)
-                           , ("b.thena.rules", "rule base b where\nrule attack :- when focus-is-hole do prim-attack")
+                           , ("b.thena.rules", "rule base b where\nrule attack at ? _ : _ :- do prim-attack")
                            ])
         fmap (concatMap ruleNames) (ruled s) @?= Just ["solve", "attack"]
     ]
@@ -599,7 +599,7 @@ returning =
       \rule twice t :- do s = concat t t ; return s\n\
       \rule shout t :- do m = twice (twice t) ; say m\n\
       \rule once t :- do m = twice t ; say m\n\
-      \rule sometimes t :- when focus-is-guess do return t\n\
+      \rule sometimes t at ? _ ≐ _ : _ :- do return t\n\
       \rule sometimes t :- do say \"nothing to give\"\n\
       \rule half t :- do x = sometimes t ; say x\n"
 

@@ -245,18 +245,18 @@ Three things are worth knowing about it:
 **A binder is taken apart too**, and its body comes out opened:
 
 ```
-rule intro-pi :- when focus-is-hole
+rule intro-pi at ? _ : _ :-
   do g = goal
      ; core`∀ (${x} : ${T}) -> ${E}` = g
      ; call intro x
 ```
 
 `${x}` is the binder's identity, `${T}` its domain and `${E}` the inside of the
-`∀` with an ordinary variable where the bound occurrences were. **The head asks
-about a hole and `goal` answers that hole's own type**, so the `∀` the pattern
-takes apart is the one `intro` then opens — run the rule twice at
-`∀ (A : Type₀) -> A -> A` and the second binder is named off the inner arrow and
-not off the statement. `λ` and `let`
+`∀` with an ordinary variable where the bound occurrences were. **`at` says the
+focus is a hole and `goal` answers that hole's own type**, so the `∀` the pattern
+takes apart is the one `intro` then opens — `attack` the statement
+`∀ (A : Type₀) -> A -> A` and run the rule twice, and the second binder is named
+off the inner arrow and not off the statement. `λ` and `let`
 read the same way — `` core`let ${x} = ${v} : ${T} in ${E}` `` — and `->` is a
 `∀` whose binder you decline to name, dependent or not.
 
@@ -281,8 +281,7 @@ Four more things about a binder:
 `intro`: it abstracts the variable out of the body again.
 
 ```
-rule rebind core`∀ (${x} : ${s}) -> ${e}` :-
-  when focus-is-hole
+rule rebind core`∀ (${x} : ${s}) -> ${e}` at ? _ : _ :-
   do g = make-forall x s e
      claim "rebuilt" g
 ```

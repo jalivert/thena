@@ -434,9 +434,9 @@ data RawOp = RawOp String [RawOperand]
 -- question, not the parser's (§2.5, the parser is shallow).
 --
 -- A head is a /run/ of tests with nothing between them, so a test that takes
--- operands is written in parentheses — @when focus-is-hole (surface-is-name t)@
+-- operands is written in parentheses — @when goal-type-is-pi (surface-is-name t)@
 -- — and a bare word is a test of no operands. Without the brackets
--- @when focus-is-hole goal-type-is-pi@ would read as one test applied to
+-- @when goal-type-is-pi goal-type-is-let@ would read as one test applied to
 -- another word.
 data RawTest = RawTest String [RawOperand]
   deriving (Eq, Show)

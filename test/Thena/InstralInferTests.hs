@@ -412,7 +412,7 @@ functionsAreFunctions =
 
       -- **A rule is unchanged**: several clauses, searched.
     , loads "…and a rule may still have as many clauses as it likes"
-        "rule g :- when focus-is-hole do prim-step\nrule g :- when focus-is-guess do prim-solve"
+        "rule g at ? _ : _ :- do prim-step\nrule g at ? _ ≐ _ : _ :- do prim-solve"
 
       -- **The positive half, and it needed no engine code.** A call to a
       -- function leaves the stack with no live decision on it — before the

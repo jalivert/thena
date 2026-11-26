@@ -721,7 +721,7 @@ splitBase :: String
 splitBase = unlines
   [ "rule base splitting where"
   , "split-all : Core -> Name -> ()"
-  , "rule split-all t d :- when focus-is-hole"
+  , "rule split-all t d at ? _ : _ :-"
   , "  do (hs, k) = prim-eliminate t"
   , "     ; cs = constructors-of d"
   , "     ; split-each cs hs k"
@@ -740,7 +740,7 @@ splitBase = unlines
   , "     ; split-each cs hs k"
   , ""
   , "split-second : Core -> Name -> ()"
-  , "rule split-second t c :- when focus-is-hole"
+  , "rule split-second t c at ? _ : _ :-"
   , "  do ([_, h], k) = prim-eliminate t"
   , "     ; goto h"
   , "     ; ihs = constructor-recursive-arguments c"

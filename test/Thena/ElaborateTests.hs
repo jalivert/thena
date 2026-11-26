@@ -844,7 +844,7 @@ baseTests =
                  ]
               -- **The interactive spelling** (MS9 phase 231): its helpers ask
               -- only about their arguments and the two tactics ask
-              -- @focus-is-hole@, so all of it is offered here.
+              -- @at ? _ : _@, so all of it is offered here.
               ++ replicate 4 "argument-patterns"
               ++ [ "argument-pattern"
                  , "open-case", "open-case"
@@ -855,7 +855,7 @@ baseTests =
                  ]
               ++ replicate 15 "elaborate"
               ++ ["run-block"]
-              -- @intro-binders@ asks @focus-is-hole@ as of MS12 phase 357.
+              -- @intro-binders@ is written @at ? _ : _@ as of MS12 phase 357.
               ++ replicate 4 "intro-binders"
               ++ replicate 2 "spine-arguments"
 
