@@ -223,6 +223,15 @@ data FaultKind
     -- ^ a name the checker does not know: a global, a datatype, a variable.
     -- **Not 'NotInScope'**, which is the surface's answer; this one is the
     -- kernel meeting a name that resolution already accepted.
+  | WordBindsNothing
+    -- ^ a rule asked for the variable an identifier is and it carries no
+    -- binder — @ident-term@ on a word and nothing more (MS12). 'TheWord' is
+    -- the word.
+    --
+    -- **Not 'NotInScope'.** Nothing was looked up: an identifier's token /is/
+    -- its identity, so a word without one names no variable anywhere, and
+    -- pointing the author at scope would send them to look for a binding that
+    -- a different spelling would not have found either.
     -- * Kinds and counts
   | WrongKindOfThing
     -- ^ something of another kind was wanted. 'TheWanted' says which.
@@ -812,6 +821,7 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
       E.ExpectedText -> wanting SomeText
       E.ExpectedName -> wanting AnIdentifier
       E.ExpectedIdent -> wanting AnIdentifier
+      E.WordBindsNothing w -> fault WordBindsNothing [is TheWord (AName w)]
       E.NoSuchNamespace n -> fault NoSuchNamespace [is TheNamespace (AName n)]
       E.AmbiguousName n gs ->
         fault NameAmbiguous [is TheWord (AName n), is TheCandidates (ANames gs)]

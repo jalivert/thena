@@ -103,6 +103,44 @@ rule intro n at ? _ : _ :- when goal-type-is-pi do prim-lambda n
 
 rule intro n at ? _ : _ :- when goal-type-is-let do prim-let n
 
+-- A RULE THAT READS ITS OWN GOAL, DECOMPOSES IT AND INDUCTS ON THE PARAMETER —
+-- the acceptance test for `~9j34x`, and what he described on 2026-11-19: *"I
+-- match that the goal's type is a universal. I then decompose that type a
+-- little bit … and then I call another rule that is search-ready for induction
+-- on the first argument."*
+--
+-- **It is the first rule in this base that takes its own goal apart.** Until
+-- the core pattern landed, a nullary rule could ask the five yes-or-no
+-- questions about its goal and learn nothing further: every destructor in the
+-- vocabulary answers a `Surface`, and `goal` hands back a `Core`. So the head
+-- here is the whole point — `${x}` is the binder the statement wrote, `${T}`
+-- its domain and `${E}` its body, and none of the three could be named before.
+--
+-- **The subject comes from the goal and not from the context.** `intro x`
+-- adopts the token `${x}` carries, so the binder is opened at that very
+-- variable and `ident-term x` is the term that mentions it. Reaching it by
+-- walking `in-scope` instead works — the innermost entry is the one just
+-- introduced — but it finds the parameter rather than naming it, and it opens a
+-- choice point per hypothesis for a subject the head already knew.
+--
+-- **`${T}` and `${E}` are bound and unused, deliberately.** The pattern says
+-- the goal is a universal of one parameter and the binder is what this rule
+-- acts on; writing `_` at the other two would say the same thing and leave a
+-- reader of the base unable to see what a core pattern binds.
+--
+-- **ABOVE `attack` AND BELOW `intro`, which is his 2026-11-23 arrangement
+-- applied again.** The universal tactic goes below the one with a shape test,
+-- or a bare `step` reaches this only by backtracking past everything `attack`
+-- opens. Below `intro` because introducing is the strictly less committal move
+-- and it is what this rule's own first instruction does: once `intro` has run,
+-- the goal is no longer a universal and this clause no longer matches, so a
+-- search tries the cheap move first and reaches the case split on the way back.
+by-induction : ()
+rule by-induction at ? _ : core`∀ (${x} : ${T}) -> ${E}` :-
+  do intro x
+     ; v = ident-term x
+     ; call induction-core v
+
 -- ATTACK LEAVES THE CURSOR ON THE HOLE IT OPENED — his ruling of 2026-11-26.
 -- The introductions are positional: each acts on the hole the cursor stands on,
 -- so the move belongs here, where it can be read, and not inside `prim-attack`,

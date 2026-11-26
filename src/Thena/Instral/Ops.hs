@@ -479,6 +479,33 @@ data Op
     -- throws a token away, and a rule that means to do that can say so by
     -- writing the word.
 
+  | IdentTerm Operand
+    -- ^ **the variable an identifier /is/, as a term** (MS12) — @ident-term x@.
+    --
+    -- **It reads the token and nothing else**, so it is the one way a rule gets
+    -- from a binder it has in hand to the term that mentions it. A core
+    -- pattern's binder position binds a 'Thena.Instral.Type.TIdent' (phase 355,
+    -- his ruling of 2026-11-26), which is what lets @call intro x@ need no
+    -- annotation; every op that /takes a term/ then had nothing to be handed.
+    -- A rule could match @core\`∀ (${x} : ${T}) -> ${E}\`@, introduce the
+    -- binder with @intro x@ and still not name the parameter it had just
+    -- bound — which is the half of @~9j34x@ the pattern alone did not close.
+    --
+    -- **Not the other direction of @name-ident@, which stays one-way.** That
+    -- would be @Ident -> Name@ and would throw the token away; this one spends
+    -- it, and is the only reader of 'Identifier'\'s token outside the three
+    -- builders and the two introducers.
+    --
+    -- **Exact, where resolving the word is not.** @resolve-name@ finds an entry
+    -- through 'localNamed', which can only see a word a user could have
+    -- written, so a generalised copy a split made is unreachable by it —
+    -- 'InScopeAt' records the same reason for handing variables over. The token
+    -- /is/ the identity (§'Identifier'), so there is nothing to look up.
+    --
+    -- **A word carrying no token fails.** It names no variable, so there is no
+    -- term to answer with — and minting one, which is what @intro@ does with
+    -- the same absence, would answer with a variable nothing had bound.
+
   | Along                     -- ^ past the head of the focus (§4.3)
   | Into                      -- ^ into a guess's body
   | CrossType                 -- ^ into the focused component's type
@@ -1868,6 +1895,7 @@ resultOf o = case o of
   Value _      -> Just (TVar 0)
   NameText _   -> Just TString
   NameIdent _  -> Just TIdent
+  IdentTerm _  -> Just TCore
   Assume _ _   -> Just TCore  -- the variable it bound; §7.3's @?x <- claim S@
   Quantify _ _ -> Nothing     -- a hole-life op, like 'Attack' and 'IntroPi'
   Claim  _ _   -> Just TCore
@@ -2157,6 +2185,7 @@ operandTypes o = case o of
   UniverseAt a   -> [(a, TLevel)]
   OneLess a -> [(a, TInt)]
   ResolveName x  -> [(x, TName)]
+  IdentTerm x    -> [(x, TIdent)]
   SurfaceNameOf x -> [(x, TSurface)]
   SurfaceLiteralOf x -> [(x, TSurface)]
   ObjectTerm x -> [(x, TSurface)]
@@ -2976,6 +3005,7 @@ opKeyword o = case o of
   Lambda _ _   -> "lambda"
   NameText _   -> "name-text"
   NameIdent _  -> "name-ident"
+  IdentTerm _  -> "ident-term"
   Along        -> "along"
   Into         -> "into"
   CrossType    -> "cross"

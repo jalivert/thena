@@ -315,6 +315,19 @@ data FailReason
     -- that holds a name says it means that name's binder. It is here because
     -- the prompt's own path and a test can reach it, exactly as 'ExpectedName'
     -- can.
+  | WordBindsNothing String
+    -- ^ @ident-term x@ where @x@ is a word and nothing more (MS12) — it names
+    -- no variable, so there is no term to answer with. Carries the word.
+    --
+    -- **Reachable from a typed base**, unlike 'ExpectedIdent': an identifier
+    -- carries its token optionally, so this is a run-time condition and not a
+    -- type error. A @\"…\"@ literal at that position is the plain case, and so
+    -- is an identifier that came through @name-ident@.
+    --
+    -- **It does not mint.** @intro@ reads the same absence as /mint a token/,
+    -- which is right where a binder is being opened and wrong here: a minted
+    -- variable would be one nothing had bound, so the term would mention a
+    -- binder that is not there.
   | NoSuchNamespace String
     -- ^ @open X@ where nothing at all is named @X.…@ (MS10 phase 247).
     --

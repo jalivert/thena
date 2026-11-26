@@ -931,6 +931,7 @@ try-in-scope : ()
 fit-in-scope : ()
 intro : ()
 intro ‹n› : Ident -> ()
+by-induction : ()
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
@@ -1000,7 +1001,7 @@ the number is its identifier.
 
 ```
 thena spine> :choices
-5225  intro (standard.thena.rules:79)   untried: attack (standard.thena.rules:112), abandon (standard.thena.rules:118), step (standard.thena.rules:179)
+5225  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:217)
 ```
 
 Each alternative names **the file and line its clause is written at**. That is
@@ -1016,7 +1017,8 @@ with two alternatives left:
 
 ```
 thena spine> retry
-retrying 5225: attack
+retrying 5225: by-induction
+backtracking to 5225: attack
 thena spine> :show
   let ? id : ∀ (A : Type₀) -> A -> A ≐ (
     let ? id1 : ∀ (A : Type₀) -> A -> A ≐ (
@@ -1027,7 +1029,7 @@ thena spine> :show
   ) in
   id
 thena spine> :choices
-5225  attack (standard.thena.rules:112)   untried: abandon (standard.thena.rules:118), step (standard.thena.rules:179)
+5225  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:217)
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -1051,6 +1053,7 @@ thena spine> step
 chose 4595: try-in-scope
 backtracking to 4595: fit-in-scope
 backtracking to 4595: intro
+backtracking to 4595: by-induction
 backtracking to 4595: attack
 thena spine> back
 thena spine> regret
@@ -1091,6 +1094,7 @@ try-in-scope : ()
 fit-in-scope : ()
 intro : ()
 intro ‹n› : Ident -> ()
+by-induction : ()
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
@@ -1512,7 +1516,7 @@ already there goes on being searched underneath them.
 ```
 thena spine> :consult examples/ChoicePoints.thena.rules
 loaded demo (3 rules)
-loaded standard (129 rules)
+loaded standard (130 rules)
 ```
 
 **The last thing you consulted is tried first.** The shipped base is consulted for

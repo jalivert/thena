@@ -193,14 +193,20 @@ matchTests =
       -- @intro "a"@ pair his ask of 2026-11-20 added. A row per name and arity,
       -- and every matching rule is always offered.
     , testCase "the hole inside a guess at a Π offers intro" $
-        matching emptyGlobals (readyAt (arrow type0 type0)) @?= holeRulesWithIntro
+        matching emptyGlobals (readyAt (arrow type0 type0)) @?= holeRulesAtPi
 
       -- §8: "Head matching runs whnf. A goal typed @id Type (Nat → Nat)@ is a Π
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
+      -- **AND THE CORE PATTERN REDUCES TOO** (MS12 phase 360): @by-induction@
+      -- is in this listing, so the pattern over the goal catches a definition
+      -- unfolding to a @∀@ exactly as the predicate does. That is his rule of
+      -- 2026-09-20 — a term is tried as written and then reduced and tried
+      -- again, one rule for every pattern — and @spec/machine.md@ §8 claimed
+      -- the opposite until this phase measured it.
     , testCase "a goal type that only reduces to a Π still matches" $
         matching withArrow (readyAt (Global (rootName "Arrow") []))
-          @?= holeRulesWithIntro
+          @?= holeRulesAtPi
 
     , testCase "and does not, in an environment where it does not unfold" $
         matching emptyGlobals (readyAt (Global (rootName "Arrow") []))
@@ -236,7 +242,7 @@ matchTests =
       -- body is already handled".
     , testCase "and at a hole that is not inside a guess it is offered, then refuses" $
         do
-          matching emptyGlobals (holeAt (arrow type0 type0)) @?= holeRulesWithIntro
+          matching emptyGlobals (holeAt (arrow type0 type0)) @?= holeRulesAtPi
           case runOut (machineAt (holeAt (arrow type0 type0))
                                  [Do (Ops.IntroPi Nothing)]) of
             Left NotReadyToIntroduce -> pure ()
@@ -1048,6 +1054,20 @@ holeRulesWithIntro :: [String]
 holeRulesWithIntro = before ++ ["intro", "intro"] ++ after
   where
     (before, after) = span (/= "attack") everyHoleRule
+
+-- | 'holeRulesWithIntro' with @by-induction@, which a Π goal adds and a @let@
+-- goal does not (MS12 phase 360).
+--
+-- **The difference between this list and 'holeRulesWithIntro' IS the landing.**
+-- @by-induction@'s head is @at ? _ : core`∀ (${x} : ${T}) -> ${E}`@ — the first
+-- clause in the base that asks what shape its goal /is/ rather than asking a
+-- yes-or-no question about it — so it is offered at a universal and absent at a
+-- @let@, and the two listings say exactly that. It is declared between @intro@
+-- and @attack@, and definition order is dispatch order.
+holeRulesAtPi :: [String]
+holeRulesAtPi = before ++ ["by-induction"] ++ after
+  where
+    (before, after) = span (/= "attack") holeRulesWithIntro
 
 -- | The recursive helpers every listing at a guess shows.
 --

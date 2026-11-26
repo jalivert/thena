@@ -2084,6 +2084,17 @@ perform instr rest m = case operation instr of
     Left e  -> failure e m
     Right i -> produce (VIdent (Identifier i Nothing)) m
 
+  -- **The variable an identifier is, as a term** (MS12) — the read that gets a
+  -- rule from a binder it holds to the term mentioning it. 'Op.IdentTerm' says
+  -- why it spends the token rather than resolving the word, and why a word
+  -- carrying none fails instead of minting one.
+  IdentTerm a -> case operandIdentifier (env (exec m)) a of
+    Left e  -> failure e m
+    Right i -> case identToken i of
+      Just v  -> produce (VTerm (Free v)) m
+      Nothing -> case identWord i of
+        Ident w -> failure (WordBindsNothing w) m
+
   Assume name ty -> component Component.Assume name ty
   Claim  name ty -> component Component.Claim  name ty
 

@@ -6,6 +6,7 @@ standard
   intro at ? _ : _
   intro ‹n› at ? _ : _
   intro ‹n› at ? _ : _
+  by-induction at ? _ : core`∀ (${x} : ${T}) -> ${E}`
   attack at ? _ : _
   try-core ‹t› at ? _ : _
   abandon at ? _ : _
@@ -300,6 +301,7 @@ try-in-scope : ()
 fit-in-scope : ()
 intro : ()
 intro ‹n› : Ident -> ()
+by-induction : ()
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
@@ -363,6 +365,7 @@ try-in-scope : ()
 fit-in-scope : ()
 intro : ()
 intro ‹n› : Ident -> ()
+by-induction : ()
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
@@ -435,6 +438,7 @@ try-in-scope : ()
 fit-in-scope : ()
 intro : ()
 intro ‹n› : Ident -> ()
+by-induction : ()
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()

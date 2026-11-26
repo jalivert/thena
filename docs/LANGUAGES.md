@@ -276,6 +276,52 @@ Four more things about a binder:
   made it real — which is the point: a rule looks at the goal's shape and *then*
   chooses between introducing and doing induction.
 
+**Once `intro` has made it real, `ident-term` is how you name it.** `intro x`
+opens the binder at the very variable `${x}` carries, and `ident-term x` is the
+term that mentions it — so a rule can hand the parameter it just introduced to
+an op that wants a term. The shipped base's `by-induction` is three lines of
+exactly that:
+
+```
+by-induction : ()
+rule by-induction at ? _ : core`∀ (${x} : ${T}) -> ${E}` :-
+  do intro x
+     ; v = ident-term x
+     ; call induction-core v
+```
+
+```
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> open Nat
+opened Nat
+thena spine> :theorem natRefl : ∀ (n : Nat) -> Eq {0} Nat n n
+proving natRefl : ∀ (n : Nat) -> Eq {0} Nat n n
+thena spine> attack
+thena spine> by-induction
+subgoals: zeroMethod, succMethod
+subgoals: zeroCase
+subgoals: succCase
+warning: n shadows an outer binder of the same word, which no word reaches now — walk up to that binder and rename it to give it one
+```
+
+The warning is the split doing its job: each case re-binds `n` as the
+constructor it stands for, which is what makes `zeroCase` a different goal from
+`succCase`, and the outer binder loses its word in the bargain.
+
+**It takes no argument**, which is the whole of it: the rule was told nothing
+and the subject of the split is the binder its own head bound. Being nullary it
+is also a candidate for a bare `step`, where it sits just below `intro` —
+introducing is the less committal move, so a search takes that first and
+reaches the case split on the way back.
+
+`ident-term` wants a binder's identity and not a word. A written word carries no
+variable, so `ident-term "a"` fails and says so: there is nothing for it to
+mean, and inventing a variable would build a term that mentions a binder which
+is not there. **A binder position in a pattern is the one thing that hands you
+an identity carrying a variable** — `name-ident n` deliberately does not, since
+a name is a word and a rule that holds one means that word.
+
 **And a body goes back under a binder with `make-forall`, `make-lambda` or
 `make-let`.** This is the reverse of the pattern, for the rule that does *not*
 `intro`: it abstracts the variable out of the body again.

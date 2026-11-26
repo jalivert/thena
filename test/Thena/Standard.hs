@@ -122,6 +122,21 @@ expectedStandard =
       [Do (IntroPi (Just (Ref "n")))]
   , atRule atHole (rootName "intro") [PVar "n"] [GoalTypeIsLet]
       [Do (IntroLet (Just (Ref "n")))]
+    -- **The rule that reads its own goal** (MS12) — the acceptance test for
+    -- @~9j34x@, and the first clause in the base whose head takes a core term
+    -- apart. @atPiGoal@ is the focus pattern; the subject of the split is the
+    -- binder the head bound, not an entry walked out of the context.
+    --
+    -- **Below @intro@ and above @attack@.** Introducing is the less committal
+    -- move and is this rule's own first instruction, so a search tries it
+    -- first and reaches the case split on the way back; @attack@ is the
+    -- universal tactic and goes below the one with a shape test, which is his
+    -- arrangement of 2026-11-23 applied a third time.
+  , atRule atPiGoal (rootName "by-induction") [] []
+      [ Do (Call "intro" [Ref "x"])
+      , Bind (Op.PVar "v") Nothing (Op.IdentTerm (Ref "x"))
+      , Do (Call "induction-core" [Ref "v"])
+      ]
   , atRule atHole (rootName "attack")     []    []      [Do Attack, Do Into]
   , atRule atHole (rootName "try-core") [PVar "t"] [] [Do (Try (Ref "t"))]
   , atRule atHole (rootName "abandon")    []    []                 [Do Abandon]
@@ -1393,6 +1408,17 @@ atRule f n ps ts body = Rule n ps (Just f) ts body Nothing []
 atHole, atGuess :: ComponentP
 atHole  = CompClaim PWild PWild
 atGuess = CompGuess PWild PWild
+
+-- | The one focus pattern in the base that asks what shape the goal /is/ (MS12)
+-- — @at ? _ : core`∀ (${x} : ${T}) -> ${E}`@.
+--
+-- **Its binder position binds and its two sub-terms bind.** The binder is what
+-- @by-induction@ acts on; @T@ and @E@ are bound and unused, so that the base
+-- shows a reader what a core pattern reaches.
+atPiGoal :: ComponentP
+atPiGoal =
+  CompClaim PWild
+    (PCore (Op.CPPi (PVar "x") (Op.CPHole (PVar "T")) (Op.CPHole (PVar "E"))))
 
 -- | The same clauses with their origins dropped, for comparing against a
 -- hand-written list (MS12 phase 342).

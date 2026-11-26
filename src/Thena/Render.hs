@@ -1688,6 +1688,10 @@ renderFailReason ren r = case r of
       ++ "\n  write the one you mean"
   ExpectedName      -> "expected a name"
   ExpectedIdent     -> "expected an identifier"
+  WordBindsNothing w ->
+    w ++ " is a word and nothing more, so there is no variable it means"
+      ++ "\n  a term can be made only from an identifier a binder was opened"
+      ++ " at — a binder position in a pattern, or the one `intro` adopted"
   DottedTextName s  ->
     show s
       ++ " is text, so all of it is one word — and a word may not hold a dot."

@@ -1970,6 +1970,48 @@ pass a tag as, and because a rule writes `∀`, `λ` and `let` as three differen
 words anyway. `make-let` takes a fourth argument, the bound value, because a
 `let` node holds one and the body does not.
 
+### A rule names the binder it introduced with `ident-term`, and the base ships one that reads its own goal
+
+*Decided and built 2026-11-26.*
+
+A pattern over a `∀` hands your rule the binder's *identity* — a word and the
+variable the body refers to. `intro x` opens the binder at that very variable
+rather than minting a second one, so after it the parameter is real; and
+`ident-term x` is the term that mentions it.
+
+That is the last piece a rule needed to work from its own goal. Before it, a
+rule with no arguments could ask whether its goal was a universal and then not
+name the parameter, because every op that takes a *term* had nothing to be
+handed. The shipped base's `by-induction` is the whole thing in three lines:
+
+```
+by-induction : ()
+rule by-induction at ? _ : core`∀ (${x} : ${T}) -> ${E}` :-
+  do intro x
+     ; v = ident-term x
+     ; call induction-core v
+```
+
+**It is told nothing.** The subject of the case split is the binder its own head
+bound, which is what separates it from `induction-core core`b``, where you name
+the scrutinee in a term you wrote. Being nullary it is a candidate for a bare
+`step` as well, so a search can reach it with nothing written down at all;
+`examples/SearchReadyInduction.thena.script` proves a theorem both ways.
+
+**Where it sits in the base is the economy.** It is below `intro` and above
+`attack`. Introducing is the strictly less committal move — and is this rule's
+own first instruction — so a search takes that first, and once it has, the goal
+is no longer a universal and this clause no longer matches. The case split is
+the next alternative at that choice point, reached by backtracking rather than
+chosen outright.
+
+**A word carrying no variable fails.** `ident-term "a"` has nothing to mean, and
+minting a variable would answer with a term mentioning a binder that is not
+there — so it says that instead. This is the one direction the conversion goes:
+`name-ident n` turns a name into an identity *without* a variable, because a
+rule holding a name means that word, and nothing turns an identity back into a
+name, which would throw the variable away.
+
 ### A level in a pattern is a numeral or a splice, and a bound level cannot be taken apart
 
 *Decided 2026-11-25. The numeral is built; a splice in a level position is not —

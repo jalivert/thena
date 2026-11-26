@@ -9,6 +9,7 @@ thena spine> step
 chose 10: try-in-scope
 backtracking to 10: fit-in-scope
 backtracking to 10: intro
+backtracking to 10: by-induction
 backtracking to 10: attack
 thena spine> step
 chose 12: try-in-scope
@@ -101,6 +102,7 @@ thena spine> step
 chose 46: try-in-scope
 backtracking to 46: fit-in-scope
 backtracking to 46: intro
+backtracking to 46: by-induction
 backtracking to 46: attack
 thena spine> step
 chose 48: try-in-scope
