@@ -72,8 +72,10 @@ twice : String -> String
 twice s = concat s s
 ```
 
-- **a rule** — `rule ‹name› ‹params› :- when ‹tests› do ‹body›`. The head is a
-  run of shape questions; a test with arguments is parenthesised.
+- **a rule** — `rule ‹name› ‹params› at ‹focus› :- when ‹tests› do ‹body›`. The
+  head is the parameters, then the focus (both optional), then a run of shape
+  questions; a test with arguments is parenthesised. *The focus* is described
+  below.
 - **a signature** — `‹name› : ‹type›`, on a line of its own and needing no
   keyword. The arity
   is the arrow chain's, so a signature is about one arity only. Parentheses make
@@ -82,6 +84,42 @@ twice s = concat s s
 - **a function** — `‹name› ‹params› = ‹expression›` or `‹name› ‹params› = do
   ‹block›`, with no keyword. A function may have several clauses, tried in
   order as in Haskell.
+
+### `at`: the focus, in the head
+
+**`at` says what the machine is looking at**, as one of the five pieces a
+development is built from, with a pattern at each position:
+
+```
+rule solve at ? h ≐ _ : s          :- do prim-solve
+rule shape at ? h : core`∀ (${x} : ${T}) -> ${E}` :- do say "a universal"
+rule onward at λ x : s             :- do say "an assumption"
+```
+
+| written | the focus is |
+|---|---|
+| `at ? ‹x› : ‹S›` | a hole nothing has been tried on |
+| `at ? ‹x› ≐ _ : ‹S›` | a hole with a part-built term under it |
+| `at λ ‹x› : ‹S›` | an assumption |
+| `at ‹x› = ‹v› : ‹S›` | a local definition |
+| `at ∀ ‹x› : ‹S›` | a ∀-binder |
+
+**A clause with no `at` asks nothing about the focus** and is offered at every
+one of them.
+
+**Each position is an ordinary pattern, so a bare word there binds**: `at ? h :
+s` binds `h` to the hole's name and `s` to its type, and the body may use both.
+That is the opposite of a `` core`…` `` region, where a bare word names a global
+and only `${…}` binds — inside a fence the text belongs to another language, and
+after `at` it is still `instral`.
+
+**A type position takes a term pattern**, which is how a rule reads the shape of
+its own goal: `` at ? h : core`∀ (${x} : ${T}) -> ${E}` `` matches only when the
+goal is a universal, and names the binder, the domain and the body.
+
+**What is under a guess is written `_` and cannot be bound.** A part-built term
+is a development rather than a term, and `instral` has no value for one; read it
+with `goal` in the body instead.
 
 **A rule is searched; a function is called.** A rule's clauses are alternatives:
 the first that matches runs, and if it fails the next is tried, so a rule can

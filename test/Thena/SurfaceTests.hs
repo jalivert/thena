@@ -1070,5 +1070,5 @@ blockTests =
       Right ts0 -> case layout ts0 of
        Left _  -> Nothing
        Right ts -> case parseRule ts of
-        Right (RawRule _ _ _ _ is _) -> Just is
+        Right (RawRule _ _ _ _ _ is _) -> Just is
         Left _                   -> Nothing

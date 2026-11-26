@@ -16,9 +16,12 @@ module Thena.Instral.Pattern
   , Slot (..)
   , CoreP (..)
   , CoreSlot (..)
+  , ComponentP (..)
   , skeletonHoles
   , corePHoles
   , corePSlots
+  , componentPSlots
+  , componentPBinds
   , patternBinds
   , patternIrrefutable
   ) where
@@ -216,6 +219,78 @@ data CoreP a
     -- and in 'Thena.Core.Term.Eliminate''s own field order, exactly as the
     -- development calculus writes it
   deriving (Eq, Show)
+
+-- | The focus as a pattern — what stands after @at@ in a rule head (MS12 phase
+-- 358, @~9j34x@).
+--
+-- **It matches a development COMPONENT, which is a different language from
+-- 'Thena.Core.Term.Core'** — his framing of 2026-09-14, @at@ names the subject
+-- and the tag names the language. The five constructors are
+-- 'Thena.Development.Component.Component'\'s five, in the notation §3.2 prints
+-- them in, and they carry no fence while the development calculus is built in
+-- (his ruling of 2026-09-13).
+--
+-- **A component pattern is NOT a 'Pattern'**, and that is not an omission. A
+-- 'Pattern' matches a 'Thena.Instral.Ops.Value', and a component is not one:
+-- @Development@ is a separate @instral@ type with no introduction form until an
+-- op produces one (his ruling of 2026-09-11). So a component pattern stands
+-- after @at@ and nowhere else, which is what makes the missing @PComponent@ a
+-- consequence of the vocabulary rather than a case left out.
+--
+-- **Every position holds an ordinary 'Pattern', so a bare word there BINDS.**
+-- That is the opposite of a @core\`…\`@ region, where a bare word resolves to a
+-- global and only @${…}@ binds, and the tag is the reason: inside a region the
+-- text belongs to another language and needs an escape, where @at ? x : s@ is
+-- the rule language itself. A @core\`…\`@ pattern may of course stand at a type
+-- position — @at ? h : core\`∀ (${x} : ${T}) -> ${E}\`@ — which is what the whole
+-- landing is for.
+data ComponentP
+  = CompAssume   Pattern Pattern
+    -- ^ @λ ‹x› : ‹S›@ — the binder and its type
+  | CompDefine   Pattern Pattern Pattern
+    -- ^ @‹x› = ‹v› : ‹S›@ — the binder, its value and its type
+  | CompClaim    Pattern Pattern
+    -- ^ @? ‹x› : ‹S›@ — an unopened hole
+  | CompGuess    Pattern Pattern
+    -- ^ @? ‹x› ≐ _ : ‹S›@ — a hole with a development under it.
+    --
+    -- **The @≐@ position takes @_@ and nothing else, so it is not a field
+    -- here.** What stands there is a 'Thena.Development.Partial.Partial', a
+    -- development of its own rather than a term, and @Development@ has no
+    -- introduction form until an op produces one (his ruling of 2026-09-11) —
+    -- so a pattern binding it would be that introduction form arriving through
+    -- a pattern, and nothing in the vocabulary could read the value.
+    -- 'Thena.Rules.resolveComponentP' refuses anything but @_@ there, and
+    -- @spec\/machine.md@ §8 has the two readings that were measured and
+    -- rejected.
+  | CompQuantify Pattern Pattern
+    -- ^ @∀ ‹x› : ‹S›@ — the fifth component, which folds into a Π
+  deriving (Eq, Show)
+
+-- | Each of a component pattern\'s positions with what it stands at, left to
+-- right (MS12 phase 358).
+--
+-- **'CoreSlot' is the right vocabulary and not a coincidence**: a component\'s
+-- binder wants a name exactly as a @core\`…\`@ region\'s binder does, and its
+-- type and a definition\'s value are core terms. So the question /what does
+-- this position take/ has the same two answers here, and
+-- 'Thena.Instral.Infer' types both from this one type.
+componentPSlots :: ComponentP -> [(CoreSlot, Pattern)]
+componentPSlots cp = case cp of
+  CompAssume   x s   -> [(AtBinder, x), (AtCore, s)]
+  CompDefine   x v s -> [(AtBinder, x), (AtCore, v), (AtCore, s)]
+  CompClaim    x s   -> [(AtBinder, x), (AtCore, s)]
+  CompGuess    x s   -> [(AtBinder, x), (AtCore, s)]
+  CompQuantify x s   -> [(AtBinder, x), (AtCore, s)]
+
+-- | The names a component pattern binds, left to right (MS12 phase 358).
+--
+-- **It is 'patternBinds' over the positions**, so a name bound by the focus is
+-- bound by the same machinery as one bound by a parameter — which is what lets
+-- 'Thena.Rules.validate'\'s scope check and 'Thena.Rules.initiallyBound' reach
+-- it without a case of their own.
+componentPBinds :: ComponentP -> [Name]
+componentPBinds = concatMap (patternBinds . snd) . componentPSlots
 
 -- | What sits at each hole, left to right.
 skeletonHoles :: Skeleton a -> [a]

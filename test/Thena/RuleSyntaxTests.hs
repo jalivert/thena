@@ -12,7 +12,7 @@
 -- checks that what they say is a word the parser and resolver actually accept.
 module Thena.RuleSyntaxTests (tests) where
 
-import Data.List (nub)
+import Data.List (isInfixOf, nub)
 import Data.Maybe (listToMaybe)
 
 import Test.Tasty (TestTree, testGroup)
@@ -33,6 +33,9 @@ import Thena.Instral.Ops
   , partWords
   )
 import qualified Thena.Instral.Ops as Op
+import Thena.Instral.Type (Ty (..))
+import Thena.Render (renderPattern)
+import Thena.Syntax.Print (componentPText)
 import Thena.Rules
   ( RuleBase (..)
   , RuleError (..)
@@ -63,6 +66,7 @@ tests =
     , headOperands
     , regions
     , mistakes
+    , focusPatterns
     ]
 
 -- --------------------------------------------------------------------------
@@ -800,3 +804,115 @@ mistakes =
           -- these cases are about which fault (MS12 phase 349).
           Left es -> Just (map faultWhy es)
           Right _ -> Nothing
+
+-- --------------------------------------------------------------------------
+-- The focus as a pattern (MS12 phase 358, `~9j34x`)
+-- --------------------------------------------------------------------------
+
+-- | __@at@, and the five development components after it__ — his framing of
+-- 2026-09-14, /@at@ names the subject and the tag names the language/.
+--
+-- **Read back and not merely parsed**, which is this file's standing rule after
+-- @ms5\/CLOSEOUT.md@ 26: 'Thena.Syntax.Print.componentPText' prints what the
+-- grammar takes, so every spelling below parses to the pattern it came from.
+focusPatterns :: TestTree
+focusPatterns =
+  testGroup
+    "the focus, via at"
+    [ testGroup "every component form reads back" (map formCase everyForm)
+
+      -- **A clause that wrote no @at@ asks nothing about the focus**, which is
+      -- every clause written before this phase and is why nothing in the
+      -- shipped base moved.
+    , testCase "a clause with no at has no focus pattern" $ do
+        r <- expectRule "rule r :- when focus-is-hole do attack"
+        ruleFocus r @?= Nothing
+
+      -- **A bare word in a position BINDS**, which is the difference between
+      -- this notation and a @core\`…\`@ region: the text after @at@ is the rule
+      -- language, so there is no escape to need.
+    , testCase "a word in a position binds, and the body may read it" $ do
+        r <- expectRule "rule r at ? h : s :- do say s"
+        validate r @?= []
+
+      -- …and the negative, so the case above is not passing for want of a
+      -- check: a name nothing bound is still refused in that body.
+    , testCase "and a name nothing bound is still refused there" $ do
+        r <- expectRule "rule r at ? h : s :- do say nosuch"
+        map faultWhy (validate r)
+          @?= [UnboundInRule (rootName "r") 0 "nosuch" TString]
+
+      -- **And a core pattern stands where a term stands**, which is the whole
+      -- point of the landing: the focus's type is taken apart in the head.
+    , testCase "a core pattern stands at a type position" $ do
+        r <- expectRule
+               "rule r at ? h : core`∀ (${x} : ${T}) -> ${E}` :- do say \"hi\""
+        ruleFocus r
+          @?= Just (Op.CompClaim (Op.PVar "h")
+                      (Op.PCore (Op.CPPi (Op.PVar "x")
+                                         (Op.CPHole (Op.PVar "T"))
+                                         (Op.CPHole (Op.PVar "E")))))
+
+      -- **The parameters and then the focus**, in writing order, which is the
+      -- order 'Thena.Instral.Ops.matchHead' matches them in.
+    , testCase "the parameters come first and the focus after them" $ do
+        r <- expectRule "rule r a b at ? h : s :- do say s"
+        (ruleParams r, ruleFocus r)
+          @?= ( [Op.PVar "a", Op.PVar "b"]
+              , Just (Op.CompClaim (Op.PVar "h") (Op.PVar "s"))
+              )
+
+      -- **A guess's @≐@ takes @_@ and nothing else** — what stands there is a
+      -- development and not a term, and @Development@ has no introduction form
+      -- until an op produces one (his ruling of 2026-09-11).
+    , testCase "a guess's ≐ takes _" $ do
+        r <- expectRule "rule r at ? h ≐ _ : s :- do say s"
+        ruleFocus r @?= Just (Op.CompGuess (Op.PVar "h") (Op.PVar "s"))
+
+    , testCase "and a name there is refused, naming what was written" $
+        case readRule "rule r at ? h ≐ g : s :- do say s" of
+          Left e | "FocusPatternForm" `isInfixOf` e -> pure ()
+          other -> assertFailure (show other)
+
+      -- **@at@ is a reserved word now** (@~86bnn@, his ruling of 2026-11-26),
+      -- so it cannot be a parameter — which is the cost the reservation buys
+      -- and the reason the marker is unambiguous.
+    , testCase "at cannot be a parameter name" $
+        case readRule "rule r at :- do attack" of
+          Left _  -> pure ()
+          Right _ -> assertFailure "at parsed as a parameter"
+
+      -- **A word that merely contains it is untouched**, because a keyword rule
+      -- can only win on a whole token.
+    , testCase "a word containing at is an ordinary name" $ do
+        r <- expectRule "rule r atom :- do say atom"
+        ruleParams r @?= [Op.PVar "atom"]
+    ]
+
+-- | One component form, written, and the pattern it reads as.
+everyForm :: [(String, Op.ComponentP)]
+everyForm =
+  [ ("λ x : s",       Op.CompAssume   (Op.PVar "x") (Op.PVar "s"))
+  , ("x = v : s",     Op.CompDefine   (Op.PVar "x") (Op.PVar "v") (Op.PVar "s"))
+  , ("? x : s",       Op.CompClaim    (Op.PVar "x") (Op.PVar "s"))
+  , ("? x ≐ _ : s",   Op.CompGuess    (Op.PVar "x") (Op.PVar "s"))
+  , ("∀ x : s",       Op.CompQuantify (Op.PVar "x") (Op.PVar "s"))
+  -- **A region at a type position, and a wildcard binder** — the one form that
+  -- shows the two notations nested, with nothing to resolve: a universe needs
+  -- no global in scope where a bare word in a region would.
+  , ("? _ : core`Type₀`", Op.CompClaim Op.PWild (Op.PCore (Op.CPUniverse 0)))
+  ]
+
+formCase :: (String, Op.ComponentP) -> TestTree
+formCase (src, want) =
+  testCase src $ do
+    r <- expectRule ("rule r at " ++ src ++ " :- do attack")
+    ruleFocus r @?= Just want
+    -- …and the printed form parses to the same pattern again.
+    r' <- expectRule
+            ("rule r at " ++ componentPText patternSource want ++ " :- do attack")
+    ruleFocus r' @?= Just want
+
+-- | A pattern as a rule file writes it — enough for the forms above.
+patternSource :: Op.Pattern -> String
+patternSource = renderPattern

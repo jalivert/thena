@@ -35,6 +35,7 @@ module Thena.Instral.Concrete
   , RawSignature (..)
   , RawTy (..)
   , RawRule (..)
+  , RawComponentP (..)
   , RawPattern (..)
   , RawInstr (..)
   , RawOp (..)
@@ -73,7 +74,26 @@ import Thena.Syntax.Lexer (Pos)
 -- statement of the rule it was — a number that reads like a line and is not
 -- one. 'Thena.Instral.Ops.ruleWrittenAt' is where the list ends up, and
 -- 'Thena.Rules.faultIn' reads it.
-data RawRule = RawRule Pos String [RawPattern] [RawTest] [RawInstr] [Pos]
+data RawRule =
+  RawRule Pos String [RawPattern] (Maybe RawComponentP) [RawTest] [RawInstr] [Pos]
+  deriving (Eq, Show)
+
+-- | The focus as written, after @at@ in a rule head (MS12 phase 358, @~9j34x@).
+--
+-- **Five constructors, one per development component**, in the notation
+-- @spec\/machine.md@ §3.2 prints them in. **Unresolved**: every position is a
+-- 'RawPattern', so a @core\`…\`@ region at a type position is still raw text
+-- here and 'Thena.Rules.resolveComponentP' is what reads it.
+--
+-- **The guess form carries its @≐@ position**, which resolution then refuses
+-- unless it is @_@: the grammar accepts a pattern there so that writing one
+-- gets a refusal naming the form rather than a parse error naming a token.
+data RawComponentP
+  = RawCPAssume   RawPattern RawPattern
+  | RawCPDefine   RawPattern RawPattern RawPattern
+  | RawCPClaim    RawPattern RawPattern
+  | RawCPGuess    RawPattern RawPattern RawPattern
+  | RawCPQuantify RawPattern RawPattern
   deriving (Eq, Show)
 
 -- | A written parameter (MS5 phase 82) — @x@, @_@, @[a, ...rest]@, @(x, y)@,

@@ -43,7 +43,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), Reach (..), Selection (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), Reach (..), Selection (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawComponentP (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -111,6 +111,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   rule    { Located _ TRule }
   do      { Located _ TDo }
   when    { Located _ TWhen }
+  at      { Located _ TAt }
   ':-'    { Located _ TNeck }
   num     { Located _ (TNumber _) }
   str     { Located _ (TString _) }
@@ -317,7 +318,7 @@ Renaming :: { (String, String) }
   : ident '->' ident                       { (wordOf $1, wordOf $3) }
 
 Rule :: { RawRule }
-  : rule ident Params ':-' Tests do Block    { RawRule (posOf $1) (wordOf $2) (reverse $3) $5 (map snd (reverse $7)) (map fst (reverse $7)) }
+  : rule ident Params Focus ':-' Tests do Block    { RawRule (posOf $1) (wordOf $2) (reverse $3) $4 $6 (map snd (reverse $8)) (map fst (reverse $8)) }
 
 -- **A body is a block** (MS5 phase 75). @do@ is a layout keyword, so
 -- "Thena.Surface.Layout" inserts these braces where the offside rule says they
@@ -480,6 +481,39 @@ PatAtoms :: { [RawPattern] }
 PatItems :: { [RawPattern] }
   : PatAtom                                { [$1] }
   | PatItems ',' PatAtom                   { $3 : $1 }
+
+-- | The focus, as a pattern after @at@ (MS12 phase 358, @~9j34x@; his framing
+-- of 2026-09-14, /@at@ names the subject and the tag names the language/).
+--
+-- **@at@ had to become a token and that is measured** (@~86bnn@, his ruling of
+-- 2026-11-26). The definition form below begins with a name, so with the marker
+-- left an ordinary @ident@ the parser cannot tell @rule r at x = v : S@ from
+-- @rule r a b@ with the one token of lookahead it has: Happy answers eight
+-- shift\/reduce conflicts in one state, against none with the token.
+--
+-- **It is written between the parameters and the neck, which is where §8 left
+-- the space for it** — /the space on either side of @:-@ is deliberately
+-- unused: pattern matching on the focus and on the goal is coming and will
+-- attach to the head/ (decided 2026-08-25).
+Focus :: { Maybe RawComponentP }
+  :                                        { Nothing }
+  | at ComponentP                          { Just $2 }
+
+-- | The five development components, in the notation @spec\/machine.md@ §3.2
+-- prints them in, and with no fence — his ruling of 2026-09-13, while the
+-- development calculus is built in.
+--
+-- **Every position is a @PatAtom@**, so a bare word binds and a @core\`…\`@
+-- region stands wherever a term does. **The guess form takes a pattern at its
+-- @≐@ and resolution refuses anything but @_@**: a refusal naming the form is
+-- worth more than a parse error naming a token, and
+-- 'Thena.Rules.resolveComponentP' is where it is said.
+ComponentP :: { RawComponentP }
+  : 'λ' PatAtom ':' PatAtom                { RawCPAssume $2 $4 }
+  | PatAtom '=' PatAtom ':' PatAtom        { RawCPDefine $1 $3 $5 }
+  | '?' PatAtom ':' PatAtom                { RawCPClaim $2 $4 }
+  | '?' PatAtom '≐' PatAtom ':' PatAtom    { RawCPGuess $2 $4 $6 }
+  | '∀' PatAtom ':' PatAtom                { RawCPQuantify $2 $4 }
 
 -- A head is a run of tests with nothing between them, so a test that takes
 -- operands is parenthesised — @when focus-is-hole (surface-is-name t)@ — and a

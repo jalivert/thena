@@ -93,6 +93,7 @@ tests =
     , producesTests
     , returnTests
     , dataTests
+    , focusTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -157,10 +158,12 @@ drain = iterRules
 -- **It is told the counter to walk from**, because 'next' matches the clause
 -- again from whatever it is handed (MS12, @~thwhg@) — so walking an iterator
 -- built at 9 from 0 would answer matches nothing ever made.
-drainMatches :: Int -> RuleIter -> [Match]
-drainMatches k it = case next emptyGlobals k it of
+-- **And the cursor to match the focus against** (MS12 phase 358): the head
+-- includes the @at@ pattern, so re-making a match re-matches that too.
+drainMatches :: Int -> Cursor -> RuleIter -> [Match]
+drainMatches k cur it = case next emptyGlobals k cur it of
   Nothing         -> []
-  Just (mt, rest) -> mt : drainMatches k rest
+  Just (mt, rest) -> mt : drainMatches k cur rest
 
 -- --------------------------------------------------------------------------
 -- What matches where (§7.6)
@@ -283,7 +286,7 @@ iteratorTests =
   testGroup
     "the iterator"
     [ testCase "hasNext agrees with next, at every position" $
-        let walk it = case next emptyGlobals 0 it of
+        let walk it = case next emptyGlobals 0 (holeAt type0) it of
               Nothing        -> hasNext it @?= False
               Just (_, rest) -> (hasNext it @?= True) >> walk rest
          in walk (matches expectedBase emptyGlobals 0 (holeAt type0))
@@ -514,7 +517,7 @@ dataTests =
       -- branch's spent tokens are never re-drawn.
       testCase "an alternative taken later is opened at a later token" $
         fmap (lookup "e" . matchEnv . fst)
-             (next emptyGlobals 60 (peeling 9 [VTerm aPi]))
+             (next emptyGlobals 60 (holeAt type1) (peeling 9 [VTerm aPi]))
           @?= Just (Just (VTerm (Free (fst (fresh 60)))))
 
     , -- **AN ALTERNATIVE IS MATCHED AGAIN WHEN IT IS TAKEN** (MS12, @~thwhg@,
@@ -531,14 +534,16 @@ dataTests =
       -- §8's binder patterns are what make this show up as a token.
       testCase "an alternative is matched from the counter it is taken at" $
         fmap (matchNames . fst)
-             (next emptyGlobals 60 (splitting 9 [VList [VText "a", VText "b"]]))
+             (next emptyGlobals 60 (holeAt type1)
+                   (splitting 9 [VList [VText "a", VText "b"]]))
           @?= Just 60
 
     , -- And it is the same clause bound the same way: re-matching re-draws the
       -- tokens and changes nothing else.
       testCase "and it binds what it bound at the fork" $
         fmap (matchEnv . fst)
-             (next emptyGlobals 60 (splitting 9 [VList [VText "a", VText "b"]]))
+             (next emptyGlobals 60 (holeAt type1)
+                   (splitting 9 [VList [VText "a", VText "b"]]))
           @?= Just [("x", VText "a"), ("xs", VList [VText "b"])]
     ]
   where
@@ -586,7 +591,8 @@ dataTests =
     namesFor k vs = map matchNames (matchesFor k vs)
 
     matchesFor k vs =
-      drainMatches k (clauses [binders] emptyGlobals k (holeAt type1)
+      drainMatches k (holeAt type1)
+                     (clauses [binders] emptyGlobals k (holeAt type1)
                               (rootName "split") vs)
 
     splitting k vs =
@@ -612,7 +618,7 @@ dataTests =
     -- Each candidate taken from the counter as it stands then — the engine's
     -- own sequence, where a body minting is what moves the counter on and
     -- @peel@'s body mints nothing, so only the matches do.
-    openedAt k it = case next emptyGlobals k it of
+    openedAt k it = case next emptyGlobals k (holeAt type1) it of
       Nothing         -> []
       Just (mt, rest) ->
         [ v | Just v <- [lookup "e" (matchEnv mt)] ]
@@ -1110,3 +1116,86 @@ splitHelpers =
 -- | @Nat@, as a core term, for the row above.
 natType :: Core
 natType = Global (rootName "Nat") []
+
+-- --------------------------------------------------------------------------
+-- The focus as a pattern (MS12 phase 358, `~9j34x`)
+-- --------------------------------------------------------------------------
+
+-- | __@at@ filters and binds__ — his framing of 2026-09-14, /@at@ names the
+-- subject and the tag names the language/.
+--
+-- **It replaces the four focus tests**, so what is checked here is what those
+-- tests were checked for: the right component and no other, and then the thing
+-- a test could not do — the parts of the focus, bound.
+focusTests :: TestTree
+focusTests =
+  testGroup
+    "the focus, via at"
+    [ -- **One form per component, and each matches its own and nothing else.**
+      testCase "a claim pattern matches a claim and not a guess" $
+        ( offered (claimPat "h" "s") (holeAt type0)
+        , offered (claimPat "h" "s") (guessAt type0)
+        ) @?= (True, False)
+
+    , testCase "a guess pattern matches a guess and not a claim" $
+        ( offered (guessPat "h" "s") (guessAt type0)
+        , offered (guessPat "h" "s") (holeAt type0)
+        ) @?= (True, False)
+
+    , testCase "an assumption pattern matches neither" $
+        ( offered (assumePat "h" "s") (holeAt type0)
+        , offered (assumePat "h" "s") (guessAt type0)
+        ) @?= (False, False)
+
+      -- **THE BINDER POSITION BINDS THE COMPONENT'S OWN IDENTITY** — the word
+      -- it prints and the variable it is, as the 'Identifier' of @~gr236@. That
+      -- is what lets a word read off the focus be handed to an op that takes
+      -- one, and it is the thing no focus test could ever answer.
+    , testCase "the binder binds the component's word and variable" $
+        lookup "h" (bound (claimPat "h" "s") (holeAt type0))
+          @?= Just (VIdent (Ops.Identifier (Ident "goal") (Just var)))
+
+    , testCase "and the type position binds the type as written" $
+        lookup "s" (bound (claimPat "h" "s") (holeAt type0))
+          @?= Just (VTerm type0)
+
+      -- **A core pattern at the type position discriminates**, which is the
+      -- whole landing in one line: the head asks what shape the goal is and
+      -- names its parts.
+    , testCase "a core pattern at the type position matches a Π only" $
+        ( offered piPat (holeAt (arrow type0 type0))
+        , offered piPat (holeAt type0)
+        ) @?= (True, False)
+
+    , testCase "and it binds the parts of that Π" $
+        [ v | (n, v) <- bound piPat (holeAt (arrow type0 type0)), n == "T" ]
+          @?= [VTerm type0]
+    ]
+  where
+    -- A base holding exactly the clause under test, so what is offered is
+    -- either that clause or nothing.
+    only cp =
+      ruleBase "focus" Nothing "" [] []
+        [ (aRule (rootName "r") [] [] [Do Ops.Attack]) { ruleFocus = Just cp } ]
+
+    asked cp cur = matches [only cp] emptyGlobals 0 cur
+
+    offered cp cur = not (null (iterRules (asked cp cur)))
+
+    -- **Through 'next', because 'RuleIter' exports no field** — the bindings a
+    -- fork made are nobody's to read until an alternative is taken (@~thwhg@),
+    -- which is exactly what this does.
+    bound cp cur = case next emptyGlobals 0 cur (asked cp cur) of
+      Just (mt, _) -> matchEnv mt
+      Nothing      -> []
+
+    claimPat x t  = Ops.CompClaim    (Ops.PVar x) (Ops.PVar t)
+    guessPat x t  = Ops.CompGuess    (Ops.PVar x) (Ops.PVar t)
+    assumePat x t = Ops.CompAssume   (Ops.PVar x) (Ops.PVar t)
+
+    -- @at ? h : core`∀ (${_} : ${T}) -> ${E}`@.
+    piPat =
+      Ops.CompClaim (Ops.PVar "h")
+        (Ops.PCore (CPPi Ops.PWild
+                         (CPHole (Ops.PVar "T"))
+                         (CPHole (Ops.PVar "E"))))

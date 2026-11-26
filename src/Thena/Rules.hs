@@ -85,8 +85,11 @@ import Thena.Instral.Ops
   , Pattern (..)
   , Skeleton (..)
   , CoreP (..)
+  , ComponentP (..)
   , patternBinds
-  , matchClause
+  , componentPBinds
+  , matchFocus
+  , matchHead
   , Test (..)
   , Value (..)
   , operandsOf
@@ -124,6 +127,7 @@ import Thena.Instral.Concrete
   , RawOp (..)
   , RawOperand (..)
   , RawRule (..)
+  , RawComponentP (..)
   , RawPattern (..)
   , RawTest (..)
   )
@@ -307,7 +311,15 @@ data Match = Match
 matches :: [RuleBase] -> GlobalEnv -> Int -> Cursor -> RuleIter
 matches bases env k cur =
   RuleIter []
-    [ Match r [] k | r <- allRules bases, all (holds env cur []) (ruleHead r) ]
+    [ Match r bound k'
+    | r <- allRules bases
+      -- **The focus pattern is part of the head, so it filters here too**
+      -- (MS12 phase 358): @at@ is what replaces @focus-is-hole@, and a list
+      -- that offered a clause whose @at@ cannot match would offer what the
+      -- engine would refuse to run.
+    , Just (bound, k') <- [matchFocus env k cur (ruleFocus r)]
+    , all (holds env cur bound) (ruleHead r)
+    ]
 
 -- | __The matching RULES, as against the matching clauses__ — his ruling,
 -- 2026-11-19: /"each rule-arity, in other words — each rule, gets to be
@@ -485,7 +497,7 @@ clauses bases env k cur nm vs = RuleIter vs (searched ++ take 1 called)
     fitting rs = go k [ r | r <- rs, ruleName r == nm ]
 
     go _ []         = []
-    go n (r : rest) = case matchClause env n r vs of
+    go n (r : rest) = case matchHead env n cur r vs of
       Just (bound, n')
         | all (holds env cur bound) (ruleHead r) -> Match r bound n' : go n' rest
       _ -> go n rest
@@ -528,14 +540,20 @@ arities bases nm =
 -- patterns land — so the case where it does not is written out rather than
 -- assumed away, and it keeps the fork's own match, which is what the engine ran
 -- with before this existed.
-next :: GlobalEnv -> Int -> RuleIter -> Maybe (Match, RuleIter)
-next env k (RuleIter vs ms) = case ms of
+-- **IT TAKES THE CURSOR SINCE MS12 PHASE 358**, because the head includes the
+-- focus and re-making the match means re-matching that too. The cursor to use
+-- is the one that stands when the alternative is entered, which backtracking has
+-- already put back to the fork's (§7.3, /backtracking puts the whole machine
+-- back/) — so the caller's current cursor is the right one and nothing has to be
+-- carried on the iterator.
+next :: GlobalEnv -> Int -> Cursor -> RuleIter -> Maybe (Match, RuleIter)
+next env k cur (RuleIter vs ms) = case ms of
   []        -> Nothing
-  mt : rest -> Just (remade env k vs mt, RuleIter vs rest)
+  mt : rest -> Just (remade env k cur vs mt, RuleIter vs rest)
 
 -- | A chosen clause's match, re-drawn from the counter as it stands.
-remade :: GlobalEnv -> Int -> [Value] -> Match -> Match
-remade env k vs mt = case matchClause env k (matchRule mt) vs of
+remade :: GlobalEnv -> Int -> Cursor -> [Value] -> Match -> Match
+remade env k cur vs mt = case matchHead env k cur (matchRule mt) vs of
   Just (bound, k') -> mt { matchEnv = bound, matchNames = k' }
   Nothing          -> mt
 
@@ -871,6 +889,17 @@ data RuleError
     -- ^ …and one that two opened namespaces both answer, naming every one it
     -- reaches. 'Thena.Core.Term.globalUnder'\'s own answer, as 'AmbiguousTag'
     -- is for a tag.
+  | FocusPatternForm     GlobalName String
+    -- ^ **a position of an @at@ pattern written with something it does not
+    -- take** (MS12 phase 358, @~9j34x@): today the one such position is a
+    -- guess\'s @≐@, which takes @_@ and nothing else. Carries the rule and what
+    -- was written there.
+    --
+    -- **It is not /unparsed/ and not /not read yet/**: what stands under a
+    -- guess is a development rather than a term, and @Development@ has no
+    -- introduction form until an op produces one (his ruling of 2026-09-11), so
+    -- there is nothing for a pattern there to bind. @spec\/machine.md@ §8 has
+    -- the two readings that were measured and rejected.
     -- ^ the right op word, written with the wrong arguments — too many, too
     -- few, or a position where a name was wanted. One error for all three: a
     -- rule body is one line, and the word is enough to find it
@@ -988,6 +1017,7 @@ faultInstruction e = case e of
   CorePatternForm {}           -> Nothing
   CorePatternNotInScope {}     -> Nothing
   CorePatternAmbiguous {}      -> Nothing
+  FocusPatternForm {}          -> Nothing
   RepeatedInPattern {}         -> Nothing
   ReservedName {}              -> Nothing
   UnknownType {}               -> Nothing
@@ -1092,7 +1122,13 @@ validate r =
     -- (surface-is-name a)@ can ask about an element. 'clauses' passes the very
     -- environment 'Thena.Instral.Ops.matchClause' built, so what this admits and what
     -- 'holds' is given cannot drift.
-    boundByParams = concatMap patternBinds (ruleParams r)
+    -- **The whole head binds since MS12 phase 358**: the parameters and then
+    -- the focus pattern, in the order 'Thena.Instral.Ops.matchHead' matches
+    -- them. The name is kept — what a /head/ binds is still what it is about —
+    -- and it is why a test may read what @at@ bound.
+    boundByParams =
+      concatMap patternBinds (ruleParams r)
+        ++ maybe [] componentPBinds (ruleFocus r)
 
     go _ _ [] = []
     go ps bound (instr : rest) =
@@ -1308,13 +1344,19 @@ resolveTyIn owner vs0 t0 = go vs0 t0
 reservedNames :: [Name]
 reservedNames = ["true", "false"]
 
--- | The names a body may read before it binds anything of its own: **its
--- parameters, and nothing else** (MS4 phase 41).
+-- | The names a body may read before it binds anything of its own: **what its
+-- head binds** (MS4 phase 41; widened at MS12 phase 358).
 --
 -- It used to add @hint@ when a rule's head asked about one, which was the only
 -- name a body could read that no @Bind@ introduced. Nothing is magic now.
+--
+-- **The parameters and then the focus pattern**, in the order
+-- 'Thena.Instral.Ops.matchHead' matches them, so a body reads what @at@ bound
+-- exactly as it reads a parameter.
 initiallyBound :: Rule -> [Name]
-initiallyBound = concatMap patternBinds . ruleParams
+initiallyBound r =
+  concatMap patternBinds (ruleParams r)
+    ++ maybe [] componentPBinds (ruleFocus r)
 
 -- | Every rule in one base, checked.
 --
@@ -1445,18 +1487,32 @@ rootReading gs = Reading gs emptyGlobals rootScope
 -- a fault about an instruction is drawn at the instruction's own line, and that
 -- is what makes the fold a place a terminal can open.
 resolveRule :: FilePath -> Reading -> RawRule -> Either [RuleFault] Rule
-resolveRule path rd (RawRule at nm ps ts body written) =
-  case (patErrs, headErrs, resolveBlock rd g (concatMap patternBinds qs) body) of
-    ([], [], Right instrs) -> Right (Rule g qs tests instrs here written)
-    (_,  _,  Right _)      -> Left (faults (patErrs ++ headErrs))
-    (_,  _,  Left bodyErrs) -> Left (faults (patErrs ++ headErrs ++ bodyErrs))
+resolveRule path rd (RawRule begins nm ps raw ts body written) =
+  case (headProblems, resolveBlock rd g bound body) of
+    ([], Right instrs)      -> Right (Rule g qs cp tests instrs here written)
+    (_,  Right _)           -> Left (faults headProblems)
+    (_,  Left bodyErrs)     -> Left (faults (headProblems ++ bodyErrs))
   where
     g = rootName nm
 
-    here   = Just (Origin path at)
+    here   = Just (Origin path begins)
     faults = faultsIn here written
 
     (patErrs, qs) = partitionEithers (map (resolvePattern rd g) ps)
+
+    -- **The focus pattern is resolved beside the parameters, and what it binds
+    -- is in scope in the body** (MS12 phase 358) — the whole head binds, so
+    -- 'resolveBlock' is told about both.
+    (focusErrs, cp) = case raw of
+      Nothing -> ([], Nothing)
+      Just r  -> case resolveComponentP rd g r of
+        Left e   -> ([e], Nothing)
+        Right c  -> ([], Just c)
+
+    bound = concatMap patternBinds qs
+              ++ maybe [] componentPBinds cp
+
+    headProblems = patErrs ++ focusErrs ++ headErrs
 
     (headErrs, tests) = partitionEithers (map test ts)
     test (RawTest w os) = case traverse headOperand os of
@@ -1542,7 +1598,7 @@ resolveFunction path rd (RawFunction at nm ps body written) =
   where
     g = rootName nm
 
-    built qs is = Rule g qs [] is here written
+    built qs is = Rule g qs Nothing [] is here written
 
     here   = Just (Origin path at)
     faults = faultsIn here written
@@ -1734,6 +1790,52 @@ hoistedBind rd g i (n, r) = case r of
 -- **Linearity is NOT checked here** — 'validate' does it, with every other
 -- name question about a rule, so that a function and a rule get the same answer
 -- and the message carries the rule\'s name.
+-- | __The focus as written, resolved__ (MS12 phase 358, @~9j34x@; his framing
+-- of 2026-09-14, /@at@ names the subject and the tag names the language/).
+--
+-- **Every position is an ordinary pattern**, so this is 'resolvePattern' five
+-- times with the component\'s shape around it — a @core\`…\`@ region at a type
+-- position is read by the same code that reads one in a parameter.
+--
+-- **A guess\'s @≐@ takes @_@ and nothing else.** What stands there is a
+-- 'Thena.Development.Partial.Partial' — a development of its own and not a
+-- term — and @Development@ has no introduction form until an op produces one
+-- (his ruling of 2026-09-11), so a pattern binding it would be that
+-- introduction form arriving through a pattern and nothing could read the
+-- value. The grammar accepts a pattern there so that the refusal can name the
+-- form; @spec\/machine.md@ §8 has the two readings measured and rejected.
+resolveComponentP
+  :: Reading -> GlobalName -> RawComponentP -> Either RuleError ComponentP
+resolveComponentP rd g raw = case raw of
+  RawCPAssume   x s   -> CompAssume   <$> pat x <*> pat s
+  RawCPDefine   x v s -> CompDefine   <$> pat x <*> pat v <*> pat s
+  RawCPClaim    x s   -> CompClaim    <$> pat x <*> pat s
+  RawCPQuantify x s   -> CompQuantify <$> pat x <*> pat s
+  RawCPGuess    x gp s -> do
+    under <- pat gp
+    case under of
+      PWild -> CompGuess <$> pat x <*> pat s
+      _     -> Left (FocusPatternForm g (writtenPattern gp))
+  where
+    pat = resolvePattern rd g
+
+-- | A written pattern, back as the author spelled it — for a refusal that has
+-- to name what stood somewhere (MS12 phase 358).
+--
+-- **Only the forms a message needs**, which is why it is not a printer: a
+-- refusal names a word, a literal or /a pattern/, and the last is enough for
+-- everything compound.
+writtenPattern :: RawPattern -> String
+writtenPattern q = case q of
+  RawPWord w   -> w
+  RawPInt k    -> show k
+  RawPChar c   -> show c
+  RawPText t   -> show t
+  RawPApp w _  -> "(" ++ w ++ " …)"
+  RawPList _ _ -> "a list pattern"
+  RawPPair _ _ -> "a pair pattern"
+  RawPObject tag _ _ -> tag ++ "`…`"
+
 resolvePattern :: Reading -> GlobalName -> RawPattern -> Either RuleError Pattern
 resolvePattern rd g = go
   where
@@ -2722,7 +2824,7 @@ surfaceBlocks rd g is = concat <$> traverse one (zip [0 :: Int ..] (blocksUnder 
         e : es -> Left (faultsIn Nothing [] (e : es))
         []     -> do
           inner <- surfaceBlocks rd nm body
-          Right (Rule nm [] [] body Nothing [] : inner)
+          Right (Rule nm [] Nothing [] body Nothing [] : inner)
       where
         nm = rootName (unGlobal g ++ ", do block " ++ show (k + 1))
 

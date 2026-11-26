@@ -45,7 +45,7 @@ import Thena.Core.Term (GlobalName (..), nameDotted, rootName)
 import Thena.Syntax.Concrete (Splice (..), splices)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
 import Thena.Rules (opArities, testTypes, writtenPositions)
-import Thena.Instral.Pattern (CoreSlot (..), corePSlots)
+import Thena.Instral.Pattern (CoreSlot (..), corePSlots, componentPSlots)
 import Thena.Instral.Ops
   ( Instr (..)
   , Name
@@ -80,6 +80,12 @@ data Site
     -- pattern runs before both, and a message that named the first instruction
     -- for a fault in a parameter is exactly the class @ms5\/CLOSEOUT.md@ 28
     -- records — /a message must identify the thing it is about uniquely/.
+  | InFocus GlobalName Int
+    -- ^ **a position of a clause's @at@ pattern, and which one** (MS12 phase
+    -- 358, @~9j34x@), counted from zero in writing order — the binder, then the
+    -- component's sub-terms. Its own site for 'InPattern'\'s reason: the focus
+    -- is not a parameter, and a message that called it one would point the
+    -- author at the wrong half of the head.
   | InSignature GlobalName Int
     -- ^ **the declaration itself, and its arity** (MS5 phase 67). His
     -- requirement: /a wrong annotation must report against the declaration, not
@@ -132,6 +138,7 @@ renderSite si = case si of
   -- rather than given a number alone: a clause's parameters are where the
   -- reader's eye goes last, so the word is worth the four characters.
   InPattern g i -> nameDotted g ++ ", parameter " ++ show (i + 1)
+  InFocus g i   -> nameDotted g ++ ", the focus pattern, position " ++ show (i + 1)
 
 renderInstralTypeError :: InstralTypeError -> String
 renderInstralTypeError e = case e of
@@ -509,6 +516,7 @@ blamedOn e = case e of
       InHead n _      -> n
       InBody n _      -> n
       InPattern n _   -> n
+      InFocus n _     -> n
       InSignature n _ -> n
 
 -- | One strongly connected component: declare it, walk its clauses, generalise.
@@ -681,8 +689,15 @@ clause env st0 r = case fromMaybe (error "declareAll missed a rule")
   where
     walk ps res st =
       let (ctx, st1)  = patternCtx (InPattern (ruleName r)) (ruleParams r) ps st
-          st2         = foldl (headTest r ctx) st1 (zip [0 ..] (ruleHead r))
-       in fst (body env r res ctx (writtenPositions (ruleBody r)) st2 (ruleBody r))
+          -- **The focus pattern is typed beside the parameters** (MS12 phase
+          -- 358): its positions say their own types — a binder is the 'TIdent'
+          -- of @~gr236@ and a component's sub-terms are 'TCore' — so a clause
+          -- that reads the focus needs no annotation, exactly as one that
+          -- matches a list does.
+          (fctx, st2) = focusCtx r st1
+          ctx'        = ctx ++ fctx
+          st3         = foldl (headTest r ctx') st2 (zip [0 ..] (ruleHead r))
+       in fst (body env r res ctx' (writtenPositions (ruleBody r)) st3 (ruleBody r))
 
     resultOfSig sg = maybe [] (: []) (sigResult sg)
 
@@ -702,6 +717,24 @@ clause env st0 r = case fromMaybe (error "declareAll missed a rule")
 -- typing, two different things to point at, and a binding reported as a
 -- parameter is exactly the class @ms5\/CLOSEOUT.md@ 28 is about: /a message
 -- must identify the thing it is about uniquely/.
+-- | Type a clause\'s @at@ pattern (MS12 phase 358, @~9j34x@).
+--
+-- **It is 'patternCtx' with the types read off the positions instead of off a
+-- signature**, which is the difference between the focus and a parameter: a
+-- parameter\'s type is what the caller passes and has to be inferred or
+-- declared, where a component\'s binder is always an identifier and its
+-- sub-terms are always core terms. So nothing here can clash with a signature,
+-- and a rule that writes @at@ declares nothing extra.
+focusCtx :: Rule -> St -> ([(Name, Local)], St)
+focusCtx r st = case ruleFocus r of
+  Nothing -> ([], st)
+  Just cp ->
+    let slots = componentPSlots cp
+     in patternCtx (InFocus (ruleName r))
+                   (map snd slots)
+                   (map (coreSlotType . fst) slots)
+                   st
+
 patternCtx :: (Int -> Site) -> [Pattern] -> [Ty] -> St -> ([(Name, Local)], St)
 patternCtx site ps ts st0 = foldl one ([], st0) (zip3 [0 ..] ps ts)
   where

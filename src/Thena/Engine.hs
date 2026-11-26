@@ -1077,7 +1077,7 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
       | depth <= lineFloor m = declined frames
       | otherwise = case fr of
           Thena.Engine.Call {} -> unwind (depth - 1) stk
-          Choice {} -> case next (globals m) (names m) (alts fr) of
+          Choice {} -> case next (globals m) (names m) (cursor (saved fr)) (alts fr) of
             -- Cannot arise: the peek in 'perform' never builds a 'Choice'
             -- without a live alternative, and 'demote' unbuilds one the moment
             -- its last is taken. Written out rather than left to a
@@ -1684,7 +1684,7 @@ perform instr rest m = case operation instr of
   -- the callee's environment under the name @hint@. Both are gone: elaboration
   -- is a rule called by name, so it was never a dispatch, and there is no magic
   -- name in the instruction language any more.
-  Dispatch -> case next (globals m) (names m) it of
+  Dispatch -> case next (globals m) (names m) (cursor (development m)) it of
     Nothing        -> failure NoRuleMatched m
     Just (mt, it')
       -- Announced only when the dispatch was a real decision, which is
@@ -1781,7 +1781,7 @@ perform instr rest m = case operation instr of
 
   Op.Call nm args -> case traverse (operandValue (env (exec m))) args of
     Left e   -> failure e m
-    Right vs -> case next (globals m) (names m) (it vs) of
+    Right vs -> case next (globals m) (names m) (cursor (development m)) (it vs) of
       Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) (rootName nm))) m
       Just (mt, it')
         | hasNext it' ->
@@ -3777,7 +3777,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
     go _ [] = Left missing
     go popped (fr : stk) = case fr of
       Choice {} | maybe True (== choiceId fr) target ->
-        case next (globals m) (names m) (alts fr) of
+        case next (globals m) (names m) (cursor (saved fr)) (alts fr) of
         Nothing        -> Left missing     -- cannot arise; see 'demote'
         Just (mt, it') -> Right
           ( m { development = saved fr

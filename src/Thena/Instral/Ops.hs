@@ -39,14 +39,18 @@ module Thena.Instral.Ops
   , Skeleton (..)
   , Slot (..)
   , CoreP (..)
+  , ComponentP (..)
   , CoreSlot (..)
   , corePSlots
   , patternBinds
+  , componentPBinds
   , patternIrrefutable
   , matchPattern
   , matchCore
   , matchPatterns
   , matchClause
+  , matchFocus
+  , matchHead
   , Test (..)
   ) where
 
@@ -62,9 +66,11 @@ import Thena.Core.Term
 import qualified Thena.Core.Term as Term
 import Thena.Instral.Pattern
   ( Pattern (..), Skeleton (..), Slot (..), CoreP (..), CoreSlot (..)
+  , ComponentP (..), componentPSlots, componentPBinds
   , skeletonHoles, corePSlots, patternBinds, patternIrrefutable )
 import Thena.Instral.Type (Signature (..), Ty (..))
-import Thena.Development.Cursor (Part (..))
+import Thena.Development.Cursor (Part (..), Cursor, Focus (..), focus)
+import qualified Thena.Development.Component as Component
 import Thena.Core.Reduce (whnf)
 import Thena.Global.Env (ArgRole, GlobalEnv, InductiveDefinition)
 import Thena.Language.Reader (Block)
@@ -2273,6 +2279,19 @@ data Rule = Rule
   , ruleParams :: [Pattern]
     -- ^ matched by @Call@; what they bind lands in the body's own 'Env'
     -- (MS5 phase 82 — they were @['Name']@ until patterns arrived).
+  , ruleFocus  :: Maybe ComponentP
+    -- ^ __the focus as a pattern__ — what @at@ was written with (MS12 phase
+    -- 358, @~9j34x@; his framing of 2026-09-14).
+    --
+    -- **'Nothing' is a clause that asks nothing about the focus** and matches
+    -- at any of them, which is what every clause written before this phase
+    -- does.
+    --
+    -- **It is part of the head and it BINDS**, which is why it is not a
+    -- 'Test': a test answers yes or no, and @at ? x : core\`∀ (${y} : ${T}) -> ${E}\`@
+    -- names four things the body then uses. 'Thena.Instral.Ops.matchFocus' is
+    -- the matcher and 'Thena.Rules.clauses' runs it between the parameters and
+    -- the tests, so a test may read what the focus bound.
   , ruleHead   :: [Test]   -- ^ all must pass
   , ruleBody   :: [Instr]
   , ruleOrigin :: Maybe Origin
@@ -2436,6 +2455,64 @@ matchPattern env k0 pt v = case (pt, v) of
 -- and a two-argument one, and each call picks its own ('Thena.Rules.clauses').
 matchClause :: GlobalEnv -> Int -> Rule -> [Value] -> Maybe (Env, Int)
 matchClause env k r = matchPatterns env k (ruleParams r)
+
+-- | __Match a clause\'s whole head__ — its parameters, then its focus pattern
+-- (MS12 phase 358, @~9j34x@).
+--
+-- **One function so that the chooser and the binder cannot disagree**, which is
+-- 'matchClause'\'s own argument one piece larger: 'Thena.Rules.clauses' calls
+-- this to filter and 'Thena.Rules.remade' calls it to bind, and a focus pattern
+-- that opens a binder mints, so two runs of it answer two environments.
+--
+-- **The parameters are matched first and the focus second**, which is the order
+-- they are written in, and the environments are concatenated — so a test may
+-- read what either bound ('Thena.Rules.clauses' passes the whole thing to
+-- 'Thena.Rules.holds').
+matchHead
+  :: GlobalEnv -> Int -> Cursor -> Rule -> [Value] -> Maybe (Env, Int)
+matchHead env k cur r vs = do
+  (bound, k1) <- matchClause env k r vs
+  (focused, k2) <- matchFocus env k1 cur (ruleFocus r)
+  pure (bound ++ focused, k2)
+
+-- | __Match the focus against a clause\'s @at@ pattern__ (MS12 phase 358).
+--
+-- **A clause that wrote no @at@ matches every focus and binds nothing**, and
+-- that is not a special case: it is what matching no pattern against anything
+-- answers.
+--
+-- **A component pattern matches a COMPONENT and nothing else**, so a focus
+-- standing on a constraint or inside a term fails every one of the five forms.
+-- A constraint binds nothing and is not a component (@spec\/machine.md@ §3.3),
+-- and a focus inside a term is a position in a term rather than a binding, so
+-- there is nothing for any of the five to be about.
+--
+-- **The binder position is matched against the component\'s own identity** —
+-- its word and its variable, as the 'Identifier' of @~gr236@ — so a word read
+-- off the focus carries the token that says /this binder/, and an op that takes
+-- one can be handed it directly.
+matchFocus
+  :: GlobalEnv -> Int -> Cursor -> Maybe ComponentP -> Maybe (Env, Int)
+matchFocus _   k _   Nothing   = Just ([], k)
+matchFocus env k cur (Just cp) = case focus cur of
+  OnComponent c -> component c
+  _             -> Nothing
+  where
+    -- The component's identity as a value: the word it prints and the variable
+    -- it is. **Always a 'Just'** — a component in a development has been opened
+    -- at a real variable, which is the difference between this and a word a
+    -- @core\`…\`@ pattern took off a binder it opened itself.
+    ident x i = VIdent (Identifier i (Just x))
+
+    run ps = matchPatterns env k (map snd (componentPSlots cp)) ps
+
+    component c = case (cp, c) of
+      (CompAssume   {}, Component.Assume   x i   t) -> run [ident x i, VTerm t]
+      (CompDefine   {}, Component.Define   x i v t) -> run [ident x i, VTerm v, VTerm t]
+      (CompClaim    {}, Component.Claim    x i   t) -> run [ident x i, VTerm t]
+      (CompGuess    {}, Component.Guess    x i _ t) -> run [ident x i, VTerm t]
+      (CompQuantify {}, Component.Quantify x i   t) -> run [ident x i, VTerm t]
+      _                                             -> Nothing
 
 -- | Match a run of patterns against a run of values (MS5 phase 82).
 --

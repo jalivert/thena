@@ -1691,18 +1691,18 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         (from, to) | onLeft    = (zr, zl)
                    | otherwise = (zl, zr)
 
-        (iLeft, iRight, iQ, iAt, iSame, iAtSame) = jWords taken
+        (iLeft, iRight, iQ, iCarried, iSame, iCarriedSame) = jWords taken
 
         motiveTerm =
           Lam iLeft i (close zl
             (Lam iRight i (close zr
               (Lam iQ (equation (eqnLevel e) i (Free zl) (Free zr)) (close zq
-                (Pi iAt (residueAt (Free from))
+                (Pi iCarried (residueAt (Free from))
                     (close zf (residueAt (Free to)))))))))
 
         methodTerm =
           Lam iSame i (close za
-            (Lam iAtSame (residueAt (Free za)) (close zb (Free zb))))
+            (Lam iCarriedSame (residueAt (Free za)) (close zb (Free zb))))
 
     -- @elim Eq (I) (λ x y w -> Φ x -> Φ y) ((λ z at -> at)) (a, b) prf@ — J over an
     -- equation this module holds as a /term/ rather than as a binder, which is
@@ -1721,17 +1721,17 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
               Lam iLeft i (close zl
                 (Lam iRight i (close zr
                   (Lam iQ (equation lv i (Free zl) (Free zr)) (close zq
-                    (Pi iAt (residueAt (Free zl))
+                    (Pi iCarried (residueAt (Free zl))
                         (close zf (residueAt (Free zr)))))))))
           , methods = [ Lam iSame i (close za
-                          (Lam iAtSame (residueAt (Free za))
+                          (Lam iCarriedSame (residueAt (Free za))
                                (close zb (Free zb)))) ]
           , indices = [a, b]
           , target  = prf
           }
       , n6 )
       where
-        (iLeft, iRight, iQ, iAt, iSame, iAtSame) = jWords taken
+        (iLeft, iRight, iQ, iCarried, iSame, iCarriedSame) = jWords taken
         (zl, n1) = fresh n0'
         (zr, n2) = fresh n1
         (zq, n3) = fresh n2
@@ -1872,9 +1872,9 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         iU    = writableAmong taken (Ident "u")
         iV    = writableAmong (taken ++ [iU]) (Ident "v")
         iW    = writableAmong (taken ++ [iU, iV]) (Ident "w")
-        iAtU  = writableAmong (taken ++ [iU, iV, iW]) (Ident "at")
+        iCarriedU  = writableAmong (taken ++ [iU, iV, iW]) (Ident "carried")
         iSame = writableAmong taken (Ident "same")
-        iAtS  = writableAmong (taken ++ [iSame]) (Ident "at")
+        iCarriedS  = writableAmong (taken ++ [iSame]) (Ident "carried")
         (cLeft, cRight, cQ, _, cSame, _) = jWords taken
 
         -- The end that does not vary. A residual equation after this one is
@@ -1957,10 +1957,10 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           , motive     = Lam iU sing (close tl
               (Lam iV sing (close tr
                 (Lam iW (equation lv sing (Free tl) (Free tr)) (close tw
-                  (Pi iAtU (App psi (Free tl))
+                  (Pi iCarriedU (App psi (Free tl))
                       (close ta (App psi (Free tr)))))))))
           , methods    = [ Lam iSame sing (close tz
-                             (Lam iAtS (App psi (Free tz)) (close ta (Free ta)))) ]
+                             (Lam iCarriedS (App psi (Free tz)) (close ta (Free ta)))) ]
           , indices    = [ptFixed, ptBinder]
           , target     = contract
           }
@@ -1979,9 +1979,9 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
       let l  = writableAmong taken (Ident "left")
           r  = writableAmong (taken ++ [l]) (Ident "right")
           q' = writableAmong (taken ++ [l, r]) (Ident "q")
-          a1 = writableAmong (taken ++ [l, r, q']) (Ident "at")
+          a1 = writableAmong (taken ++ [l, r, q']) (Ident "carried")
           sm = writableAmong taken (Ident "same")
-          a2 = writableAmong (taken ++ [sm]) (Ident "at")
+          a2 = writableAmong (taken ++ [sm]) (Ident "carried")
        in (l, r, q', a1, sm, a2)
 
     -- @Eq {l} I a b@.

@@ -164,6 +164,7 @@ import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
 import Thena.Syntax.Print
   ( corePText
+  , componentPText
   , dagger
   , Env
   , escapeChar
@@ -752,6 +753,7 @@ describe t = case t of
   TDashes     -> "--"
   TRule       -> "rule"
   TWhen       -> "when"
+  TAt         -> "at"
   TNeck       -> ":-"
   TNumber k   -> show k
   TString txt -> show txt
@@ -2659,13 +2661,24 @@ renderRuleBases ren bs = concatMap one bs
 -- **Exported so one spelling serves the listing and the check on it**:
 -- "Thena.View.Rules" draws the same line from a 'Thena.View.Rules.RuleView',
 -- and @Thena.View.RulesTests@ crosses the two.
+-- **AND ITS FOCUS, WHEN IT WROTE ONE** (MS12 phase 358, @~9j34x@). A clause
+-- that asks about the focus says so on its own line, for the reason the
+-- parameters are here: the listing's job is to let a reader tell two clauses of
+-- one name apart, and after @at@ lands in the base the focus is what tells most
+-- of them apart.
 renderRuleClause :: Rendering -> Rule -> String
 renderRuleClause ren r =
-  unwords (nameString ren (ruleName r) : map written (ruleParams r))
+  unwords
+    (nameString ren (ruleName r) : map written (ruleParams r))
+      ++ focusPart
   where
     written pt = case pt of
       PVar n -> "‹" ++ n ++ "›"
       _      -> renderPattern pt
+
+    focusPart = case ruleFocus r of
+      Nothing -> ""
+      Just cp -> " at " ++ componentPText written cp
 
 renderRuleFileError :: Rendering -> FilePath -> RuleFileError -> [String]
 renderRuleFileError ren path e = case e of
@@ -2709,6 +2722,7 @@ whereRuleError ren e = case e of
   CorePatternForm g _     -> inName g
   CorePatternNotInScope g _  -> inName g
   CorePatternAmbiguous g _ _ -> inName g
+  FocusPatternForm g _    -> inName g
   RepeatedInPattern g _   -> inName g
   BadOperands g i _       -> inRule g i
   NoSuchTag g i _         -> inRule g i
@@ -2808,6 +2822,12 @@ whatRuleError e = case e of
   CorePatternAmbiguous _ w ls ->
     w ++ " could be " ++ intercalate " or " (map nameDotted ls)
       ++ ", so it is ambiguous here"
+  -- **The one position of an @at@ pattern that takes @_@ and nothing else.**
+  -- What stands under a guess is a development and not a term, so the message
+  -- says what is there rather than offering a spelling that would work.
+  FocusPatternForm _ what ->
+    what ++ " cannot stand under a guess's ≐ — write _, and read the"
+      ++ " development with goal"
   UnknownType _ w         -> w ++ " is not a type"
   TypeArity _ w want got  ->
     w ++ " takes " ++ show want ++ ", not " ++ show got

@@ -433,6 +433,15 @@ data Role
   | TheField
   | TheIndex
   | TheParameter
+  | TheFocus
+    -- ^ __a position of a clause's @at@ pattern__ (MS12 phase 358, @~9j34x@),
+    -- as an 'ACount' counting from 1 — the binder, then the component's
+    -- sub-terms, in writing order.
+    --
+    -- **Its own role and not 'TheParameter'**: the focus is the other half of a
+    -- head, so a pane that said /parameter 2/ for a fault in @at@ would point
+    -- the author at a part of the line that is not the one with the mistake in
+    -- it. The same argument 'Thena.Instral.Infer.InFocus' is written on.
   | TheMethod
   | TheMotive
   | TheConstructor
@@ -1478,6 +1487,12 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
       -- exactly as a word in a term is.
       R.CorePatternForm g what ->
         fault BlockShapeWrong [is TheRule (name g), is ThePattern (APattern what)]
+      -- **And the one an @at@ pattern raises** (MS12 phase 358): a position
+      -- written with something it does not take. As far as a pane is concerned
+      -- it is the same shape as a core pattern's form — the rule, and what was
+      -- written where a pattern stands.
+      R.FocusPatternForm g what ->
+        fault BlockShapeWrong [is TheRule (name g), is ThePattern (APattern what)]
       R.CorePatternNotInScope g w ->
         fault NotInScope [is TheRule (name g), is TheWord (AName w)]
       R.CorePatternAmbiguous g w gs ->
@@ -1582,6 +1597,7 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
       I.InHead g i -> [is TheRule (name g), is TheTest (ALine (i + 1))]
       I.InBody g i -> [is TheRule (name g), is TheInstruction (ALine (i + 1))]
       I.InPattern g i -> [is TheRule (name g), is TheParameter (ACount (i + 1))]
+      I.InFocus g i -> [is TheRule (name g), is TheFocus (ACount (i + 1))]
       I.InSignature g a -> [is TheRule (name g), is TheCount (ACount a)]
 
     -- ** A warning

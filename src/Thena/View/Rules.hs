@@ -29,7 +29,7 @@ import Thena.View.Instral (OperandView, StatementView, displayBlock, displayOper
 import Thena.Rules (testOperands, testWord)
 import Thena.Instral.Type (Signature)
 import Thena.View.Type (SignatureView, displaySignature)
-import Thena.Syntax.Print (Env)
+import Thena.Syntax.Print (Env, componentPText)
 
 -- | A rule's name, its head, its params as `:matches`' own placeholders, and
 -- its body as 115d's statements — a rule's body is never a live @pc@, so
@@ -38,6 +38,20 @@ data RuleView = RuleView
   { ruleViewName      :: String
   , ruleViewHead      :: [TestView]
   , ruleViewParams    :: [String]
+  , ruleViewFocus     :: Maybe String
+    -- ^ __the clause's @at@ pattern, as written__ (MS12 phase 358, @~9j34x@;
+    -- his framing of 2026-09-14) — one of the five development components with
+    -- a pattern at each position, in @spec\/machine.md@ §3.2's notation and
+    -- with no fence (his ruling of 2026-09-13).
+    --
+    -- **A 'String' for the reason 'ruleViewParams' is one**: what a pane draws
+    -- here is the line the author wrote, and 'Thena.Syntax.Print.componentPText'
+    -- is a spelling that reads back, so a reader who copies it has a line the
+    -- grammar takes. A structured shape would be a second description of the
+    -- development calculus's notation for a pane that draws it as text.
+    --
+    -- **'Nothing' is a clause that asks nothing about the focus**, which is
+    -- every clause written before this phase.
   , ruleViewBody      :: [StatementView]
   , ruleViewSignature :: Maybe SignatureView
     -- ^ **the type its rule file declared for the name** (MS5 phase 67), as
@@ -96,6 +110,7 @@ displayRule sp gs budget env bs n at sig r =
     (nameOf (ruleName r))
     (map test (ruleHead r))
     (map placeholder (ruleParams r))
+    (componentPText placeholder <$> ruleFocus r)
     (displayBlock sp gs budget env bs n at Nothing (ruleBody r))
     (fmap displaySignature sig)
     (originPath <$> ruleOrigin r)

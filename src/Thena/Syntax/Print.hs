@@ -27,6 +27,7 @@ module Thena.Syntax.Print
   , rawFunBody
   , rawPattern
   , corePText
+  , componentPText
   , rawTy
     -- * Declarations, blocks and whole files
   , rawDecl
@@ -60,7 +61,7 @@ import Thena.Core.Level (Level, Normal (..), levelOfNat, levelVarName, normalise
 import Thena.Core.Context
   (Context, entryIdent, entryVar, wordReaches)
 import Thena.Core.Term (GlobalName (..), Ident (..), Literal (..), Var, nameDotted)
-import Thena.Instral.Pattern (CoreP (..))
+import Thena.Instral.Pattern (CoreP (..), ComponentP (..), Pattern)
 import Thena.Instral.Concrete
   ( RawDecl (..)
   , Reach (..)
@@ -69,6 +70,7 @@ import Thena.Instral.Concrete
   , RawOpenSpec (..)
   , RawFunction (..)
   , RawRule (..)
+  , RawComponentP (..)
   , RawSignature (..)
   , RawTest (..)
   , RawTy (..)
@@ -181,6 +183,29 @@ block is = case is of
 -- none of @\`@, @$@ or @\\@, and a @${…}@ must NOT be escaped or the scanner
 -- reads the @$@ as a character instead of an escape opener — which is the one
 -- thing 'Thena.Render.coreRegion' cannot be used for here.
+-- | A component pattern, in the notation @spec\/machine.md@ §3.2 prints the
+-- five development components in and the grammar after @at@ accepts (MS12
+-- phase 358, @~9j34x@).
+--
+-- **Here and not in a display renderer, for 'corePText'\'s reason**: what it
+-- prints reads back. @? x ≐ _ : s@ printed from a pattern parses to that
+-- pattern again, so @:rules@ can list a clause's focus and the line a reader
+-- copies is a line the grammar takes.
+--
+-- **No fence**, his ruling of 2026-09-13, while the development calculus is
+-- built in. **The guess's @≐@ always prints @_@**, which is the only thing that
+-- may stand there.
+-- **The pattern printer comes in**, as 'corePText'\'s does, so the two display
+-- renderers keep their own spelling of a pattern and share this one of a
+-- component.
+componentPText :: (Pattern -> String) -> ComponentP -> String
+componentPText f cp = case cp of
+  CompAssume   x s   -> "λ " ++ f x ++ " : " ++ f s
+  CompDefine   x v s -> f x ++ " = " ++ f v ++ " : " ++ f s
+  CompClaim    x s   -> "? " ++ f x ++ " : " ++ f s
+  CompGuess    x s   -> "? " ++ f x ++ " ≐ _ : " ++ f s
+  CompQuantify x s   -> "∀ " ++ f x ++ " : " ++ f s
+
 corePText :: (a -> String) -> CoreP a -> String
 corePText at cp = "core" ++ [tick] ++ top cp ++ [tick]
   where
@@ -232,6 +257,27 @@ corePText at cp = "core" ++ [tick] ++ top cp ++ [tick]
       LChar ch  -> escapeChar ch
       LInt k    -> show k
       LRegex r  -> "/" ++ r ++ "/"
+
+-- | The focus of a rule head, as written (MS12 phase 358, @~9j34x@).
+--
+-- **A printed base has to read back**, so a clause that wrote @at@ prints it:
+-- without this the focus would be dropped and the rule would come back
+-- matching every component.
+focus :: Maybe RawComponentP -> String
+focus Nothing   = ""
+focus (Just cp) = " at " ++ rawComponentP cp
+
+-- | The five development components, in the notation @spec\/machine.md@ §3.2
+-- prints them in — the spelling the grammar accepts, so what this writes parses.
+rawComponentP :: RawComponentP -> String
+rawComponentP cp = case cp of
+  RawCPAssume   x s   -> "λ " ++ p x ++ " : " ++ p s
+  RawCPDefine   x v s -> p x ++ " = " ++ p v ++ " : " ++ p s
+  RawCPClaim    x s   -> "? " ++ p x ++ " : " ++ p s
+  RawCPGuess    x g s -> "? " ++ p x ++ " ≐ " ++ p g ++ " : " ++ p s
+  RawCPQuantify x s   -> "∀ " ++ p x ++ " : " ++ p s
+  where
+    p = rawPattern
 
 rawPattern :: RawPattern -> String
 rawPattern rp = case rp of
@@ -482,8 +528,9 @@ rawDecl d = case d of
   DeclSignature (RawSignature _ n t) -> [n ++ " : " ++ rawTy t]
   DeclFunction (RawFunction _ n ps b _) ->
     header (n ++ concatMap ((" " ++) . rawPattern) ps) b
-  DeclRule (RawRule _ n ps ts is _) ->
-    ("rule " ++ n ++ concatMap ((" " ++) . rawPattern) ps ++ " :-" ++ whens ts ++ " do")
+  DeclRule (RawRule _ n ps cp ts is _) ->
+    ("rule " ++ n ++ concatMap ((" " ++) . rawPattern) ps ++ focus cp
+       ++ " :-" ++ whens ts ++ " do")
       : map (("  " ++) . rawInstruction) is
   -- **An @open@ line, as written** (MS10 phase 267). @open X in ‹d›@ is one
   -- line and then the declaration it reaches, indented under it, so a

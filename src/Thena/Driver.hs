@@ -2135,7 +2135,7 @@ instralEntry gs env sc bases bound src = do
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts. All three checks are 'checkBlock' since phase 90.
-  case checkBlock gs bases bound (Rule (rootName "entry") [] [] prog Nothing []) of
+  case checkBlock gs bases bound (Rule (rootName "entry") [] Nothing [] prog Nothing []) of
     Just (BlockIll es)      -> Left (LineIllFormed es)
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
@@ -2172,7 +2172,7 @@ entryBindings gs env sc bases bound src =
   Left _     -> []
   Right prog ->
     boundBy (allSignatures bases) (allCallable bases) bound
-      (Rule (rootName "entry") [] [] prog Nothing [])
+      (Rule (rootName "entry") [] Nothing [] prog Nothing [])
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
@@ -5900,7 +5900,7 @@ dispatch s name arg = case name of
                                      (scope machine))
                             (rootName "entry") (map fst bound) body of
         Left errs -> (s, Failed (blockProblem (faultsIn Nothing [] errs)))
-        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] [] is Nothing []) of
+        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] Nothing [] is Nothing []) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionFuel s)
@@ -8913,7 +8913,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- itself declared above it, and a @language@ block is exactly such a thing.
   --
   -- **The same checker the prompt uses**, so the messages are unchanged.
-  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] [] is Nothing []) of
+  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] Nothing [] is Nothing []) of
     Just (BlockIll errs)      -> stop (load [] m) msgs warns (BlockRefused errs)
     Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
     Nothing ->

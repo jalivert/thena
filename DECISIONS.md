@@ -27,8 +27,9 @@ one paragraph, not three; the full argument lives in the design notes.
 ### An identifier may contain almost anything
 
 *Decided 2026-08-25; consequences accepted 2026-08-29. The keyword list is
-reviewed whenever a word is reserved — most recently 2026-11-10, when the module
-system's five were accepted. The dot was reserved on 2026-10-30, for namespaces.*
+reviewed whenever a word is reserved — most recently 2026-11-26, when `at` was
+taken for the focus pattern in a rule head. The dot was reserved on 2026-10-30,
+for namespaces.*
 
 Most languages reserve a generous set of punctuation and give you the rest.
 Thena does the opposite: it reserves as little as it can, so you can name things
@@ -42,7 +43,7 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` |
 | a tagged literal's fence | `` ` `` |
 | whitespace | |
-| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `private` `public` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `open` `namespace` `consult` `import` `exporting` `private` `public` `hiding` `renaming` `rule` `language` `context` `judgment` `notation` `when` `at` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -1788,6 +1789,52 @@ bare `Type`. If a name has level parameters, you write them.
 `⊔` — the join — is a real part of the level algebra and prints in inferred
 types (`And {ℓ₇₂ ℓ₇₃} : Type (ℓ₇₂ ⊔ ℓ₇₃)`), but **you cannot write one.** Only
 inference builds a join.
+
+### A rule head says what the focus is, with `at`
+
+*Decided 2026-09-14, built 2026-11-26. `at` is a reserved word from that day.*
+
+A rule's head is its parameters, then the focus, then its shape tests — and the
+focus is written as a pattern over one of the five pieces a development is built
+from:
+
+```
+rule solve at ? h ≐ _ : s                         :- do prim-solve
+rule shape at ? h : core`∀ (${x} : ${T}) -> ${E}`  :- do say "a universal"
+rule onward at λ x : s                            :- do say "an assumption"
+```
+
+| written | the focus is |
+|---|---|
+| `at ? ‹x› : ‹S›` | a hole nothing has been tried on |
+| `at ? ‹x› ≐ _ : ‹S›` | a hole with a part-built term under it |
+| `at λ ‹x› : ‹S›` | an assumption |
+| `at ‹x› = ‹v› : ‹S›` | a local definition |
+| `at ∀ ‹x› : ‹S›` | a ∀-binder |
+
+**`at` names the subject and a tag names the language.** The pattern after `at`
+is over development components, which are not core terms, and the development
+calculus is built in rather than declared — so there is no fence to write. When
+it becomes a declared language it will gain one, like anything else.
+
+**A clause with no `at` is offered at every focus.** Nothing about an existing
+rule changed.
+
+**Each position is an ordinary pattern, so a bare word binds there.** `at ? h :
+s` binds the hole's name and its type; a `` core`…` `` region at the type
+position names the parts of the goal. This is the opposite of the rule inside a
+region, where a bare word names a global — inside a fence the text is another
+language's and needs an escape, and after `at` it is still `instral`.
+
+**What is under a guess is written `_`, and cannot be bound.** A part-built term
+is a development rather than a term, and `instral` has no value for a
+development; a body reads it with `goal`.
+
+**`at` is a reserved word, project-wide.** A notation needs a token: the
+definition form begins with a name, so without the keyword `rule r at x = v : S`
+could not be told from a rule of two parameters. Nothing else may be named `at`
+in any of the four languages — a word that merely contains it, like
+`universe-at`, is untouched.
 
 ### A pattern over a core term is a tagged region, and only `${…}` binds
 
