@@ -233,8 +233,8 @@ dependentMotives =
             concatMap opening (eqDecl : decls)
               ++ [":theorem t : " ++ goal, "attack"]
               ++ replicate intros "intro"
-              ++ ["into"]
-              ++ replicate intros "along"
+              -- No navigation after the intros: each leaves the cursor on what
+              -- is left to prove (MS12 phase 357).
               ++ ["eliminate-core core`x`", ":revalidate"]
           l = loadSource withRules (unlines script)
        in case loadedError l of
@@ -782,7 +782,7 @@ nestedNames =
     script =
       [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
       , ":theorem twice : \8704 (m : Nat) (n : Nat) -> Nat"
-      , "attack", "intro", "intro", "into", "along", "along"
+      , "attack", "intro", "intro"
         -- The outer split, whose methods take the hints unchanged.
       , "eliminate-core core`m`"
         -- Into the one whose name the inner split will ask for again.

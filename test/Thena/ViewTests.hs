@@ -120,11 +120,17 @@ after = foldl (\s l -> fst (oneLine s l)) (withRuleBases expectedBase newSession
 -- show that.
 fixtures :: [(String, Session)]
 fixtures =
+  -- **@attack@ leaves the cursor inside the guess it made** (MS12 phase 357),
+  -- so @back@ is what stands at the root — and the fixture that has no type at
+  -- its focus is the one that goes @along@ from there, off the only link and
+  -- onto a trailing term no guess encloses.
   [ ("nothing proved yet", after [])
-  , ("a theorem, attacked, cursor at the root", after (theorem <> ["attack"]))
-  , ("the cursor moved along, off the first link", after (theorem <> ["attack", "along"]))
-  , ("along twice, then back to the root", after (theorem <> ["attack", "along", "goto-root"]))
-  , ("inside the guess's own body", after (theorem <> ["attack", "into"]))
+  , ("a theorem, attacked, cursor inside the guess", after (theorem <> ["attack"]))
+  , ( "the cursor moved along at the root, off the first link"
+    , after (theorem <> ["attack", "back", "along"]) )
+  , ( "along, then back to the root"
+    , after (theorem <> ["attack", "back", "along", "goto-root"]) )
+  , ("inside the guess's own body, past a binder", after (theorem <> ["attack", "intro"]))
   ]
   where
     theorem = [":theorem t : \8704 (A : Type\8320) -> A -> A"]

@@ -35,9 +35,6 @@ open Or
 attack
 intro
 intro
-into
-along
-along
 eliminate-core core`xs`
 goto-named "nilMethod"
 elaborate surface`orRight (And (Eq Comparison different same) Empty) (And (Eq Comparison different different) (Empty -> Empty)) (both (Eq Comparison different different) (Empty -> Empty) (refl Comparison different) (\ i -> i))`
@@ -56,9 +53,6 @@ qed
 attack
 intro
 intro
-into
-along
-along
 eliminate-core core`avoid`
 goto-named "nilMethod"
 elaborate surface`\ ni -> refl String c`
@@ -81,11 +75,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`i`
 goto-named "extend-hereMethod"
 elaborate surface`\ G x T e -> Ctx.lemmata.noConfusion (extend G x T) empty e`
@@ -107,11 +96,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`i`
 goto-named "extend-hereMethod"
 elaborate surface`\ G0 x T G a S e -> orLeft (And (Eq String x a) (Eq Ty T S)) (And (Eq String x a -> Empty) (extend-in x T G)) (both (Eq String x a) (Eq Ty T S) (extendName G0 x T G a S e) (extendTy G0 x T G a S e))`
@@ -140,15 +124,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
-along
-along
-along
 eliminate-core core`ctxInvExtend-tactics G x S y U i`
 goto-named "orLeftMethod"
 elaborate surface`\ h -> subst String (\ z -> extend-in z U (extend G1 x S)) x y (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h)) (subst Ty (\ V -> extend-in x V (extend G1 x S)) S U (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h)) extend-here)`
@@ -166,11 +141,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`d`
 goto-named "T-varMethod"
 elaborate surface`\ x T1 G0 i G1 inc -> T-var (inc x T1 i)`
@@ -197,11 +167,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`d`
 goto-named "T-varMethod"
 elaborate surface`\ x T0 G0 i bound acc w h -> elim Or ((And (Eq Comparison (member x bound) same) (In x bound)) (And (Eq Comparison (member x bound) different) (In x bound -> Empty))) (\ o -> FvSpec G0 bound acc w) ((\ hs -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) (subst Comparison (\ q -> In w (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q)) (member x bound) same (andLeft (Eq Comparison (member x bound) same) (In x bound) hs) h)) (\ hs -> elim Or ((Eq String w x) (In w acc)) (\ o1 -> FvSpec G0 bound acc w) ((\ q -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w)) (both (In w bound -> Empty) (Dom G0 w) (\ ib -> andRight (Eq Comparison (member x bound) different) (In x bound -> Empty) hs (subst String (\ z -> In z bound) w x q ib)) (pair Ty (\ U -> extend-in w U G0) T0 (subst String (\ z -> extend-in z T0 G0) x w (sym String w x q) i)))) (\ ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia)) () (subst Comparison (\ q -> In w (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q)) (member x bound) different (andLeft (Eq Comparison (member x bound) different) (In x bound -> Empty) hs) h))) () (memberSpec-tactics x bound)`
@@ -223,10 +188,6 @@ attack
 intro
 intro
 intro
-into
-along
-along
-along
 eliminate-core core`l`
 goto-named "nilMethod"
 elaborate surface`\ h -> orRight Empty (In w r) h`
@@ -245,10 +206,6 @@ attack
 intro
 intro
 intro
-into
-along
-along
-along
 eliminate-core core`ys`
 goto-named "nilMethod"
 elaborate surface`\ h -> absurdly (FromImage s (nil String) w) h`
@@ -265,8 +222,6 @@ qed
 :theorem listNil-tactics : ∀ (l : List {0} String) (f : ∀ (w : String) -> In {0} w l -> Empty {0}) -> Eq {0} (List {0} String) l (nil {0} String)
 attack
 intro
-into
-along
 eliminate-core core`l`
 goto-named "nilMethod"
 elaborate surface`\ f -> refl (List String) (nil String)`
@@ -287,12 +242,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
 eliminate-core core`fvInCtx-tactics empty N S d (nil {0} String) (nil {0} String) w h`
 goto-named "orLeftMethod"
 elaborate surface`\ e -> e`
@@ -329,16 +278,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
-along
-along
-along
-along
 eliminate-core core`ctxInvExtend-tactics G x S y U i`
 goto-named "orLeftMethod"
 elaborate surface`\ h -> subst String (\ z -> Entry (extend D x S) z U (look z (cons (And String LC) (both String LC x (var x)) s))) x y (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h)) (subst Ty (\ V -> Entry (extend D x S) x V (look x (cons (And String LC) (both String LC x (var x)) s))) S U (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h)) (orLeft (And (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S))) (And (typing empty (look x (cons (And String LC) (both String LC x (var x)) s)) S) (Eq (List String) (LC.fv.x (look x (cons (And String LC) (both String LC x (var x)) s))) (nil String))) (both (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S)) (lookHit-tactics x (var x) s) extend-here)))`
@@ -365,17 +304,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
-along
-along
-along
-along
-along
 eliminate-core core`imagesIn-tactics s (LC.fv.x {0} (abs x S E)) x h`
 goto-named "pairMethod"
 elaborate surface`\ y p -> elim Or ((In y (nil String)) (And (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y))) (\ o -> Empty) ((\ e -> e) (\ r -> elim Sigma (Ty (\ U -> extend-in y U (extend G x S))) (\ z -> Empty) ((\ U i -> elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (extend-in y U G))) (\ o -> Empty) ((\ h1 -> andLeft (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y) r (orLeft (Eq String y x) (In y (nil String)) (andLeft (Eq String y x) (Eq Ty U S) h1))) (\ h2 -> elim Or ((And (Eq LC (look y s) (var y)) (extend-in y U D)) (And (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String)))) (\ o -> Empty) ((\ e -> elim Or ((Eq String x y) Empty) (\ o1 -> Empty) ((\ q -> andLeft (Eq String y x -> Empty) (extend-in y U G) h2 (sym String x y q)) (\ e1 -> e1)) () (subst LC (\ m -> In x (LC.fv.x m)) (look y s) (var y) (andLeft (Eq LC (look y s) (var y)) (extend-in y U D) e) (andRight (In y (LC.fv.x (abs x S E))) (In x (LC.fv.x (look y s))) p))) (\ c -> subst (List String) (\ l -> In x l) (LC.fv.x (look y s)) (nil String) (andRight (typing empty (look y s) U) (Eq (List String) (LC.fv.x (look y s)) (nil String)) c) (andRight (In y (LC.fv.x (abs x S E))) (In x (LC.fv.x (look y s))) p))) () (g y U (andRight (Eq String y x -> Empty) (extend-in y U G) h2)))) () (ctxInvExtend-tactics G x S y U i))) () (andRight (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y) r))) () (fvInCtx-tactics (extend G x S) E T d (cons String x (nil String)) (nil String) y (andLeft (In y (LC.fv.x (abs x S E))) (In x (LC.fv.x (look y s))) p))`
@@ -394,11 +322,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`d`
 goto-named "T-varMethod"
 elaborate surface`\ x T0 G0 i D s g -> elim Or ((And (Eq LC (look x s) (var x)) (extend-in x T0 D)) (And (typing empty (look x s) T0) (Eq (List String) (LC.fv.x (look x s)) (nil String)))) (\ o -> typing D (look x s) T0) ((\ e -> subst LC (\ m -> typing D m T0) (var x) (look x s) (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (extend-in x T0 D) e)) (T-var (andRight (Eq LC (look x s) (var x)) (extend-in x T0 D) e))) (\ c -> weakenEmpty-tactics (look x s) T0 (andLeft (typing empty (look x s) T0) (Eq (List String) (LC.fv.x (look x s)) (nil String)) c) D)) () (g x T0 i)`
@@ -425,11 +348,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`d`
 goto-named "T-varMethod"
 elaborate surface`\ x T0 G0 i M N e -> absurdly (AppInv G0 M N T0) (LC.lemmata.noConfusion (var x) (app M N) e)`
@@ -453,11 +371,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`d`
 goto-named "T-varMethod"
 elaborate surface`\ y T0 G0 i x S E e -> absurdly (AbsInv G0 x S E T0) (LC.lemmata.noConfusion (var y) (abs x S E) e)`

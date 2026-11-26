@@ -5,11 +5,11 @@ thena spine> intro
 thena spine> intro
 thena spine> intro
 thena spine> :show
-▶ let ? projection : ∀ (T : Type₀) -> T -> T -> T ≐ (
+  let ? projection : ∀ (T : Type₀) -> T -> T -> T ≐ (
     λ (T : Type₀) ->
     λ (x : T) ->
     λ (x1 : T) ->
-    let ? projection1 : T in
+▶   let ? projection1 : T in
     projection1
   ) in
   projection

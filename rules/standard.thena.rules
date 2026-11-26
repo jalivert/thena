@@ -69,19 +69,16 @@ rule fit-in-scope :- when focus-is-hole
      ; f = apply-next h n
      ; call fit-core f
 
-attack : ()
-rule attack :- when focus-is-hole do prim-attack
-
-try-core : Core -> ()
-rule try-core t :- when focus-is-hole do prim-try t
-
-abandon : ()
-rule abandon :- when focus-is-hole do prim-abandon
-
+-- **ABOVE `attack`, for the reason `try-in-scope` is** — his instruction of
+-- 2026-11-23, applied again in MS12 phase 357. `attack` matches at every hole
+-- and never fails, so with `attack` first a bare `step` at a ∀ goal attacked
+-- for ever and never introduced: the introductions ask about a hole now, which
+-- is the same list `attack` is in. The universal tactic goes below the one with
+-- a shape test.
 intro : ()
-rule intro :- when focus-is-guess goal-type-is-pi do prim-lambda
+rule intro :- when focus-is-hole goal-type-is-pi do prim-lambda
 
-rule intro :- when focus-is-guess goal-type-is-let do prim-let
+rule intro :- when focus-is-hole goal-type-is-let do prim-let
 
 -- `intro` SAYING WHAT THE BINDING IS CALLED — 2026-11-20. Without it the only
 -- names a proof's own arguments could have were the ones the statement wrote,
@@ -102,9 +99,23 @@ rule intro :- when focus-is-guess goal-type-is-let do prim-let
 -- word, no token*. A rule holding a `Name` writes `name-ident` to say it means
 -- that word's binder.
 intro : Ident -> ()
-rule intro n :- when focus-is-guess goal-type-is-pi do prim-lambda n
+rule intro n :- when focus-is-hole goal-type-is-pi do prim-lambda n
 
-rule intro n :- when focus-is-guess goal-type-is-let do prim-let n
+rule intro n :- when focus-is-hole goal-type-is-let do prim-let n
+
+-- ATTACK LEAVES THE CURSOR ON THE HOLE IT OPENED — his ruling of 2026-11-26.
+-- The introductions are positional: each acts on the hole the cursor stands on,
+-- so the move belongs here, where it can be read, and not inside `prim-attack`,
+-- which is table 2.7's replacement and nothing else. `back` is the way out to
+-- the guess, which is what `solve` and `regret` act on.
+attack : ()
+rule attack :- when focus-is-hole do prim-attack ; into
+
+try-core : Core -> ()
+rule try-core t :- when focus-is-hole do prim-try t
+
+abandon : ()
+rule abandon :- when focus-is-hole do prim-abandon
 
 -- RENAMING THE BINDER AT THE FOCUS — 2026-11-20, his ruling *THERE IS ONE
 -- NAME*, part four. A word written twice kills the outer binder: nothing
@@ -572,11 +583,8 @@ rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds fs k :-
      when (binder-is-argument b) (pattern-is-wildcard p)
   do w = fresh-name "u"
      ; wi = name-ident w
-     ; g = here
      ; k2 = prim-lambda wi
-     ; goto k2
      ; v = resolve-name w
-     ; goto g
      ; vs2 = prepend v vs
      ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
@@ -586,11 +594,8 @@ rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds fs k :-
      ; no-nesting sub
      ; w = pattern-head p
      ; wi = name-ident w
-     ; g = here
      ; k2 = prim-lambda wi
-     ; goto k2
      ; v = resolve-name w
-     ; goto g
      ; vs2 = prepend v vs
      ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
@@ -653,22 +658,16 @@ rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-hypot
      ; n = name-or-stem n0 "ih"
      ; h = fresh-name n
      ; hi = name-ident h
-     ; g = here
      ; k2 = prim-lambda hi
-     ; goto k2
      ; v = resolve-name h
-     ; goto g
      ; vs2 = prepend v vs
      ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
 rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-copy b)
   do n = binder-name b
      ; ni = name-ident n
-     ; g = here
      ; k2 = prim-lambda ni
-     ; goto k2
      ; v = resolve-name n
-     ; goto g
      ; vs2 = prepend v vs
      ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
@@ -806,7 +805,6 @@ rule elaborate-arm t c sub bs fs (p, ob) :-
      ; prim-attack
      ; into
      ; k0 = here
-     ; back
      ; k1 = intro-arm-binders as bs [] [] fs k0
      ; goto k1
      ; arm-needs-body sub ob
@@ -1091,7 +1089,6 @@ rule open-case mh (some sub) bs fs :-
      ; prim-attack
      ; into
      ; k0 = here
-     ; back
      ; k1 = intro-arm-binders ps bs [] [] fs k0
      ; goto k1
 
@@ -1262,7 +1259,6 @@ rule elaborate t :- when focus-is-hole (surface-is-lambda t)
      ; prim-attack
      ; into
      ; k = here
-     ; back
      ; body = call intro-binders t k
      ; goto body
      ; b = lambda-body t
@@ -1284,9 +1280,8 @@ rule elaborate t :- when focus-is-hole (surface-is-forall t)
      ; u  = fresh-universe
      ; d  = claim dn u
      ; prim-attack
-     ; quantify x d
      ; into
-     ; along
+     ; quantify x d
      ; c  = here
      ; goto d
      ; call elaborate ty
@@ -1463,7 +1458,7 @@ rule run-block t :- do play t
 -- only components in the chain — which stopped being true the moment a written
 -- type needed a hole of its own inside them.
 intro-binders : Surface -> Core -> Core
-rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-bare t)
+rule intro-binders t k :- when focus-is-hole (lambda-binds-more t) (lambda-is-bare t)
   do x  = lambda-name t
      ; xi = name-ident x
      ; k2 = prim-lambda xi
@@ -1471,7 +1466,7 @@ rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-b
      ; body = call intro-binders tl k2
      ; return body
 
-rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-bare t)
+rule intro-binders t k :- when focus-is-hole (lambda-binds-one t) (lambda-is-bare t)
   do x = lambda-name t
      ; xi = name-ident x
      ; k2 = prim-lambda xi
@@ -1483,46 +1478,40 @@ rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-ba
 -- binders already introduced, and then unified with the type the binder actually
 -- got. So `\ A (a : A) -> a` works, a wrong annotation fails at the binder it was
 -- written on, and where the goal's domain is still open the annotation solves it.
-rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-annotated t)
-  do g  = here
-     ; x  = lambda-name t
+rule intro-binders t k :- when focus-is-hole (lambda-binds-more t) (lambda-is-annotated t)
+  do x  = lambda-name t
      ; ty = lambda-annot-type t
      ; dn = fresh-name "A"
      ; u  = fresh-universe
-     ; goto k
+     ; g  = here
      ; d  = claim dn u
      ; goto d
      ; call elaborate ty
      ; goto g
      ; xi = name-ident x
      ; k2 = prim-lambda xi
-     ; goto k2
      ; v  = resolve-name x
      ; s  = typeof v
      ; unify d s
-     ; goto g
      ; tl = lambda-tail t
      ; body = call intro-binders tl k2
      ; return body
 
-rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-annotated t)
-  do g  = here
-     ; x  = lambda-name t
+rule intro-binders t k :- when focus-is-hole (lambda-binds-one t) (lambda-is-annotated t)
+  do x  = lambda-name t
      ; ty = lambda-annot-type t
      ; dn = fresh-name "A"
      ; u  = fresh-universe
-     ; goto k
+     ; g  = here
      ; d  = claim dn u
      ; goto d
      ; call elaborate ty
      ; goto g
      ; xi = name-ident x
      ; k2 = prim-lambda xi
-     ; goto k2
      ; v  = resolve-name x
      ; s  = typeof v
      ; unify d s
-     ; goto g
      ; return k2
 
 -- The walk itself, and it is a recursion over the surface spine: take the first

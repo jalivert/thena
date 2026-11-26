@@ -551,14 +551,23 @@ hasNext (RuleIter _ ms) = not (null ms)
 
 -- | One shape question, answered against the focus.
 --
--- **The cost of shallow heads, in one concrete case** (§8). @GoalTypeIsPi@ asks
--- about the focused component's own type, so at
--- @? x ≐ (λ A . ? h : Nat . h) : ∀ (A : Type₀) -> Nat@ it passes — the guess's
--- type is a Π — while @intro@ itself would fail, because the hole it actually
--- reaches is at @Nat@. That is §8's stated cost arriving, not a bug: the rule
--- matches, runs and fails in its body, and failing in a body is already handled
--- (§7.3). Asking about the hole at the bottom of the guess instead would make
--- the head a traversal, which is what \"shallow\" rules out.
+-- **The cost of shallow heads, in one concrete case** (§8). @FocusIsHole@ passes
+-- at the hole a fresh @:theorem@ leaves, so @intro@ is offered there — and
+-- @intro@ refuses it with @NotReadyToIntroduce@, because a λ above the root of
+-- a development would change what the development proves. That is §8's stated
+-- cost arriving, not a bug: the rule matches, runs and fails in its body, and
+-- failing in a body is already handled (§7.3). A head that could tell the two
+-- holes apart would have to ask what *encloses* the focus, which is what
+-- \"shallow\" rules out.
+--
+-- **THE EXAMPLE THIS HADDOCK CARRIED UNTIL MS12 PHASE 357 NO LONGER EXISTS**, and
+-- it is worth saying why. It was @GoalTypeIsPi@ passing at
+-- @? x ≐ (λ A . ? h : Nat . h) : ∀ (A : Type₀) -> Nat@ — the guess's type being a
+-- Π — while @intro@ failed, because the hole it walked down to was at @Nat@.
+-- **The introducers are positional now** (§7.2): they act at the focused hole, so
+-- a head asking about the focus and the body acting on it are asking about one
+-- type. The remaining cost is the one above, and it is a position's
+-- surroundings rather than a type's depth.
 -- **The third argument binds a call's arguments to this clause's parameters**
 -- (MS4 phase 47), and is empty for 'matches' and 'dispatch', which supply
 -- none.

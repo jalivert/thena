@@ -159,9 +159,6 @@ tests =
         , "intro"
         , "intro"
         , ":show"
-        , "into"
-        , "along"
-        , "along"
         , ":where"
           -- @x@, not @_@: his ruling of 2026-11-20 gives an argument the
           -- statement did not name a real, writable one.
@@ -252,8 +249,6 @@ tests =
         , "attack"
         , ":matches"
         , "intro"
-        , "into"
-        , "along"
         , ":where"
         , ":matches"
         , ":abandon"
@@ -289,12 +284,12 @@ tests =
         , ":show"
         , ":choices"
           -- Deterministic commands in between. They push no frame (the peek),
-          -- and they do not disturb the one that is there.
-        , "into"
+          -- and they do not disturb the one that is there. @back@ then @into@
+          -- is a round trip: the cursor is on the hole below the binder @step@
+          -- introduced, so @back@ stands on that binder and @along@ returns.
+        , "back"
         , "along"
         , ":where"
-        , "back"
-        , "back"
         , ":choices"
           -- retry takes one ALTERNATIVE, not one command: it pops back past
           -- everything since, restores the development, and runs the next one.
@@ -403,13 +398,12 @@ tests =
         "structural"
         [ ":theorem byhand : Type\8321"
         , "attack"
-          -- @quantify@ is @intro@'s twin: it acts at the guess and claims the
-          -- codomain at its own universe, which is why the Π's level is not
-          -- pinned to the codomain's.
+          -- @quantify@ is @intro@'s twin: it acts at the hole the cursor stands
+          -- on and claims the codomain at its own universe, which is why the
+          -- Π's level is not pinned to the codomain's. It leaves the cursor on
+          -- that codomain hole, so there is nothing to navigate.
         , "quantify \"A\" core`Type\8320`"
         , ":show"
-        , "into"
-        , "along"
         , "try-core core`Type\8320`"
         , "solve"
         , "back"
@@ -449,9 +443,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , ":where"
           -- Two questions, two answers: the second lists only what could
           -- elaborate that hint.
@@ -475,9 +466,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , "elaborate surface`b`"
           -- **Applying a non-function says so**, since MS8 phase 170. The
           -- name-headed clause's refusal used to be discarded by the
@@ -491,9 +479,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , ":step on"
         , "elaborate surface`a`"
         , ":step"
@@ -693,10 +678,6 @@ tests =
         , "intro"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
-        , "along"
         , "eliminate-core core`e`"
         , "back"
         , ":where"
@@ -714,8 +695,6 @@ tests =
         , ":theorem plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n"
         , "attack"
         , "intro"
-        , "into"
-        , "along"
         , "eliminate-core core`n`"
         , ":show"
         , "back"
@@ -754,8 +733,6 @@ tests =
         , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty {0}"
         , "attack"
         , "intro"
-        , "into"
-        , "along"
         , "eliminate-core core`p`"
         , ":where"
         , "back"
@@ -796,9 +773,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , "eliminate-core core`i`"
         , "eliminate-core core`n`"
         , ":abandon"
@@ -820,10 +794,6 @@ tests =
         , "intro"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
-        , "along"
         , ":matches"
         , "eliminate-core core`Type₀`"
         , "eliminate-core core`succ`"
@@ -851,9 +821,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , "eliminate-core core`b`"
         , ":where"
         , ":abandon"
@@ -878,9 +845,6 @@ tests =
         , "attack"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
         , "eliminate-core core`c`"
         , ":quit"
         ]
@@ -1163,10 +1127,6 @@ tests =
         , "intro"
         , "intro"
         , "intro"
-        , "into"
-        , "along"
-        , "along"
-        , "along"
         , "apply-core core`f`"
         , ":show"
         , "goto-named \"_\""
@@ -1227,8 +1187,6 @@ tests =
         , ":theorem h : \8704 (b : Bool) -> Maybe Bool"
         , "attack"
         , "intro"
-        , "into"
-        , "along"
         , ":where"
         , "apply-core core`Just`"
         , "goto-named \"a\""
@@ -1237,9 +1195,12 @@ tests =
         , "solve"
         , "qed"
         , ":show h"
-          -- The head is the guard, so @apply@ at a guess never runs its body.
+          -- The head is the guard, so @apply@ at a guess never runs its body —
+          -- and @back@ is what stands at one, @attack@ having left the cursor on
+          -- the hole inside it (MS12 phase 357).
         , ":theorem guessed : Bool"
         , "attack"
+        , "back"
         , "apply-core core`true`"
         , ":abandon"
         ]
@@ -1418,8 +1379,6 @@ tests =
         , ":theorem probe : \8704 (b : Box1 Nat) -> Nat"
         , "attack"
         , "intro"
-        , "into"
-        , "along"
         , "eliminate-core core`b`"
         , ":abandon"
         , "data N : Type where { z : N ; s : N -> N }"
@@ -1656,7 +1615,6 @@ tests =
         , ":trust none"
         , ":theorem viaHonest : Eq {0} Nat zero zero"
         , "attack"
-        , "into"
         , "try-core core`honest {0}`"
         , "solve"
         , "back"
@@ -1665,7 +1623,6 @@ tests =
         , "qed"
         , ":theorem viaLiar : Eq {0} Nat zero (succ zero)"
         , "attack"
-        , "into"
         , "try-core core`liar {0}`"
         , "solve"
         , "back"

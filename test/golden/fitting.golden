@@ -16,7 +16,7 @@ thena spine> :show
 ▶ let t0 = refined : Nat -> Nat in
   t0
 thena spine> :choices
-31  fit-core (standard.thena.rules:240)   untried: fit-core (standard.thena.rules:244)
+31  fit-core (standard.thena.rules:251)   untried: fit-core (standard.thena.rules:255)
 thena spine> :undo
 ▶ let ? t0 : Nat -> Nat in
   t0
@@ -78,5 +78,5 @@ thena spine> :show
 ▶ let goal = refined : Bool -> Maybe Bool in
   goal
 thena spine> :choices
-91  fit-core (standard.thena.rules:240)   untried: fit-core (standard.thena.rules:244)
+91  fit-core (standard.thena.rules:251)   untried: fit-core (standard.thena.rules:255)
 thena spine> :quit

@@ -669,7 +669,7 @@ engineTests =
     script call =
       declarations
         ++ [ ":theorem vtail : \8704 (A : Type\8320) (n : Nat) (v : Vec A (succ n)) -> Vec A n"
-           , "attack", "intro", "intro", "intro", "into", "along", "along", "along"
+           , "attack", "intro", "intro", "intro"
            , call
            , ":revalidate"
            ]

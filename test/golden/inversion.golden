@@ -30,8 +30,6 @@ thena spine> :theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty {0}
 proving oneNotEven : Ev (succ zero) -> Empty {0}
 thena spine> attack
 thena spine> intro
-thena spine> into
-thena spine> along
 thena spine> eliminate-core core`p`
 subgoals: evZeroMethod, evSSMethod
 thena spine> :where

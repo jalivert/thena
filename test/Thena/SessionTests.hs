@@ -315,7 +315,9 @@ failureStaysInTheLine =
           (before == after)
     ]
   where
-    script = [":theorem t : ∀ (A : Type₀) -> A -> A", "step"]
+    -- The @back@ is the way out to the guess @attack@ made, which is what
+    -- @regret@ acts on (MS12 phase 357).
+    script = [":theorem t : ∀ (A : Type₀) -> A -> A", "step", "back"]
 
 -- --------------------------------------------------------------------------
 -- The deliverable
@@ -338,10 +340,8 @@ identityProof =
   , "attack"
   , "intro"
   , "intro"
-  -- Down into the guess and past the two binders it just made, to the hole.
-  , "into"
-  , "along"
-  , "along"
+  -- No navigation: @attack@ left the cursor on the hole it opened and each
+  -- @intro@ leaves it on what is left to prove (MS12 phase 357).
   -- **The second binder of @A -> A@ is called @x@ — his ruling of 2026-11-20.**
   -- A non-dependent Π carries 'Thena.Core.Term.anonymousIdent' (§2.6), which is
   -- not a name; 'Thena.Core.Context.writableIn' mints a real one as the binder
@@ -395,7 +395,7 @@ holeTests =
   , ok "intro walks a Π"        (arrowGoal ++ ["attack", "intro"])
   , ok "and then the next one"  (arrowGoal ++ ["attack", "intro", "intro"])
 
-  , ok "try attaches a guess"             (natGoal ++ ["attack", "into", "try-core core`zero`"])
+  , ok "try attaches a guess"             (natGoal ++ ["attack", "try-core core`zero`"])
 
     -- **A bare argument is neither vocabulary as of MS5 phase 62b** — it is an
     -- @instral@ reference, so this one is simply a name nothing bound. The
@@ -406,31 +406,34 @@ holeTests =
     -- validated and typed like a rule file now, so an unbound name is a
     -- 'Thena.Rules.UnboundInRule' at entry time.
   , refuses "a bare argument is a reference, not a term"
-      (natGoal ++ ["attack", "into", "try-core zero"])
+      (natGoal ++ ["attack", "try-core zero"])
       [UnboundInRule (rootName "entry") 0 "zero" (TVar 0)]
     -- And the vocabularies still do not mix: the surface fence makes a
     -- 'Thena.Instral.Ops.VSurface', which a core tactic will not take. **The refusal is
     -- the type system's now**, where it used to be the op's at run time.
   , mistyped "a core tactic will not take a surface argument"
-      (natGoal ++ ["attack", "into", "try-core surface`zero`"])
+      (natGoal ++ ["attack", "try-core surface`zero`"])
       [Clash (InBody (rootName "entry") 0) TCore TSurface]
     -- The corners subsume phase 23b's parenthesisation rule: an argument that
     -- is not a single atom needed parentheses, and inside corners it does not.
   , ok "and inside them an argument needs no parentheses"
-      (natGoal ++ ["attack", "into", "try-core core`succ zero`"])
+      (natGoal ++ ["attack", "try-core core`succ zero`"])
   , ok "and regret takes it off again"
-      (natGoal ++ ["attack", "into", "try-core core`zero`", "regret"])
+      (natGoal ++ ["attack", "try-core core`zero`", "regret"])
   , halts "regret needs a guess" (natGoal ++ ["regret"])
       (NoClauseMatched "regret" 0 [0])
 
   , ok "solve commits a pure guess"
-      (natGoal ++ ["attack", "into", "try-core core`zero`", "solve"])
-  , notYetPure "and refuses one that is not pure" (natGoal ++ ["attack", "solve"])
+      (natGoal ++ ["attack", "try-core core`zero`", "solve"])
+    -- @attack@ leaves the cursor on the hole it opened, so the way to the guess
+    -- it made is @back@ — the guess is what @solve@ acts on (MS12 phase 357).
+  , notYetPure "and refuses one that is not pure"
+      (natGoal ++ ["attack", "back", "solve"])
 
     -- @claim@ inserts above the focus and leaves it where it was, so reaching
     -- the new hole is a @back@ — the path gained a step and this pops it.
   , ok "abandon drops a hole nothing refers to"
-      (natGoal ++ ["attack", "into", "claim \"spare\" core`Nat`", "back", "abandon"])
+      (natGoal ++ ["attack", "claim \"spare\" core`Nat`", "back", "abandon"])
   , halts "and refuses one that is still referred to"
       (natGoal ++ ["abandon"]) (CannotMove StillReferenced)
   ]

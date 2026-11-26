@@ -102,7 +102,23 @@ expectedStandard =
       , Bind (Op.PVar "f") Nothing (Op.ApplyNext (Ref "h") (Ref "n"))
       , Do (Call "fit-core" [Ref "f"])
       ]
-  , aRule (rootName "attack")     []    [FocusIsHole]                 [Do Attack]
+    -- **ABOVE @attack@, for the reason @try-in-scope@ is** — his instruction of
+    -- 2026-11-23, applied again in MS12 phase 357: the introductions ask about a
+    -- hole now, and @attack@ matches at every hole and never fails, so below it
+    -- a bare @step@ at a ∀ goal attacked for ever and never introduced.
+  , aRule (rootName "intro")      []    [FocusIsHole, GoalTypeIsPi]   [Do (IntroPi Nothing)]
+  , aRule (rootName "intro")      []    [FocusIsHole, GoalTypeIsLet]  [Do (IntroLet Nothing)]
+    -- **And the same two at arity one** (MS12 phase 326, his ask of
+    -- 2026-11-20): @intro "a"@ says what the binding is called, which is the
+    -- way past an argument the statement never named. @prim-lambda@ and
+    -- @prim-let@ have taken an optional name since MS4 phase 41f; nothing in
+    -- the base passed one. A call is matched by name /and/ arity, so these are
+    -- two further rules and neither shadows the nullary pair.
+  , aRule (rootName "intro") [PVar "n"] [FocusIsHole, GoalTypeIsPi]
+      [Do (IntroPi (Just (Ref "n")))]
+  , aRule (rootName "intro") [PVar "n"] [FocusIsHole, GoalTypeIsLet]
+      [Do (IntroLet (Just (Ref "n")))]
+  , aRule (rootName "attack")     []    [FocusIsHole]      [Do Attack, Do Into]
   , aRule (rootName "try-core") [PVar "t"] [FocusIsHole] [Do (Try (Ref "t"))]
   , aRule (rootName "abandon")    []    [FocusIsHole]                 [Do Abandon]
     -- **Two clauses of one name** (phase 23b): table 2.8 has two intro rules and
@@ -110,18 +126,6 @@ expectedStandard =
     -- for. Before phase 23 a call could not backtrack, so they had to be
     -- @intro-pi@ and @intro-let@; now they are @intro@, and typing @intro@ at
     -- the REPL reaches whichever one applies.
-  , aRule (rootName "intro")      []    [FocusIsGuess, GoalTypeIsPi]  [Do (IntroPi Nothing)]
-  , aRule (rootName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do (IntroLet Nothing)]
-    -- **And the same two at arity one** (MS12 phase 326, his ask of
-    -- 2026-11-20): @intro "a"@ says what the binding is called, which is the
-    -- way past an argument the statement never named. @prim-lambda@ and
-    -- @prim-let@ have taken an optional name since MS4 phase 41f; nothing in
-    -- the base passed one. A call is matched by name /and/ arity, so these are
-    -- two further rules and neither shadows the nullary pair.
-  , aRule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsPi]
-      [Do (IntroPi (Just (Ref "n")))]
-  , aRule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsLet]
-      [Do (IntroLet (Just (Ref "n")))]
     -- **The repair for a shadowed binder** (MS12 phase 330), his ruling of
     -- 2026-11-20, /THERE IS ONE NAME/, part four: the word the component at the
     -- focus is bound under, changed in the development and so in the term.
@@ -499,7 +503,6 @@ elaborateClauses =
            , Do Attack
            , Do Into
            , Bind (Op.PVar "k0") Nothing Here
-           , Do Back
            , Bind (Op.PVar "k1") Nothing
                (Op.Call "intro-arm-binders"
                         [ Ref "ps", Ref "bs", Op.ListOf [], Op.ListOf []
@@ -641,7 +644,6 @@ elaborateClauses =
       , Do Attack
       , Do Into
       , Bind (Op.PVar "k") Nothing Here
-      , Do Back
       , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "t", Ref "k"])
       , Do (Goto (Ref "body"))
       , Bind (Op.PVar "b") Nothing (Op.LambdaBody (Ref "t"))
@@ -659,8 +661,8 @@ elaborateClauses =
       , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
       , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u"))
       , Do Attack
+      , Do Into
       , Do (Op.Quantify (Ref "x") (Ref "d"))
-      , Do Into, Do Along
       , Bind (Op.PVar "c") Nothing Here
       , Do (Goto (Ref "d"))
       , call "elaborate" [Ref "ty"]
@@ -819,7 +821,7 @@ spineWalkers =
 binderWalkers :: [Rule]
 binderWalkers =
   [ aRule (rootName "intro-binders") [PVar "t", PVar "k"]
-      [FocusIsGuess, LambdaBindsMore (Ref "t"), LambdaIsBare (Ref "t")]
+      [FocusIsHole, LambdaBindsMore (Ref "t"), LambdaIsBare (Ref "t")]
       [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
       , Bind (Op.PVar "xi") Nothing (Op.NameIdent (Ref "x"))
       , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "xi")))
@@ -828,7 +830,7 @@ binderWalkers =
       , Do (Op.Return (Ref "body"))
       ]
   , aRule (rootName "intro-binders") [PVar "t", PVar "k"]
-      [FocusIsGuess, LambdaBindsOne (Ref "t"), LambdaIsBare (Ref "t")]
+      [FocusIsHole, LambdaBindsOne (Ref "t"), LambdaIsBare (Ref "t")]
       [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
       , Bind (Op.PVar "xi") Nothing (Op.NameIdent (Ref "x"))
       , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "xi")))
@@ -839,14 +841,14 @@ binderWalkers =
     -- claimed /inside/ the binders already introduced — the only place an
     -- earlier binder of the same group is in scope — and then unified with it.
   , aRule (rootName "intro-binders") [PVar "t", PVar "k"]
-      [FocusIsGuess, LambdaBindsMore (Ref "t"), LambdaIsAnnotated (Ref "t")]
+      [FocusIsHole, LambdaBindsMore (Ref "t"), LambdaIsAnnotated (Ref "t")]
       (annotatedBinder
          ++ [ Bind (Op.PVar "tl") Nothing (Op.LambdaTail (Ref "t"))
             , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "tl", Ref "k2"])
             , Do (Op.Return (Ref "body"))
             ])
   , aRule (rootName "intro-binders") [PVar "t", PVar "k"]
-      [FocusIsGuess, LambdaBindsOne (Ref "t"), LambdaIsAnnotated (Ref "t")]
+      [FocusIsHole, LambdaBindsOne (Ref "t"), LambdaIsAnnotated (Ref "t")]
       (annotatedBinder ++ [Do (Op.Return (Ref "k2"))])
   ]
 
@@ -855,23 +857,20 @@ binderWalkers =
 -- and unify the two inside the binder, where both are nameable.
 annotatedBinder :: [Instr]
 annotatedBinder =
-  [ Bind (Op.PVar "g") Nothing Here
-  , Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
+  [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
   , Bind (Op.PVar "ty") Nothing (Op.LambdaAnnotType (Ref "t"))
   , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
   , Bind (Op.PVar "u") Nothing (Call "fresh-universe" [])
-  , Do (Goto (Ref "k"))
+  , Bind (Op.PVar "g") Nothing Here
   , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u"))
   , Do (Goto (Ref "d"))
   , Do (Call "elaborate" [Ref "ty"])
   , Do (Goto (Ref "g"))
   , Bind (Op.PVar "xi") Nothing (Op.NameIdent (Ref "x"))
   , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "xi")))
-  , Do (Goto (Ref "k2"))
   , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "x"))
   , Bind (Op.PVar "s") Nothing (Typing (Ref "v"))
   , Do (Unify (Ref "d") (Ref "s"))
-  , Do (Goto (Ref "g"))
   ]
 
 -- | The splitting tree (MS9) — @induction t of { p -> e ; … }@ with arms.
@@ -985,11 +984,8 @@ splitClauses =
       [BinderIsArgument (Ref "b"), PatternIsWildcard (Ref "p")]
       [ Bind (Op.PVar "w") Nothing (Op.FreshName (Lit (VText "u")))
       , Bind (Op.PVar "wi") Nothing (Op.NameIdent (Ref "w"))
-      , Bind (Op.PVar "g") Nothing Here
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "wi")))
-      , Do (Goto (Ref "k2"))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "w"))
-      , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
@@ -1005,11 +1001,8 @@ splitClauses =
       , call "no-nesting" [Ref "sub"]
       , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
       , Bind (Op.PVar "wi") Nothing (Op.NameIdent (Ref "w"))
-      , Bind (Op.PVar "g") Nothing Here
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "wi")))
-      , Do (Goto (Ref "k2"))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "w"))
-      , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
@@ -1114,11 +1107,8 @@ splitClauses =
           (Op.Call "name-or-stem" [Ref "n0", Lit (VText "ih")])
       , Bind (Op.PVar "h") Nothing (Op.FreshName (Ref "n"))
       , Bind (Op.PVar "hi") Nothing (Op.NameIdent (Ref "h"))
-      , Bind (Op.PVar "g") Nothing Here
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "hi")))
-      , Do (Goto (Ref "k2"))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "h"))
-      , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
@@ -1138,11 +1128,8 @@ splitClauses =
       [BinderIsCopy (Ref "b")]
       [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
       , Bind (Op.PVar "ni") Nothing (Op.NameIdent (Ref "n"))
-      , Bind (Op.PVar "g") Nothing Here
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "ni")))
-      , Do (Goto (Ref "k2"))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "n"))
-      , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
@@ -1249,7 +1236,6 @@ splitClauses =
       , Do Attack
       , Do Into
       , Bind (Op.PVar "k0") Nothing Here
-      , Do Back
         -- **One walk over the report**, whose order is the order the method
         -- binds them in: no rule here knows what that order is.
       , Bind (Op.PVar "k1") Nothing

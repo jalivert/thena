@@ -472,6 +472,8 @@ dispatchableTests =
                   ]
                ++ replicate 15 "elaborate"
                ++ ["run-block"]
+               -- @intro-binders@ asks @focus-is-hole@ as of MS12 phase 357.
+               ++ replicate 4 "intro-binders"
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals 0 hole)
           @?= ["try-in-scope", "fit-in-scope", "attack", "abandon", "step"]

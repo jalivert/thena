@@ -20,10 +20,6 @@ thena spine> attack
 thena spine> intro
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
-thena spine> along
 thena spine> eliminate-core core`e`
 subgoals: reflMethod
 thena spine> back
@@ -54,8 +50,6 @@ thena spine> :theorem plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
 proving plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
 thena spine> attack
 thena spine> intro
-thena spine> into
-thena spine> along
 thena spine> eliminate-core core`n`
 subgoals: zeroMethod, succMethod
 thena spine> :show

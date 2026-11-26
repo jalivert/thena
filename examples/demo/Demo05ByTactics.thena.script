@@ -54,9 +54,6 @@ qed
 attack
 intro
 intro
-into
-along
-along
 case-core core`n`
 
 goto-named "NV-zeroCase1"

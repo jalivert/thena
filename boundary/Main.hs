@@ -84,7 +84,7 @@ import Thena.View.Failure
   , Why (..)
   )
 import Thena.View.Choices (AltView (..), ChoiceView (..))
-import Thena.View.Development (LinkView (..))
+import Thena.View.Development (LinkShape (..), LinkView (..))
 import Thena.View.Goals (GoalKind (..), GoalView (..))
 import Thena.View.Machine (MachineView (..))
 import Thena.View.Matches (MatchView (..))
@@ -130,10 +130,25 @@ main = do
 advance :: Session -> [String] -> Session
 advance = foldl (\acc l -> fst (oneLine acc l))
 
+-- | Is the cursor on this chain or on any chain nested inside it?
+--
+-- **A guess branches, so the focused link need not be at the top** (MS12 phase
+-- 357): since the introducers became positional, @attack@ leaves the cursor on
+-- the hole it opened, which is a link inside the guess's own body. A pane that
+-- scanned only the outer chain for 'linkFocus' would draw no highlight at all
+-- from the first @attack@ onwards, so the recursion is the contract and not a
+-- convenience of this check.
+focusedLink :: [LinkView] -> Bool
+focusedLink = any one
+  where
+    one l = linkFocus l || case linkShape l of
+      AGuessLink { guessBody = body } -> focusedLink body
+      _                               -> False
+
 checks :: [Session -> [String]]
 checks =
   [ \s -> want "developmentView" (not (null (developmentView budget s)))
-  , \s -> want "a link is marked" (any linkFocus (developmentView budget s))
+  , \s -> want "a link is marked" (focusedLink (developmentView budget s))
   , \s -> want "machineView" (machineReached (machineView budget s))
   , \s -> want "focusTypeView" (maybe True (const True) (focusTypeView budget s))
   , \s -> want "rulesView" (not (null [ r | (_, rs) <- rulesView budget s, r <- rs ]))

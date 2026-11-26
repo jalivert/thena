@@ -1601,16 +1601,19 @@ perform instr rest m = case operation instr of
       -- Table 2.7's side condition on @assume@ and @claim@, and a ∀-binder
       -- owes it for the same reason (phase 25f): @Θ ⊢ S : Type@.
       (Left e,  _, n1) -> failure (NotTypeable e) m { names = n1 }
-      (Right _, _, n1) -> case focus (cursor (development m)) of
-        OnComponent (Component.Guess x xi g s) ->
-          case quantifyIn (globals m) contextAt n1 i dom g of
-            Left r -> failure r m { names = n1 }
-            Right (g', n2) -> case replaceComponent (Component.Guess x xi g' s)
-                                                    (cursor (development m)) of
-              Left e    -> failure (CannotMove e) m { names = n2 }
-              Right cur -> Continue (advance m { development = Development cur, names = n2 })
-        OnComponent _ -> failure NotReadyToIntroduce m { names = n1 }
-        _             -> failure (CannotMove NotOnTheSpine) m { names = n1 }
+      (Right _, _, n1)
+        | not (Cursor.atTrailingHole (cursor (development m))) ->
+            failure NotReadyToIntroduce m { names = n1 }
+        | otherwise -> case focus (cursor (development m)) of
+            OnComponent c -> case quantifyIn (globals m) contextAt n1 i dom c of
+              Left r -> failure r m { names = n1 }
+              Right (binder, hole, n2) ->
+                case replaceComponent hole
+                       (insertAbove binder (cursor (development m))) of
+                  Left e    -> failure (CannotMove e) m { names = n2 }
+                  Right cur ->
+                    Continue (advance m { development = Development cur, names = n2 })
+            _ -> failure (CannotMove NotOnTheSpine) m { names = n1 }
 
   -- **Table 2.7's side condition @Θ ⊩ t : S@, enforced** (phase 25b). It was
   -- documented and not checked until this phase, so an ill-typed guess sat in
@@ -3139,31 +3142,31 @@ perform instr rest m = case operation instr of
           Right cur -> Continue (advance m { development = Development cur, names = n1 })
       _ -> failure (CannotMove NotOnTheSpine) m
 
-    -- 'onHole' for an op that also answers with something. Written beside it
-    -- rather than in terms of it because the value has to be produced /after/
-    -- the component is replaced, and 'produce' is what ends the instruction.
-    onHoleProducing f = case focus (cursor (development m)) of
-      OnComponent c -> case f c of
-        Left r            -> failure r m
-        Right (c', v, n1) -> case replaceComponent c' (cursor (development m)) of
-          Left e    -> failure (CannotMove e) m
-          Right cur ->
-            produce (VTerm v) m { development = Development cur, names = n1 }
-      _ -> failure (CannotMove NotOnTheSpine) m
-
     -- 'Op.IntroPi' and 'Op.IntroLet' differ in exactly one thing — which of
     -- table 2.8's introduction rules is on offer (MS4 phase 58) — so the op is
     -- written once and takes it.
-    -- **The hole it opened is its answer** (MS8), so a clause can @goto@ it and
-    -- work in the scope the binder just created. 'onHoleProducing' is 'onHole'
-    -- with that one difference.
     introOp rule mn = case traverse (operandIdentifier (env (exec m))) mn of
       Left r   -> failure r m
-      Right nm -> onHoleProducing $ \c -> case c of
-        Component.Guess x i g ty ->
-          (\(g', h, n1) -> (Component.Guess x i g' ty, Free h, n1))
-            <$> rule (globals m) contextAt (names m) nm g
-        _ -> Left NotReadyToIntroduce
+      Right nm -> openingBinder (rule (globals m) contextAt (names m) nm)
+
+    -- **One binder above the focused hole, and the hole retyped in place**
+    -- (MS12 phase 357, his ruling of 2026-11-26). The shape test is
+    -- 'Cursor.atTrailingHole' and the cursor does not move, so the op answers
+    -- the hole it was asked at.
+    openingBinder f
+      | not (Cursor.atTrailingHole (cursor (development m))) =
+          failure NotReadyToIntroduce m
+      | otherwise = case focus (cursor (development m)) of
+          OnComponent c -> case f c of
+            Left r -> failure r m
+            Right (binder, hole, n1) ->
+              case replaceComponent hole
+                     (insertAbove binder (cursor (development m))) of
+                Left e    -> failure (CannotMove e) m
+                Right cur ->
+                  produce (VTerm (Free (variableOf hole)))
+                          m { development = Development cur, names = n1 }
+          _ -> failure (CannotMove NotOnTheSpine) m
 
     component build name ty =
       case (,) <$> operandIdent (env (exec m)) name <*> term ty of
@@ -3480,23 +3483,30 @@ whereImpure i = case i of
   StillAGuess x n    -> GuessOf x n
   StillConstrained _ -> ConstraintAt 1
 
--- | Table 2.8's @intro-∀@ and @intro-let@, inside a guess.
+-- | Table 2.8's @intro-∀@ and @intro-let@, **at the hole the cursor stands on**.
 --
 -- The thesis's own note is the specification: the introduction tactics "only
--- replace constructions of the shape @?x : S . x@". **Within a guess body there
--- is at most one such position, and it is the bottom one** — everything above
--- it is an assumption, a definition or a guess, none of which has that shape.
--- So "find the shape" and "walk to the end of the chain" are the same
--- traversal, and there is nothing to disambiguate.
+-- replace constructions of the shape @?x : S . x@", and
+-- 'Thena.Development.Cursor.atTrailingHole' is that test asked of the position.
+-- So this does no searching at all — it is handed the component it rewrites, and
+-- Γ is the context at the focus, which already holds every binder above it.
 --
--- Walking rather than matching the body directly is what lets introductions
--- accumulate: after one @intro@ the body is @λ A : Type₀ . ? h : A -> A . h@,
--- and the next @intro@ has to reach past the λ it just made. Γ grows as it
--- goes, because the hole's type is whnf'd where the hole actually is.
+-- **The hole keeps its own variable, and that is what table 2.8 means by moving
+-- a hole through its type**: @?x : ∀y:S. T . x@ becomes @λy:S. ?x : T . x@, the
+-- same @x@ at a smaller type. So an introduction is one binder inserted above
+-- the focus and one type rewritten in place, and the cursor does not move — it
+-- is already standing on what is left to prove.
 --
--- It stays inside the guess, and that is why @attack@ exists: introducing at
--- the top of the whole development would change what the development proves,
--- whereas inside a guess the guess's own type absorbs the binders.
+-- **It walked the guess's chain until MS12 phase 357**, carrying Γ down by hand,
+-- which is 'Thena.Development.Cursor'\'s own @Γ_P@ rebuilt because the cursor was
+-- somewhere else. That is what divorced the question a rule asks from the place
+-- an instruction acts, and it is his ruling of 2026-11-26 that it goes.
+--
+-- @attack@ is still what makes a hole ready: a binder inserted above a hole of
+-- the development itself would change what the development proves, and a guess's
+-- own type is what absorbs the binders. What changed is that @attack@ leaves the
+-- cursor on the hole it opened — @prim-attack ; into@ in the shipped base — so
+-- the introductions that follow are positional.
 -- | Table 2.8's @intro-∀@ — Brady's @LAMBDA@, and it **normalises** the goal.
 --
 -- **What a λ means, said by the caller rather than read off the goal**
@@ -3509,8 +3519,8 @@ whereImpure i = case i of
 -- local one, so the @let@ survives and 'introduceLet' would eat the caller's
 -- binder on it.
 introduceLambda
-  :: GlobalEnv -> Context -> Int -> Maybe Identifier -> Partial
-  -> Either FailReason (Partial, Var, Int)
+  :: GlobalEnv -> Context -> Int -> Maybe Identifier -> Component.Component
+  -> Either FailReason (Component.Component, Component.Component, Int)
 introduceLambda = introducing FunctionOnly
 
 -- | Table 2.8's @intro-let@ — Brady's @LET@, and it reads the type **as
@@ -3525,8 +3535,8 @@ introduceLambda = introducing FunctionOnly
 -- @T@ /in terms of @y@/. Reducing gives @T[s\/y]@, which is the same type and
 -- an unreadable goal. This rule is how a proof keeps the author's name.
 introduceLet
-  :: GlobalEnv -> Context -> Int -> Maybe Identifier -> Partial
-  -> Either FailReason (Partial, Var, Int)
+  :: GlobalEnv -> Context -> Int -> Maybe Identifier -> Component.Component
+  -> Either FailReason (Component.Component, Component.Component, Int)
 introduceLet = introducing LetOnly
 
 -- | Which of table 2.8's two introduction rules this is.
@@ -3543,29 +3553,28 @@ data IntroRule
   = FunctionOnly  -- ^ @prim-lambda@
   | LetOnly       -- ^ @prim-let@
 
--- **It answers with the hole it opened** as well as the rewritten chain. The
--- binder's own variable is not interesting to a caller — the name is what a
--- clause wrote and @resolve-name@ finds it — but the hole for what is left of
--- the goal cannot be reached any other way: it is not the focus, @goto@ takes a
--- variable, and counting @along@s from the guess does not scale past one
--- binder. It is what lets the annotated λ binder be checked /inside/ the binder
--- it belongs to.
+-- **It answers the hole for what is left**, which is now the hole it was asked
+-- at: the same variable, at the type under the binder. A clause that wants to
+-- work in the scope the binder just created needs no @goto@ at all — it is
+-- standing there — and the answer is kept because a caller threading one hole
+-- through a recursion over binders reads it (@intro-binders@ is that caller).
+-- The binder's own variable is not interesting to a caller: the name is what a
+-- clause wrote and @resolve-name@ finds it.
 introducing
-  :: IntroRule -> GlobalEnv -> Context -> Int -> Maybe Identifier -> Partial
-  -> Either FailReason (Partial, Var, Int)
-introducing rule env ctx n nm p = case p of
-  Under (Component.Claim v i s) (Trailing (Free v'))
-    | v == v' -> case s of
-        Let j val sty cod
-          | LetOnly <- rule ->
-              Right (opened (Component.Define y (named j) val sty) (instantiate (Free y) cod))
-        -- @intro-∀@ reduces first, because a goal typed @id Type₀ (Nat -> Nat)@
-        -- is a Π and must be introduced (§8's own example, from the other side).
-        _ | FunctionOnly <- rule -> case whnf env ctx s of
-              Pi j dom cod -> Right (opened (Component.Assume y (named j) dom) (instantiate (Free y) cod))
-              _            -> Left NothingToIntroduce
-          | otherwise -> Left NothingToIntroduce
-      where
+  :: IntroRule -> GlobalEnv -> Context -> Int -> Maybe Identifier -> Component.Component
+  -> Either FailReason (Component.Component, Component.Component, Int)
+introducing rule env ctx n nm c = case c of
+  Component.Claim v i s -> case s of
+    Let j val sty cod
+      | LetOnly <- rule ->
+          Right (opened (Component.Define y (named j) val sty) (instantiate (Free y) cod))
+    -- @intro-∀@ reduces first, because a goal typed @id Type₀ (Nat -> Nat)@
+    -- is a Π and must be introduced (§8's own example, from the other side).
+    _ | FunctionOnly <- rule -> case whnf env ctx s of
+          Pi j dom cod -> Right (opened (Component.Assume y (named j) dom) (instantiate (Free y) cod))
+          _            -> Left NothingToIntroduce
+      | otherwise -> Left NothingToIntroduce
+   where
         -- The caller's name if there is one, the type's otherwise — and in
         -- that second case made **free in the context the binder lands in**,
         -- which is the word being minted where the type has none and numbered
@@ -3617,25 +3626,19 @@ introducing rule env ctx n nm p = case p of
         (y, n1) = case nm >>= identToken of
           Just adopted -> (adopted, n)
           Nothing      -> fresh n
-        (h, n2) = fresh n1
-        opened binder rest =
-          ( Under binder (Under (Component.Claim h i rest) (Trailing (Free h)))
-          , h
-          , n2
-          )
-  -- **The rule is threaded, not dropped.** Reverting to a both-rules reading
-  -- here would apply to every binder after the first, which is where a @let@
-  -- one binder down actually bites.
-  Under c rest ->
-    (\(rest', h, n1) -> (Under c rest', h, n1))
-      <$> introducing rule env (ctx ++ [Component.forget c]) n nm rest
+        -- **No fresh hole.** The hole the cursor is on keeps its variable and
+        -- its word, and only its type moves under the binder — table 2.8's
+        -- @?x : ∀y:S. T . x@ ⇒ @λy:S. ?x : T . x@. It minted a second hole per
+        -- binder until MS12 phase 357, which is why a two-binder proof used to
+        -- name its goal @t11@.
+        opened binder rest = (binder, Component.Claim v i rest, n1)
   _ -> Left NotReadyToIntroduce
 
 -- | Open a ∀-binder where 'introduceLambda' opens a λ-binder (MS4 phase 41f).
 --
 -- The same shape test — table 2.8's /"only replace constructions of the shape
--- @?x : S . x@"/ — and the same walk down the chain. Two differences, and both
--- are what a Π is:
+-- @?x : S . x@"/ — and the same position: it acts on the hole the cursor stands
+-- on. Two differences, and both are what a Π is:
 --
 --   * **the domain is given, not read off the goal.** @intro@ takes the type
 --     from the Π it is moving through; there is no Π here yet, so the caller
@@ -3647,24 +3650,19 @@ introducing rule env ctx n nm p = case p of
 --     @Type₁@. The relation between them is /owed/, by
 --     "Thena.Development.Validate"'s @peeled@, and not forced here.
 quantifyIn
-  :: GlobalEnv -> Context -> Int -> Ident -> Core -> Partial
-  -> Either FailReason (Partial, Int)
-quantifyIn env ctx n i dom p = case p of
-  Under (Component.Claim v ci s) (Trailing (Free v'))
-    | v == v' -> case whnf env ctx s of
-        Universe _ ->
-          let (y, n1) = fresh n
-              (h, n2) = fresh n1
-              (l, n3) = freshLevelMeta n2
-           in Right
-                ( Under (Component.Quantify y i dom)
-                    (Under (Component.Claim h ci (Universe (LVar l))) (Trailing (Free h)))
-                , n3
-                )
-        _ -> Left GoalIsNotAUniverse
-  Under c rest ->
-    (\(rest', n1) -> (Under c rest', n1))
-      <$> quantifyIn env (ctx ++ [Component.forget c]) n i dom rest
+  :: GlobalEnv -> Context -> Int -> Ident -> Core -> Component.Component
+  -> Either FailReason (Component.Component, Component.Component, Int)
+quantifyIn env ctx n i dom c = case c of
+  Component.Claim v ci s -> case whnf env ctx s of
+    Universe _ ->
+      let (y, n1) = fresh n
+          (l, n2) = freshLevelMeta n1
+       in Right
+            ( Component.Quantify y i dom
+            , Component.Claim v ci (Universe (LVar l))
+            , n2
+            )
+    _ -> Left GoalIsNotAUniverse
   _ -> Left NotReadyToIntroduce
 
 -- --------------------------------------------------------------------------

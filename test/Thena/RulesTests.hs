@@ -22,7 +22,7 @@ import Thena.Core.Term
   , rootScope
   )
 import Thena.Development.Component (Component (..))
-import Thena.Development.Cursor (Cursor, crossType, enter)
+import Thena.Development.Cursor (Cursor, crossType, enter, into)
 import Thena.Development.Partial (Partial (..))
 import Thena.Declared (nat, natDecl, opensIn)
 import Thena.Standard (aRule, expectedBase)
@@ -112,6 +112,13 @@ holeAt :: Core -> Cursor
 holeAt ty = enter (Under (Claim v (Ident "goal") ty) (Trailing (Free v)))
   where v = var
 
+-- | The hole inside the guess — where @attack@ now leaves the cursor, and the
+-- only position the introduction tactics act at (MS12 phase 357).
+readyAt :: Core -> Cursor
+readyAt ty = case into (guessAt ty) of
+  Right cur -> cur
+  Left e    -> error ("could not enter the guess: " ++ show e)
+
 -- | @? x ≐ (? y : ty . y) : ty . x@ — what @attack@ makes.
 guessAt :: Core -> Cursor
 guessAt ty =
@@ -172,45 +179,65 @@ matchTests =
         matching emptyGlobals (guessAt type0)
           @?= ["rename", "solve", "regret", "step", "step", "step"] ++ walkers
 
+      -- **A guess is no longer where @intro@ is offered** (MS12 phase 357): the
+      -- introductions act at the hole inside it, so what a guess offers is the
+      -- two tactics that act on a guess.
+    , testCase "a guess at a Π offers solve and regret, and not intro" $
+        matching emptyGlobals (guessAt (arrow type0 type0))
+          @?= ["rename", "solve", "regret", "step", "step", "step"] ++ walkers
+
       -- **Two @intro@ rows, not one** (MS12 phase 326): the nullary pair and the
       -- @intro "a"@ pair his ask of 2026-11-20 added. A row per name and arity,
       -- and every matching rule is always offered.
-    , testCase "a guess at a Π offers intro as well" $
-        matching emptyGlobals (guessAt (arrow type0 type0))
-          @?= ["intro", "intro", "rename", "solve", "regret", "step", "step", "step"] ++ walkers
+    , testCase "the hole inside a guess at a Π offers intro" $
+        matching emptyGlobals (readyAt (arrow type0 type0)) @?= holeRulesWithIntro
 
       -- §8: "Head matching runs whnf. A goal typed @id Type (Nat → Nat)@ is a Π
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
     , testCase "a goal type that only reduces to a Π still matches" $
-        matching withArrow (guessAt (Global (rootName "Arrow") []))
-          @?= ["intro", "intro", "rename", "solve", "regret", "step", "step", "step"] ++ walkers
+        matching withArrow (readyAt (Global (rootName "Arrow") []))
+          @?= holeRulesWithIntro
 
     , testCase "and does not, in an environment where it does not unfold" $
-        matching emptyGlobals (guessAt (Global (rootName "Arrow") []))
-          @?= ["rename", "solve", "regret", "step", "step", "step"] ++ walkers
+        matching emptyGlobals (readyAt (Global (rootName "Arrow") []))
+          @?= everyHoleRule
 
       -- The one test that must NOT reduce: whnf δ-reduces a term-level let
       -- away (§5.1), so asking about the reduced type would make GoalTypeIsLet
       -- unpassable — which is exactly the bug this phase found in
       -- 'Thena.Engine.introduce'.
     , testCase "a goal type written as a let offers intro" $
-        matching emptyGlobals (guessAt (Let (Ident "x") type0 type1 (close var type0)))
-          @?= ["intro", "intro", "rename", "solve", "regret", "step", "step", "step"] ++ walkers
+        matching emptyGlobals (readyAt (Let (Ident "x") type0 type1 (close var type0)))
+          @?= holeRulesWithIntro
 
       -- The invariant checked by different code from the code that maintains
       -- it: the head says @intro@ applies, so @intro@ must actually apply. It
       -- is the direction that /is/ guaranteed for these two rules, and the one
       -- the let bug broke — the op could not do what no head could offer.
     , testCase "where the let clause is offered, intro succeeds" $
-        let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
+        let cur = readyAt (Let (Ident "x") type0 type1 (close var type0))
          in do
               nameOf `map` drain (matches expectedBase emptyGlobals 0 cur)
-                @?= ["intro", "intro", "rename", "solve", "regret", "step", "step", "step"] ++ walkers
+                @?= holeRulesWithIntro
               ranOk (machineAt cur [Do (Ops.IntroLet Nothing)])
 
     , testCase "where the Π clause is offered, intro succeeds" $
-        ranOk (machineAt (guessAt (arrow type0 type0)) [Do (Ops.IntroPi Nothing)])
+        ranOk (machineAt (readyAt (arrow type0 type0)) [Do (Ops.IntroPi Nothing)])
+
+      -- **THE COST OF THE HEAD BEING @focus-is-hole@** (MS12 phase 357). The
+      -- root of a development has the thesis's @?x : S . x@ shape too, so the
+      -- head passes there and the op refuses: a binder put at the root would
+      -- change what the development proves, which is what @attack@ is for.
+      -- Offered and refused, rather than not offered — §7.3's "failing in a
+      -- body is already handled".
+    , testCase "and at a hole that is not inside a guess it is offered, then refuses" $
+        do
+          matching emptyGlobals (holeAt (arrow type0 type0)) @?= holeRulesWithIntro
+          case runOut (machineAt (holeAt (arrow type0 type0))
+                                 [Do (Ops.IntroPi Nothing)]) of
+            Left NotReadyToIntroduce -> pure ()
+            other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- Every head that asks about a component fails in the core fragment, so
       -- what is left is the rules with no head at all. Definite, not
@@ -695,7 +722,7 @@ producesTests =
       , ("down",        e, piHole,  [Do Ops.CrossType], Ops.Down Ops.Dom)
       , ("back",        e, hole,    [Do Ops.CrossType], Ops.Back)
       , ("attack",      e, hole,    [],            Ops.Attack)
-      , ("intro",       e, guessAt (arrow type0 type0), [], Ops.IntroPi Nothing)
+      , ("intro",       e, readyAt (arrow type0 type0), [], Ops.IntroPi Nothing)
       , ("try",         e, hole,    [],            Ops.Try (term type0))
       , ("regret",      e, hole,    tried,         Ops.Regret)
       , ("solve",       e, hole,    tried,         Ops.Solve)
@@ -998,15 +1025,30 @@ everyHoleRule =
     ++ ["induction-core", "case-core"]
     ++ replicate 15 "elaborate"
     ++ ["run-block"]
+    -- **@intro-binders@ asks @focus-is-hole@ as of MS12 phase 357**, with
+    -- @intro@ itself: what it walks is the hole the cursor stands on. A test
+    -- about an argument nobody supplied does not exclude a clause (phase 47),
+    -- so all four are offered — a group or a single binder, written or bare.
+    ++ replicate 4 "intro-binders"
     ++ replicate 2 "spine-arguments"
+
+-- | 'everyHoleRule' with the two nullary @intro@ clauses, which a Π or a @let@
+-- goal adds (MS12 phase 357). The @intro "a"@ pair takes an argument, so a
+-- listing with none does not show it.
+--
+-- **@intro@ is declared just above @attack@** (MS12 phase 357), and definition
+-- order is dispatch order, so that is where the rows appear.
+holeRulesWithIntro :: [String]
+holeRulesWithIntro = before ++ ["intro", "intro"] ++ after
+  where
+    (before, after) = span (/= "attack") everyHoleRule
 
 -- | The recursive helpers every listing at a guess shows.
 --
 -- **A test about an argument nobody supplied does not exclude a clause** (phase
 -- 47), so a rule whose head only asks about its argument is offered wherever
--- its state test passes — and @intro-binders@ really does apply at a guess, in
--- all four of its clauses: a group or a single binder, each with a written type
--- or without.
+-- its state test passes. @intro-binders@ left this list in MS12 phase 357: it
+-- asks @focus-is-hole@ now, with @intro@.
 walkers :: [String]
 walkers =
   ["claim", "assume", "quantify"]
@@ -1014,7 +1056,6 @@ walkers =
     -- @elaborate@ clause that calls them rather than with the other helpers.
     ++ splitHelpers
     ++ [ "run-block"
-       , "intro-binders", "intro-binders", "intro-binders", "intro-binders"
        , "spine-arguments", "spine-arguments"
        ]
 

@@ -4,19 +4,52 @@ proving second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B
 thena spine> step
 chose 10: try-in-scope
 backtracking to 10: fit-in-scope
+backtracking to 10: intro
 backtracking to 10: attack
 thena spine> step
-chose 12: intro
+chose 12: try-in-scope
+backtracking to 12: fit-in-scope
+backtracking to 12: intro
 thena spine> step
-chose 15: intro
+chose 14: try-in-scope
+chose 15: any-of
+backtracking to 15: any-of
+backtracking to 14: fit-in-scope
+chose 16: any-of
+backtracking to 16: any-of
+backtracking to 14: intro
 thena spine> step
-chose 18: intro
-thena spine> step
-chose 21: intro
-thena spine> goto second1
+chose 18: try-in-scope
+chose 19: any-of
+backtracking to 19: any-of
+chose 20: any-of
+backtracking to 20: any-of
+backtracking to 18: fit-in-scope
+chose 21: any-of
+backtracking to 21: any-of
+chose 22: any-of
+backtracking to 22: any-of
+backtracking to 18: intro
 thena spine> step
 chose 24: try-in-scope
 chose 25: any-of
+backtracking to 25: any-of
+chose 26: any-of
+backtracking to 26: any-of
+chose 27: any-of
+backtracking to 27: any-of
+backtracking to 24: fit-in-scope
+chose 28: any-of
+backtracking to 28: any-of
+chose 29: any-of
+backtracking to 29: any-of
+chose 30: any-of
+backtracking to 30: any-of
+backtracking to 24: intro
+thena spine> goto second1
+thena spine> step
+chose 32: try-in-scope
+chose 33: any-of
 thena spine> :show
   let ? second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B ≐ (
     λ (A : Type₀) ->
@@ -30,52 +63,85 @@ thena spine> :show
   ) in
   second
 thena spine> :choices
-25  any-of (standard.thena.rules:506)   untried: any-of (standard.thena.rules:507)
-24  try-in-scope (standard.thena.rules:43)   untried: fit-in-scope (standard.thena.rules:63), attack (standard.thena.rules:73), abandon (standard.thena.rules:79), step (standard.thena.rules:168)
-21  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:123), regret (standard.thena.rules:126), step (standard.thena.rules:170)
-18  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:123), regret (standard.thena.rules:126), step (standard.thena.rules:170)
-15  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:123), regret (standard.thena.rules:126), step (standard.thena.rules:170)
-12  intro (standard.thena.rules:82)   untried: solve (standard.thena.rules:123), regret (standard.thena.rules:126), step (standard.thena.rules:170)
-10  attack (standard.thena.rules:73)   untried: abandon (standard.thena.rules:79), step (standard.thena.rules:168)
+33  any-of (standard.thena.rules:517)   untried: any-of (standard.thena.rules:518)
+32  try-in-scope (standard.thena.rules:43)   untried: fit-in-scope (standard.thena.rules:63), attack (standard.thena.rules:112), abandon (standard.thena.rules:118), step (standard.thena.rules:179)
+24  intro (standard.thena.rules:79)   untried: attack (standard.thena.rules:112), abandon (standard.thena.rules:118), step (standard.thena.rules:179)
+18  intro (standard.thena.rules:79)   untried: attack (standard.thena.rules:112), abandon (standard.thena.rules:118), step (standard.thena.rules:179)
+14  intro (standard.thena.rules:79)   untried: attack (standard.thena.rules:112), abandon (standard.thena.rules:118), step (standard.thena.rules:179)
+12  intro (standard.thena.rules:79)   untried: attack (standard.thena.rules:112), abandon (standard.thena.rules:118), step (standard.thena.rules:179)
+10  attack (standard.thena.rules:112)   untried: abandon (standard.thena.rules:118), step (standard.thena.rules:179)
 thena spine> :abandon
 abandoned second
 thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
 proving mp : ∀ (A : Type₀) (B : Type₀) -> A -> (A -> B) -> B
 thena spine> step
-chose 38: try-in-scope
-backtracking to 38: fit-in-scope
-backtracking to 38: attack
+chose 46: try-in-scope
+backtracking to 46: fit-in-scope
+backtracking to 46: intro
+backtracking to 46: attack
 thena spine> step
-chose 40: intro
+chose 48: try-in-scope
+backtracking to 48: fit-in-scope
+backtracking to 48: intro
 thena spine> step
-chose 43: intro
+chose 50: try-in-scope
+chose 51: any-of
+backtracking to 51: any-of
+backtracking to 50: fit-in-scope
+chose 52: any-of
+backtracking to 52: any-of
+backtracking to 50: intro
 thena spine> step
-chose 46: intro
-thena spine> step
-chose 49: intro
-thena spine> goto mp1
-thena spine> step
-chose 52: try-in-scope
-chose 53: any-of
-backtracking to 53: any-of
-chose 54: any-of
-backtracking to 54: any-of
+chose 54: try-in-scope
 chose 55: any-of
 backtracking to 55: any-of
 chose 56: any-of
 backtracking to 56: any-of
-backtracking to 52: fit-in-scope
+backtracking to 54: fit-in-scope
 chose 57: any-of
-chose 59: fit-core
-already equal
-thena spine> goto a
+backtracking to 57: any-of
+chose 58: any-of
+backtracking to 58: any-of
+backtracking to 54: intro
 thena spine> step
-chose 61: try-in-scope
+chose 60: try-in-scope
+chose 61: any-of
+backtracking to 61: any-of
 chose 62: any-of
 backtracking to 62: any-of
 chose 63: any-of
+backtracking to 63: any-of
+backtracking to 60: fit-in-scope
+chose 64: any-of
+backtracking to 64: any-of
+chose 65: any-of
+backtracking to 65: any-of
+chose 66: any-of
+backtracking to 66: any-of
+backtracking to 60: intro
+thena spine> goto mp1
 thena spine> step
-chose 64: solve
+chose 68: try-in-scope
+chose 69: any-of
+backtracking to 69: any-of
+chose 70: any-of
+backtracking to 70: any-of
+chose 71: any-of
+backtracking to 71: any-of
+chose 72: any-of
+backtracking to 72: any-of
+backtracking to 68: fit-in-scope
+chose 73: any-of
+chose 75: fit-core
+already equal
+thena spine> goto a
+thena spine> step
+chose 77: try-in-scope
+chose 78: any-of
+backtracking to 78: any-of
+chose 79: any-of
+thena spine> step
+chose 80: solve
 thena spine> goto-root
 thena spine> solve
 thena spine> qed

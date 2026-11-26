@@ -387,7 +387,7 @@ tests =
     , testGroup
         "prim-lambda takes an identifier, and adopts the token in it"
         [ testCase "a word with no token mints one, which is what it always did" $
-            case atPi [Do Ops.Attack, Do (Ops.IntroPi (Just (ident "a" Nothing)))] of
+            case atPi [Do Ops.Attack, Do Ops.Into, Do (Ops.IntroPi (Just (ident "a" Nothing)))] of
               Finished m ->
                 (fmap snd (binderOf (devOf m)), fmap ((/= someToken) . fst) (binderOf (devOf m)))
                   @?= (Just (Ident "a"), Just True)
@@ -396,7 +396,7 @@ tests =
           -- The widening his ruling gave the literal set, at run time: the
           -- value really is a text, and it reads here as a word with no token.
         , testCase "and a written literal is that same word with no token" $
-            case atPi [Do Ops.Attack, Do (Ops.IntroPi (Just (text "a")))] of
+            case atPi [Do Ops.Attack, Do Ops.Into, Do (Ops.IntroPi (Just (text "a")))] of
               Finished m -> fmap snd (binderOf (devOf m)) @?= Just (Ident "a")
               other -> assertFailure ("expected Finished, got " ++ show other)
 
@@ -405,7 +405,7 @@ tests =
           -- leave the context holding a different binder with the same word
           -- printed on both, and @Eq@ on 'Thena.Core.Term.Core' compares tokens.
         , testCase "a token that came with the word is the binder's own" $
-            case atPi [Do Ops.Attack, Do (Ops.IntroPi (Just (ident "a" (Just someToken)))) ] of
+            case atPi [Do Ops.Attack, Do Ops.Into, Do (Ops.IntroPi (Just (ident "a" (Just someToken)))) ] of
               Finished m -> binderOf (devOf m) @?= Just (someToken, Ident "a")
               other -> assertFailure ("expected Finished, got " ++ show other)
 
@@ -413,7 +413,7 @@ tests =
           -- the hole @intro@ opens still takes one, so adopting is exactly one
           -- mint fewer than not adopting.
         , testCase "and adopting mints nothing, so the counter moves one less" $
-            let counter is = case atPi [Do Ops.Attack, Do (Ops.IntroPi (Just is))] of
+            let counter is = case atPi [Do Ops.Attack, Do Ops.Into, Do (Ops.IntroPi (Just is))] of
                   Finished m -> Just (names m)
                   _          -> Nothing
                 minted = counter (ident "a" Nothing)
@@ -427,6 +427,7 @@ tests =
         , testCase "the adopted variable is in the context the binder opened" $
             case atPi
                    [ Do Ops.Attack
+                   , Do Ops.Into
                    , Bind (Ops.PVar "h") Nothing
                        (Ops.IntroPi (Just (ident "a" (Just someToken))))
                    , Do (Ops.Goto (Ref "h"))
@@ -443,7 +444,7 @@ tests =
           -- (his ruling of 2026-11-20, /THERE IS ONE NAME/, part one). With
           -- @a@ already in the context the binder lands as @a1@.
         , testCase "a word that came with a token is made free" $
-            case taken [Do Ops.Attack, Do (Ops.IntroPi (Just (ident "a" (Just someToken))))] of
+            case taken [Do Ops.Attack, Do Ops.Into, Do (Ops.IntroPi (Just (ident "a" (Just someToken))))] of
               Finished m -> binderWords (devOf m) @?= [Ident "a", Ident "a1"]
               other -> assertFailure ("expected Finished, got " ++ show other)
 
@@ -452,7 +453,7 @@ tests =
           -- repair). This is the same call with the token dropped, so the only
           -- thing that moves is the provenance.
         , testCase "…and one with no token is used as written, taken or not" $
-            case taken [Do Ops.Attack, Do (Ops.IntroPi (Just (ident "a" Nothing)))] of
+            case taken [Do Ops.Attack, Do Ops.Into, Do (Ops.IntroPi (Just (ident "a" Nothing)))] of
               Finished m -> binderWords (devOf m) @?= [Ident "a", Ident "a"]
               other -> assertFailure ("expected Finished, got " ++ show other)
 
@@ -462,6 +463,7 @@ tests =
         , testCase "and a name is refused rather than rooted" $
             stuckWith ExpectedIdent
               (atPi [ Do Ops.Attack
+                    , Do Ops.Into
                     , Do (Ops.IntroPi (Just (Lit (VName (rootName "a")))))
                     ])
         ]

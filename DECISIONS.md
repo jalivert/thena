@@ -4290,6 +4290,91 @@ A tactic that needs a name *nobody* has still asks for one, with `fresh-name`.
 
 ## Tactics and the rule engine
 
+### An operation acts where the cursor stands
+
+*Decided 2026-11-26.*
+
+A tactic is run at a position. `attack` opens a guess at the hole you are
+standing on, `intro` takes a binder off that goal, `solve` accepts the guess you
+are in — and until this was settled, three of them did not quite work that way.
+`intro`, its `let` form and `quantify` took the *focused guess* as their subject
+and walked down inside it, looking for the hole at the end of the body, and put
+their binder wherever that walk stopped. So a rule could read one position and
+change another:
+
+```
+rule intro-pi :- when focus-is-guess
+  do g = goal
+     ; core`∀ (${x} : ${T}) -> ${E}` = g
+     ; call intro x
+```
+
+Run that twice at `∀ (A : Type₀) -> A -> A`. `goal` at a guess answers the
+guess's own type, which is the whole statement and never changes, so the second
+run read `A` off the outer `∀` again — while `intro` acted on the hole at the
+bottom of the body, where the binder waiting to be opened is the arrow's. The
+rule named one quantifier's binder and the system opened another's with the
+word. Nothing ill-typed came out of it — a binder's type is the one the goal
+supplies, and a binder's word decides nothing in a core term — but **the rule
+asked about one thing and the system acted on another, silently**, and no rule
+could be written that did not risk it. The same rule, with `focus-is-hole` as
+its head, now names the second binder off the arrow — the rule above in a file
+of its own, consulted, and nothing else typed:
+
+```
+thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
+thena spine> attack
+thena spine> intro-pi
+thena spine> intro-pi
+thena spine> :show
+  let ? id : ∀ (A : Type₀) -> A -> A ≐ (
+    λ (A : Type₀) ->
+    λ (x : A) ->
+▶   let ? id1 : A in
+    id1
+  ) in
+  id
+```
+
+**So the three of them act at the cursor, like everything else.** The position
+they require is a hole standing at the end of a guess body, which is the shape
+McBride's thesis gives for the operations that replace a construction, and an
+operation handed anything else refuses rather than going looking. The root of a
+development is not that shape, and the refusal is load-bearing: a λ put there
+would change the statement being proved.
+
+**`attack` leaves you on the hole it opened**, so the three apply immediately
+after it and nothing is navigated in between:
+
+```
+thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> :where
+focus
+  let ? id1 : A in
+path
+  root ▸ ≐ id ▸ A ▸ x
+context
+  A : Type₀
+  x : A
+type
+  A
+```
+
+**The hole keeps its name.** The binder goes in above it and its type moves
+under the binder, so the goal that was `id1` after one `intro` is still `id1`
+after two — nothing is minted and renamed behind the proof.
+
+**And they ask `focus-is-hole`, which puts them beside `attack`** in the list
+the engine searches. `attack` applies at every hole and never fails, so the
+order of the base is what keeps them reachable: `intro` is written above
+`attack`, for the same reason `try-in-scope` is — see *the tactics that can
+close a goal are tried before the one that opens it up*.
+
+---
+
 ### A rule's head may ask about what the rule was called with
 
 *Decided 2026-09-03.*
@@ -5249,14 +5334,14 @@ instructions with no iteration — so a helper peels one binder and calls itself
 on the tail, and the term is its own counter:
 
 ```
-rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-bare t)
+rule intro-binders t k :- when focus-is-hole (lambda-binds-more t) (lambda-is-bare t)
   do x  = lambda-name t
      ; k2 = prim-lambda x
      ; tl = lambda-tail t
      ; body = call intro-binders tl k2
      ; return body
 
-rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-bare t)
+rule intro-binders t k :- when focus-is-hole (lambda-binds-one t) (lambda-is-bare t)
   do x = lambda-name t
      ; k2 = prim-lambda x
      ; return k2
@@ -6365,17 +6450,16 @@ tactic typed:
 
 ```
 thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B
-thena spine> step    -- ×5: attack, and four intros
-thena spine> goto mp1
+thena spine> step 5            -- attack, and four intros
 thena spine> step
-chose 4710: try-in-scope
+chose 4623: try-in-scope
 …
-backtracking to 4710: fit-in-scope
-chose 4715: any-of
-chose 4717: fit-core
+backtracking to 4623: fit-in-scope
+chose 4628: any-of
+chose 4630: fit-core
 already equal
-thena spine> goto a
-thena spine> step    -- closes ? a : A with x
+thena spine> next              -- the ? a : A that fit-in-scope opened
+thena spine> step              -- closes it with x
 ```
 
 **What this is not is a search strategy.** Rule order is global, and which rule
@@ -6384,9 +6468,14 @@ that refines, and at `A -> A` with the hypothesis to hand you want the rule that
 finishes. One order cannot be both, and ordering the base is the only control
 over the search that exists today.
 
-**And the three `goto`s above are typed by hand because nothing focuses the next
-goal.** The names in them were minted by the machine, so no rule base could
-contain them. That is the limit on automatic proof, not the order of the rules.
+**And the `next` above is typed by hand because nothing focuses the next goal
+between steps.** It used to be three `goto`s, two of them naming holes the
+machine had minted, which no rule base could have contained; since every
+operation acts where the cursor stands, the only move left is the one from a
+goal that is finished to the one the search opened on the way. **`step` does not
+make it** — a rule that moved the cursor on its own would be deciding the order
+goals are worked in, which is the search strategy this entry says the base does
+not have. That is the limit on automatic proof, not the order of the rules.
 
 ---
 
