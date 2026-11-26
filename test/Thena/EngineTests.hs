@@ -109,6 +109,35 @@ binderWords p = case p of
 someToken :: Var
 someToken = fst (fresh 97)
 
+-- | A variable no body in these tests mentions, for the one assertion about a
+-- binder that abstracts nothing (MS12 phase 356).
+unusedVar :: Var
+unusedVar = fst (fresh 500)
+
+-- | The word a binder prints, which @Eq@ on 'Core' ignores (MS12 phase 356).
+binderWordOf :: Value -> Maybe Ident
+binderWordOf v = case v of
+  VTerm (Pi i _ _)    -> Just i
+  VTerm (Lam i _ _)   -> Just i
+  VTerm (Let i _ _ _) -> Just i
+  _                   -> Nothing
+
+-- | @∀ (A : Type₀) -> A@, the smallest universal whose body mentions its binder.
+dependentPi :: Core
+dependentPi = Pi (Ident "A") type0 (close someToken (Free someToken))
+
+-- | What @core\`∀ (${x} : ${t}) -> ${e}\`@ binds, matched against 'dependentPi'
+-- (MS12 phase 356). The three values are the operands @make-forall@ takes, so a
+-- test can put back exactly what the pattern took apart.
+peeled :: Maybe (Value, Value, Value)
+peeled = case Ops.matchPattern emptyGlobals 0 pat (VTerm dependentPi) of
+  Nothing      -> Nothing
+  Just (bs, _) -> (,,) <$> lookup "x" bs <*> lookup "t" bs <*> lookup "e" bs
+  where
+    pat = Ops.PCore (Ops.CPPi (Ops.PVar "x")
+                              (Ops.CPHole (Ops.PVar "t"))
+                              (Ops.CPHole (Ops.PVar "e")))
+
 -- | The binder @intro@ opened: the variable it is and the word it displays.
 --
 -- It digs through the chain rather than matching one shape, because what is
@@ -435,6 +464,115 @@ tests =
               (atPi [ Do Ops.Attack
                     , Do (Ops.IntroPi (Just (Lit (VName (rootName "a")))))
                     ])
+        ]
+    , -- **PUTTING A BODY BACK UNDER A BINDER** — @~cpgwp@, MS12 phase 356, and
+      -- the reverse of the landing before it. A core pattern that matches a
+      -- binder opens the scope at a minted token, so the body a rule holds is
+      -- an ordinary term with a free variable in it; these three ops abstract
+      -- that variable out again. They are the branch that does /not/ @intro@:
+      -- a rule that takes a @∀@ apart and does induction on the parameter never
+      -- makes the variable real, and the motive it builds is this
+      -- re-abstraction.
+      testGroup
+        "make-forall, make-lambda and make-let put a body back under a binder"
+        [ -- **The token is what says which occurrences belong to the binder**,
+          -- and it is the only thing that could: the word decides nothing, and
+          -- two binders may print the same one.
+          testCase "the token the identifier carries is the variable abstracted" $
+            case runTo (machine [ Bind (Ops.PVar "g") Nothing
+                                    (Ops.MakeForall (ident "A" (Just someToken))
+                                                    (term type0)
+                                                    (term (Free someToken))) ]) of
+              Finished m ->
+                lookup "g" (envOf m)
+                  @?= Just (VTerm (Pi (Ident "A") type0 (close someToken (Free someToken))))
+              other -> assertFailure ("expected Finished, got " ++ show other)
+
+          -- @Eq@ on 'Thena.Core.Term.Core' ignores a binder's word, so the
+          -- assertion above cannot see it and this one is what pins it.
+        , testCase "and the word it carries is the binder's" $
+            case runTo (machine [ Bind (Ops.PVar "g") Nothing
+                                    (Ops.MakeForall (ident "A" (Just someToken))
+                                                    (term type0)
+                                                    (term (Free someToken))) ]) of
+              Finished m -> fmap binderWordOf (lookup "g" (envOf m)) @?= Just (Just (Ident "A"))
+              other -> assertFailure ("expected Finished, got " ++ show other)
+
+          -- **A word with no token binds nothing, and that is not a failure.**
+          -- There is nothing to abstract, so the binder stands over a body that
+          -- does not mention it — the scope @arrow@ builds for a domain it has
+          -- no word for. The @someToken@ in the body stays free.
+        , testCase "a word with no token binds nothing" $
+            case runTo (machine [ Bind (Ops.PVar "g") Nothing
+                                    (Ops.MakeForall (ident "A" Nothing)
+                                                    (term type0)
+                                                    (term (Free someToken))) ]) of
+              Finished m ->
+                lookup "g" (envOf m)
+                  @?= Just (VTerm (Pi (Ident "A") type0 (close unusedVar (Free someToken))))
+              other -> assertFailure ("expected Finished, got " ++ show other)
+
+        , testCase "make-lambda is the same op at a λ" $
+            case runTo (machine [ Bind (Ops.PVar "g") Nothing
+                                    (Ops.MakeLambda (ident "A" (Just someToken))
+                                                    (term type0)
+                                                    (term (Free someToken))) ]) of
+              Finished m ->
+                lookup "g" (envOf m)
+                  @?= Just (VTerm (Lam (Ident "A") type0 (close someToken (Free someToken))))
+              other -> assertFailure ("expected Finished, got " ++ show other)
+
+          -- **The one builder that cannot be three operands wide**: a @let@'s
+          -- value belongs to the node and not to the body, in the order
+          -- 'Thena.Core.Term.Let' holds them and a @let@ pattern binds them.
+        , testCase "make-let takes the value as well as the type" $
+            case runTo (machine [ Bind (Ops.PVar "g") Nothing
+                                    (Ops.MakeLet (ident "x" (Just someToken))
+                                                 (term type0)
+                                                 (term (Universe (levelOfNat 1)))
+                                                 (term (Free someToken))) ]) of
+              Finished m ->
+                lookup "g" (envOf m)
+                  @?= Just (VTerm (Let (Ident "x") type0 (Universe (levelOfNat 1))
+                                       (close someToken (Free someToken))))
+              other -> assertFailure ("expected Finished, got " ++ show other)
+
+          -- Nothing but an identifier stands at the first operand —
+          -- 'ExpectedIdent', as at @prim-lambda@'s.
+        , testCase "and anything but an identifier is refused there" $
+            stuckWith ExpectedIdent
+              (runTo (machine [ Do (Ops.MakeForall (Lit (VName (rootName "a")))
+                                                   (term type0)
+                                                   (term type0)) ]))
+
+          -- **THE BINDING AND RE-BINDING, IN ONE ASSERTION** — his own phrasing
+          -- for what @~cpgwp@ is. The pattern of the landing before this one
+          -- takes @∀ (A : Type₀) -> A@ apart; these operands are exactly what
+          -- it bound, and the op puts the term back together. **A term that
+          -- survives this round trip is what says the token in the identifier
+          -- and the token free in the body are the same variable** — were they
+          -- two, the rebuilt body would hold a loose @Free@ the kernel refuses.
+        , testCase "a universal taken apart and put back is the same term" $
+            case peeled of
+              Nothing -> assertFailure "the pattern did not match"
+              Just (x, d, b) ->
+                case runTo (machine [ Bind (Ops.PVar "g") Nothing
+                                        (Ops.MakeForall (Lit x) (Lit d) (Lit b)) ]) of
+                  Finished m -> lookup "g" (envOf m) @?= Just (VTerm dependentPi)
+                  other -> assertFailure ("expected Finished, got " ++ show other)
+
+          -- And the word travels with it: the pattern read @A@ off the binder
+          -- and the rebuilt term carries it, which is what makes a rule's
+          -- @make-forall@ print the term the user wrote.
+        , testCase "and it keeps the word the pattern read off the binder" $
+            case peeled of
+              Nothing -> assertFailure "the pattern did not match"
+              Just (x, d, b) ->
+                case runTo (machine [ Bind (Ops.PVar "g") Nothing
+                                        (Ops.MakeForall (Lit x) (Lit d) (Lit b)) ]) of
+                  Finished m ->
+                    fmap binderWordOf (lookup "g" (envOf m)) @?= Just (Just (Ident "A"))
+                  other -> assertFailure ("expected Finished, got " ++ show other)
         ]
     ]
   where

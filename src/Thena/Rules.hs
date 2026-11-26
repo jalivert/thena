@@ -2240,7 +2240,19 @@ ternaryOps =
   [ ("make-trusted", Op.MakeTrusted)
   , ("specialise", Op.Specialise)
   , ("define-global", Op.DefineGlobal [])
+    -- Putting a body back under a binder (MS12 phase 356): the reverse of
+    -- taking a @∀@ or a @λ@ apart, for the rule that destructures a binder and
+    -- does not @intro@ it.
+  , ("make-forall", Op.MakeForall)
+  , ("make-lambda", Op.MakeLambda)
   ]
+
+-- | **The first op with four operands** (MS12 phase 356). A @let@ node holds a
+-- value as well as a type, and the value belongs to the node and not to the
+-- body, so the one binder builder that cannot be three operands wide is this
+-- one.
+quaternaryOps :: [(String, Operand -> Operand -> Operand -> Operand -> Op)]
+quaternaryOps = [ ("make-let", Op.MakeLet) ]
 
 -- | Does some op bear this word at /some/ arity?
 --
@@ -2286,6 +2298,7 @@ opWords =
     ++ [ (w, f sample) | (w, f) <- unaryOps ]
     ++ [ (w, f sample sample) | (w, f) <- binaryOps ]
     ++ [ (w, f sample sample sample) | (w, f) <- ternaryOps ]
+    ++ [ (w, f sample sample sample sample) | (w, f) <- quaternaryOps ]
   where
     sample = Lit (VText "x")
 
@@ -2351,6 +2364,8 @@ operation rd g i (RawOp w as)
         (_, _, Just f,  [a, b])   -> f <$> ref a <*> ref b
         _ | Just f <- lookup w ternaryOps
           , [a, b, c] <- as       -> f <$> ref a <*> ref b <*> ref c
+        _ | Just f <- lookup w quaternaryOps
+          , [a, b, c, d] <- as    -> f <$> ref a <*> ref b <*> ref c <*> ref d
         -- **A word that names no op is a call to a rule of that name**
         -- (phase 25e), which is what a bare word has meant at the REPL since
         -- phase 23b. The user, 2026-08-26: *"Bare word was always, always, the

@@ -234,6 +234,41 @@ Four more things about a binder:
   made it real — which is the point: a rule looks at the goal's shape and *then*
   chooses between introducing and doing induction.
 
+**And a body goes back under a binder with `make-forall`, `make-lambda` or
+`make-let`.** This is the reverse of the pattern, for the rule that does *not*
+`intro`: it abstracts the variable out of the body again.
+
+```
+rule rebind core`∀ (${x} : ${s}) -> ${e}` :-
+  when focus-is-hole
+  do g = make-forall x s e
+     claim "rebuilt" g
+```
+
+```
+thena spine> :theorem t : Type₀
+proving t : Type₀
+thena spine> rebind core`∀ (A : Type₀) -> A`
+thena spine> :where
+focus
+  let ? t : Type₀ in
+path
+  root ▸ rebuilt
+context
+  rebuilt : ∀ (A : Type₀) -> A
+type
+  Type₀
+```
+
+`make-lambda` is the same three arguments at a `λ`, and `make-let` takes a
+fourth — `make-let x v T E` — because a `let` holds its bound value. The first
+argument is the binder's *identity*, which is what `${x}` binds: it carries the
+variable the body refers to, and that variable is what says which occurrences
+the binder takes. A plain word there, `make-forall "B" s e`, binds nothing — the
+binder stands over a body that does not mention it, and if the body came off a
+pattern its variable stays loose, so `claim` refuses the term and names the
+variable that is not in scope.
+
 **A word your rule read off a binder is renumbered when it lands.** `intro x`
 with an `x` that came off the goal treats the word the way a bare `intro` does
 — the system found it, so it is made free in the scope the binder lands in. On

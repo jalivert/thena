@@ -280,6 +280,12 @@ everyOp =
   , ("in-scope",      InScopeAt)
   , ("arrow x y",     Arrow (Ref "x") (Ref "y"))
   , ("apply-to x y",  ApplyTo (Ref "x") (Ref "y"))
+    -- Putting a body back under a binder (MS12 phase 356): the identifier
+    -- carries the token to abstract, and @make-let@ is the first op in the
+    -- language with four operands.
+  , ("make-forall x t e", Op.MakeForall (Ref "x") (Ref "t") (Ref "e"))
+  , ("make-lambda x t e", Op.MakeLambda (Ref "x") (Ref "t") (Ref "e"))
+  , ("make-let x v t e",  Op.MakeLet (Ref "x") (Ref "v") (Ref "t") (Ref "e"))
   , ("prepend x y",   Op.Prepend (Ref "x") (Ref "y"))
   , ("declare-primitive x y", Op.DeclarePrimitive (Ref "x") (Ref "y"))
   , ("surface-literal t", Op.SurfaceLiteralOf (Ref "t"))

@@ -1195,6 +1195,49 @@ data Op
     -- **@App (Canonical …) x@ is constructible here and is not well formed.**
     -- That is @.claude\/spec\/representation.md@ §3.4's line, deliberately: the checker
     -- refuses it, and no abstraction boundary is put in the way of building it.
+  | MakeForall Operand Operand Operand
+    -- ^ **an identifier, a domain and a body → the dependent @Π@** (MS12
+    -- phase 356): the reverse of taking a @∀@ apart, and the op a rule needs
+    -- when it destructures a binder and does /not/ @intro@ it.
+    --
+    -- **The body goes back under the binder.** A core pattern matching a
+    -- binder mints a token and opens the scope at it (§8), so the body a rule
+    -- holds is an ordinary term with a free variable where the binder's
+    -- occurrences were; this abstracts that variable out again —
+    -- 'Thena.Core.Term.close', which no op exposed until here. A rule that
+    -- takes a @∀@ apart and then does induction on the parameter never makes
+    -- the variable real, and the motive it builds is exactly this
+    -- re-abstraction.
+    --
+    -- **The identifier carries which variable to close**, and that is why the
+    -- first operand is an 'Identifier' and not a 'Thena.Core.Term.Ident':
+    -- @${x}@ binds the word /and/ the token, and the token is the only thing
+    -- that says which occurrences belong to this binder.
+    --
+    -- **A word with no token binds nothing**, and that is not a failure: the
+    -- binder stands, the body does not mention it, and the result is what
+    -- 'Arrow' builds for a term that names its domain. 'Arrow' is the
+    -- degenerate case of this op and is kept, because elaborating @e a@ has no
+    -- word to supply and @_@ is the right one.
+    --
+    -- **It builds; it does not check** — 'Arrow'\'s line, for 'Arrow'\'s
+    -- reason: @Θ ⊢ S : Type@ is @claim@'s side condition and @try@'s, and a
+    -- constructed term is checked where it is used.
+  | MakeLambda Operand Operand Operand
+    -- ^ **the same for @λ@** (MS12 phase 356) — an identifier, the annotation
+    -- and the body.
+    --
+    -- **Three ops and not one taking a tag**, for the reason 'CaseAnalyse' is
+    -- a second op beside 'Eliminate': @instral@ has no enum to pass, and the
+    -- three binders are three different words a rule writes.
+  | MakeLet Operand Operand Operand Operand
+    -- ^ **the same for @let@** (MS12 phase 356) — an identifier, the value,
+    -- the type and the body, in the order 'Thena.Core.Term.Let' holds them and
+    -- the order a @let@ pattern binds them.
+    --
+    -- **The fourth operand is what makes a @let@ a @let@**: its value is part
+    -- of the node and not of the body, so this is the one binder whose builder
+    -- cannot be three operands wide.
   | ResolveCore Operand
     -- ^ **turn a @core@ region into a term, here** (MS5 phase 61b).
     --
@@ -1849,6 +1892,9 @@ resultOf o = case o of
   FreshName _  -> Just TName
   Here         -> Just TCore
   Arrow _ _    -> Just TCore
+  MakeForall {} -> Just TCore
+  MakeLambda {} -> Just TCore
+  MakeLet {}    -> Just TCore
   ApplyTo _ _  -> Just TCore
   FreshLevel     -> Just TLevel
   LevelOf _      -> Just TLevel
@@ -2094,6 +2140,11 @@ operandTypes o = case o of
   FreshName a  -> [(a, TName)]
   Here         -> []
   Arrow a b    -> [(a, TCore), (b, TCore)]
+  -- **The identifier comes first and carries the token**, so the three
+  -- binder builders read in the order their binders are written.
+  MakeForall x d b -> [(x, TIdent), (d, TCore), (b, TCore)]
+  MakeLambda x d b -> [(x, TIdent), (d, TCore), (b, TCore)]
+  MakeLet x v t b  -> [(x, TIdent), (v, TCore), (t, TCore), (b, TCore)]
   ApplyTo a b  -> [(a, TCore), (b, TCore)]
   FreshLevel     -> []
   LevelOf a      -> [(a, TInt)]
@@ -2878,6 +2929,9 @@ opKeyword o = case o of
   FreshName _  -> "fresh-name"
   Here         -> "here"
   Arrow _ _    -> "arrow"
+  MakeForall {} -> "make-forall"
+  MakeLambda {} -> "make-lambda"
+  MakeLet {}    -> "make-let"
   ApplyTo _ _  -> "apply-to"
   FreshLevel     -> "fresh-level"
   LevelOf _      -> "level"

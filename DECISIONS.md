@@ -1851,6 +1851,67 @@ A word a pattern took off a `∀` is the second kind, whichever way it reaches
 gives you `A1`, not a second `A` with a shadowing warning. Nothing your rule
 holds breaks, because it refers to the binder by identity and not by word.
 
+### A body goes back under a binder with `make-forall`, `make-lambda` or `make-let`
+
+*Decided and built 2026-11-26.*
+
+Taking a `∀` apart hands your rule the binder's identity, its domain and the
+body with an ordinary variable where the bound occurrences were. Three ops put
+that back together:
+
+```
+g = make-forall x T E        -- ∀ (x : T) -> E
+f = make-lambda x T E        -- λ (x : T) -> E
+l = make-let x v T E         -- let x = v : T in E
+```
+
+**It is the reverse of the pattern, and it is what a rule that does induction
+needs.** A rule that takes a `∀` apart and then introduces the binder calls
+`intro` and the variable becomes real. A rule that does induction on the
+parameter instead never introduces it, and the motive it has to build is exactly
+this re-abstraction — the body abstracted over the variable again.
+
+**The first argument is the binder's identity and not a word**, which is why it
+is what `${x}` binds and not a string: the identity carries the variable the
+pattern opened the scope at, and that variable is the only thing that says which
+occurrences of the body belong to this binder. Two binders may print the same
+word.
+
+```
+rule rebind core`∀ (${x} : ${s}) -> ${e}` :-
+  when focus-is-hole
+  do g = make-forall x s e
+     claim "rebuilt" g
+```
+
+```
+thena spine> :theorem t : Type₀
+proving t : Type₀
+thena spine> rebind core`∀ (A : Type₀) -> A`
+thena spine> :where
+focus
+  let ? t : Type₀ in
+path
+  root ▸ rebuilt
+context
+  rebuilt : ∀ (A : Type₀) -> A
+type
+  Type₀
+```
+
+**A word with no variable in it binds nothing.** `make-forall "B" T E` builds a
+binder over a body that does not mention it, which is what `arrow` builds for a
+domain it has no word for. If `E` came off a pattern the variable in it stays
+loose, and the term is refused where you use it rather than where you build it:
+`claim` says *that is not a type* and names the variable that is not in scope.
+Nothing here type-checks what it builds — a constructed term is checked where it
+is used, which is the line everywhere else in the rule language draws too.
+
+**Three ops and not one with a tag**, because the rule language has nothing to
+pass a tag as, and because a rule writes `∀`, `λ` and `let` as three different
+words anyway. `make-let` takes a fourth argument, the bound value, because a
+`let` node holds one and the body does not.
+
 ### A level in a pattern is a numeral or a splice, and a bound level cannot be taken apart
 
 *Decided 2026-11-25. The numeral is built; a splice in a level position is not —

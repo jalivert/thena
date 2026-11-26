@@ -2164,6 +2164,24 @@ perform instr rest m = case operation instr of
     Left r         -> failure r m
     Right (f', x') -> produce (VTerm (App f' x')) m
 
+  -- **The three binder builders, and the reverse of taking a binder apart**
+  -- (MS12 phase 356). A core pattern that matched a binder minted a token and
+  -- opened the scope at it, so the body a rule is holding has a free variable
+  -- where the binder's occurrences were; @bindingIn@ puts it back under one.
+  --
+  -- **Nothing here touches the development or the focus**, exactly as 'Arrow',
+  -- 'ApplyTo' and 'Op.MakeTrusted' do not: a constructed term is checked where
+  -- it is used.
+  Op.MakeForall x d b -> binding x d b Pi
+
+  Op.MakeLambda x d b -> binding x d b Lam
+
+  Op.MakeLet x v t b -> case (,,) <$> term v <*> term t <*> term b of
+    Left r              -> failure r m
+    Right (v', t', b')  -> case identOf x of
+      Left r   -> failure r m
+      Right i  -> bound i b' (\w n1 sc -> produce (VTerm (Let w v' t' sc)) m { names = n1 })
+
   -- **@trusted claimed actual body@, built and not checked** (MS8 phase 150),
   -- exactly as 'Arrow' and 'ApplyTo' are: whether the claim is plausible is not
   -- a question anything asks, which is the feature, and whether @actual@
@@ -2856,6 +2874,26 @@ perform instr rest m = case operation instr of
     declaredNameOf o = declaredIn m <$> nameOf o
     wordOf  = operandWord (env (exec m))
     term    = operandTerm (env (exec m))
+    identOf = operandIdentifier (env (exec m))
+
+    -- **Putting a body back under a binder** (MS12 phase 356), shared by the
+    -- three builders: the identifier's token is the variable to abstract out,
+    -- and 'Thena.Core.Term.close' is the abstraction no op exposed until here.
+    --
+    -- **A word carrying no token binds nothing.** There is no variable to
+    -- abstract, so the binder stands over a body that does not mention it —
+    -- which is the scope 'Arrow' builds for a domain it has no word for, and
+    -- 'Arrow' mints its variable here for the same reason: 'Var' has no other
+    -- introduction form.
+    bound i b k = case identToken i of
+      Just v  -> k (identWord i) (names m) (close v b)
+      Nothing -> let (v, n1) = fresh (names m) in k (identWord i) n1 (close v b)
+
+    binding x d b con = case (,) <$> term d <*> term b of
+      Left r         -> failure r m
+      Right (d', b') -> case identOf x of
+        Left r  -> failure r m
+        Right i -> bound i b' (\w n1 sc -> produce (VTerm (con w d' sc)) m { names = n1 })
 
     -- **The three readers' shared plumbing** (MS9 phase 176). Each takes the
     -- operand that names a declaration and hands the declaration to its
