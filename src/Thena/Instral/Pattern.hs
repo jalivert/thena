@@ -15,8 +15,10 @@ module Thena.Instral.Pattern
   , Skeleton (..)
   , Slot (..)
   , CoreP (..)
+  , CoreSlot (..)
   , skeletonHoles
   , corePHoles
+  , corePSlots
   , patternBinds
   , patternIrrefutable
   ) where
@@ -123,6 +125,24 @@ data Slot
     -- value of that type on either side of the hole
   deriving (Eq, Show)
 
+-- | What the thing at a core pattern's hole has to be (MS12 phase 355).
+--
+-- **'Slot' one language down, and a type of its own rather than two more
+-- constructors there.** An object language's grammar has no binder position and
+-- a core region has no token class, so one type would carry a case neither
+-- language can reach — and @-Wall@ would then ask every total walk over the
+-- other language's holes for an arm it can never take. The question /what does
+-- a splice in a region take/ has one shape and two answers, which is what these
+-- two types are.
+data CoreSlot
+  = AtCore
+    -- ^ a term position, so a 'Thena.Core.Term.Core'
+  | AtBinder
+    -- ^ **a binder's identity**, so a 'Thena.Instral.Ops.Identifier' — the
+    -- one position in a @core\`…\`@ region that wants a /name/ rather than a
+    -- term.
+  deriving (Eq, Show)
+
 -- | A core term's shape with something at each of its splices (MS12 phase
 -- 352).
 --
@@ -139,10 +159,14 @@ data Slot
 -- why 'CPTrusted' carries three and not the two a surface term writes: the
 -- derived @actual@ is a field, so a pattern may stand at it.
 --
--- **THE BINDERS ARE NOT HERE YET.** @∀@, @λ@ and @let@ open a scope, and
--- opening one mints a token, which is the question @~thwhg@ asks and the
--- landing after this one answers. 'Thena.Rules.resolvePattern' refuses one with
--- 'Thena.Rules.CorePatternForm' rather than reading it as something else.
+-- **THE BINDERS OPEN A SCOPE, AND THAT IS WHY MATCHING MINTS** (MS12 phase
+-- 355). 'CPPi', 'CPLam' and 'CPLet' each carry what their /binder/ binds as
+-- well as their sub-terms, and matching one mints a token, puts it in the
+-- 'Thena.Instral.Ops.Identifier' the binder position binds, and opens the body
+-- at it — so the body a @${E}@ holds is an ordinary term with a free variable
+-- where the binder's occurrences were. @~thwhg@ (an alternative is matched
+-- again when it is taken) is what made that safe and @~2n5tn@ is what decided
+-- the word @intro@ gives it.
 data CoreP a
   = CPHole a
     -- ^ @${x}@ — whatever stands here, and what the position takes
@@ -167,6 +191,26 @@ data CoreP a
     -- the line 'Thena.Instral.Ops.matchSkeleton' already draws.
   | CPTrusted (CoreP a) (CoreP a) (CoreP a)
     -- ^ @trusted claimed actual body@ — all three fields
+  | CPPi a (CoreP a) (CoreP a)
+    -- ^ @∀ (${x} : ${T}) -> ${E}@ — the binder, its domain and its opened body
+    -- (MS12 phase 355).
+    --
+    -- **The first field is a name position and the other two are term
+    -- positions**, which is why it is an @a@ and not a @CoreP a@: a binder's
+    -- identity is a 'Thena.Instral.Ops.Identifier', so the pattern at it is
+    -- matched against one. @spec\/machine.md@ §8 — /@${…}@ is the only binding
+    -- marker/ — is why a written word is refused there rather than compared: a
+    -- binder's word decides nothing, so there is nothing for a written one to
+    -- mean.
+    --
+    -- **@${S} -> ${B}@ is this with the binder unbound**, non-dependent or
+    -- not: an arrow's body still sits under a scope, so it is opened to be
+    -- matched, and the pattern simply does not name what it was opened at.
+  | CPLam a (CoreP a) (CoreP a)
+    -- ^ @λ (${x} : ${T}) -> ${E}@ — the binder, its domain and its opened body
+  | CPLet a (CoreP a) (CoreP a) (CoreP a)
+    -- ^ @let ${x} = ${v} : ${T} in ${E}@ — the binder, its value, its type and
+    -- its opened body, in 'Thena.Core.Term.Let''s own field order
   | CPEliminate GlobalName [Int] [CoreP a] (CoreP a) [CoreP a] [CoreP a] (CoreP a)
     -- ^ @elim d {ℓ} (params) motive (methods) (indices) target@ — positional
     -- and in 'Thena.Core.Term.Eliminate''s own field order, exactly as the
@@ -183,16 +227,31 @@ skeletonHoles sk = case sk of
 -- | What sits at each of a core pattern's holes, left to right (MS12 phase
 -- 352) — 'skeletonHoles' for the language one down.
 corePHoles :: CoreP a -> [a]
-corePHoles cp = case cp of
-  CPHole a         -> [a]
+corePHoles = map snd . corePSlots
+
+-- | Each hole with the slot it stands at, left to right (MS12 phase 355) —
+-- 'Thena.Instral.Infer.holesOf' for the language one down.
+--
+-- **It exists because the binders gave a core region a second kind of hole.**
+-- Until them every @${…}@ inside a @core\`…\`@ stood where a term stands, so
+-- 'corePHoles' alone was enough and the type was read off the region's tag; a
+-- binder position wants a name, so the position has to say what it takes.
+corePSlots :: CoreP a -> [(CoreSlot, a)]
+corePSlots cp = case cp of
+  CPHole a         -> [(AtCore, a)]
   CPName _ _       -> []
   CPUniverse _     -> []
   CPLit _          -> []
-  CPApp f a        -> corePHoles f ++ corePHoles a
-  CPTrusted c a b  -> corePHoles c ++ corePHoles a ++ corePHoles b
+  CPApp f a        -> corePSlots f ++ corePSlots a
+  CPTrusted c a b  -> corePSlots c ++ corePSlots a ++ corePSlots b
+  -- **The binder first, then the sub-terms left to right**, which is the order
+  -- they are written in and the order the matcher binds them in.
+  CPPi x d b       -> (AtBinder, x) : corePSlots d ++ corePSlots b
+  CPLam x d b      -> (AtBinder, x) : corePSlots d ++ corePSlots b
+  CPLet x v t b    -> (AtBinder, x) : corePSlots v ++ corePSlots t ++ corePSlots b
   CPEliminate _ _ ps m ms is t ->
-    concatMap corePHoles ps ++ corePHoles m ++ concatMap corePHoles ms
-      ++ concatMap corePHoles is ++ corePHoles t
+    concatMap corePSlots ps ++ corePSlots m ++ concatMap corePSlots ms
+      ++ concatMap corePSlots is ++ corePSlots t
 
 -- | The names a pattern binds, left to right.
 --

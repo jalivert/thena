@@ -3535,11 +3535,30 @@ introducing rule env ctx n nm p = case p of
         -- 2026-11-20**, /THERE IS ONE NAME/, part one; 'writableIn' is the
         -- whole of it and says why.
         --
-        -- **The op can tell the two apart and that is why this is the place.**
-        -- @nm@ is 'Nothing' exactly when the user typed a bare @intro@, so the
-        -- word is a hint copied out of a closed term and not something they
-        -- wrote; a word they wrote is theirs, taken or not (MS4 phase 41f).
-        named j = maybe (writableIn ctx j) identWord nm
+        -- **The op can tell written from read and that is why this is the
+        -- place.** @nm@ is 'Nothing' exactly when the user typed a bare
+        -- @intro@, so the word is a hint copied out of a closed term and not
+        -- something they wrote; a word they wrote is theirs, taken or not (MS4
+        -- phase 41f). An argument that carries a token was /also/ copied out of
+        -- a term, which is 'readOff' below.
+        named j = maybe (writableIn ctx j) readOff nm
+        -- **A WORD THAT CAME OFF A TERM IS MADE FREE, WHOEVER HANDED IT OVER**
+        -- — his ruling of 2026-11-26, @~2n5tn@. A @core\`∀ (${x} : ${T}) ->
+        -- ${E}\`@ pattern takes the word off the goal's ∀-binder, which is
+        -- where a bare @intro@ takes it from too, and then hands it over as an
+        -- /argument/, which is where a word the author wrote arrives. The
+        -- provenance decides, not the position: both are the system supplying a
+        -- word, so both are free in the scope the binder lands in.
+        --
+        -- **The token is the test for provenance, and a sound one.** Nothing in
+        -- @instral@ can attach a token to a word a rule chose — there is no op
+        -- that changes the word in an identifier — so a token is present
+        -- exactly when the word was read off a term. @intro \"q\"@ and
+        -- @name-ident n@ both carry none and are used as written, which is MS4
+        -- phase 41f and is not touched.
+        readOff ident = case identToken ident of
+          Just _  -> writableIn ctx (identWord ident)
+          Nothing -> identWord ident
         -- **A TOKEN THAT CAME WITH THE WORD IS ADOPTED, NOT MINTED OVER** —
         -- his ruling of 2026-11-25, /one @intro@, and a written literal may
         -- stand at an identifier/ (MS12 phase 353). The caller is holding a

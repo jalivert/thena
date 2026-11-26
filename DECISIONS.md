@@ -1791,8 +1791,7 @@ inference builds a join.
 
 ### A pattern over a core term is a tagged region, and only `${…}` binds
 
-*Decided 2026-11-25. Built for every form but the binders; `∀`, `λ` and `let`
-in a pattern are refused for now, and say so.*
+*Decided 2026-11-25. Built, binders included.*
 
 A rule takes a core term apart with a pattern, the same way it matches a surface
 term or a term of a language you declared — there is no separate notation for
@@ -1811,6 +1810,25 @@ with two spellings costs more than the two characters it saves.
 plain word quietly becomes a variable. A word that names nothing is refused when
 the file is read, not when the clause is tried.
 
+**A binder's name is a position that binds, so it takes a splice and a written
+word is refused.** `core`∀ (x : ${T}) -> ${E}`` does not read. There is nothing
+it could mean: a bare word inside a region names a global, which a binder's name
+is not, and a binder's word carries no meaning in a core term — two terms that
+differ only in a binder's word are the same term — so there would be nothing for
+a written one to compare against. The mirror holds at a position that *refers*,
+like an `elim`'s datatype, where a word is written and a splice is refused.
+
+**`_` is the wildcard inside a region too**, at a binder and at a term alike:
+`core`∀ (${_} : ${S}) -> ${E}`` matches a universal and names only its parts.
+
+**Several binders in one group are several patterns.**
+`core`∀ (${x} : ${S}) (${y} : ${T}) -> ${E}`` nests exactly as the term does,
+because each `∀` binds one thing.
+
+**`->` is a binder as much as `∀` is.** `core`${S} -> ${B}`` matches a universal
+whose binder the pattern declines to name — dependent or not, since the body
+sits under the binder either way and has to be opened to be looked at.
+
 **A word with no braces has no level arguments.** `Nat` means `Nat` at no
 levels, exactly as it does when you write it in a term, so a family you use at a
 level is matched by writing that level: `Empty {0}`.
@@ -1823,6 +1841,15 @@ not write the dependence, because the position already says it.
 not introduce its binder: the variable the body refers to is not in scope yet,
 and `intro` is what makes it real. A rule can therefore look at the shape of a
 goal and *then* decide between introducing and doing induction.
+
+**A word your rule read off a term is renumbered where the binder lands, not
+used as written.** `intro` has always treated the two sources of a word
+differently — one you typed is yours, taken or not, and one the system found on
+the goal's own binder is made free so that two live bindings never share a word.
+A word a pattern took off a `∀` is the second kind, whichever way it reaches
+`intro`: matching `∀ (A : Type₀) -> …` where `A` is already bound and introducing
+gives you `A1`, not a second `A` with a shadowing warning. Nothing your rule
+holds breaks, because it refers to the binder by identity and not by word.
 
 ### A level in a pattern is a numeral or a splice, and a bound level cannot be taken apart
 

@@ -190,6 +190,14 @@ corePText at cp = "core" ++ [tick] ++ top cp ++ [tick]
       -- **A keyword and a fixed number of atoms**, which is the grammar's own
       -- shape for both of these.
       CPTrusted cl ac b -> unwords ["trusted", atom cl, atom ac, atom b]
+      -- **A binder group is written out one binder at a time**, never collected
+      -- back into @∀ (x : S) (y : T) ->@: the reader nests them, so one per
+      -- quantifier is the spelling that reads back to the same tree with the
+      -- fewest rules here.
+      CPPi x d b  -> unwords ["∀", bound x d, "->", top b]
+      CPLam x d b -> unwords ["λ", bound x d, "->", top b]
+      CPLet x v ty b ->
+        unwords ["let", hole x, "=", top v, ":", top ty, "in", top b]
       CPEliminate d ls ps m ms is t ->
         unwords
           [ "elim", nameDotted d ++ levelArgs (map levelOfNat ls)
@@ -198,11 +206,20 @@ corePText at cp = "core" ++ [tick] ++ top cp ++ [tick]
       _ -> atom c
 
     atom c = case c of
-      CPHole a       -> "$" ++ ['{'] ++ at a ++ ['}']
+      CPHole a       -> hole a
       CPName n ls    -> nameDotted n ++ levelArgs (map levelOfNat ls)
       CPUniverse k   -> "Type" ++ subscript k
       CPLit l        -> concatMap escapeRaw (literal l)
       _              -> "(" ++ top c ++ ")"
+
+    -- A splice, written so the region scanner reads the @$@ as an escape
+    -- opener — see the note above.
+    hole a = "$" ++ ['{'] ++ at a ++ ['}']
+
+    -- **A binder's name position is a splice too**, so it is written the same
+    -- way; what differs is that the grammar wants a name there, which is why
+    -- a written word has no reading ('Thena.Rules.corePattern').
+    bound x d = "(" ++ hole x ++ " : " ++ top d ++ ")"
 
     group ps = "(" ++ unwords (map atom ps) ++ ")"
 

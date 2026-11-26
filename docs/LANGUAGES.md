@@ -204,9 +204,42 @@ Three things are worth knowing about it:
   pattern matches the term elaboration actually produced as well as the one you
   wrote.
 
-**The binders are not in yet.** `` core`∀ (${x} : ${T}) -> ${E}` ``, `λ` and
-`let` are designed and refused for now, and the refusal says which form it was;
-`->` goes with them, being a `∀` whose variable is unused.
+**A binder is taken apart too**, and its body comes out opened:
+
+```
+rule intro-pi :- when focus-is-guess
+  do g = goal
+     ; core`∀ (${x} : ${T}) -> ${E}` = g
+     ; call intro x
+```
+
+`${x}` is the binder's identity, `${T}` its domain and `${E}` the inside of the
+`∀` with an ordinary variable where the bound occurrences were. `λ` and `let`
+read the same way — `` core`let ${x} = ${v} : ${T} in ${E}` `` — and `->` is a
+`∀` whose binder you decline to name, dependent or not.
+
+Four more things about a binder:
+
+- **Its name position binds, so it takes a splice.** `` core`∀ (x : ${T}) -> ${E}` ``
+  is refused: a bare word inside a region names a global, which a binder's name
+  is not, and a binder's word means nothing in a core term anyway — two terms
+  that differ only in one are the same term.
+- **`_` works there**, as it does anywhere a pattern is written:
+  `` core`∀ (${_} : ${S}) -> ${E}` `` matches a universal and names only its
+  parts.
+- **Several binders in one group are several patterns**, nesting as the term
+  does: `` core`∀ (${x} : ${S}) (${y} : ${T}) -> ${E}` ``.
+- **Taking a `∀` apart introduces nothing.** The variable `${E}` refers to is
+  not in scope, so you cannot `claim` at it or `fill` with it until `intro` has
+  made it real — which is the point: a rule looks at the goal's shape and *then*
+  chooses between introducing and doing induction.
+
+**A word your rule read off a binder is renumbered when it lands.** `intro x`
+with an `x` that came off the goal treats the word the way a bare `intro` does
+— the system found it, so it is made free in the scope the binder lands in. On
+a goal `∀ (A : Type₀) -> …` where `A` is already bound you get `A1`, not a
+second `A` and a shadowing warning. A word *you* wrote, `intro "A"`, is still
+used as given.
 
 **What you type at the prompt is a block**, so a binding lives for the entry and
 dies with it:

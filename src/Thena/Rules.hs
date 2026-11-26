@@ -109,6 +109,7 @@ import Thena.Syntax.Parser (parseTerm)
 import Thena.Syntax.Concrete
   ( Raw (..)
   , RawIdent (..)
+  , RawBinder (..)
   )
 import qualified Thena.Instral.Type as Ty
 import Thena.Instral.Type (Signature (..), Ty (..))
@@ -1793,17 +1794,30 @@ resolvePattern rd g = go
 -- does ('Thena.Language.Build.skeletonOf' is handed @map PVar names@): one
 -- answer to /what does a splice in a region bind/, and not two.
 --
--- **THE FORMS IT REFUSES ARE THE LANDINGS AFTER THIS ONE.** The binders open a
--- scope, and opening one mints a token — @~thwhg@ is the decision that gates
--- them. @->@ is a binder too, non-dependent or not: its body is under a scope
--- that has to be opened to be matched. A @Type@ with no level asks for a level
--- to be inferred and there is nothing to infer against while a pattern runs. A
--- splice where the grammar wants a /name/ is the binder patterns' own
--- notation, so it lands with them.
+-- **THE BINDERS LAND HERE TOO, AS OF MS12 PHASE 355.** @∀@, @λ@, @let@ and
+-- @->@ all open a scope, so all four read as the three binder forms of
+-- 'CoreP' — an arrow being a @∀@ whose binder the pattern does not name,
+-- non-dependent or not.
+--
+-- **A BINDER POSITION TAKES A SPLICE AND NOTHING ELSE.** @${…}@ is the only
+-- binding marker (§8) and a bare word inside a region resolves to a /global/,
+-- which a binder's name is not; and a binder's word decides nothing, so
+-- comparing a written one would compare display data the kernel's own equality
+-- ignores. Both readings are wrong, so the form is refused and says so.
+--
+-- **WHAT IT STILL REFUSES.** A @Type@ with no level asks for a level to be
+-- inferred and there is nothing to infer against while a pattern runs; a splice
+-- where the grammar wants a /global/ — an @elim@'s datatype, a name at level
+-- arguments — is not a position anything binds; and the development chain's own
+-- forms (a hole, a guess, a constraint) are not 'Thena.Core.Term.Core' at all.
 corePattern :: Reading -> GlobalName -> Raw -> Either RuleError (CoreP Pattern)
 corePattern rd g = go
   where
     go r = case r of
+      -- @_@ is the wildcard wherever a pattern is written ('resolvePattern'),
+      -- and a splice inside a region is no exception: @core\`${_}\`@ matches
+      -- any term and binds nothing.
+      RawSplice "_"    -> Right (CPHole PWild)
       RawSplice x      -> Right (CPHole (PVar x))
       RawName ps s     -> named (GlobalName ps s) []
       RawAt ps i ls    -> word i >>= \s -> named (GlobalName ps s) ls
@@ -1811,6 +1825,17 @@ corePattern rd g = go
       RawPrimitive l   -> Right (CPLit l)
       RawApp f a       -> CPApp <$> go f <*> go a
       RawTrusted c a b -> CPTrusted <$> go c <*> go a <*> go b
+      -- **A binder group nests, exactly as it does when a term is resolved**
+      -- ('Thena.Syntax.Resolve''s @binders@): @∀ (${x} : ${S}) (${y} : ${T}) ->
+      -- ${E}@ is two 'CPPi's, because 'Thena.Core.Term.Pi' binds one thing.
+      RawPi  bs b      -> nested CPPi  bs b
+      RawLam bs b      -> nested CPLam bs b
+      RawLet i v t b   -> CPLet <$> bound i <*> go v <*> go t <*> go b
+      -- **An arrow is a @∀@ whose binder is not named** (§8, /@->@ is a binder
+      -- too, non-dependent or not/). Its body is under a scope like any other,
+      -- so it is opened to be matched; what the pattern declines to say is what
+      -- it was opened at.
+      RawArrow s b     -> CPPi PWild <$> go s <*> go b
       -- **Positional and in 'Thena.Core.Term.Eliminate''s field order**, which
       -- is the order the development calculus writes them in, so no field has
       -- to be named.
@@ -1821,10 +1846,6 @@ corePattern rd g = go
           <$> traverse go prs <*> go m <*> traverse go ms
           <*> traverse go is <*> go t
       RawUniverseOpen  -> refuse "Type with no level"
-      RawArrow {}      -> refuse "->"
-      RawPi {}         -> refuse "a universal"
-      RawLam {}        -> refuse "a lambda"
-      RawLet {}        -> refuse "a let"
       RawClaim {}      -> refuse "a hole"
       RawGuess {}      -> refuse "a guess"
       RawPending {}    -> refuse "a constraint"
@@ -1833,11 +1854,30 @@ corePattern rd g = go
     refuse :: String -> Either RuleError a
     refuse what = Left (CorePatternForm g what)
 
-    -- A name position takes a word or a splice, and the splice is the binder
-    -- patterns' notation.
+    -- A position that wants a GLOBAL takes a word and nothing else: an
+    -- @elim@'s datatype and a name at level arguments are references, and a
+    -- splice there would be a name supplied when the pattern runs, which is not
+    -- a thing anything binds.
     word i = case i of
       RawWord s        -> Right s
-      RawIdentSplice _ -> refuse "a splice where a name is written"
+      RawIdentSplice _ -> refuse "a splice where a global's name is written"
+
+    -- A BINDER position is the mirror of that: it binds, so it takes a splice
+    -- and a written word is refused. @_@ reads as the wildcard it is
+    -- everywhere else a pattern is written ('resolvePattern'), so
+    -- @core\`∀ (${_} : ${S}) -> ${E}\`@ matches a universal and names only
+    -- its parts.
+    bound i = case i of
+      RawIdentSplice "_" -> Right PWild
+      RawIdentSplice x   -> Right (PVar x)
+      RawWord _          -> refuse "a written word where a binder is bound"
+
+    -- **One group at a time, innermost last**, so the binder a splice names is
+    -- in the body that follows it.
+    nested con bs b = case bs of
+      []                  -> go b
+      RawBinder i d : more ->
+        con <$> bound i <*> go d <*> nested con more b
 
     named nm ls = (\nm' -> CPName nm' ls) <$> resolved nm
 

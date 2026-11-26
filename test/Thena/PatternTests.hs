@@ -27,9 +27,12 @@ import Thena.Core.Term
 import Thena.Global.Env (emptyGlobals)
 import Thena.Instral.Ops
   ( CoreP (..)
+  , CoreSlot (..)
+  , Identifier (..)
   , Instr (..)
   , Pattern (..)
   , Value (..)
+  , corePSlots
   , matchPattern
   , matchPatterns
   , patternBinds
@@ -106,6 +109,22 @@ everyPattern =
   , ("core`String`",  PCore (CPName (rootName "String") []))
   , ("core`String {0 1}`", PCore (CPName (rootName "String") [0, 1]))
   , ("core`3`",       PCore (CPLit (LInt 3)))
+    -- **The binders, as of MS12 phase 355.** One binder per quantifier is the
+    -- spelling the printer writes and the reader nests, so these round-trip;
+    -- @∀ (${x} : ${S}) (${y} : ${T}) ->@ is the same tree written shorter and
+    -- is tested in 'coreTerms' below.
+  , ("core`\8704 (${x} : ${t}) -> ${e}`",
+        PCore (CPPi (PVar "x") (CPHole (PVar "t")) (CPHole (PVar "e"))))
+  , ("core`\955 (${x} : ${t}) -> ${e}`",
+        PCore (CPLam (PVar "x") (CPHole (PVar "t")) (CPHole (PVar "e"))))
+  , ("core`let ${x} = ${v} : ${t} in ${e}`",
+        PCore (CPLet (PVar "x") (CPHole (PVar "v")) (CPHole (PVar "t"))
+                     (CPHole (PVar "e"))))
+    -- @_@ is the wildcard inside a region as it is anywhere else a pattern is
+    -- written, at a binder and at a term alike.
+  , ("core`\8704 (${_} : ${t}) -> ${e}`",
+        PCore (CPPi PWild (CPHole (PVar "t")) (CPHole (PVar "e"))))
+  , ("core`${_}`",    PCore (CPHole PWild))
   ]
 
 -- | Read a whole rule, for the binding cases above.
@@ -483,6 +502,81 @@ coreTerms =
       testCase "a term is tried as written and then reduced" $
         matchTerm (CPUniverse 0) redex @?= Just []
 
+      -- ----------------------------------------------------------------
+      -- The binders — MS12 phase 355
+      -- ----------------------------------------------------------------
+
+    , -- **THE WHOLE POINT OF THE LANDING, IN ONE ASSERTION.** A binder's
+      -- identity and the body opened at it must name the SAME variable: the
+      -- @${x}@ carries the token, the @${E}@ holds a term with that token free
+      -- in it, and @intro@ adopting the token is what makes the pair real
+      -- (@~gr236@). Were they to disagree the two would print one word and mean
+      -- two binders, which is the defect @~thwhg@ was opened for.
+      testCase "a universal binds its binder, its domain and its opened body" $
+        matchFrom 0 (CPPi (PVar "x") (CPHole (PVar "t")) (CPHole (PVar "e")))
+                    (Pi (Ident "A") star (close someVar (Free someVar)))
+          @?= Just [ ("x", VIdent (Identifier (Ident "A") (Just mintedVar)))
+                   , ("t", VTerm star)
+                   , ("e", VTerm (Free mintedVar))
+                   ]
+
+    , -- **Opening a scope is what mints**, so this is the one pattern form that
+      -- spends the counter the matchers have threaded since MS12 phase 351.
+      testCase "matching a binder advances the counter by one" $
+        fmap snd (matchPattern emptyGlobals 7
+                    (PCore (CPPi PWild (CPHole PWild) (CPHole PWild)))
+                    (VTerm (Pi (Ident "A") star (close someVar star))))
+          @?= Just 8
+
+    , testCase "a lambda and a let are the same question" $ do
+        matchFrom 0 (CPLam (PVar "x") (CPHole PWild) (CPHole (PVar "e")))
+                    (Lam (Ident "f") star (close someVar (Free someVar)))
+          @?= Just [ ("x", VIdent (Identifier (Ident "f") (Just mintedVar)))
+                   , ("e", VTerm (Free mintedVar))
+                   ]
+        matchFrom 0 (CPLet (PVar "x") (CPHole (PVar "v")) (CPHole (PVar "t"))
+                           (CPHole (PVar "e")))
+                    (Let (Ident "d") star (Universe (levelOfNat 1))
+                         (close someVar (Free someVar)))
+          @?= Just [ ("x", VIdent (Identifier (Ident "d") (Just mintedVar)))
+                   , ("v", VTerm star)
+                   , ("t", VTerm (Universe (levelOfNat 1)))
+                   , ("e", VTerm (Free mintedVar))
+                   ]
+
+    , -- §8: @->@ is a binder too, non-dependent or not. Its body sits under a
+      -- scope like any other, so it is opened to be matched; what the pattern
+      -- declines to say is what it was opened at.
+      testCase "an arrow is a universal whose binder is not named" $ do
+        readPattern "core`${s} -> ${b}`"
+          @?= Right (PCore (CPPi PWild (CPHole (PVar "s")) (CPHole (PVar "b"))))
+        matchFrom 0 (CPPi PWild (CPHole (PVar "s")) (CPHole (PVar "b")))
+                    (Pi (Ident "A") star (close someVar star))
+          @?= Just [("s", VTerm star), ("b", VTerm star)]
+
+    , -- **A binder group nests**, exactly as it does when a term is resolved:
+      -- 'Thena.Core.Term.Pi' binds one thing, so two written in one group are
+      -- two patterns.
+      testCase "a binder group is as many patterns as it has binders" $
+        readPattern "core`\8704 (${x} : ${s}) (${y} : ${t}) -> ${e}`"
+          @?= Right (PCore (CPPi (PVar "x") (CPHole (PVar "s"))
+                                 (CPPi (PVar "y") (CPHole (PVar "t"))
+                                       (CPHole (PVar "e")))))
+
+    , -- A pattern says which form it wants and the others do not match it.
+      testCase "a binder form matches its own node and no other" $ do
+        matchTerm (CPPi PWild (CPHole PWild) (CPHole PWild))
+                  (Lam (Ident "f") star (close someVar star)) @?= Nothing
+        matchTerm (CPLam PWild (CPHole PWild) (CPHole PWild))
+                  (Pi (Ident "A") star (close someVar star)) @?= Nothing
+
+    , -- **A hole at a binder is typed 'TIdent' and nowhere else**, which is
+      -- what lets @call intro x@ be written with nothing annotated (@~gr236@).
+      testCase "a binder's hole stands at a name and the rest at terms" $
+        map fst (corePSlots (CPPi (PVar "x") (CPHole (PVar "t"))
+                                  (CPHole (PVar "e"))))
+          @?= [AtBinder, AtCore, AtCore]
+
     , -- @spec/machine.md@ §8: the counter is threaded and nothing mints yet.
       testCase "the counter comes back untouched" $
         fmap snd (matchPattern emptyGlobals 7
@@ -491,14 +585,19 @@ coreTerms =
                     (VTerm (Trusted star star star)))
           @?= Just 7
 
-    , -- **Every refusal below names a form the development calculus writes**,
-      -- and each is a landing of its own: the binders wait on @~thwhg@, and
-      -- @Type@ with no level asks for an inference that has nothing to run
-      -- against while a pattern runs.
-      testCase "a binder is refused, and says which form it was" $ do
+    , -- **A BINDER POSITION BINDS, SO IT TAKES A SPLICE AND NOTHING ELSE**
+      -- (MS12 phase 355). A bare word inside a region resolves to a /global/,
+      -- which a binder's name is not, and a binder's word decides nothing, so
+      -- there is nothing a written one could mean.
+      testCase "a written word where a binder is bound is refused" $ do
         expect "core`\8704 (x : String) -> String`" "CorePatternForm"
         expect "core`\955 (x : String) -> x`" "CorePatternForm"
-        expect "core`String -> String`" "CorePatternForm"
+        expect "core`let x = ${v} : ${t} in ${e}`" "CorePatternForm"
+
+    , -- @Type@ with no level asks for an inference that has nothing to run
+      -- against while a pattern runs. It is the one form the development
+      -- calculus writes that a pattern will not read at any landing.
+      testCase "Type with no level is refused" $
         expect "core`Type`" "CorePatternForm"
 
     , -- **An elimination's fields are positions too**, in
@@ -512,9 +611,9 @@ coreTerms =
                    , ("t", VTerm (Universe (levelOfNat 1)))
                    ]
 
-    , -- The one name position the grammar reaches is an @elim@'s head, and a
-      -- splice there is the binder patterns' notation.
-      testCase "a splice where a name is written is refused" $
+    , -- **A position that wants a GLOBAL is the mirror of a binder's**: it
+      -- refers, so it takes a word and a splice there is refused.
+      testCase "a splice where a global's name is written is refused" $
         expect "core`elim ${d} () ${m} () () ${t}`" "CorePatternForm"
 
     , -- Stage b, parked by him (@~6z6nx@). Said as itself rather than as an
@@ -535,7 +634,17 @@ coreTerms =
       let (v, _) = fresh 0
        in App (Lam (Ident "x") star (close v star)) star
 
+    -- **'Thena.Core.Term.Var''s constructor is not exported** — 'fresh' is the
+    -- only way to mint one, which is what makes a dangling index
+    -- unconstructible (§3.4). So a test that needs a particular variable asks
+    -- for it by the counter it comes off.
+    someVar   = fst (fresh 9)   -- what a hand-built scope is closed over
+    mintedVar = fst (fresh 0)   -- what a match from 0 mints for the binder
+
     matchTerm cp t = fmap fst (matchPattern emptyGlobals 0 (PCore cp) (VTerm t))
+
+    -- The same, from a named counter, for the forms that mint.
+    matchFrom k cp t = fmap fst (matchPattern emptyGlobals k (PCore cp) (VTerm t))
 
     expect src want = case readPattern src of
       Right p -> assertFailure ("expected a refusal, got " ++ show p)

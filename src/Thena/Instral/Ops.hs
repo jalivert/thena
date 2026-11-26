@@ -39,6 +39,8 @@ module Thena.Instral.Ops
   , Skeleton (..)
   , Slot (..)
   , CoreP (..)
+  , CoreSlot (..)
+  , corePSlots
   , patternBinds
   , patternIrrefutable
   , matchPattern
@@ -59,8 +61,8 @@ import Thena.Core.Term
 -- this module's own 'Eliminate' op are different things of one name.
 import qualified Thena.Core.Term as Term
 import Thena.Instral.Pattern
-  ( Pattern (..), Skeleton (..), Slot (..), CoreP (..)
-  , skeletonHoles, patternBinds, patternIrrefutable )
+  ( Pattern (..), Skeleton (..), Slot (..), CoreP (..), CoreSlot (..)
+  , skeletonHoles, corePSlots, patternBinds, patternIrrefutable )
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Development.Cursor (Part (..))
 import Thena.Core.Reduce (whnf)
@@ -2454,10 +2456,17 @@ matchSkeleton env k sk t = case here t of
 -- gets it rather than a rule of its own, and the counter the second attempt
 -- begins from is the one the first was handed.
 --
--- **Nothing here mints**, and the counter is threaded through anyway: that is
--- the shape @spec\/machine.md@ §8 asks for and what the binder patterns need
--- already in place. The binders are the landing after this one, and @~thwhg@ is
--- the question they wait on.
+-- **A BINDER IS WHERE THIS MINTS** (MS12 phase 355), and it is the only place:
+-- opening a scope needs a variable to open it at, so the counter the matchers
+-- have threaded since MS12 phase 351 is finally spent. Nothing is put in the
+-- context and no line is added to the proof term — @spec\/machine.md@ §8, /a
+-- deconstruction form is never a proof step/ — so the variable is not yet real,
+-- and @intro@ adopting the token is what makes it so.
+--
+-- **A token this mints can be handed out twice and that is answered** —
+-- @~thwhg@, his ruling of 2026-11-26: an alternative is matched again from the
+-- counter as it stands when it is taken (§7.6), so an abandoned branch's spent
+-- tokens are never re-drawn.
 matchCore :: GlobalEnv -> Int -> CoreP Pattern -> Core -> Maybe (Env, Int)
 matchCore env k cp t = case here t of
   Just bs -> Just bs
@@ -2481,6 +2490,19 @@ matchCore env k cp t = case here t of
         -- stand at it, which is what makes the obligation readable from a rule.
         Trusted c' a' b' -> run [(c, c'), (a, a'), (b, b')]
         _                -> Nothing
+      -- **A binder is opened to be matched**, which is what makes this the one
+      -- form that mints: the token goes into the 'Identifier' the binder
+      -- position binds and the body is opened at it, so @${E}@ holds an
+      -- ordinary term with a free variable where the binder's occurrences were.
+      CPPi x d b -> case term of
+        Term.Pi j dom cod  -> under j x [(d, dom)] b cod
+        _                  -> Nothing
+      CPLam x d b -> case term of
+        Term.Lam j dom cod -> under j x [(d, dom)] b cod
+        _                  -> Nothing
+      CPLet x v ty b -> case term of
+        Term.Let j val sty cod -> under j x [(v, val), (ty, sty)] b cod
+        _                      -> Nothing
       CPEliminate d ls ps m ms is tg -> case term of
         Term.Eliminate d' ls' ps' m' ms' is' tg'
           | d == d'
@@ -2500,6 +2522,20 @@ matchCore env k cp t = case here t of
       where
         ok = Just ([], k)
         run = threading (\k' (q, u) -> matchCore env k' q u) k
+
+        -- **Mint, bind the binder, then the sub-terms left to right** — the
+        -- order 'Thena.Instral.Pattern.corePSlots' reports, so what a hole
+        -- binds and what the type checker said it takes cannot disagree.
+        --
+        -- **The token is minted whether or not the pattern names it.** Opening
+        -- the scope is what needs it, and an arrow — a @∀@ with a 'PWild'
+        -- binder — opens one like any other.
+        under j x before body cod =
+          let (y, k1) = Term.fresh k
+           in do (b0, k2) <- matchPattern env k1 x (VIdent (Identifier j (Just y)))
+                 (b1, k3) <- threading (\k' (q, u) -> matchCore env k' q u) k2 before
+                 (b2, k4) <- matchCore env k3 body (Term.open y cod)
+                 Just (b0 ++ b1 ++ b2, k4)
 
         -- **A pattern whose head is a hole is matched node by node**, not
         -- through the spine: @${f} ${a}@ against @App (App g x) y@ binds @f@ to

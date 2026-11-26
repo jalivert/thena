@@ -49,6 +49,7 @@ import Thena.Global.Env
   )
 import Thena.Instral.Ops
   ( AnswerKind (..)
+  , CoreP (..)
   , Instr (..)
   , Op
   , Operand (..)
@@ -455,11 +456,39 @@ dataTests =
       -- is matching no names, which answers none.
       testCase "and a clause that binds nothing carries an empty one" $
         envFor [VList []] @?= [[]]
-    , -- **The name counter rides out with the candidate too** (MS12, §8), and
-      -- nothing matches yet that mints — so a candidate reports the counter the
+    , -- **The name counter rides out with the candidate too** (MS12, §8). A
+      -- list pattern mints nothing, so this candidate reports the counter the
       -- search was handed, unchanged.
       testCase "and the counter the search was handed rides out with it" $
         namesFor 9 [VList [VText "a", VText "b"]] @?= [9]
+
+    , -- **NO TWO CANDIDATES OF ONE FORK HAND OUT ONE TOKEN** (MS12, @~thwhg@),
+      -- which the binder patterns of MS12 phase 355 are what make visible: a
+      -- core binder pattern opens a scope, so each candidate mints, and each is
+      -- taken from the counter as it stands then. Entered in turn from 9, the
+      -- two open at 9 and at 10.
+      --
+      -- **It is the re-match and not the candidate list that makes this true.**
+      -- 'Thena.Rules.clauses' also runs the counter along its candidates, but
+      -- nothing reads those stored counters: 'next' re-makes every match from
+      -- the counter it is handed, and 'RuleIter' exports no field, so the
+      -- threading in 'clauses' is only what the fallback in 'remade' answers
+      -- with when a re-match fails. That is the shape his ruling of 2026-11-26
+      -- chose and @~thwhg@'s definition records it.
+      testCase "two candidates of one fork open at different tokens" $
+        openedAt 9 (peeling 9 [VTerm aPi])
+          @?= [ VTerm (Free (fst (fresh 9)))
+              , VTerm (Free (fst (fresh 10)))
+              ]
+
+    , -- **AND THE RE-MATCH DRAWS A DIFFERENT TOKEN**, which is the other half
+      -- of @~thwhg@ made visible: the fork drew at 9 and the alternative is
+      -- entered at 60, so the body it binds is opened at 60. The abandoned
+      -- branch's spent tokens are never re-drawn.
+      testCase "an alternative taken later is opened at a later token" $
+        fmap (lookup "e" . matchEnv . fst)
+             (next emptyGlobals 60 (peeling 9 [VTerm aPi]))
+          @?= Just (Just (VTerm (Free (fst (fresh 60)))))
 
     , -- **AN ALTERNATIVE IS MATCHED AGAIN WHEN IT IS TAKEN** (MS12, @~thwhg@,
       -- his ruling of 2026-11-26). The match made at the fork is what says the
@@ -535,6 +564,37 @@ dataTests =
 
     splitting k vs =
       clauses [binders] emptyGlobals k (holeAt type1) (rootName "split") vs
+
+    -- **Two clauses that both match and both MINT** — a core binder pattern
+    -- opens a scope, and opening one is where a pattern spends the counter.
+    peelers =
+      ruleBase "peelers" Nothing "" [] []
+        [ aRule (rootName "peel")
+                [Ops.PCore (CPPi Ops.PWild (CPHole Ops.PWild)
+                                 (CPHole (Ops.PVar "e")))] []
+            [Do (Ops.Say (Lit (VText "first")))]
+        , aRule (rootName "peel")
+                [Ops.PCore (CPPi Ops.PWild (CPHole Ops.PWild)
+                                 (CPHole (Ops.PVar "e")))] []
+            [Do (Ops.Say (Lit (VText "second")))]
+        ]
+
+    peeling k vs =
+      clauses [peelers] emptyGlobals k (holeAt type1) (rootName "peel") vs
+
+    -- Each candidate taken from the counter as it stands then — the engine's
+    -- own sequence, where a body minting is what moves the counter on and
+    -- @peel@'s body mints nothing, so only the matches do.
+    openedAt k it = case next emptyGlobals k it of
+      Nothing         -> []
+      Just (mt, rest) ->
+        [ v | Just v <- [lookup "e" (matchEnv mt)] ]
+          ++ openedAt (matchNames mt) rest
+
+    -- @∀ (A : Type₁) -> A@, whose body mentions the binder, so what the match
+    -- opened it at is what the @${e}@ holds.
+    aPi = Pi (Ident "A") type1 (close hidden (Free hidden))
+      where hidden = fst (fresh 99)
 
 -- | What a rule hands back (MS5 phase 63).
 --

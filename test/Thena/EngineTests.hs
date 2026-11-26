@@ -87,6 +87,23 @@ atPi is = case setGoal piGoal (machine []) of
 piGoal :: Core
 piGoal = Pi (Ident "a") type0 (close (fst (fresh 0)) type0)
 
+-- | 'atPi' with the goal's own binder word already standing in the context, so
+-- that whether @intro@ makes a word free is visible (MS12 phase 355, @~2n5tn@).
+taken :: [Instr] -> Outcome
+taken is = atPi (Do (Ops.Assume (text "a") (term type0)) : is)
+
+-- | Every binder word in the chain, outermost first.
+--
+-- 'binderOf' answers the first one it reaches, which is the context entry here
+-- and not the one @intro@ opened; what these two tests are about is the pair.
+binderWords :: Partial -> [Ident]
+binderWords p = case p of
+  Under (Guess _ _ body _) rest -> binderWords body ++ binderWords rest
+  Under (Assume _ i _) rest     -> i : binderWords rest
+  Under _ rest                  -> binderWords rest
+  Trailing _                    -> []
+  Pending _ _                   -> []
+
 -- | A token minted far past anything this machine's counter will reach, so that
 -- a test asserting it was adopted cannot pass by coincidence.
 someToken :: Var
@@ -387,6 +404,27 @@ tests =
                    , Bind (Ops.PVar "s") Nothing (Ops.Typing (term (Free someToken)))
                    ] of
               Finished m -> lookup "s" (envOf m) @?= Just (VTerm type0)
+              other -> assertFailure ("expected Finished, got " ++ show other)
+
+          -- **A WORD THAT CAME OFF A TERM IS MADE FREE WHERE THE BINDER
+          -- LANDS** — his ruling of 2026-11-26, @~2n5tn@, MS12 phase 355. The
+          -- token is the test for provenance: nothing can attach one to a word
+          -- a rule chose, so a token present means the word was read off a
+          -- term, and a word the system found is free in the scope it lands in
+          -- (his ruling of 2026-11-20, /THERE IS ONE NAME/, part one). With
+          -- @a@ already in the context the binder lands as @a1@.
+        , testCase "a word that came with a token is made free" $
+            case taken [Do Ops.Attack, Do (Ops.IntroPi (Just (ident "a" (Just someToken))))] of
+              Finished m -> binderWords (devOf m) @?= [Ident "a", Ident "a1"]
+              other -> assertFailure ("expected Finished, got " ++ show other)
+
+          -- **And a word the AUTHOR wrote is used as given, taken or not** (MS4
+          -- phase 41f, reaffirmed 2026-11-20 part four, which made @rename@ the
+          -- repair). This is the same call with the token dropped, so the only
+          -- thing that moves is the provenance.
+        , testCase "…and one with no token is used as written, taken or not" $
+            case taken [Do Ops.Attack, Do (Ops.IntroPi (Just (ident "a" Nothing)))] of
+              Finished m -> binderWords (devOf m) @?= [Ident "a", Ident "a"]
               other -> assertFailure ("expected Finished, got " ++ show other)
 
           -- A @Name@ variable at this position is a type error, so this is only

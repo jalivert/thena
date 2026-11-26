@@ -45,7 +45,7 @@ import Thena.Core.Term (GlobalName (..), nameDotted, rootName)
 import Thena.Syntax.Concrete (Splice (..), splices)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
 import Thena.Rules (opArities, testTypes, writtenPositions)
-import Thena.Instral.Pattern (corePHoles)
+import Thena.Instral.Pattern (CoreSlot (..), corePSlots)
 import Thena.Instral.Ops
   ( Instr (..)
   , Name
@@ -720,15 +720,19 @@ patternCtx site ps ts st0 = foldl one ([], st0) (zip3 [0 ..] ps ts)
             hole (acc, k) (slot, q) =
               let (bs, k') = go si q (slotType slot) k in (acc ++ bs, k')
          in foldl hole ([], st1) (holesOf sk)
-      -- **A core term is a 'TCore' and so is every hole in it** (MS12 phase
-      -- 352, @~9j34x@): a @${…}@ inside a @core\`…\`@ pattern stands where a
-      -- /term/ stands, and the one position that wants a name — a binder's
-      -- identifier — is refused when the pattern is read, so there is no second
-      -- kind of hole to tell apart here.
+      -- **A core term is a 'TCore' and each hole takes its slot's type** (MS12
+      -- phases 352 and 355, @~9j34x@) — the same shape a 'PObject' has one
+      -- language up, and for the same reason: the position decides, and the
+      -- position was settled when the pattern was read. A @${…}@ at a term
+      -- stands where a term stands and takes a 'TCore'; one at a /binder/ takes
+      -- the 'TIdent' of @~gr236@, so a rule that matches
+      -- @core\`∀ (${x} : ${T}) -> ${E}\`@ may hand @x@ straight to @intro@ and
+      -- nothing has to be annotated.
       PCore cp ->
         let st1 = unify si t TCore st
-            hole (acc, k) q = let (bs, k') = go si q TCore k in (acc ++ bs, k')
-         in foldl hole ([], st1) (corePHoles cp)
+            hole (acc, k) (slot, q) =
+              let (bs, k') = go si q (coreSlotType slot) k in (acc ++ bs, k')
+         in foldl hole ([], st1) (corePSlots cp)
       PInt _   -> ([], unify si t TInt st)
       PChar _  -> ([], unify si t TChar st)
       PBool _  -> ([], unify si t TBool st)
@@ -998,6 +1002,14 @@ slotType slot = case slot of
   -- Every other token class is over @String@; §3 admits three primitive types
   -- and the check at declaration refuses the rest.
   AtPrimitive _                 -> TString
+
+-- | 'slotType' for a core region's two positions (MS12 phase 355). A binder
+-- takes the 'TIdent' of @~gr236@, which is what lets a matched @∀@'s binder go
+-- straight to @intro@ with nothing annotated.
+coreSlotType :: CoreSlot -> Ty
+coreSlotType slot = case slot of
+  AtCore   -> TCore
+  AtBinder -> TIdent
 
 -- | Each hole with the slot it stands at, left to right.
 holesOf :: Skeleton a -> [(Slot, a)]
