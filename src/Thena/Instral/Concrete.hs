@@ -89,7 +89,8 @@ data RawRule =
 -- unless it is @_@: the grammar accepts a pattern there so that writing one
 -- gets a refusal naming the form rather than a parse error naming a token.
 data RawComponentP
-  = RawCPAssume   RawPattern RawPattern
+  = RawCPAny     RawPattern
+  | RawCPAssume   RawPattern RawPattern
   | RawCPDefine   RawPattern RawPattern RawPattern
   | RawCPClaim    RawPattern RawPattern
   | RawCPGuess    RawPattern RawPattern RawPattern

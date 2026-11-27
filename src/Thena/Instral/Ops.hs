@@ -2535,9 +2535,22 @@ matchFocus env k cur (Just cp) = case focus cur of
     -- @core\`…\`@ pattern took off a binder it opened itself.
     ident x i = VIdent (Identifier i (Just x))
 
+    -- The identity of whichever of the five it is — all five carry one.
+    identOf c = case c of
+      Component.Assume   x i   _ -> ident x i
+      Component.Define   x i _ _ -> ident x i
+      Component.Claim    x i   _ -> ident x i
+      Component.Guess    x i _ _ -> ident x i
+      Component.Quantify x i   _ -> ident x i
+
     run ps = matchPatterns env k (map snd (componentPSlots cp)) ps
 
     component c = case (cp, c) of
+      -- **The one form that does not name a shape** (MS12 phase 363,
+      -- @~9m27n@): every component has an identity, so this binds it and asks
+      -- nothing else. 'componentPSlots' is what says there is one position,
+      -- so the run below needs no case of its own beyond the value.
+      (CompAny      {}, _)                          -> run [identOf c]
       (CompAssume   {}, Component.Assume   x i   t) -> run [ident x i, VTerm t]
       (CompDefine   {}, Component.Define   x i v t) -> run [ident x i, VTerm v, VTerm t]
       (CompClaim    {}, Component.Claim    x i   t) -> run [ident x i, VTerm t]
@@ -2782,21 +2795,13 @@ primitiveValue l = case l of
 -- is — for the reason §8 gives about string literals, that a grammar policing
 -- operand kinds would be the rule language's type system in the wrong place
 -- (@ms2\/CLOSEOUT.md@ 4b, deferred at his direction 2026-09-03).
+-- **THERE ARE NO FOCUS TESTS LEFT** (MS12 phase 363, @~9m27n@). @at@ asks all
+-- four questions they asked — @at ? _ : _@, @at ? _ ≐ _ : _@, @at _ = _ : _@
+-- and, since his ruling of 2026-11-27, @at _@ for /any/ component, which is the
+-- one @focus-is-component@ held on for. **Every test here is a question about a
+-- term the clause was handed**, and that is now the whole of what a test is.
 data Test
-  = FocusIsComponent
-    -- ^ the focus is a component of the chain rather than a core term (MS4
-    -- phase 49c). What @along@ and the other component moves need, and the one
-    -- thing that is true throughout a walk over a binder group.
-    --
-    -- **THE LAST OF THE FOUR FOCUS TESTS, AND IT IS HERE BECAUSE @at@ CANNOT
-    -- ASK ITS QUESTION** (MS12 phase 359, @~9m27n@). @focus-is-hole@,
-    -- @focus-is-guess@ and @focus-is-definition@ were deleted when the shipped
-    -- base was rewritten onto @at@, their questions being
-    -- @at ? _ : _@, @at ? _ ≐ _ : _@ and @at _ = _ : _@; this one asks whether
-    -- the focus is /any/ of the five components, and a 'ComponentP' is written
-    -- as one of the five. The spelling that would retire it is a decision of
-    -- his.
-  | GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
+  = GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
   | GoalTypeIsLet   -- ^ … or to a @let@, which is table 2.8's other intro
   | SurfaceIsName Operand
     -- ^ the operand is a surface term whose focus is a name (MS4 phase 47)

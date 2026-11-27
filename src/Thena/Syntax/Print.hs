@@ -200,6 +200,7 @@ block is = case is of
 -- component.
 componentPText :: (Pattern -> String) -> ComponentP -> String
 componentPText f cp = case cp of
+  CompAny      x     -> f x
   CompAssume   x s   -> "λ " ++ f x ++ " : " ++ f s
   CompDefine   x v s -> f x ++ " = " ++ f v ++ " : " ++ f s
   CompClaim    x s   -> "? " ++ f x ++ " : " ++ f s
@@ -283,6 +284,7 @@ focus (Just cp) = " at " ++ rawComponentP cp
 -- prints them in — the spelling the grammar accepts, so what this writes parses.
 rawComponentP :: RawComponentP -> String
 rawComponentP cp = case cp of
+  RawCPAny      x     -> p x
   RawCPAssume   x s   -> "λ " ++ p x ++ " : " ++ p s
   RawCPDefine   x v s -> p x ++ " = " ++ p v ++ " : " ++ p s
   RawCPClaim    x s   -> "? " ++ p x ++ " : " ++ p s

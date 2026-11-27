@@ -162,11 +162,13 @@ rule abandon at ? _ : _ :- do prim-abandon
 -- development and therefore the term. `DECISIONS.md`, *A word that reaches
 -- nothing is marked*, says what it repairs.
 --
--- The head is `focus-is-component` because a word belongs to a binder and all
--- five components are one; a constraint and a position inside a core term are
--- not, and `prim-rename` refuses there for the same reason the head does.
+-- The focus is written `at _` because a word belongs to a binder and all five
+-- components are one; a constraint and a position inside a core term are not,
+-- and `prim-rename` refuses there for the same reason the head does. `_` and
+-- not a bound word: the op is handed `n`, the word to give, and asks the focus
+-- itself for the binder to give it to.
 rename : Name -> ()
-rule rename n :- when focus-is-component do prim-rename n
+rule rename n at _ :- do prim-rename n
 
 solve : ()
 rule solve at ? _ ≐ _ : _ :- do prim-solve
@@ -235,15 +237,15 @@ rule step at ? _ ≐ _ : _ :- do prim-step
 -- engine's as it is everywhere else: `step 5` is five dispatches in a row, not
 -- five attempts to make progress. There is no brake here and this is not one —
 -- a rule that calls itself without a count still does not terminate.
--- **Both clauses ask `focus-is-component`** rather than going headless: a rule
--- with no head matches everywhere, the core fragment included, which is why
+-- **Both clauses say `at _`** rather than going headless: a rule with no head
+-- matches everywhere, the core fragment included, which is why
 -- `fresh-universe` at the top of this file is a function. The count is about
 -- the chain, so the chain is what the head asks about, and `number-is-positive`
 -- rides beside it on the clause that recurses.
 step : Int -> ()
-rule step 0 :- when focus-is-component do
+rule step 0 at _ :- do
 
-rule step n :- when focus-is-component (number-is-positive n)
+rule step n at _ :- when (number-is-positive n)
   do step
      ; m = one-less n
      ; call step m
@@ -314,7 +316,7 @@ rule fit-core f at ? _ : _ :-
 -- term — ms5/CLOSEOUT.md 1.
 --
 -- NO HEAD, and that is the honest answer rather than the tidy one. The tidy one
--- was focus-is-component, written first to keep these out of the core
+-- was a focus test, written first to keep these out of the core
 -- fragment's match list — and it is FALSE: the ops insert above the focus
 -- through Cursor.insertAbove, which works from inside a core term too, so
 -- claim "k" core`Nat` succeeds there. A head that refused what the op it wraps
@@ -1571,13 +1573,13 @@ rule intro-binders t k at ? _ : _ :- when (lambda-binds-one t) (lambda-is-annota
 -- instantiates — refuses at the claim with `that head does not take that many
 -- arguments`, and the prelude has such a spine.
 --
--- focus-is-component is there for enter-binders' reason (phase 49c): a head of
+-- `at _` is there for enter-binders' reason (phase 49c): a head of
 -- argument tests alone is true of every state, so the clause would be offered
--- everywhere. It is a test that is TRUE here, not one chosen to tidy the match
+-- everywhere. It is a focus that is TRUE here, not one chosen to tidy the match
 -- list — the focus is the hole on the way in and the argument just elaborated
 -- on the way round.
 spine-arguments : Core -> Core -> Surface -> ()
-rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
+rule spine-arguments h f t at _ :- when (surface-is-app t)
   do goto h
      ; n0 = next-argument-name f
      ; n1 = name-or-stem n0 "a"
@@ -1596,7 +1598,7 @@ rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
 -- whose later domains appear only once an earlier argument is known refuses at
 -- the claim with `that head does not take that many arguments`, measured at
 -- MS12 phase 320 over the prelude.
-rule spine-arguments h f t :- when focus-is-component (surface-is-name t)
+rule spine-arguments h f t at _ :- when (surface-is-name t)
   do goto h
      ; fill f
      ; solve

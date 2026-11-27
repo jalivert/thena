@@ -10,15 +10,15 @@ standard
   attack at ? _ : _
   try-core ‹t› at ? _ : _
   abandon at ? _ : _
-  rename ‹n›
+  rename ‹n› at _
   solve at ? _ ≐ _ : _
   regret at ? _ ≐ _ : _
   eliminate-core ‹t› at ? _ : _
   eliminate-generalising-core ‹t› at ? _ : _
   step at ? _ : _
   step at ? _ ≐ _ : _
-  step 0
-  step ‹n›
+  step 0 at _
+  step ‹n› at _
   fill ‹t› at ? _ : _
   unify-refine-core ‹t› at ? _ : _
   apply-core ‹f› at ? _ : _
@@ -128,8 +128,8 @@ standard
   intro-binders ‹t› ‹k› at ? _ : _
   intro-binders ‹t› ‹k› at ? _ : _
   intro-binders ‹t› ‹k› at ? _ : _
-  spine-arguments ‹h› ‹f› ‹t›
-  spine-arguments ‹h› ‹f› ‹t›
+  spine-arguments ‹h› ‹f› ‹t› at _
+  spine-arguments ‹h› ‹f› ‹t› at _
 thena spine> :matches
 try-in-scope : ()
 fit-in-scope : ()

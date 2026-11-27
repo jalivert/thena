@@ -66,7 +66,7 @@ module Thena.Rules
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   (Core (..), GlobalName (..), InScope, globalUnder, nameDotted, rootName, rootScope)
-import Thena.Development.Cursor (Cursor, Focus (..), context, expectedType, focus)
+import Thena.Development.Cursor (Cursor, context, expectedType)
 import Thena.Global.Env (GlobalEnv, emptyGlobals, knownIn)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Build (skeletonOf)
@@ -602,9 +602,6 @@ hasNext (RuleIter _ ms) = not (null ms)
 -- name here is never a mistake in the rule.
 holds :: GlobalEnv -> Cursor -> Op.Env -> Test -> Bool
 holds env cur args t = case t of
-  FocusIsComponent -> case focus cur of
-    OnComponent _ -> True
-    _             -> False
   GoalTypeIsPi  -> case reduced of
     Just (Pi {}) -> True
     _            -> False
@@ -1800,6 +1797,7 @@ hoistedBind rd g i (n, r) = case r of
 resolveComponentP
   :: Reading -> GlobalName -> RawComponentP -> Either RuleError ComponentP
 resolveComponentP rd g raw = case raw of
+  RawCPAny      x     -> CompAny      <$> pat x
   RawCPAssume   x s   -> CompAssume   <$> pat x <*> pat s
   RawCPDefine   x v s -> CompDefine   <$> pat x <*> pat v <*> pat s
   RawCPClaim    x s   -> CompClaim    <$> pat x <*> pat s
@@ -2573,7 +2571,6 @@ data TestError = NoSuchTestWord | WrongTestArity Int Int
 -- forgot.
 withOperands :: Test -> [Operand] -> Maybe Test
 withOperands t os = case (t, os) of
-  (FocusIsComponent, []) -> Just FocusIsComponent
   (GoalTypeIsPi,     []) -> Just GoalTypeIsPi
   (GoalTypeIsLet,    []) -> Just GoalTypeIsLet
   (SurfaceIsName _, [o])         -> Just (SurfaceIsName o)
@@ -2635,7 +2632,6 @@ withOperands t os = case (t, os) of
 -- surface language's from MS4 phase 47 onward.
 testTypes :: Test -> [(Operand, Ty.Ty)]
 testTypes t = case t of
-  FocusIsComponent -> []
   GoalTypeIsPi    -> []
   GoalTypeIsLet   -> []
   SurfaceIsSplit o        -> [(o, Ty.TSurface)]
@@ -2693,7 +2689,6 @@ testOperands = map fst . testTypes
 -- phase widened an identifier.
 testWord :: Test -> String
 testWord t = case t of
-  FocusIsComponent -> "focus-is-component"
   GoalTypeIsPi    -> "goal-type-is-pi"
   GoalTypeIsLet   -> "goal-type-is-let"
   SurfaceIsSplit _        -> "surface-is-split"
@@ -2745,8 +2740,7 @@ testWord t = case t of
 -- not what any written one says.
 everyTest :: [Test]
 everyTest =
-  [ FocusIsComponent
-  , GoalTypeIsPi, GoalTypeIsLet
+  [ GoalTypeIsPi, GoalTypeIsLet
   , SurfaceIsName (Lit (VText ""))
   , SurfaceIsLiteral (Lit (VText ""))
   , SurfaceIsObject (Lit (VText ""))

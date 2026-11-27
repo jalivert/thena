@@ -264,7 +264,21 @@ data CoreP a
 -- position — @at ? h : core\`∀ (${x} : ${T}) -> ${E}\`@ — which is what the whole
 -- landing is for.
 data ComponentP
-  = CompAssume   Pattern Pattern
+  = CompAny      Pattern
+    -- ^ @‹x›@ — /any/ of the five, standing at its identity and nothing
+    -- else (MS12 phase 363, @~9m27n@, his ruling of 2026-11-27).
+    --
+    -- **It is the one form whose shape is not one of the five**, and that is
+    -- the point: a lone pattern is not a near-miss of any particular
+    -- component, where @‹x› : ‹S›@ — the other spelling measured — is
+    -- @? ‹x› : ‹S›@ with its sigil dropped and would read as /a hole/. **His
+    -- objection, 2026-11-27**, and it is what decided the spelling.
+    --
+    -- What it gives up: a rule wanting the focus\'s /type/ without saying
+    -- which form it is has to be written five times, or ask @goal@. Nothing in
+    -- the shipped base wants that — the five clauses that used to ask
+    -- @focus-is-component@ want the identity or nothing at all.
+  | CompAssume   Pattern Pattern
     -- ^ @λ ‹x› : ‹S›@ — the binder and its type
   | CompDefine   Pattern Pattern Pattern
     -- ^ @‹x› = ‹v› : ‹S›@ — the binder, its value and its type
@@ -296,6 +310,7 @@ data ComponentP
 -- 'Thena.Instral.Infer' types both from this one type.
 componentPSlots :: ComponentP -> [(CoreSlot, Pattern)]
 componentPSlots cp = case cp of
+  CompAny      x     -> [(AtBinder, x)]
   CompAssume   x s   -> [(AtBinder, x), (AtCore, s)]
   CompDefine   x v s -> [(AtBinder, x), (AtCore, v), (AtCore, s)]
   CompClaim    x s   -> [(AtBinder, x), (AtCore, s)]

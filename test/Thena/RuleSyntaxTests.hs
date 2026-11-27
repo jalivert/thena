@@ -465,9 +465,9 @@ headOperands =
 
     , testCase "beside bare ones, in either order" $ do
         r <- expectRule
-               "rule r s :- when focus-is-component (surface-is-name s) goal-type-is-pi \
+               "rule r s :- when goal-type-is-let (surface-is-name s) goal-type-is-pi \
                \do prim-solve"
-        ruleHead r @?= [FocusIsComponent, SurfaceIsName (Ref "s"), GoalTypeIsPi]
+        ruleHead r @?= [GoalTypeIsLet, SurfaceIsName (Ref "s"), GoalTypeIsPi]
 
     , testCase "a literal is accepted where a name is" $ do
         r <- expectRule "rule r :- when (surface-is-name \"x\") do prim-solve"
@@ -822,13 +822,37 @@ focusPatterns =
     "the focus, via at"
     [ testGroup "every component form reads back" (map formCase everyForm)
 
-      -- **A clause that wrote no @at@ asks nothing about the focus.** Five
-      -- clauses of the shipped base are still written that way, asking
-      -- @focus-is-component@ because @at@ has no spelling for /any/ component
-      -- (MS12 phase 359, @~9m27n@), and so is every rule that is a function.
+      -- **A clause that wrote no @at@ asks nothing about the focus**, which
+      -- every rule that is a function does — and since his ruling of
+      -- 2026-11-27 (@~9m27n@) that is the only reason to write none, @at _@
+      -- being the spelling for /any/ component.
     , testCase "a clause with no at has no focus pattern" $ do
-        r <- expectRule "rule r :- when focus-is-component do attack"
+        r <- expectRule "rule r :- when goal-type-is-pi do attack"
         ruleFocus r @?= Nothing
+
+      -- **@at _@ names no shape and binds nothing** — what
+      -- @focus-is-component@ was, his ruling of 2026-11-27 (@~9m27n@), and the
+      -- five clauses that asked that test now write it.
+    , testCase "a bare pattern after at is any component" $ do
+        r <- expectRule "rule r :- do attack"
+        ruleFocus r @?= Nothing
+        r' <- expectRule "rule r at _ :- do attack"
+        ruleFocus r' @?= Just (Op.CompAny Op.PWild)
+
+      -- …and it is a pattern like any other there, so a word binds the
+      -- component's own identity and the body may spend it.
+    , testCase "and a word there binds the focused component's identity" $ do
+        r <- expectRule "rule r at x :- do prim-rename x"
+        ruleFocus r @?= Just (Op.CompAny (Op.PVar "x"))
+        validate r @?= []
+
+      -- **A definition is still a definition**, which is the one state where a
+      -- lone pattern and a longer form compete: one token of lookahead decides
+      -- it, and @happy@ reports 0 conflicts.
+    , testCase "and at x = v : s is still the definition form" $ do
+        r <- expectRule "rule r at x = v : s :- do say v"
+        ruleFocus r
+          @?= Just (Op.CompDefine (Op.PVar "x") (Op.PVar "v") (Op.PVar "s"))
 
       -- **A bare word in a position BINDS**, which is the difference between
       -- this notation and a @core\`…\`@ region: the text after @at@ is the rule
@@ -899,6 +923,8 @@ everyForm =
   , ("? x : s",       Op.CompClaim    (Op.PVar "x") (Op.PVar "s"))
   , ("? x ≐ _ : s",   Op.CompGuess    (Op.PVar "x") (Op.PVar "s"))
   , ("∀ x : s",       Op.CompQuantify (Op.PVar "x") (Op.PVar "s"))
+  -- **The sixth form, which names no shape** — his ruling of 2026-11-27.
+  , ("x",             Op.CompAny      (Op.PVar "x"))
   -- **A region at a type position, and a wildcard binder** — the one form that
   -- shows the two notations nested, with nothing to resolve: a universe needs
   -- no global in scope where a bare word in a region would.

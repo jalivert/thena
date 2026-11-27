@@ -423,8 +423,8 @@ dispatchableTests =
                -- hypothesis that has to be applied to something.
                "try-in-scope", "fit-in-scope"
              , "attack", "try-core", "abandon"
-               -- **@rename@ is offered here too** (MS12 phase 330): its head is
-               -- @focus-is-component@, and dispatch runs it no more than it runs
+               -- **@rename@ is offered here too** (MS12 phase 330): its focus
+               -- is @at _@, and dispatch runs it no more than it runs
                -- @try-core@ — it takes a parameter.
              , "rename", "eliminate-core"
              , "eliminate-generalising-core", "step", "step", "step", "fill"

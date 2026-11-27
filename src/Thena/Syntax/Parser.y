@@ -502,7 +502,16 @@ Focus :: { Maybe RawComponentP }
 
 -- | The five development components, in the notation @spec\/machine.md@ §3.2
 -- prints them in, and with no fence — his ruling of 2026-09-13, while the
--- development calculus is built in.
+-- development calculus is built in. **Plus a sixth form that names no shape:**
+-- a lone pattern, meaning /any/ component (MS12 phase 363, @~9m27n@, his
+-- ruling of 2026-11-27). @at _@ is what the five clauses that used to ask
+-- @focus-is-component@ write, and the test is gone.
+--
+-- **One state decides between the lone pattern and a definition**, and one
+-- token of lookahead settles it: after @at@ and a pattern, an @=@ shifts and
+-- anything else reduces. @happy@ reports 0 conflicts, the count the grammar has
+-- always had — measured 2026-11-26 for this production and again when it
+-- landed.
 --
 -- **Every position is a @PatAtom@**, so a bare word binds and a @core\`…\`@
 -- region stands wherever a term does. **The guess form takes a pattern at its
@@ -510,7 +519,8 @@ Focus :: { Maybe RawComponentP }
 -- worth more than a parse error naming a token, and
 -- 'Thena.Rules.resolveComponentP' is where it is said.
 ComponentP :: { RawComponentP }
-  : 'λ' PatAtom ':' PatAtom                { RawCPAssume $2 $4 }
+  : PatAtom                                { RawCPAny $1 }
+  | 'λ' PatAtom ':' PatAtom                { RawCPAssume $2 $4 }
   | PatAtom '=' PatAtom ':' PatAtom        { RawCPDefine $1 $3 $5 }
   | '?' PatAtom ':' PatAtom                { RawCPClaim $2 $4 }
   | '?' PatAtom '≐' PatAtom ':' PatAtom    { RawCPGuess $2 $4 $6 }

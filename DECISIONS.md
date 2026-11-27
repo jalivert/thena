@@ -1824,19 +1824,30 @@ is over development components, which are not core terms, and the development
 calculus is built in rather than declared — so there is no fence to write. When
 it becomes a declared language it will gain one, like anything else.
 
-**A clause with no `at` is offered at every focus** — every rule that is a
-function, and the five clauses below that ask about the focus without caring
-which of the five it is.
+**A clause with no `at` is offered at every focus** — which is every rule that
+is a function.
 
-**IT REPLACED THREE HEAD TESTS, AND THERE IS NO FOURTH TO REPLACE THEM WITH.**
-`focus-is-hole`, `focus-is-guess` and `focus-is-definition` are gone: they are
-`at ? _ : _`, `at ? _ ≐ _ : _` and `at _ = _ : _`, and asking the same question
-two ways is the redundancy this notation exists to remove. **`focus-is-component`
-stays**, because it asks whether the focus is *any* of the five and `at` is
-written as one of them. Five clauses of the shipped base ask it — `rename`, both
-clauses of `step` over a count, and both of `spine-arguments` — and each is the
-weakest true statement its body needs: a word belongs to a binder and all five
-components have one, while a constraint and a position inside a term do not.
+**`at _` IS ANY COMPONENT.** A lone pattern names no shape: it stands at the
+component's own identity and asks nothing else, so it matches all five. Write it
+when a rule needs the focus to be a component of the chain and does not care
+which — `rename` does, because a word belongs to a binder and all five
+components have one, while a constraint and a position inside a term do not:
+
+```
+rule rename n at _ :- do prim-rename n
+```
+
+**IT REPLACED EVERY HEAD TEST ABOUT THE FOCUS.** `focus-is-hole`,
+`focus-is-guess`, `focus-is-definition` and `focus-is-component` are all gone:
+they are `at ? _ : _`, `at ? _ ≐ _ : _`, `at _ = _ : _` and `at _`, and asking
+the same question two ways is the redundancy this notation exists to remove.
+Every head test that remains asks about a term the clause was handed.
+
+**Why *any component* is a lone pattern and not `at _ : _`**, which would also
+have read as "identity and type, shape unsaid": `_ : _` is `? _ : _` with the
+sigil dropped, so it reads as a hole — the one thing it must not mean. The cost
+of the lone pattern is that a rule wanting the focus's type without saying which
+form it is writes five clauses, or asks `goal`.
 
 **Each position is an ordinary pattern, so a bare word binds there.** `at ? h :
 s` binds the hole's name and its type; a `` core`…` `` region at the type
@@ -6185,8 +6196,8 @@ too. It is an ordinary identifier again.
 
 ```
 spine-arguments : Core -> Core -> Surface -> ()
-rule spine-arguments h f t :- when focus-is-component (surface-is-app t) do …
-rule spine-arguments h f t :- when focus-is-component (surface-is-name t) do …
+rule spine-arguments h f t at _ :- when (surface-is-app t) do …
+rule spine-arguments h f t at _ :- when (surface-is-name t) do …
 ```
 
 **The arity is the arrow chain's.** That signature is about `spine-arguments` at

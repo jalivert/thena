@@ -1011,8 +1011,8 @@ everyHoleRule =
     -- for a hypothesis that has to be applied, and sits just under it.
   [ "try-in-scope", "fit-in-scope"
   , "attack", "try-core", "abandon"
-    -- **@rename@ is offered at every component** (MS12 phase 330): its head is
-    -- @focus-is-component@, because a word belongs to a binder and all five
+    -- **@rename@ is offered at every component** (MS12 phase 330): its focus
+    -- is @at _@, because a word belongs to a binder and all five
     -- components are one. It is therefore in this list and in every guess
     -- listing below, and only the core fragment loses it.
   , "rename", "eliminate-core"

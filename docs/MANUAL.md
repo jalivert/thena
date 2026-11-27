@@ -1001,7 +1001,7 @@ the number is its identifier.
 
 ```
 thena spine> :choices
-5225  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:217)
+5225  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:219)
 ```
 
 Each alternative names **the file and line its clause is written at**. That is
@@ -1029,7 +1029,7 @@ thena spine> :show
   ) in
   id
 thena spine> :choices
-5225  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:217)
+5225  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:219)
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was

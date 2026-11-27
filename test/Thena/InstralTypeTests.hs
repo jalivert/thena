@@ -434,8 +434,13 @@ headTests :: TestTree
 headTests =
   testGroup
     "head tests"
-    [ testCase "a focus question asks about nothing" $
-        map snd (testTypes FocusIsComponent) @?= []
+      -- **There is no focus test left to ask about nothing** — his ruling of
+      -- 2026-11-27 retired @focus-is-component@, the last of the four, @at _@
+      -- being the spelling for /any/ component (@~9m27n@). A goal question is
+      -- what stands in its place here: it asks about the focus and takes no
+      -- operand.
+    [ testCase "a goal question asks about nothing" $
+        map snd (testTypes GoalTypeIsPi) @?= []
     , testCase "a surface question wants a surface term" $
         map snd (testTypes (SurfaceIsLambda r)) @?= [TSurface]
     , testCase "and so does every other one" $

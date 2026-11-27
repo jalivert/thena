@@ -64,13 +64,13 @@ thena spine> :show
   ) in
   second
 thena spine> :choices
-33  any-of (standard.thena.rules:555)   untried: any-of (standard.thena.rules:556)
-32  try-in-scope (standard.thena.rules:43)   untried: fit-in-scope (standard.thena.rules:63), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:217)
-24  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:217)
-18  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:217)
-14  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:217)
-12  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:217)
-10  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:217)
+33  any-of (standard.thena.rules:557)   untried: any-of (standard.thena.rules:558)
+32  try-in-scope (standard.thena.rules:43)   untried: fit-in-scope (standard.thena.rules:63), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:219)
+24  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:219)
+18  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:219)
+14  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:219)
+12  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:219)
+10  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:219)
 thena spine> :abandon
 abandoned second
 thena spine> :theorem mp : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> (A -> B) -> B

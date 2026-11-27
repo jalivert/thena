@@ -94,6 +94,7 @@ development is built from, with a pattern at each position:
 rule solve at ? h ≐ _ : s          :- do prim-solve
 rule shape at ? h : core`∀ (${x} : ${T}) -> ${E}` :- do say "a universal"
 rule onward at λ x : s             :- do say "an assumption"
+rule name-it n at _                :- do prim-rename n
 ```
 
 | written | the focus is |
@@ -103,9 +104,19 @@ rule onward at λ x : s             :- do say "an assumption"
 | `at λ ‹x› : ‹S›` | an assumption |
 | `at ‹x› = ‹v› : ‹S›` | a local definition |
 | `at ∀ ‹x› : ‹S›` | a ∀-binder |
+| `at ‹x›` | **any** of the five — no shape named |
 
-**A clause with no `at` asks nothing about the focus** and is offered at every
-one of them.
+**`at _` is the last row written out**: a lone pattern names no shape, so it
+stands at the piece's own identity and matches all five. `rename` is written
+that way, because a word belongs to a binder and every one of the five has one,
+while a constraint and a position inside a term have none. Write a word instead
+of `_` and it binds that identity, so the body can act on the focused piece:
+`rule name-it n at x :- do prim-rename n` is the same rule with the focus's own
+word in hand.
+
+**A clause with no `at` at all asks nothing about the focus** and is offered at
+every one of them, a constraint and a position inside a term included — which is
+the difference between writing no `at` and writing `at _`.
 
 **Each position is an ordinary pattern, so a bare word there binds**: `at ? h :
 s` binds `h` to the hole's name and `s` to its type, and the body may use both.

@@ -148,7 +148,7 @@ expectedStandard =
     -- **The repair for a shadowed binder** (MS12 phase 330), his ruling of
     -- 2026-11-20, /THERE IS ONE NAME/, part four: the word the component at the
     -- focus is bound under, changed in the development and so in the term.
-  , aRule (rootName "rename") [PVar "n"] [FocusIsComponent]
+  , atRule atAny (rootName "rename") [PVar "n"] []
       [Do (Op.Rename (Ref "n"))]
   , atRule atGuess (rootName "solve")      []    []                [Do Solve]
   , atRule atGuess (rootName "regret")     []    []                [Do Regret]
@@ -272,8 +272,8 @@ fitMore = atRule atHole (rootName "fit-core") [PVar "f"] []
 -- picks the clause, which is what 'Thena.Rules.clauses' does for every other
 -- name.
 --
--- **No head, and that is the honest answer rather than the tidy one.** A head of
--- 'FocusIsComponent' was written first, to keep these out of the core
+-- **No head, and that is the honest answer rather than the tidy one.** A focus
+-- test was written first, to keep these out of the core
 -- fragment's match list, and it is /false/: the ops insert above the focus
 -- through 'Thena.Development.Cursor.insertAbove', which works from inside a core
 -- term too. A head that refused what the op it wraps allows would make two
@@ -352,11 +352,11 @@ proveGuess = atRule atGuess (rootName "step") [] [] [Do Dispatch]
 -- 'Thena.Instral.Ops.NumberIsPositive', so the dispatch makes no choice point
 -- and a retry cannot count below nought.
 stepZero :: Rule
-stepZero = aRule (rootName "step") [Op.PInt 0] [FocusIsComponent] []
+stepZero = atRule atAny (rootName "step") [Op.PInt 0] [] []
 
 stepMany :: Rule
-stepMany = aRule (rootName "step") [PVar "n"]
-  [FocusIsComponent, NumberIsPositive (Ref "n")]
+stepMany = atRule atAny (rootName "step") [PVar "n"]
+  [NumberIsPositive (Ref "n")]
   [ Do (Call "step" [])
   , Bind (Op.PVar "m") Nothing (Op.OneLess (Ref "n"))
   , Do (Call "step" [Ref "m"])
@@ -815,8 +815,8 @@ elaborateClauses =
 -- rule therefore cannot hand a value back.
 spineWalkers :: [Rule]
 spineWalkers =
-  [ aRule (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
-      [FocusIsComponent, SurfaceIsApp (Ref "t")]
+  [ atRule atAny (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
+      [SurfaceIsApp (Ref "t")]
       [ Do (Goto (Ref "h"))
       , Bind (Op.PVar "n0") Nothing (Op.NextArgumentName (Ref "f"))
       , Bind (Op.PVar "n1") Nothing
@@ -829,8 +829,8 @@ spineWalkers =
       , Bind (Op.PVar "tl") Nothing (Op.AppTail (Ref "t"))
       , Do (Call "spine-arguments" [Ref "h", Ref "f2", Ref "tl"])
       ]
-  , aRule (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
-      [FocusIsComponent, SurfaceIsName (Ref "t")]
+  , atRule atAny (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
+      [SurfaceIsName (Ref "t")]
       [ Do (Goto (Ref "h"))
       , Do (Call "fill" [Ref "f"])
       , Do (Call "solve" [])
@@ -1393,21 +1393,27 @@ aRule n ps ts body = Rule n ps Nothing ts body Nothing []
 -- | The same with an @at@ pattern (MS12 phase 359, @~9j34x@).
 --
 -- **It is a second helper rather than a fifth argument to 'aRule'**, because the
--- clauses that write no @at@ are still a third of the base — the five that ask
--- @focus-is-component@ and every function-shaped rule — and a @Nothing@ at every
--- one of those call sites says less than its absence does.
+-- clauses that write no @at@ are still a quarter of the base — every
+-- function-shaped rule — and a @Nothing@ at every one of those call sites says
+-- less than its absence does.
 atRule :: ComponentP -> GlobalName -> [Pattern] -> [Test] -> [Instr] -> Rule
 atRule f n ps ts body = Rule n ps (Just f) ts body Nothing []
 
--- | The two focus patterns the shipped base writes (MS12 phase 359).
+-- | The three shape-free focus patterns the shipped base writes (MS12 phases
+-- 359 and 363).
 --
--- **They are what @focus-is-hole@ and @focus-is-guess@ were**: a hole is a
--- @Claim@ and a guess is a @Guess@, and neither clause looks at the binder or
--- the type, so both positions are the wildcard. @at ? _ : _@ and
+-- **The first two are what @focus-is-hole@ and @focus-is-guess@ were**: a hole
+-- is a @Claim@ and a guess is a @Guess@, and neither clause looks at the binder
+-- or the type, so both positions are the wildcard. @at ? _ : _@ and
 -- @at ? _ ≐ _ : _@ as the file writes them.
-atHole, atGuess :: ComponentP
+--
+-- **'atAny' is what @focus-is-component@ was**, retired by his ruling of
+-- 2026-11-27 (@~9m27n@): @at _@, naming no shape and binding nothing, which the
+-- five clauses that asked that test now write.
+atHole, atGuess, atAny :: ComponentP
 atHole  = CompClaim PWild PWild
 atGuess = CompGuess PWild PWild
+atAny   = CompAny PWild
 
 -- | The one focus pattern in the base that asks what shape the goal /is/ (MS12)
 -- — @at ? _ : core`∀ (${x} : ${T}) -> ${E}`@.

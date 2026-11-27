@@ -76,7 +76,7 @@ thena spine> :show
   ) in
   id
 thena spine> :choices
-7  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:217)
+7  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:219)
 thena spine> back
 thena spine> along
 thena spine> :where
@@ -89,7 +89,7 @@ context
 type
   A -> A
 thena spine> :choices
-7  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:217)
+7  intro (standard.thena.rules:79)   untried: by-induction (standard.thena.rules:139), attack (standard.thena.rules:150), abandon (standard.thena.rules:156), step (standard.thena.rules:219)
 thena spine> retry
 retrying 7: by-induction
 backtracking to 7: attack
@@ -103,7 +103,7 @@ thena spine> :show
   ) in
   id
 thena spine> :choices
-7  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:217)
+7  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:219)
 thena spine> retry
 retrying 7: abandon
 backtracking to 7: step
@@ -121,7 +121,7 @@ chose 14: try-in-scope
 backtracking to 14: fit-in-scope
 backtracking to 14: attack
 thena spine> :choices
-14  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:217)
+14  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:219)
 thena spine> :suspend
 suspended gone
 thena spine> :theorem lemma : Type₁
@@ -133,5 +133,5 @@ abandoned lemma
 thena spine> :resume gone
 resumed gone
 thena spine> :choices
-14  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:217)
+14  attack (standard.thena.rules:150)   untried: abandon (standard.thena.rules:156), step (standard.thena.rules:219)
 thena spine> :quit
