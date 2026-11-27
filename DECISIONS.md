@@ -7909,6 +7909,28 @@ interactively, and elaborating such a file would then have to rename for real �
 which means the words in your development would not be the words in your file.
 Lean 4 carries the same split and closes the same gap the same way.
 
+### A word Thena mints for you is always a word you can type
+
+*Decided 2026-11-27.*
+
+**A binder Thena names itself gets a word that is free in scope and a word the
+language has not reserved.** The first half was always true; the second was not,
+and the two are the same requirement — a word is only a handle if typing it where
+it is printed reaches the binder, and a keyword typed there is not a name at all.
+
+The eliminator for an equation binds the value a transport carries. Had that
+binder kept the word it was first given, reserving `at` would have made its own
+method unreadable:
+
+```
+λ (same : Nat) (at : Fin same) -> at        -- the lexer refuses this line
+λ (same : Nat) (at1 : Fin same) -> at1      -- what Thena prints instead
+```
+
+**It applies only to words Thena mints.** A word *you* write is used as given —
+*a name you write is the name you get*, above — and a keyword was never one you
+could write, the parser having refused it.
+
 ### You are told when a word you write kills a binder, and `rename` is the way back
 
 *Decided 2026-11-20.*

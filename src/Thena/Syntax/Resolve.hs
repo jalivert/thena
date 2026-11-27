@@ -9,7 +9,8 @@ module Thena.Syntax.Resolve
   , resolveData
   ) where
 
-import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar, freshIdent)
+import Thena.Core.Context
+  (Context, Entry (..), entryIdent, entryVar, writableAmong)
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat)
 import Thena.Core.Term
   ( Core (..)
@@ -737,7 +738,10 @@ prefix gr env gs local n raw = walk [ Ident w | (w, _) <- local ] local n raw
       RawArrow s b -> do
         (s', n1) <- core gr env gs [] [] lcl k s
         let (v, n2) = fresh n1
-            i       = freshIdent taken (Ident "x")
+            -- 'writableAmong' and not 'freshIdent': the word has to be one
+            -- the lexer reads back as well as one nothing has taken
+            -- (@~vndxj@). The stem is @x@, so nothing moves today.
+            i       = writableAmong taken (Ident "x")
             e       = Hypothesis v i s'
         (tel, local', rest, n3) <- walk (taken ++ [i]) lcl n2 b
         Right (e : tel, local', rest, n3)

@@ -19,6 +19,7 @@ module Thena.Core.Term
   , Ident (..)
   , anonymousIdent
   , freshIdent
+  , freshIdentWhere
   , freeAmong
   , GlobalName (..)
   , rootName
@@ -131,11 +132,26 @@ anonymousIdent = Ident "_"
 -- disagreed about what a free word is. It was in "Thena.Core.Context" until
 -- MS12 phase 329, which needed it where 'Scope' is visible.
 freshIdent :: [Ident] -> Ident -> Ident
-freshIdent taken i@(Ident hint)
+freshIdent = freshIdentWhere (const True)
+
+-- | 'freshIdent' with a second thing an identifier has to be, asked of every
+-- candidate the numbering rule tries.
+--
+-- **There is one caller and it is 'Thena.Core.Context.writableAmong'** (MS12,
+-- @~vndxj@), which needs the word it mints to be one the lexer reads back as a
+-- name and not only one nothing else has taken. The test is a parameter rather
+-- than a second numbering loop over there for the reason the haddock above
+-- gives: two spellings of the suffix would mean two notions of a free word.
+--
+-- A test that no candidate can satisfy would not terminate. The one caller\'s
+-- does: @w@, @w1@, @w2@ cannot all be keywords, the keywords being a finite
+-- list that no word with a numeral in it is on.
+freshIdentWhere :: (Ident -> Bool) -> [Ident] -> Ident -> Ident
+freshIdentWhere ok taken i@(Ident hint)
   | free i    = i
   | otherwise = numbered (1 :: Int)
   where
-    free j = j `notElem` taken
+    free j = j `notElem` taken && ok j
     numbered k =
       let j = Ident (hint ++ show k) in if free j then j else numbered (k + 1)
 
