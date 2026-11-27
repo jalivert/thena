@@ -21,13 +21,14 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Core.Level (Level (..), levelOfNat)
+import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Term
   (Core (..), Ident (..), Literal (..), close, fresh, rootName)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Instral.Ops
   ( CoreP (..)
   , CoreSlot (..)
+  , LevelP (..)
   , Identifier (..)
   , Instr (..)
   , Pattern (..)
@@ -107,7 +108,12 @@ everyPattern =
                          (CPHole (PVar "b"))))
   , ("core`Type\8320`",  PCore (CPUniverse 0))
   , ("core`String`",  PCore (CPName (rootName "String") []))
-  , ("core`String {0 1}`", PCore (CPName (rootName "String") [0, 1]))
+  , ("core`String {0 1}`",
+        PCore (CPName (rootName "String") [LPNat 0, LPNat 1]))
+    -- **A level argument may be a splice as of MS12 phase 361** (@~bkrvn@),
+    -- and it round-trips as it was written.
+  , ("core`String {${l}}`",
+        PCore (CPName (rootName "String") [LPHole (PVar "l")]))
   , ("core`3`",       PCore (CPLit (LInt 3)))
     -- **The binders, as of MS12 phase 355.** One binder per quantifier is the
     -- spelling the printer writes and the reader nests, so these round-trip;
@@ -445,7 +451,8 @@ coreTerms =
         expect "core`nope`" "CorePatternNotInScope"
 
     , testCase "a level is written in braces and compared whole" $
-        readPattern "core`String {0}`" @?= Right (PCore (CPName strName [0]))
+        readPattern "core`String {0}`"
+          @?= Right (PCore (CPName strName [LPNat 0]))
 
     , -- The development calculus's own reading, not a rule of the pattern's:
       -- a word with no braces is @Global g []@ when it is written in an
@@ -453,7 +460,33 @@ coreTerms =
       testCase "no braces means no level arguments" $ do
         matchTerm (CPName strName []) (Global strName []) @?= Just []
         matchTerm (CPName strName []) (Global strName [LZero]) @?= Nothing
-        matchTerm (CPName strName [0]) (Global strName [LZero]) @?= Just []
+        matchTerm (CPName strName [LPNat 0]) (Global strName [LZero]) @?= Just []
+
+    , -- **A LEVEL ARGUMENT IS A POSITION AS OF MS12 PHASE 361** (@~bkrvn@), and
+      -- the level it takes is taken WHOLE: a rigid parameter is exactly the
+      -- level a rule cannot write down, which is why pinning a numeral was not
+      -- an answer. Nothing matches inside the level either way.
+      testCase "a splice takes the level the term is at, whatever it is" $ do
+        matchTerm (CPName strName [LPHole (PVar "l")]) (Global strName [LZero])
+          @?= Just [("l", VLevel LZero)]
+        matchTerm (CPName strName [LPHole (PVar "l")]) (Global strName [rigid])
+          @?= Just [("l", VLevel rigid)]
+        matchTerm (CPName strName [LPHole PWild]) (Global strName [rigid])
+          @?= Just []
+
+    , -- The contrast that says what the splice is for: a written numeral is
+      -- the only thing a clause could say before, and it misses every level
+      -- that is not that numeral.
+      testCase "…where a written numeral matches that level and no other" $ do
+        matchTerm (CPName strName [LPNat 0]) (Global strName [rigid]) @?= Nothing
+        matchTerm (CPName strName [LPNat 0]) (Global strName [levelOfNat 1])
+          @?= Nothing
+
+    , -- 'corePSlots' is what the type checker reads, so a level position has
+      -- to report itself there or the binding would be typed as a term.
+      testCase "and the position reports itself as a level" $
+        corePSlots (CPName strName [LPHole (PVar "l")])
+          @?= [(AtLevel, PVar "l")]
 
     , testCase "a universe is matched at its level" $ do
         matchTerm (CPUniverse 0) (Universe LZero) @?= Just []
@@ -624,6 +657,10 @@ coreTerms =
   where
     strName = rootName "String"
     star    = Universe LZero
+
+    -- A definition's prenex level parameter: a level with no numeral, and the
+    -- case @~bkrvn@ was about.
+    rigid   = LVar (LRigid 0)
 
     applied = CPApp (CPName strName []) (CPHole (PVar "x"))
 

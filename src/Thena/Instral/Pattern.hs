@@ -15,6 +15,7 @@ module Thena.Instral.Pattern
   , Skeleton (..)
   , Slot (..)
   , CoreP (..)
+  , LevelP (..)
   , CoreSlot (..)
   , ComponentP (..)
   , skeletonHoles
@@ -144,6 +145,23 @@ data CoreSlot
     -- ^ **a binder's identity**, so a 'Thena.Instral.Ops.Identifier' — the
     -- one position in a @core\`…\`@ region that wants a /name/ rather than a
     -- term.
+  | AtLevel
+    -- ^ **a level argument**, so a 'Thena.Core.Level.Level' (MS12 phase 361,
+    -- @~bkrvn@) — the third kind of position a region has, and the level
+    -- arrives whole.
+  deriving (Eq, Show)
+
+-- | A level argument in a core pattern: written, or a position (MS12 phase
+-- 361, @~bkrvn@).
+--
+-- **'Thena.Syntax.Concrete.RawLevel' after resolution**, and the reason it is
+-- a type of its own rather than @CoreP a@ at a level position is that a level
+-- is not a term: nothing matches /inside/ a level expression
+-- (@spec\/machine.md@ §8), so the only two things a pattern can say about one
+-- are /this numeral/ and /whatever it is, and I will take it/.
+data LevelP a
+  = LPNat Int   -- ^ @{0}@ — compared whole, by normal form
+  | LPHole a    -- ^ @{${l}}@ — whatever level stands here, and what takes it
   deriving (Eq, Show)
 
 -- | A core term's shape with something at each of its splices (MS12 phase
@@ -173,14 +191,15 @@ data CoreSlot
 data CoreP a
   = CPHole a
     -- ^ @${x}@ — whatever stands here, and what the position takes
-  | CPName GlobalName [Int]
+  | CPName GlobalName [LevelP a]
     -- ^ a word, resolved, and the level arguments written in braces after it
     --
     -- **No braces means no level arguments, and that is the development
     -- calculus's own reading** (@Thena.Syntax.Resolve@'s @plain@), not a
     -- rule of this type's: @Empty@ written in an operand is
     -- @Global Empty []@, so @Empty@ written in a pattern is what matches it.
-    -- A level is a numeral in braces and nothing matches inside one (§8).
+    -- A level in braces is a numeral or a position ('LevelP'), and nothing
+    -- matches inside one (§8).
   | CPUniverse Int
     -- ^ @Type₀@ — a universe at a written level. @Type@ with no level is an
     -- /inferred/ one and is refused in a pattern: there is nothing to infer
@@ -214,7 +233,7 @@ data CoreP a
   | CPLet a (CoreP a) (CoreP a) (CoreP a)
     -- ^ @let ${x} = ${v} : ${T} in ${E}@ — the binder, its value, its type and
     -- its opened body, in 'Thena.Core.Term.Let''s own field order
-  | CPEliminate GlobalName [Int] [CoreP a] (CoreP a) [CoreP a] [CoreP a] (CoreP a)
+  | CPEliminate GlobalName [LevelP a] [CoreP a] (CoreP a) [CoreP a] [CoreP a] (CoreP a)
     -- ^ @elim d {ℓ} (params) motive (methods) (indices) target@ — positional
     -- and in 'Thena.Core.Term.Eliminate''s own field order, exactly as the
     -- development calculus writes it
@@ -314,7 +333,10 @@ corePHoles = map snd . corePSlots
 corePSlots :: CoreP a -> [(CoreSlot, a)]
 corePSlots cp = case cp of
   CPHole a         -> [(AtCore, a)]
-  CPName _ _       -> []
+  -- **A level argument is a position too, as of MS12 phase 361** (@~bkrvn@),
+  -- and it comes before the arguments written after the word, which is the
+  -- order it is written in.
+  CPName _ ls      -> levelled ls
   CPUniverse _     -> []
   CPLit _          -> []
   CPApp f a        -> corePSlots f ++ corePSlots a
@@ -324,9 +346,11 @@ corePSlots cp = case cp of
   CPPi x d b       -> (AtBinder, x) : corePSlots d ++ corePSlots b
   CPLam x d b      -> (AtBinder, x) : corePSlots d ++ corePSlots b
   CPLet x v t b    -> (AtBinder, x) : corePSlots v ++ corePSlots t ++ corePSlots b
-  CPEliminate _ _ ps m ms is t ->
-    concatMap corePSlots ps ++ corePSlots m ++ concatMap corePSlots ms
-      ++ concatMap corePSlots is ++ corePSlots t
+  CPEliminate _ ls ps m ms is t ->
+    levelled ls ++ concatMap corePSlots ps ++ corePSlots m
+      ++ concatMap corePSlots ms ++ concatMap corePSlots is ++ corePSlots t
+  where
+    levelled ls = [ (AtLevel, a) | LPHole a <- ls ]
 
 -- | The names a pattern binds, left to right.
 --

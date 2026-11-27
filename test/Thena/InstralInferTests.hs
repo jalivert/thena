@@ -908,11 +908,16 @@ spliceTemplates =
       -- MS5 phase 89 — levels, and why the grammar needed no third splice
       -- ----------------------------------------------------------------
 
-      -- **A level reaches a template as a TERM**, and that is the phase's
-      -- finding: @level@ and @fresh-level@ build one, @universe-at@ wraps it,
-      -- and what gets spliced is the universe. So the remaining nonterminal —
-      -- a level position — needs no splice production at all, because the ops
-      -- compose and a term splice already exists.
+      -- **A level reaches a UNIVERSE as a term**: @level@ and @fresh-level@
+      -- build a level, @universe-at@ wraps it, and what gets spliced is the
+      -- universe.
+      --
+      -- **PHASE 89 CONCLUDED FROM THAT THAT A LEVEL POSITION NEEDED NO SPLICE
+      -- PRODUCTION, AND THAT WAS WRONG** (MS12 phase 361, @~bkrvn@). It holds
+      -- for a universe and for nothing else: a global's level arguments are
+      -- prenex, so @Empty {${l}}@ is the only way to write one at a level a
+      -- rule was handed, and no composition of ops reaches it. The two cases
+      -- below are the production that was missing.
     , loadsWith "a universe at an exact computed level, spliced"
         "l = level 2 ; u = universe-at l ; t = resolve-core core`${u} -> ${u}`"
 
@@ -926,8 +931,21 @@ spliceTemplates =
           BasesLoaded _ _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
+      -- **A GLOBAL'S LEVEL ARGUMENT TAKES ONE DIRECTLY** (MS12 phase 361,
+      -- @~bkrvn@), which is the position no composition reached. The binding
+      -- is typed from where it sits, exactly as a term splice and a name
+      -- splice are.
+    , loadsWith "a global at a spliced level argument"
+        "l = fresh-level ; t = resolve-core core`Empty {${l}}`"
+
+    , loadsWith "…and an elim's level arguments are the same position"
+        "l = level 1 ; d = goal ; t = resolve-core core`elim Nat {${l}} () ${d} () () ${d}`"
+
       -- **The types are what keep the two apart.** A level is not a term and
       -- not an Int, and both confusions are refused when the file loads.
+    , clashesWith "a term where a level argument is wanted"
+        "d = goal ; t = resolve-core core`Empty {${d}}`"
+
     , clashesWith "a level where a term is wanted"
         "l = fresh-level ; t = resolve-core core`${l} -> ${l}`"
 

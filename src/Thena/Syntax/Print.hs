@@ -61,7 +61,7 @@ import Thena.Core.Level (Level, Normal (..), levelOfNat, levelVarName, normalise
 import Thena.Core.Context
   (Context, entryIdent, entryVar, wordReaches)
 import Thena.Core.Term (GlobalName (..), Ident (..), Literal (..), Var, nameDotted)
-import Thena.Instral.Pattern (CoreP (..), ComponentP (..), Pattern)
+import Thena.Instral.Pattern (CoreP (..), LevelP (..), ComponentP (..), Pattern)
 import Thena.Instral.Concrete
   ( RawDecl (..)
   , Reach (..)
@@ -225,14 +225,14 @@ corePText at cp = "core" ++ [tick] ++ top cp ++ [tick]
         unwords ["let", hole x, "=", top v, ":", top ty, "in", top b]
       CPEliminate d ls ps m ms is t ->
         unwords
-          [ "elim", nameDotted d ++ levelArgs (map levelOfNat ls)
+          [ "elim", nameDotted d ++ patternLevels ls
           , group ps, atom m, group ms, group is, atom t
           ]
       _ -> atom c
 
     atom c = case c of
       CPHole a       -> hole a
-      CPName n ls    -> nameDotted n ++ levelArgs (map levelOfNat ls)
+      CPName n ls    -> nameDotted n ++ patternLevels ls
       CPUniverse k   -> "Type" ++ subscript k
       CPLit l        -> concatMap escapeRaw (literal l)
       _              -> "(" ++ top c ++ ")"
@@ -240,6 +240,18 @@ corePText at cp = "core" ++ [tick] ++ top cp ++ [tick]
     -- A splice, written so the region scanner reads the @$@ as an escape
     -- opener — see the note above.
     hole a = "$" ++ ['{'] ++ at a ++ ['}']
+
+    -- **A level argument prints as it was written** (MS12 phase 361,
+    -- @~bkrvn@): a numeral, or the splice standing at it. 'levelArgs' is the
+    -- printer for a 'Thena.Core.Level.Level' and a pattern's levels are not
+    -- all levels, so the braces are written here instead of mapping into it.
+    patternLevels ls
+      | null ls   = ""
+      | otherwise = " {" ++ unwords (map lvl ls) ++ "}"
+      where
+        lvl l = case l of
+          LPNat k  -> renderLevelAtom (levelOfNat k)
+          LPHole a -> hole a
 
     -- **A binder's name position is a splice too**, so it is written the same
     -- way; what differs is that the grammar wants a name there, which is why

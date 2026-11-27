@@ -1786,6 +1786,12 @@ id {suc 0}            a parse error: a level argument is an atom
 There is no inference of level *arguments* at a use site the way there is for a
 bare `Type`. If a name has level parameters, you write them.
 
+**Inside a rule there is one more atom, `${l}`** — a level a rule was handed,
+spliced into the term it is building. It is the same splice a term position
+takes, at the one other place the grammar wants something, and it is the only
+way to write a term at a level that has no numeral; see *a level in a pattern is
+a numeral or a splice*, below.
+
 `⊔` — the join — is a real part of the level algebra and prints in inferred
 types (`And {ℓ₇₂ ℓ₇₃} : Type (ℓ₇₂ ⊔ ℓ₇₃)`), but **you cannot write one.** Only
 inference builds a join.
@@ -2014,9 +2020,10 @@ name, which would throw the variable away.
 
 ### A level in a pattern is a numeral or a splice, and a bound level cannot be taken apart
 
-*Decided 2026-11-25. The numeral is built; a splice in a level position is not —
-the development calculus has no notation for one yet, in a pattern or anywhere
-else, so `core`Empty {${l}}`` does not parse.*
+*Decided 2026-11-25, and built 2026-11-27 — the splice came a phase later than
+the numeral, because a level position admitted no splice anywhere in the
+language and one production had to serve a pattern and an ordinary term
+literal alike.*
 
 A pattern over a core term writes level arguments in the same braces a use does,
 numerals only as above, and may put a splice in one:
@@ -2036,6 +2043,20 @@ literally; `${l}` binds it whole. A rule that holds a level that way can pass it
 on but cannot look inside it: there is no pattern for *is this a successor*, and
 a question about a level's shape is one to ask of the level rather than a shape
 to match.
+
+**And the level you bound is written back the same way**, in a term the rule
+builds rather than matches:
+
+```
+rule by-reflexivity at ? _ : core`Eq {${l}} ${A} ${a} ${b}` :-
+  do t = resolve-core core`refl {${l}} ${A} ${a}`
+     ; fill t
+     ; solve
+```
+
+That clause closes an equation at whatever level it was stated at. Written with
+`{0}` in place of both splices it proves the level-zero case and is stuck one
+level up, which is the whole of what a pinned numeral costs you.
 
 ### A pattern over a trusted term sees all three of its parts
 

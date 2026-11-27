@@ -22,11 +22,13 @@
 module Thena.Syntax.Concrete
   ( Raw (..)
   , RawPiece (..)
+  , RawLevel (..)
   , Splice (..)
   , splices
   , splicesIn
   , termSplicesIn
   , nameSplicesIn
+  , levelSplicesIn
   , RawBinder (..)
   , RawIdent (..)
   , RawConstraint (..)
@@ -51,9 +53,9 @@ data Raw
   | RawUniverse Int
   | RawPrimitive Literal         -- ^ @"ab"@, @'c'@, @3@ (MS6 phase 97a)
   | RawUniverseOpen              -- ^ @Type@ — a universe whose level is inferred
-  | RawAt [String] RawIdent [Int]
-    -- ^ @foo {0 1}@, @String.eq {0}@ — a global at level arguments, with the
-    -- steps of its path (MS10 phase 240)
+  | RawAt [String] RawIdent [RawLevel]
+    -- ^ @foo {0 1}@, @String.eq {0}@, @Empty {${l}}@ — a global at level
+    -- arguments, with the steps of its path (MS10 phase 240)
 
   | RawLam [RawBinder] Raw       -- ^ @λ (x : S) (y : T) -> b@
   | RawPi [RawBinder] Raw        -- ^ @∀ (x : S) (y : T) -> B@
@@ -91,7 +93,7 @@ data Raw
     --
     -- **The grammars are asked for at resolution**, not here: a module is
     -- parsed whole before its own @language@ block is installed.
-  | RawElim [String] RawIdent [Int] [Raw] Raw [Raw] [Raw] Raw
+  | RawElim [String] RawIdent [RawLevel] [Raw] Raw [Raw] [Raw] Raw
     -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
     -- positional, and in exactly 'Thena.Core.Term.Core''s own field order for
     -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.
@@ -123,6 +125,27 @@ data RawPiece
 -- | @(x : S)@ — one parenthesised binding. Always annotated: there is no
 -- inference at this level, and a binder with no type is a parse error rather
 -- than a hole (§2.6).
+-- | A LEVEL ARGUMENT in the source, which may itself be spliced (MS12 phase
+-- 361, @~bkrvn@).
+--
+-- **The third position his principle reaches** — /a splice supplies a
+-- nonterminal/ — and the last one in the development calculus that a written
+-- term could not reach: a level argument was a numeral and nothing else, so
+-- @core\`Empty {${l}}\`@ was a parse error both in an operand and in a
+-- pattern. One production serves both, because both read this type.
+--
+-- **A level is still compared and resolved WHOLE.** This says only where a
+-- level may come from, not that a level /expression/ has parts a pattern can
+-- reach into — @spec\/machine.md@ §8, /nothing matches inside a level
+-- expression/, is unchanged. What the binding holds is a
+-- 'Thena.Instral.Type.TLevel', so a @max@ or a rigid parameter rides in whole.
+data RawLevel
+  = RawLevelNat Int       -- ^ @0@, @1@ — a level written as a numeral
+  | RawLevelSplice String
+    -- ^ @${l}@ — the level comes from the binding @l@ when the instruction
+    -- runs, and in a pattern it is a position that binds one.
+  deriving (Eq, Show)
+
 -- | A NAME in the source, which may itself be spliced (MS5 phase 88).
 --
 -- **His principle, applied all the way**: /a splice supplies a nonterminal/.
@@ -176,6 +199,10 @@ data RawConstructor = RawConstructor String Raw
 data Splice
   = TermSplice String  -- ^ @${x}@ where the grammar wants a term
   | NameSplice String  -- ^ @${x}@ where the grammar wants a name
+  | LevelSplice String
+    -- ^ @${x}@ where the grammar wants a level argument (MS12 phase 361,
+    -- @~bkrvn@) — the third kind, and the lesson of phase 90 above is why it
+    -- is a kind of its own rather than a term splice in a special place.
   deriving (Eq, Show)
 
 -- | Every hole a written term waits for, outermost first (MS5 phases 81, 88).
@@ -197,9 +224,9 @@ splices t = case t of
   RawClaim n ty p    -> named n ++ splices ty ++ splices p
   RawGuess n ty g p  -> named n ++ splices ty ++ splices g ++ splices p
   RawPending _ p     -> splices p
-  RawElim _ d _ ps m ms is tg ->
-    named d ++ concatMap splices ps ++ splices m ++ concatMap splices ms
-      ++ concatMap splices is ++ splices tg
+  RawElim _ d ls ps m ms is tg ->
+    named d ++ levelled ls ++ concatMap splices ps ++ splices m
+      ++ concatMap splices ms ++ concatMap splices is ++ splices tg
   RawTrusted c a b   -> splices c ++ splices a ++ splices b
   -- **A region's splices are the terms it holds** (MS6 phase 110), in the
   -- order they were written, which is the order they fill the reading's slots.
@@ -207,18 +234,23 @@ splices t = case t of
   RawName _ _        -> []
   RawUniverse _      -> []
   RawUniverseOpen    -> []
-  RawAt _ n _        -> named n
+  RawAt _ n ls       -> named n ++ levelled ls
   where
     binder (RawBinder n ty) = named n ++ splices ty
 
     named i = case i of { RawIdentSplice x -> [NameSplice x] ; RawWord _ -> [] }
+
+    levelled ls = [ LevelSplice x | RawLevelSplice x <- ls ]
 
 -- | The binding each hole is filled from, term and name alike — what @validate@
 -- needs, since a missing binding is refused the same way whatever it was for.
 splicesIn :: Raw -> [String]
 splicesIn = map bindingOf . splices
   where
-    bindingOf sp = case sp of { TermSplice x -> x ; NameSplice x -> x }
+    bindingOf sp = case sp of
+      TermSplice x  -> x
+      NameSplice x  -> x
+      LevelSplice x -> x
 
 -- | The holes standing in a TERM position, one entry per occurrence.
 termSplicesIn :: Raw -> [String]
@@ -227,3 +259,8 @@ termSplicesIn t = [ x | TermSplice x <- splices t ]
 -- | The holes standing in a NAME position, one entry per occurrence.
 nameSplicesIn :: Raw -> [String]
 nameSplicesIn t = [ x | NameSplice x <- splices t ]
+
+-- | The holes standing in a LEVEL position, one entry per occurrence (MS12
+-- phase 361, @~bkrvn@).
+levelSplicesIn :: Raw -> [String]
+levelSplicesIn t = [ x | LevelSplice x <- splices t ]

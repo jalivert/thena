@@ -324,6 +324,7 @@ test-suite thena-test
         Thena.SpecialiseTests
         Thena.DotPatternTests
         Thena.InteractiveSplitTests
+        Thena.LevelSpliceTests
         Thena.SearchReadyTests
         Thena.EliminateTests
         Thena.EliminatorTests

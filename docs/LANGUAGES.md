@@ -237,7 +237,9 @@ Three things are worth knowing about it:
   is read.
 - **A word with no braces has no level arguments**, exactly as in a term you
   write: `Empty` matches `Empty` at no levels, and `Empty {0}` matches it at the
-  first.
+  first. **A splice in the braces takes whichever level it is at** —
+  `Empty {${l}}` matches at every level and binds that level as `l`, which is
+  the only way to reach one that has no numeral.
 - **The term is tried as written and then reduced and tried again**, so a
   pattern matches the term elaboration actually produced as well as the one you
   wrote.
@@ -690,8 +692,30 @@ the rules do not type check:
   wrong, instruction 2: wanted Name, got Core
 ```
 
-A level needs no splice of its own: build a universe with `level ‹n›` or
-`fresh-level` and `universe-at`, and splice the term.
+**A level argument is the third position**, and it takes a splice of its own:
+`core`Empty {${l}}`` is `Empty` at a level the rule is holding. To build a
+*universe* at one you need no splice — `level ‹n›` or `fresh-level`, then
+`universe-at`, then splice the term — but a global's level arguments are
+written out at every use, so nothing composes into those and this is how they
+are reached:
+
+```
+rule by-reflexivity at ? _ : core`Eq {${l}} ${A} ${a} ${b}` :-
+  do t = resolve-core core`refl {${l}} ${A} ${a}`
+     ; fill t
+     ; solve
+```
+
+```
+thena spine> :theorem t : Eq {1} Nat zero zero
+thena spine> by-reflexivity
+already equal
+thena spine> qed
+t : Eq {1} Nat zero zero   ∎
+```
+
+The same clause with `{0}` written in place of both splices proves that theorem
+at level zero and is stuck at level one.
 
 **`` surface`…` `` takes no splice.** The core grammar does, and so does an
 object language's region (§6).

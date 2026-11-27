@@ -84,6 +84,7 @@ import Thena.Instral.Ops
   , Pattern (..)
   , Skeleton (..)
   , CoreP (..)
+  , LevelP (..)
   , ComponentP (..)
   , patternBinds
   , componentPBinds
@@ -111,6 +112,7 @@ import Thena.Syntax.Parser (parseTerm)
 import Thena.Syntax.Concrete
   ( Raw (..)
   , RawIdent (..)
+  , RawLevel (..)
   , RawBinder (..)
   )
 import qualified Thena.Instral.Type as Ty
@@ -1922,7 +1924,8 @@ corePattern rd g = go
       RawSplice "_"    -> Right (CPHole PWild)
       RawSplice x      -> Right (CPHole (PVar x))
       RawName ps s     -> named (GlobalName ps s) []
-      RawAt ps i ls    -> word i >>= \s -> named (GlobalName ps s) ls
+      RawAt ps i ls    -> word i >>= \s ->
+                            levels ls >>= named (GlobalName ps s)
       RawUniverse k    -> Right (CPUniverse k)
       RawPrimitive l   -> Right (CPLit l)
       RawApp f a       -> CPApp <$> go f <*> go a
@@ -1944,7 +1947,8 @@ corePattern rd g = go
       RawElim ps d ls prs m ms is t -> do
         s   <- word d
         d'  <- resolved (GlobalName ps s)
-        CPEliminate d' ls
+        ls' <- levels ls
+        CPEliminate d' ls'
           <$> traverse go prs <*> go m <*> traverse go ms
           <*> traverse go is <*> go t
       RawUniverseOpen  -> refuse "Type with no level"
@@ -1982,6 +1986,19 @@ corePattern rd g = go
         con <$> bound i <*> go d <*> nested con more b
 
     named nm ls = (\nm' -> CPName nm' ls) <$> resolved nm
+
+    -- **A LEVEL ARGUMENT IS A NUMERAL OR A POSITION** (MS12 phase 361,
+    -- @~bkrvn@), which is the whole of the pattern side of that item: the
+    -- grammar now reads a splice where a level is written, and a splice in a
+    -- pattern binds, exactly as one in a term position does. @_@ is the
+    -- wildcard here too, so @core\`Empty {${_}}\`@ matches @Empty@ at any
+    -- level and names nothing.
+    levels = traverse level
+      where
+        level l = case l of
+          RawLevelNat k          -> Right (LPNat k)
+          RawLevelSplice "_"     -> Right (LPHole PWild)
+          RawLevelSplice x       -> Right (LPHole (PVar x))
 
     -- **The one walk** — 'Thena.Core.Term.globalUnder', which is what
     -- 'Thena.Engine.globalNamed' and a surface term's resolver both ask, so a

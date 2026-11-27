@@ -1036,13 +1036,15 @@ slotType slot = case slot of
   -- and the check at declaration refuses the rest.
   AtPrimitive _                 -> TString
 
--- | 'slotType' for a core region's two positions (MS12 phase 355). A binder
--- takes the 'TIdent' of @~gr236@, which is what lets a matched @∀@'s binder go
--- straight to @intro@ with nothing annotated.
+-- | 'slotType' for a core region's three positions (MS12 phases 355 and 361).
+-- A binder takes the 'TIdent' of @~gr236@, which is what lets a matched @∀@'s
+-- binder go straight to @intro@ with nothing annotated, and a level argument
+-- takes the 'TLevel' that @universe-at@ has always consumed (@~bkrvn@).
 coreSlotType :: CoreSlot -> Ty
 coreSlotType slot = case slot of
   AtCore   -> TCore
   AtBinder -> TIdent
+  AtLevel  -> TLevel
 
 -- | Each hole with the slot it stands at, left to right.
 holesOf :: Skeleton a -> [(Slot, a)]
@@ -1074,8 +1076,9 @@ operandType ctx si o st = case o of
     -- **Each occurrence is typed where it sits** (phase 90): a binding used
     -- in both kinds of position is asked both questions, and one of them fails.
     let hole s sp = case sp of
-          TermSplice x -> operandAgainst ctx si TCore (Ref x) s
-          NameSplice x -> operandAgainst ctx si TName (Ref x) s
+          TermSplice x  -> operandAgainst ctx si TCore (Ref x) s
+          NameSplice x  -> operandAgainst ctx si TName (Ref x) s
+          LevelSplice x -> operandAgainst ctx si TLevel (Ref x) s
         st1 = foldl hole st (splices raw)
      in valueType si (VRaw raw) st1
   Lit v      -> valueType si v st

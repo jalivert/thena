@@ -39,6 +39,7 @@ module Thena.Instral.Ops
   , Skeleton (..)
   , Slot (..)
   , CoreP (..)
+  , LevelP (..)
   , ComponentP (..)
   , CoreSlot (..)
   , corePSlots
@@ -54,6 +55,7 @@ module Thena.Instral.Ops
   , Test (..)
   ) where
 
+import Data.Bifunctor (first)
 import Data.Maybe (isJust)
 
 import Thena.Core.Level (Level, levelOfNat)
@@ -65,7 +67,7 @@ import Thena.Core.Term
 -- this module's own 'Eliminate' op are different things of one name.
 import qualified Thena.Core.Term as Term
 import Thena.Instral.Pattern
-  ( Pattern (..), Skeleton (..), Slot (..), CoreP (..), CoreSlot (..)
+  ( Pattern (..), Skeleton (..), Slot (..), CoreP (..), CoreSlot (..), LevelP (..)
   , ComponentP (..), componentPSlots, componentPBinds
   , skeletonHoles, corePSlots, patternBinds, patternIrrefutable )
 import Thena.Instral.Type (Signature (..), Ty (..))
@@ -2663,12 +2665,13 @@ matchCore env k cp t = case here t of
       CPEliminate d ls ps m ms is tg -> case term of
         Term.Eliminate d' ls' ps' m' ms' is' tg'
           | d == d'
-          , levelsAre ls ls'
           , length ps == length ps'
           , length ms == length ms'
-          , length is == length is' ->
-              run (zip ps ps' ++ [(m, m')] ++ zip ms ms'
-                     ++ zip is is' ++ [(tg, tg')])
+          , length is == length is'
+          , Just (b0, k1) <- levels k ls ls' ->
+              first (b0 ++) <$>
+                runFrom k1 (zip ps ps' ++ [(m, m')] ++ zip ms ms'
+                              ++ zip is is' ++ [(tg, tg')])
         _ -> Nothing
       -- **A word and an application are one case**, because a constructor
       -- application has two spellings and the head is where the name is: the
@@ -2678,7 +2681,28 @@ matchCore env k cp t = case here t of
       CPApp {}  -> applied
       where
         ok = Just ([], k)
-        run = threading (\k' (q, u) -> matchCore env k' q u) k
+        run = runFrom k
+
+        -- **The counter is a parameter of this and not closed over**, because
+        -- a level argument is matched before the sub-terms are and may itself
+        -- have minted (MS12 phase 361).
+        runFrom = threading (\k' (q, u) -> matchCore env k' q u)
+
+        -- **A LEVEL ARGUMENT IS MATCHED, NOT ONLY COMPARED** (MS12 phase 361,
+        -- @~bkrvn@). A numeral is compared whole — 'Thena.Core.Level' equality
+        -- is equality of normal forms, so @{0}@ matches @max 0 0@ — and a
+        -- position takes the level it stands at, whatever it is: a join and a
+        -- rigid parameter are exactly the levels a rule cannot write down, and
+        -- taking one whole is what @~bkrvn@ was about. Nothing matches
+        -- /inside/ a level expression (@spec\/machine.md@ §8).
+        levels k' ls ls'
+          | length ls /= length ls' = Nothing
+          | otherwise = threading one k' (zip ls ls')
+          where
+            one k'' (l, lv) = case l of
+              LPNat n  | lv == levelOfNat n -> Just ([], k'')
+                       | otherwise          -> Nothing
+              LPHole p -> matchPattern env k'' p (VLevel lv)
 
         -- **Mint, bind the binder, then the sub-terms left to right** — the
         -- order 'Thena.Instral.Pattern.corePSlots' reports, so what a hole
@@ -2690,7 +2714,7 @@ matchCore env k cp t = case here t of
         under j x before body cod =
           let (y, k1) = Term.fresh k
            in do (b0, k2) <- matchPattern env k1 x (VIdent (Identifier j (Just y)))
-                 (b1, k3) <- threading (\k' (q, u) -> matchCore env k' q u) k2 before
+                 (b1, k3) <- runFrom k2 before
                  (b2, k4) <- matchCore env k3 body (Term.open y cod)
                  Just (b0 ++ b1 ++ b2, k4)
 
@@ -2702,8 +2726,9 @@ matchCore env k cp t = case here t of
           ((CPHole {}, _), _) -> structural
           ((CPName g ls, args), _) -> case spineOf term of
             Just (g', ls', args')
-              | g == g', levelsAre ls ls', length args == length args' ->
-                  run (zip args args')
+              | g == g', length args == length args'
+              , Just (b0, k1) <- levels k ls ls' ->
+                  first (b0 ++) <$> runFrom k1 (zip args args')
             -- A written word that the term does not head may still be an
             -- ordinary application underneath, which @structural@ is what
             -- reads; a bare word with no arguments has nothing to try.
@@ -2713,8 +2738,6 @@ matchCore env k cp t = case here t of
         structural = case (cp, term) of
           (CPApp f a, App x y) -> run [(f, x), (a, y)]
           _                    -> Nothing
-
-    levelsAre ls ls' = map levelOfNat ls == ls'
 
 -- | A core pattern's application spine: its head, and the arguments written
 -- after it (MS12 phase 352).

@@ -115,7 +115,7 @@ import Thena.Errors
   )
 import Thena.Surface.Concrete (Plicity (..))
 import qualified Thena.Surface.Concrete as Concrete
-import Thena.Syntax.Concrete (termSplicesIn, nameSplicesIn)
+import Thena.Syntax.Concrete (termSplicesIn, nameSplicesIn, levelSplicesIn)
 import Thena.Syntax.Resolve (resolveWith, Filling (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Build
@@ -1337,10 +1337,11 @@ perform instr rest m = case operation instr of
     -- **Two kinds of hole, filled from two walks** (MS5 phase 88). The
     -- position decides which a hole is, so a term splice is looked up as a
     -- term and a name splice as a name; neither can be handed the other.
-    Right (VRaw raw) -> case (,) <$> traverse (filling (env (exec m))) (termSplicesIn raw)
-                                 <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw) of
+    Right (VRaw raw) -> case (,,) <$> traverse (filling (env (exec m))) (termSplicesIn raw)
+                                  <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw)
+                                  <*> traverse (levelFilling (env (exec m))) (levelSplicesIn raw) of
       Left r   -> failure r m
-      Right (ts, ns) -> case resolveWith (grammars m) (ts ++ ns) (globals m) (scope m) contextAt (names m) raw of
+      Right (ts, ns, ls) -> case resolveWith (grammars m) (ts ++ ns ++ ls) (globals m) (scope m) contextAt (names m) raw of
         Left e        -> failure (CannotResolve e) m
         Right (t, n1) -> produce (VTerm t) m { names = n1 }
     Right _          -> failure ExpectedRaw m
@@ -2223,10 +2224,9 @@ perform instr rest m = case operation instr of
       | k >= 0      -> produce (VLevel (levelOfNat k)) m
     Right _         -> failure ExpectedInt m
 
-  UniverseAt a -> case operandValue (env (exec m)) a of
-    Left e           -> failure e m
-    Right (VLevel l) -> produce (VTerm (Universe l)) m
-    Right _          -> failure ExpectedLevel m
+  UniverseAt a -> case operandLevel (env (exec m)) a of
+    Left e  -> failure e m
+    Right l -> produce (VTerm (Universe l)) m
 
   -- **One less, and that is the whole of the arithmetic** (MS12 phase 347).
   -- Total: @one-less 0@ is @-1@, because the condition belongs in a head and
@@ -3405,6 +3405,14 @@ operandTerm e o = operandValue e o >>= \v -> case v of
   VTerm t -> Right t
   _                  -> Left ExpectedTerm
 
+-- | …and only a 'VLevel' is a level (MS12 phase 361). The reader @universe-at@
+-- has always done by hand, named so that a level argument's splice refuses
+-- exactly as it does.
+operandLevel :: Env -> Operand -> Either FailReason Level
+operandLevel e o = operandValue e o >>= \v -> case v of
+  VLevel l -> Right l
+  _        -> Left ExpectedLevel
+
 -- | One @${x}@ hole, paired with the term that fills it (MS5 phase 81).
 --
 -- **Shaped like 'operandTerm' and refusing for the same reason**: a hole stands
@@ -3421,6 +3429,16 @@ filling e x = (,) x . FillTerm <$> operandTerm e (Ref x)
 -- scope has no namespaces for a path to name anything in.
 nameFilling :: Env -> String -> Either FailReason (String, Filling)
 nameFilling e x = (,) x . FillName . Ident <$> operandWord e (Ref x)
+
+-- | …and one that stands at a LEVEL argument (MS12 phase 361, @~bkrvn@).
+--
+-- **The third and last position a written term has**, and the level rides in
+-- whole: @core`Empty {${l}}`@ is a term a rule can write at a level it could
+-- not name, which is what the item was about. The refusal is the ordinary
+-- @ExpectedLevel@ one, so a binding that is not a level fails here the way it
+-- fails at @universe-at@.
+levelFilling :: Env -> String -> Either FailReason (String, Filling)
+levelFilling e x = (,) x . FillLevel <$> operandLevel e (Ref x)
 
 -- | An unelaborated tree and the place it sits at (§7.2). Shaped like
 -- 'operandText' and 'operandTerm', and phase 17b's reason for existing at all:

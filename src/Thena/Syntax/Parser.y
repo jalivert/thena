@@ -39,6 +39,7 @@ import Thena.Syntax.Concrete
   , RawPiece (..)
   , RawBinder (..)
   , RawIdent (..)
+  , RawLevel (..)
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
@@ -704,15 +705,20 @@ ObjectBit :: { RawPiece }
 
 -- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as
 -- rule parameters and call arguments are a bare run of names (phase 23).
-LevelArgs :: { [Int] }
+LevelArgs :: { [RawLevel] }
   : '{' LevelAtoms '}'                     { reverse $2 }
 
-LevelAtoms :: { [Int] }
+LevelAtoms :: { [RawLevel] }
   :                                        { [] }
   | LevelAtoms LevelAtom                   { $2 : $1 }
 
-LevelAtom :: { Int }
-  : num                                    { fromInteger (numOf $1) }
+-- **A level argument is a numeral or a splice** (MS12 phase 361, @~bkrvn@):
+-- the third position his /a splice supplies a nonterminal/ reaches, and the
+-- one production serves an operand and a pattern alike, since both read a
+-- @RawLevel@.
+LevelAtom :: { RawLevel }
+  : num                                    { RawLevelNat (fromInteger (numOf $1)) }
+  | '${' ident '}$'                        { RawLevelSplice (wordOf $2) }
 
 -- The argument list of a rule invoked at the REPL (phase 23b): a run of atoms,
 -- exactly as a rule body writes its operands. @try (\ x -> x)@ is one argument
