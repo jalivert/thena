@@ -40,8 +40,8 @@ thena spine> :accepts Surface
   spine-arguments/3 : Core -> Core -> Surface -> ()   (rule)
 thena spine> do { attack }
 thena spine> :show
-▶ let ? t : Type₀ ≐ (
-    let ? t1 : Type₀ in
+  let ? t : Type₀ ≐ (
+▶   let ? t1 : Type₀ in
     t1
   ) in
   t

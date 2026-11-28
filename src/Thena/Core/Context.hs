@@ -29,8 +29,10 @@ import Thena.Core.Term
   , close
   , freeAmong
   , freshIdent
+  , freshIdentWhere
   , substLevelsIn
   )
+import Thena.Syntax.Lexer (isIdentifier)
 
 -- | An entry in a working context: a name with a type, or a name with a type
 -- and a value.
@@ -114,10 +116,33 @@ writableIn ctx = writableAmong (map entryIdent ctx)
 -- The rule is written once here and 'writableIn' is this with a context's
 -- words; 'Thena.Core.Term.freeAmong' is the same question without the word
 -- invented for a nameless binder.
+--
+-- **A WORD HAS TO BE ONE THE LEXER READS BACK AS A NAME, NOT ONLY ONE NOTHING
+-- ELSE HAS TAKEN** (MS12, @~vndxj@). Avoiding a clash is not the whole of
+-- being writable: a word is writable when a user can type it where it is
+-- printed and mean this binder, and a keyword typed there is not a name at
+-- all. **It had already happened twice and both times a human caught it** —
+-- @at@ was minted for a transport\'s carried value and phase 358 reserved @at@,
+-- and a rule variable was called @of@ when MS9 phase 179 reserved @of@
+-- (@.claude\/HAZARDS.md@ has that one, which shipped). Nothing minted was a
+-- keyword when this went in, so it changes no term; what it removes is the
+-- next reservation\'s silence.
+--
+-- **The lexer is asked rather than a list being copied down here**: a copy is
+-- a second authority to keep true, and 'Thena.Syntax.Lexer.isIdentifier' is
+-- already the question — "Thena.Engine" asks it of a word a user supplies for
+-- the same reason (§2.6). It also catches a word that is unreadable for some
+-- reason other than being a keyword, which a keyword list would not.
+--
+-- The import is not a new layer: "Thena.Syntax.Lexer" imports nothing of this
+-- project\'s, and "Thena.Errors" — which this module is under — already reaches
+-- it.
 writableAmong :: [Ident] -> Ident -> Ident
 writableAmong taken i
-  | i == anonymousIdent = freshIdent taken (Ident "x")
-  | otherwise           = freeAmong taken i
+  | i == anonymousIdent = freshIdentWhere readable taken (Ident "x")
+  | otherwise           = freshIdentWhere readable taken i
+  where
+    readable (Ident w) = isIdentifier w
 
 -- | A telescope of words the system is minting, each made writable among this
 -- context /and the ones the run has already placed outside it/ — innermost

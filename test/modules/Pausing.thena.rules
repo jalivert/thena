@@ -6,5 +6,5 @@ rule base pausing where
 --
 -- MS12 phase 309 is what reaches it from inside a module load.
 
-rule elaborate t :- when focus-is-hole (surface-is-placeholder t)
+rule elaborate t at ? _ : _ :- when (surface-is-placeholder t)
   do yield "a placeholder: fill it and `yield` to carry on"

@@ -14,11 +14,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`e`
 back
 try-core core`\ (c : A) -> refl {0} A c`
@@ -40,12 +35,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
 eliminate-core core`e`
 back
 try-core core`\ (c : A) (h : P c) -> h`
@@ -69,13 +58,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
-along
 eliminate-core core`e`
 back
 try-core core`\ (c : A) -> refl {0} B (f c)`
@@ -99,12 +81,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
 eliminate-core core`e`
 back
 try-core core`\ (z : A) (h : Eq {0} A z c) -> h`
@@ -124,9 +100,6 @@ qed
 attack
 intro
 intro
-into
-along
-along
 eliminate-core core`s`
 back
 back
@@ -188,9 +161,6 @@ qed
 attack
 intro
 intro
-into
-along
-along
 eliminate-core core`s`
 back
 back
@@ -252,9 +222,6 @@ qed
 attack
 intro
 intro
-into
-along
-along
 eliminate-core core`s`
 back
 back
@@ -318,11 +285,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`s`
 back
 back
@@ -386,9 +348,6 @@ qed
 attack
 intro
 intro
-into
-along
-along
 eliminate-core core`nv`
 back
 back
@@ -412,11 +371,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`s`
 back
 back
@@ -482,11 +436,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`s`
 back
 back
@@ -556,15 +505,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
-along
-along
-along
 eliminate-core core`s`
 back
 back
@@ -636,13 +576,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
-along
 eliminate-core core`s`
 back
 back
@@ -708,9 +641,6 @@ qed
 attack
 intro
 intro
-into
-along
-along
 eliminate-core core`s`
 back
 back
@@ -774,11 +704,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`s`
 back
 back
@@ -846,13 +771,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
-along
 eliminate-core core`s`
 back
 back
@@ -918,9 +836,6 @@ qed
 attack
 intro
 intro
-into
-along
-along
 eliminate-core core`s`
 back
 back
@@ -984,11 +899,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
 eliminate-core core`s`
 back
 back
@@ -1056,13 +966,6 @@ intro
 intro
 intro
 intro
-into
-along
-along
-along
-along
-along
-along
 eliminate-core core`s`
 back
 back
@@ -1129,10 +1032,6 @@ attack
 intro
 intro
 intro
-into
-along
-along
-along
 eliminate-core core`s1`
 back
 back

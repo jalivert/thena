@@ -53,7 +53,7 @@ module Thena.Engine
   ) where
 
 import Data.List (intercalate, nub)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
@@ -115,7 +115,7 @@ import Thena.Errors
   )
 import Thena.Surface.Concrete (Plicity (..))
 import qualified Thena.Surface.Concrete as Concrete
-import Thena.Syntax.Concrete (termSplicesIn, nameSplicesIn)
+import Thena.Syntax.Concrete (termSplicesIn, nameSplicesIn, levelSplicesIn)
 import Thena.Syntax.Resolve (resolveWith, Filling (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Build
@@ -133,12 +133,12 @@ import Thena.Instral.Ops
   ( AnswerKind
   , Origin (..)
   , Env
+  , Identifier (..)
   , Rule (..)
   , Instr (..)
   , Op (..)
   , Operand (..)
   , Value (..)
-  , matchClause
   )
 import Thena.Global.Declare (buildInductive)
 import Thena.Global.Env
@@ -174,8 +174,10 @@ import Thena.Tactics.Specialise
 import Thena.Instral.Infer (inferProgram, reachingAll)
 import Thena.Instral.Type (Signature)
 import Thena.Rules
-  ( RuleBase, RuleError (..), RuleIter, allCallable, allSignatures, arities
-  , basePath, clauses, dispatch, hasNext, next, resolveBlock, rootReading )
+  ( Match (..), RuleBase, RuleError (..), RuleIter, allCallable, allSignatures
+  , arities, basePath, clauses, dispatch, hasNext, iterRules, next
+  , resolveBlock
+  , rootReading )
 import Thena.Syntax.Lexer (isIdentifier)
 import Thena.Surface.Zipper (SurfaceZipper)
 import qualified Thena.Surface.Zipper as Zipper
@@ -564,17 +566,19 @@ data Frame
         -- ^ **the same field a 'Call' carries, and it means the same thing.**
         -- Both frames have exactly one lifetime as of MS4 phase 57: entered,
         -- returned, and stepped over ever after. See 'resumeFrom'.
-      , callArgs  :: [Value]
-        -- ^ the arguments a @call@ was given, or @[]@ for a dispatch (phase
-        -- 23). Kept beside 'entryEnv' rather than folded into it because each
-        -- clause binds them to **its own** parameter names — clauses of one
-        -- name need not agree on those, or even on how many there are. See
-        -- 'seedFor', which is the one place the two are put together.
       , entryEnv  :: Env
         -- ^ the environment /every/ alternative of this choice point starts in
         -- (phase 17b). Empty for a plain @step@; @[(hint, …)]@ when the
         -- dispatch carried one, because a hint belongs to the dispatch and not
         -- to the alternative that happened to be tried first.
+        --
+        -- **What an alternative adds to it is the alternative's own**, and it
+        -- rides in 'alts' (MS12): a @callArgs@ field used to stand beside this
+        -- one so that @seedFor@ could re-match the arguments against whichever
+        -- clause was taken next, since clauses of one name need not agree on
+        -- what they call their parameters. The match now travels with the
+        -- clause, so there is nothing left to re-match and the arguments need
+        -- not be kept.
         --
         -- Without it, backtracking into a second elaboration rule would enter
         -- it with @hint@ unbound and it would fail as an unbound 'Ref'. MS1
@@ -990,8 +994,10 @@ resumeAt :: Answer -> Machine -> Machine
 -- interaction: the driver asks again rather than failing on the user's behalf.
 resumeAt a m = case pc (exec m) of
   Bind p _ (Ask _ _) : rest
-    | Just bs <- Op.matchPattern (globals m) p (VText a) ->
-        m { exec = (exec m) { pc = rest, env = bs ++ env (exec m) } }
+    | Just (bs, k) <- Op.matchPattern (globals m) (names m) p (VText a) ->
+        m { exec  = (exec m) { pc = rest, env = bs ++ env (exec m) }
+          , names = k
+          }
   Do     (Ask _ _) : rest -> m { exec = (exec m) { pc = rest } }
   _                       -> m
 
@@ -1071,7 +1077,7 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
       | depth <= lineFloor m = declined frames
       | otherwise = case fr of
           Thena.Engine.Call {} -> unwind (depth - 1) stk
-          Choice {} -> case next (alts fr) of
+          Choice {} -> case next (globals m) (names m) (cursor (saved fr)) (alts fr) of
             -- Cannot arise: the peek in 'perform' never builds a 'Choice'
             -- without a live alternative, and 'demote' unbuilds one the moment
             -- its last is taken. Written out rather than left to a
@@ -1096,10 +1102,10 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
             -- **And the pool goes back with it** (MS11 phase 300): the
             -- branch being abandoned may have pushed a base, and the
             -- alternative about to run is one on which that body never ran.
-            Just (r, it') -> Saying (took "backtracking to" fr r) m
+            Just (mt, it') -> Saying (took "backtracking to" fr (matchRule mt)) m
               { development = saved fr
-              , exec  = Exec (ruleBody r) (seedFor (globals m) fr r)
-                             (demote fr r it' : savedBelow fr)
+              , exec  = Exec (ruleBody (matchRule mt)) (seedFor fr mt)
+                             (demote fr (matchRule mt) it' : savedBelow fr)
                              (savedPushes fr)
               }
 
@@ -1138,8 +1144,8 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
 -- and the entry environment they seed; everything else they said was the same
 -- thing written twice, and 'savedEnclosing' (MS4 phase 42) is the field that
 -- made writing it twice cost something.
-choicePoint :: Machine -> Maybe Op.Pattern -> [Instr] -> RuleIter -> Rule -> [Value] -> Env -> Frame
-choicePoint m dest rest it' r vs seed =
+choicePoint :: Machine -> Maybe Op.Pattern -> [Instr] -> RuleIter -> Rule -> Env -> Frame
+choicePoint m dest rest it' r seed =
   Choice
     { resume         = rest
     , resumeEnv      = env (exec m)
@@ -1153,7 +1159,6 @@ choicePoint m dest rest it' r vs seed =
     , chosen         = ruleName r
     , chosenAt       = ruleOrigin r
     , returned       = False
-    , callArgs       = vs
     , entryEnv       = seed
     }
 
@@ -1175,7 +1180,6 @@ demote fr r it'
         , chosen         = ruleName r
         , chosenAt       = ruleOrigin r
         , returned       = False
-        , callArgs       = callArgs fr
         , entryEnv       = entryEnv fr
         }
     -- **@returned = False@ in both branches**: the frame is being /entered/,
@@ -1295,9 +1299,12 @@ perform instr rest m = case operation instr of
       -- belong to the body rather than to a position in it.
       Just (fr, is, e, stk') -> case destination fr of
         Nothing -> Continue m { exec = Exec is e stk' (savedPushes fr) }
-        Just p  -> case Op.matchPattern (globals m) p v of
+        Just p  -> case Op.matchPattern (globals m) (names m) p v of
           Nothing -> failure (BindingDidNotMatch p) m
-          Just bs -> Continue m { exec = Exec is (bs ++ e) stk' (savedPushes fr) }
+          Just (bs, k) -> Continue m
+            { exec  = Exec is (bs ++ e) stk' (savedPushes fr)
+            , names = k
+            }
 
   -- **Hand control over, and stay put** (MS4 phase 45b). @pc@ is deliberately
   -- unchanged — see 'Op.Yield' and 'resumeYield'.
@@ -1330,10 +1337,11 @@ perform instr rest m = case operation instr of
     -- **Two kinds of hole, filled from two walks** (MS5 phase 88). The
     -- position decides which a hole is, so a term splice is looked up as a
     -- term and a name splice as a name; neither can be handed the other.
-    Right (VRaw raw) -> case (,) <$> traverse (filling (env (exec m))) (termSplicesIn raw)
-                                 <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw) of
+    Right (VRaw raw) -> case (,,) <$> traverse (filling (env (exec m))) (termSplicesIn raw)
+                                  <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw)
+                                  <*> traverse (levelFilling (env (exec m))) (levelSplicesIn raw) of
       Left r   -> failure r m
-      Right (ts, ns) -> case resolveWith (grammars m) (ts ++ ns) (globals m) (scope m) contextAt (names m) raw of
+      Right (ts, ns, ls) -> case resolveWith (grammars m) (ts ++ ns ++ ls) (globals m) (scope m) contextAt (names m) raw of
         Left e        -> failure (CannotResolve e) m
         Right (t, n1) -> produce (VTerm t) m { names = n1 }
     Right _          -> failure ExpectedRaw m
@@ -1553,8 +1561,10 @@ perform instr rest m = case operation instr of
   -- shape @?x : S . x@" — anything else is made ready by @attack@ first. So the
   -- shape test is the specification, not a shortcut.
   -- **The name is optional** (MS4 phase 41b). Given, it is the binder's; absent,
-  -- the binder keeps the one written in the type. Read through 'operandIdent',
-  -- so it is checked to be something the printer can print back (§2.6).
+  -- the binder keeps the one written in the type. Read through
+  -- 'operandIdentifier', so it is checked to be something the printer can print
+  -- back (§2.6) — **and so that a token that came with the word is adopted
+  -- rather than minted over** (MS12 phase 353, his ruling of 2026-11-25).
   IntroPi mn -> introOp introduceLambda mn
   IntroLet mn -> introOp introduceLet mn
 
@@ -1592,16 +1602,19 @@ perform instr rest m = case operation instr of
       -- Table 2.7's side condition on @assume@ and @claim@, and a ∀-binder
       -- owes it for the same reason (phase 25f): @Θ ⊢ S : Type@.
       (Left e,  _, n1) -> failure (NotTypeable e) m { names = n1 }
-      (Right _, _, n1) -> case focus (cursor (development m)) of
-        OnComponent (Component.Guess x xi g s) ->
-          case quantifyIn (globals m) contextAt n1 i dom g of
-            Left r -> failure r m { names = n1 }
-            Right (g', n2) -> case replaceComponent (Component.Guess x xi g' s)
-                                                    (cursor (development m)) of
-              Left e    -> failure (CannotMove e) m { names = n2 }
-              Right cur -> Continue (advance m { development = Development cur, names = n2 })
-        OnComponent _ -> failure NotReadyToIntroduce m { names = n1 }
-        _             -> failure (CannotMove NotOnTheSpine) m { names = n1 }
+      (Right _, _, n1)
+        | not (Cursor.atTrailingHole (cursor (development m))) ->
+            failure NotReadyToIntroduce m { names = n1 }
+        | otherwise -> case focus (cursor (development m)) of
+            OnComponent c -> case quantifyIn (globals m) contextAt n1 i dom c of
+              Left r -> failure r m { names = n1 }
+              Right (binder, hole, n2) ->
+                case replaceComponent hole
+                       (insertAbove binder (cursor (development m))) of
+                  Left e    -> failure (CannotMove e) m { names = n2 }
+                  Right cur ->
+                    Continue (advance m { development = Development cur, names = n2 })
+            _ -> failure (CannotMove NotOnTheSpine) m { names = n1 }
 
   -- **Table 2.7's side condition @Θ ⊩ t : S@, enforced** (phase 25b). It was
   -- documented and not checked until this phase, so an ill-typed guess sat in
@@ -1672,9 +1685,9 @@ perform instr rest m = case operation instr of
   -- the callee's environment under the name @hint@. Both are gone: elaboration
   -- is a rule called by name, so it was never a dispatch, and there is no magic
   -- name in the instruction language any more.
-  Dispatch -> case next it of
-    Nothing       -> failure NoRuleMatched m
-    Just (r, it')
+  Dispatch -> case next (globals m) (names m) (cursor (development m)) it of
+    Nothing        -> failure NoRuleMatched m
+    Just (mt, it')
       -- Announced only when the dispatch was a real decision, which is
       -- exactly when a 'Choice' was built. A message marks a choice; where
       -- there was one candidate there was none, and a line per deterministic
@@ -1685,21 +1698,31 @@ perform instr rest m = case operation instr of
       -- runs therefore ends that rule and its value is dropped, which is what
       -- @x = prove@ being refused at load time already said.
       | hasNext it' ->
-          Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                 (entering r (choicePoint m Nothing rest it' r [] []) m { names = names m + 1 })
+          let m' = reserving mt m
+           in Saying ("chose " ++ show (names m') ++ ": "
+                        ++ nameOfRule (matchRule mt))
+                     (entering mt (choicePoint m' Nothing rest it' (matchRule mt) [])
+                               m' { names = names m' + 1 })
       | otherwise ->
-          Continue (entering r (Thena.Engine.Call rest (env (exec m)) Nothing
-                                                  (pushes (exec m)) False) m)
+          Continue (entering mt (Thena.Engine.Call rest (env (exec m)) Nothing
+                                                   (pushes (exec m)) False)
+                             (reserving mt m))
     where
-      it = dispatch (rules m) (globals m) (cursor (development m))
+      it = dispatch (rules m) (globals m) (names m) (cursor (development m))
 
       -- THE PEEK, decided 2026-08-20. A 'Choice' is built only when there
       -- really is another alternative — Prolog's determinism detection.
       -- Otherwise this is an ordinary 'Call', carrying no iterator, no
       -- snapshot and no identifier. The cost is Prolog's own: one more head
       -- match is computed than is used.
-      entering r fr k =
-        k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) (pushes (exec m)) }
+      -- **The match's own environment**, which for a dispatch is empty: a
+      -- dispatch supplies no arguments and 'Thena.Rules.dispatch' skips any
+      -- rule with parameters, so there is nothing for a pattern to have bound.
+      -- It is written as the match's environment all the same, because that is
+      -- the one place an entered body's bindings come from.
+      entering mt fr k =
+        k { exec = Exec (ruleBody (matchRule mt)) (matchEnv mt)
+                     (fr : stack (exec m)) (pushes (exec m)) }
 
   -- **Call by name: the same search as @Dispatch@, over a narrower candidate
   -- list** (§8, phase 23). The user's own framing, and it is why this case now
@@ -1737,44 +1760,54 @@ perform instr rest m = case operation instr of
           -- nothing to bind. §2's ruling is that a refutable pattern that does
           -- not match /fails/ — in a rule that backtracks, which is what he
           -- wanted; in a lambda it is the caller\'s failure, as in Haskell.
-          Right vs | Nothing <- Op.matchPatterns (globals m) ps vs ->
-            failure (PatternDidNotMatch nm (length vs)) m
-          Right vs ->
-            -- **The same frame a rule call pushes**, and deliberately: a closure
-            -- is an anonymous rule, so @return@, backtracking below it and the
-            -- destination all work without a second mechanism.
-            Continue m
-              { exec = Exec body (fromMaybe [] (Op.matchPatterns (globals m) ps vs) ++ cl)
-                         (Thena.Engine.Call rest (env (exec m)) wants
-                                            (pushes (exec m)) False
-                            : stack (exec m))
-                         (pushes (exec m))
-              }
+          -- **One match and not two** (MS12). This tested with one call of
+          -- 'Op.matchPatterns' and then bound with a second call of it on the
+          -- same values, which is the mistake §8 names one level down: once a
+          -- pattern mints, the second call answers an environment differing
+          -- from the tested one in a variable nothing prints.
+          Right vs -> case Op.matchPatterns (globals m) (names m) ps vs of
+            Nothing      -> failure (PatternDidNotMatch nm (length vs)) m
+            Just (bs, k) ->
+              -- **The same frame a rule call pushes**, and deliberately: a
+              -- closure is an anonymous rule, so @return@, backtracking below
+              -- it and the destination all work without a second mechanism.
+              Continue m
+                { exec = Exec body (bs ++ cl)
+                           (Thena.Engine.Call rest (env (exec m)) wants
+                                              (pushes (exec m)) False
+                              : stack (exec m))
+                           (pushes (exec m))
+                , names = k
+                }
 
   Op.Call nm args -> case traverse (operandValue (env (exec m))) args of
     Left e   -> failure e m
-    Right vs -> case next (it vs) of
+    Right vs -> case next (globals m) (names m) (cursor (development m)) (it vs) of
       Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) (rootName nm))) m
-      Just (r, it')
+      Just (mt, it')
         | hasNext it' ->
-            Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                   (entering vs r (choicePoint m wants rest it' r vs []) m { names = names m + 1 })
+            let m' = reserving mt m
+             in Saying ("chose " ++ show (names m') ++ ": "
+                          ++ nameOfRule (matchRule mt))
+                       (entering mt (choicePoint m' wants rest it' (matchRule mt) [])
+                                 m' { names = names m' + 1 })
         | otherwise ->
-            Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) wants
-                                                       (pushes (exec m)) False) m)
+            Continue (entering mt (Thena.Engine.Call rest (env (exec m)) wants
+                                                     (pushes (exec m)) False)
+                               (reserving mt m))
     where
-      it vs = clauses (rules m) (globals m) (cursor (development m)) (rootName nm) vs
+      it vs = clauses (rules m) (globals m) (names m) (cursor (development m))
+                      (rootName nm) vs
 
-      -- The callee's parameters, bound to the arguments. 'clauses' has already
-      -- filtered on arity, so the two lists agree by construction — and the
-      -- frame keeps @vs@ rather than this, because the next clause may name its
-      -- parameters differently ('seedFor').
-      -- @fromMaybe []@ cannot arise: 'clauses' answered with @r@ only because
-      -- 'Op.matchClause' succeeded on these very values. Written this way
-      -- rather than with a partial pattern so that the total function stays
-      -- total, which is what the one-matcher design is for.
-      entering vs r fr k =
-        k { exec = Exec (ruleBody r) (fromMaybe [] (matchClause (globals m) r vs))
+      -- **The callee's parameters, bound to the arguments by the match that
+      -- chose this clause** — not by a second match run here. 'Thena.Rules.clauses'
+      -- had to match to choose at all, and its answer rides in the
+      -- 'Thena.Rules.Match'; running it again would be a different environment
+      -- the moment a pattern mints anything (§8). The @fromMaybe []@ that used
+      -- to stand here, and the proof that it could not arise, are gone with the
+      -- second call.
+      entering mt fr k =
+        k { exec = Exec (ruleBody (matchRule mt)) (matchEnv mt)
                      (fr : stack (exec m)) (pushes (exec m)) }
 
   -- §3.7's elimination tactic (phase 17). The goal is the focus, as with the
@@ -2043,6 +2076,26 @@ perform instr rest m = case operation instr of
     Left e  -> failure e m
     Right g -> produce (VText (nameDotted g)) m
 
+  -- **A name is an identifier that has no token** (MS12 phase 353), so this
+  -- forgets nothing and adds nothing — the word is checked to be one the
+  -- printer can print back, exactly as every other binder's word is, and the
+  -- token is 'Nothing'. 'Op.NameIdent' says why it is written down rather than
+  -- being a coercion inference performs.
+  NameIdent a -> case operandIdent (env (exec m)) a of
+    Left e  -> failure e m
+    Right i -> produce (VIdent (Identifier i Nothing)) m
+
+  -- **The variable an identifier is, as a term** (MS12) — the read that gets a
+  -- rule from a binder it holds to the term mentioning it. 'Op.IdentTerm' says
+  -- why it spends the token rather than resolving the word, and why a word
+  -- carrying none fails instead of minting one.
+  IdentTerm a -> case operandIdentifier (env (exec m)) a of
+    Left e  -> failure e m
+    Right i -> case identToken i of
+      Just v  -> produce (VTerm (Free v)) m
+      Nothing -> case identWord i of
+        Ident w -> failure (WordBindsNothing w) m
+
   Assume name ty -> component Component.Assume name ty
   Claim  name ty -> component Component.Claim  name ty
 
@@ -2126,6 +2179,24 @@ perform instr rest m = case operation instr of
     Left r         -> failure r m
     Right (f', x') -> produce (VTerm (App f' x')) m
 
+  -- **The three binder builders, and the reverse of taking a binder apart**
+  -- (MS12 phase 356). A core pattern that matched a binder minted a token and
+  -- opened the scope at it, so the body a rule is holding has a free variable
+  -- where the binder's occurrences were; @bindingIn@ puts it back under one.
+  --
+  -- **Nothing here touches the development or the focus**, exactly as 'Arrow',
+  -- 'ApplyTo' and 'Op.MakeTrusted' do not: a constructed term is checked where
+  -- it is used.
+  Op.MakeForall x d b -> binding x d b Pi
+
+  Op.MakeLambda x d b -> binding x d b Lam
+
+  Op.MakeLet x v t b -> case (,,) <$> term v <*> term t <*> term b of
+    Left r              -> failure r m
+    Right (v', t', b')  -> case identOf x of
+      Left r   -> failure r m
+      Right i  -> bound i b' (\w n1 sc -> produce (VTerm (Let w v' t' sc)) m { names = n1 })
+
   -- **@trusted claimed actual body@, built and not checked** (MS8 phase 150),
   -- exactly as 'Arrow' and 'ApplyTo' are: whether the claim is plausible is not
   -- a question anything asks, which is the feature, and whether @actual@
@@ -2153,10 +2224,9 @@ perform instr rest m = case operation instr of
       | k >= 0      -> produce (VLevel (levelOfNat k)) m
     Right _         -> failure ExpectedInt m
 
-  UniverseAt a -> case operandValue (env (exec m)) a of
-    Left e           -> failure e m
-    Right (VLevel l) -> produce (VTerm (Universe l)) m
-    Right _          -> failure ExpectedLevel m
+  UniverseAt a -> case operandLevel (env (exec m)) a of
+    Left e  -> failure e m
+    Right l -> produce (VTerm (Universe l)) m
 
   -- **One less, and that is the whole of the arithmetic** (MS12 phase 347).
   -- Total: @one-less 0@ is @-1@, because the condition belongs in a head and
@@ -2818,6 +2888,26 @@ perform instr rest m = case operation instr of
     declaredNameOf o = declaredIn m <$> nameOf o
     wordOf  = operandWord (env (exec m))
     term    = operandTerm (env (exec m))
+    identOf = operandIdentifier (env (exec m))
+
+    -- **Putting a body back under a binder** (MS12 phase 356), shared by the
+    -- three builders: the identifier's token is the variable to abstract out,
+    -- and 'Thena.Core.Term.close' is the abstraction no op exposed until here.
+    --
+    -- **A word carrying no token binds nothing.** There is no variable to
+    -- abstract, so the binder stands over a body that does not mention it —
+    -- which is the scope 'Arrow' builds for a domain it has no word for, and
+    -- 'Arrow' mints its variable here for the same reason: 'Var' has no other
+    -- introduction form.
+    bound i b k = case identToken i of
+      Just v  -> k (identWord i) (names m) (close v b)
+      Nothing -> let (v, n1) = fresh (names m) in k (identWord i) n1 (close v b)
+
+    binding x d b con = case (,) <$> term d <*> term b of
+      Left r         -> failure r m
+      Right (d', b') -> case identOf x of
+        Left r  -> failure r m
+        Right i -> bound i b' (\w n1 sc -> produce (VTerm (con w d' sc)) m { names = n1 })
 
     -- **The three readers' shared plumbing** (MS9 phase 176). Each takes the
     -- operand that names a declaration and hands the declaration to its
@@ -2871,9 +2961,16 @@ perform instr rest m = case operation instr of
     -- reports its subgoals /and/ hands back how many equations they carry.
     producing k v m' = case instr of
       Do _ -> k (advance m')
-      Bind p _ _ -> case Op.matchPattern (globals m) p v of
-        Nothing -> failure (BindingDidNotMatch p) m'
-        Just bs -> k (advance m' { exec = (exec m') { env = bs ++ env (exec m') } })
+      -- **The counter comes from @m'@ and not from @m@**: the op that produced
+      -- this value may have minted (and 'navigate' below always does), so a
+      -- match that mints must begin after it rather than from where the
+      -- instruction started.
+      Bind p _ _ -> case Op.matchPattern (globals m) (names m') p v of
+        Nothing      -> failure (BindingDidNotMatch p) m'
+        Just (bs, k') -> k (advance m'
+          { exec  = (exec m') { env = bs ++ env (exec m') }
+          , names = k'
+          })
 
     -- 'Assume' and 'Claim' differ only in which component they build, and both
     -- produce the variable they bound: §7.3's sketch reads @?x <- claim S@.
@@ -3056,31 +3153,31 @@ perform instr rest m = case operation instr of
           Right cur -> Continue (advance m { development = Development cur, names = n1 })
       _ -> failure (CannotMove NotOnTheSpine) m
 
-    -- 'onHole' for an op that also answers with something. Written beside it
-    -- rather than in terms of it because the value has to be produced /after/
-    -- the component is replaced, and 'produce' is what ends the instruction.
-    onHoleProducing f = case focus (cursor (development m)) of
-      OnComponent c -> case f c of
-        Left r            -> failure r m
-        Right (c', v, n1) -> case replaceComponent c' (cursor (development m)) of
-          Left e    -> failure (CannotMove e) m
-          Right cur ->
-            produce (VTerm v) m { development = Development cur, names = n1 }
-      _ -> failure (CannotMove NotOnTheSpine) m
-
     -- 'Op.IntroPi' and 'Op.IntroLet' differ in exactly one thing — which of
     -- table 2.8's introduction rules is on offer (MS4 phase 58) — so the op is
     -- written once and takes it.
-    -- **The hole it opened is its answer** (MS8), so a clause can @goto@ it and
-    -- work in the scope the binder just created. 'onHoleProducing' is 'onHole'
-    -- with that one difference.
-    introOp rule mn = case traverse (operandIdent (env (exec m))) mn of
+    introOp rule mn = case traverse (operandIdentifier (env (exec m))) mn of
       Left r   -> failure r m
-      Right nm -> onHoleProducing $ \c -> case c of
-        Component.Guess x i g ty ->
-          (\(g', h, n1) -> (Component.Guess x i g' ty, Free h, n1))
-            <$> rule (globals m) contextAt (names m) nm g
-        _ -> Left NotReadyToIntroduce
+      Right nm -> openingBinder (rule (globals m) contextAt (names m) nm)
+
+    -- **One binder above the focused hole, and the hole retyped in place**
+    -- (MS12 phase 357, his ruling of 2026-11-26). The shape test is
+    -- 'Cursor.atTrailingHole' and the cursor does not move, so the op answers
+    -- the hole it was asked at.
+    openingBinder f
+      | not (Cursor.atTrailingHole (cursor (development m))) =
+          failure NotReadyToIntroduce m
+      | otherwise = case focus (cursor (development m)) of
+          OnComponent c -> case f c of
+            Left r -> failure r m
+            Right (binder, hole, n1) ->
+              case replaceComponent hole
+                     (insertAbove binder (cursor (development m))) of
+                Left e    -> failure (CannotMove e) m
+                Right cur ->
+                  produce (VTerm (Free (variableOf hole)))
+                          m { development = Development cur, names = n1 }
+          _ -> failure (CannotMove NotOnTheSpine) m
 
     component build name ty =
       case (,) <$> operandIdent (env (exec m)) name <*> term ty of
@@ -3308,6 +3405,14 @@ operandTerm e o = operandValue e o >>= \v -> case v of
   VTerm t -> Right t
   _                  -> Left ExpectedTerm
 
+-- | …and only a 'VLevel' is a level (MS12 phase 361). The reader @universe-at@
+-- has always done by hand, named so that a level argument's splice refuses
+-- exactly as it does.
+operandLevel :: Env -> Operand -> Either FailReason Level
+operandLevel e o = operandValue e o >>= \v -> case v of
+  VLevel l -> Right l
+  _        -> Left ExpectedLevel
+
 -- | One @${x}@ hole, paired with the term that fills it (MS5 phase 81).
 --
 -- **Shaped like 'operandTerm' and refusing for the same reason**: a hole stands
@@ -3324,6 +3429,16 @@ filling e x = (,) x . FillTerm <$> operandTerm e (Ref x)
 -- scope has no namespaces for a path to name anything in.
 nameFilling :: Env -> String -> Either FailReason (String, Filling)
 nameFilling e x = (,) x . FillName . Ident <$> operandWord e (Ref x)
+
+-- | …and one that stands at a LEVEL argument (MS12 phase 361, @~bkrvn@).
+--
+-- **The third and last position a written term has**, and the level rides in
+-- whole: @core`Empty {${l}}`@ is a term a rule can write at a level it could
+-- not name, which is what the item was about. The refusal is the ordinary
+-- @ExpectedLevel@ one, so a binding that is not a level fails here the way it
+-- fails at @universe-at@.
+levelFilling :: Env -> String -> Either FailReason (String, Filling)
+levelFilling e x = (,) x . FillLevel <$> operandLevel e (Ref x)
 
 -- | An unelaborated tree and the place it sits at (§7.2). Shaped like
 -- 'operandText' and 'operandTerm', and phase 17b's reason for existing at all:
@@ -3364,6 +3479,29 @@ operandIdent e o = do
   s <- operandWord e o
   if isIdentifier s then Right (Ident s) else Left (NotAnIdentifier s)
 
+-- | …and the identity of a binder: that word, with the token it stands for
+-- when there is one (MS12 phase 353).
+--
+-- **The second half of his ruling of 2026-11-25**, /one @intro@, and a written
+-- literal may stand at an identifier/ — @.claude\/RULINGS.md@. The widening is
+-- in two places and this is the run-time one: 'Thena.Instral.Infer.settleText'
+-- is where a written @\"…\"@ is admitted at the type, and here is where the
+-- text it really is becomes a word with no token.
+--
+-- **A 'Op.VName' is refused rather than rooted.** Inference admits a
+-- /literal/ at this type and not a variable, so a name arriving here was
+-- written as a path — and a path names nothing in a development's own scope
+-- ('operandWord'). The conversion from a 'Thena.Instral.Type.TName' /variable/
+-- is @name-ident@, written down.
+operandIdentifier :: Env -> Operand -> Either FailReason Identifier
+operandIdentifier e o = operandValue e o >>= \v -> case v of
+  VIdent i -> Right i
+  VText s
+    | '.' `elem` s    -> Left (DottedTextName s)
+    | isIdentifier s  -> Right (Identifier (Ident s) Nothing)
+    | otherwise       -> Left (NotAnIdentifier s)
+  _ -> Left ExpectedIdent
+
 -- | Which component stopped 'extract'. Purely a translation from
 -- "Thena.Development.Partial"\'s local 'Impure' into the shared vocabulary —
 -- 'Thena.Errors' may not import @Partial@ (it sits below @Core@), so the
@@ -3374,23 +3512,30 @@ whereImpure i = case i of
   StillAGuess x n    -> GuessOf x n
   StillConstrained _ -> ConstraintAt 1
 
--- | Table 2.8's @intro-∀@ and @intro-let@, inside a guess.
+-- | Table 2.8's @intro-∀@ and @intro-let@, **at the hole the cursor stands on**.
 --
 -- The thesis's own note is the specification: the introduction tactics "only
--- replace constructions of the shape @?x : S . x@". **Within a guess body there
--- is at most one such position, and it is the bottom one** — everything above
--- it is an assumption, a definition or a guess, none of which has that shape.
--- So "find the shape" and "walk to the end of the chain" are the same
--- traversal, and there is nothing to disambiguate.
+-- replace constructions of the shape @?x : S . x@", and
+-- 'Thena.Development.Cursor.atTrailingHole' is that test asked of the position.
+-- So this does no searching at all — it is handed the component it rewrites, and
+-- Γ is the context at the focus, which already holds every binder above it.
 --
--- Walking rather than matching the body directly is what lets introductions
--- accumulate: after one @intro@ the body is @λ A : Type₀ . ? h : A -> A . h@,
--- and the next @intro@ has to reach past the λ it just made. Γ grows as it
--- goes, because the hole's type is whnf'd where the hole actually is.
+-- **The hole keeps its own variable, and that is what table 2.8 means by moving
+-- a hole through its type**: @?x : ∀y:S. T . x@ becomes @λy:S. ?x : T . x@, the
+-- same @x@ at a smaller type. So an introduction is one binder inserted above
+-- the focus and one type rewritten in place, and the cursor does not move — it
+-- is already standing on what is left to prove.
 --
--- It stays inside the guess, and that is why @attack@ exists: introducing at
--- the top of the whole development would change what the development proves,
--- whereas inside a guess the guess's own type absorbs the binders.
+-- **It walked the guess's chain until MS12 phase 357**, carrying Γ down by hand,
+-- which is 'Thena.Development.Cursor'\'s own @Γ_P@ rebuilt because the cursor was
+-- somewhere else. That is what divorced the question a rule asks from the place
+-- an instruction acts, and it is his ruling of 2026-11-26 that it goes.
+--
+-- @attack@ is still what makes a hole ready: a binder inserted above a hole of
+-- the development itself would change what the development proves, and a guess's
+-- own type is what absorbs the binders. What changed is that @attack@ leaves the
+-- cursor on the hole it opened — @prim-attack ; into@ in the shipped base — so
+-- the introductions that follow are positional.
 -- | Table 2.8's @intro-∀@ — Brady's @LAMBDA@, and it **normalises** the goal.
 --
 -- **What a λ means, said by the caller rather than read off the goal**
@@ -3403,8 +3548,8 @@ whereImpure i = case i of
 -- local one, so the @let@ survives and 'introduceLet' would eat the caller's
 -- binder on it.
 introduceLambda
-  :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
-  -> Either FailReason (Partial, Var, Int)
+  :: GlobalEnv -> Context -> Int -> Maybe Identifier -> Component.Component
+  -> Either FailReason (Component.Component, Component.Component, Int)
 introduceLambda = introducing FunctionOnly
 
 -- | Table 2.8's @intro-let@ — Brady's @LET@, and it reads the type **as
@@ -3419,8 +3564,8 @@ introduceLambda = introducing FunctionOnly
 -- @T@ /in terms of @y@/. Reducing gives @T[s\/y]@, which is the same type and
 -- an unreadable goal. This rule is how a proof keeps the author's name.
 introduceLet
-  :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
-  -> Either FailReason (Partial, Var, Int)
+  :: GlobalEnv -> Context -> Int -> Maybe Identifier -> Component.Component
+  -> Either FailReason (Component.Component, Component.Component, Int)
 introduceLet = introducing LetOnly
 
 -- | Which of table 2.8's two introduction rules this is.
@@ -3437,29 +3582,28 @@ data IntroRule
   = FunctionOnly  -- ^ @prim-lambda@
   | LetOnly       -- ^ @prim-let@
 
--- **It answers with the hole it opened** as well as the rewritten chain. The
--- binder's own variable is not interesting to a caller — the name is what a
--- clause wrote and @resolve-name@ finds it — but the hole for what is left of
--- the goal cannot be reached any other way: it is not the focus, @goto@ takes a
--- variable, and counting @along@s from the guess does not scale past one
--- binder. It is what lets the annotated λ binder be checked /inside/ the binder
--- it belongs to.
+-- **It answers the hole for what is left**, which is now the hole it was asked
+-- at: the same variable, at the type under the binder. A clause that wants to
+-- work in the scope the binder just created needs no @goto@ at all — it is
+-- standing there — and the answer is kept because a caller threading one hole
+-- through a recursion over binders reads it (@intro-binders@ is that caller).
+-- The binder's own variable is not interesting to a caller: the name is what a
+-- clause wrote and @resolve-name@ finds it.
 introducing
-  :: IntroRule -> GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
-  -> Either FailReason (Partial, Var, Int)
-introducing rule env ctx n nm p = case p of
-  Under (Component.Claim v i s) (Trailing (Free v'))
-    | v == v' -> case s of
-        Let j val sty cod
-          | LetOnly <- rule ->
-              Right (opened (Component.Define y (named j) val sty) (instantiate (Free y) cod))
-        -- @intro-∀@ reduces first, because a goal typed @id Type₀ (Nat -> Nat)@
-        -- is a Π and must be introduced (§8's own example, from the other side).
-        _ | FunctionOnly <- rule -> case whnf env ctx s of
-              Pi j dom cod -> Right (opened (Component.Assume y (named j) dom) (instantiate (Free y) cod))
-              _            -> Left NothingToIntroduce
-          | otherwise -> Left NothingToIntroduce
-      where
+  :: IntroRule -> GlobalEnv -> Context -> Int -> Maybe Identifier -> Component.Component
+  -> Either FailReason (Component.Component, Component.Component, Int)
+introducing rule env ctx n nm c = case c of
+  Component.Claim v i s -> case s of
+    Let j val sty cod
+      | LetOnly <- rule ->
+          Right (opened (Component.Define y (named j) val sty) (instantiate (Free y) cod))
+    -- @intro-∀@ reduces first, because a goal typed @id Type₀ (Nat -> Nat)@
+    -- is a Π and must be introduced (§8's own example, from the other side).
+    _ | FunctionOnly <- rule -> case whnf env ctx s of
+          Pi j dom cod -> Right (opened (Component.Assume y (named j) dom) (instantiate (Free y) cod))
+          _            -> Left NothingToIntroduce
+      | otherwise -> Left NothingToIntroduce
+   where
         -- The caller's name if there is one, the type's otherwise — and in
         -- that second case made **free in the context the binder lands in**,
         -- which is the word being minted where the type has none and numbered
@@ -3467,31 +3611,63 @@ introducing rule env ctx n nm p = case p of
         -- 2026-11-20**, /THERE IS ONE NAME/, part one; 'writableIn' is the
         -- whole of it and says why.
         --
-        -- **The op can tell the two apart and that is why this is the place.**
-        -- @nm@ is 'Nothing' exactly when the user typed a bare @intro@, so the
-        -- word is a hint copied out of a closed term and not something they
-        -- wrote; a word they wrote is theirs, taken or not (MS4 phase 41f).
-        named j = maybe (writableIn ctx j) id nm
-        (y, n1) = fresh n
-        (h, n2) = fresh n1
-        opened binder rest =
-          ( Under binder (Under (Component.Claim h i rest) (Trailing (Free h)))
-          , h
-          , n2
-          )
-  -- **The rule is threaded, not dropped.** Reverting to a both-rules reading
-  -- here would apply to every binder after the first, which is where a @let@
-  -- one binder down actually bites.
-  Under c rest ->
-    (\(rest', h, n1) -> (Under c rest', h, n1))
-      <$> introducing rule env (ctx ++ [Component.forget c]) n nm rest
+        -- **The op can tell written from read and that is why this is the
+        -- place.** @nm@ is 'Nothing' exactly when the user typed a bare
+        -- @intro@, so the word is a hint copied out of a closed term and not
+        -- something they wrote; a word they wrote is theirs, taken or not (MS4
+        -- phase 41f). An argument that carries a token was /also/ copied out of
+        -- a term, which is 'readOff' below.
+        named j = maybe (writableIn ctx j) readOff nm
+        -- **A WORD THAT CAME OFF A TERM IS MADE FREE, WHOEVER HANDED IT OVER**
+        -- — his ruling of 2026-11-26, @~2n5tn@. A @core\`∀ (${x} : ${T}) ->
+        -- ${E}\`@ pattern takes the word off the goal's ∀-binder, which is
+        -- where a bare @intro@ takes it from too, and then hands it over as an
+        -- /argument/, which is where a word the author wrote arrives. The
+        -- provenance decides, not the position: both are the system supplying a
+        -- word, so both are free in the scope the binder lands in.
+        --
+        -- **The token is the test for provenance, and a sound one.** Nothing in
+        -- @instral@ can attach a token to a word a rule chose — there is no op
+        -- that changes the word in an identifier — so a token is present
+        -- exactly when the word was read off a term. @intro \"q\"@ and
+        -- @name-ident n@ both carry none and are used as written, which is MS4
+        -- phase 41f and is not touched.
+        readOff ident = case identToken ident of
+          Just _  -> writableIn ctx (identWord ident)
+          Nothing -> identWord ident
+        -- **A TOKEN THAT CAME WITH THE WORD IS ADOPTED, NOT MINTED OVER** —
+        -- his ruling of 2026-11-25, /one @intro@, and a written literal may
+        -- stand at an identifier/ (MS12 phase 353). The caller is holding a
+        -- term that already points at that token — the inside of a binder a
+        -- @core\`∀ (${x} : ${T}) -> ${E}\`@ pattern opened — and @Eq@ on
+        -- 'Thena.Core.Term.Core' compares tokens and ignores words, so a
+        -- second mint would leave the context entry and the rule's own term
+        -- naming different binders with the same word printed on both.
+        --
+        -- **Adopting does not advance the counter**, because the mint that
+        -- produced the token advanced it already: the match that opened the
+        -- binder threads the counter for exactly this reason (§7.6, MS12
+        -- phase 351). Minting again here would be the second token, which is
+        -- the whole defect.
+        --
+        -- **No token means mint**, which is what a bare @intro@ and
+        -- @intro \"A\"@ have always done.
+        (y, n1) = case nm >>= identToken of
+          Just adopted -> (adopted, n)
+          Nothing      -> fresh n
+        -- **No fresh hole.** The hole the cursor is on keeps its variable and
+        -- its word, and only its type moves under the binder — table 2.8's
+        -- @?x : ∀y:S. T . x@ ⇒ @λy:S. ?x : T . x@. It minted a second hole per
+        -- binder until MS12 phase 357, which is why a two-binder proof used to
+        -- name its goal @t11@.
+        opened binder rest = (binder, Component.Claim v i rest, n1)
   _ -> Left NotReadyToIntroduce
 
 -- | Open a ∀-binder where 'introduceLambda' opens a λ-binder (MS4 phase 41f).
 --
 -- The same shape test — table 2.8's /"only replace constructions of the shape
--- @?x : S . x@"/ — and the same walk down the chain. Two differences, and both
--- are what a Π is:
+-- @?x : S . x@"/ — and the same position: it acts on the hole the cursor stands
+-- on. Two differences, and both are what a Π is:
 --
 --   * **the domain is given, not read off the goal.** @intro@ takes the type
 --     from the Π it is moving through; there is no Π here yet, so the caller
@@ -3503,24 +3679,19 @@ introducing rule env ctx n nm p = case p of
 --     @Type₁@. The relation between them is /owed/, by
 --     "Thena.Development.Validate"'s @peeled@, and not forced here.
 quantifyIn
-  :: GlobalEnv -> Context -> Int -> Ident -> Core -> Partial
-  -> Either FailReason (Partial, Int)
-quantifyIn env ctx n i dom p = case p of
-  Under (Component.Claim v ci s) (Trailing (Free v'))
-    | v == v' -> case whnf env ctx s of
-        Universe _ ->
-          let (y, n1) = fresh n
-              (h, n2) = fresh n1
-              (l, n3) = freshLevelMeta n2
-           in Right
-                ( Under (Component.Quantify y i dom)
-                    (Under (Component.Claim h ci (Universe (LVar l))) (Trailing (Free h)))
-                , n3
-                )
-        _ -> Left GoalIsNotAUniverse
-  Under c rest ->
-    (\(rest', n1) -> (Under c rest', n1))
-      <$> quantifyIn env (ctx ++ [Component.forget c]) n i dom rest
+  :: GlobalEnv -> Context -> Int -> Ident -> Core -> Component.Component
+  -> Either FailReason (Component.Component, Component.Component, Int)
+quantifyIn env ctx n i dom c = case c of
+  Component.Claim v ci s -> case whnf env ctx s of
+    Universe _ ->
+      let (y, n1) = fresh n
+          (l, n2) = freshLevelMeta n1
+       in Right
+            ( Component.Quantify y i dom
+            , Component.Claim v ci (Universe (LVar l))
+            , n2
+            )
+    _ -> Left GoalIsNotAUniverse
   _ -> Left NotReadyToIntroduce
 
 -- --------------------------------------------------------------------------
@@ -3560,7 +3731,7 @@ choicePoints :: Machine -> [ChoicePoint]
 choicePoints m =
   [ ChoicePoint (choiceId fr)
                 (ChoiceAlt (chosen fr) (chosenAt fr))
-                [ ChoiceAlt (ruleName r) (ruleOrigin r) | r <- drainIter (alts fr) ]
+                [ ChoiceAlt (ruleName r) (ruleOrigin r) | r <- iterRules (alts fr) ]
   | fr@Choice {} <- stack (exec m)
   ]
 
@@ -3568,11 +3739,6 @@ choicePoints m =
 -- by the time it leaves here — the same bargain 'unifyMessage' already struck.
 nameOfRule :: Rule -> String
 nameOfRule = nameDotted . ruleName
-
-drainIter :: RuleIter -> [Rule]
-drainIter it = case next it of
-  Nothing        -> []
-  Just (r, rest) -> r : drainIter rest
 
 -- | Why @retry@ could not.
 --
@@ -3598,16 +3764,39 @@ data RetryError = NoChoicePoint | UnknownChoice Int
 --
 -- **One expression covers a dispatch and a call**, which is the whole reason
 -- @Call@ could stop being a separate mechanism. A dispatch has no arguments and
--- 'Thena.Rules.dispatch' skips parameterised rules, so this is just its
--- 'entryEnv' — the hint, or nothing. A call carries no hint and binds its
--- arguments to the clause's own parameters by MATCHING them (MS5 phase 82),
--- which 'Thena.Rules.clauses' has already done once to choose this clause.
+-- 'Thena.Rules.dispatch' skips parameterised rules, so an alternative of one
+-- adds nothing to the frame's 'entryEnv' — the hint, or nothing. A call carries
+-- no hint and binds its arguments to the clause's own parameters by MATCHING
+-- them (MS5 phase 82), which 'Thena.Rules.clauses' did once to choose this
+-- clause at all.
 --
--- **It is the same 'Thena.Instral.Ops.matchClause' call**, and that is the point: the
--- clause that was chosen and the environment it runs in cannot disagree about
--- what a pattern bound. Before patterns both were @zip@ and agreeing was free.
-seedFor :: GlobalEnv -> Frame -> Rule -> Env
-seedFor env fr r = entryEnv fr ++ fromMaybe [] (matchClause env r (callArgs fr))
+-- **It is that match's own answer and not a second call of it** (MS12, §8).
+-- This used to re-run 'Thena.Instral.Ops.matchClause' on the arguments the frame had
+-- kept, which was free only while matching is a function of its inputs: a
+-- pattern that opens a binder mints a token, so the second run answers an
+-- environment differing from the first in a variable nothing prints — and
+-- keeping those two from disagreeing about what a pattern bound is the whole
+-- reason this function exists. Carrying the match removes the disagreement
+-- rather than defending against it.
+seedFor :: Frame -> Match -> Env
+seedFor fr mt = entryEnv fr ++ matchEnv mt
+
+-- | __The tokens the chosen match drew become the session's__ (MS12).
+--
+-- A search matches every candidate from the counter it was handed
+-- ('Thena.Rules.matchNames'), so the counter does not move until one candidate
+-- is taken — and this is the taking. Written out rather than folded into
+-- @entering@ because a choice point's identifier is drawn from the same
+-- counter, and it has to be drawn /after/ the match it is forking on.
+--
+-- **Only the first alternative of a choice point goes through this**, and an
+-- alternative reached by backtracking does not need it: 'Thena.Rules.next'
+-- matches that clause again from the counter as it stands when it is taken
+-- (@~thwhg@, his ruling of 2026-11-26), so the match it arrives with is already
+-- drawn from ahead of the session's counter rather than from behind it. 'names'
+-- does not go backwards (§7.4) and now nothing asks it to.
+reserving :: Match -> Machine -> Machine
+reserving mt k = k { names = matchNames mt }
 
 retryFrom :: Maybe Int -> Machine -> Either RetryError (Machine, String)
 retryFrom target m = go (0 :: Int) (stack (exec m))
@@ -3616,12 +3805,13 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
 
     go _ [] = Left missing
     go popped (fr : stk) = case fr of
-      Choice {} | maybe True (== choiceId fr) target -> case next (alts fr) of
-        Nothing       -> Left missing      -- cannot arise; see 'demote'
-        Just (r, it') -> Right
+      Choice {} | maybe True (== choiceId fr) target ->
+        case next (globals m) (names m) (cursor (saved fr)) (alts fr) of
+        Nothing        -> Left missing     -- cannot arise; see 'demote'
+        Just (mt, it') -> Right
           ( m { development = saved fr
-              , exec  = Exec (ruleBody r) (seedFor (globals m) fr r)
-                             (demote fr r it' : savedBelow fr)
+              , exec  = Exec (ruleBody (matchRule mt)) (seedFor fr mt)
+                             (demote fr (matchRule mt) it' : savedBelow fr)
                              (savedPushes fr)
                 -- **'savedBelow' and not @stk@** (MS12), so that
                 -- this really is 'failure''s unwind with a target instead of
@@ -3647,7 +3837,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
                 -- the floor moves to exactly this frame's depth and no further.
               , lineFloor = length stk
               }
-          , note (choiceId fr) (ruleName r) popped
+          , note (choiceId fr) (ruleName (matchRule mt)) popped
           )
       _ -> go (popped + 1) stk
 

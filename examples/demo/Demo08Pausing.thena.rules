@@ -38,5 +38,5 @@ rule base pausing where
 -- There is no `Nat` in the prelude; declare one, or consult this alongside a
 -- module that has the datatype you want to use.
 
-rule elaborate t :- when focus-is-hole (surface-is-placeholder t)
+rule elaborate t at ? _ : _ :- when (surface-is-placeholder t)
   do yield "a placeholder: fill it and `yield` to carry on"

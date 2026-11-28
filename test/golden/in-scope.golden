@@ -19,7 +19,7 @@ context
 type
   B
 thena spine> try-in-scope
-chose 19: any-of
+chose 15: any-of
 thena spine> :show
   let ? second : ∀ (A : Type₀) (B : Type₀) -> A -> B -> B ≐ (
     λ (A : Type₀) ->
@@ -33,7 +33,7 @@ thena spine> :show
   ) in
   second
 thena spine> :choices
-19  any-of (standard.thena.rules:499)   untried: any-of (standard.thena.rules:500)
+15  any-of (standard.thena.rules:557)   untried: any-of (standard.thena.rules:558)
 thena spine> :abandon
 abandoned second
 thena spine> :theorem first : ∀ (A : Type₀) -> ∀ (B : Type₀) -> A -> B -> A
@@ -45,9 +45,9 @@ thena spine> intro
 thena spine> intro
 thena spine> goto first1
 thena spine> try-in-scope
-chose 39: any-of
-backtracking to 39: any-of
-chose 40: any-of
+chose 31: any-of
+backtracking to 31: any-of
+chose 32: any-of
 thena spine> :show
   let ? first : ∀ (A : Type₀) (B : Type₀) -> A -> B -> A ≐ (
     λ (A : Type₀) ->

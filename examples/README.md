@@ -64,6 +64,7 @@ be imported nor state what it imports; that is why none of them does now.
 | `DeterminacyPatterns.thena` | The same theorem, with **every one of its lemmas** by dependent pattern matching — no `elim` and no no-confusion anywhere. Its header says why a recursion across a generalising split is written exactly like any other one, and nothing in it binds an induction hypothesis. Read it beside `DeterminacySurface.thena` |
 | `Tier0.thena` | MS4's first checkpoint: a datatype, a function by elimination, a theorem |
 | `DependentIndex.thena.script`, `Products.thena.script` | REPL scripts: elimination over an indexed family, and no-confusion |
+| `SearchReadyInduction.thena.script` | **A rule that reads its own goal.** `by-induction` in the shipped base is handed nothing: its head matches that the goal is a universal, names the parts, introduces the binder and inducts on that parameter. Read it beside `SplitAtAHole.thena.script`, which makes the same split by hand and names the scrutinee |
 | `ChoicePoints.thena.rules` | What a choice point resumes into |
 | `Trying.thena` | A scratch module, with a `Bool` and two commented-out attempts |
 

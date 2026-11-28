@@ -223,6 +223,15 @@ data FaultKind
     -- ^ a name the checker does not know: a global, a datatype, a variable.
     -- **Not 'NotInScope'**, which is the surface's answer; this one is the
     -- kernel meeting a name that resolution already accepted.
+  | WordBindsNothing
+    -- ^ a rule asked for the variable an identifier is and it carries no
+    -- binder — @ident-term@ on a word and nothing more (MS12). 'TheWord' is
+    -- the word.
+    --
+    -- **Not 'NotInScope'.** Nothing was looked up: an identifier's token /is/
+    -- its identity, so a word without one names no variable anywhere, and
+    -- pointing the author at scope would send them to look for a binding that
+    -- a different spelling would not have found either.
     -- * Kinds and counts
   | WrongKindOfThing
     -- ^ something of another kind was wanted. 'TheWanted' says which.
@@ -433,6 +442,15 @@ data Role
   | TheField
   | TheIndex
   | TheParameter
+  | TheFocus
+    -- ^ __a position of a clause's @at@ pattern__ (MS12 phase 358, @~9j34x@),
+    -- as an 'ACount' counting from 1 — the binder, then the component's
+    -- sub-terms, in writing order.
+    --
+    -- **Its own role and not 'TheParameter'**: the focus is the other half of a
+    -- head, so a pane that said /parameter 2/ for a fault in @at@ would point
+    -- the author at a part of the line that is not the one with the mistake in
+    -- it. The same argument 'Thena.Instral.Infer.InFocus' is written on.
   | TheMethod
   | TheMotive
   | TheConstructor
@@ -802,6 +820,8 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
         fault BlockShapeWrong [is TheInstruction (ALine (i + 1)), is TheWord (AName w)]
       E.ExpectedText -> wanting SomeText
       E.ExpectedName -> wanting AnIdentifier
+      E.ExpectedIdent -> wanting AnIdentifier
+      E.WordBindsNothing w -> fault WordBindsNothing [is TheWord (AName w)]
       E.NoSuchNamespace n -> fault NoSuchNamespace [is TheNamespace (AName n)]
       E.AmbiguousName n gs ->
         fault NameAmbiguous [is TheWord (AName n), is TheCandidates (ANames gs)]
@@ -1470,6 +1490,27 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
       R.BadTestOperands g w -> fault BlockShapeWrong [is TheRule (name g), is TheWord (AName w)]
       R.BadPattern g w ->
         fault BlockShapeWrong [is TheRule (name g), is ThePattern (APattern w)]
+      -- **A core pattern's three** (MS12 phase 352, @~9j34x@). The form it does
+      -- not read is the pattern itself as far as a pane is concerned — what was
+      -- written, in the position a pattern stands — and the two name failures
+      -- are the ordinary ones, because a word in a core pattern is resolved
+      -- exactly as a word in a term is.
+      R.CorePatternForm g what ->
+        fault BlockShapeWrong [is TheRule (name g), is ThePattern (APattern what)]
+      -- **And the one an @at@ pattern raises** (MS12 phase 358): a position
+      -- written with something it does not take. As far as a pane is concerned
+      -- it is the same shape as a core pattern's form — the rule, and what was
+      -- written where a pattern stands.
+      R.FocusPatternForm g what ->
+        fault BlockShapeWrong [is TheRule (name g), is ThePattern (APattern what)]
+      R.CorePatternNotInScope g w ->
+        fault NotInScope [is TheRule (name g), is TheWord (AName w)]
+      R.CorePatternAmbiguous g w gs ->
+        fault NameAmbiguous
+          [ is TheRule (name g)
+          , is TheWord (AName w)
+          , is TheCandidates (ANames (map (spelledIn sp) gs))
+          ]
       R.RepeatedInPattern g n -> fault NameRepeated [is TheRule (name g), is TheWord (AName n)]
       R.ReservedName g n -> fault NameReserved [is TheRule (name g), is TheWord (AName n)]
       R.BadOperands g i w -> lineOf BlockShapeWrong g i [is TheWord (AName w)]
@@ -1566,6 +1607,7 @@ displayRefused sp grammars budget env binders counter here refused = case refuse
       I.InHead g i -> [is TheRule (name g), is TheTest (ALine (i + 1))]
       I.InBody g i -> [is TheRule (name g), is TheInstruction (ALine (i + 1))]
       I.InPattern g i -> [is TheRule (name g), is TheParameter (ACount (i + 1))]
+      I.InFocus g i -> [is TheRule (name g), is TheFocus (ACount (i + 1))]
       I.InSignature g a -> [is TheRule (name g), is TheCount (ACount a)]
 
     -- ** A warning

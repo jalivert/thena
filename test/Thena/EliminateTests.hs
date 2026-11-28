@@ -233,8 +233,8 @@ dependentMotives =
             concatMap opening (eqDecl : decls)
               ++ [":theorem t : " ++ goal, "attack"]
               ++ replicate intros "intro"
-              ++ ["into"]
-              ++ replicate intros "along"
+              -- No navigation after the intros: each leaves the cursor on what
+              -- is left to prove (MS12 phase 357).
               ++ ["eliminate-core core`x`", ":revalidate"]
           l = loadSource withRules (unlines script)
        in case loadedError l of
@@ -476,8 +476,8 @@ friendlyTests =
           (ctx, n1) = contextOf env n0
             [("m", "Nat"), ("b", "Below.Below (succ m) (fz m)")]
        in map (rendered ctx . thirdOf') (elimMethods (run "tiedDep" env ctx n1 "Nat" "b"))
-            @?= [ "∀ (m : Nat.Nat) (q : Eq.Eq {0} Nat.Nat (Nat.succ m) (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) ((Nat.succ m) (Nat.succ m†)) q) (Fin.fz m)) (Fin.fz m†) -> Nat.Nat"
-                , "∀ (m : Nat.Nat) (j : Fin.Fin m) -> Below.Below m j -> (∀ (q : Eq.Eq {0} Nat.Nat m (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) (m (Nat.succ m†)) q) j) (Fin.fz m†) -> Nat.Nat) -> ∀ (q : Eq.Eq {0} Nat.Nat (Nat.succ m) (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (at : Fin.Fin same) -> at)) ((Nat.succ m) (Nat.succ m†)) q) (Fin.fs m j)) (Fin.fz m†) -> Nat.Nat"
+            @?= [ "∀ (m : Nat.Nat) (q : Eq.Eq {0} Nat.Nat (Nat.succ m) (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (carried : Fin.Fin same) -> carried)) ((Nat.succ m) (Nat.succ m†)) q) (Fin.fz m)) (Fin.fz m†) -> Nat.Nat"
+                , "∀ (m : Nat.Nat) (j : Fin.Fin m) -> Below.Below m j -> (∀ (q : Eq.Eq {0} Nat.Nat m (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (carried : Fin.Fin same) -> carried)) (m (Nat.succ m†)) q) j) (Fin.fz m†) -> Nat.Nat) -> ∀ (q : Eq.Eq {0} Nat.Nat (Nat.succ m) (Nat.succ m†)) -> Eq.Eq {0} (Fin.Fin (Nat.succ m†)) ((elim Eq.Eq {0} (Nat.Nat) (λ (left : Nat.Nat) (right : Nat.Nat) (q2 : Eq.Eq {0} Nat.Nat left right) -> Fin.Fin left -> Fin.Fin right) ((λ (same : Nat.Nat) (carried : Fin.Fin same) -> carried)) ((Nat.succ m) (Nat.succ m†)) q) (Fin.fs m j)) (Fin.fz m†) -> Nat.Nat"
                 ]
 
     -- The load-bearing artifact of phase 19, and the thing @check@ alone would
@@ -782,7 +782,7 @@ nestedNames =
     script =
       [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
       , ":theorem twice : \8704 (m : Nat) (n : Nat) -> Nat"
-      , "attack", "intro", "intro", "into", "along", "along"
+      , "attack", "intro", "intro"
         -- The outer split, whose methods take the hints unchanged.
       , "eliminate-core core`m`"
         -- Into the one whose name the inner split will ask for again.

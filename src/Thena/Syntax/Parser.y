@@ -39,11 +39,12 @@ import Thena.Syntax.Concrete
   , RawPiece (..)
   , RawBinder (..)
   , RawIdent (..)
+  , RawLevel (..)
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), Reach (..), Selection (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), Reach (..), Selection (..), RawOpen (..), RawOpenSpec (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawComponentP (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -111,6 +112,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   rule    { Located _ TRule }
   do      { Located _ TDo }
   when    { Located _ TWhen }
+  at      { Located _ TAt }
   ':-'    { Located _ TNeck }
   num     { Located _ (TNumber _) }
   str     { Located _ (TString _) }
@@ -317,7 +319,7 @@ Renaming :: { (String, String) }
   : ident '->' ident                       { (wordOf $1, wordOf $3) }
 
 Rule :: { RawRule }
-  : rule ident Params ':-' Tests do Block    { RawRule (posOf $1) (wordOf $2) (reverse $3) $5 (map snd (reverse $7)) (map fst (reverse $7)) }
+  : rule ident Params Focus ':-' Tests do Block    { RawRule (posOf $1) (wordOf $2) (reverse $3) $4 $6 (map snd (reverse $8)) (map fst (reverse $8)) }
 
 -- **A body is a block** (MS5 phase 75). @do@ is a layout keyword, so
 -- "Thena.Surface.Layout" inserts these braces where the offside rule says they
@@ -481,10 +483,53 @@ PatItems :: { [RawPattern] }
   : PatAtom                                { [$1] }
   | PatItems ',' PatAtom                   { $3 : $1 }
 
+-- | The focus, as a pattern after @at@ (MS12 phase 358, @~9j34x@; his framing
+-- of 2026-09-14, /@at@ names the subject and the tag names the language/).
+--
+-- **@at@ had to become a token and that is measured** (@~86bnn@, his ruling of
+-- 2026-11-26). The definition form below begins with a name, so with the marker
+-- left an ordinary @ident@ the parser cannot tell @rule r at x = v : S@ from
+-- @rule r a b@ with the one token of lookahead it has: Happy answers eight
+-- shift\/reduce conflicts in one state, against none with the token.
+--
+-- **It is written between the parameters and the neck, which is where §8 left
+-- the space for it** — /the space on either side of @:-@ is deliberately
+-- unused: pattern matching on the focus and on the goal is coming and will
+-- attach to the head/ (decided 2026-08-25).
+Focus :: { Maybe RawComponentP }
+  :                                        { Nothing }
+  | at ComponentP                          { Just $2 }
+
+-- | The five development components, in the notation @spec\/machine.md@ §3.2
+-- prints them in, and with no fence — his ruling of 2026-09-13, while the
+-- development calculus is built in. **Plus a sixth form that names no shape:**
+-- a lone pattern, meaning /any/ component (MS12 phase 363, @~9m27n@, his
+-- ruling of 2026-11-27). @at _@ is what the five clauses that used to ask
+-- @focus-is-component@ write, and the test is gone.
+--
+-- **One state decides between the lone pattern and a definition**, and one
+-- token of lookahead settles it: after @at@ and a pattern, an @=@ shifts and
+-- anything else reduces. @happy@ reports 0 conflicts, the count the grammar has
+-- always had — measured 2026-11-26 for this production and again when it
+-- landed.
+--
+-- **Every position is a @PatAtom@**, so a bare word binds and a @core\`…\`@
+-- region stands wherever a term does. **The guess form takes a pattern at its
+-- @≐@ and resolution refuses anything but @_@**: a refusal naming the form is
+-- worth more than a parse error naming a token, and
+-- 'Thena.Rules.resolveComponentP' is where it is said.
+ComponentP :: { RawComponentP }
+  : PatAtom                                { RawCPAny $1 }
+  | 'λ' PatAtom ':' PatAtom                { RawCPAssume $2 $4 }
+  | PatAtom '=' PatAtom ':' PatAtom        { RawCPDefine $1 $3 $5 }
+  | '?' PatAtom ':' PatAtom                { RawCPClaim $2 $4 }
+  | '?' PatAtom '≐' PatAtom ':' PatAtom    { RawCPGuess $2 $4 $6 }
+  | '∀' PatAtom ':' PatAtom                { RawCPQuantify $2 $4 }
+
 -- A head is a run of tests with nothing between them, so a test that takes
--- operands is parenthesised — @when focus-is-hole (surface-is-name t)@ — and a
+-- operands is parenthesised — @when goal-type-is-pi (surface-is-name t)@ — and a
 -- bare word is a test of no operands (MS4 phase 47). Without the brackets
--- @when focus-is-hole goal-type-is-pi@ would parse as one test applied to
+-- @when goal-type-is-pi goal-type-is-let@ would parse as one test applied to
 -- another word, which is the same ambiguity a REPL argument run has and is
 -- answered the same way.
 Tests :: { [RawTest] }
@@ -670,15 +715,20 @@ ObjectBit :: { RawPiece }
 
 -- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as
 -- rule parameters and call arguments are a bare run of names (phase 23).
-LevelArgs :: { [Int] }
+LevelArgs :: { [RawLevel] }
   : '{' LevelAtoms '}'                     { reverse $2 }
 
-LevelAtoms :: { [Int] }
+LevelAtoms :: { [RawLevel] }
   :                                        { [] }
   | LevelAtoms LevelAtom                   { $2 : $1 }
 
-LevelAtom :: { Int }
-  : num                                    { fromInteger (numOf $1) }
+-- **A level argument is a numeral or a splice** (MS12 phase 361, @~bkrvn@):
+-- the third position his /a splice supplies a nonterminal/ reaches, and the
+-- one production serves an operand and a pattern alike, since both read a
+-- @RawLevel@.
+LevelAtom :: { RawLevel }
+  : num                                    { RawLevelNat (fromInteger (numOf $1)) }
+  | '${' ident '}$'                        { RawLevelSplice (wordOf $2) }
 
 -- The argument list of a rule invoked at the REPL (phase 23b): a run of atoms,
 -- exactly as a rule body writes its operands. @try (\ x -> x)@ is one argument

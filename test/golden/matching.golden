@@ -1,38 +1,39 @@
 thena spine> :rules
 standard
-  try-in-scope
-  fit-in-scope
-  attack
-  try-core ‹t›
-  abandon
-  intro
-  intro
-  intro ‹n›
-  intro ‹n›
-  rename ‹n›
-  solve
-  regret
-  eliminate-core ‹t›
-  eliminate-generalising-core ‹t›
-  step
-  step
-  step 0
-  step ‹n›
-  fill ‹t›
-  unify-refine-core ‹t›
-  apply-core ‹f›
-  fit-core ‹f›
-  fit-core ‹f›
+  try-in-scope at ? _ : _
+  fit-in-scope at ? _ : _
+  intro at ? _ : _
+  intro at ? _ : _
+  intro ‹n› at ? _ : _
+  intro ‹n› at ? _ : _
+  by-induction at ? _ : core`∀ (${x} : ${T}) -> ${E}`
+  attack at ? _ : _
+  try-core ‹t› at ? _ : _
+  abandon at ? _ : _
+  rename ‹n› at _
+  solve at ? _ ≐ _ : _
+  regret at ? _ ≐ _ : _
+  eliminate-core ‹t› at ? _ : _
+  eliminate-generalising-core ‹t› at ? _ : _
+  step at ? _ : _
+  step at ? _ ≐ _ : _
+  step 0 at _
+  step ‹n› at _
+  fill ‹t› at ? _ : _
+  unify-refine-core ‹t› at ? _ : _
+  apply-core ‹f› at ? _ : _
+  fit-core ‹f› at ? _ : _
+  fit-core ‹f› at ? _ : _
   claim ‹ty›
   assume ‹ty›
   quantify ‹ty›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
   no-nesting []
   ihs-for ‹t› ‹c›
   ihs-for ‹t› ‹c›
@@ -105,30 +106,30 @@ standard
   with-hypotheses [c, ...cs]
   without-hypotheses []
   without-hypotheses [c, ...cs]
-  induction-core ‹t›
-  case-core ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
-  elaborate ‹t›
+  induction-core ‹t› at ? _ : _
+  case-core ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
+  elaborate ‹t› at ? _ : _
   run-block ‹t›
-  intro-binders ‹t› ‹k›
-  intro-binders ‹t› ‹k›
-  intro-binders ‹t› ‹k›
-  intro-binders ‹t› ‹k›
-  spine-arguments ‹h› ‹f› ‹t›
-  spine-arguments ‹h› ‹f› ‹t›
+  intro-binders ‹t› ‹k› at ? _ : _
+  intro-binders ‹t› ‹k› at ? _ : _
+  intro-binders ‹t› ‹k› at ? _ : _
+  intro-binders ‹t› ‹k› at ? _ : _
+  spine-arguments ‹h› ‹f› ‹t› at _
+  spine-arguments ‹h› ‹f› ‹t› at _
 thena spine> :matches
 try-in-scope : ()
 fit-in-scope : ()
@@ -187,17 +188,28 @@ without-hypotheses ‹list› : List a -> List (a, List b)
 induction-core ‹t› : Core -> ()
 case-core ‹t› : Core -> ()
 run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> attack
 thena spine> :matches
+try-in-scope : ()
+fit-in-scope : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
 rename ‹n› : Name -> ()
-solve : ()
-regret : ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
 step : ()
 step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
 claim ‹ty› : Core -> ()
 assume ‹ty› : Core -> ()
 quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
@@ -234,6 +246,8 @@ split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core 
 split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
 with-hypotheses ‹list› : List Name -> List (Name, List Name)
 without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
 run-block ‹t› : Surface -> ()
 intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
@@ -285,6 +299,9 @@ proving id : ∀ (A : Type₀) -> A -> A
 thena spine> :matches
 try-in-scope : ()
 fit-in-scope : ()
+intro : ()
+intro ‹n› : Ident -> ()
+by-induction : ()
 attack : ()
 try-core ‹t› : Core -> ()
 abandon : ()
@@ -340,19 +357,31 @@ without-hypotheses ‹list› : List a -> List (a, List b)
 induction-core ‹t› : Core -> ()
 case-core ‹t› : Core -> ()
 run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> attack
 thena spine> :matches
+try-in-scope : ()
+fit-in-scope : ()
 intro : ()
-intro ‹n› : Name -> ()
+intro ‹n› : Ident -> ()
+by-induction : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
 rename ‹n› : Name -> ()
-solve : ()
-regret : ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
 step : ()
 step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
 claim ‹ty› : Core -> ()
 assume ‹ty› : Core -> ()
 quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
@@ -389,12 +418,12 @@ split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core 
 split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
 with-hypotheses ‹list› : List Name -> List (Name, List Name)
 without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
 run-block ‹t› : Surface -> ()
 intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> intro
-thena spine> into
-thena spine> along
 thena spine> :where
 focus
   let ? id1 : A -> A in
@@ -404,6 +433,75 @@ context
   A : Type₀
 type
   A -> A
+thena spine> :matches
+try-in-scope : ()
+fit-in-scope : ()
+intro : ()
+intro ‹n› : Ident -> ()
+by-induction : ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
+rename ‹n› : Name -> ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
+step : ()
+step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
+claim ‹ty› : Core -> ()
+assume ‹ty› : Core -> ()
+quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
+no-nesting ‹list› : List a -> ()
+ihs-for ‹t› ‹c› : Surface -> Name -> List Name
+reverse-onto ‹list› ‹acc› : List a -> List a -> List a
+any-of ‹list› : List a -> a
+apply-all ‹f› ‹list› : Core -> List Core -> Core
+instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
+name-or-stem ‹n› ‹stem› : Name -> Name -> Name
+intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
+bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
+same-length ‹list› ‹list› : List a -> List b -> ()
+arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
+pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
+case-must-vanish ‹option› : Option Core -> ()
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
+arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
+one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
+arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
+arms-are-distinct ‹t› : Surface -> ()
+split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
+split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
+split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
+split-elaborate ‹t› : Surface -> ()
+argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
+argument-pattern ‹b› : Binder -> Pattern
+open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
+split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
+with-hypotheses ‹list› : List Name -> List (Name, List Name)
+without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
+run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
+spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
+thena spine> :abandon
+abandoned id
+thena spine> :theorem c : ∀ (A : Type₀) -> Type₀
+proving c : Type₀ -> Type₀
+thena spine> attack
+thena spine> intro
 thena spine> :matches
 try-in-scope : ()
 fit-in-scope : ()
@@ -462,81 +560,36 @@ without-hypotheses ‹list› : List a -> List (a, List b)
 induction-core ‹t› : Core -> ()
 case-core ‹t› : Core -> ()
 run-block ‹t› : Surface -> ()
-spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
-thena spine> :abandon
-abandoned id
-thena spine> :theorem c : ∀ (A : Type₀) -> Type₀
-proving c : Type₀ -> Type₀
-thena spine> attack
-thena spine> intro
-thena spine> :matches
-intro : ()
-intro ‹n› : Name -> ()
-rename ‹n› : Name -> ()
-solve : ()
-regret : ()
-step : ()
-step ‹n› : Int -> ()
-claim ‹ty› : Core -> ()
-assume ‹ty› : Core -> ()
-quantify ‹ty› : Core -> ()
-no-nesting ‹list› : List a -> ()
-ihs-for ‹t› ‹c› : Surface -> Name -> List Name
-reverse-onto ‹list› ‹acc› : List a -> List a -> List a
-any-of ‹list› : List a -> a
-apply-all ‹f› ‹list› : Core -> List Core -> Core
-instantiate-with ‹f› ‹vs› : Core -> List Core -> Core
-name-or-stem ‹n› ‹stem› : Name -> Name -> Name
-intro-arm-binders ‹ps› ‹list› ‹vs› ‹ds› ‹fs› ‹k› : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
-dotted-position-is-forced ‹e› ‹option› ‹vs› ‹k› : Surface -> Option Core -> List Core -> Core -> ()
-bind-friendlies ‹list› ‹vs› ‹ds› : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
-bind-solved ‹list› ‹k› : List (Name, Core) -> Core -> ()
-same-length ‹list› ‹list› : List a -> List b -> ()
-arm-for ‹t› ‹c› : Surface -> Name -> Option (Pattern, Option Surface)
-pick ‹w› ‹c› ‹p› ‹b› ‹r› : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
-arm-needs-body ‹k› ‹option› : Core -> Option Surface -> ()
-elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹pair› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› ‹option› : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
-vanished-case-takes-no-body ‹option› : Option (a, Option b) -> ()
-case-must-vanish ‹option› : Option Core -> ()
-one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs› : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
-arm-must-be-for-this-datatype ‹a› ‹b› : Name -> Name -> ()
-arms-are-for-this-datatype ‹t› ‹d› : Surface -> Name -> ()
-one-arm-per-constructor ‹a› ‹b› : Name -> Name -> ()
-arm-not-repeated ‹w› ‹t› : Name -> Surface -> ()
-arms-are-distinct ‹t› : Surface -> ()
-split-cases ‹t› ‹list› ‹list› ‹m› : Surface -> List Name -> List Core -> MethodShape -> ()
-split-over ‹t› ‹cs› ‹pair› : Surface -> List Name -> (List Core, MethodShape) -> ()
-split-claim ‹t› ‹x› : Surface -> Core -> (List Core, MethodShape)
-split-elaborate ‹t› : Surface -> ()
-argument-patterns ‹list› ‹acc› : List (Binder, a) -> List Pattern -> List Pattern
-argument-pattern ‹b› : Binder -> Pattern
-open-case ‹mh› ‹option› ‹bs› ‹fs› : Core -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
-split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core -> MethodShape -> ()
-split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
-with-hypotheses ‹list› : List Name -> List (Name, List Name)
-without-hypotheses ‹list› : List a -> List (a, List b)
-run-block ‹t› : Surface -> ()
 intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> intro
-stuck: that hole's type is neither a ∀ nor a let
+stuck: no clause of intro applies here
 thena spine> :abandon
 abandoned c
 thena spine> :theorem l : let x = Type₀ : Type₁ in x
 proving l : let x = Type₀ : Type₁ in x
 thena spine> attack
 thena spine> :matches
+try-in-scope : ()
+fit-in-scope : ()
 intro : ()
-intro ‹n› : Name -> ()
+intro ‹n› : Ident -> ()
+attack : ()
+try-core ‹t› : Core -> ()
+abandon : ()
 rename ‹n› : Name -> ()
-solve : ()
-regret : ()
+eliminate-core ‹t› : Core -> ()
+eliminate-generalising-core ‹t› : Core -> ()
 step : ()
 step ‹n› : Int -> ()
+fill ‹t› : Core -> ()
+unify-refine-core ‹t› : Core -> ()
+apply-core ‹f› : Core -> ()
+fit-core ‹f› : Core -> ()
 claim ‹ty› : Core -> ()
 assume ‹ty› : Core -> ()
 quantify ‹ty› : Core -> ()
+elaborate ‹t› : Surface -> ()
 no-nesting ‹list› : List a -> ()
 ihs-for ‹t› ‹c› : Surface -> Name -> List Name
 reverse-onto ‹list› ‹acc› : List a -> List a -> List a
@@ -573,14 +626,16 @@ split-holes ‹list› ‹list› ‹m› : List (Name, List Name) -> List Core 
 split-holes-over ‹cs› ‹pair› : List (Name, List Name) -> (List Core, MethodShape) -> ()
 with-hypotheses ‹list› : List Name -> List (Name, List Name)
 without-hypotheses ‹list› : List a -> List (a, List b)
+induction-core ‹t› : Core -> ()
+case-core ‹t› : Core -> ()
 run-block ‹t› : Surface -> ()
 intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> intro
 thena spine> :show
-▶ let ? l : let x = Type₀ : Type₁ in x ≐ (
+  let ? l : let x = Type₀ : Type₁ in x ≐ (
     let x = Type₀ : Type₁ in
-    let ? l1 : x in
+▶   let ? l1 : x in
     l1
   ) in
   l

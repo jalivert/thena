@@ -7,16 +7,13 @@ thena spine> attack
 thena spine> intro
 thena spine> intro
 thena spine> :show
-▶ let ? id : ∀ (A : Type₀) -> A -> A ≐ (
+  let ? id : ∀ (A : Type₀) -> A -> A ≐ (
     λ (A : Type₀) ->
     λ (x : A) ->
-    let ? id1 : A in
+▶   let ? id1 : A in
     id1
   ) in
   id
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> :where
 focus
   let ? id1 : A in

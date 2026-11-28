@@ -39,10 +39,10 @@ import Thena.Engine
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
-import Thena.Standard (aRule)
+import Thena.Standard (atRule, atHole, atGuess)
 import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Rule (..), Test (..), Value (..))
 import qualified Thena.Instral.Ops as Ops
-import Thena.Rules (RuleBase, matches, next, ruleBase)
+import Thena.Rules (RuleBase, matchRule, matches, next, ruleBase)
 import Thena.Surface.Concrete (Surface (..))
 import Thena.Surface.Zipper (rootedAt)
 
@@ -112,16 +112,16 @@ isGuess m = case focus (cursor (development m)) of
 -- arguments to its own, which is why the @Choice@ frame keeps the argument
 -- /values/ rather than a ready-made environment.
 badClause, goodClause :: Rule
-badClause  = aRule (rootName "step") [Ops.PVar "x"] [FocusIsHole] [Do Solve]
-goodClause = aRule (rootName "step") [Ops.PVar "y"] [FocusIsHole] [Do (Try (Ref "y"))]
+badClause  = atRule atHole (rootName "step") [Ops.PVar "x"] [] [Do Solve]
+goodClause = atRule atHole (rootName "step") [Ops.PVar "y"] [] [Do (Try (Ref "y"))]
 
 -- | Same name, one argument fewer. Never a candidate for a two-argument call.
 nullary :: Rule
-nullary = aRule (rootName "step") [] [FocusIsHole] [Do Attack]
+nullary = atRule atHole (rootName "step") [] [] [Do Attack]
 
 -- | Same name and arity, but a head that cannot pass at a hole.
 guessOnly :: Rule
-guessOnly = aRule (rootName "step") [Ops.PVar "x"] [FocusIsGuess] [Do Solve]
+guessOnly = atRule atGuess (rootName "step") [Ops.PVar "x"] [] [Do Solve]
 
 -- --------------------------------------------------------------------------
 -- A head that asks about an argument (MS4 phase 47)
@@ -135,9 +135,9 @@ guessOnly = aRule (rootName "step") [Ops.PVar "x"] [FocusIsGuess] [Do Solve]
 -- chosen by a test over the argument.
 nameClause, otherClause :: Rule
 nameClause =
-  aRule (rootName "pick") [Ops.PVar "s"] [FocusIsHole, SurfaceIsName (Ref "s")]
+  atRule atHole (rootName "pick") [Ops.PVar "s"] [SurfaceIsName (Ref "s")]
     [Do Attack]
-otherClause = aRule (rootName "pick") [Ops.PVar "s"] [FocusIsHole] [Do (Try (Lit (VTerm type0)))]
+otherClause = atRule atHole (rootName "pick") [Ops.PVar "s"] [] [Do (Try (Lit (VTerm type0)))]
 
 callPick :: Surface -> [Instr]
 callPick t = [Do (Ops.Call "pick" [Lit (VSurface (rootedAt t))])]
@@ -222,7 +222,9 @@ headArguments =
       -- term the user has not typed — so the clause is listed, exactly as a
       -- parameterised rule has always been.
       testCase "matches lists it, having no argument to ask about" $
-        fmap (ruleName . fst) (next (matches (bases [nameClause]) emptyGlobals hole))
+        fmap (ruleName . matchRule . fst)
+             (next emptyGlobals 0 hole
+                   (matches (bases [nameClause]) emptyGlobals 0 hole))
           @?= Just (rootName "pick")
     ]
 
@@ -316,14 +318,14 @@ recursion =
     -- @attack@ turns the hole into a guess, so the recursive call reaches the
     -- /other/ clause and stops. A clause that recursed without changing the
     -- state would not terminate, and would not in Prolog either.
-    recurses = aRule (rootName "down") [] [FocusIsHole]
+    recurses = atRule atHole (rootName "down") [] []
                  [Do Attack, Do (Ops.Call "down" [])]
-    stops    = aRule (rootName "down") [] [FocusIsGuess] [Do Regret]
+    stops    = atRule atGuess (rootName "down") [] [] [Do Regret]
     callDown = [Do (Ops.Call "down" [])]
 
-    callsLater = aRule (rootName "first") [] [FocusIsHole]
+    callsLater = atRule atHole (rootName "first") [] []
                    [Do (Ops.Call "later" [])]
-    later      = aRule (rootName "later") [] [FocusIsHole] [Do Attack]
+    later      = atRule atHole (rootName "later") [] [] [Do Attack]
     callFirst  = [Do (Ops.Call "first" [])]
 
 
@@ -389,18 +391,18 @@ frameLifetime =
                    ("the counter went backwards: " ++ show (names before)
                       ++ " then " ++ show (names after))
 
-    recurses = aRule (rootName "down") [] [FocusIsHole]
+    recurses = atRule atHole (rootName "down") [] []
                  [Do Attack, Do (Ops.Call "down" [])]
-    stops    = aRule (rootName "down") [] [FocusIsGuess] [Do Regret]
+    stops    = atRule atGuess (rootName "down") [] [] [Do Regret]
 
     -- Two clauses of one name, both of whose heads pass at a hole: the peek
     -- finds two candidates and builds a @Choice@.
-    choiceA  = aRule (rootName "either") [] [FocusIsHole] [Do Attack]
-    choiceB  = aRule (rootName "either") [] [FocusIsHole] [Do Attack, Do Regret]
+    choiceA  = atRule atHole (rootName "either") [] [] [Do Attack]
+    choiceB  = atRule atHole (rootName "either") [] [] [Do Attack, Do Regret]
 
     -- The first alternative runs an op that cannot apply here, so the search
     -- unwinds into the choice point and takes the second.
-    failsFirst = aRule (rootName "either") [] [FocusIsHole] [Do Regret]
+    failsFirst = atRule atHole (rootName "either") [] [] [Do Regret]
 
-    outer = aRule (rootName "outer") [] [FocusIsHole]
+    outer = atRule atHole (rootName "outer") [] []
               [Do (Ops.Call "either" []), Do Regret]

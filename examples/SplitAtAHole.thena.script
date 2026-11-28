@@ -32,10 +32,6 @@ attack
 intro
 intro
 intro
-into
-along
-along
-along
 induction-core core`b`
 
 -- THE BINDERS ARE THE DECLARATION'S OWN NAMES. `bz`'s argument is `m`, and the
@@ -79,10 +75,6 @@ attack
 intro
 intro
 intro
-into
-along
-along
-along
 case-core core`xs`
 goto-named "vconsCase1"
 try-core core`a`

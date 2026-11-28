@@ -49,6 +49,7 @@ import Data.List (find, isPrefixOf)
 import Thena.Language.Grammar (Grammar, grammarForTag, grammarKey)
 import Thena.Core.Term (InScope)
 import Thena.Driver (entryBindings)
+import Thena.Global.Env (GlobalEnv)
 import Thena.Instral.Ops (Name, Value)
 import Thena.Instral.Type (Ty (..))
 import Thena.Instral.Commands (isCommandLine, isWholeLine)
@@ -80,9 +81,10 @@ import Thena.View.Tokens
 -- 'offeredStuck' — which is phase 134's field, and is exactly the condition
 -- \"the text left of the cursor did not read\".
 statementOffer
-  :: [Grammar] -> InScope -> [RuleBase] -> [String] -> [(Name, Value)]
-  -> [Written] -> [Written] -> OfferView
-statementOffer gs sc bs namespaces goals before after = answer { offeredBound = bound }
+  :: [Grammar] -> GlobalEnv -> InScope -> [RuleBase] -> [String]
+  -> [(Name, Value)] -> [Written] -> [Written] -> OfferView
+statementOffer gs env sc bs namespaces goals before after =
+  answer { offeredBound = bound }
   where
     text   = textOf before ++ textOf after
     cursor = length (textOf before)
@@ -165,7 +167,7 @@ statementOffer gs sc bs namespaces goals before after = answer { offeredBound = 
       , fits t
       ]
 
-    written = if null prefix then [] else entryBindings gs sc bs goals prefix
+    written = if null prefix then [] else entryBindings gs env sc bs goals prefix
     unwritten =
       [ (n, TCore) | (n, _) <- goals, n `notElem` map fst written ]
 

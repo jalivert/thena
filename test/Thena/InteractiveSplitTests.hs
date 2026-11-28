@@ -70,7 +70,7 @@ atAHole s =
       \{ vnil : Vec A z ; vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n) }"
     , "open Vec"
     , ":theorem vfirst : \8704 (A : Type\8320) (m : N) (xs : Vec A (s m)) -> A"
-    , "attack", "intro", "intro", "intro", "into", "along", "along", "along"
+    , "attack", "intro", "intro", "intro"
     ]
 
 tests :: TestTree

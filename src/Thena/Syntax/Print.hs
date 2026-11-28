@@ -26,6 +26,8 @@ module Thena.Syntax.Print
   , rawRhs
   , rawFunBody
   , rawPattern
+  , corePText
+  , componentPText
   , rawTy
     -- * Declarations, blocks and whole files
   , rawDecl
@@ -55,10 +57,11 @@ module Thena.Syntax.Print
 import Data.List (intercalate)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Level (Level, Normal (..), levelVarName, normalise)
+import Thena.Core.Level (Level, Normal (..), levelOfNat, levelVarName, normalise)
 import Thena.Core.Context
   (Context, entryIdent, entryVar, wordReaches)
 import Thena.Core.Term (GlobalName (..), Ident (..), Literal (..), Var, nameDotted)
+import Thena.Instral.Pattern (CoreP (..), LevelP (..), ComponentP (..), Pattern)
 import Thena.Instral.Concrete
   ( RawDecl (..)
   , Reach (..)
@@ -67,6 +70,7 @@ import Thena.Instral.Concrete
   , RawOpenSpec (..)
   , RawFunction (..)
   , RawRule (..)
+  , RawComponentP (..)
   , RawSignature (..)
   , RawTest (..)
   , RawTy (..)
@@ -159,6 +163,136 @@ block is = case is of
 -- lexer does not accept. The surface case a few lines below always used the
 -- right pair; these did not, and nothing exercised them until a whole rule file
 -- had to be printed and re-read (MS7 phase 112c).
+-- | A core pattern, in the development calculus's own notation, **with the
+-- @core@ fence around it** (MS12 phase 352, @~9j34x@).
+--
+-- **Here and not in a display renderer, because it reads back**, which is this
+-- module's own line: @core\`trusted ${c} ${a} ${b}\`@ printed from a pattern
+-- parses to that pattern again. That is what 'Thena.Instral.Pattern.PObject'
+-- cannot promise — a skeleton prints as the constructor application it is,
+-- since writing the region back needs the grammar — and what a core pattern
+-- can, the development calculus being Thena's own.
+--
+-- **A name is written WHOLE, scope or none**, which is the line
+-- 'Thena.Render.renderSkeleton' already draws one language up (MS10 phase 254):
+-- a pattern is printed where there is no scope to shorten against, and a whole
+-- name resolves under any scope — so @:rules@ lists @core\`And.And ${a} ${b}\`@
+-- for a clause whose file wrote @And@, and that spelling reads back.
+--
+-- **Only a literal is region-escaped.** A name, a keyword and a level hold
+-- none of @\`@, @$@ or @\\@, and a @${…}@ must NOT be escaped or the scanner
+-- reads the @$@ as a character instead of an escape opener — which is the one
+-- thing 'Thena.Render.coreRegion' cannot be used for here.
+-- | A component pattern, in the notation @spec\/machine.md@ §3.2 prints the
+-- five development components in and the grammar after @at@ accepts (MS12
+-- phase 358, @~9j34x@).
+--
+-- **Here and not in a display renderer, for 'corePText'\'s reason**: what it
+-- prints reads back. @? x ≐ _ : s@ printed from a pattern parses to that
+-- pattern again, so @:rules@ can list a clause's focus and the line a reader
+-- copies is a line the grammar takes.
+--
+-- **No fence**, his ruling of 2026-09-13, while the development calculus is
+-- built in. **The guess's @≐@ always prints @_@**, which is the only thing that
+-- may stand there.
+-- **The pattern printer comes in**, as 'corePText'\'s does, so the two display
+-- renderers keep their own spelling of a pattern and share this one of a
+-- component.
+componentPText :: (Pattern -> String) -> ComponentP -> String
+componentPText f cp = case cp of
+  CompAny      x     -> f x
+  CompAssume   x s   -> "λ " ++ f x ++ " : " ++ f s
+  CompDefine   x v s -> f x ++ " = " ++ f v ++ " : " ++ f s
+  CompClaim    x s   -> "? " ++ f x ++ " : " ++ f s
+  CompGuess    x s   -> "? " ++ f x ++ " ≐ _ : " ++ f s
+  CompQuantify x s   -> "∀ " ++ f x ++ " : " ++ f s
+
+corePText :: (a -> String) -> CoreP a -> String
+corePText at cp = "core" ++ [tick] ++ top cp ++ [tick]
+  where
+    top c = case c of
+      CPApp {} -> unwords (map atom (hd : args))
+        where (hd, args) = spine c []
+      -- **A keyword and a fixed number of atoms**, which is the grammar's own
+      -- shape for both of these.
+      CPTrusted cl ac b -> unwords ["trusted", atom cl, atom ac, atom b]
+      -- **A binder group is written out one binder at a time**, never collected
+      -- back into @∀ (x : S) (y : T) ->@: the reader nests them, so one per
+      -- quantifier is the spelling that reads back to the same tree with the
+      -- fewest rules here.
+      CPPi x d b  -> unwords ["∀", bound x d, "->", top b]
+      CPLam x d b -> unwords ["λ", bound x d, "->", top b]
+      CPLet x v ty b ->
+        unwords ["let", hole x, "=", top v, ":", top ty, "in", top b]
+      CPEliminate d ls ps m ms is t ->
+        unwords
+          [ "elim", nameDotted d ++ patternLevels ls
+          , group ps, atom m, group ms, group is, atom t
+          ]
+      _ -> atom c
+
+    atom c = case c of
+      CPHole a       -> hole a
+      CPName n ls    -> nameDotted n ++ patternLevels ls
+      CPUniverse k   -> "Type" ++ subscript k
+      CPLit l        -> concatMap escapeRaw (literal l)
+      _              -> "(" ++ top c ++ ")"
+
+    -- A splice, written so the region scanner reads the @$@ as an escape
+    -- opener — see the note above.
+    hole a = "$" ++ ['{'] ++ at a ++ ['}']
+
+    -- **A level argument prints as it was written** (MS12 phase 361,
+    -- @~bkrvn@): a numeral, or the splice standing at it. 'levelArgs' is the
+    -- printer for a 'Thena.Core.Level.Level' and a pattern's levels are not
+    -- all levels, so the braces are written here instead of mapping into it.
+    patternLevels ls
+      | null ls   = ""
+      | otherwise = " {" ++ unwords (map lvl ls) ++ "}"
+      where
+        lvl l = case l of
+          LPNat k  -> renderLevelAtom (levelOfNat k)
+          LPHole a -> hole a
+
+    -- **A binder's name position is a splice too**, so it is written the same
+    -- way; what differs is that the grammar wants a name there, which is why
+    -- a written word has no reading ('Thena.Rules.corePattern').
+    bound x d = "(" ++ hole x ++ " : " ++ top d ++ ")"
+
+    group ps = "(" ++ unwords (map atom ps) ++ ")"
+
+    spine c acc = case c of
+      CPApp f a -> spine f (a : acc)
+      _         -> (c, acc)
+
+    literal l = case l of
+      LString x -> escapeString x
+      LChar ch  -> escapeChar ch
+      LInt k    -> show k
+      LRegex r  -> "/" ++ r ++ "/"
+
+-- | The focus of a rule head, as written (MS12 phase 358, @~9j34x@).
+--
+-- **A printed base has to read back**, so a clause that wrote @at@ prints it:
+-- without this the focus would be dropped and the rule would come back
+-- matching every component.
+focus :: Maybe RawComponentP -> String
+focus Nothing   = ""
+focus (Just cp) = " at " ++ rawComponentP cp
+
+-- | The five development components, in the notation @spec\/machine.md@ §3.2
+-- prints them in — the spelling the grammar accepts, so what this writes parses.
+rawComponentP :: RawComponentP -> String
+rawComponentP cp = case cp of
+  RawCPAny      x     -> p x
+  RawCPAssume   x s   -> "λ " ++ p x ++ " : " ++ p s
+  RawCPDefine   x v s -> p x ++ " = " ++ p v ++ " : " ++ p s
+  RawCPClaim    x s   -> "? " ++ p x ++ " : " ++ p s
+  RawCPGuess    x g s -> "? " ++ p x ++ " ≐ " ++ p g ++ " : " ++ p s
+  RawCPQuantify x s   -> "∀ " ++ p x ++ " : " ++ p s
+  where
+    p = rawPattern
+
 rawPattern :: RawPattern -> String
 rawPattern rp = case rp of
   RawPWord w   -> w
@@ -408,8 +542,9 @@ rawDecl d = case d of
   DeclSignature (RawSignature _ n t) -> [n ++ " : " ++ rawTy t]
   DeclFunction (RawFunction _ n ps b _) ->
     header (n ++ concatMap ((" " ++) . rawPattern) ps) b
-  DeclRule (RawRule _ n ps ts is _) ->
-    ("rule " ++ n ++ concatMap ((" " ++) . rawPattern) ps ++ " :-" ++ whens ts ++ " do")
+  DeclRule (RawRule _ n ps cp ts is _) ->
+    ("rule " ++ n ++ concatMap ((" " ++) . rawPattern) ps ++ focus cp
+       ++ " :-" ++ whens ts ++ " do")
       : map (("  " ++) . rawInstruction) is
   -- **An @open@ line, as written** (MS10 phase 267). @open X in ‹d›@ is one
   -- line and then the declaration it reaches, indented under it, so a

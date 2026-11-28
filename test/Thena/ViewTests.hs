@@ -120,11 +120,17 @@ after = foldl (\s l -> fst (oneLine s l)) (withRuleBases expectedBase newSession
 -- show that.
 fixtures :: [(String, Session)]
 fixtures =
+  -- **@attack@ leaves the cursor inside the guess it made** (MS12 phase 357),
+  -- so @back@ is what stands at the root — and the fixture that has no type at
+  -- its focus is the one that goes @along@ from there, off the only link and
+  -- onto a trailing term no guess encloses.
   [ ("nothing proved yet", after [])
-  , ("a theorem, attacked, cursor at the root", after (theorem <> ["attack"]))
-  , ("the cursor moved along, off the first link", after (theorem <> ["attack", "along"]))
-  , ("along twice, then back to the root", after (theorem <> ["attack", "along", "goto-root"]))
-  , ("inside the guess's own body", after (theorem <> ["attack", "into"]))
+  , ("a theorem, attacked, cursor inside the guess", after (theorem <> ["attack"]))
+  , ( "the cursor moved along at the root, off the first link"
+    , after (theorem <> ["attack", "back", "along"]) )
+  , ( "along, then back to the root"
+    , after (theorem <> ["attack", "back", "along", "goto-root"]) )
+  , ("inside the guess's own body, past a binder", after (theorem <> ["attack", "intro"]))
   ]
   where
     theorem = [":theorem t : \8704 (A : Type\8320) -> A -> A"]
@@ -451,13 +457,13 @@ faultPlaces =
     -- case the ask is about: @say x@ is the rule's second written instruction,
     -- so the old answer was /instruction 2/ and nothing else.
     place "an unbound name is at the statement that reads it" "p.thena.rules"
-      "rule base p where\nrule crush :- when focus-is-hole do\n  say \"hi\"\n  say x\n"
+      "rule base p where\nrule crush at ? _ : _ :- do\n  say \"hi\"\n  say x\n"
       BlockShapeWrong (Pos 4 3)
 
   , -- …and the first statement of the same body, so that the line is read and
     -- not guessed from the clause.
     place "…and the first statement is its own line too" "q.thena.rules"
-      "rule base q where\nrule crush :- when focus-is-hole do\n  say x\n  say \"hi\"\n"
+      "rule base q where\nrule crush at ? _ : _ :- do\n  say x\n  say \"hi\"\n"
       BlockShapeWrong (Pos 3 3)
 
   , -- **A head belongs to the clause**, there being no statement for it to be

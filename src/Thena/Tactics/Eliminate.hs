@@ -1134,12 +1134,19 @@ eliminate env ctx sch prem n0 goal tgt =
                   iQ     = writableAmong (taken ++ [iLeft, iRight]) (Ident "q")
                   underQ = taken ++ [iLeft, iRight, iQ]
                   iYs    = writableRunAmong underQ (map (const (Ident "y")) deps)
-                  iAt    = writableAmong (underQ ++ iYs) (Ident "at")
+                  -- __The word is @carried@ and not @at@ — MS12 phase 358,
+                  -- his ruling of 2026-11-26, @~86bnn@.__ @at@ became a
+                  -- reserved word with the focus pattern, so a binder minted
+                  -- with that spelling would have printed a term the lexer
+                  -- cannot read back. @carried@ also says what the binder is:
+                  -- the value standing at the transport's left endpoint, which
+                  -- the method below hands back unchanged.
+                  iCarried    = writableAmong (underQ ++ iYs) (Ident "carried")
 
                   iSame   = writableAmong taken (Ident "same")
                   iZs     = writableRunAmong (taken ++ [iSame])
                                              (map (const (Ident "y")) deps)
-                  iAtSame = writableAmong (taken ++ [iSame] ++ iZs) (Ident "at")
+                  iCarriedSame = writableAmong (taken ++ [iSame] ++ iZs) (Ident "carried")
 
                   -- What stands for each moving position under the motive's own
                   -- binders, which is what the inner transport reads.
@@ -1164,7 +1171,7 @@ eliminate env ctx sch prem n0 goal tgt =
                           (piOver [ Hypothesis yv i (shaped (Free zl) yArgs sk)
                                   | (yv, i, sk) <- zip3 ys iYs depSkels
                                   ]
-                            (Pi iAt
+                            (Pi iCarried
                                 (shaped (Free zl) yArgs skel)
                                 (close zf
                                   (shaped (Free zr) depCarried skel)))))))))
@@ -1178,7 +1185,7 @@ eliminate env ctx sch prem n0 goal tgt =
                       (lamOver [ Hypothesis yv i (shaped (Free za) zArgs sk)
                                | (yv, i, sk) <- zip3 zas iZs depSkels
                                ]
-                        (Lam iAtSame
+                        (Lam iCarriedSame
                              (shaped (Free za) zArgs skel)
                              (close zb (Free zb)))))
 

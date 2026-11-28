@@ -67,8 +67,8 @@ import Thena.Instral.Ops
 import qualified Thena.Instral.Ops as Ops
 import Thena.Rules
   ( RuleIter
+  , iterRules
   , matches
-  , next
   )
 import Thena.Files (startingSession)
 import Thena.Render (renderResponse)
@@ -458,9 +458,7 @@ isHole m = case focus (cursor (development m)) of
   _                             -> False
 
 drain :: RuleIter -> [Rule]
-drain it = case next it of
-  Nothing        -> []
-  Just (r, rest) -> r : drain rest
+drain = iterRules
 
 -- --------------------------------------------------------------------------
 -- The leaves
@@ -801,7 +799,7 @@ baseTests =
       -- **@fit-core@ is two clauses and both heads pass**, which is the point
       -- of it: the choice point between them is the search.
       testCase "every rule whose head passes is a candidate" $
-        [ nameDotted g | Rule g _ _ _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
+        [ nameDotted g | Rule g _ _ _ _ _ _ <- drain (matches expectedBase emptyGlobals 0 hole) ]
           @?= [ -- **The first nullary candidate that can close a goal** (MS12):
                 -- it reads the context itself, so it needs no argument and a
                 -- bare @prove@ therefore has it. **It is first, above @attack@**
@@ -846,7 +844,7 @@ baseTests =
                  ]
               -- **The interactive spelling** (MS9 phase 231): its helpers ask
               -- only about their arguments and the two tactics ask
-              -- @focus-is-hole@, so all of it is offered here.
+              -- @at ? _ : _@, so all of it is offered here.
               ++ replicate 4 "argument-patterns"
               ++ [ "argument-pattern"
                  , "open-case", "open-case"
@@ -857,6 +855,8 @@ baseTests =
                  ]
               ++ replicate 15 "elaborate"
               ++ ["run-block"]
+              -- @intro-binders@ is written @at ? _ : _@ as of MS12 phase 357.
+              ++ replicate 4 "intro-binders"
               ++ replicate 2 "spine-arguments"
 
       -- **The nullary @step@ is a rule over the op and nothing else** — the
@@ -864,8 +864,8 @@ baseTests =
       -- parameters. @step ‹n›@ is in this listing too (MS12 phase 347) and is
       -- filtered out here by its arity.
     , testCase "step is a rule over prim-step" $
-        case [ r | r@(Rule (GlobalName [] "step") [] _ _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
-          [Rule _ ps _ b _ _] -> (ps, b) @?= ([], [Do Ops.Dispatch])
+        case [ r | r@(Rule (GlobalName [] "step") [] _ _ _ _ _) <- drain (matches expectedBase emptyGlobals 0 hole) ] of
+          [Rule _ ps _ _ b _ _] -> (ps, b) @?= ([], [Do Ops.Dispatch])
           other           -> assertFailure ("expected one clause: " ++ show other)
     ]
 

@@ -72,8 +72,10 @@ twice : String -> String
 twice s = concat s s
 ```
 
-- **a rule** — `rule ‹name› ‹params› :- when ‹tests› do ‹body›`. The head is a
-  run of shape questions; a test with arguments is parenthesised.
+- **a rule** — `rule ‹name› ‹params› at ‹focus› :- when ‹tests› do ‹body›`. The
+  head is the parameters, then the focus (both optional), then a run of shape
+  questions; a test with arguments is parenthesised. *The focus* is described
+  below.
 - **a signature** — `‹name› : ‹type›`, on a line of its own and needing no
   keyword. The arity
   is the arrow chain's, so a signature is about one arity only. Parentheses make
@@ -82,6 +84,53 @@ twice s = concat s s
 - **a function** — `‹name› ‹params› = ‹expression›` or `‹name› ‹params› = do
   ‹block›`, with no keyword. A function may have several clauses, tried in
   order as in Haskell.
+
+### `at`: the focus, in the head
+
+**`at` says what the machine is looking at**, as one of the five pieces a
+development is built from, with a pattern at each position:
+
+```
+rule solve at ? h ≐ _ : s          :- do prim-solve
+rule shape at ? h : core`∀ (${x} : ${T}) -> ${E}` :- do say "a universal"
+rule onward at λ x : s             :- do say "an assumption"
+rule name-it n at _                :- do prim-rename n
+```
+
+| written | the focus is |
+|---|---|
+| `at ? ‹x› : ‹S›` | a hole nothing has been tried on |
+| `at ? ‹x› ≐ _ : ‹S›` | a hole with a part-built term under it |
+| `at λ ‹x› : ‹S›` | an assumption |
+| `at ‹x› = ‹v› : ‹S›` | a local definition |
+| `at ∀ ‹x› : ‹S›` | a ∀-binder |
+| `at ‹x›` | **any** of the five — no shape named |
+
+**`at _` is the last row written out**: a lone pattern names no shape, so it
+stands at the piece's own identity and matches all five. `rename` is written
+that way, because a word belongs to a binder and every one of the five has one,
+while a constraint and a position inside a term have none. Write a word instead
+of `_` and it binds that identity, so the body can act on the focused piece:
+`rule name-it n at x :- do prim-rename n` is the same rule with the focus's own
+word in hand.
+
+**A clause with no `at` at all asks nothing about the focus** and is offered at
+every one of them, a constraint and a position inside a term included — which is
+the difference between writing no `at` and writing `at _`.
+
+**Each position is an ordinary pattern, so a bare word there binds**: `at ? h :
+s` binds `h` to the hole's name and `s` to its type, and the body may use both.
+That is the opposite of a `` core`…` `` region, where a bare word names a global
+and only `${…}` binds — inside a fence the text belongs to another language, and
+after `at` it is still `instral`.
+
+**A type position takes a term pattern**, which is how a rule reads the shape of
+its own goal: `` at ? h : core`∀ (${x} : ${T}) -> ${E}` `` matches only when the
+goal is a universal, and names the binder, the domain and the body.
+
+**What is under a guess is written `_` and cannot be bound.** A part-built term
+is a development rather than a term, and `instral` has no value for one; read it
+with `goal` in the body instead.
 
 **A rule is searched; a function is called.** A rule's clauses are alternatives:
 the first that matches runs, and if it fails the next is tried, so a rule can
@@ -182,6 +231,151 @@ backtracking to 680: pick
 onetwo
 ```
 
+**A pattern may also be a term**, written in the same backticks a term is
+written in, with `${…}` where something is to be bound. `` core`…` `` is the
+development calculus, so it takes a `Core` apart:
+
+```
+rule claim-of core`trusted ${c} ${a} ${b}` :- do say "a trusted term"
+rule at-star  core`Type₀`                :- do say "the first universe"
+```
+
+Three things are worth knowing about it:
+
+- **Only `${…}` binds.** A bare word inside the region names a global and
+  matches that and nothing else, so there is no position where a plain word
+  quietly becomes a variable. A word that names nothing is refused when the file
+  is read.
+- **A word with no braces has no level arguments**, exactly as in a term you
+  write: `Empty` matches `Empty` at no levels, and `Empty {0}` matches it at the
+  first. **A splice in the braces takes whichever level it is at** —
+  `Empty {${l}}` matches at every level and binds that level as `l`, which is
+  the only way to reach one that has no numeral.
+- **The term is tried as written and then reduced and tried again**, so a
+  pattern matches the term elaboration actually produced as well as the one you
+  wrote.
+
+**A binder is taken apart too**, and its body comes out opened:
+
+```
+rule intro-pi at ? _ : _ :-
+  do g = goal
+     ; core`∀ (${x} : ${T}) -> ${E}` = g
+     ; call intro x
+```
+
+`${x}` is the binder's identity, `${T}` its domain and `${E}` the inside of the
+`∀` with an ordinary variable where the bound occurrences were. **`at` says the
+focus is a hole and `goal` answers that hole's own type**, so the `∀` the pattern
+takes apart is the one `intro` then opens — `attack` the statement
+`∀ (A : Type₀) -> A -> A` and run the rule twice, and the second binder is named
+off the inner arrow and not off the statement. `λ` and `let`
+read the same way — `` core`let ${x} = ${v} : ${T} in ${E}` `` — and `->` is a
+`∀` whose binder you decline to name, dependent or not.
+
+Four more things about a binder:
+
+- **Its name position binds, so it takes a splice.** `` core`∀ (x : ${T}) -> ${E}` ``
+  is refused: a bare word inside a region names a global, which a binder's name
+  is not, and a binder's word means nothing in a core term anyway — two terms
+  that differ only in one are the same term.
+- **`_` works there**, as it does anywhere a pattern is written:
+  `` core`∀ (${_} : ${S}) -> ${E}` `` matches a universal and names only its
+  parts.
+- **Several binders in one group are several patterns**, nesting as the term
+  does: `` core`∀ (${x} : ${S}) (${y} : ${T}) -> ${E}` ``.
+- **Taking a `∀` apart introduces nothing.** The variable `${E}` refers to is
+  not in scope, so you cannot `claim` at it or `fill` with it until `intro` has
+  made it real — which is the point: a rule looks at the goal's shape and *then*
+  chooses between introducing and doing induction.
+
+**Once `intro` has made it real, `ident-term` is how you name it.** `intro x`
+opens the binder at the very variable `${x}` carries, and `ident-term x` is the
+term that mentions it — so a rule can hand the parameter it just introduced to
+an op that wants a term. The shipped base's `by-induction` is three lines of
+exactly that:
+
+```
+by-induction : ()
+rule by-induction at ? _ : core`∀ (${x} : ${T}) -> ${E}` :-
+  do intro x
+     ; v = ident-term x
+     ; call induction-core v
+```
+
+```
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> open Nat
+opened Nat
+thena spine> :theorem natRefl : ∀ (n : Nat) -> Eq {0} Nat n n
+proving natRefl : ∀ (n : Nat) -> Eq {0} Nat n n
+thena spine> attack
+thena spine> by-induction
+subgoals: zeroMethod, succMethod
+subgoals: zeroCase
+subgoals: succCase
+warning: n shadows an outer binder of the same word, which no word reaches now — walk up to that binder and rename it to give it one
+```
+
+The warning is the split doing its job: each case re-binds `n` as the
+constructor it stands for, which is what makes `zeroCase` a different goal from
+`succCase`, and the outer binder loses its word in the bargain.
+
+**It takes no argument**, which is the whole of it: the rule was told nothing
+and the subject of the split is the binder its own head bound. Being nullary it
+is also a candidate for a bare `step`, where it sits just below `intro` —
+introducing is the less committal move, so a search takes that first and
+reaches the case split on the way back.
+
+`ident-term` wants a binder's identity and not a word. A written word carries no
+variable, so `ident-term "a"` fails and says so: there is nothing for it to
+mean, and inventing a variable would build a term that mentions a binder which
+is not there. **A binder position in a pattern is the one thing that hands you
+an identity carrying a variable** — `name-ident n` deliberately does not, since
+a name is a word and a rule that holds one means that word.
+
+**And a body goes back under a binder with `make-forall`, `make-lambda` or
+`make-let`.** This is the reverse of the pattern, for the rule that does *not*
+`intro`: it abstracts the variable out of the body again.
+
+```
+rule rebind core`∀ (${x} : ${s}) -> ${e}` at ? _ : _ :-
+  do g = make-forall x s e
+     claim "rebuilt" g
+```
+
+```
+thena spine> :theorem t : Type₀
+proving t : Type₀
+thena spine> rebind core`∀ (A : Type₀) -> A`
+thena spine> :where
+focus
+  let ? t : Type₀ in
+path
+  root ▸ rebuilt
+context
+  rebuilt : ∀ (A : Type₀) -> A
+type
+  Type₀
+```
+
+`make-lambda` is the same three arguments at a `λ`, and `make-let` takes a
+fourth — `make-let x v T E` — because a `let` holds its bound value. The first
+argument is the binder's *identity*, which is what `${x}` binds: it carries the
+variable the body refers to, and that variable is what says which occurrences
+the binder takes. A plain word there, `make-forall "B" s e`, binds nothing — the
+binder stands over a body that does not mention it, and if the body came off a
+pattern its variable stays loose, so `claim` refuses the term and names the
+variable that is not in scope.
+
+**A word your rule read off a binder is renumbered when it lands.** `intro x`
+with an `x` that came off the goal treats the word the way a bare `intro` does
+— the system found it, so it is made free in the scope the binder lands in. On
+a goal `∀ (A : Type₀) -> …` where `A` is already bound you get `A1`, not a
+second `A` and a shadowing warning. A word *you* wrote, `intro "A"`, is still
+used as given.
+
 **What you type at the prompt is a block**, so a binding lives for the entry and
 dies with it:
 
@@ -207,7 +401,7 @@ are GHCi's spelling.
 ## 5. `instral` has types, and they are checked when a file loads
 
 ```
-String   Name   Int   Char   Bool   Level
+String   Name   Ident   Int   Char   Bool   Level
 List a   Option a   (a, b)   a -> b
 Surface   Core   Development
 ```
@@ -227,6 +421,11 @@ Two rules about types worth knowing:
 - **`Name` is not `String`.** A string literal is accepted at either, so
   `fresh-name "h"` needs nothing; a *variable* going from a name to a string is
   written down, with `name-text`.
+- **`Ident` is a binder, not a word.** It is what `intro` takes: a word, and —
+  when a rule got it by taking a binder apart — the variable that binder was
+  opened at, which `intro` then adopts instead of making a second one. A string
+  literal is accepted here too, and means *this word, no variable*; a `Name`
+  variable is written down, with `name-ident`.
 - **Inference is Hindley-Milner.** A rule or function is generalised, so
   `rule ignore x :- do say "ignored"` can be used at a `Name` in one place and a
   `Core` in another with no signature. **A local is not generalised**: a lambda
@@ -504,8 +703,30 @@ the rules do not type check:
   wrong, instruction 2: wanted Name, got Core
 ```
 
-A level needs no splice of its own: build a universe with `level ‹n›` or
-`fresh-level` and `universe-at`, and splice the term.
+**A level argument is the third position**, and it takes a splice of its own:
+`core`Empty {${l}}`` is `Empty` at a level the rule is holding. To build a
+*universe* at one you need no splice — `level ‹n›` or `fresh-level`, then
+`universe-at`, then splice the term — but a global's level arguments are
+written out at every use, so nothing composes into those and this is how they
+are reached:
+
+```
+rule by-reflexivity at ? _ : core`Eq {${l}} ${A} ${a} ${b}` :-
+  do t = resolve-core core`refl {${l}} ${A} ${a}`
+     ; fill t
+     ; solve
+```
+
+```
+thena spine> :theorem t : Eq {1} Nat zero zero
+thena spine> by-reflexivity
+already equal
+thena spine> qed
+t : Eq {1} Nat zero zero   ∎
+```
+
+The same clause with `{0}` written in place of both splices proves that theorem
+at level zero and is stuck at level one.
 
 **`` surface`…` `` takes no splice.** The core grammar does, and so does an
 object language's region (§6).

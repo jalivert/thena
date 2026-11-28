@@ -2082,9 +2082,9 @@ checkBlock gs bases bound r =
 -- **The same grammar a rule body has**, so nothing is \"@instral@, except at the
 -- REPL\".
 instralEntry
-  :: [Grammar] -> InScope -> [RuleBase] -> [(Ops.Name, Value)] -> String
-  -> Either LineError [Instr]
-instralEntry gs sc bases bound src = do
+  :: [Grammar] -> GlobalEnv -> InScope -> [RuleBase] -> [(Ops.Name, Value)]
+  -> String -> Either LineError [Instr]
+instralEntry gs env sc bases bound src = do
   ts  <- mapLeft LineSyntax (tokensOf src)
   -- **An entry is laid out, like a rule file** (MS5 phase 78). One line gets a
   -- block around it and nothing else changes; a @:{ … :}@ entry gets a @;@
@@ -2122,7 +2122,7 @@ instralEntry gs sc bases bound src = do
             -- with** (MS12 phase 349): the prompt is not a file, and the
             -- refusal of a line says so by naming no place — the engine's own
             -- /the line is in front of you/.
-            (resolveBlock (Reading gs sc) (rootName "entry") (map fst bound)
+            (resolveBlock (Reading gs env sc) (rootName "entry") (map fst bound)
                (concatMap hoist (map snd (reverse is))))
   -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
   -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
@@ -2135,7 +2135,7 @@ instralEntry gs sc bases bound src = do
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts. All three checks are 'checkBlock' since phase 90.
-  case checkBlock gs bases bound (Rule (rootName "entry") [] [] prog Nothing []) of
+  case checkBlock gs bases bound (Rule (rootName "entry") [] Nothing [] prog Nothing []) of
     Just (BlockIll es)      -> Left (LineIllFormed es)
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
@@ -2165,13 +2165,14 @@ instralEntry gs sc bases bound src = do
 -- says what /kind/ of thing goes at the cursor and lists nothing, which is the
 -- honest answer while the lines above are broken.
 entryBindings
-  :: [Grammar] -> InScope -> [RuleBase] -> [(Ops.Name, Value)] -> String
-  -> [(Ops.Name, Ty)]
-entryBindings gs sc bases bound src = case instralEntry gs sc bases bound src of
+  :: [Grammar] -> GlobalEnv -> InScope -> [RuleBase] -> [(Ops.Name, Value)]
+  -> String -> [(Ops.Name, Ty)]
+entryBindings gs env sc bases bound src =
+  case instralEntry gs env sc bases bound src of
   Left _     -> []
   Right prog ->
     boundBy (allSignatures bases) (allCallable bases) bound
-      (Rule (rootName "entry") [] [] prog Nothing [])
+      (Rule (rootName "entry") [] Nothing [] prog Nothing [])
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
@@ -5895,10 +5896,11 @@ dispatch s name arg = case name of
           -- session\'s goals on the end of the environment for the same reason.
           bound = (if Engine.isYielding machine then env (exec machine) else [])
                     ++ goals
-       in case resolveBlock (Reading (grammars machine) (scope machine))
+       in case resolveBlock (Reading (grammars machine) (globals machine)
+                                     (scope machine))
                             (rootName "entry") (map fst bound) body of
         Left errs -> (s, Failed (blockProblem (faultsIn Nothing [] errs)))
-        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] [] is Nothing []) of
+        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (rootName "entry") [] Nothing [] is Nothing []) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionFuel s)
@@ -5985,7 +5987,9 @@ dispatch s name arg = case name of
     matching =
       [ MatchedRule nm k (groupParams grp) (lookup (nm, k) inferredTypes)
       | ((nm, k), grp) <-
-          matchingRules (rules machine) (globals machine)
+          -- **A read-only query, so the counter goes nowhere** (MS12) — the
+          -- same bargain 'Thena.View.matchesView' writes out.
+          matchingRules (rules machine) (globals machine) (names machine)
                         (cursor (development machine))
       ]
 
@@ -6642,7 +6646,8 @@ dispatch s name arg = case name of
     -- the split into a word and an argument run was 62b's shape and an entry has
     -- no such shape: it is a sequence of instructions, of which one op and its
     -- operands is the degenerate case.
-    line = case instralEntry (grammars machine) (scope machine) (rules machine)
+    line = case instralEntry (grammars machine) (globals machine) (scope machine)
+                             (rules machine)
                              (Engine.goalEnv machine) (name ++ " " ++ arg) of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
@@ -7263,7 +7268,7 @@ scopedDecls reveals brought gs env conc = go conc []
         let (paths, names, opens) = brought (moduleFromSteps pth x)
             sc' = (revealing names sc) { scopeOpens = opens ++ scopeOpens sc }
          in go sc' (ps ++ reverse paths) inner ++ go sc ps rest
-      _                 -> (Reading gs sc, ps, d) : go sc ps rest
+      _                 -> (Reading gs env sc, ps, d) : go sc ps rest
 
     -- **THE PATH IS RESOLVED WHERE THERE IS SOMETHING TO RESOLVE IT AGAINST —
     -- MS12 PHASE 313.** It was taken verbatim, which was right while every
@@ -8094,7 +8099,8 @@ installReadBases below heldBelow s = go []
     -- outside every @consult … where@ block may call into a base that file
     -- holds somewhere, and is told so when it runs rather than when it loads.
     blocksOf reach (conc, st, b) =
-      case surfaceBlocks (Reading (grammars (sessionMachine s)) conc)
+      case surfaceBlocks (Reading (grammars (sessionMachine s))
+                                  (globals (sessionMachine s)) conc)
                          (rootName (baseName b))
                          (concatMap ruleBody bodies) of
       Left errs -> Left (basePath b, errs)
@@ -8907,7 +8913,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- itself declared above it, and a @language@ block is exactly such a thing.
   --
   -- **The same checker the prompt uses**, so the messages are unchanged.
-  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] [] is Nothing []) of
+  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (rootName "do") [] Nothing [] is Nothing []) of
     Just (BlockIll errs)      -> stop (load [] m) msgs warns (BlockRefused errs)
     Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
     Nothing ->

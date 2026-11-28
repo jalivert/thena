@@ -163,7 +163,9 @@ import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
 import Thena.Syntax.Print
-  ( dagger
+  ( corePText
+  , componentPText
+  , dagger
   , Env
   , escapeChar
   , escapeRaw
@@ -190,6 +192,7 @@ import Thena.Global.Env
   )
 import Thena.Instral.Ops
   ( AnswerKind (..)
+  , Identifier (..)
   , Instr (..)
   , Op
   , Operand (..)
@@ -750,6 +753,7 @@ describe t = case t of
   TDashes     -> "--"
   TRule       -> "rule"
   TWhen       -> "when"
+  TAt         -> "at"
   TNeck       -> ":-"
   TNumber k   -> show k
   TString txt -> show txt
@@ -1494,6 +1498,12 @@ renderValue ren ctx v = case v of
   -- form is the fallback 'nameDotted' documents — the printer's shortest-ending
   -- policy is over terms, and a bare name value has no scope to shorten in.
   VName g            -> nameDotted g
+  -- **An identifier prints as its word, and the token is NOT shown** (MS12
+  -- phase 353). **His, 2026-11-19**, of the name counter: /"The counter is sort
+  -- of like a thing that is invisible to the user, in a way. User doesn't own
+  -- it."/ So a token has no spelling to print and no number a reader could use;
+  -- what they can use is the word the binder will display.
+  VIdent i           -> identString (identWord i)
   VInt k             -> show k
   VChar c            -> escapeChar c
   VBool True         -> "true"
@@ -1677,6 +1687,11 @@ renderFailReason ren r = case r of
     n ++ " is ambiguous here: it could be " ++ intercalate " or " gs
       ++ "\n  write the one you mean"
   ExpectedName      -> "expected a name"
+  ExpectedIdent     -> "expected an identifier"
+  WordBindsNothing w ->
+    w ++ " is a word and nothing more, so there is no variable it means"
+      ++ "\n  a term can be made only from an identifier a binder was opened"
+      ++ " at — a binder position in a pattern, or the one `intro` adopted"
   DottedTextName s  ->
     show s
       ++ " is text, so all of it is one word — and a word may not hold a dot."
@@ -2650,13 +2665,24 @@ renderRuleBases ren bs = concatMap one bs
 -- **Exported so one spelling serves the listing and the check on it**:
 -- "Thena.View.Rules" draws the same line from a 'Thena.View.Rules.RuleView',
 -- and @Thena.View.RulesTests@ crosses the two.
+-- **AND ITS FOCUS, WHEN IT WROTE ONE** (MS12 phase 358, @~9j34x@). A clause
+-- that asks about the focus says so on its own line, for the reason the
+-- parameters are here: the listing's job is to let a reader tell two clauses of
+-- one name apart, and after @at@ lands in the base the focus is what tells most
+-- of them apart.
 renderRuleClause :: Rendering -> Rule -> String
 renderRuleClause ren r =
-  unwords (nameString ren (ruleName r) : map written (ruleParams r))
+  unwords
+    (nameString ren (ruleName r) : map written (ruleParams r))
+      ++ focusPart
   where
     written pt = case pt of
       PVar n -> "‹" ++ n ++ "›"
       _      -> renderPattern pt
+
+    focusPart = case ruleFocus r of
+      Nothing -> ""
+      Just cp -> " at " ++ componentPText written cp
 
 renderRuleFileError :: Rendering -> FilePath -> RuleFileError -> [String]
 renderRuleFileError ren path e = case e of
@@ -2697,6 +2723,10 @@ whereRuleError ren e = case e of
   BadTestOperands g _     -> inName g
   ReservedName g _        -> inName g
   BadPattern g _          -> inName g
+  CorePatternForm g _     -> inName g
+  CorePatternNotInScope g _  -> inName g
+  CorePatternAmbiguous g _ _ -> inName g
+  FocusPatternForm g _    -> inName g
   RepeatedInPattern g _   -> inName g
   BadOperands g i _       -> inRule g i
   NoSuchTag g i _         -> inRule g i
@@ -2785,6 +2815,23 @@ whatRuleError e = case e of
       ++ ", so it is ambiguous here"
   BadRegion _ _ tag why   ->
     "this " ++ tag ++ " term did not parse: " ++ renderSyntaxError why
+  -- **It says what was written and not that the region is wrong**, because
+  -- every one of these forms is a term the development calculus writes and a
+  -- pattern will read at a later landing (MS12 phase 352, @spec\/machine.md@
+  -- §8).
+  CorePatternForm _ what  ->
+    what ++ " is not read in a core pattern yet"
+  CorePatternNotInScope _ w ->
+    w ++ " is not in scope, and a word in a core pattern names a global"
+  CorePatternAmbiguous _ w ls ->
+    w ++ " could be " ++ intercalate " or " (map nameDotted ls)
+      ++ ", so it is ambiguous here"
+  -- **The one position of an @at@ pattern that takes @_@ and nothing else.**
+  -- What stands under a guess is a development and not a term, so the message
+  -- says what is there rather than offering a spelling that would work.
+  FocusPatternForm _ what ->
+    what ++ " cannot stand under a guess's ≐ — write _, and read the"
+      ++ " development with goal"
   UnknownType _ w         -> w ++ " is not a type"
   TypeArity _ w want got  ->
     w ++ " takes " ++ show want ++ ", not " ++ show got
@@ -2857,6 +2904,11 @@ renderPattern pt = case pt of
   PSome a     -> "(some " ++ renderPattern a ++ ")"
   PNone       -> "none"
   PObject sk  -> renderSkeleton renderPattern sk
+  -- **The one pattern form that prints back to the region it was written as**
+  -- (MS12 phase 352): the development calculus needs no grammar to be written,
+  -- so 'Thena.Syntax.Print.corePText' is in the module whose output reads back
+  -- and both display printers call it rather than carrying a copy each.
+  PCore cp    -> corePText renderPattern cp
   PList ps mt ->
     "[" ++ intercalate ", " (map renderPattern ps ++ tl) ++ "]"
     where tl = case mt of

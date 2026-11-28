@@ -29,10 +29,11 @@ module Thena.View.Instral
 
 import Data.List (intercalate)
 
-import Thena.Core.Term (Spelling, spelledIn, nameDotted, Literal (..))
+import Thena.Core.Term (Spelling, spelledIn, nameDotted, Ident (..), Literal (..))
 import Thena.Global.Env (inductiveName)
 import Thena.Instral.Ops
   ( AnswerKind (..)
+  , Identifier (..)
   , Instr (..)
   , Op (..)
   , Operand (..)
@@ -49,7 +50,8 @@ import Thena.View.Address (Address)
 import Thena.View.Core (Budget, Display, displayCore)
 import Thena.View.Surface (SurfaceShape, displaySurface)
 import Thena.Surface.Zipper (focus)
-import Thena.Syntax.Print (Env, escapeChar, escapeString, renderLevel, surfacePattern)
+import Thena.Syntax.Print
+  (Env, corePText, escapeChar, escapeString, renderLevel, surfacePattern)
 import Thena.Core.Term (Var)
 
 -- | One instruction, positioned.
@@ -246,6 +248,13 @@ displayValue sp gs budget env bs n at v = case v of
   -- unrestricted and may hold brackets or spaces, so there is no spelling that
   -- reads it back and quoting it would promise one.
   VName g -> ValName (nameDotted g)
+  -- **An identifier rides out as 'ValOpaque', carrying its word** (MS12 phase
+  -- 353) — the escape 'VPattern' and 'VBinder' use, and for their reason: a
+  -- frontend has nothing to do with the token, and a case of its own would
+  -- break every total match over 'ValueView' for no present gain. A structured
+  -- view is owed when something asks. **Not 'ValName'**, which would say it is
+  -- a name, and the two are different types in @instral@.
+  VIdent (Identifier (Ident w) _) -> ValOpaque w
   VInt k -> ValInt k
   VChar c -> ValChar (escapeChar c)
   VBool b -> ValBool b
@@ -309,6 +318,12 @@ patternText pt = case pt of
   PSome a     -> "(some " ++ patternText a ++ ")"
   PNone       -> "none"
   PObject sk  -> skeletonText sk
+  -- **Shared and not copied** (MS12 phase 352), unlike the rest of this
+  -- function: a core pattern's notation reads back, so its printer belongs in
+  -- "Thena.Syntax.Print", and a second copy of it here would be a second table
+  -- of the development calculus's spelling rather than the cheap duplicate the
+  -- note above justifies.
+  PCore cp    -> corePText patternText cp
   PList ps mt ->
     "[" ++ intercalate ", " (map patternText ps ++ tl) ++ "]"
     where

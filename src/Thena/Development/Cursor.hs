@@ -50,6 +50,7 @@ module Thena.Development.Cursor
     -- * Reading the position (§4.5)
   , context
   , expectedType
+  , atTrailingHole
 
     -- * Changing the development
   , insertAbove
@@ -69,7 +70,7 @@ module Thena.Development.Cursor
 
 import Data.Foldable (toList)
 import Data.List ((\\))
-import Data.Maybe (mapMaybe)
+import Data.Maybe (isJust, mapMaybe)
 
 import Thena.Core.Level (Level, LevelVar, substLevel)
 import Thena.Core.Context (Context, Entry (..), freshIdent, substLevelsInEntry)
@@ -762,6 +763,28 @@ expectedType cur = case cur of
     InSlot _ _                      -> Nothing
     TrailingTerm                    -> innermostGuess p
   InCore {} -> Nothing
+
+-- | Is the focus table 2.8's @?x : S . x@ — a hole whose chain ends in its own
+-- variable, and nothing else after it?
+--
+-- **This is the introduction tactics' shape test, and it is the specification**
+-- (OLEG table 2.8: they /"only replace constructions of the shape @?x : S . x@"/).
+-- It lives here because it is a question about the position, not about the
+-- component: the same hole one @along@ further up its chain is a different
+-- answer, and a binder inserted above a hole that is /not/ trailing would put
+-- everything below it under that binder and change what the construction
+-- proves.
+--
+-- **Being inside a guess is part of the shape**, which is why the enclosing
+-- 'IntoGuess' is asked for: the thesis writes the tactics over
+-- @?x ≐ (?x' : S . x')@, so what they rewrite is a guess's /body/. The root of
+-- a development has the trailing shape too, and a binder put there would change
+-- what the development proves — the thing @attack@ exists to stop.
+atTrailingHole :: Cursor -> Bool
+atTrailingHole cur = case cur of
+  InPartial p (Claim v _ _) (Trailing (Free v'))
+    | v == v' -> isJust (innermostGuess p)
+  _           -> False
 
 componentType :: Component -> Core
 componentType c = case c of

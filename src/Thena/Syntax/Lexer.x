@@ -287,6 +287,22 @@ tokens :-
   -- be written above it.
   "notation"    { keyword TNotation }
   "when"        { keyword TWhen }
+  -- **THE TWENTY-EIGHTH WORD, MS12 phase 358 — his ruling of 2026-11-26,
+  -- @~86bnn@.** @at@ marks the focus pattern in a rule head (his framing of
+  -- 2026-09-14: /@at@ names the subject and the tag names the language/), and a
+  -- notation cannot exist without a token — the argument @trusted@, @induction@
+  -- and @case@ were reserved on. **Measured, and it is why the word had to be
+  -- taken**: a component's definition form @at x = v : S@ begins with a name,
+  -- so with the marker left an ordinary identifier the grammar has eight
+  -- shift\/reduce conflicts where it has none with this token.
+  --
+  -- **It narrows identifiers project-wide**, as every word here does, and
+  -- nothing written in either repository used it as a name. **What did use it
+  -- was the system itself**: "Thena.Tactics.Eliminate" and
+  -- "Thena.Tactics.Specialise" minted a binder spelled @at@ until this phase
+  -- renamed it @carried@, which would have made them print a term this lexer
+  -- can no longer read.
+  "at"          { keyword TAt }
   ":-"          { keyword TNeck }
   $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
   @string       { \p s -> Located (posOf p) (TString (unescape s)) }
@@ -402,6 +418,7 @@ data Token
     -- as raw text (MS6 phase 101, @ms6\/SPEC.md@ §7.0). Only 'lexModule'
     -- produces one; see 'blockText'.
   | TWhen
+  | TAt          -- ^ @rule r at ? x : S :- …@ (MS12 phase 358, @~86bnn@)
   | TNeck
   | TNumber Integer
   | TString String

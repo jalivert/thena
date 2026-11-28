@@ -2,7 +2,7 @@
 
 rule base demo where
 
-rule pick :- when focus-is-hole do say "  pick: FIRST alternative"
-rule pick :- when focus-is-hole do say "  pick: SECOND alternative"
+rule pick at ? _ : _ :- do say "  pick: FIRST alternative"
+rule pick at ? _ : _ :- do say "  pick: SECOND alternative"
 
-rule outer :- when focus-is-hole do call pick
+rule outer at ? _ : _ :- do call pick

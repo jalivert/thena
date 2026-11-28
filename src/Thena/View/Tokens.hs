@@ -192,6 +192,7 @@ kindOf t = case t of
   -- MS8 phase 158: the fourth block word (§4.8).
   TNotation     -> AKeyword
   TWhen         -> AKeyword
+  TAt           -> AKeyword
 
   TQuery        -> AHole
   TGuessed      -> AHole

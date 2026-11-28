@@ -37,11 +37,10 @@ import Thena.Engine
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
-import Thena.Instral.Ops (Instr (..), Rule (..), Test (..))
+import Thena.Instral.Ops (Instr (..), Rule (..))
 import qualified Thena.Instral.Ops as Ops
-import qualified Thena.Rules
-import Thena.Rules (RuleBase, dispatch, matches, ruleBase)
-import Thena.Standard (aRule, expectedBase)
+import Thena.Rules (RuleBase, dispatch, iterRules, matches, ruleBase)
+import Thena.Standard (atRule, atHole, expectedBase)
 
 tests :: TestTree
 tests =
@@ -67,7 +66,7 @@ hole = enter (Under (Claim v (Ident "goal") type0) (Trailing (Free v)))
   where v = fst (fresh 0)
 
 rule :: String -> [Instr] -> Rule
-rule n = aRule (rootName n) [] [FocusIsHole]
+rule n = atRule atHole (rootName n) [] []
 
 -- | Succeeds, and changes the development: the hole becomes a guess.
 works :: Rule
@@ -414,7 +413,7 @@ dispatchableTests =
     "dispatch skips parameterised rules"
     [ testCase "matches shows try, dispatch does not" $ do
         let std = expectedBase
-        names' (matches std emptyGlobals hole)
+        names' (matches std emptyGlobals 0 hole)
           @?= [ -- **@try-in-scope@ is nullary and dispatch DOES run it** (MS12):
                -- it finds its own term, so it is the one candidate in this list
                -- that can close the goal. **It is ABOVE @attack@** (his
@@ -424,8 +423,8 @@ dispatchableTests =
                -- hypothesis that has to be applied to something.
                "try-in-scope", "fit-in-scope"
              , "attack", "try-core", "abandon"
-               -- **@rename@ is offered here too** (MS12 phase 330): its head is
-               -- @focus-is-component@, and dispatch runs it no more than it runs
+               -- **@rename@ is offered here too** (MS12 phase 330): its focus
+               -- is @at _@, and dispatch runs it no more than it runs
                -- @try-core@ — it takes a parameter.
              , "rename", "eliminate-core"
              , "eliminate-generalising-core", "step", "step", "step", "fill"
@@ -473,8 +472,10 @@ dispatchableTests =
                   ]
                ++ replicate 15 "elaborate"
                ++ ["run-block"]
+               -- @intro-binders@ is written @at ? _ : _@ as of MS12 phase 357.
+               ++ replicate 4 "intro-binders"
                ++ replicate 2 "spine-arguments"
-        names' (dispatch std emptyGlobals hole)
+        names' (dispatch std emptyGlobals 0 hole)
           @?= ["try-in-scope", "fit-in-scope", "attack", "abandon", "step"]
 
       -- And that is what the engine actually runs: @try-core@ would have been
@@ -494,6 +495,4 @@ dispatchableTests =
     ]
   where
     names' it = [ nameDotted (ruleName r) | r <- drainIt it ]
-    drainIt it = case Thena.Rules.next it of
-      Nothing        -> []
-      Just (r, rest) -> r : drainIt rest
+    drainIt = iterRules

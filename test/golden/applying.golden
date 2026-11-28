@@ -66,6 +66,7 @@ without-hypotheses ‹list› : List a -> List (a, List b)
 induction-core ‹t› : Core -> ()
 case-core ‹t› : Core -> ()
 run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> apply-core core`Just`
 solved: A
@@ -96,10 +97,6 @@ thena spine> attack
 thena spine> intro
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
-thena spine> along
 thena spine> apply-core core`f`
 already equal
 thena spine> :show
@@ -193,8 +190,6 @@ thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
 proving h : Bool -> Maybe Bool
 thena spine> attack
 thena spine> intro
-thena spine> into
-thena spine> along
 thena spine> :where
 focus
   let ? h1 : Maybe Bool in
@@ -219,6 +214,7 @@ h = let h = λ (b : Bool) -> let A = Bool : Type₀ in let refined1 = b : Bool i
 thena spine> :theorem guessed : Bool
 proving guessed : Bool
 thena spine> attack
+thena spine> back
 thena spine> apply-core core`true`
 stuck: no clause of apply-core applies here
 thena spine> :abandon

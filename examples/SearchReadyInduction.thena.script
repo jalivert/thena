@@ -1,0 +1,81 @@
+-- A RULE THAT READS ITS OWN GOAL (MS12) — the acceptance test for a core
+-- pattern in a rule head.
+--
+-- `by-induction` in the shipped base takes no arguments. It matches that its
+-- goal is a universal, names the three parts of it, introduces the binder and
+-- inducts on that parameter:
+--
+--   rule by-induction at ? _ : core`∀ (${x} : ${T}) -> ${E}` :-
+--     do intro x
+--        ; v = ident-term x
+--        ; call induction-core v
+--
+-- Until a pattern could stand over a core term, none of that could be written.
+-- `goal` hands a rule a core term and every destructor in the vocabulary
+-- answers a surface one, so a nullary rule could ask the yes-or-no questions —
+-- is the focus a hole, is its type a ∀ — and learn nothing further. It could
+-- recognise the shape of its goal and still not name the parts it would have
+-- to hand to `induction-core`.
+--
+-- WHAT TO COMPARE IT WITH: `SplitAtAHole.thena.script`, beside this file,
+-- makes the same kind of split by hand. There the author writes
+--
+--   attack ; intro ; intro ; intro ; induction-core core`b`
+--
+-- and names the scrutinee themselves, in a term they wrote out. Here nothing
+-- is written down: the rule is handed no argument and the subject of the split
+-- is the binder its own head bound.
+
+data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+open Nat
+
+-- IT IS OFFERED TO THE SEARCH, which is the half the proof below does not
+-- show. `by-induction` is nullary, so it is a candidate wherever a bare `step`
+-- looks, and it sits between `intro` and `attack` in the base: introducing is
+-- the strictly less committal move and is this rule's own first instruction,
+-- so `step` takes that and one `retry` reaches the case split.
+:theorem reachedBySearch : ∀ (n : Nat) -> Eq {0} Nat n n
+attack
+step
+:choices
+retry
+:abandon
+
+-- AND THE PROOF, with the rule called by name. One hole per constructor, each
+-- case's binders introduced and its equations already discharged — the same
+-- thing `induction-core` hands an author who names the scrutinee, reached
+-- without naming one.
+--
+-- `qed` is the judge: it runs the kernel over the finished development, so a
+-- goal the rule shaped wrongly could not be proved past.
+:theorem natRefl : ∀ (n : Nat) -> Eq {0} Nat n n
+attack
+by-induction
+
+-- THE CASES ARE REFINED, which is what makes the two of them different proofs:
+-- `n` is a definition inside each one — `zero` here, `succ x` below — so the
+-- goal names the constructor rather than the parameter.
+goto-named "zeroCase1"
+try-core core`refl {0} Nat zero`
+solve
+goto-named "zeroCase"
+solve
+
+-- The `succ` case carries its induction hypothesis, `x1 : Eq {0} Nat x x`, and
+-- this theorem does not need it: `refl` closes both cases. It is in scope all
+-- the same, which is what `induction-core` gives that `case-core` does not.
+goto-named "succCase1"
+try-core core`refl {0} Nat (succ x)`
+solve
+goto-named "succCase"
+solve
+
+goto-named "zeroMethod"
+solve
+goto-named "succMethod"
+solve
+goto-named "natRefl1"
+solve
+goto-root
+solve
+qed

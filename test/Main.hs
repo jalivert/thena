@@ -44,6 +44,8 @@ import qualified Thena.DeclarationReadersTests
 import qualified Thena.SpecialiseTests
 import qualified Thena.DotPatternTests
 import qualified Thena.InteractiveSplitTests
+import qualified Thena.LevelSpliceTests
+import qualified Thena.SearchReadyTests
 import qualified Thena.EliminateTests
 import qualified Thena.EliminatorTests
 import qualified Thena.EngineTests
@@ -124,6 +126,8 @@ main =
       , Thena.SpecialiseTests.tests
       , Thena.DotPatternTests.tests
       , Thena.InteractiveSplitTests.tests
+      , Thena.LevelSpliceTests.tests
+      , Thena.SearchReadyTests.tests
       , Thena.EliminateTests.tests
       , Thena.EliminatorTests.tests
       , Thena.EngineTests.tests

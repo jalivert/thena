@@ -3,9 +3,6 @@ proving const : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> :where
 focus
   let ? const1 : A in
@@ -74,6 +71,7 @@ without-hypotheses ‹list› : List a -> List (a, List b)
 induction-core ‹t› : Core -> ()
 case-core ‹t› : Core -> ()
 run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> elaborate surface`a`
 already equal
@@ -101,9 +99,6 @@ proving again : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> elaborate surface`b`
 stuck: not in scope: b
 thena spine> elaborate surface`a a`
@@ -115,9 +110,6 @@ proving shown : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> :step on
 thena spine> elaborate surface`a`
 pc
@@ -140,7 +132,7 @@ pc
   2  f = resolve-name w
   3  call spine-arguments h f e
 env
-  h = core`‹Var 33›`
+  h = core`‹Var 25›`
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
@@ -154,7 +146,7 @@ pc
   2  call spine-arguments h f e
 env
   e = ‹a›
-  h = core`‹Var 33›`
+  h = core`‹Var 25›`
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
@@ -168,7 +160,7 @@ pc
 env
   w = a
   e = ‹a›
-  h = core`‹Var 33›`
+  h = core`‹Var 25›`
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
@@ -182,7 +174,7 @@ env
   f = core`a`
   w = a
   e = ‹a›
-  h = core`‹Var 33›`
+  h = core`‹Var 25›`
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
@@ -195,7 +187,7 @@ pc
   1  call fill f
   2  call solve
 env
-  h = core`‹Var 33›`
+  h = core`‹Var 25›`
   f = core`a`
   t = ‹a›
 stack

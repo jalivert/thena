@@ -22,6 +22,9 @@ module Thena.Standard
   , expectedBase
   , withRules
   , aRule
+  , atRule
+  , atHole
+  , atGuess
   , forgetOrigins
   ) where
 
@@ -39,6 +42,7 @@ import Thena.Instral.Ops
   , Operand (..)
   , Rule (..)
   , Pattern (..)
+  , ComponentP (..)
   , Test (..)
   )
 import Thena.Instral.Ops (Value (VText))
@@ -83,7 +87,7 @@ expectedStandard =
     -- cycled attack\/solve\/regret for ever with this rule untried at every
     -- choice point it made. The order of the two is the fix, and it is in the
     -- file as well as here.
-  [ aRule (rootName "try-in-scope") [] [FocusIsHole]
+  [ atRule atHole (rootName "try-in-scope") [] []
       [ Bind (Op.PVar "hs") Nothing Op.InScopeAt
       , Bind (Op.PVar "h") Nothing (Op.Call "any-of" [Ref "hs"])
       , Do (Try (Ref "h"))
@@ -92,7 +96,7 @@ expectedStandard =
     -- instruction of 2026-11-23), below the bare guess because it opens a hole
     -- per argument. It starts at ONE argument, so it does not repeat the rule
     -- above: @fit-core@\'s own first clause is the bare spine.
-  , aRule (rootName "fit-in-scope") [] [FocusIsHole]
+  , atRule atHole (rootName "fit-in-scope") [] []
       [ Bind (Op.PVar "hs") Nothing Op.InScopeAt
       , Bind (Op.PVar "h") Nothing (Op.Call "any-of" [Ref "hs"])
       , Bind (Op.PVar "n0") Nothing (Op.NextArgumentName (Ref "h"))
@@ -102,39 +106,58 @@ expectedStandard =
       , Bind (Op.PVar "f") Nothing (Op.ApplyNext (Ref "h") (Ref "n"))
       , Do (Call "fit-core" [Ref "f"])
       ]
-  , aRule (rootName "attack")     []    [FocusIsHole]                 [Do Attack]
-  , aRule (rootName "try-core") [PVar "t"] [FocusIsHole] [Do (Try (Ref "t"))]
-  , aRule (rootName "abandon")    []    [FocusIsHole]                 [Do Abandon]
-    -- **Two clauses of one name** (phase 23b): table 2.8 has two intro rules and
-    -- they differ only in their head, which is exactly what a second clause is
-    -- for. Before phase 23 a call could not backtrack, so they had to be
-    -- @intro-pi@ and @intro-let@; now they are @intro@, and typing @intro@ at
-    -- the REPL reaches whichever one applies.
-  , aRule (rootName "intro")      []    [FocusIsGuess, GoalTypeIsPi]  [Do (IntroPi Nothing)]
-  , aRule (rootName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do (IntroLet Nothing)]
+    -- **ABOVE @attack@, for the reason @try-in-scope@ is** — his instruction of
+    -- 2026-11-23, applied again in MS12 phase 357: the introductions ask about a
+    -- hole now, and @attack@ matches at every hole and never fails, so below it
+    -- a bare @step@ at a ∀ goal attacked for ever and never introduced.
+  , atRule atHole (rootName "intro")      []    [GoalTypeIsPi]   [Do (IntroPi Nothing)]
+  , atRule atHole (rootName "intro")      []    [GoalTypeIsLet]  [Do (IntroLet Nothing)]
     -- **And the same two at arity one** (MS12 phase 326, his ask of
     -- 2026-11-20): @intro "a"@ says what the binding is called, which is the
     -- way past an argument the statement never named. @prim-lambda@ and
     -- @prim-let@ have taken an optional name since MS4 phase 41f; nothing in
     -- the base passed one. A call is matched by name /and/ arity, so these are
     -- two further rules and neither shadows the nullary pair.
-  , aRule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsPi]
+  , atRule atHole (rootName "intro") [PVar "n"] [GoalTypeIsPi]
       [Do (IntroPi (Just (Ref "n")))]
-  , aRule (rootName "intro") [PVar "n"] [FocusIsGuess, GoalTypeIsLet]
+  , atRule atHole (rootName "intro") [PVar "n"] [GoalTypeIsLet]
       [Do (IntroLet (Just (Ref "n")))]
+    -- **The rule that reads its own goal** (MS12) — the acceptance test for
+    -- @~9j34x@, and the first clause in the base whose head takes a core term
+    -- apart. @atPiGoal@ is the focus pattern; the subject of the split is the
+    -- binder the head bound, not an entry walked out of the context.
+    --
+    -- **Below @intro@ and above @attack@.** Introducing is the less committal
+    -- move and is this rule's own first instruction, so a search tries it
+    -- first and reaches the case split on the way back; @attack@ is the
+    -- universal tactic and goes below the one with a shape test, which is his
+    -- arrangement of 2026-11-23 applied a third time.
+  , atRule atPiGoal (rootName "by-induction") [] []
+      [ Do (Call "intro" [Ref "x"])
+      , Bind (Op.PVar "v") Nothing (Op.IdentTerm (Ref "x"))
+      , Do (Call "induction-core" [Ref "v"])
+      ]
+  , atRule atHole (rootName "attack")     []    []      [Do Attack, Do Into]
+  , atRule atHole (rootName "try-core") [PVar "t"] [] [Do (Try (Ref "t"))]
+  , atRule atHole (rootName "abandon")    []    []                 [Do Abandon]
+    -- **Two clauses of one name** (phase 23b): table 2.8 has two intro rules and
+    -- they differ only in their head, which is exactly what a second clause is
+    -- for. Before phase 23 a call could not backtrack, so they had to be
+    -- @intro-pi@ and @intro-let@; now they are @intro@, and typing @intro@ at
+    -- the REPL reaches whichever one applies.
     -- **The repair for a shadowed binder** (MS12 phase 330), his ruling of
     -- 2026-11-20, /THERE IS ONE NAME/, part four: the word the component at the
     -- focus is bound under, changed in the development and so in the term.
-  , aRule (rootName "rename") [PVar "n"] [FocusIsComponent]
+  , atRule atAny (rootName "rename") [PVar "n"] []
       [Do (Op.Rename (Ref "n"))]
-  , aRule (rootName "solve")      []    [FocusIsGuess]                [Do Solve]
-  , aRule (rootName "regret")     []    [FocusIsGuess]                [Do Regret]
+  , atRule atGuess (rootName "solve")      []    []                [Do Solve]
+  , atRule atGuess (rootName "regret")     []    []                [Do Regret]
     -- **Two rules, two constructions** (MS9 phase 211, `~84x46`):
     -- @eliminate-core@ is §3.7 with every premise fixed, and the generalising
     -- one is that plus §2.8's copies. The base's own comment has why the
     -- generalising construction does not squat the plain word.
-  , aRule (rootName "eliminate-core")  [PVar "t"] [FocusIsHole]                 [Do (Op.EliminateFixed (Ref "t"))]
-  , aRule (rootName "eliminate-generalising-core") [PVar "t"] [FocusIsHole]      [Do (Op.Eliminate (Ref "t"))]
+  , atRule atHole (rootName "eliminate-core")  [PVar "t"] []                 [Do (Op.EliminateFixed (Ref "t"))]
+  , atRule atHole (rootName "eliminate-generalising-core") [PVar "t"] []      [Do (Op.Eliminate (Ref "t"))]
   , proveRule
   , proveGuess
   , stepZero
@@ -181,7 +204,7 @@ expectedStandard =
 -- check — and left this rule symmetric, so the same operation answered
 -- differently depending on which one you reached it through.
 fillRule :: Rule
-fillRule = aRule (rootName "fill") [PVar "t"] [FocusIsHole]
+fillRule = atRule atHole (rootName "fill") [PVar "t"] []
   [ Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "refined")))
   , Bind (Op.PVar "x") Nothing (Define (Ref "n") (Ref "t"))
   , Bind (Op.PVar "s") Nothing (Typing (Ref "x"))
@@ -197,7 +220,7 @@ fillRule = aRule (rootName "fill") [PVar "t"] [FocusIsHole]
 -- discharge. It calls the /rules/ and not the primitives, so the seam Brady
 -- needs — @FILL@, the two @FOCUS@es, @SOLVE@ — is one a caller can get at.
 unifyRefine :: Rule
-unifyRefine = aRule (rootName "unify-refine-core") [PVar "t"] [FocusIsHole]
+unifyRefine = atRule atHole (rootName "unify-refine-core") [PVar "t"] []
   [ Do (Call "fill" [Ref "t"])
   , Do (Call "solve" [])
   ]
@@ -208,7 +231,7 @@ unifyRefine = aRule (rootName "unify-refine-core") [PVar "t"] [FocusIsHole]
 -- saturated spine and 'unifyRefine' is what makes it fit, unchanged. @apply@
 -- adds no capability the two of them did not already have.
 applyRule :: Rule
-applyRule = aRule (rootName "apply-core") [PVar "f"] [FocusIsHole]
+applyRule = atRule atHole (rootName "apply-core") [PVar "f"] []
   [ Bind (Op.PVar "s") Nothing (Op.Apply (Ref "f"))
   , Do (Call "unify-refine-core" [Ref "s"])
   ]
@@ -226,13 +249,13 @@ applyRule = aRule (rootName "apply-core") [PVar "f"] [FocusIsHole]
 -- phase 49f for 'spineArguments', which is this same recursion with a surface
 -- term saying how many arguments there are instead of the search finding out.
 fitFits :: Rule
-fitFits = aRule (rootName "fit-core") [PVar "f"] [FocusIsHole]
+fitFits = atRule atHole (rootName "fit-core") [PVar "f"] []
   [ Do (Call "fill" [Ref "f"])
   , Do (Call "solve" [])
   ]
 
 fitMore :: Rule
-fitMore = aRule (rootName "fit-core") [PVar "f"] [FocusIsHole]
+fitMore = atRule atHole (rootName "fit-core") [PVar "f"] []
   [ Bind (Op.PVar "n0") Nothing (Op.NextArgumentName (Ref "f"))
   , Bind (Op.PVar "n1") Nothing
       (Op.Call "name-or-stem" [Ref "n0", Lit (VText "a")])
@@ -249,8 +272,8 @@ fitMore = aRule (rootName "fit-core") [PVar "f"] [FocusIsHole]
 -- picks the clause, which is what 'Thena.Rules.clauses' does for every other
 -- name.
 --
--- **No head, and that is the honest answer rather than the tidy one.** A head of
--- 'FocusIsComponent' was written first, to keep these out of the core
+-- **No head, and that is the honest answer rather than the tidy one.** A focus
+-- test was written first, to keep these out of the core
 -- fragment's match list, and it is /false/: the ops insert above the focus
 -- through 'Thena.Development.Cursor.insertAbove', which works from inside a core
 -- term too. A head that refused what the op it wraps allows would make two
@@ -312,15 +335,15 @@ expectedFunctions =
 -- **Two clauses, and that is how the rule language spells a disjunction** —
 -- @intro@ has had two for the same reason since phase 15. Search makes sense
 -- wherever a component is focused, and there is no single test for /hole or
--- guess/; one clause with @focus-is-hole@ would have made @prove@ silent at a
+-- guess/; one clause written @at ? _ : _@ would have made @prove@ silent at a
 -- guess, where the base has @intro@, @solve@ and @regret@ waiting, and an
 -- empty head would have offered it in the core fragment, where nothing can
 -- act at all.
 proveRule :: Rule
-proveRule = aRule (rootName "step") [] [FocusIsHole] [Do Dispatch]
+proveRule = atRule atHole (rootName "step") [] [] [Do Dispatch]
 
 proveGuess :: Rule
-proveGuess = aRule (rootName "step") [] [FocusIsGuess] [Do Dispatch]
+proveGuess = atRule atGuess (rootName "step") [] [] [Do Dispatch]
 
 -- | @step ‹n›@ — n moves (MS12 phase 347), his instruction of 2026-11-24.
 --
@@ -329,11 +352,11 @@ proveGuess = aRule (rootName "step") [] [FocusIsGuess] [Do Dispatch]
 -- 'Thena.Instral.Ops.NumberIsPositive', so the dispatch makes no choice point
 -- and a retry cannot count below nought.
 stepZero :: Rule
-stepZero = aRule (rootName "step") [Op.PInt 0] [FocusIsComponent] []
+stepZero = atRule atAny (rootName "step") [Op.PInt 0] [] []
 
 stepMany :: Rule
-stepMany = aRule (rootName "step") [PVar "n"]
-  [FocusIsComponent, NumberIsPositive (Ref "n")]
+stepMany = atRule atAny (rootName "step") [PVar "n"]
+  [NumberIsPositive (Ref "n")]
   [ Do (Call "step" [])
   , Bind (Op.PVar "m") Nothing (Op.OneLess (Ref "n"))
   , Do (Call "step" [Ref "m"])
@@ -499,7 +522,6 @@ elaborateClauses =
            , Do Attack
            , Do Into
            , Bind (Op.PVar "k0") Nothing Here
-           , Do Back
            , Bind (Op.PVar "k1") Nothing
                (Op.Call "intro-arm-binders"
                         [ Ref "ps", Ref "bs", Op.ListOf [], Op.ListOf []
@@ -548,7 +570,7 @@ elaborateClauses =
            ]
          -- **The two tactics, and each ends where it was invoked.** The word is
          -- the rule's name, which is why there are two and no flag.
-       , aRule (rootName "induction-core") [PVar "t"] [FocusIsHole]
+       , atRule atHole (rootName "induction-core") [PVar "t"] []
            [ Bind (Op.PVar "h") Nothing Here
            , Bind (Op.PVar "r") Nothing (Op.Eliminate (Ref "t"))
            , Bind (Op.PVar "tt") Nothing (Op.Typing (Ref "t"))
@@ -558,7 +580,7 @@ elaborateClauses =
            , call "split-holes-over" [Ref "cs2", Ref "r"]
            , Do (Goto (Ref "h"))
            ]
-       , aRule (rootName "case-core") [PVar "t"] [FocusIsHole]
+       , atRule atHole (rootName "case-core") [PVar "t"] []
            [ Bind (Op.PVar "h") Nothing Here
            , Bind (Op.PVar "r") Nothing (Op.CaseAnalyse (Ref "t"))
            , Bind (Op.PVar "tt") Nothing (Op.Typing (Ref "t"))
@@ -569,20 +591,20 @@ elaborateClauses =
            , call "split-holes-over" [Ref "cs2", Ref "r"]
            , Do (Goto (Ref "h"))
            ]
-       , aRule (rootName "elaborate") [PVar "t"]
-           [ FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
+       , atRule atHole (rootName "elaborate") [PVar "t"]
+           [ SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
            , SplitIsInduction (Ref "t")
            ]
            [call "split-elaborate" [Ref "t"]]
          -- **Two clauses only because the head language has no disjunction.**
          -- The word means something inside, at @split-claim@ and @ihs-for@.
-       , aRule (rootName "elaborate") [PVar "t"]
-           [ FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
+       , atRule atHole (rootName "elaborate") [PVar "t"]
+           [ SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
            , SplitIsCases (Ref "t")
            ]
            [call "split-elaborate" [Ref "t"]]
-       , aRule (rootName "elaborate") [PVar "t"]
-           [FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")]
+       , atRule atHole (rootName "elaborate") [PVar "t"]
+           [SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")]
            [call "split-elaborate" [Ref "t"]]
        ]
     ++ [
@@ -593,13 +615,13 @@ elaborateClauses =
     -- to the second, which is what the Haskell @case@ did: a partial
     -- application of a head with recorded plicities is an ordinary binary
     -- application.
-    aRule (rootName "elaborate") [PVar "t"]
-      [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsElim (Ref "t")]
+    atRule atHole (rootName "elaborate") [PVar "t"]
+      [SurfaceIsApp (Ref "t"), AppHeadIsElim (Ref "t")]
       [ Bind (Op.PVar "a") Nothing (Op.ElimSpine (Ref "t"))
       , call "elaborate" [Ref "a"]
       ]
-  , aRule (rootName "elaborate") [PVar "t"]
-      [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsName (Ref "t")]
+  , atRule atHole (rootName "elaborate") [PVar "t"]
+      [SurfaceIsApp (Ref "t"), AppHeadIsName (Ref "t")]
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "e") Nothing (Op.ExpandImplicits (Ref "t"))
       , Bind (Op.PVar "hd") Nothing (Op.AppHead (Ref "e"))
@@ -607,8 +629,8 @@ elaborateClauses =
       , Bind (Op.PVar "f") Nothing (Op.ResolveName (Ref "w"))
       , Do (Call "spine-arguments" [Ref "h", Ref "f", Ref "e"])
       ]
-  , aRule (rootName "elaborate") [PVar "t"]
-      [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsTerm (Ref "t"), AppArgsAreExplicit (Ref "t")]
+  , atRule atHole (rootName "elaborate") [PVar "t"]
+      [SurfaceIsApp (Ref "t"), AppHeadIsTerm (Ref "t"), AppArgsAreExplicit (Ref "t")]
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
       , Bind (Op.PVar "u1") Nothing (Op.Call "fresh-universe" [])
@@ -641,7 +663,6 @@ elaborateClauses =
       , Do Attack
       , Do Into
       , Bind (Op.PVar "k") Nothing Here
-      , Do Back
       , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "t", Ref "k"])
       , Do (Goto (Ref "body"))
       , Bind (Op.PVar "b") Nothing (Op.LambdaBody (Ref "t"))
@@ -659,8 +680,8 @@ elaborateClauses =
       , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
       , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u"))
       , Do Attack
+      , Do Into
       , Do (Op.Quantify (Ref "x") (Ref "d"))
-      , Do Into, Do Along
       , Bind (Op.PVar "c") Nothing Here
       , Do (Goto (Ref "d"))
       , call "elaborate" [Ref "ty"]
@@ -688,13 +709,13 @@ elaborateClauses =
       ]
     -- **Two clauses for @let@**, because the annotation is optional and the
     -- head language has no negation.
-  , aRule (rootName "elaborate") [PVar "t"] [FocusIsHole, LetIsAnnotated (Ref "t")]
+  , atRule atHole (rootName "elaborate") [PVar "t"] [LetIsAnnotated (Ref "t")]
       (letPrelude ++
         [ Do (Goto (Ref "x"))
         , Bind (Op.PVar "ty") Nothing (Op.LetType (Ref "t"))
         , call "elaborate" [Ref "ty"]
         ] ++ letBody [Do (Op.RecordImplicits (Ref "t"))])
-  , aRule (rootName "elaborate") [PVar "t"] [FocusIsHole, LetIsBare (Ref "t")]
+  , atRule atHole (rootName "elaborate") [PVar "t"] [LetIsBare (Ref "t")]
       (letPrelude ++ letBody [])
   , clause SurfaceIsAscription
       [ Bind (Op.PVar "h") Nothing Here
@@ -748,7 +769,7 @@ elaborateClauses =
     ++ binderWalkers
     ++ spineWalkers
   where
-    clause test = aRule (rootName "elaborate") [PVar "t"] [FocusIsHole, test (Ref "t")]
+    clause test = atRule atHole (rootName "elaborate") [PVar "t"] [test (Ref "t")]
     call nm as = Do (Call nm as)
 
     letPrelude =
@@ -794,8 +815,8 @@ elaborateClauses =
 -- rule therefore cannot hand a value back.
 spineWalkers :: [Rule]
 spineWalkers =
-  [ aRule (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
-      [FocusIsComponent, SurfaceIsApp (Ref "t")]
+  [ atRule atAny (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
+      [SurfaceIsApp (Ref "t")]
       [ Do (Goto (Ref "h"))
       , Bind (Op.PVar "n0") Nothing (Op.NextArgumentName (Ref "f"))
       , Bind (Op.PVar "n1") Nothing
@@ -808,8 +829,8 @@ spineWalkers =
       , Bind (Op.PVar "tl") Nothing (Op.AppTail (Ref "t"))
       , Do (Call "spine-arguments" [Ref "h", Ref "f2", Ref "tl"])
       ]
-  , aRule (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
-      [FocusIsComponent, SurfaceIsName (Ref "t")]
+  , atRule atAny (rootName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
+      [SurfaceIsName (Ref "t")]
       [ Do (Goto (Ref "h"))
       , Do (Call "fill" [Ref "f"])
       , Do (Call "solve" [])
@@ -818,33 +839,35 @@ spineWalkers =
 
 binderWalkers :: [Rule]
 binderWalkers =
-  [ aRule (rootName "intro-binders") [PVar "t", PVar "k"]
-      [FocusIsGuess, LambdaBindsMore (Ref "t"), LambdaIsBare (Ref "t")]
+  [ atRule atHole (rootName "intro-binders") [PVar "t", PVar "k"]
+      [LambdaBindsMore (Ref "t"), LambdaIsBare (Ref "t")]
       [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
-      , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
+      , Bind (Op.PVar "xi") Nothing (Op.NameIdent (Ref "x"))
+      , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "xi")))
       , Bind (Op.PVar "tl") Nothing (Op.LambdaTail (Ref "t"))
       , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "tl", Ref "k2"])
       , Do (Op.Return (Ref "body"))
       ]
-  , aRule (rootName "intro-binders") [PVar "t", PVar "k"]
-      [FocusIsGuess, LambdaBindsOne (Ref "t"), LambdaIsBare (Ref "t")]
+  , atRule atHole (rootName "intro-binders") [PVar "t", PVar "k"]
+      [LambdaBindsOne (Ref "t"), LambdaIsBare (Ref "t")]
       [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
-      , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
+      , Bind (Op.PVar "xi") Nothing (Op.NameIdent (Ref "x"))
+      , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "xi")))
       , Do (Op.Return (Ref "k2"))
       ]
     -- **A written type is a check, not a declaration** (MS8): the binder's type
     -- is still the goal's, and what was written is elaborated into a hole
     -- claimed /inside/ the binders already introduced — the only place an
     -- earlier binder of the same group is in scope — and then unified with it.
-  , aRule (rootName "intro-binders") [PVar "t", PVar "k"]
-      [FocusIsGuess, LambdaBindsMore (Ref "t"), LambdaIsAnnotated (Ref "t")]
+  , atRule atHole (rootName "intro-binders") [PVar "t", PVar "k"]
+      [LambdaBindsMore (Ref "t"), LambdaIsAnnotated (Ref "t")]
       (annotatedBinder
          ++ [ Bind (Op.PVar "tl") Nothing (Op.LambdaTail (Ref "t"))
             , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "tl", Ref "k2"])
             , Do (Op.Return (Ref "body"))
             ])
-  , aRule (rootName "intro-binders") [PVar "t", PVar "k"]
-      [FocusIsGuess, LambdaBindsOne (Ref "t"), LambdaIsAnnotated (Ref "t")]
+  , atRule atHole (rootName "intro-binders") [PVar "t", PVar "k"]
+      [LambdaBindsOne (Ref "t"), LambdaIsAnnotated (Ref "t")]
       (annotatedBinder ++ [Do (Op.Return (Ref "k2"))])
   ]
 
@@ -853,22 +876,20 @@ binderWalkers =
 -- and unify the two inside the binder, where both are nameable.
 annotatedBinder :: [Instr]
 annotatedBinder =
-  [ Bind (Op.PVar "g") Nothing Here
-  , Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
+  [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
   , Bind (Op.PVar "ty") Nothing (Op.LambdaAnnotType (Ref "t"))
   , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
   , Bind (Op.PVar "u") Nothing (Call "fresh-universe" [])
-  , Do (Goto (Ref "k"))
+  , Bind (Op.PVar "g") Nothing Here
   , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u"))
   , Do (Goto (Ref "d"))
   , Do (Call "elaborate" [Ref "ty"])
   , Do (Goto (Ref "g"))
-  , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
-  , Do (Goto (Ref "k2"))
+  , Bind (Op.PVar "xi") Nothing (Op.NameIdent (Ref "x"))
+  , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "xi")))
   , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "x"))
   , Bind (Op.PVar "s") Nothing (Typing (Ref "v"))
   , Do (Unify (Ref "d") (Ref "s"))
-  , Do (Goto (Ref "g"))
   ]
 
 -- | The splitting tree (MS9) — @induction t of { p -> e ; … }@ with arms.
@@ -981,11 +1002,9 @@ splitClauses =
       ]
       [BinderIsArgument (Ref "b"), PatternIsWildcard (Ref "p")]
       [ Bind (Op.PVar "w") Nothing (Op.FreshName (Lit (VText "u")))
-      , Bind (Op.PVar "g") Nothing Here
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
-      , Do (Goto (Ref "k2"))
+      , Bind (Op.PVar "wi") Nothing (Op.NameIdent (Ref "w"))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "wi")))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "w"))
-      , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
@@ -1000,11 +1019,9 @@ splitClauses =
       [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
       , call "no-nesting" [Ref "sub"]
       , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
-      , Bind (Op.PVar "g") Nothing Here
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
-      , Do (Goto (Ref "k2"))
+      , Bind (Op.PVar "wi") Nothing (Op.NameIdent (Ref "w"))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "wi")))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "w"))
-      , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
@@ -1108,11 +1125,9 @@ splitClauses =
       , Bind (Op.PVar "n") Nothing
           (Op.Call "name-or-stem" [Ref "n0", Lit (VText "ih")])
       , Bind (Op.PVar "h") Nothing (Op.FreshName (Ref "n"))
-      , Bind (Op.PVar "g") Nothing Here
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "h")))
-      , Do (Goto (Ref "k2"))
+      , Bind (Op.PVar "hi") Nothing (Op.NameIdent (Ref "h"))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "hi")))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "h"))
-      , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
@@ -1131,11 +1146,9 @@ splitClauses =
       ]
       [BinderIsCopy (Ref "b")]
       [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
-      , Bind (Op.PVar "g") Nothing Here
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "n")))
-      , Do (Goto (Ref "k2"))
+      , Bind (Op.PVar "ni") Nothing (Op.NameIdent (Ref "n"))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "ni")))
       , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "n"))
-      , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
           (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
@@ -1242,7 +1255,6 @@ splitClauses =
       , Do Attack
       , Do Into
       , Bind (Op.PVar "k0") Nothing Here
-      , Do Back
         -- **One walk over the report**, whose order is the order the method
         -- binds them in: no rule here knows what that order is.
       , Bind (Op.PVar "k1") Nothing
@@ -1376,7 +1388,43 @@ splitClauses =
 -- rules and not about its layout. 'forgetOrigins' is what the comparison runs
 -- through.
 aRule :: GlobalName -> [Pattern] -> [Test] -> [Instr] -> Rule
-aRule n ps ts body = Rule n ps ts body Nothing []
+aRule n ps ts body = Rule n ps Nothing ts body Nothing []
+
+-- | The same with an @at@ pattern (MS12 phase 359, @~9j34x@).
+--
+-- **It is a second helper rather than a fifth argument to 'aRule'**, because the
+-- clauses that write no @at@ are still a quarter of the base — every
+-- function-shaped rule — and a @Nothing@ at every one of those call sites says
+-- less than its absence does.
+atRule :: ComponentP -> GlobalName -> [Pattern] -> [Test] -> [Instr] -> Rule
+atRule f n ps ts body = Rule n ps (Just f) ts body Nothing []
+
+-- | The three shape-free focus patterns the shipped base writes (MS12 phases
+-- 359 and 363).
+--
+-- **The first two are what @focus-is-hole@ and @focus-is-guess@ were**: a hole
+-- is a @Claim@ and a guess is a @Guess@, and neither clause looks at the binder
+-- or the type, so both positions are the wildcard. @at ? _ : _@ and
+-- @at ? _ ≐ _ : _@ as the file writes them.
+--
+-- **'atAny' is what @focus-is-component@ was**, retired by his ruling of
+-- 2026-11-27 (@~9m27n@): @at _@, naming no shape and binding nothing, which the
+-- five clauses that asked that test now write.
+atHole, atGuess, atAny :: ComponentP
+atHole  = CompClaim PWild PWild
+atGuess = CompGuess PWild PWild
+atAny   = CompAny PWild
+
+-- | The one focus pattern in the base that asks what shape the goal /is/ (MS12)
+-- — @at ? _ : core`∀ (${x} : ${T}) -> ${E}`@.
+--
+-- **Its binder position binds and its two sub-terms bind.** The binder is what
+-- @by-induction@ acts on; @T@ and @E@ are bound and unused, so that the base
+-- shows a reader what a core pattern reaches.
+atPiGoal :: ComponentP
+atPiGoal =
+  CompClaim PWild
+    (PCore (Op.CPPi (PVar "x") (Op.CPHole (PVar "T")) (Op.CPHole (PVar "E"))))
 
 -- | The same clauses with their origins dropped, for comparing against a
 -- hand-written list (MS12 phase 342).

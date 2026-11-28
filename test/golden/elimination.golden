@@ -11,9 +11,6 @@ proving noEq : ∀ (n : Nat) -> Fin n -> Nat
 thena spine> attack
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> eliminate-core core`i`
 stuck: eliminating at indices needs Eq.Eq, which is not declared
 thena spine> eliminate-core core`n`
@@ -44,10 +41,6 @@ thena spine> attack
 thena spine> intro
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
-thena spine> along
 thena spine> :matches
 try-in-scope : ()
 fit-in-scope : ()
@@ -106,6 +99,7 @@ without-hypotheses ‹list› : List a -> List (a, List b)
 induction-core ‹t› : Core -> ()
 case-core ‹t› : Core -> ()
 run-block ‹t› : Surface -> ()
+intro-binders ‹t› ‹k› : Surface -> Core -> Core
 spine-arguments ‹h› ‹f› ‹t› : Core -> Core -> Surface -> ()
 thena spine> eliminate-core core`Type₀`
 stuck: Type₀ is not a target: its type is Type₁, not a fully applied datatype
@@ -137,9 +131,6 @@ proving tied : ∀ (m : Nat) -> Below (succ m) (fz m) -> Nat
 thena spine> attack
 thena spine> intro
 thena spine> intro
-thena spine> into
-thena spine> along
-thena spine> along
 thena spine> eliminate-core core`b`
 subgoals: bzMethod, bsMethod
 thena spine> :where
@@ -150,8 +141,8 @@ path
 context
   m : Nat
   b : Below (succ m) (fz m)
-  bzMethod : ∀ (m : Nat) (q : Eq {0} Nat (succ m) (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) ((succ m) (succ m†)) q) (fz m)) (fz m†) -> Nat
-  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (∀ (q : Eq {0} Nat m (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) (m (succ m†)) q) j) (fz m†) -> Nat) -> ∀ (q : Eq {0} Nat (succ m) (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) ((succ m) (succ m†)) q) (fs m j)) (fz m†) -> Nat
+  bzMethod : ∀ (m : Nat) (q : Eq {0} Nat (succ m) (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (carried : Fin same) -> carried)) ((succ m) (succ m†)) q) (fz m)) (fz m†) -> Nat
+  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (∀ (q : Eq {0} Nat m (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (carried : Fin same) -> carried)) (m (succ m†)) q) j) (fz m†) -> Nat) -> ∀ (q : Eq {0} Nat (succ m) (succ m†)) -> Eq {0} (Fin (succ m†)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q2 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (carried : Fin same) -> carried)) ((succ m) (succ m†)) q) (fs m j)) (fz m†) -> Nat
 type
   Nat
 thena spine> :abandon
@@ -165,10 +156,6 @@ thena spine> intro
 stuck: no clause of intro applies here
 thena spine> intro
 stuck: no clause of intro applies here
-thena spine> into
-thena spine> along
-thena core> along
-stuck: that move is for the chain, and the focus is a core term
-thena core> eliminate-core core`c`
+thena spine> eliminate-core core`c`
 stuck: not in scope: c
-thena core> :quit
+thena spine> :quit
